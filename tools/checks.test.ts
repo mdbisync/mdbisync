@@ -11,16 +11,18 @@ const lock = parseLockfile(
     lockfileVersion: 3,
     packages: {
       "": { name: "root" },
-      "node_modules/runtime-lib": {},
-      "node_modules/dev-lib": { dev: true },
-      "node_modules/@scope/scripted": { dev: true, hasInstallScript: true },
+      "node_modules/runtime-lib": { version: "1.0.0" },
+      "node_modules/dev-lib": { version: "1.0.0", dev: true },
+      "node_modules/dev-optional-lib": { version: "1.0.0", devOptional: true },
+      "node_modules/@scope/scripted": { version: "2.0.0", dev: true, hasInstallScript: true },
     },
   }),
 );
 
-test("install scripts are reported unless allowed by name", () => {
-  assert.deepEqual(findInstallScripts(lock, new Map()), ["node_modules/@scope/scripted"]);
-  assert.deepEqual(findInstallScripts(lock, new Map([["node_modules/@scope/scripted", "reason"]])), []);
+test("install scripts are reported unless allowed by name and exact version", () => {
+  assert.deepEqual(findInstallScripts(lock, new Map()), ["node_modules/@scope/scripted@2.0.0"]);
+  assert.deepEqual(findInstallScripts(lock, new Map([["node_modules/@scope/scripted@2.0.0", "reason"]])), []);
+  assert.deepEqual(findInstallScripts(lock, new Map([["node_modules/@scope/scripted@1.9.0", "reason"]])), ["node_modules/@scope/scripted@2.0.0"]);
 });
 
 test("the committed lock file passes the install-script check", () => {
@@ -43,11 +45,11 @@ test("development-only packages in a bundle are reported", () => {
         imports: [],
         exports: [],
         entryPoint: "src/cli.ts",
-        inputs: { "src/cli.ts": { bytesInOutput: 1 }, "node_modules/runtime-lib/x.js": { bytesInOutput: 1 }, "node_modules/dev-lib/y.js": { bytesInOutput: 1 } },
+        inputs: { "src/cli.ts": { bytesInOutput: 1 }, "node_modules/runtime-lib/x.js": { bytesInOutput: 1 }, "node_modules/dev-lib/y.js": { bytesInOutput: 1 }, "node_modules/dev-optional-lib/z.js": { bytesInOutput: 1 } },
       },
     },
   } satisfies Metafile;
-  assert.deepEqual(findDevPackagesInBundle(metafile, lock), ["node_modules/dev-lib"]);
+  assert.deepEqual(findDevPackagesInBundle(metafile, lock), ["node_modules/dev-lib", "node_modules/dev-optional-lib"]);
 });
 
 test("Cyrillic characters are found by line", () => {

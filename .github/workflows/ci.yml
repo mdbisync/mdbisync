@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -43,4 +43,6 @@ jobs:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
       - name: Pre-commit hooks
+        env:
+          SKIP: no-cyrillic # already run above
         run: pipx run pre-commit==4.6.2 run --all-files --show-diff-on-failure

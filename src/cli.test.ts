@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { COMMANDS, USAGE_EXIT_CODE } from "./commands.ts";
 import { runCli } from "./cli.ts";
 import { VERSION } from "./version.ts";
@@ -61,5 +61,7 @@ for (const entry of entries) {
       assert.equal(child.stderr, `${name}: not implemented\n`);
     }
     assert.equal(execFileSync(process.execPath, [entry.file, "--version"], { encoding: "utf8" }), `${VERSION}\n`);
+    // The bundle is the package's `bin`, so it must start with a Node shebang.
+    assert.ok(readFileSync(entry.file, "utf8").startsWith("#!/usr/bin/env node\n"), `${entry.file} lacks the shebang`);
   });
 }

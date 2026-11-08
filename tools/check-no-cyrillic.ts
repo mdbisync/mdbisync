@@ -12,7 +12,7 @@ export function findCyrillicLines(text: string): number[] {
 }
 
 function trackedFiles(): string[] {
-  const output = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8" });
+  const output = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" });
   return output.split("\0").filter((file) => file !== "");
 }
 

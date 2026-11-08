@@ -1,6 +1,7 @@
 // Bundles each entry point into one self-contained file under dist/, then
 // checks that no development-only package ended up in a bundle.
 
+import { rmSync } from "node:fs";
 import { build, type Metafile } from "esbuild";
 import { readLockfile, packagePathOf, type LockedPackage } from "./lockfile.ts";
 
@@ -25,6 +26,7 @@ export function findDevPackagesInBundle(metafile: Metafile, packages: readonly L
 }
 
 async function main(): Promise<void> {
+  rmSync("dist", { recursive: true, force: true }); // no stale bundles
   const result = await build({
     entryPoints: ENTRY_POINTS,
     outdir: "dist",

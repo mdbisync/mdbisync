@@ -4,13 +4,16 @@ import { readFileSync } from "node:fs";
 
 export interface LockedPackage {
   readonly path: string;
+  readonly version: string;
+  // Installed only for development: `dev`, or `devOptional` (a dev-only
+  // package that some dependency also lists as optional).
   readonly dev: boolean;
   readonly hasInstallScript: boolean;
 }
 
 interface LockfileJson {
   readonly lockfileVersion?: number;
-  readonly packages?: Record<string, { dev?: boolean; hasInstallScript?: boolean }>;
+  readonly packages?: Record<string, { version?: string; dev?: boolean; devOptional?: boolean; hasInstallScript?: boolean }>;
 }
 
 export function parseLockfile(text: string): LockedPackage[] {
@@ -20,7 +23,12 @@ export function parseLockfile(text: string): LockedPackage[] {
   }
   return Object.entries(lock.packages)
     .filter(([path]) => path !== "")
-    .map(([path, entry]) => ({ path, dev: entry.dev === true, hasInstallScript: entry.hasInstallScript === true }));
+    .map(([path, entry]) => ({
+      path,
+      version: entry.version ?? "",
+      dev: entry.dev === true || entry.devOptional === true,
+      hasInstallScript: entry.hasInstallScript === true,
+    }));
 }
 
 export function readLockfile(file = "package-lock.json"): LockedPackage[] {

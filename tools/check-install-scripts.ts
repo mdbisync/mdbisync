@@ -4,16 +4,17 @@
 
 import { readLockfile, type LockedPackage } from "./lockfile.ts";
 
-// Packages whose install script is known and not needed. Each entry says why.
+// Packages whose install script is known and not needed, keyed by path and
+// exact version so that an update has to be looked at again. Each entry says why.
 export const ALLOWED_INSTALL_SCRIPTS: ReadonlyMap<string, string> = new Map([
   [
-    "node_modules/esbuild",
+    "node_modules/esbuild@0.28.2",
     "build-time only; its postinstall only verifies the platform binary, which npm installs as an optional dependency, so it works with scripts off",
   ],
 ]);
 
 export function findInstallScripts(packages: readonly LockedPackage[], allowed: ReadonlyMap<string, string> = ALLOWED_INSTALL_SCRIPTS): string[] {
-  return packages.filter((pkg) => pkg.hasInstallScript && !allowed.has(pkg.path)).map((pkg) => pkg.path);
+  return packages.filter((pkg) => pkg.hasInstallScript && !allowed.has(`${pkg.path}@${pkg.version}`)).map((pkg) => `${pkg.path}@${pkg.version}`);
 }
 
 if (import.meta.main) {

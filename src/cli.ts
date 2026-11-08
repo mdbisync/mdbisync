@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Command-line entry: `mdbisync <command>` and `mdbisync --version`.
 
 import { COMMANDS, USAGE_EXIT_CODE, isCommandName, notImplementedMessage } from "./commands.ts";
