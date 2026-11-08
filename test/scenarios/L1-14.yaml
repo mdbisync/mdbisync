@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "id": "L1-14",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "linear-seeded",
+    "fixtures": [
+      "matching-commented-archived-linear-only"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "run",
+      "action": "initial-sync",
+      "args": {
+        "confirm": true,
+        "direction": "git-to-linear"
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "documents.matchedIds",
+        "operator": "same-as",
+        "expected": "before.matchedIds"
+      },
+      {
+        "subject": "documents.matchedComments",
+        "operator": "same-as",
+        "expected": "before.matchedComments"
+      },
+      {
+        "subject": "documents.content",
+        "operator": "same-as",
+        "expected": "tracked.body"
+      },
+      {
+        "subject": "documents.archived",
+        "operator": "same-as",
+        "expected": "before.archived"
+      },
+      {
+        "subject": "documents.linearOnlyState",
+        "operator": "equal",
+        "expected": "trash"
+      },
+      {
+        "subject": "documents.linearOnlyRestorable",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

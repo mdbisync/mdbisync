@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "id": "L5-17",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "failed",
+        "name": "format"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "passed"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "runs.0.summary.setupErrorCheck",
+        "operator": "equal",
+        "expected": "format"
+      },
+      {
+        "subject": "runs.0.pullRequests.state",
+        "operator": "equal",
+        "expected": "open"
+      },
+      {
+        "subject": "runs.0.pullRequests.merged",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "runs.0.writes.linear",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "runs.last.pullRequests.merged",
+        "operator": "equal",
+        "expected": 1
+      }
+    ]
+  }
+}
