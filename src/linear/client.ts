@@ -1,18 +1,20 @@
 // The operations the engine needs from Linear, as our own GraphQL documents
 // (no lazy SDK models, so a relation never costs an extra request).
 
-import { LinearError, LinearStoppedError, LinearUploadError, type StopReason } from './errors.ts';
+import { DocumentTooLongError, LinearError, LinearStoppedError, LinearUploadError, type StopReason } from './errors.ts';
+import { LINEAR_FACTS, lengthRefusal, type LinearFacts } from './facts.ts';
 import { GraphQLTransport, type TransportOptions } from './transport.ts';
 
 /** Largest page Linear serves for a connection. */
 export const MAX_PAGE_SIZE = 250;
 /**
- * Default page size for document lists and reads by id. Each document with
- * content is one node; Linear limits a single query's complexity, so pages
- * stay well under the maximum.
- * TODO(MDS-005-4): size from the measured complexity cost of these queries.
+ * Default page size for document lists and reads by id: the largest page.
+ * Measured complexity of a documents page is about 2.7 points per document
+ * (first 50, 100, 250: 135, 270, 675 points; 140, 280, 700 with content), far
+ * below a single query's limit and 0.04% of the hourly 2,000,000 points, so
+ * full pages save requests, the scarcer budget (5,000 an hour).
  */
-export const DEFAULT_PAGE_SIZE = 100;
+export const DEFAULT_PAGE_SIZE = MAX_PAGE_SIZE;
 /** Longest wait for an upload's PUT to storage; files are at most a few MB. */
 export const UPLOAD_TIMEOUT_MS = 120_000;
 
@@ -119,9 +121,12 @@ interface PageInfo {
 
 export class LinearClient {
   readonly transport: GraphQLTransport;
+  /** What the client assumes about Linear; the measured `LINEAR_FACTS` unless a test or the probe sets others. */
+  readonly facts: LinearFacts;
 
-  constructor(options: TransportOptions | GraphQLTransport) {
+  constructor(options: TransportOptions | GraphQLTransport, facts: LinearFacts = LINEAR_FACTS) {
     this.transport = options instanceof GraphQLTransport ? options : new GraphQLTransport(options);
+    this.facts = facts;
   }
 
   get stats() {
@@ -150,16 +155,18 @@ export class LinearClient {
   }
 
   /**
-   * Lists every document of a project, or of a team, page by page.
-   * TODO(MDS-005-4): whether a team filter also returns the team's project
-   * documents is a format-report fact; the engine filters team zones by
-   * `projectId === null` until then.
+   * Lists every document of a project, or of a team zone (the team's
+   * documents outside projects), page by page. Trashed documents are listed
+   * only with `includeArchived`, then with `trashed` and `archivedAt` set.
    */
   async listDocuments(place: DocumentPlace, options: ListOptions = {}): Promise<LinearDocument[]> {
-    const filter = place.projectId !== undefined
-      ? { project: { id: { eq: place.projectId } } }
-      : { team: { id: { eq: place.teamId } } };
-    return this.#pagedDocuments('ListDocuments', filter, options);
+    if (place.projectId !== undefined) {
+      return this.#pagedDocuments('ListDocuments', { project: { id: { eq: place.projectId } } }, options);
+    }
+    const documents = await this.#pagedDocuments('ListDocuments', { team: { id: { eq: place.teamId } } }, options);
+    // Linear's team filter returns only the team zone (`LINEAR_FACTS`); should
+    // that change, project documents still stay out of it.
+    return this.facts.teamFilterIncludesProjectDocuments ? documents.filter((d) => d.projectId === null) : documents;
   }
 
   /**
@@ -187,7 +194,14 @@ export class LinearClient {
     return result;
   }
 
+  /**
+   * Creates a document and returns its record with the stored content. A
+   * title or content longer than Linear accepts throws `DocumentTooLongError`
+   * without a request. Linear's payload holds the stored content, so this is
+   * one request; it reads the document back only when `facts` says otherwise.
+   */
   async createDocument(place: DocumentPlace, input: CreateDocumentInput): Promise<LinearDocument> {
+    this.#refuseTooLong('CreateDocument', input);
     const data = await this.request<{ documentCreate: { success: boolean; document: RawDocument } }>(
       'CreateDocument',
       'mutation',
@@ -196,15 +210,18 @@ export class LinearClient {
       }`,
       { input: { ...input, ...place }, withContent: true },
     );
-    return toDocument(succeeded('CreateDocument', data.documentCreate).document);
+    const created = toDocument(succeeded('CreateDocument', data.documentCreate).document);
+    return this.#storedRecord('CreateDocument', created);
   }
 
   /**
    * Updates a document: content, rename (title), move (projectId or teamId),
-   * icon and color. The returned content is what Linear's payload holds;
-   * whether that is the stored form is `LINEAR_FACTS.mutationsReturnStoredContent`.
+   * icon and color. Like `createDocument`, refuses a too-long title or
+   * content without a request, and returns the stored content when the patch
+   * changes content, in one request.
    */
   async updateDocument(id: string, patch: DocumentPatch): Promise<LinearDocument> {
+    this.#refuseTooLong('UpdateDocument', patch);
     const data = await this.request<{ documentUpdate: { success: boolean; document: RawDocument } }>(
       'UpdateDocument',
       'mutation',
@@ -213,7 +230,8 @@ export class LinearClient {
       }`,
       { id, input: patch, withContent: patch.content !== undefined },
     );
-    return toDocument(succeeded('UpdateDocument', data.documentUpdate).document);
+    const updated = toDocument(succeeded('UpdateDocument', data.documentUpdate).document);
+    return patch.content === undefined ? updated : this.#storedRecord('UpdateDocument', updated);
   }
 
   /** Moves a document to trash; it can be restored. Never deletes for good. */
@@ -253,6 +271,8 @@ export class LinearClient {
   /**
    * Uploads a file: `fileUpload` returns a signed storage URL, the bytes go
    * there with one PUT, and the returned asset URL is what documents embed.
+   * Measured: Linear issues an upload target for a declared 10 MiB and for
+   * 10 MiB + 1 byte, and refuses a declared 100 MiB (INPUT_ERROR).
    */
   async uploadFile(input: UploadInput): Promise<{ assetUrl: string }> {
     const data = await this.request<{
@@ -288,6 +308,19 @@ export class LinearClient {
       throw new LinearUploadError('FileUpload.put', `FileUpload.put: storage answered HTTP ${response.status}`);
     }
     return { assetUrl: target.assetUrl };
+  }
+
+  #refuseTooLong(operation: string, document: { title?: string | undefined; content?: string | undefined }): void {
+    const refusal = lengthRefusal(document, this.facts);
+    if (refusal) throw new DocumentTooLongError(operation, refusal);
+  }
+
+  /** The written document's record with its stored content: the payload, or a read-back when the payload may differ. */
+  async #storedRecord(operation: string, written: LinearDocument): Promise<LinearDocument> {
+    if (this.facts.mutationsReturnStoredContent) return written;
+    const [stored] = await this.getDocuments([written.id], { withContent: true });
+    if (!stored) throw new LinearError(operation, `${operation}: the written document could not be read back`);
+    return stored;
   }
 
   async #pagedDocuments(operation: string, filter: unknown, options: ListOptions): Promise<LinearDocument[]> {

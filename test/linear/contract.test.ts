@@ -6,7 +6,7 @@
 // path for the JSON report of requests per operation).
 //
 // Everything written is neutral work text in two short-lived projects, which
-// are removed at the end. About 25 API requests per run.
+// are removed at the end. About 30 API requests per run.
 
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -14,6 +14,7 @@ import { writeFile } from 'node:fs/promises';
 import { after, before, describe, it } from 'node:test';
 
 import {
+  DocumentTooLongError,
   LinearClient,
   LinearGraphQLError,
   LinearTokenError,
@@ -149,12 +150,30 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     assert.equal(first.projectId, projectIds[0]);
     assert.equal(typeof first.content, 'string');
     assert.ok(first.documentContentId);
+    assert.equal(perOperation.createDocument, 1, 'a create with its stored record is one request');
   });
 
-  it('reads documents by ids in one request', async () => {
+  it('reads documents by ids in one request, with the content the create returned', async () => {
     const docs = await measured('getDocuments (2 ids)', () => linear.getDocuments([first.id, second.id], { withContent: true }));
     assert.deepEqual(docs.map((d) => d.id).sort(), [first.id, second.id].sort());
     assert.ok(docs.every((d) => typeof d.content === 'string' && d.content.length > 0));
+    const stored = new Map(docs.map((d) => [d.id, d.content]));
+    assert.equal(stored.get(first.id), first.content, 'the create payload is the stored content');
+    assert.equal(stored.get(second.id), second.content);
+  });
+
+  it('does not return project documents for a team filter', async () => {
+    const zone = await measured('listDocuments (team)', () => linear.listDocuments({ teamId }));
+    const ids = new Set(zone.map((d) => d.id));
+    assert.ok(!ids.has(first.id) && !ids.has(second.id));
+    assert.ok(zone.every((d) => d.projectId === null));
+  });
+
+  it('leaves out a too-long title without a request', async () => {
+    const before = stats.total;
+    const error = await linear.createDocument({ projectId: projectIds[0]! }, { title: 'T'.repeat(513) }).catch((e: unknown) => e);
+    assert.ok(error instanceof DocumentTooLongError);
+    assert.equal(stats.total, before);
   });
 
   it('lists the documents of a project with content', async () => {
@@ -165,6 +184,9 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   it('updates content, renames, sets icon and color, and moves', async () => {
     const updated = await measured('updateDocument (content)', () => linear.updateDocument(first.id, { content: '# Goals\n\n- Ship the demo\n' }));
     assert.equal(typeof updated.content, 'string');
+    assert.equal(perOperation['updateDocument (content)'], 1, 'an update with its stored record is one request');
+    const [read] = await linear.getDocuments([first.id], { withContent: true });
+    assert.equal(read?.content, updated.content, 'the update payload is the stored content');
     const renamed = await measured('updateDocument (rename)', () => linear.updateDocument(first.id, { title: 'Weekly planning, revised' }));
     assert.equal(renamed.title, 'Weekly planning, revised');
     const styled = await measured('updateDocument (icon, color)', () => linear.updateDocument(first.id, { icon: 'Book', color: '#5e6ad2' }));
