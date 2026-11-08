@@ -185,10 +185,7 @@ describe('initial sync dry run', () => {
     }
   });
 
-  for (const [label, extra] of [
-    ['a confirmed run from git to Linear', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' }],
-    ['a run from Linear to git', { MDBISYNC_DIRECTION: 'linear-to-git' }],
-  ] as const) {
+  for (const [label, extra] of [['a run from Linear to git', { MDBISYNC_DIRECTION: 'linear-to-git' }]] as const) {
     it(`${label} is not built yet: it says so after the preflight and writes nothing`, async () => {
       const result = await run(fakeWorld(), extra);
       assert.equal(result.exitCode, COMMANDS['initial-sync'].notImplementedExitCode);

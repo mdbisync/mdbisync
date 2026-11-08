@@ -218,7 +218,9 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         }
         if (written === 0) await checkpoint('before-write');
         if (item.kind === 'create') {
-          const created = await linear.createDocument(placeId(targets, item.entry.place), { id: newId(), title: item.entry.title, content: body });
+          // Matching compares titles in NFC; a new title is written in that form too, so the next run matches it.
+          const title = item.entry.title.normalize('NFC');
+          const created = await linear.createDocument(placeId(targets, item.entry.place), { id: newId(), title, content: body });
           remember(path, created);
           result.created.push(path);
           await checkpoint('document-created-before-ids-push');

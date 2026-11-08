@@ -4,9 +4,10 @@ Two-way sync between Markdown files in a Git repository and Linear documents,
 run as a GitHub Action.
 
 **Status:** early development. `lint` and `fix` work on Markdown files.
-`check` checks a repository's setup; `sync`
-and `initial-sync` run the same check (and `sync` refuses to run without its
-state) and then answer "not implemented". Nothing writes yet.
+`check` checks a repository's setup. `initial-sync` from git to Linear
+works, as a dry run and confirmed; `sync` and `initial-sync` from Linear to
+git run the same check (and `sync` refuses to run without its state) and
+then answer "not implemented".
 
 ## Folder mapping
 
@@ -44,6 +45,29 @@ alone.
 The command line reads the action's inputs (see `action.yml`) from
 environment variables: `MDBISYNC_LINEAR_CLIENT_ID` for `linear-client-id`,
 and so on.
+
+## Initial sync from git to Linear
+
+`initial-sync` with `direction: git-to-linear` makes Linear equal to the
+tracked branch. Without `confirm: true` it is a dry run: it lists by path
+what it would create, overwrite and move to Linear's trash, and the files it
+leaves out, and writes nothing. With `confirm: true`:
+
+- a document whose title is a file's path keeps its id, comments and history
+  and gets the file's text (front matter stays in git); a file without a
+  document gets a new one; a document that already holds the text is not
+  written;
+- the documents of the annotated projects and team zones that match no file
+  are moved to Linear's trash, from which they can be restored;
+- document ids go to `refs/mdbisync/ids` as the run goes, and at the end
+  one push records `refs/mdbisync/linear` (the tracked branch with each
+  synchronized file as Linear stores it), `ids` and `uploads`.
+
+A run that stops early (Linear's rate limit, a rejected write) records no
+`linear` and exits with code 5. Run it again with the same inputs: it skips
+the documents it already wrote, and a document created just before a crash
+is found by its title, not created twice. When the state refs are lost, a
+new confirmed run rebuilds them without duplicating documents.
 
 ## Layout
 
