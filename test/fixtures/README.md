@@ -11,6 +11,9 @@ the format probe and the corpus generator all read this bank.
   not fixtures themselves.
 - `index.yaml`: the index of every fixture and asset.
 - `check-index.mjs`: checks the bank against the index.
+- `<name>.linear.md`, `<name>.linear.yjs.json` and `linear-probe.json`:
+  Linear's recorded forms, written by the format probe (`test/probe/`).
+  They are not fixtures; each must sit beside its fixture.
 
 Fixtures are byte-exact test data. Some have CRLF line endings, a byte order
 mark, trailing spaces, tabs or no final newline on purpose, so

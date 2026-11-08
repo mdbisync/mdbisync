@@ -235,6 +235,8 @@ describe('format probe helpers', () => {
     doc.getXmlFragment('prosemirror').push([paragraph]);
     const summary = summarizeContentState(Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'));
     assert.deepEqual(summary, { roots: ['prosemirror'], content: [{ type: 'paragraph', children: [{ text: 'bold', marks: { strong: true } }] }] });
+    const mapped = summarizeContentState(Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'), { mapString: (v) => v.replace('bold', 'mapped') });
+    assert.deepEqual(mapped.content[0], { type: 'paragraph', children: [{ text: 'mapped', marks: { strong: true } }] }, 'text runs are mapped too');
   });
 
   it('shows the lines that differ', () => {

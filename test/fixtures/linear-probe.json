@@ -617,7 +617,19 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
-    "lint-errors/duplicate-title/plan.md": {
+    "lint-errors/duplicate-title/cafe-nfc.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/duplicate-title/cafe-nfd.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/duplicate-title/guide-lower.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/duplicate-title/guide-upper.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },
@@ -1018,6 +1030,10 @@
       "fixedPoint": true
     },
     "typography-scripts/zero-width-space.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "unsynced/markdown-extension/plan.md": {
       "yjs": "recorded",
       "fixedPoint": true
     },

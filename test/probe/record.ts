@@ -103,7 +103,13 @@ export function writeRecord(bank: Bank, run: ProbeRun): void {
     if (run.yjsBlocked && previous) entry.yjs = previous.yjs;
     manifest.fixtures[result.file] = entry;
   }
-  manifest.fixtures = Object.fromEntries(Object.entries(manifest.fixtures).sort(([a], [b]) => a.localeCompare(b)));
+  // Entries of fixtures that left the bank go with them.
+  const inBank = new Set(bank.fixtures.map((fixture) => fixture.file));
+  manifest.fixtures = Object.fromEntries(
+    Object.entries(manifest.fixtures)
+      .filter(([file]) => inBank.has(file))
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
   writeFileSync(join(bank.dir, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 

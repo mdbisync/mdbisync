@@ -508,7 +508,8 @@ export async function findLimit(refusalAt: (value: number) => Promise<string | u
 function describe(error: unknown): string {
   if (error instanceof LinearGraphQLError) {
     // The message names the operation and Linear's code and text; never content.
-    return error.message.replace(/^[^:]*: /, '');
+    // Linear's request id changes on every call and says nothing about the refusal.
+    return error.message.replace(/^[^:]*: /, '').replace(/ \(HTTP \d+, request [^)]*\)/, '');
   }
   return error instanceof Error ? error.message : String(error);
 }

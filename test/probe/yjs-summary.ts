@@ -37,7 +37,7 @@ function toNodes(item: unknown, mapString: (value: string) => string): YjsNode[]
   if (item instanceof Y.XmlText) {
     const delta = item.toDelta() as Array<{ insert: unknown; attributes?: Record<string, unknown> }>;
     return delta.map((run) => {
-      const text = typeof run.insert === 'string' ? run.insert : JSON.stringify(run.insert);
+      const text = mapString(typeof run.insert === 'string' ? run.insert : JSON.stringify(run.insert));
       const marks = run.attributes ? normalizeMarks(run.attributes, mapString) : undefined;
       return marks ? { text, marks } : { text };
     });
