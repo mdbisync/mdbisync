@@ -15,7 +15,7 @@ export interface PlanReport {
     create: string[];
     overwrite: string[];
     trash: string[];
-    /** Every path the run would write or trash: create, overwrite and trash together. */
+    /** Every path the run would write or trash, each once (a duplicate document's trash entry shares its file's path). */
     paths: string[];
   };
   /** Paths of the left-out files. */
@@ -34,7 +34,7 @@ export function toPlanReport(plan: InitialSyncPlan, direction: Direction, confir
       create: paths(plan.create),
       overwrite: paths(plan.overwrite),
       trash: paths(plan.trash),
-      paths: [...paths(plan.create), ...paths(plan.overwrite), ...paths(plan.trash)].sort(compare),
+      paths: [...new Set([...paths(plan.create), ...paths(plan.overwrite), ...paths(plan.trash)])].sort(compare),
     },
     leftOut: paths(plan.leftOut),
     leftOutFiles: plan.leftOut,
@@ -66,8 +66,8 @@ export function renderDryRun(plan: InitialSyncPlan): string {
     lines.push('');
   };
   section('Create', plan.create.length, ['Path', 'In Linear'], plan.create.map((entry) => [entry.path, placeLabel(entry.place)]));
-  section('Overwrite', plan.overwrite.length, ['Path', 'In Linear'], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place)]));
-  section('Move to trash', plan.trash.length, ['Path', 'In Linear'], plan.trash.map((entry) => [entry.path, placeLabel(entry.place)]));
+  section('Overwrite', plan.overwrite.length, ['Path', 'In Linear', 'Document'], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]));
+  section('Move to trash', plan.trash.length, ['Path', 'In Linear', 'Document'], plan.trash.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]));
   section(
     'Left out',
     plan.leftOut.length,

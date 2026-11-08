@@ -20,24 +20,26 @@ export async function runOperation(
   initialSync: InitialSyncInputs | undefined,
   options: PreflightOptions,
 ): Promise<OperationOutcome> {
-  if (operation === 'initial-sync' && initialSync === undefined) throw new Error('initial sync needs its direction and confirm inputs');
-  const dryRun = operation === 'initial-sync' && isDryRunBuilt(initialSync as InitialSyncInputs);
+  if ((operation === 'initial-sync') !== (initialSync !== undefined)) {
+    throw new Error('the direction and confirm inputs belong to an initial sync, and only to it');
+  }
+  const dryRun = initialSync !== undefined && isDryRunBuilt(initialSync) ? initialSync : undefined;
   let plan: PlanReport | undefined;
   let planSummary = '';
   const preflight = await runPreflight(
     operation,
     inputs,
     options,
-    dryRun
-      ? async (context) => {
+    dryRun === undefined
+      ? undefined
+      : async (context) => {
           const planned = await planFromRepository(context);
-          plan = toPlanReport(planned, (initialSync as InitialSyncInputs).direction, false);
+          plan = toPlanReport(planned, dryRun.direction, dryRun.confirm);
           planSummary = renderDryRun(planned);
-        }
-      : undefined,
+        },
   );
   if (!preflight.ok) return { ...preflight, notImplemented: false };
-  const outcome: OperationOutcome = { ...preflight, notImplemented: operation !== 'check' && !dryRun };
+  const outcome: OperationOutcome = { ...preflight, notImplemented: operation !== 'check' && dryRun === undefined };
   if (plan !== undefined) {
     outcome.plan = plan;
     outcome.summary = `${preflight.summary.trimEnd()}\n\n${planSummary}`;
