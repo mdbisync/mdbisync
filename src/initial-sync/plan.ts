@@ -92,11 +92,11 @@ export function placeKey(place: Place): string {
 }
 
 /**
- * Builds the plan. A file is left out when the linter reports it (ADR-003),
+ * Builds the plan. A file is left out when the linter reports it,
  * when its title collides with another file's, or when its title is longer
  * than Linear accepts; a left-out file's document, if any, is neither
  * overwritten nor trashed. A document matches a file when its title equals
- * the file's title exactly (ADR-001); when several live documents share
+ * the file's title exactly; when several live documents share
  * that title, the oldest is the match and the others go to trash.
  */
 export function planInitialSync(input: PlanInput): InitialSyncPlan {
