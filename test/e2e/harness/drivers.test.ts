@@ -99,14 +99,25 @@ describe('engine driver', () => {
     assert.equal(env['MDBISYNC_CONFIRM'], 'true');
   });
 
-  it('recognizes a command that answers "not implemented"', async () => {
+  it('recognizes a command that answers "not implemented", and only that', async () => {
     const dir = fresh('engine-');
-    const result = await runEngine({
-      command: 'sync', names: runNames('4f1a9c'), cwd: dir, repository: 'o/r', hooksDir: dir, reportFile: join(dir, 'r.json'), summaryFile: join(dir, 's.md'),
+    const call = {
+      command: 'sync' as const, names: runNames('4f1a9c'), cwd: dir, repository: 'o/r', hooksDir: dir, reportFile: join(dir, 'r.json'), summaryFile: join(dir, 's.md'),
       linearUrl: 'http://127.0.0.1:1', credentials: { linearClientId: '', linearClientSecret: '', githubToken: '' }, extraEnv: {}, timeoutMs: 30_000,
-    });
-    assert.equal(result.notImplemented, true);
-    assert.equal(result.timedOut, false);
+    };
+    const stub = (body: string) => {
+      const file = join(dir, `stub-${Math.random().toString(16).slice(2)}.mjs`);
+      writeFileSync(file, body);
+      return { ...process.env, MDBISYNC_ENGINE: file };
+    };
+    // A warning line may come before the stub's answer.
+    const answered = await runEngine(call, stub("process.stderr.write('warning: x\\nsync: not implemented\\n'); process.exitCode = 10;\n"));
+    assert.equal(answered.notImplemented, true);
+    assert.equal(answered.timedOut, false);
+    // A setup stop or an input error is a real outcome, not "not implemented".
+    const stopped = await runEngine(call, stub("process.stderr.write('sync: stopped before any write (no-state)\\n'); process.exitCode = 4;\n"));
+    assert.equal(stopped.notImplemented, false);
+    assert.equal(stopped.exitCode, 4);
   });
 
   it('kills an engine that runs too long', async () => {
