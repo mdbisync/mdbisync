@@ -81,13 +81,13 @@ describe('preflight', () => {
 
   it('L1-02: a correct setup passes; the summary lists every item and the security hooks', async () => {
     const world = fakeWorld();
-    const { result, report } = await run('initial-sync', world);
+    const { result, report } = await run('initial-sync', world, { MDBISYNC_DIRECTION: 'git-to-linear' });
     assert.equal(report.ok, true);
     assert.equal(report.code, null);
     assert.deepEqual(report.setupChecks.map((check) => check.name), [...CHECK_NAMES]);
     assert.deepEqual(report.securityHooks, ['no-test-secrets']);
     assert.match(result.stdout, /\| security-hooks \| passed \| security hooks present: no-test-secrets \|/);
-    assert.equal(result.stderr, 'initial-sync: not implemented\n');
+    assert.equal(result.exitCode, 0, result.stderr);
     assert.equal(world.minted, 1);
     assert.equal(world.revoked, 1);
   });
