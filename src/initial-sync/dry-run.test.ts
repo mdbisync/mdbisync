@@ -14,6 +14,10 @@ import { type Fixture, createFixture } from '../state/test-helpers.ts';
 
 const CANARY = 'kx-7a2b9c40';
 const PRE_COMMIT = `repos:
+  - repo: https://github.com/example/mdbisync
+    rev: 0123456789abcdef0123456789abcdef01234567
+    hooks:
+      - id: linear-format
   - repo: local
     hooks:
       - id: no-test-secrets
