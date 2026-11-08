@@ -32,6 +32,8 @@ jobs:
         run: npm run check:install-scripts
       - name: No Cyrillic characters
         run: npm run check:cyrillic
+      - name: Fixture bank matches its index
+        run: npm run check:fixtures
       - name: Type check
         run: npm run typecheck
       - name: Bundle
