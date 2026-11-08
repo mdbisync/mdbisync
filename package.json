@@ -17,7 +17,8 @@
     "test": "node --test \"src/**/*.test.ts\" \"tools/**/*.test.ts\" \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
     "check:install-scripts": "node tools/check-install-scripts.ts",
     "check:cyrillic": "node tools/check-no-cyrillic.ts",
-    "check:fixtures": "node test/fixtures/check-index.mjs"
+    "check:fixtures": "node test/fixtures/check-index.mjs",
+    "probe:format": "node test/probe/run.ts"
   },
   "dependencies": {
     "@actions/core": "3.0.1",

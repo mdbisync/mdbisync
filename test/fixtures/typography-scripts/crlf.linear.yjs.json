@@ -1,0 +1,10 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"First line of the note.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Second paragraph.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-748d5036","marks":{"attribution":"user"}}]}
+  ]
+}

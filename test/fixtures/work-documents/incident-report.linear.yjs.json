@@ -1,0 +1,115 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Incident review: slow search","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Impact:","marks":{"attribution":"user","strong":{}}},{"text":" search took over ten seconds for 40 minutes.","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Timeline","marks":{"attribution":"user"}}]},
+    {
+      "type": "table",
+      "attrs": {"sizing":"fit"},
+      "children": [
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Time","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Event","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"09:12","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Alert fired","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"09:20","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Index rebuild found running","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"09:52","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"Rebuild paused, latency normal","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Root cause","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"A scheduled index rebuild ran during peak hours.","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Follow-ups","marks":{"attribution":"user"}}]},
+    {
+      "type": "todo_list",
+      "children": [
+        {
+          "type": "todo_item",
+          "attrs": {"done":false},
+          "children": [
+            {"type":"paragraph","children":[{"text":"Move rebuilds to the night window","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "todo_item",
+          "attrs": {"done":false},
+          "children": [
+            {"type":"paragraph","children":[{"text":"Alert on rebuild duration","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-55d16289","marks":{"attribution":"user"}}]}
+  ]
+}

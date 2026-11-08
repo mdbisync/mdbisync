@@ -1,0 +1,68 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Item one","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"<<<<<<< ours","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {"text":"Item two, our version","marks":{"attribution":"user"}},
+                {"type":"hard_break"},
+                {"text":"=======","marks":{"attribution":"user"}}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Item two, their version","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "collapsible_section",
+      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
+      "children": [
+        {
+          "type": "collapsible_heading",
+          "children": [
+            {"type":"paragraph","children":[{"text":"theirs","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "bullet_list",
+          "children": [
+            {
+              "type": "list_item",
+              "children": [
+                {"type":"paragraph","children":[{"text":"Item three","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {"type":"paragraph","children":[{"text":"Ref kx-0e192afe","marks":{"attribution":"user"}}]}
+      ]
+    }
+  ]
+}

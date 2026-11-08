@@ -1,0 +1,12 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"code_block","attrs":{"id":"<id>","language":"yaml"},"children":[{"text":"owner: ops","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {"type":"horizontal_rule"},
+    {"type":"paragraph","children":[{"text":"A rule after the body.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-f38e059b","marks":{"attribution":"user"}}]}
+  ]
+}

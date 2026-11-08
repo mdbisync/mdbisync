@@ -1,0 +1,10 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Text before the block.","marks":{"attribution":"user"}}]},
+    {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"indented code line one\nindented code line two","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-6d25f90f","marks":{"attribution":"user"}}]}
+  ]
+}

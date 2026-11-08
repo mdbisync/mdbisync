@@ -1,0 +1,12 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "image",
+      "attrs": {"alt":"Missing","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/does-not-exist.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-cc5611cc","marks":{"attribution":"user"}}]}
+  ]
+}

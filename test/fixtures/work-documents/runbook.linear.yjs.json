@@ -1,0 +1,51 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Runbook: restart the queue worker","marks":{"attribution":"user"}}]},
+    {
+      "type": "callout",
+      "attrs": {"color":"#f2994a","icon":"Alert"},
+      "children": [
+        {"type":"paragraph","children":[{"text":"Restarting drops jobs that are in flight. Drain the queue first.","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Steps","marks":{"attribution":"user"}}]},
+    {
+      "type": "ordered_list",
+      "attrs": {"order":1},
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Pause new jobs:","marks":{"attribution":"user"}}]},
+            {"type":"code_block","attrs":{"id":"<id>","language":"sh"},"children":[{"text":"worker pause","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Wait until the queue is empty.","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Restart the service:","marks":{"attribution":"user"}}]},
+            {"type":"code_block","attrs":{"id":"<id>","language":"sh"},"children":[{"text":"systemctl restart worker","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Resume jobs and watch the dashboard for five minutes.","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Rollback","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"If the worker does not start, restore the previous release and page the on-call engineer.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-ce481f48","marks":{"attribution":"user"}}]}
+  ]
+}

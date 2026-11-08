@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Literal *stars*, _underscores_, # hash and [brackets].","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-7d0ec9e8","marks":{"attribution":"user"}}]}
+  ]
+}

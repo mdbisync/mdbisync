@@ -1,0 +1,27 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "todo_list",
+      "children": [
+        {
+          "type": "todo_item",
+          "attrs": {"done":false},
+          "children": [
+            {"type":"paragraph","children":[{"text":"open","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "todo_item",
+          "attrs": {"done":true},
+          "children": [
+            {"type":"paragraph","children":[{"text":"done","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-981d1bd9","marks":{"attribution":"user"}}]}
+  ]
+}

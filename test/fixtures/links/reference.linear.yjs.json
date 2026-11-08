@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Read the ","marks":{"attribution":"user"}},{"text":"guide","marks":{"attribution":"user","link":{"href":"https://example.com/guide","noEmbed":null}}},{"text":" and the ","marks":{"attribution":"user"}},{"text":"policy","marks":{"attribution":"user","link":{"href":"https://example.com/policy","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-b3c01c3b","marks":{"attribution":"user"}}]}
+  ]
+}
