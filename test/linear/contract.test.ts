@@ -39,7 +39,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   const stats = new RequestStats();
   const perOperation: Record<string, number> = {};
   // Every request, without content: operation, status, request id, error codes.
-  const requests: Array<Omit<LogEntry, 'rateLimitHeaders'>> = [];
+  const requests: LogEntry[] = [];
   let token: RunToken;
   let linear: LinearClient;
   let teamId: string;
@@ -50,9 +50,11 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   /** Runs one step and records how many API requests it took. */
   async function measured<T>(name: string, step: () => Promise<T>): Promise<T> {
     const before = stats.total;
-    const result = await step();
-    perOperation[name] = stats.total - before;
-    return result;
+    try {
+      return await step();
+    } finally {
+      perOperation[name] = stats.total - before;
+    }
   }
 
   before(async () => {
@@ -61,7 +63,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
       token: token.accessToken,
       baseUrl,
       stats,
-      hooks: { log: ({ rateLimitHeaders, ...entry }) => requests.push(entry) },
+      hooks: { log: (entry) => requests.push(entry) },
     });
     const teams = await linear.request<{ teams: { nodes: Array<{ id: string; key: string }> } }>(
       'Teams',
@@ -85,16 +87,27 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
 
   after(async () => {
     if (!linear) return;
+    const cleanupErrors: unknown[] = [];
     try {
       for (const id of projectIds) {
-        await linear.request('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id });
+        try {
+          await linear.request('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id });
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
       }
     } finally {
-      await measured('revoke token', () => revokeToken(token.accessToken, { baseUrl, stats }));
-      const report = { perOperation, stats: stats.toJSON(), lastRateLimit: linear.transport.lastRateLimit?.headers, requests };
-      console.log(JSON.stringify(report, null, 2));
-      if (process.env.LINEAR_CONTRACT_REPORT) await writeFile(process.env.LINEAR_CONTRACT_REPORT, JSON.stringify(report, null, 2));
+      try {
+        await measured('revoke token', () => revokeToken(token.accessToken, { baseUrl, stats }));
+      } catch (error) {
+        cleanupErrors.push(error);
+      } finally {
+        const report = { perOperation, stats: stats.toJSON(), lastRateLimit: linear.transport.lastRateLimit?.headers, requests, cleanupFailed: cleanupErrors.length > 0 };
+        console.log(JSON.stringify(report, null, 2));
+        if (process.env.LINEAR_CONTRACT_REPORT) await writeFile(process.env.LINEAR_CONTRACT_REPORT, JSON.stringify(report, null, 2));
+      }
     }
+    if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Contract cleanup failed');
   });
 
   it('reads the rate-limit status', async () => {
