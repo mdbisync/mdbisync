@@ -115,6 +115,13 @@ test('an unchanged fixture with a final line break is reported', () => {
   }
 });
 
+test('a rule needs a fixture unless the corpus covers it', () => {
+  const errors = withCopy((d) => editIndex(d, '    covered_by: corpus\n', ''));
+  assert.ok(errors.includes('rule duplicate-title: no fixtures'), errors.join('\n'));
+  const wrong = withCopy((d) => editIndex(d, '    covered_by: corpus\n', '    covered_by: elsewhere\n'));
+  assert.ok(wrong.includes('rule duplicate-title: covered_by can only be corpus'), wrong.join('\n'));
+});
+
 test('a fixture indexed twice is reported', () => {
   const errors = withCopy((d) => {
     const p = join(d, 'index.yaml');

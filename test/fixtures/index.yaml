@@ -44,6 +44,7 @@ rules:
     title: "Documents over 250,000 characters are rejected."
   - id: duplicate-title
     title: "Two files map to one document title."
+    covered_by: corpus
 known_constructs:
   - construct: math-block-dollars
     class: fixable
@@ -72,8 +73,6 @@ known_constructs:
   - construct: image-in-link
     class: lint-error
   - construct: over-content-limit
-    class: lint-error
-  - construct: duplicate-title
     class: lint-error
   - construct: image-relative-path
     class: unchanged
@@ -1608,22 +1607,6 @@ fixtures:
     rule: image-in-link
     basis: known
     canary: kx-d5ff24b6
-  - file: "lint-errors/duplicate-title/plan.md"
-    group: lint-errors
-    construct: duplicate-title
-    class: lint-error
-    rule: duplicate-title
-    basis: known
-    canary: kx-3ff0391c
-    note: "pairs with plan.markdown; both map to the title duplicate-title/plan"
-  - file: "lint-errors/duplicate-title/plan.markdown"
-    group: lint-errors
-    construct: duplicate-title
-    class: lint-error
-    rule: duplicate-title
-    basis: known
-    canary: kx-96c657ab
-    note: "pairs with plan.md; both map to the title duplicate-title/plan"
   - file: "images/png.md"
     group: images
     construct: image-relative-path
@@ -1791,6 +1774,21 @@ fixtures:
     basis: assumed
     canary: kx-d8d5d447
     synced: false
+  - file: "unsynced/markdown-extension/plan.md"
+    group: unsynced
+    construct: markdown-extension-sibling
+    class: unchanged
+    basis: assumed
+    canary: kx-adb18378
+    note: "plan.markdown next to it is not synchronized, so the two do not collide"
+  - file: "unsynced/markdown-extension/plan.markdown"
+    group: unsynced
+    construct: unsynced-markdown-extension
+    class: unchanged
+    basis: assumed
+    canary: kx-f430d6c3
+    synced: false
+    note: "ignored, so it does not collide with plan.md"
   - file: "unsynced/binary-named.md"
     group: unsynced
     construct: unsynced-binary-md

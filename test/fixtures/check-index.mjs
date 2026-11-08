@@ -228,8 +228,15 @@ export function checkBank(bankDir) {
   for (const g of groups) {
     if (!index.fixtures.some((f) => f.group === g)) err(`group ${g}: no fixtures`);
   }
-  for (const r of rules) {
-    if (!index.fixtures.some((f) => f.rule === r)) err(`rule ${r}: no fixtures`);
+  // A rule whose cases cannot live in the bank (for example file names that
+  // collide on case-insensitive file systems) is covered by the corpus instead.
+  for (const r of index.rules) {
+    if (r.covered_by !== undefined && r.covered_by !== 'corpus') {
+      err(`rule ${r.id}: covered_by can only be corpus`);
+    }
+    if (r.covered_by === undefined && !index.fixtures.some((f) => f.rule === r.id)) {
+      err(`rule ${r.id}: no fixtures`);
+    }
   }
   // A known construct has a fixture with basis known, and no fixture of it
   // contradicts the known class. Basis known is only for listed constructs.

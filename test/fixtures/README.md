@@ -38,6 +38,13 @@ Each fixture entry has:
 | `missing_target` | `true` when a broken relative link is the point of the fixture |
 | `note` | free text |
 
+A rule in `rules` needs at least one fixture, unless it has
+`covered_by: corpus`: its cases cannot live in the bank and the corpus
+generator builds them instead. For example, two file names that differ only
+in case or Unicode normalization cannot both be checked out on macOS. Only
+`.md` files are synchronized, so a `.markdown` file next to an `.md` file of
+the same name is ignored and does not collide with it.
+
 `known_constructs` lists the constructs whose behavior is already known,
 with their class. Every one needs a fixture with basis `known`, every
 fixture of it must have that class, and basis `known` is used only for
