@@ -12,7 +12,7 @@ import * as Y from 'yjs';
 import { LinearClient } from '../../src/linear/index.ts';
 import { FakeLinear, fakeDocument, type ReceivedRequest } from '../linear/fake-linear.ts';
 import { fromLinear, goldenMarkdownPath, goldenYjsPath, loadBank, sentForm, toLinear } from './bank.ts';
-import { findLimit, isLeftover, runProbe } from './probe.ts';
+import { PROBE_FACTS, findLimit, isLeftover, runProbe } from './probe.ts';
 import { findDrift, refusalKey, writeRecord } from './record.ts';
 import { diffLines, keptOnlyInYjs, renderReport } from './report.ts';
 import { summarizeContentState } from './yjs-summary.ts';
@@ -155,7 +155,7 @@ describe('format probe against a fake Linear', () => {
   });
 
   const probe = () =>
-    runProbe({ client: new LinearClient({ token: 'fake', baseUrl: fake.url }), bank: loadBank(bankDir), runId: 'test-run', facts: false });
+    runProbe({ client: new LinearClient({ token: 'fake', baseUrl: fake.url }, PROBE_FACTS), bank: loadBank(bankDir), runId: 'test-run', facts: false });
 
   it('records Linear forms, refusals and Yjs beside the fixtures, and deletes its project', async () => {
     const run = await probe();

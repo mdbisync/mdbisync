@@ -1,0 +1,201 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, posix } from "node:path";
+import { linkTargets, rewrite, targetPath } from "./bank.ts";
+import { checkCorpus } from "./check.ts";
+import { longTitle } from "./documents.ts";
+import { buildCorpus, writeCorpus } from "./generate.ts";
+import { gitattributes } from "./model.ts";
+import { MINI_DOCUMENTS } from "./slices.ts";
+import { COLLISIONS } from "./tree.ts";
+
+// The default corpus, built once for the tests that only read it.
+let defaultCorpus: ReturnType<typeof buildCorpus> | undefined;
+function corpus(): ReturnType<typeof buildCorpus> {
+  defaultCorpus ??= buildCorpus();
+  return defaultCorpus;
+}
+
+function treeDigest(dir: string, base = dir): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) for (const [k, v] of treeDigest(full, base)) out.set(k, v);
+    else out.set(full.slice(base.length + 1), createHash("sha256").update(readFileSync(full)).digest("hex"));
+  }
+  return out;
+}
+
+test("the same seed writes byte-identical trees, and the result passes the corpus check", () => {
+  const a = mkdtempSync(join(tmpdir(), "corpus-a-"));
+  const b = mkdtempSync(join(tmpdir(), "corpus-b-"));
+  try {
+    writeCorpus(buildCorpus("determinism"), a, false);
+    writeCorpus(buildCorpus("determinism"), b, false);
+    const left = treeDigest(a);
+    const right = treeDigest(b);
+    assert.ok(left.size >= 2000, `only ${left.size} files`);
+    assert.deepEqual([...left.keys()].sort(), [...right.keys()].sort());
+    for (const [path, digest] of left) assert.equal(right.get(path), digest, path);
+
+    const result = checkCorpus(a);
+    assert.deepEqual(result.problems, []);
+    assert.ok(result.files >= 2000);
+  } finally {
+    rmSync(a, { recursive: true, force: true });
+    rmSync(b, { recursive: true, force: true });
+  }
+});
+
+test("a different seed changes the generated content but not the layout rules", () => {
+  const one = corpus();
+  const two = buildCorpus("seed-two");
+  const text = (c: ReturnType<typeof buildCorpus>) => c.files.filter((f) => f.group === "work-documents").map((f) => f.content.toString()).join("");
+  assert.notEqual(text(one), text(two));
+  assert.equal(one.files.filter((f) => f.group === "pairwise").length, two.files.filter((f) => f.group === "pairwise").length);
+});
+
+test("long titles have exactly the asked length and fit the file name limit", () => {
+  for (const length of [100, 200, 250, 255, 256, 300]) {
+    const title = longTitle(length);
+    assert.equal(title.length, length);
+    for (const segment of title.split("/")) assert.ok(Buffer.byteLength(`${segment}.md`) <= 255, segment);
+  }
+});
+
+test("the slices are closed and the mini slice has its twelve documents", () => {
+  const built = corpus();
+  const byPath = new Map(built.files.map((f) => [f.path, f]));
+  for (const [slice, paths] of Object.entries(built.slices)) {
+    for (const path of paths) {
+      const file = byPath.get(path);
+      assert.ok(file, `${slice}: ${path}`);
+      for (const target of file.links) assert.ok(paths.includes(target), `${slice}: ${path} links to ${target}, which the slice leaves out`);
+    }
+    assert.ok(paths.includes(".gitattributes") && paths.includes(".pre-commit-config.yaml"), slice);
+  }
+  const documents = built.slices.mini.filter((p) => byPath.get(p)?.synced && byPath.get(p)?.kind === "markdown");
+  assert.equal(documents.length, MINI_DOCUMENTS);
+  for (const slice of ["mini", "mid"] as const) {
+    assert.deepEqual(built.slices[slice].filter((p) => byPath.get(p)?.macosUnsafe), [], `${slice} holds a macOS-unsafe name`);
+  }
+  assert.equal(built.slices.full.length, built.files.length);
+});
+
+test("one image is used by exactly 40 documents, and two files are over the upload limit", () => {
+  const users = corpus().files.filter((f) => f.links.includes("docs/handbook/assets/shared-logo.png"));
+  assert.equal(users.length, 40);
+  const tooLarge = corpus().files.filter((f) => f.kind !== "markdown" && f.rule === "upload-too-large").map((f) => f.kind);
+  assert.deepEqual(tooLarge.sort(), ["attachment", "image"]);
+});
+
+test("duplicate-title fixtures are taken from the bank once, never paired by the generator", () => {
+  const built = corpus();
+  const generated = built.files.filter((f) => f.path.startsWith(`${COLLISIONS}/`) && f.group !== "construct-singles");
+  assert.deepEqual(generated, []);
+  for (const excluded of built.manifest.excluded) {
+    assert.ok(!built.files.some((f) => f.path.endsWith(excluded.file)), excluded.file);
+  }
+});
+
+test("reference definitions count as links; footnote definitions do not", () => {
+  const found = linkTargets("![Banner][banner]\n\n[banner]: ../assets/banner.png\n\nText[^1]\n\n[^1]: a note\n\n[site]: https://www.example.com\n");
+  assert.deepEqual(found, [{ written: "../assets/banner.png", form: "definition" }]);
+});
+
+test("every relative link a corpus document writes is in its dependency list", () => {
+  const built = corpus();
+  const byPath = new Map(built.files.map((f) => [f.path, f]));
+  const reference = byPath.get("docs/reference/images/reference.md");
+  assert.ok(reference, "the bank's reference-style image fixture is in the corpus");
+  assert.ok(reference.links.includes("docs/reference/assets/banner.png"), "a reference-style image records its image");
+  for (const file of built.files) {
+    if (file.kind !== "markdown") continue;
+    for (const { written } of linkTargets(file.content.toString("utf8"))) {
+      const bare = (written.startsWith("<") ? written.slice(1, -1) : written).split("#")[0] as string;
+      const target = posix.normalize(posix.join(posix.dirname(file.path), decodeURI(bare)));
+      if (byPath.has(target)) assert.ok(file.links.includes(target), `${file.path} links to ${target} without listing it`);
+    }
+  }
+});
+
+test("HTML src and href count as links, and the HTML image fixture records its image", () => {
+  assert.deepEqual(linkTargets('<img src="../assets/banner.png" alt="x">\n<a href="https://www.example.com">y</a>\n'), [{ written: "../assets/banner.png", form: "html" }]);
+  const html = corpus().files.find((f) => f.path === "docs/reference/html-extensions/html-img.md");
+  assert.ok(html?.links.includes("docs/reference/assets/banner.png"));
+});
+
+test("bank fixtures whose links still reach their files are copied byte for byte", () => {
+  for (const name of ["links/spaces-angle.md", "links/spaces-encoded.md", "links/relative.md", "images/reference.md"]) {
+    const copied = corpus().files.find((f) => f.path === `docs/reference/${name}`);
+    assert.ok(copied, name);
+    assert.deepEqual(copied.content, readFileSync(join("test/fixtures", name)), name);
+  }
+});
+
+test("a malformed percent escape is kept as written, and replacements are literal", () => {
+  assert.equal(targetPath("100%.md"), "100%.md");
+  assert.equal(targetPath("<a%20b.md#part>"), "a b.md");
+  const text = "[a](old.md) and\n\n[ref]: old.md\n";
+  assert.equal(rewrite(text, { written: "old.md", form: "inline" }, "new $& name.md"), "[a](<new $& name.md>) and\n\n[ref]: old.md\n");
+  assert.equal(rewrite(text, { written: "old.md", form: "definition" }, "$1.md"), "[a](old.md) and\n\n[ref]: $1.md\n");
+});
+
+test("bank files above every annotation are unsynced, and every bank fixture keeps its bank group", () => {
+  const built = corpus();
+  for (const file of built.files.filter((f) => f.path.startsWith("loose/"))) {
+    assert.equal(file.synced, false, file.path);
+    assert.equal(file.group, "unsynced", file.path);
+  }
+  const bankFiles = built.manifest.files.filter((f) => f.path.startsWith("docs/reference/") && f.path !== "docs/reference/README.md");
+  assert.ok(bankFiles.length > 200);
+  for (const file of bankFiles) assert.ok(file.bank_group, file.path);
+});
+
+test("every document in a slice has the annotation READMEs above it", () => {
+  const built = corpus();
+  const byPath = new Map(built.files.map((f) => [f.path, f]));
+  for (const [slice, paths] of Object.entries(built.slices)) {
+    const inSlice = new Set(paths);
+    for (const path of paths) {
+      const file = byPath.get(path);
+      if (!file?.synced) continue;
+      for (let dir = posix.dirname(path); dir !== "."; dir = posix.dirname(dir)) {
+        const readme = byPath.get(`${dir}/README.md`);
+        if (readme?.group === "annotations") assert.ok(inSlice.has(readme.path), `${slice}: ${path} without ${readme.path}`);
+      }
+    }
+  }
+});
+
+test("every generated image and attachment has its own content", () => {
+  // Uploads are deduplicated by content hash, so two equal files would test one upload.
+  const seen = new Map<string, string>();
+  for (const file of corpus().files) {
+    if ((file.kind !== "image" && file.kind !== "attachment") || file.bankGroup !== null || file.path.startsWith("loose/")) continue;
+    const digest = createHash("sha256").update(file.content).digest("hex");
+    assert.equal(seen.get(digest), undefined, `${file.path} has the same content as ${seen.get(digest)}`);
+    seen.set(digest, file.path);
+  }
+});
+
+test("the corpus attributes keep CRLF documents byte-exact even with core.autocrlf", () => {
+  const repo = mkdtempSync(join(tmpdir(), "corpus-eol-"));
+  try {
+    const run = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+    run("init", "-q");
+    run("config", "core.autocrlf", "true");
+    writeFileSync(join(repo, ".gitattributes"), gitattributes());
+    const crlf = "# Title\r\n\r\nLine one\r\nLine two\r\n";
+    writeFileSync(join(repo, "doc.md"), crlf);
+    run("add", ".gitattributes", "doc.md");
+    assert.equal(run("cat-file", "-p", ":doc.md"), crlf);
+    assert.match(run("check-attr", "text", "doc.md"), /text: unset/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
