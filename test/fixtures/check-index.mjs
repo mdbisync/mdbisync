@@ -16,7 +16,7 @@ const CANARY_ANY = /kx-[0-9a-f]{8}/g;
 const CYRILLIC = /[\u0400-\u052F\u1C80-\u1C8F\u2DE0-\u2DFF\uA640-\uA69F]/u;
 const ROOT_FILES = new Set(['.gitattributes', 'index.yaml', 'README.md', 'check-index.mjs', 'check-index.test.mjs']);
 const ASSETS_DIR = 'assets';
-const MARKDOWN = /\.(md|markdown)$/;
+const MARKDOWN = /\.md$/; // only .md files are synchronized
 
 // ---------------------------------------------------------------------------
 // A parser for the small YAML subset index.yaml uses: top-level scalars and
@@ -138,6 +138,39 @@ export function relativeTargets(text) {
     .map((t) => decode(t.split('#')[0]));
 }
 
+// Some fixtures need file names that collide on case-insensitive file systems
+// (macOS, Windows) or normalization-insensitive ones (macOS). They are committed
+// under safe names; `name_as` is the name a test writes them under, and
+// `macos_unsafe: true` marks them. Each such name must collide with another
+// fixture's name_as and differ from it byte for byte.
+// Upper then lower case folds final sigma and similar special cases alike.
+const collisionKey = (name) => name.normalize('NFC').toUpperCase().toLowerCase();
+
+function checkNameAs(fixtures, onDisk, err) {
+  const named = fixtures.filter((f) => f.name_as !== undefined);
+  for (const f of fixtures) {
+    if ((f.name_as !== undefined) !== (f.macos_unsafe === true)) {
+      err(`${f.file}: name_as and macos_unsafe: true go together`);
+    }
+  }
+  const committed = new Set(onDisk.map(collisionKey));
+  const seen = new Map();
+  for (const f of named) {
+    const as = f.name_as;
+    if (typeof as !== 'string' || !MARKDOWN.test(as) || dirname(as) !== dirname(f.file)) {
+      err(`${f.file}: name_as must be a .md name in the same folder`);
+      continue;
+    }
+    if (seen.has(as)) err(`${f.file}: name_as also used by ${seen.get(as)}`);
+    seen.set(as, f.file);
+    if (committed.has(collisionKey(as))) err(`${f.file}: name_as ${as} collides with a committed file`);
+    const partner = named.some(
+      (o) => o !== f && typeof o.name_as === 'string' && o.name_as !== as && collisionKey(o.name_as) === collisionKey(as),
+    );
+    if (!partner) err(`${f.file}: name_as has no colliding partner`);
+  }
+}
+
 export function checkBank(bankDir) {
   const errors = [];
   const err = (msg) => errors.push(msg);
@@ -231,6 +264,7 @@ export function checkBank(bankDir) {
   for (const r of rules) {
     if (!index.fixtures.some((f) => f.rule === r)) err(`rule ${r}: no fixtures`);
   }
+  checkNameAs(index.fixtures, onDisk, err);
   // A known construct has a fixture with basis known, and no fixture of it
   // contradicts the known class. Basis known is only for listed constructs.
   const known = new Map(index.known_constructs.map((k) => [k.construct, k.class]));

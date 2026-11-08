@@ -34,9 +34,22 @@ Each fixture entry has:
 | `basis` | `known` when the class was observed, `assumed` until the format probe confirms or corrects it |
 | `canary` | the fixture's unique token, `kx-` and eight hex digits |
 | `canary_in` | `name` when the file cannot hold text (an empty file): the token is in the file name |
-| `synced` | `false` for files that are never synchronized |
+| `synced` | `false` for files that are never synchronized; this field, not the group, decides it |
 | `missing_target` | `true` when a broken relative link is the point of the fixture |
+| `name_as` | the colliding name a test writes the fixture under (see below) |
+| `macos_unsafe` | `true` together with `name_as` |
 | `note` | free text |
+
+Every rule in `rules` needs at least one fixture. Only `.md` files are
+synchronized and treated as Markdown, so a `.markdown` file next to an
+`.md` file of the same name is ignored and does not collide with it.
+
+Two file names that differ only in case or Unicode normalization map to one
+title, but a checkout cannot hold both on macOS (case or normalization) or
+Windows (case). Such fixtures are
+committed under safe names, with `name_as` giving the name a test writes
+them under on a case- and normalization-sensitive file system, and
+`macos_unsafe: true`. Each `name_as` must collide with another fixture's.
 
 `known_constructs` lists the constructs whose behavior is already known,
 with their class. Every one needs a fixture with basis `known`, every
