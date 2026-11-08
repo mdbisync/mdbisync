@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { appendFile, readFile } from 'node:fs/promises';
+import { appendFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createReleaseCommit, validateVersion } from './package.ts';
+import { createReleaseCommit, validateVersion, verifyReleaseDirectory } from './package.ts';
 
 // This step needs only Node and Git; dependency installation belongs to the build job.
 export async function tagRelease(sourceSha: string, version: string, directory: string, repository = process.cwd()): Promise<string> {
@@ -12,8 +12,7 @@ export async function tagRelease(sourceSha: string, version: string, directory: 
   git('merge-base', '--is-ancestor', sourceSha, 'origin/main');
   const existing = git('ls-remote', '--tags', 'origin', `refs/tags/${version}`);
   if (existing !== '') throw new Error('Release tag already exists; choose a new version');
-  const manifest = JSON.parse(await readFile(resolve(directory, 'release.json'), 'utf8')) as { source?: string; version?: string };
-  if (manifest.source !== sourceSha || manifest.version !== version) throw new Error('Release provenance does not match the requested source and version');
+  await verifyReleaseDirectory(resolve(directory), sourceSha, version);
   const releaseSha = await createReleaseCommit({ repository, directory: resolve(directory), sourceSha, version });
   git('tag', '-a', version, releaseSha, '-m', `Release ${version}\n\nSource: ${sourceSha}`);
   git('push', 'origin', `refs/tags/${version}:refs/tags/${version}`);

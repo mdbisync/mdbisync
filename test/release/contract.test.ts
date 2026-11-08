@@ -26,14 +26,13 @@ test('real bundles run from the isolated release tree and install as an offline 
     }
     // Build tools exist only in the source tree, never in the consumer tree.
     await symlink(join(root, 'node_modules'), join(source, 'node_modules'), 'dir');
-    const run = (command: string, args: string[]) => execFileSync(command, args, { cwd: source, encoding: 'utf8', stdio: 'pipe' });
     const version = 'v0.1.0-rc.1';
-    run('npm', ['version', '--allow-same-version', '--no-git-tag-version', '--ignore-scripts', version.slice(1)]);
-    run(process.execPath, ['tools/build.ts']);
+    execFileSync(process.execPath, ['tools/build.ts'], { cwd: source, encoding: 'utf8', env: { ...process.env, MDBISYNC_RELEASE_VERSION: version.slice(1) } });
     const action: unknown = parse(await readFile(join(source, 'action.yml'), 'utf8'));
     const hooks: unknown = parse(await readFile(join(source, '.pre-commit-hooks.yaml'), 'utf8'));
     await stageRelease({ source, output, sourceSha: 'a'.repeat(40), version, action, hooks });
     await smokeRelease(output);
+    assert.equal(await readFile(join(source, 'package.json'), 'utf8'), await readFile(join(root, 'package.json'), 'utf8'));
     await assert.rejects(readFile(join(output, 'package-lock.json')), /ENOENT/);
     await assert.rejects(readFile(join(output, 'node_modules/package.json')), /ENOENT/);
   } finally {

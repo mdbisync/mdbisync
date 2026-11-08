@@ -36,6 +36,10 @@ async function main(): Promise<void> {
     format: "esm",
     // Some bundled CommonJS packages call require(); give the ES module bundle one.
     banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' },
+    define: {
+      __MDBISYNC_RELEASE_VERSION__: process.env["MDBISYNC_RELEASE_VERSION"] === undefined
+        ? "undefined" : JSON.stringify(process.env["MDBISYNC_RELEASE_VERSION"]),
+    },
     metafile: true,
     legalComments: "linked",
     logLevel: "warning",

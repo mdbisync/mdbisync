@@ -64,8 +64,17 @@ The action runs its checked-in JavaScript bundles without installation.
 The hook needs Node 24.15.0, which pre-commit provisions when creating its
 environment; its package has no registry dependencies. Enable Dependabot's
 `github-actions` ecosystem in your repository to propose action SHA updates,
-and use `pre-commit autoupdate --freeze` for hook SHA updates. Review the two
-pins together. The release mechanism does not make unfinished commands
+then copy the proposed release SHA into the hook's `rev` in the same change.
+To update to a specific pre-release, resolve its annotated tag and use the
+first column as both pins:
+
+```sh
+git ls-remote https://github.com/mikhail-yaskou/mdbisync 'refs/tags/v0.1.0-rc.2^{}'
+```
+
+`pre-commit autoupdate` follows source history and cannot discover these
+isolated release commits. Keep the hook on an explicitly resolved release
+SHA. The release mechanism does not make unfinished commands
 functional; the development status above still applies.
 
 ## License

@@ -32,17 +32,19 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Validate and check out source
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+          git checkout --detach "$SOURCE_SHA"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
-      - name: Validate source and version
-        run: |
-          node --input-type=module -e 'import { validateVersion } from "./src/release/package.ts"; validateVersion(process.env.RELEASE_VERSION); if (!/^[a-f0-9]{40}$/.test(process.env.SOURCE_SHA) || process.env.SOURCE_SHA.length !== 40) throw new Error("Expected a full source SHA");'
-          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
-          git checkout --detach "$SOURCE_SHA"
       - name: Install locked build dependencies without scripts
-        run: npm ci --ignore-scripts
+        run: |
+          node --input-type=module -e 'import { validateVersion, validateSha } from "./src/release/package.ts"; validateVersion(process.env.RELEASE_VERSION); validateSha(process.env.SOURCE_SHA);'
+          npm ci --ignore-scripts
       - name: Verify dependency admission
         run: |
           npm audit signatures
@@ -51,11 +53,11 @@ jobs:
       - name: Check, build and test source
         run: |
           npm run typecheck
-          npm version --allow-same-version --no-git-tag-version --ignore-scripts "${RELEASE_VERSION#v}"
           npm run build
           npm test
       - name: Stage and verify self-contained release
         run: |
+          MDBISYNC_RELEASE_VERSION="${RELEASE_VERSION#v}" npm run build
           node src/release/prepare.ts "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/release"
           node src/release/smoke.ts "$RUNNER_TEMP/release"
           tar -C "$RUNNER_TEMP/release" -cf "$RUNNER_TEMP/release.tar" .

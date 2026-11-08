@@ -9,6 +9,7 @@ export async function prepareRelease(sourceSha: string, version: string, output:
   const source = process.cwd();
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   if (head !== sourceSha) throw new Error('Source SHA must match the checked-out source');
+  execFileSync('git', ['diff', '--exit-code', 'HEAD', '--'], { stdio: 'pipe' });
   const action: unknown = parse(await readFile('action.yml', 'utf8'));
   const hooks: unknown = parse(await readFile('.pre-commit-hooks.yaml', 'utf8'));
   await stageRelease({ source, output: resolve(output), sourceSha, version, action, hooks });

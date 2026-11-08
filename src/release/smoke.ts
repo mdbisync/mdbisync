@@ -38,8 +38,12 @@ export async function smokeRelease(directory: string): Promise<void> {
     const version = run(process.execPath, [join(root, bins.mdbisync!), '--version']);
     assert.equal(version.status, 0, version.stderr);
     assert.equal(version.stdout.trim(), manifest.version.slice(1));
+    const pack = run('npm', ['pack', '--offline', '--ignore-scripts', '--json', '--cache', join(temporary, 'cache'), '--pack-destination', temporary]);
+    assert.equal(pack.status, 0, pack.stderr);
+    const packed = JSON.parse(pack.stdout) as { filename: string }[];
+    assert.equal(packed.length, 1);
     // This mirrors pre-commit's one-time local package installation, offline.
-    const install = run('npm', ['install', '--global', '--offline', '--ignore-scripts', '--cache', join(temporary, 'cache'), '--prefix', join(temporary, 'prefix'), root]);
+    const install = run('npm', ['install', '--global', '--offline', '--ignore-scripts', '--cache', join(temporary, 'cache'), '--prefix', join(temporary, 'prefix'), join(temporary, packed[0]!.filename)]);
     assert.equal(install.status, 0, install.stderr);
     const hookCli = run(join(temporary, 'prefix/bin/mdbisync'), ['--help']);
     assert.equal(hookCli.status, 0, hookCli.stderr);

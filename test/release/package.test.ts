@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { tagRelease } from '../../src/release/tag.ts';
-import { createReleaseCommit, releasePackage, stageRelease, validateAction, validateHooks, validateVersion } from '../../src/release/package.ts';
+import { createReleaseCommit, releasePackage, stageRelease, validateAction, validateHooks, validateVersion, verifyReleaseDirectory } from '../../src/release/package.ts';
 
 const action = { runs: { using: 'node24', main: 'dist/action.cjs', post: 'dist/post.cjs', 'post-if': 'always()' } };
 
@@ -17,11 +17,11 @@ test('release version must be an explicit semantic pre-release', () => {
 });
 
 test('release package retains only the bundled executable contract', () => {
-  assert.deepEqual(releasePackage({ name: 'mdbisync', bin: { mdbisync: 'dist/cli.cjs' }, dependencies: { example: '1.0.0' }, scripts: { prepare: 'npm install' } }, 'v0.1.0-rc.1'), {
+  assert.deepEqual(releasePackage({ name: 'mdbisync', type: 'module', engines: { node: '>=24.5' }, bin: { mdbisync: 'dist/cli.cjs' }, dependencies: { example: '1.0.0' }, scripts: { prepare: 'npm install' } }, 'v0.1.0-rc.1'), {
     name: 'mdbisync', version: '0.1.0-rc.1', private: true, type: 'module',
-    engines: { node: '>=24.2' }, bin: { mdbisync: 'dist/cli.cjs' },
+    engines: { node: '>=24.5' }, bin: { mdbisync: 'dist/cli.cjs' },
   });
-  assert.throws(() => releasePackage({ name: 'mdbisync', bin: { mdbisync: '../cli.js' } }, 'v0.1.0-rc.1'), /bundle/);
+  assert.throws(() => releasePackage({ name: 'mdbisync', type: 'module', engines: { node: '>=24.2' }, bin: { mdbisync: '../cli.js' } }, 'v0.1.0-rc.1'), /bundle/);
 });
 
 test('action must run local bundled JavaScript with a post entry and no steps', () => {
@@ -59,7 +59,7 @@ test('release tree is self-contained and its tagged commit does not change main'
     await writeFile(join(source, 'LICENSE'), 'Example license\n');
     await writeFile(join(source, 'action.yml'), 'runs:\n  using: node24\n');
     await writeFile(join(source, '.pre-commit-hooks.yaml'), '- id: linear-format\n');
-    await writeFile(join(source, 'package.json'), JSON.stringify({ name: 'mdbisync', bin: { mdbisync: 'dist/cli.cjs' } }));
+    await writeFile(join(source, 'package.json'), JSON.stringify({ name: 'mdbisync', type: 'module', engines: { node: '>=24.2' }, bin: { mdbisync: 'dist/cli.cjs' } }));
     await writeFile(join(source, 'dist/action.cjs'), 'console.log("action")');
     await writeFile(join(source, 'dist/post.cjs'), 'console.log("post")');
     await writeFile(join(source, 'dist/cli.cjs'), '#!/usr/bin/env node\nconsole.log("cli")');
@@ -72,7 +72,14 @@ test('release tree is self-contained and its tagged commit does not change main'
     await stageRelease(options);
     const manifest = JSON.parse(await readFile(join(output, 'release.json'), 'utf8'));
     assert.equal(manifest.source, parent);
-    assert.match(manifest.bundles['dist/cli.cjs'], /^[a-f0-9]{64}$/);
+    assert.match(manifest.files['dist/cli.cjs'], /^[a-f0-9]{64}$/);
+    await verifyReleaseDirectory(output, parent, options.version);
+    await writeFile(join(output, 'dist/cli.cjs'), 'changed');
+    await assert.rejects(verifyReleaseDirectory(output, parent, options.version), /checksum/);
+    await writeFile(join(output, 'dist/cli.cjs'), await readFile(join(source, 'dist/cli.cjs')));
+    await writeFile(join(output, 'extra.txt'), 'unexpected');
+    await assert.rejects(verifyReleaseDirectory(output, parent, options.version), /Unexpected/);
+    await rm(join(output, 'extra.txt'));
     const release = await createReleaseCommit({ repository: source, directory: output, sourceSha: parent, version: options.version });
     assert.equal(git('rev-parse', 'main'), parent);
     assert.equal(git('rev-parse', `${release}^`), parent);
@@ -84,7 +91,14 @@ test('release tree is self-contained and its tagged commit does not change main'
     git('push', '--set-upstream', 'origin', 'main');
     const tagged = await tagRelease(parent, options.version, output, source);
     assert.equal(git('rev-parse', `${options.version}^{commit}`), tagged);
-    assert.match(git('ls-remote', '--tags', 'origin', `refs/tags/${options.version}^{}`), new RegExp(`^${tagged}`));
+    // The documented update resolves the peeled annotated tag, never main.
+    const resolved = git('ls-remote', remote, `refs/tags/${options.version}^{}`).split(/\s+/)[0]!;
+    assert.equal(resolved, tagged);
+    assert.notEqual(resolved, parent);
+    const consumer = join(root, 'consumer');
+    execFileSync('git', ['clone', '--no-checkout', remote, consumer], { stdio: 'pipe' });
+    execFileSync('git', ['-C', consumer, 'checkout', '--detach', resolved], { stdio: 'pipe' });
+    assert.equal(execFileSync(process.execPath, [join(consumer, 'dist/cli.cjs')], { encoding: 'utf8' }).trim(), 'cli');
     assert.equal(git('rev-parse', 'main'), parent);
     await assert.rejects(tagRelease(parent, options.version, output, source), /already exists/);
     assert.equal(execFileSync(process.execPath, [join(output, 'dist/cli.cjs')], { encoding: 'utf8' }).trim(), 'cli');
