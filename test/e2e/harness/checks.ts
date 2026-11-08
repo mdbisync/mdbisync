@@ -8,9 +8,10 @@ import { join, posix } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
-import { annotatedFolders, owningFolder } from './corpus.ts';
+import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
 import { HarnessGapError, ProductError, type CheckOutcome } from './results.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
+import { refreshView, resolveSubject } from './subjects.ts';
 
 // --- pure helpers ----------------------------------------------------------
 
@@ -84,9 +85,29 @@ export interface Sides {
   documents: Map<string, LinearDocument>;
   /** Every document in the run's projects and team-zone prefix. */
   allDocuments: LinearDocument[];
+  /** SHA-256 of a file → upload URL, as the uploads ref holds it. */
+  uploadsByHash: Map<string, string>;
+  /** Every tracked file's SHA-256 (an LFS pointer's object id for LFS files) by path. */
+  hashes: Map<string, string>;
+  /** The tracked branch's tip. */
+  tip: string;
+  /** Annotated folders of the tracked branch. */
+  folders: Folder[];
 }
 
-async function fetchRef(git: Git, ref: string): Promise<string | null> {
+/** A file's SHA-256: an LFS pointer's object id, else the hash of the bytes. */
+export function fileHash(bytes: Buffer): string {
+  const pointer = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:([0-9a-f]{64})\n/.exec(bytes.toString('latin1'));
+  return pointer?.[1] ?? createHash('sha256').update(bytes).digest('hex');
+}
+
+/** An LFS pointer's object size, or null for a file stored in git. */
+export function lfsSize(bytes: Buffer): number | null {
+  const match = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\n[\s\S]*?^size (\d+)$/m.exec(bytes.toString('latin1'));
+  return match === null ? null : Number(match[1]);
+}
+
+export async function fetchRef(git: Git, ref: string): Promise<string | null> {
   try {
     await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
     return (await git.text(['rev-parse', ref])).trim();
@@ -120,10 +141,12 @@ export async function readSides(ctx: RunContext): Promise<Sides> {
   }
   const files = new Map<string, string>();
   const hashToPath = new Map<string, string>();
+  const hashes = new Map<string, string>();
   for (const path of tracked) {
     const bytes = readFileSync(join(git.dir, path));
-    const pointer = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:([0-9a-f]{64})\n/.exec(bytes.toString('latin1'));
-    hashToPath.set(pointer?.[1] ?? createHash('sha256').update(bytes).digest('hex'), path);
+    const hash = fileHash(bytes);
+    hashToPath.set(hash, path);
+    hashes.set(path, hash);
     if (path.endsWith('.md') && owningFolder(path, folders) !== null && !unsynced.has(path)) files.set(path, bytes.toString('utf8'));
   }
   const uploads = new Map<string, string>();
@@ -143,7 +166,8 @@ export async function readSides(ctx: RunContext): Promise<Sides> {
   const documents = new Map(allDocuments.map((document) => [document.id, document]));
   const missing = [...ids.values()].map((entry) => entry.id).filter((id) => !documents.has(id));
   if (missing.length > 0) for (const document of await world.app.getDocuments(missing, { withContent: true })) documents.set(document.id, document);
-  return { files, ids, uploads, documents, allDocuments };
+  const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
+  return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders };
 }
 
 // --- invariants ---------------------------------------------------------------
@@ -171,14 +195,7 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
 
   async I2(ctx, sides) {
     if (ctx.edits.length === 0) return ok('I2');
-    const s = await sides();
-    const gitText = [...s.files.values()].join('\n');
-    const linearText = [...s.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n');
-    const lost = ctx.edits.filter((edit) => {
-      const inGit = gitText.includes(edit.token);
-      const inLinear = linearText.includes(edit.token);
-      return edit.removal === true ? inGit || inLinear : !(inGit && inLinear);
-    });
+    const lost = lostEdits(ctx, await sides());
     return lost.length === 0 ? ok('I2') : bad('I2', `${lost.length} edits are not on both sides: ${lost.map((edit) => `${edit.side} ${edit.token}`).join(', ')}`);
   },
 
@@ -214,46 +231,7 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   },
 
   async I5(ctx) {
-    const world = ctx.live;
-    const canaries = new Set<string>();
-    if (world !== null) {
-      const sources = new Set(world.tree.paths.values());
-      for (const file of world.manifest.files) if (file.canary !== null && sources.has(file.path)) canaries.add(file.canary);
-    }
-    const texts = new Map<string, string>();
-    ctx.engine.results.forEach((result, index) => {
-      texts.set(`run ${index} stdout`, result.stdout);
-      texts.set(`run ${index} stderr`, result.stderr);
-      texts.set(`run ${index} summary`, result.summary);
-    });
-    if (world !== null) {
-      for (const pr of await world.rest.pullRequests(`t/${ctx.names.runId}/`)) texts.set(`pull request #${pr.number}`, `${pr.title}\n${pr.body ?? ''}`);
-      // Linear comments on the run's documents.
-      const ids = [...world.projects.values()].map((project) => project.id);
-      for (const projectId of ids) {
-        const data = await world.app.request<{ documents: { nodes: Array<{ id: string; comments: { nodes: Array<{ body: string }> } }> } }>(
-          'RunComments',
-          'query',
-          'query RunComments($projectId: ID!) { documents(first: 250, filter: { project: { id: { eq: $projectId } } }) { nodes { id comments(first: 50) { nodes { body } } } } }',
-          { projectId },
-        );
-        for (const document of data.documents.nodes) texts.set(`comments on ${document.id}`, document.comments.nodes.map((comment) => comment.body).join('\n'));
-      }
-      for (const team of world.tree.teamZones.keys()) {
-        const teamId = world.teams.get(team)?.id;
-        if (teamId === undefined) continue;
-        const data = await world.app.request<{ documents: { nodes: Array<{ id: string; project: { id: string } | null; comments: { nodes: Array<{ body: string }> } }> } }>(
-          'RunTeamComments',
-          'query',
-          'query RunTeamComments($teamId: ID!, $prefix: String!) { documents(first: 250, filter: { team: { id: { eq: $teamId } }, title: { startsWith: $prefix } }) { nodes { id project { id } comments(first: 50) { nodes { body } } } } }',
-          { teamId, prefix: ctx.names.teamZonePrefix },
-        );
-        for (const document of data.documents.nodes) {
-          if (document.project === null) texts.set(`comments on ${document.id}`, document.comments.nodes.map((comment) => comment.body).join('\n'));
-        }
-      }
-    }
-    const hits = scanCanaries(texts, canaries);
+    const hits = await canaryScan(ctx, { summariesOnly: false });
     return hits.length === 0 ? ok('I5') : bad('I5', `canary tokens found in: ${[...new Set(hits.map((hit) => hit.source))].join(', ')}`);
   },
 
@@ -322,6 +300,61 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   },
 };
 
+/** Edits that are not on both sides (or, for a removal, still on a side). */
+export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documents'>): RunContext['edits'] {
+  const gitText = [...sides.files.values()].join('\n');
+  const linearText = [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n');
+  return ctx.edits.filter((edit) => {
+    const inGit = gitText.includes(edit.token);
+    const inLinear = linearText.includes(edit.token);
+    return edit.removal === true ? inGit || inLinear : !(inGit && inLinear);
+  });
+}
+
+/** Canary tokens of the run's slice in run logs and summaries and, unless `summariesOnly`, in pull request texts and Linear comments. */
+export async function canaryScan(ctx: RunContext, options: { summariesOnly: boolean }): Promise<CanaryHit[]> {
+  const world = ctx.live;
+  const canaries = new Set<string>();
+  if (world !== null) {
+    const sources = new Set(world.tree.paths.values());
+    for (const file of world.manifest.files) if (file.canary !== null && sources.has(file.path)) canaries.add(file.canary);
+  }
+  const texts = new Map<string, string>();
+  ctx.engine.results.forEach((result, index) => {
+    texts.set(`run ${index} summary`, result.summary);
+    if (options.summariesOnly) return;
+    texts.set(`run ${index} stdout`, result.stdout);
+    texts.set(`run ${index} stderr`, result.stderr);
+  });
+  if (world !== null && !options.summariesOnly) {
+    for (const pr of await world.rest.pullRequests(`t/${ctx.names.runId}/`)) texts.set(`pull request #${pr.number}`, `${pr.title}\n${pr.body ?? ''}`);
+    // Linear comments on the run's documents.
+    for (const project of world.projects.values()) {
+      const data = await world.app.request<{ documents: { nodes: Array<{ id: string; comments: { nodes: Array<{ body: string }> } }> } }>(
+        'RunComments',
+        'query',
+        'query RunComments($projectId: ID!) { documents(first: 250, filter: { project: { id: { eq: $projectId } } }) { nodes { id comments(first: 50) { nodes { body } } } } }',
+        { projectId: project.id },
+      );
+      for (const document of data.documents.nodes) texts.set(`comments on ${document.id}`, document.comments.nodes.map((comment) => comment.body).join('\n'));
+    }
+    for (const team of world.tree.teamZones.keys()) {
+      const teamId = world.teams.get(team)?.id;
+      if (teamId === undefined) continue;
+      const data = await world.app.request<{ documents: { nodes: Array<{ id: string; project: { id: string } | null; comments: { nodes: Array<{ body: string }> } }> } }>(
+        'RunTeamComments',
+        'query',
+        'query RunTeamComments($teamId: ID!, $prefix: String!) { documents(first: 250, filter: { team: { id: { eq: $teamId } }, title: { startsWith: $prefix } }) { nodes { id project { id } comments(first: 50) { nodes { body } } } } }',
+        { teamId, prefix: ctx.names.teamZonePrefix },
+      );
+      for (const document of data.documents.nodes) {
+        if (document.project === null) texts.set(`comments on ${document.id}`, document.comments.nodes.map((comment) => comment.body).join('\n'));
+      }
+    }
+  }
+  return scanCanaries(texts, canaries);
+}
+
 async function trackedTip(ctx: RunContext): Promise<string | undefined> {
   const world = ctx.live;
   if (world === null) return undefined;
@@ -338,18 +371,8 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
 
 // --- assertions --------------------------------------------------------------
 
-/** Subjects the harness computes itself; others come from the engine's run report (`runs.N.*`). */
-const SUBJECTS: Record<string, (ctx: RunContext) => Promise<unknown>> = {
-  'pullRequests.created': async (ctx) => (ctx.live === null ? 0 : (await ctx.live.rest.pullRequests(ctx.names.syncBranch)).length),
-  'pullRequests.open': async (ctx) => (ctx.live === null ? 0 : (await ctx.live.rest.pullRequests(ctx.names.syncBranch, 'open')).length),
-};
-
-export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
-  if (ctx.observations.has(subject)) return { known: true, value: ctx.observations.get(subject) };
-  const compute = SUBJECTS[subject];
-  if (compute !== undefined) return { known: true, value: await compute(ctx) };
-  return { known: false };
-}
+// Assertion subjects resolve in subjects.ts: observed, from the engine's report, or computed by the harness.
+export { resolveSubject };
 
 export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
   let cached: Promise<Sides> | undefined;
@@ -364,6 +387,8 @@ export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
       else throw error;
     }
   }
+  // I6 ran the sync once more: assertions read the world as it is now.
+  refreshView(ctx);
   for (const assertion of ctx.scenario.checks.assertions) {
     const actual = await resolveSubject(ctx, assertion.subject);
     if (!actual.known) throw new HarnessGapError(`assertion subject ${assertion.subject}`);

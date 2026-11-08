@@ -1,27 +1,41 @@
 // Step executors: one per `<kind>.<action>` of the spec schema.
 //
-// git steps commit as a person to the run's tracked branch; linear steps edit
-// as editor-a or editor-b through their own API keys; run steps start the
-// engine; fault steps arm the proxy or the engine's checkpoints; ui steps
-// are left to the UI session's checklist. Every text a step writes is
+// git steps commit as a person to the run's tracked branch (or, for the
+// sync branch and CI fixes, to the run's sync branch); linear steps edit as
+// editor-a or editor-b through their own API keys; run steps start the
+// engine or the real workflows; fault steps arm the proxy, the engine's
+// checkpoints or a change to the repository that `fault.clear` undoes; ui
+// steps are left to the UI session's checklist. Every text a step writes is
 // neutral work text with a run token, so I2 can find it on both sides.
 
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { COMMANDS, type CommandName } from '../../../src/commands.ts';
-import { readIds, stateRef, resolveStateConfig, type Git } from '../../../src/state/index.ts';
+import { Git } from '../../../src/state/index.ts';
 import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
+import { INVARIANT_CHECKS, readSides, snapshotRefs, stripFrontMatter } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
-import { newRunId } from './isolation.ts';
-import { nextToken, type Editor, type RunContext } from './context.ts';
+import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
+import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
-import { personCommit } from './sandbox.ts';
+import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
+import { newRunId } from './isolation.ts';
+import { fixableSample, hashes, linearPart, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
+import { burst, realClock, soak, type LoadDriver } from './load.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
+import { HARNESS, personCommit } from './sandbox.ts';
 import type { Step } from './spec.ts';
+import {
+  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readWorking, resolveDestination, setTarget, sibling, targetPath,
+} from './step-helpers.ts';
+import { jobSpans, maxOverlap, runResult, SCHEDULE_BLOCKED, waitForRun } from './workflows.ts';
+
+export { documentId, documentPaths, resolveDestination, sibling, targetPath };
 
 export const ENGINE_TIMEOUT_MS = 30 * 60_000;
 export const CHECKPOINT_TIMEOUT_MS = 10 * 60_000;
@@ -30,120 +44,9 @@ export const SYNC_WORKFLOW = 'mdbisync.yml';
 
 type Executor = (ctx: RunContext, args: Record<string, unknown>) => Promise<void>;
 
-// --- helpers -------------------------------------------------------------
-
-function live(ctx: RunContext) {
-  if (ctx.live === null) throw new Error('this step needs the sandbox and Linear, but the scenario runs offline');
-  return ctx.live;
-}
-
 const GAPS = new Set<string>();
-/** Actions the harness cannot perform yet; their scenarios fail as harness gaps once the engine reaches them. */
+/** Actions the harness cannot perform yet; their scenarios fail as harness gaps once the engine reaches them. Empty: every action has an executor. */
 export const HARNESS_GAPS: ReadonlySet<string> = GAPS;
-
-function gap(step: string): Executor {
-  GAPS.add(step);
-  return async () => {
-    throw new HarnessGapError(step);
-  };
-}
-
-/** Synced Markdown documents of the run's tree (not annotation READMEs), sorted. */
-export function documentPaths(ctx: RunContext): string[] {
-  const world = live(ctx);
-  const synced = new Set(world.manifest.files.filter((file) => file.synced && file.kind === 'markdown' && file.class !== 'lint-error').map((file) => file.path));
-  return [...world.tree.paths].filter(([, source]) => synced.has(source) && !/(^|\/)README\.md$/.test(source)).map(([target]) => target).sort();
-}
-
-/** The scenario's target document: a named path or path suffix, else the first document. */
-export function targetPath(ctx: RunContext, target?: unknown, offset = 0): string {
-  const paths = documentPaths(ctx);
-  if (typeof target === 'string') {
-    const found = paths.find((path) => path === target || path.endsWith(`/${target}`) || path.includes(target));
-    if (found !== undefined) return found;
-  }
-  const path = paths[offset % Math.max(1, paths.length)];
-  if (path === undefined) throw new EnvBlockedError('the slice has no synchronized document to edit');
-  return path;
-}
-
-/** A path in the same folder as `path` (a file at the root stays at the root). */
-export function sibling(path: string, name: string): string {
-  const folder = path.split('/').slice(0, -1).join('/');
-  return folder === '' ? name : `${folder}/${name}`;
-}
-
-/**
- * Where a move goes. Specs name destinations by role: `project/<rest>` and
- * `same-project/<rest>` stay in the source's project folder;
- * `other-team/other-project/<rest>` goes to a project folder of another team.
- */
-export function resolveDestination(ctx: RunContext, source: string, destination: string): string {
-  const world = live(ctx);
-  const projectFolders = [...world.tree.rewritten.keys()].map((readme) => readme.replace(/\/?README\.md$/, '')).sort();
-  const own = projectFolders.filter((folder) => source.startsWith(`${folder}/`)).sort((a, b) => b.length - a.length)[0];
-  const top = (path: string) => path.split('/')[0];
-  const match = /^(project|same-project|other-team\/other-project)\/(.+)$/.exec(destination);
-  if (match === null) return destination;
-  const rest = match[2] as string;
-  if (match[1] === 'other-team/other-project') {
-    const other = projectFolders.find((folder) => top(folder) !== top(source));
-    if (other === undefined) throw new EnvBlockedError('the slice has no project of another team to move to');
-    return `${other}/${rest}`;
-  }
-  return own === undefined ? sibling(source, rest) : `${own}/${rest}`;
-}
-
-function paragraph(token: string): string {
-  return `The review moved to the next morning, note ${token}.`;
-}
-
-async function readWorking(git: Git, path: string): Promise<string> {
-  return readFileSync(join(git.dir, path), 'utf8');
-}
-
-async function pull(git: Git, ctx: RunContext): Promise<void> {
-  await git.run(['pull', '--quiet', '--no-rebase', '--no-edit', 'origin', ctx.names.trackedBranch]);
-}
-
-async function commitAsPerson(ctx: RunContext, changes: Map<string, string | Buffer | null>, message: string, bypassHook = false): Promise<void> {
-  const git = await ctx.person();
-  await pull(git, ctx);
-  const commit = await personCommit(git, ctx.names, changes, message, { verify: !bypassHook });
-  ctx.ownCommits.push(commit);
-}
-
-/** The Linear document id the engine recorded for a path, from the run's ids ref. */
-export async function documentId(ctx: RunContext, path: string): Promise<string> {
-  const git = await ctx.person();
-  const config = resolveStateConfig({ trackedBranch: ctx.names.trackedBranch, syncBranch: ctx.names.syncBranch, refPrefix: ctx.names.refPrefix });
-  const ref = stateRef(config, 'ids');
-  try {
-    await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
-  } catch {
-    throw new ProductError(`no ${ref.split('/').pop()} state ref: the engine has not recorded any document`);
-  }
-  const ids = await readIds(git, (await git.text(['rev-parse', ref])).trim());
-  const entry = ids.get(path);
-  if (entry === undefined) throw new ProductError(`the engine recorded no document for a target path`);
-  return entry.id;
-}
-
-async function editorEdit(ctx: RunContext, editor: Editor, path: string, change: (text: string, token: string) => string, removal = false): Promise<string> {
-  const world = live(ctx);
-  const id = await documentId(ctx, path);
-  const client = world.editors[editor];
-  const [document] = await client.getDocuments([id], { withContent: true });
-  if (document === undefined) throw new ProductError('a recorded document does not exist in Linear');
-  const token = nextToken(ctx);
-  await client.updateDocument(id, { content: change(document.content ?? '', token) });
-  ctx.edits.push({ side: 'linear', path, token, ...(removal ? { removal } : {}) });
-  return token;
-}
-
-function editor(args: Record<string, unknown>): Editor {
-  return args.actor === 'editor-b' ? 'editor-b' : 'editor-a';
-}
 
 // --- the engine ----------------------------------------------------------
 
@@ -174,13 +77,68 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
 function settleResult(ctx: RunContext, result: EngineResult): void {
   ctx.engine.results.push(result);
   const n = ctx.engine.results.length - 1 - ctx.engine.setupRuns;
+  ctx.observations.set(`harness.runs.${n}.finishedAt`, Date.now());
   ctx.observations.set(`runs.${n}.exitCode`, result.exitCode);
   if (result.report !== null) for (const [key, value] of Object.entries(result.report)) ctx.observations.set(`runs.${n}.${key}`, value);
   if (result.notImplemented) throw new NotImplementedError(result.command, 'the engine command');
   if (result.timedOut) throw new ProductError(`${result.command} did not finish within ${ENGINE_TIMEOUT_MS / 60_000} minutes`);
 }
 
+/** Starts the engine and waits at `checkpoint`; false (after recording the result) when the engine ended first. */
+async function startPaused(ctx: RunContext, call: EngineCall, checkpoint: Checkpoint): Promise<ReturnType<typeof startEngine> | null> {
+  const running = startEngine(call);
+  ctx.engine.pending = running;
+  const reached = await ctx.checkpoints.waitReached(checkpoint, { timeoutMs: CHECKPOINT_TIMEOUT_MS, exited: running.done });
+  if (reached) return running;
+  running.kill();
+  delete ctx.engine.pending;
+  settleResult(ctx, await running.done);
+  throw new ProductError(`the engine did not reach checkpoint ${checkpoint}`);
+}
+
+/**
+ * `lint` or `fix` on an offline input (L0): the outputs the format
+ * scenarios assert on, with the expectations of the same input.
+ */
+async function offlineFormat(ctx: RunContext, command: 'lint' | 'fix', args: Record<string, unknown>): Promise<void> {
+  const input = offlineInput(args.input);
+  const dir = join(ctx.runDir, `${command}-input`);
+  writeInput(dir, input.files);
+  // Expectations of this input; the bank's recorded forms only for the files that have one.
+  const compared = args.input === 'lint-errors' ? new Set(input.files.keys()) : new Set(input.golden.keys());
+  const only = (files: ReadonlyMap<string, string>) => new Map([...files].filter(([path]) => compared.has(path)));
+  ctx.observations.set('input.bytes', input.files);
+  ctx.observations.set('input.markerBytes', markerLines(input.files));
+  ctx.observations.set('golden.linearForm', input.golden);
+  ctx.observations.set('corpus.lintErrors', input.lintErrors);
+  const passes = command === 'fix' ? Number(args.passes ?? 1) : 1;
+  for (let pass = 0; pass < passes; pass += 1) {
+    const result = runFormatCommand(command, dir);
+    if (result.status === COMMANDS[command].notImplementedExitCode && result.stderr.includes('not implemented')) throw new NotImplementedError(command);
+    ctx.observations.set(`${command}.exitCode`, result.status);
+    if (command === 'lint') {
+      const findings = parseFindings(result.stdout);
+      ctx.observations.set('lint.leftOut', [...new Set(findings.map((finding) => finding.file))].sort());
+      const fields = (['file', 'line', 'rule', 'message'] as const).filter((field) => findings.length > 0 && findings.every((finding) => finding[field] !== '' && !Number.isNaN(finding[field])));
+      ctx.observations.set('lint.diagnostics.fields', fields);
+      continue;
+    }
+    const output = readInput(dir, input.files.keys());
+    if (pass === 0) {
+      // Compared with Linear's recorded form, a file counts without its front matter, which stays in git.
+      const reaching = new Map([...output].filter(([path]) => input.golden.has(path)).map(([path, text]) => [path, linearPart(text)]));
+      ctx.observations.set('fix.output', args.input === 'lint-errors' ? only(output) : reaching);
+      ctx.observations.set('fix.validOutput', reaching);
+      ctx.observations.set('fix.first.bytes', hashes(output));
+      ctx.observations.set('fix.markerBytes', markerLines(output));
+    } else {
+      ctx.observations.set('fix.second.bytes', hashes(output));
+    }
+  }
+}
+
 async function runCommand(ctx: RunContext, command: CommandName, args: Record<string, unknown>): Promise<void> {
+  if (ctx.live === null && (command === 'lint' || command === 'fix') && args.input !== undefined) return offlineFormat(ctx, command, args);
   if (ctx.live === null) {
     // Offline commands (lint, fix) run on the fixture bank and the corpus without credentials.
     const result = spawnSync(process.execPath, [engineEntry(), command], { encoding: 'utf8', cwd: ctx.runDir });
@@ -190,15 +148,25 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
   }
   const call = await engineCall(ctx, command, args);
   if (args.wait === false) {
-    const running = startEngine(call);
-    ctx.engine.pending = running;
-    const reached = ctx.engine.pausedAt === undefined ? true : await ctx.checkpoints.waitReached(ctx.engine.pausedAt, { timeoutMs: CHECKPOINT_TIMEOUT_MS, exited: running.done });
-    if (!reached) {
-      running.kill();
-      delete ctx.engine.pending;
-      settleResult(ctx, await running.done);
-      throw new ProductError(`the engine did not reach checkpoint ${ctx.engine.pausedAt}`);
+    if (ctx.engine.pausedAt === undefined) {
+      ctx.engine.pending = startEngine(call);
+      return;
     }
+    await startPaused(ctx, call, ctx.engine.pausedAt);
+    ctx.observations.set('pause.reachedAt', Date.now());
+    return;
+  }
+  const trigger = ctx.engine.trigger;
+  if (trigger !== undefined) {
+    // A fault that happens in the middle of this run: pause, act, go on.
+    delete ctx.engine.trigger;
+    ctx.checkpoints.pause(trigger.checkpoint);
+    const running = await startPaused(ctx, call, trigger.checkpoint);
+    if (running === null) return;
+    await trigger.action();
+    ctx.checkpoints.resume(trigger.checkpoint);
+    delete ctx.engine.pending;
+    settleResult(ctx, await running.done);
     return;
   }
   settleResult(ctx, await runEngine(call));
@@ -213,15 +181,123 @@ async function settle(ctx: RunContext, limit = 4): Promise<void> {
   }
 }
 
+/**
+ * The repository files the setup command writes (workflows, pre-commit
+ * configuration), committed as a person would after running `init`.
+ */
+async function installWorkflows(ctx: RunContext): Promise<void> {
+  if (ctx.observations.has('workflows.installed')) return;
+  const git = await ctx.person();
+  await pull(git, ctx);
+  const result = spawnSync(process.execPath, [engineEntry(), 'init'], { cwd: git.dir, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8' } });
+  if (result.status === COMMANDS.init.notImplementedExitCode && result.stderr.includes('not implemented')) throw new NotImplementedError('init', 'writing the workflows');
+  if (result.status !== 0) throw new ProductError(`init exited with ${String(result.status)}`);
+  await git.run(['add', '--all']);
+  await git.run(['commit', '--quiet', '--no-verify', '-m', 'Add the sync workflows']);
+  await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+  ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
+  ctx.observations.set('workflows.installed', true);
+}
+
+async function requireWorkflows(ctx: RunContext): Promise<void> {
+  const world = live(ctx);
+  if (!(await world.rest.workflowExists(SYNC_WORKFLOW, ctx.names.trackedBranch))) {
+    throw new NotImplementedError('init', `the sync workflow ${SYNC_WORKFLOW} is not in the tracked branch`);
+  }
+  if (world.githubTokenSource !== 'app') throw new EnvBlockedError('actions mode needs the GitHub App token');
+}
+
+function workflowInputs(ctx: RunContext, args: Record<string, unknown>): Record<string, string> {
+  return {
+    operation: typeof args.command === 'string' ? args.command : 'sync',
+    'tracked-branch': ctx.names.trackedBranch,
+    'sync-branch': ctx.names.syncBranch,
+    'state-ref-prefix': ctx.names.refPrefix,
+    ...(typeof args.direction === 'string' ? { direction: args.direction } : {}),
+    ...(args.confirm === true ? { confirm: 'true' } : {}),
+  };
+}
+
+function recordWorkflowRun(ctx: RunContext, run: { id: number; event: string }): void {
+  const runs = (ctx.observations.get('workflows.runs') as Array<{ id: number; event: string }> | undefined) ?? [];
+  ctx.observations.set('workflows.runs', [...runs, { id: run.id, event: run.event }]);
+}
+
+function seenRuns(ctx: RunContext): Set<number> {
+  return new Set(((ctx.observations.get('workflows.runs') as Array<{ id: number }> | undefined) ?? []).map((run) => run.id));
+}
+
+async function trackedTipOnServer(ctx: RunContext): Promise<string> {
+  const git = await ctx.person();
+  await git.run(['fetch', '--quiet', 'origin', ctx.names.trackedBranch]);
+  return (await git.text(['rev-parse', 'FETCH_HEAD'])).trim();
+}
+
+/** Starts (dispatch) or finds (push, pull request) a workflow run, waits for it and records its result as an engine run. */
+async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Promise<void> {
+  const world = live(ctx);
+  const event = typeof args.event === 'string' ? args.event : 'workflow_dispatch';
+  if (event === 'schedule') throw new EnvBlockedError(SCHEDULE_BLOCKED);
+  await requireWorkflows(ctx);
+  const command = (typeof args.command === 'string' ? args.command : 'sync') as CommandName;
+  let run;
+  if (event === 'workflow_dispatch') {
+    const after = Date.now();
+    await world.rest.dispatchWorkflow(SYNC_WORKFLOW, ctx.names.trackedBranch, workflowInputs(ctx, args));
+    run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: seenRuns(ctx) });
+  } else if (event === 'push') {
+    // The run the latest push to the tracked branch started.
+    run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after: Number(ctx.observations.get('start.time') ?? 0), exclude: seenRuns(ctx), headSha: await trackedTipOnServer(ctx) });
+  } else if (event === 'pull_request') {
+    const pr = ctx.observations.get('ci.pullRequest') as { number: number; head: string; openedAt: number } | undefined;
+    if (pr === undefined) throw new Error('run.workflow on pull_request needs git.open-pr first');
+    run = await waitForRun(world.rest, { branch: ctx.names.syncBranch, event, after: pr.openedAt, exclude: seenRuns(ctx) });
+  } else {
+    throw new Error(`run.workflow cannot start a ${event} run`);
+  }
+  recordWorkflowRun(ctx, run);
+  settleResult(ctx, await runResult(world.rest, run, command));
+}
+
 // --- the executors -------------------------------------------------------
+
+function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
+  return {
+    ...realClock,
+    linearEdit: async (actor, path) => {
+      await editorEdit(ctx, actor, path, (text, token) => paragraphEdit(text, undefined, token));
+    },
+    gitEdit: async (paths) => {
+      const git = await ctx.person();
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await pull(git, ctx);
+          const changes = new Map<string, string>();
+          for (const path of paths) {
+            const token = nextToken(ctx);
+            changes.set(path, paragraphEdit(await readWorking(git, path), undefined, token));
+            ctx.edits.push({ side: 'git', path, token });
+          }
+          await commitAsPerson(ctx, changes, 'Update the review date');
+          return;
+        } catch (error) {
+          // The sync may push to the tracked branch between the pull and the push: try again on top of it.
+          if (attempt >= 3) throw error;
+          await git.run(['reset', '--quiet', '--hard', `origin/${ctx.names.trackedBranch}`], { okCodes: [0, 128] });
+        }
+      }
+    },
+    sync,
+  };
+}
 
 const RUN: Record<string, Executor> = {
   'run.sync': (ctx, args) => runCommand(ctx, 'sync', args),
   'run.initial-sync': (ctx, args) => runCommand(ctx, 'initial-sync', args),
   'run.settle': (ctx) => settle(ctx),
   'run.capture': (ctx) => runCommand(ctx, 'sync', {}),
-  'run.lint': (ctx) => runCommand(ctx, 'lint', {}),
-  'run.fix': (ctx) => runCommand(ctx, 'fix', {}),
+  'run.lint': (ctx, args) => runCommand(ctx, 'lint', args),
+  'run.fix': (ctx, args) => runCommand(ctx, 'fix', args),
   'run.resume-until-complete': async (ctx, args) => {
     // Recovery continues the sync unless the scenario names the initial sync (L1-16).
     const command = args.command === 'initial-sync' ? 'initial-sync' : 'sync';
@@ -275,52 +351,212 @@ const RUN: Record<string, Executor> = {
   'run.pre-commit': async (ctx) => {
     const scratch = join(ctx.runDir, 'scratch');
     if (!existsSync(scratch)) throw new Error('run.pre-commit needs git.scratch-hook first');
+    const before = spawnSync('git', ['diff', '--no-ext-diff', '--binary'], { cwd: scratch, encoding: 'utf8' }).stdout;
     const result = spawnSync('pre-commit', ['run', '--all-files'], { cwd: scratch, encoding: 'utf8' });
     if (result.error !== undefined) throw new EnvBlockedError('pre-commit is not installed on this host');
     const output = `${result.stdout}${result.stderr}`;
     if (output.includes('not implemented')) throw new NotImplementedError('fix', 'through the Linear-format hook');
+    const after = spawnSync('git', ['diff', '--no-ext-diff', '--binary'], { cwd: scratch, encoding: 'utf8' }).stdout;
+    // Stage what the hook fixed, as a person does before the next try.
+    spawnSync('git', ['add', '--all'], { cwd: scratch });
     const n = Number(ctx.observations.get('preCommit.runs') ?? 0);
     ctx.observations.set('preCommit.runs', n + 1);
     ctx.observations.set(`hook.runs.${n}.exitCode`, result.status);
+    ctx.observations.set(`runs.${n}.exitCode`, result.status);
+    ctx.observations.set(`runs.${n}.filesChanged`, before !== after);
+    const rule = ctx.observations.get('fixture.rule');
+    const named = typeof rule === 'string' && output.includes(rule) ? rule : (/\brule[: ]+([a-z][a-z-]+)/i.exec(output)?.[1] ?? null);
+    ctx.observations.set(`runs.${n}.diagnosticRule`, named);
   },
   'run.scan-canaries': async () => {
-    // The scan itself is a check (I5); this step marks where the scenario asks for it.
+    // The scan itself is a check (I5) and the subject scan.canaryMatches; this step marks where the scenario asks for it.
   },
-  'run.cleanup': async () => {
-    // Cleanup runs after every scenario; this step marks where L5-20 inspects it.
+  'run.cleanup': async (ctx) => {
+    // Cleanup runs after every scenario; here L5-20 reads which Linear tokens are still active.
+    ctx.observations.set('tokens.seen', [...(ctx.proxy?.tokens() ?? [])]);
   },
-  'run.workflow': async (ctx, args) => {
+  'run.workflow': (ctx, args) => workflowRun(ctx, args),
+  'run.workflow-parallel': async (ctx, args) => {
     const world = live(ctx);
-    if (!(await world.rest.workflowExists(SYNC_WORKFLOW, ctx.names.trackedBranch))) {
-      throw new NotImplementedError('init', `the sync workflow ${SYNC_WORKFLOW} is not in the tracked branch`);
+    const events = Array.isArray(args.events) ? (args.events as string[]) : ['push', 'workflow_dispatch'];
+    if (events.includes('schedule')) throw new EnvBlockedError(SCHEDULE_BLOCKED);
+    await requireWorkflows(ctx);
+    const after = Date.now();
+    // Start every event at once, plus one more when a pending run must be replaced by a newer one.
+    const starts = [...events, ...(args.replacePending === true ? ['workflow_dispatch'] : [])];
+    await Promise.all(starts.map(async (event) => {
+      if (event === 'push') await loadDriver(ctx, async () => {}).gitEdit([targetPath(ctx)]);
+      else await world.rest.dispatchWorkflow(SYNC_WORKFLOW, ctx.names.trackedBranch, workflowInputs(ctx, {}));
+    }));
+    const runs = [];
+    for (const event of starts) {
+      const run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: new Set([...seenRuns(ctx), ...runs.map((candidate) => candidate.id)]) });
+      runs.push(run);
+      recordWorkflowRun(ctx, run);
     }
-    if (world.githubTokenSource !== 'app') throw new EnvBlockedError('actions mode needs the GitHub App token');
-    const inputs: Record<string, string> = {
-      operation: typeof args.command === 'string' ? args.command : 'sync',
-      'tracked-branch': ctx.names.trackedBranch,
-      'sync-branch': ctx.names.syncBranch,
-      'state-ref-prefix': ctx.names.refPrefix,
-      ...(typeof args.direction === 'string' ? { direction: args.direction } : {}),
-      ...(args.confirm === true ? { confirm: 'true' } : {}),
-    };
-    await world.rest.dispatchWorkflow(SYNC_WORKFLOW, ctx.names.trackedBranch, inputs);
-    throw new HarnessGapError('run.workflow (waiting for the dispatched run)');
+    ctx.observations.set('workflows.maxActiveInGroup', maxOverlap(await jobSpans(world.rest, runs)));
+    for (const run of runs) {
+      if (run.conclusion === 'cancelled') continue; // replaced by a newer run of the group
+      settleResult(ctx, await runResult(world.rest, run, 'sync'));
+    }
   },
-  'run.workflow-parallel': gap('run.workflow-parallel'),
-  'run.token-lifecycle': gap('run.token-lifecycle'),
-  'run.burst': gap('run.burst'),
-  'run.soak': gap('run.soak'),
+  'run.token-lifecycle': async (ctx, args) => {
+    const proxy = ctx.proxy;
+    if (proxy === null) throw new Error('token hygiene needs the Linear proxy');
+    const outcomes = Array.isArray(args.outcomes) ? (args.outcomes as string[]) : ['success', 'failure', 'killed'];
+    const byOutcome: Record<string, string[]> = {};
+    for (const outcome of outcomes) {
+      const known = new Set(proxy.tokens());
+      if (outcome === 'success') {
+        await runCommand(ctx, 'sync', {});
+      } else if (outcome === 'failure') {
+        // A run that fails after it has its token: every request after the third answers 500.
+        proxy.setFaults([{ kind: 'http', status: 500, requestNumber: 3, retryAfterSeconds: null, times: 10_000 }]);
+        try {
+          await runCommand(ctx, 'sync', {});
+        } finally {
+          proxy.clearFaults();
+        }
+      } else if (outcome === 'killed') {
+        ctx.checkpoints.pause('before-write');
+        const running = await startPaused(ctx, await engineCall(ctx, 'sync', {}), 'before-write');
+        running?.kill();
+        ctx.checkpoints.resume('before-write');
+        delete ctx.engine.pending;
+        if (running !== null && running !== undefined) ctx.engine.results.push(await running.done);
+      }
+      byOutcome[outcome] = proxy.tokens().filter((token) => !known.has(token));
+    }
+    ctx.observations.set('tokens.byOutcome', byOutcome);
+  },
+  'run.burst': async (ctx, args) => {
+    const result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), {
+      durationMs: Number(args.durationSeconds ?? 900) * 1000,
+      linearEditsPerMinute: Number(args.linearEditsPerMinute ?? 50),
+      gitPushesPerMinute: Number(args.gitPushesPerMinute ?? 1),
+      documents: documentPaths(ctx),
+    });
+    ctx.observations.set('report.generatedLinearEdits', result.linearEdits);
+    ctx.observations.set('report.generatedGitPushes', result.gitPushes);
+  },
+  'run.soak': async (ctx, args) => {
+    // The sync runs every `scheduleSeconds`. In actions mode the harness starts
+    // each run by dispatch, as an external trigger would (a schedule never runs
+    // on a run's branch); the report says so.
+    const actions = ctx.scenario.mode === 'actions';
+    const sync = actions ? () => workflowRun(ctx, { event: 'workflow_dispatch' }) : () => runCommand(ctx, 'sync', {});
+    const driver = {
+      ...loadDriver(ctx, sync),
+      checkInvariants: async () => {
+        const sides = await readSides(ctx);
+        const lost = (await INVARIANT_CHECKS.I2(ctx, async () => sides)).ok ? 0 : (await import('./checks.ts')).lostEdits(ctx, sides).length;
+        const converged = await INVARIANT_CHECKS.I1(ctx, async () => sides);
+        const checks = (ctx.observations.get('soak.checks') as Array<{ I1: boolean; lost: number }> | undefined) ?? [];
+        ctx.observations.set('soak.checks', [...checks, { I1: converged.ok, lost }]);
+        return { lostEdits: lost };
+      },
+    };
+    const result = await soak(driver, {
+      durationMs: Number(args.durationSeconds ?? 86_400) * 1000,
+      scheduleMs: Number(args.scheduleSeconds ?? 300) * 1000,
+      invariantIntervalMs: Number(args.invariantIntervalSeconds ?? 3600) * 1000,
+      actors: Array.isArray(args.actors) ? (args.actors as Array<'editor-a' | 'editor-b' | 'git'>) : ['editor-a', 'editor-b', 'git'],
+      seed: String(args.randomSeed ?? ctx.names.runId),
+      documents: documentPaths(ctx),
+    });
+    ctx.observations.set('report.hourlyInvariantChecks', result.invariantChecks);
+    const own = ctx.engine.results.slice(ctx.engine.setupRuns);
+    const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+    metrics.scheduleDelay = Math.max(0, ...result.scheduleDelays);
+    metrics.runnerMinutes = Math.round(own.reduce((sum, run) => sum + run.durationMs, 0) / 600) / 100;
+    // Tokens are visible to the harness only through its proxy (local runs).
+    metrics.activeLinearTokens = actions ? null : ctx.proxy?.tokens().length ?? 0;
+    metrics.trigger = actions ? 'dispatch' : 'local';
+    ctx.observations.set('metrics', metrics);
+  },
 };
+
+/** The sync branch checked out in a worktree of the person's clone; null when it does not exist. */
+async function syncBranchWorktree(ctx: RunContext): Promise<Git | null> {
+  const git = await ctx.person();
+  const fetched = await git.run(['fetch', '--quiet', 'origin', `refs/heads/${ctx.names.syncBranch}`], { okCodes: [0, 128] });
+  if (fetched.code !== 0) return null;
+  const dir = join(ctx.runDir, `sync-worktree-${nextToken(ctx)}`);
+  await git.run(['worktree', 'add', '--quiet', '--detach', dir, 'FETCH_HEAD']);
+  return new Git(dir, live(ctx).sandbox.env(HARNESS));
+}
+
+async function commitToSyncBranch(ctx: RunContext, change: (git: Git) => Promise<void>, message: string): Promise<string> {
+  const git = await syncBranchWorktree(ctx);
+  if (git === null) throw new ProductError('the run has no sync branch');
+  try {
+    await change(git);
+    await git.run(['commit', '--quiet', '--no-verify', '--all', '-m', message]);
+    await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.syncBranch}`]);
+    return (await git.text(['rev-parse', 'HEAD'])).trim();
+  } finally {
+    await (await ctx.person()).run(['worktree', 'remove', '--force', git.dir], { okCodes: [0, 128] });
+  }
+}
+
+/** Files of a merge of three versions, as `git merge-file` makes it (the conflict oracle of L3-08). */
+function gitMergeFile(ours: string, base: string, theirs: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'merge-oracle-'));
+  try {
+    for (const [name, text] of [['ours', ours], ['base', base], ['theirs', theirs]] as const) writeFileSync(join(dir, name), text);
+    return spawnSync('git', ['merge-file', '-p', join(dir, 'ours'), join(dir, 'base'), join(dir, 'theirs')], { encoding: 'utf8' }).stdout;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const IMAGE_FOLDER = { lfs: 'media', regular: 'inline' } as const;
 
 const GIT: Record<string, Executor> = {
   'git.edit': async (ctx, args) => {
-    const path = targetPath(ctx, args.target);
+    if (args.workflows === true) await installWorkflows(ctx);
     const git = await ctx.person();
     await pull(git, ctx);
+    if (args.fixture === 'many-conflicts') {
+      // Conflicting edits of the first paragraph of N documents and clean edits of M others, in one commit.
+      const paths = documentPaths(ctx);
+      const conflicting = paths.slice(0, Number(args.conflictingDocuments ?? 20));
+      const clean = paths.slice(conflicting.length, conflicting.length + Number(args.cleanEdits ?? 100));
+      if (conflicting.length + clean.length < Number(args.conflictingDocuments ?? 20) + Number(args.cleanEdits ?? 100)) throw new EnvBlockedError('the slice has too few documents for the conflicts and clean edits');
+      const changes = new Map<string, string>();
+      const cleanTokens: string[] = [];
+      for (const [index, path] of [...conflicting, ...clean].entries()) {
+        const token = nextToken(ctx);
+        const text = await readWorking(git, path);
+        changes.set(path, index < conflicting.length ? editParagraph(text, 0, token) : paragraphEdit(text, undefined, token));
+        ctx.edits.push({ side: 'git', path, token });
+        if (index >= conflicting.length) cleanTokens.push(token);
+      }
+      await commitAsPerson(ctx, changes, 'Update the weekly notes');
+      ctx.observations.set('conflict.paths', conflicting);
+      ctx.observations.set('edits.clean', cleanTokens);
+      return;
+    }
+    const path = targetPath(ctx, args.target);
+    setTarget(ctx, path);
     const token = nextToken(ctx);
     const text = await readWorking(git, path);
-    await commitAsPerson(ctx, new Map([[path, `${text.replace(/\n*$/, '\n')}\n${paragraph(token)}\n`]]), 'Update the review date');
+    const shaped = await fixtureEdit(ctx, args.fixture, 'git', path, text, token);
+    const next = shaped?.text ?? paragraphEdit(text, args.target, token);
+    const changes = new Map<string, string | Buffer>([[path, next], ...(shaped?.files ?? new Map())]);
     ctx.edits.push({ side: 'git', path, token });
+    // Clean edits of other documents in the same commit (L3-02).
+    const cleanTokens: string[] = [];
+    for (const other of documentPaths(ctx).filter((candidate) => candidate !== path).slice(0, Number(args.cleanEdits ?? 0))) {
+      const cleanToken = nextToken(ctx);
+      changes.set(other, paragraphEdit(await readWorking(git, other), undefined, cleanToken));
+      ctx.edits.push({ side: 'git', path: other, token: cleanToken });
+      cleanTokens.push(cleanToken);
+    }
+    if (cleanTokens.length > 0) ctx.observations.set('edits.clean', cleanTokens);
+    if (args.fixture === 'adjacent-paragraphs') ctx.observations.set('fixture.base', stripFrontMatter(text));
+    await commitAsPerson(ctx, changes, 'Update the review date');
+    ctx.observations.set('edited.gitBody', stripFrontMatter(next));
   },
   'git.edit-many': async (ctx, args) => {
     const count = typeof args.documents === 'number' ? args.documents : 10;
@@ -329,24 +565,37 @@ const GIT: Record<string, Executor> = {
     const changes = new Map<string, string>();
     for (const path of documentPaths(ctx).slice(0, count)) {
       const token = nextToken(ctx);
-      changes.set(path, `${(await readWorking(git, path)).replace(/\n*$/, '\n')}\n${paragraph(token)}\n`);
+      changes.set(path, paragraphEdit(await readWorking(git, path), undefined, token));
       ctx.edits.push({ side: 'git', path, token });
     }
     await commitAsPerson(ctx, changes, 'Update review dates');
   },
   'git.add': async (ctx, args) => {
     const token = nextToken(ctx);
-    const path = typeof args.path === 'string' ? args.path : sibling(targetPath(ctx), `notes-${token}.md`);
-    await commitAsPerson(ctx, new Map([[path, `# Notes\n\n${paragraph(token)}\n`]]), 'Add notes', args.bypassHook === true);
+    if (ctx.live === null) {
+      // Offline (L0-08): the file goes into the scratch repository, past the hook.
+      const scratch = join(ctx.runDir, 'scratch');
+      if (!existsSync(scratch)) throw new Error('git.add offline needs git.scratch-hook first');
+      const unfixable = args.fixture === 'unfixable';
+      writeFileSync(join(scratch, unfixable ? 'notes.md' : `notes-${token}.md`), unfixable ? '# Notes\n\nSee the note.[^1]\n\n[^1]: Added later.\n' : `# Notes\n\n${noteSentence(token)}\n`);
+      if (unfixable) ctx.observations.set('fixture.rule', 'footnote');
+      spawnSync('git', ['add', '--all'], { cwd: scratch });
+      return;
+    }
+    const path = typeof args.path === 'string' ? resolveDestination(ctx, targetPath(ctx), args.path) : sibling(targetPath(ctx), `notes-${token}.md`);
+    await commitAsPerson(ctx, new Map([[path, `# Notes\n\n${noteSentence(token)}\n`]]), 'Add notes', args.bypassHook === true);
     ctx.edits.push({ side: 'git', path, token });
+    ctx.observations.set('git.added', path);
   },
   'git.delete': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
+    setTarget(ctx, path);
     await commitAsPerson(ctx, new Map([[path, null]]), 'Remove an old page');
     ctx.observations.set('git.deleted', path);
   },
   'git.move': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
+    setTarget(ctx, path);
     const git = await ctx.person();
     await pull(git, ctx);
     const destination = typeof args.destination === 'string' ? resolveDestination(ctx, path, args.destination) : sibling(path, `moved-${nextToken(ctx)}.md`);
@@ -363,9 +612,11 @@ const GIT: Record<string, Executor> = {
     await pull(git, ctx);
     const copy = path.replace(/\.md$/, `-copy-${nextToken(ctx)}.md`);
     await commitAsPerson(ctx, new Map([[copy, await readWorking(git, path)]]), 'Copy a page');
+    ctx.observations.set('git.copied', { from: path, to: copy });
   },
   'git.front-matter': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
+    setTarget(ctx, path);
     const git = await ctx.person();
     await pull(git, ctx);
     const text = await readWorking(git, path);
@@ -375,10 +626,100 @@ const GIT: Record<string, Executor> = {
   },
   'git.add-footnote': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
+    setTarget(ctx, path);
     const git = await ctx.person();
     await pull(git, ctx);
     const text = await readWorking(git, path);
     await commitAsPerson(ctx, new Map([[path, `${text.replace(/\n*$/, '\n')}\nSee the note.[^1]\n\n[^1]: Added later.\n`]]), 'Add a footnote', args.bypassHook === true);
+  },
+  'git.remove-footnote': async (ctx) => {
+    const path = ctx.observations.get('fixture.leftOut') as string | undefined;
+    if (path === undefined) throw new Error('git.remove-footnote needs the left-out document its setup adds');
+    const git = await ctx.person();
+    await pull(git, ctx);
+    const text = await readWorking(git, path);
+    const token = nextToken(ctx);
+    const fixed = `${text.replace(/\[\^[^\]]+\](?!:)/g, '').replace(/^\[\^[^\]]+\]:.*\n?/gm, '').replace(/\n*$/, '\n')}\n${noteSentence(token)}\n`;
+    await commitAsPerson(ctx, new Map([[path, fixed]]), 'Drop the footnote');
+    ctx.edits.push({ side: 'git', path, token });
+    ctx.observations.set('git.joined', path);
+  },
+  'git.move-rewrite': async (ctx, args) => {
+    const path = targetPath(ctx, args.target);
+    setTarget(ctx, path);
+    const git = await ctx.person();
+    await pull(git, ctx);
+    const token = nextToken(ctx);
+    const destination = sibling(path, `rewritten-${token}.md`);
+    const text = stripFrontMatter(await readWorking(git, path));
+    const lines = text.split('\n');
+    const keep = Math.floor(lines.length * (1 - Number(args.rewriteFraction ?? 1)));
+    const body = [...lines.slice(0, keep), `# Rewritten notes`, '', noteSentence(token), '', 'Everything else on this page was replaced by the new plan.', ''].join('\n');
+    await commitAsPerson(ctx, new Map<string, string | null>([[path, null], [destination, body]]), 'Rewrite and move a page');
+    ctx.edits.push({ side: 'git', path: destination, token });
+    ctx.observations.set('git.moved', { from: path, to: destination });
+  },
+  'git.move-folder': async (ctx) => {
+    const folder = ctx.observations.get('fixture.folder') as { path: string; documents: string[] } | undefined;
+    if (folder === undefined) throw new Error('git.move-folder needs the folder its setup prepares');
+    const git = await ctx.person();
+    await pull(git, ctx);
+    const renamed = `${folder.path}-archive`;
+    await git.run(['mv', folder.path, renamed]);
+    await git.run(['commit', '--quiet', '-m', 'Rename a folder']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
+    ctx.observations.set('git.movedFolder', folder.documents.map((path) => ({ from: path, to: `${renamed}${path.slice(folder.path.length)}` })));
+  },
+  'git.annotation': async (ctx) => {
+    const folders = projectFolders(ctx);
+    const [own, other] = [folders[0], folders.find((candidate) => candidate.project !== folders[0]?.project)];
+    if (own === undefined || other === undefined) throw new EnvBlockedError('the slice needs two project folders');
+    const git = await ctx.person();
+    await pull(git, ctx);
+    const readme = `${own.folder}/README.md`;
+    await commitAsPerson(ctx, new Map([[readme, (await readWorking(git, readme)).split(own.project).join(other.project)]]), 'Move the folder to the other project');
+    ctx.observations.set('git.annotation', { folder: own.folder, project: other.project });
+  },
+  'git.image-add': async (ctx, args) => {
+    const storage = args.storage === 'regular' ? 'regular' : 'lfs';
+    const count = Number(args.documents ?? 1);
+    const git = await ctx.person();
+    await pull(git, ctx);
+    const token = nextToken(ctx);
+    const bytes = seededPng(token);
+    const documents = documentPaths(ctx).slice(0, count);
+    const first = documents[0];
+    if (first === undefined) throw new EnvBlockedError('the slice has no document');
+    setTarget(ctx, first);
+    const image = sibling(first, `${IMAGE_FOLDER[storage]}/diagram-${token}.png`);
+    const changes = new Map<string, string | Buffer>([[image, bytes]]);
+    for (const path of documents) {
+      const relativeImage = [...path.split('/').slice(0, -1).map(() => '..'), image].join('/');
+      changes.set(path, `${(await readWorking(git, path)).replace(/\n*$/, '\n')}\n![diagram ${token}](${relativeImage})\n`);
+    }
+    await commitAsPerson(ctx, changes, 'Add a diagram');
+    for (const path of documents) ctx.edits.push({ side: 'git', path, token });
+    ctx.observations.set('git.imagePath', image);
+    ctx.observations.set('git.imageHash', sha256(bytes));
+  },
+  'git.image-change': async (ctx) => {
+    const git = await ctx.person();
+    await pull(git, ctx);
+    for (const path of documentPaths(ctx)) {
+      const text = await readWorking(git, path);
+      const link = [...text.matchAll(/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?/g)].map((match) => match[1] as string).find((candidate) => !/^[a-z]+:/i.test(candidate));
+      if (link === undefined) continue;
+      const image = join(path, '..', decodeURI(link)).replace(/^\.\//, '');
+      if (!existsSync(join(git.dir, image))) continue;
+      setTarget(ctx, path);
+      const bytes = seededPng(nextToken(ctx));
+      await commitAsPerson(ctx, new Map([[image, bytes]]), 'Update the diagram');
+      ctx.observations.set('git.imagePath', image);
+      ctx.observations.set('git.imageHash', sha256(bytes));
+      return;
+    }
+    throw new EnvBlockedError('the slice has no document with an image in the repository');
   },
   'git.delete-refs': async (ctx, args) => {
     const world = live(ctx);
@@ -393,6 +734,73 @@ const GIT: Record<string, Executor> = {
     const open = await world.rest.pullRequests(ctx.names.syncBranch, 'open');
     if (open.length === 0) throw new ProductError('no sync pull request is open');
     for (const pr of open) await world.rest.closePullRequest(pr.number);
+  },
+  'git.open-pr': async (ctx, args) => {
+    // A person's pull request with a file the Linear-format hook fixes, for the CI example workflow (L0-09).
+    const world = live(ctx);
+    if (args.workflows === true) await installWorkflows(ctx);
+    const git = await ctx.person();
+    await pull(git, ctx);
+    const token = nextToken(ctx);
+    const folder = projectFolders(ctx)[0]?.folder ?? '';
+    const path = `${folder === '' ? '' : `${folder}/`}guides/format-check-${token}.md`;
+    const text = args.fixture === 'fixable' ? `${fixableSample().text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n` : `# Format check\n\n${noteSentence(token)}\n`;
+    const commit = await personCommit(git, ctx.names, new Map([[path, text]]), 'Add the format check page', { verify: false, branch: ctx.names.syncBranch });
+    await git.run(['reset', '--quiet', '--hard', `origin/${ctx.names.trackedBranch}`], { okCodes: [0, 128] });
+    ctx.ownCommits.push(commit);
+    const openedAt = Date.now();
+    const pr = await world.rest.openPullRequest(ctx.names.syncBranch, ctx.names.trackedBranch, 'Add the format check page', 'A small page for the weekly review.');
+    ctx.observations.set('ci.pullRequest', { number: pr.number, head: commit, openedAt });
+  },
+  'git.edit-sync-branch': async (ctx) => {
+    const path = targetPath(ctx);
+    const token = nextToken(ctx);
+    const commit = await commitToSyncBranch(ctx, async (git) => {
+      writeFileSync(join(git.dir, path), paragraphEdit(readFileSync(join(git.dir, path), 'utf8'), undefined, token));
+    }, 'Add a note to the pending changes');
+    ctx.edits.push({ side: 'git', path, token });
+    ctx.observations.set('syncBranch.personCommit', commit);
+  },
+  'git.ci-fix': async (ctx, args) => {
+    // Fix commits a CI job makes on the sync pull request's branch.
+    const path = typeof args.target === 'string' ? targetPath(ctx, args.target) : targetPath(ctx);
+    const fixes = Array.isArray(args.fixes) ? (args.fixes as string[]) : ['stable-fix'];
+    const commits = (ctx.observations.get('ciFix.commits') as string[] | undefined) ?? [];
+    const interleavings = (ctx.observations.get('report.interleavingsCovered') as string[] | undefined) ?? [];
+    interleavings.push(ctx.engine.pausedAt === 'after-capture-push-before-pr' ? 'capture-before-fix' : 'fix-before-capture');
+    for (const fix of fixes) {
+      const token = nextToken(ctx);
+      const addition = fix === 'linear-would-undo'
+        // Column alignment, which Linear drops (it keeps `| -- |` separators).
+        ? `\n| Check | Result |\n|:--|--:|\n| ${token} | ok |\n`
+        : `\nChecked by the format job, ref ${token}.\n`;
+      commits.push(await commitToSyncBranch(ctx, async (git) => {
+        writeFileSync(join(git.dir, path), `${readFileSync(join(git.dir, path), 'utf8').replace(/\n*$/, '\n')}${addition}`);
+      }, 'Apply the format fixes'));
+      ctx.observations.set(fix === 'linear-would-undo' ? 'ciFix.unstable' : 'ciFix.stable', token);
+    }
+    ctx.observations.set('ciFix.commits', commits);
+    ctx.observations.set('report.interleavingsCovered', interleavings);
+  },
+  'git.resolve': async (ctx) => {
+    const path = targetPath(ctx);
+    setTarget(ctx, path);
+    const git = await ctx.person();
+    await pull(git, ctx);
+    const text = await readWorking(git, path);
+    const resolved = resolveKeeping(text, 'git');
+    if (resolved === text) throw new ProductError('the tracked branch holds no conflict markers to resolve');
+    await commitAsPerson(ctx, new Map([[path, resolved]]), 'Resolve the conflict');
+    ctx.observations.set('resolved.body', stripFrontMatter(resolved));
+  },
+  'git.conflict-again': async (ctx) => {
+    const path = targetPath(ctx);
+    const git = await ctx.person();
+    await pull(git, ctx);
+    const token = nextToken(ctx);
+    const next = editInsideMarkers(await readWorking(git, path), 'git', token);
+    await commitAsPerson(ctx, new Map([[path, next]]), 'Rework the open question');
+    ctx.edits.push({ side: 'git', path, token });
   },
   'git.remove-security-hooks': async (ctx) => {
     const git = await ctx.person();
@@ -409,57 +817,99 @@ const GIT: Record<string, Executor> = {
     spawnSync('git', ['init', '--quiet', scratch]);
     writeFileSync(
       join(scratch, '.pre-commit-config.yaml'),
-      `repos:\n  - repo: local\n    hooks:\n      - id: linear-format\n        name: Linear format\n        entry: node ${join(REPO_ROOT, 'src/cli.ts')} fix\n        language: system\n        files: \\.md$\n`,
+      `repos:\n  - repo: local\n    hooks:\n      - id: linear-format\n        name: Linear format\n        entry: node ${engineEntry()} fix\n        language: system\n        files: \\.md$\n`,
     );
-    writeFileSync(join(scratch, 'page.md'), '# Page\n\n| a | b |\n|:--|--:|\n| 1 | 2 |\n');
+    // A file the Linear-format hook fixes, from the fixture bank.
+    writeFileSync(join(scratch, 'page.md'), fixableSample().text);
     spawnSync('git', ['add', '--all'], { cwd: scratch });
   },
-  'git.open-pr': gap('git.open-pr'),
-  'git.edit-sync-branch': gap('git.edit-sync-branch'),
-  'git.image-add': gap('git.image-add'),
-  'git.image-change': gap('git.image-change'),
-  'git.move-folder': gap('git.move-folder'),
-  'git.move-rewrite': gap('git.move-rewrite'),
-  'git.annotation': gap('git.annotation'),
-  'git.remove-footnote': gap('git.remove-footnote'),
-  'git.resolve': gap('git.resolve'),
-  'git.conflict-again': gap('git.conflict-again'),
-  'git.ci-fix': gap('git.ci-fix'),
 };
+
+/**
+ * An edit of the first line of one version inside the markers: `git` edits
+ * the tracked branch's version, `linear` Linear's. Both sides editing the
+ * same line again makes a new conflict (L3-12); one side alone is an edit
+ * inside open markers (L3-11).
+ */
+export function editInsideMarkers(text: string, version: 'git' | 'linear', token: string): string {
+  const lines = text.split('\n');
+  const start = lines.indexOf(version === 'git' ? MARKERS.git : MARKERS.linear);
+  if (start < 0) throw new ProductError('the document holds no conflict markers');
+  const line = lines.findIndex((candidate, index) => index > start && candidate.trim() !== '');
+  if (line < 0 || Object.values(MARKERS).includes(lines[line] as never)) throw new ProductError('the conflict has an empty version');
+  lines[line] = `${(lines[line] as string).replace(/\s+$/, '')} ${noteSentence(token)}`;
+  return lines.join('\n');
+}
+
+/** A tracked document's current content in Linear, read as an editor. */
+async function linearContent(ctx: RunContext, path: string): Promise<{ id: string; content: string; icon: string | null; color: string | null }> {
+  const world = live(ctx);
+  const id = await documentId(ctx, path);
+  const [document] = await world.editors['editor-a'].getDocuments([id], { withContent: true });
+  if (document === undefined) throw new ProductError('a recorded document does not exist in Linear');
+  return { id, content: document.content ?? '', icon: document.icon, color: document.color };
+}
 
 const LINEAR: Record<string, Executor> = {
   'linear.edit': async (ctx, args) => {
-    await editorEdit(ctx, editor(args), targetPath(ctx, args.target), (text, token) => `${text.replace(/\n*$/, '\n')}\n${paragraph(token)}\n`);
+    const conflicting = ctx.observations.get('conflict.paths') as string[] | undefined;
+    if (args.fixture === 'many-conflicts' && conflicting !== undefined) {
+      for (const path of conflicting) await editorEdit(ctx, editorOf(args), path, (text, token) => editParagraph(text, 0, token));
+      return;
+    }
+    const path = targetPath(ctx, args.target);
+    await editorEdit(ctx, editorOf(args), path, async (text, token) => (await fixtureEdit(ctx, args.fixture, 'linear', path, text, token))?.text ?? paragraphEdit(text, args.target, token));
+    if (args.fixture === 'adjacent-paragraphs') {
+      const base = ctx.observations.get('fixture.base') as string | undefined;
+      const gitBody = ctx.observations.get('edited.gitBody') as string | undefined;
+      if (base !== undefined && gitBody !== undefined) ctx.observations.set('oracle.gitMerge', gitMergeFile(gitBody, base, ctx.observations.get('edited.linearBody') as string));
+    }
   },
   'linear.edit-many': async (ctx, args) => {
     const count = typeof args.documents === 'number' ? args.documents : 10;
-    for (const path of documentPaths(ctx).slice(0, count)) {
-      await editorEdit(ctx, editor(args), path, (text, token) => `${text.replace(/\n*$/, '\n')}\n${paragraph(token)}\n`);
+    let paths = documentPaths(ctx);
+    if (args.teams === 2) {
+      // Spread over the two teams' folders.
+      const byTeam = new Map<string, string[]>();
+      for (const path of paths) byTeam.set(path.split('/')[0] as string, [...(byTeam.get(path.split('/')[0] as string) ?? []), path]);
+      const lists = [...byTeam.values()];
+      paths = [];
+      for (let index = 0; paths.length < count && lists.some((list) => index < list.length); index += 1) for (const list of lists) if (list[index] !== undefined && paths.length < count) paths.push(list[index] as string);
     }
+    for (const path of paths.slice(0, count)) await editorEdit(ctx, editorOf(args), path, (text, token) => paragraphEdit(text, undefined, token));
   },
   'linear.repeated-edit': async (ctx, args) => {
     const count = typeof args.count === 'number' ? args.count : 5;
     const path = targetPath(ctx);
-    for (let index = 0; index < count; index += 1) await editorEdit(ctx, editor(args), path, (text, token) => `${text.replace(/\n*$/, '\n')}\n${paragraph(token)}\n`);
+    const tokens: string[] = [];
+    for (let index = 0; index < count; index += 1) tokens.push(await editorEdit(ctx, editorOf(args), path, (text, token) => paragraphEdit(text, undefined, token)));
+    const reachedAt = Number(ctx.observations.get('pause.reachedAt') ?? Date.now());
+    ctx.observations.set('race', { reachedAt, resumedAt: Date.now(), tokens });
   },
   'linear.rename': async (ctx, args) => {
     const world = live(ctx);
     const path = targetPath(ctx, args.target);
     const id = await documentId(ctx, path);
-    const title = `${path.split('/').slice(0, -1).join('/')}/${String(args.title ?? 'renamed')}-${nextToken(ctx)}`.replace(/^\//, '');
-    await world.editors[editor(args)].updateDocument(id, { title });
+    setTarget(ctx, path, id);
+    const title = String(args.title ?? `notes/renamed-${nextToken(ctx)}`);
+    await world.editors[editorOf(args)].updateDocument(id, { title });
     ctx.observations.set('linear.renamed', { from: path, title });
   },
   'linear.trash': async (ctx, args) => {
     const world = live(ctx);
     const path = targetPath(ctx, args.target);
-    await world.editors[editor(args)].trashDocument(await documentId(ctx, path));
+    const id = await documentId(ctx, path);
+    setTarget(ctx, path, id);
+    await world.editors[editorOf(args)].trashDocument(id);
     ctx.observations.set('linear.trashed', path);
   },
   'linear.restore': async (ctx, args) => {
     const world = live(ctx);
-    const path = targetPath(ctx, args.target);
-    await world.editors[editor(args)].restoreDocument(await documentId(ctx, path));
+    const trashed = ctx.observations.get('fixture.trashedDocument') as { path: string; id: string } | undefined;
+    const path = args.fixture === 'trashed-document' && trashed !== undefined ? trashed.path : targetPath(ctx, args.target);
+    const id = args.fixture === 'trashed-document' && trashed !== undefined ? trashed.id : await documentId(ctx, path);
+    setTarget(ctx, path, id);
+    await world.editors[editorOf(args)].restoreDocument(id);
   },
   'linear.create': async (ctx, args) => {
     const world = live(ctx);
@@ -468,26 +918,156 @@ const LINEAR: Record<string, Executor> = {
     const token = nextToken(ctx);
     const title = typeof args.title === 'string' ? args.title : `guides/page-${token}`;
     const characters = typeof args.characters === 'number' ? args.characters : 0;
-    const body = characters > 0 ? `${paragraph(token)}\n\n${'Plain text line. '.repeat(Math.ceil(characters / 17)).slice(0, characters)}\n` : `${paragraph(token)}\n`;
-    await world.editors[editor(args)].createDocument({ projectId: project.id }, { title, content: body });
+    const body = characters > 0 ? `${noteSentence(token)}\n\n${'Plain text line. '.repeat(Math.ceil(characters / 17)).slice(0, characters)}\n` : `${noteSentence(token)}\n`;
+    const document = await world.editors[editorOf(args)].createDocument({ projectId: project.id }, { title, content: body });
+    const folder = projectFolders(ctx).find((candidate) => candidate.project === project.name)?.folder;
+    setTarget(ctx, folder === undefined ? `${title}.md` : `${folder}/${title}.md`, document.id);
+    ctx.observations.set('linear.created', document.id);
     ctx.edits.push({ side: 'linear', path: title, token });
   },
-  'linear.move-project': gap('linear.move-project'),
-  'linear.metadata': gap('linear.metadata'),
-  'linear.out-of-scope': gap('linear.out-of-scope'),
-  'linear.delete-permanently': gap('linear.delete-permanently'),
-  'linear.image-add': gap('linear.image-add'),
-  'linear.rich-edit': gap('linear.rich-edit'),
-  'linear.resolve': gap('linear.resolve'),
-  'linear.remove-one-marker': gap('linear.remove-one-marker'),
-  'linear.edit-inside-markers': gap('linear.edit-inside-markers'),
-  'linear.conflict-again': gap('linear.conflict-again'),
-  'linear.remove-secret': gap('linear.remove-secret'),
+  'linear.move-project': async (ctx, args) => {
+    const world = live(ctx);
+    const path = targetPath(ctx, args.target);
+    const { id } = await linearContent(ctx, path);
+    setTarget(ctx, path, id);
+    const own = projectFolders(ctx).filter((candidate) => path.startsWith(`${candidate.folder}/`))[0];
+    const other = projectFolders(ctx).find((candidate) => candidate.project !== own?.project);
+    const project = [...world.projects.values()].find((candidate) => candidate.name === other?.project);
+    if (own === undefined || other === undefined || project === undefined) throw new EnvBlockedError('the slice needs a document in a project and a second project');
+    await world.editors[editorOf(args)].updateDocument(id, { projectId: project.id });
+    ctx.observations.set('expected.destinationPath', `${other.folder}${path.slice(own.folder.length)}`);
+  },
+  'linear.metadata': async (ctx, args) => {
+    const world = live(ctx);
+    const path = targetPath(ctx, args.target);
+    const id = await documentId(ctx, path);
+    setTarget(ctx, path, id);
+    const editor = world.editors[editorOf(args)];
+    const variants = Array.isArray(args.variants) ? (args.variants as string[]) : ['icon', 'color', 'comment'];
+    if (variants.includes('icon')) await editor.updateDocument(id, { icon: 'Fire' });
+    if (variants.includes('color')) await editor.updateDocument(id, { color: '#f2c94c' });
+    if (variants.includes('comment')) {
+      const [document] = await editor.getDocuments([id]);
+      if (document?.documentContentId) await editor.commentOnDocument(document.documentContentId, 'Looks good to me.');
+    }
+  },
+  'linear.out-of-scope': async (ctx, args) => {
+    const world = live(ctx);
+    const editor = world.editors[editorOf(args)];
+    const variants = Array.isArray(args.variants) ? (args.variants as string[]) : ['unmapped-project', 'trash'];
+    for (const [index, variant] of variants.entries()) {
+      const path = targetPath(ctx, undefined, index);
+      const id = await documentId(ctx, path);
+      setTarget(ctx, path, id);
+      if (variant === 'unmapped-project') {
+        // A run project that no folder names; cleanup deletes it with the run's projects.
+        const team = [...world.teams.values()][0];
+        if (team === undefined) throw new EnvBlockedError('the test workspace has no team');
+        const unmapped = await world.world.createProject(ctx.names.project(8), [team.id]);
+        world.projects.set('UNMAPPED', unmapped);
+        await editor.updateDocument(id, { projectId: unmapped.id });
+      } else if (variant === 'trash') {
+        await editor.trashDocument(id);
+      }
+    }
+  },
+  'linear.delete-permanently': async (ctx, args) => {
+    const world = live(ctx);
+    const trashed = ctx.observations.get('fixture.trashedDocument') as { path: string; id: string } | undefined;
+    if (trashed === undefined) throw new Error('linear.delete-permanently needs the trashed-document fixture');
+    setTarget(ctx, trashed.path, trashed.id);
+    try {
+      await world.editors[editorOf(args)].request('DeleteDocumentForGood', 'mutation', 'mutation DeleteDocumentForGood($id: String!) { documentDelete(id: $id, permanentlyDelete: true) { success } }', { id: trashed.id });
+      ctx.observations.set('fault.documentGone', 'linear');
+    } catch {
+      // Linear's API cannot delete a document for good: the engine, which reaches Linear only
+      // through the proxy, is told what Linear answers for such a document.
+      if (ctx.proxy === null) throw new EnvBlockedError('Linear\'s API cannot delete a document for good and the run has no proxy');
+      ctx.proxy.setFaults([{ kind: 'document-gone', id: trashed.id }]);
+      ctx.observations.set('fault.documentGone', 'proxy');
+    }
+  },
+  'linear.image-add': async (ctx, args) => {
+    const world = live(ctx);
+    const path = targetPath(ctx, args.target);
+    const editor = world.editors[editorOf(args)];
+    await editorEdit(ctx, editorOf(args), path, async (text, token) => {
+      const upload = await editor.uploadFile({ filename: `diagram-${token}.png`, contentType: 'image/png', bytes: new Uint8Array(seededPng(token)) });
+      ctx.observations.set('linear.imageUrl', upload.assetUrl);
+      return `${text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n\n![diagram](${upload.assetUrl})\n`;
+    });
+    ctx.observations.set('linear.imageCapturedAtRequest', ctx.proxy?.requests.length ?? 0);
+  },
+  'linear.rich-edit': async (ctx, args) => {
+    const world = live(ctx);
+    const path = targetPath(ctx, args.target);
+    const constructs = Array.isArray(args.constructs) ? (args.constructs as string[]) : ['table', 'mermaid', 'task-list'];
+    await editorEdit(ctx, editorOf(args), path, (text, token) => {
+      const blocks = [noteSentence(token)];
+      if (constructs.includes('table')) blocks.push(`| Item | Owner |\n| -- | -- |\n| Budget ${token} | Ana |`);
+      if (constructs.includes('mermaid')) blocks.push('```mermaid\nflowchart LR\n  Plan --> Review\n```');
+      if (constructs.includes('task-list')) blocks.push(`- [ ] Send the notes ${token}\n- [x] Book the room`);
+      return `${text.replace(/\n*$/, '\n')}\n${blocks.join('\n\n')}\n`;
+    });
+    // What Linear made of it: the form git must end up with.
+    const [document] = await world.editors['editor-a'].getDocuments([await documentId(ctx, path)], { withContent: true });
+    ctx.observations.set('golden.linearForm', document?.content ?? null);
+  },
+  'linear.resolve': async (ctx, args) => {
+    const path = targetPath(ctx, args.target);
+    await editorEdit(ctx, editorOf(args), path, (text) => {
+      const resolved = resolveKeeping(text, 'linear');
+      if (resolved === text) throw new ProductError('the document holds no conflict markers to resolve');
+      ctx.observations.set('resolved.body', resolved);
+      return resolved;
+    });
+  },
+  'linear.remove-one-marker': async (ctx, args) => {
+    await editorEdit(ctx, editorOf(args), targetPath(ctx, args.target), (text) => {
+      if (!text.split('\n').includes(MARKERS.end)) throw new ProductError('the document holds no end marker');
+      return text.split('\n').filter((line) => line !== MARKERS.end).join('\n');
+    });
+  },
+  'linear.edit-inside-markers': async (ctx, args) => {
+    await editorEdit(ctx, editorOf(args), targetPath(ctx, args.target), (text, token) => editInsideMarkers(text, 'linear', token));
+  },
+  'linear.conflict-again': async (ctx, args) => {
+    // The same line as git.conflict-again: the first line of the git version.
+    await editorEdit(ctx, editorOf(args), targetPath(ctx, args.target), (text, token) => editInsideMarkers(text, 'git', token));
+  },
+  'linear.remove-secret': async (ctx, args) => {
+    const world = live(ctx);
+    const secret = ctx.observations.get('secret.value') as string | undefined;
+    const path = ctx.observations.get('secret.path') as string | undefined;
+    if (secret === undefined || path === undefined) throw new Error('linear.remove-secret needs an edit with the fake-secret fixture first');
+    // How the blocked document looks before alice fixes it (L2-35).
+    const { id, icon, color } = await linearContent(ctx, path);
+    ctx.observations.set('blocked.icon', icon);
+    ctx.observations.set('blocked.color', color);
+    const data = await world.app.request<{ document: { comments: { nodes: Array<{ body: string }> } } | null }>(
+      'BlockedComments', 'query', 'query BlockedComments($id: String!) { document(id: $id) { comments(first: 100) { nodes { body } } } }', { id },
+    );
+    ctx.observations.set('blocked.comments', (data.document?.comments.nodes ?? []).map((comment) => comment.body));
+    await editorEdit(ctx, editorOf(args), path, (text) => text.replace(` Access key ${secret}.`, ''));
+  },
 };
 
 function http(ctx: RunContext): NonNullable<RunContext['proxy']> {
   if (ctx.proxy === null) throw new Error('this fault needs the Linear proxy');
   return ctx.proxy;
+}
+
+/** Commits a change to a file and registers the commit that puts it back for `fault.clear`. */
+async function changeUntilClear(ctx: RunContext, path: string, change: (text: string) => string, message: string): Promise<void> {
+  const git = await ctx.person();
+  await pull(git, ctx);
+  const original = await readWorking(git, path);
+  const next = change(original);
+  if (next === original) throw new Error(`the fault found nothing to change in ${path}`);
+  await commitAsPerson(ctx, new Map([[path, next]]), message, true);
+  ctx.engine.restores.push(async () => {
+    await commitAsPerson(ctx, new Map([[path, original]]), 'Put the setting back', true);
+  });
 }
 
 const FAULT: Record<string, Executor> = {
@@ -509,6 +1089,8 @@ const FAULT: Record<string, Executor> = {
     ctx.proxy?.clearFaults();
     ctx.engine.env = {};
     delete ctx.engine.badCredential;
+    delete ctx.engine.trigger;
+    for (const restore of ctx.engine.restores.splice(0).reverse()) await restore();
   },
   'fault.http': async (ctx, args) => {
     http(ctx).setFaults([{
@@ -521,7 +1103,7 @@ const FAULT: Record<string, Executor> = {
   },
   'fault.write-error': async (ctx, args) => {
     const variants = Array.isArray(args.variants) ? (args.variants as string[]) : ['server-error'];
-    http(ctx).setFaults(variants.map((variant) => ({ kind: 'write-error' as const, variant: variant === 'reset' ? 'reset' as const : 'server-error' as const, times: 1 })));
+    http(ctx).setFaults(variants.map((variant) => ({ kind: 'write-error' as const, variant: variant === 'reset' || variant === 'connection-reset' ? 'reset' as const : 'server-error' as const, times: 1 })));
   },
   'fault.budget-headers': async (ctx, args) => {
     http(ctx).setFaults([{ kind: 'budget-headers', remaining: typeof args.remaining === 'number' ? args.remaining : 10, includeEndpointLimits: args.includeEndpointLimits === true }]);
@@ -550,10 +1132,75 @@ const FAULT: Record<string, Executor> = {
   'fault.checks': async () => {
     throw new EnvBlockedError('needs a failing required check on the sync pull request; the GitHub App may only read checks');
   },
-  'fault.stale-lease': gap('fault.stale-lease'),
-  'fault.hooks': gap('fault.hooks'),
-  'fault.annotation-target': gap('fault.annotation-target'),
-  'fault.missing-lfs-object': gap('fault.missing-lfs-object'),
+  'fault.stale-lease': async (ctx, args) => {
+    // Someone else moves a state ref while the run is between its reads and its atomic push.
+    const store = typeof args.ref === 'string' ? args.ref : 'ids';
+    const ref = `${ctx.names.refPrefix}/${store}`;
+    ctx.engine.trigger = {
+      checkpoint: 'after-write-before-record',
+      action: async () => {
+        const git = await ctx.person();
+        await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+        const tip = (await git.text(['rev-parse', ref])).trim();
+        const tree = (await git.text(['rev-parse', `${tip}^{tree}`])).trim();
+        const moved = (await git.text(['commit-tree', tree, '-p', tip, '-m', 'Unrelated update'])).trim();
+        await git.run(['push', '--quiet', '--no-verify', 'origin', `${moved}:${ref}`]);
+        ctx.observations.set('fault.staleLease', { ref: store, from: tip, to: moved });
+      },
+    };
+  },
+  'fault.hooks': async (ctx, args) => {
+    if (args.linearFormat !== false) return;
+    // The repository's pre-commit configuration without the Linear-format hook.
+    await changeUntilClear(ctx, '.pre-commit-config.yaml', (text) => {
+      const blocks = text.split(/(?=^ {2}- repo:)/m);
+      return blocks.filter((block) => !/^\s*- id: linear-format\s*$/m.test(block)).join('');
+    }, 'Drop the format hook');
+  },
+  'fault.annotation-target': async (ctx, args) => {
+    const world = live(ctx);
+    const variants = Array.isArray(args.variants) ? (args.variants as string[]) : ['missing-team', 'missing-project'];
+    if (variants.includes('renamed-team')) throw new EnvBlockedError('renaming a team changes it for every run in the workspace; the harness does not change shared teams');
+    const git = await ctx.person();
+    await pull(git, ctx);
+    if (variants.includes('missing-team')) {
+      const readme = [...world.tree.teamZones.values()].map((folder) => `${folder.split('/').slice(0, -1).join('/')}/README.md`.replace(/^\//, ''))[0];
+      const key = 'QZX';
+      if (readme === undefined || !existsSync(join(git.dir, readme))) throw new EnvBlockedError('the slice has no team-zone annotation');
+      if (world.teams.has(key)) throw new Error('the made-up team key exists');
+      await changeUntilClear(ctx, readme, (text) => text.replace(/^linear-team:\s*\S+/m, `linear-team: ${key}`), 'Point the folder at another team');
+    }
+    if (variants.includes('missing-project')) {
+      const folder = projectFolders(ctx)[0];
+      if (folder === undefined) throw new EnvBlockedError('the slice has no project folder');
+      await changeUntilClear(ctx, `${folder.folder}/README.md`, (text) => text.split(folder.project).join(`Retired plans ${ctx.names.runId}`), 'Point the folder at another project');
+    }
+    if (variants.includes('renamed-project')) {
+      const folder = projectFolders(ctx).at(-1);
+      const project = [...world.projects.values()].find((candidate) => candidate.name === folder?.project);
+      if (project === undefined) throw new EnvBlockedError('the slice has no project to rename');
+      const rename = (name: string) => world.world.client.request('RenameProject', 'mutation', 'mutation RenameProject($id: String!, $name: String!) { projectUpdate(id: $id, input: { name: $name }) { success } }', { id: project.id, name });
+      await rename(`${project.name} old`);
+      ctx.engine.restores.push(async () => {
+        await rename(project.name);
+      });
+    }
+  },
+  'fault.missing-lfs-object': async (ctx) => {
+    // The image's LFS pointer names an object the server never received.
+    const image = ctx.observations.get('git.imagePath') as string | undefined;
+    if (image === undefined) throw new Error('fault.missing-lfs-object needs git.image-add first');
+    const oid = sha256(`missing ${nextToken(ctx)}`);
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize 4096\n`;
+    const git = await ctx.person();
+    await pull(git, ctx);
+    mkdirSync(join(git.dir, image, '..'), { recursive: true });
+    writeFileSync(join(git.dir, image), pointer);
+    await git.run(['add', '--', image]);
+    await git.run(['commit', '--quiet', '--no-verify', '-m', 'Update the diagram']);
+    await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
+  },
   'fault.golden-drift': async (ctx, args) => {
     // A recorded Linear form edited by hand, in a copy of the bank, so the next probe must report drift.
     const copy = join(ctx.runDir, 'bank');
@@ -572,14 +1219,22 @@ const OTHER: Record<string, Executor> = {
     const pending = ctx.engine.pending;
     if (pending === undefined || !isCheckpoint(args.checkpoint)) throw new Error('kill needs a paused asynchronous run');
     pending.kill();
+    ctx.observations.set('kill.at', Date.now());
     delete ctx.engine.pending;
     ctx.checkpoints.resume(args.checkpoint as Checkpoint);
     delete ctx.engine.pausedAt;
     const result = await pending.done;
     ctx.engine.results.push(result);
-    ctx.observations.set(`runs.${ctx.engine.results.length - 1}.killed`, true);
+    ctx.observations.set(`runs.${ctx.engine.results.length - 1 - ctx.engine.setupRuns}.killed`, true);
   },
-  'merge.pull-request': gap('merge.pull-request'),
+  'merge.pull-request': async (ctx) => {
+    // A person merges the sync pull request (Linear → git initial sync).
+    const world = live(ctx);
+    const [pr] = await world.rest.pullRequests(ctx.names.syncBranch, 'open');
+    if (pr === undefined) throw new ProductError('no sync pull request is open to merge');
+    const merged = await world.rest.mergePullRequest(pr.number);
+    ctx.observations.set('merge.commit', merged.sha);
+  },
 };
 
 const UI_ACTIONS = [
@@ -604,3 +1259,5 @@ export async function runStep(ctx: RunContext, step: Step): Promise<void> {
   if (executor === undefined) throw new HarnessGapError(`${step.kind}.${step.action}`);
   await executor(ctx, step.args);
 }
+
+export { snapshotRefs };

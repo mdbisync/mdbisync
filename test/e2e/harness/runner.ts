@@ -21,6 +21,8 @@ import { classify, EnvBlockedError, ProductError, type CheckOutcome, type Scenar
 import { CorpusMissingError, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
+import { prepareFixtures, UNSAFE_TITLES } from './fixtures.ts';
+import { BEFORE_VIEW, needsBeforeView, takeView } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
 
 export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
@@ -104,6 +106,12 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     world,
     engineApp: { clientId: app.clientId, clientSecret: app.clientSecret },
     seededDocuments: [],
+    async download(url) {
+      // Personal API keys go in the Authorization header as they are.
+      const response = await fetch(url, { headers: { authorization: config.editors['editor-a'] } });
+      if (!response.ok) throw new ProductError(`an upload URL answered HTTP ${response.status}`);
+      return Buffer.from(await response.arrayBuffer());
+    },
   };
   ctx.live = live;
 
@@ -138,17 +146,34 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   }
 
   const state = ctx.scenario.setup.state;
+  const tools = { runStep };
+  await prepareFixtures(ctx, live, 'beforeSync', tools);
   if (state === 'linear-seeded') await seedLinear(ctx, live);
   if (state === 'converged' || state === 'conflicted') {
     await runStep(ctx, { kind: 'run', action: 'initial-sync', args: { direction: 'git-to-linear', confirm: true } });
+    await prepareFixtures(ctx, live, 'afterSync', tools);
   }
   if (state === 'conflicted') {
-    await runStep(ctx, { kind: 'git', action: 'edit', args: {} });
-    await runStep(ctx, { kind: 'linear', action: 'edit', args: { actor: 'editor-a' } });
+    // Both sides edit the same paragraph of the same document: an open conflict.
+    await runStep(ctx, { kind: 'git', action: 'edit', args: { fixture: 'same-paragraph' } });
+    await runStep(ctx, { kind: 'linear', action: 'edit', args: { actor: 'editor-a', fixture: 'same-paragraph' } });
     await runStep(ctx, { kind: 'run', action: 'sync', args: {} });
   }
-  // The scenario's own edits and runs start here.
+  // The scenario's own edits and runs start here: setup's edits are not the scenario's.
   ctx.engine.setupRuns = ctx.engine.results.length;
+  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.)/.test(key)) ctx.observations.delete(key);
+  await recordStart(ctx, live);
+}
+
+/** What the subjects compare against: the world when setup ended. */
+async function recordStart(ctx: RunContext, live: LiveWorld): Promise<void> {
+  ctx.observations.set('start.time', Date.now());
+  ctx.observations.set('start.proxyIndex', ctx.proxy?.requests.length ?? 0);
+  ctx.observations.set('start.refs', await snapshotRefs(ctx));
+  ctx.observations.set('start.trackedTip', (await live.sandbox.runRefs()).find((ref) => ref.ref === `refs/heads/${ctx.names.trackedBranch}`)?.oid);
+  ctx.observations.set('start.pullRequests', (await live.rest.pullRequests(ctx.names.syncBranch)).map((pr) => pr.number));
+  const before = needsBeforeView(ctx);
+  if (before.needed) ctx.observations.set(BEFORE_VIEW, await takeView(ctx, before.comments));
 }
 
 /** Documents in Linear whose titles are the slice's paths, as editor-a: the start of Linear → git scenarios. */
@@ -163,6 +188,7 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
   }
   const folders = annotatedFolders(readmes);
   const synced = new Set(live.manifest.files.filter((file) => file.synced && file.class !== 'lint-error').map((file) => file.path));
+  const seededPaths = new Map<string, string>();
   for (const [target, source] of live.tree.paths) {
     if (!synced.has(source) || !target.endsWith('.md')) continue;
     const folder = owningFolder(target, folders);
@@ -173,15 +199,17 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
     if (place === null) continue;
     const document = await live.editors['editor-a'].createDocument(place, { title: titleOf(target, folder.folder), content: stripFrontMatter(texts.get(target) ?? '') });
     live.seededDocuments.push(document.id);
+    seededPaths.set(target, document.id);
   }
+  ctx.observations.set('setup.seededPaths', seededPaths);
   for (const fixture of ctx.scenario.setup.fixtures) await FIXTURE_PREPARATION[fixture]?.(ctx, live);
+  ctx.observations.set('setup.seeded', [...live.seededDocuments]);
 }
 
 /** A 1×1 PNG, for an image that exists only in Linear. */
 const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/eL9GtQAAAABJRU5ErkJggg==', 'base64');
 
-/** Titles that are not plain paths (L1R-05). */
-export const UNSAFE_TITLES = ['notes/agenda: monday?', 'notes/plan*draft', '  notes/leading spaces', 'notes/back\\slash', 'notes/pipe | table'];
+export { UNSAFE_TITLES };
 
 /**
  * Setup beyond seeding that some fixtures of Linear-first scenarios need.
@@ -289,7 +317,7 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
     live: null,
     proxy: null,
     checkpoints: new CheckpointControl(join(runDir, 'hooks')),
-    engine: { results: [], setupRuns: 0, env: {} },
+    engine: { results: [], setupRuns: 0, env: {}, restores: [] },
     edits: [],
     ownCommits: [],
     observations: new Map(),
@@ -384,6 +412,7 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
     budgetWaitMs: grant?.waitedMs ?? 0,
     checks,
     cleanup: cleanupOutcome,
+    ...(ctx.observations.has('metrics') ? { metrics: ctx.observations.get('metrics') as Record<string, unknown> } : {}),
   };
 }
 

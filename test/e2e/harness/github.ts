@@ -96,10 +96,28 @@ export interface PullRequest {
   state: 'open' | 'closed';
   title: string;
   body: string | null;
-  head: { ref: string };
+  head: { ref: string; sha: string };
   base: { ref: string };
   merged_at: string | null;
   created_at: string;
+  user?: { login: string } | null;
+  merged_by?: { login: string } | null;
+  merge_commit_sha?: string | null;
+}
+
+export interface WorkflowRun {
+  id: number;
+  status: string;
+  conclusion: string | null;
+  event: string;
+  created_at: string;
+  run_started_at?: string;
+  updated_at?: string;
+  head_branch?: string;
+  head_sha?: string;
+  path?: string;
+  actor?: { login: string } | null;
+  triggering_actor?: { login: string } | null;
 }
 
 export class SandboxRest {
@@ -115,6 +133,15 @@ export class SandboxRest {
 
   request<T>(method: string, path: string, body?: unknown): Promise<T> {
     return call<T>(this.#token, method, `${this.#repoPath}${path}`, body, this.#fetch);
+  }
+
+  /** Bytes of a repository API path that answers with a redirect to a file (artifacts, logs). */
+  async download(path: string): Promise<Buffer> {
+    const response = await this.#fetch(`${API}${this.#repoPath}${path}`, {
+      headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${this.#token}`, 'x-github-api-version': '2022-11-28', 'user-agent': 'scenario-harness' },
+    });
+    if (!response.ok) throw new GitHubError(`GET ${path.split('?')[0]}: HTTP ${response.status}`, response.status);
+    return Buffer.from(await response.arrayBuffer());
   }
 
   /** Pull requests whose head branch starts with `prefix` (all states, newest first). */
@@ -146,11 +173,16 @@ export class SandboxRest {
     await this.request('POST', `/actions/workflows/${encodeURIComponent(file)}/dispatches`, { ref, inputs });
   }
 
-  async workflowRuns(branch: string): Promise<Array<{ id: number; status: string; conclusion: string | null; event: string; created_at: string }>> {
-    const data = await this.request<{ workflow_runs: Array<{ id: number; status: string; conclusion: string | null; event: string; created_at: string }> }>(
-      'GET',
-      `/actions/runs?branch=${encodeURIComponent(branch)}&per_page=50`,
-    );
+  async workflowRuns(branch: string): Promise<WorkflowRun[]> {
+    const data = await this.request<{ workflow_runs: WorkflowRun[] }>('GET', `/actions/runs?branch=${encodeURIComponent(branch)}&per_page=50`);
     return data.workflow_runs;
+  }
+
+  async mergePullRequest(number: number): Promise<{ sha: string }> {
+    return this.request('PUT', `/pulls/${number}/merge`, { merge_method: 'merge' });
+  }
+
+  async openPullRequest(head: string, base: string, title: string, body: string): Promise<PullRequest> {
+    return this.request('POST', '/pulls', { head, base, title, body });
   }
 }
