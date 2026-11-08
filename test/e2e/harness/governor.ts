@@ -172,7 +172,7 @@ export class Governor {
     const releaseAll = () => held.splice(0).reverse().forEach((lock) => lock.release());
     try {
       if (scenario.slice === 'full') {
-        held.push(await acquireLock('slice-full', { stateDir: options.stateDir, runId, timeoutMs: Math.max(0, deadline - this.#now()) }));
+        held.push(await acquireLock('slice-full', { stateDir: options.stateDir, runId, timeoutMs: Math.max(0, deadline - this.#now()), onWait: (holder) => options.log?.(`full slice: waiting for run ${holder?.runId ?? 'unknown'}`) }));
       }
       // Try the apps in turn, starting after the last one used.
       const apps = options.apps.map((_, index) => options.apps[(this.#next + index) % options.apps.length] as App);

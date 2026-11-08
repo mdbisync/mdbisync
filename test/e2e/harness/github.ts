@@ -45,6 +45,7 @@ async function call<T>(token: string, method: string, path: string, body?: unkno
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: AbortSignal.timeout(60_000),
   });
   if (!response.ok) throw new GitHubError(`${method} ${path.split('?')[0]}: HTTP ${response.status}`, response.status);
   if (response.status === 204) return undefined as T;

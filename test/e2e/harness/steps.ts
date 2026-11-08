@@ -18,7 +18,7 @@ import { findDrift } from '../../probe/record.ts';
 import { isCheckpoint } from './checkpoints.ts';
 import { newRunId } from './isolation.ts';
 import { nextToken, type Editor, type RunContext } from './context.ts';
-import { REPO_ROOT, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
+import { REPO_ROOT, engineEntry, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { personCommit } from './sandbox.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import type { Step } from './spec.ts';
@@ -183,7 +183,7 @@ function settleResult(ctx: RunContext, result: EngineResult): void {
 async function runCommand(ctx: RunContext, command: CommandName, args: Record<string, unknown>): Promise<void> {
   if (ctx.live === null) {
     // Offline commands (lint, fix) run on the fixture bank and the corpus without credentials.
-    const result = spawnSync(process.execPath, [join(REPO_ROOT, 'src/cli.ts'), command], { encoding: 'utf8', cwd: ctx.runDir });
+    const result = spawnSync(process.execPath, [engineEntry(), command], { encoding: 'utf8', cwd: ctx.runDir });
     if (result.status === COMMANDS[command].notImplementedExitCode && result.stderr.includes('not implemented')) throw new NotImplementedError(command);
     ctx.observations.set(`${command}.exitCode`, result.status);
     return;

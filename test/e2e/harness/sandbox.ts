@@ -49,7 +49,8 @@ export class Sandbox {
   }
 
   env(who: { name: string; email: string } = HARNESS): Record<string, string> {
-    return { ...gitAuthEnv(this.#token), ...identityEnv(who), GIT_LFS_SKIP_SMUDGE: '1' };
+    // A stalled transfer (under 1 KB/s for a minute) fails instead of hanging the run.
+    return { ...gitAuthEnv(this.#token), ...identityEnv(who), GIT_LFS_SKIP_SMUDGE: '1', GIT_HTTP_LOW_SPEED_LIMIT: '1000', GIT_HTTP_LOW_SPEED_TIME: '60' };
   }
 
   /** Brings the shared cache up to date with the sandbox's main branch. */

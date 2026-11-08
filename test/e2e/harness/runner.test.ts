@@ -161,12 +161,37 @@ function deps(config: Partial<TestConfig> = {}) {
   };
 }
 
+/** Runs `body` with MDBISYNC_ENGINE pointing at a stub engine script. */
+async function withStubEngine<T>(script: string, body: () => Promise<T>): Promise<T> {
+  const file = join(fresh('stub-engine-'), 'engine.mjs');
+  writeFileSync(file, script);
+  const before = process.env.MDBISYNC_ENGINE;
+  process.env.MDBISYNC_ENGINE = file;
+  try {
+    return await body();
+  } finally {
+    if (before === undefined) delete process.env.MDBISYNC_ENGINE;
+    else process.env.MDBISYNC_ENGINE = before;
+  }
+}
+const NOT_IMPLEMENTED = `const codes = { sync: 10, 'initial-sync': 11, lint: 12, fix: 13, init: 14, check: 15 };
+const command = process.argv[2];
+process.stderr.write(command + ': not implemented\\n');
+process.exitCode = codes[command];
+`;
+
 describe('runner', () => {
   it('runs an offline scenario to expected-red when the engine answers "not implemented"', async () => {
-    const result = await runScenario(byId('L0-01'), deps());
+    const result = await withStubEngine(NOT_IMPLEMENTED, () => runScenario(byId('L0-01'), deps()));
     assert.equal(result.result, 'expected-red');
     assert.match(result.reason ?? '', /not implemented: fix/);
     assert.equal(result.cleanup.ok, true);
+  });
+
+  it('fails a scenario, as the harness\'s gap, when it cannot observe an assertion\'s subject', async () => {
+    const result = await withStubEngine('process.exitCode = 0;\n', () => runScenario(byId('L0-01'), deps()));
+    assert.equal(result.result, 'fail');
+    assert.match(result.reason ?? '', /harness: .*assertion subject fix\.second\.bytes/);
   });
 
   it('reports a live scenario env-blocked, with the reason, when the configuration is missing', async () => {
@@ -182,7 +207,7 @@ describe('runner', () => {
 
   it('runs many scenarios on parallel workers and keeps their order', async () => {
     const ids = ['L0-01', 'L0-02', 'L0-03', 'L0-04'];
-    const results = await runScenarios(ids.map(byId), deps(), 3);
+    const results = await withStubEngine(NOT_IMPLEMENTED, () => runScenarios(ids.map(byId), deps(), 3));
     assert.deepEqual(results.map((result) => result.id), ids);
     assert.ok(results.every((result) => result.result === 'expected-red'));
   });
