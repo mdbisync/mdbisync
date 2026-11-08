@@ -2,11 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { COMMANDS, USAGE_EXIT_CODE } from "./commands.ts";
+import { COMMANDS, PREFLIGHT_COMMANDS, USAGE_EXIT_CODE } from "./commands.ts";
 import { runCli } from "./cli.ts";
 import { VERSION } from "./version.ts";
 
 const commandNames = Object.keys(COMMANDS);
+const stubNames = commandNames.filter((name) => !(PREFLIGHT_COMMANDS as readonly string[]).includes(name));
+/** An environment without any MDBISYNC_* input. */
+const bareEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("MDBISYNC_") && key !== "GITHUB_REPOSITORY"));
 
 test("every command has its own non-zero exit code", () => {
   const codes: number[] = Object.values(COMMANDS).map((info) => info.notImplementedExitCode);
@@ -20,22 +23,31 @@ test("the command set is the documented one", () => {
   assert.deepEqual(commandNames, ["sync", "initial-sync", "lint", "fix", "init", "check"]);
 });
 
-for (const name of commandNames) {
-  test(`${name} prints "not implemented" with its exit code`, () => {
-    const result = runCli([name]);
+for (const name of stubNames) {
+  test(`${name} prints "not implemented" with its exit code`, async () => {
+    const result = await runCli([name]);
     assert.equal(result.stderr, `${name}: not implemented\n`);
     assert.equal(result.stdout, "");
     assert.equal(result.exitCode, COMMANDS[name as keyof typeof COMMANDS].notImplementedExitCode);
   });
 }
 
-test("--version prints the package version", () => {
-  assert.deepEqual(runCli(["--version"]), { exitCode: 0, stdout: `${VERSION}\n`, stderr: "" });
+for (const name of PREFLIGHT_COMMANDS) {
+  test(`${name} without its inputs names the missing input and exits with the usage code`, async () => {
+    const result = await runCli([name], { env: bareEnv });
+    assert.equal(result.exitCode, USAGE_EXIT_CODE);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, new RegExp(`^${name}: the input `));
+  });
+}
+
+test("--version prints the package version", async () => {
+  assert.deepEqual(await runCli(["--version"]), { exitCode: 0, stdout: `${VERSION}\n`, stderr: "" });
 });
 
-test("an unknown or missing command prints usage and exits with the usage code", () => {
+test("an unknown or missing command prints usage and exits with the usage code", async () => {
   for (const args of [[], ["nope"]]) {
-    const result = runCli(args);
+    const result = await runCli(args);
     assert.equal(result.exitCode, USAGE_EXIT_CODE);
     assert.match(result.stderr, /Usage: mdbisync <command>/);
   }
@@ -55,10 +67,15 @@ for (const entry of entries) {
       t.skip("not built; run `npm run build` first");
       return;
     }
-    for (const name of commandNames) {
+    for (const name of stubNames) {
       const child = spawnSync(process.execPath, [entry.file, name], { encoding: "utf8" });
       assert.equal(child.status, COMMANDS[name as keyof typeof COMMANDS].notImplementedExitCode, `${entry.file} ${name}`);
       assert.equal(child.stderr, `${name}: not implemented\n`);
+    }
+    for (const name of PREFLIGHT_COMMANDS) {
+      const child = spawnSync(process.execPath, [entry.file, name], { encoding: "utf8", env: bareEnv });
+      assert.equal(child.status, USAGE_EXIT_CODE, `${entry.file} ${name}`);
+      assert.match(child.stderr, /the input linear-client-id is required/);
     }
     assert.equal(execFileSync(process.execPath, [entry.file, "--version"], { encoding: "utf8" }), `${VERSION}\n`);
     // The bundle is the package's `bin`, so it must start with a Node shebang.

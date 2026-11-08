@@ -3,8 +3,44 @@
 Two-way sync between Markdown files in a Git repository and Linear documents,
 run as a GitHub Action.
 
-**Status:** early development. Every command and both action entry points
-answer "not implemented"; nothing is usable yet.
+**Status:** early development. `check` checks a repository's setup; `sync`
+and `initial-sync` run the same check (and `sync` refuses to run without its
+state) and then answer "not implemented". Nothing writes yet.
+
+## Folder mapping
+
+A folder maps to Linear through its `README.md` front matter:
+
+```yaml
+---
+linear-team: ENG            # a team, by key or name
+linear-project: Field notes # a project of that team
+---
+```
+
+A folder names the team, a folder below it (or the same folder) names the
+project, and every folder below inherits both. Files in folders between the
+team folder and a project folder are team documents. Deeper folders become a
+path in the document title: `notes/guides/install.md` under a project folder
+`notes/` is the document `guides/install`. Only `.md` files with text content
+are synchronized; files above every annotated folder are not. Two files whose
+titles differ only in letter case or Unicode normalization are both left out
+and reported.
+
+## Setup check
+
+Before it writes anything, every run checks that the Linear token works and
+may write, that the GitHub token has contents, pull requests and workflows
+write and checks and commit statuses read, that merge commits are allowed,
+that every annotation is valid and its team and project exist in Linear, and
+whether pre-commit hooks marked `alias: security` exist (without them the run
+goes on and says that content is pushed unchecked). The result goes to the
+job summary as names and states, never document content. `check` runs it
+alone.
+
+The command line reads the action's inputs (see `action.yml`) from
+environment variables: `MDBISYNC_LINEAR_CLIENT_ID` for `linear-client-id`,
+and so on.
 
 ## Layout
 
@@ -12,6 +48,11 @@ answer "not implemented"; nothing is usable yet.
 | --- | --- |
 | `src/cli.ts` | Command line: `sync`, `initial-sync`, `lint`, `fix`, `init`, `check`, `--version` |
 | `src/action/` | GitHub Action steps: `main` (operation `sync` or `initial-sync`) and `post` |
+| `src/run/` | Inputs and the preflight every run starts with |
+| `src/mapping/` | Folder annotations and the mapping of files to documents |
+| `src/setup/` | The setup check and the refusal to sync without state |
+| `src/linear/` | Linear client |
+| `src/state/` | The sync's state refs, trees and LFS reads |
 | `action.yml` | Action metadata (`node24`, bundled `main` and `post`) |
 | `tools/` | Build and supply-chain checks |
 | `test/fixtures/`, `test/corpus/`, `test/scenarios/`, `test/e2e/` | Test data, corpus generator, scenario specs and end-to-end harness |

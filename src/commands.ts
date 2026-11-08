@@ -1,6 +1,8 @@
 // The commands of the command-line entry and their exit codes.
-// Every command is a stub for now: it reports "not implemented" and exits
-// with its own code, so callers and tests can tell the stubs apart.
+// `sync`, `initial-sync` and `check` run the preflight (the sync's state and
+// the setup check); after a passed preflight, `sync` and `initial-sync` and
+// the other commands are still stubs that report "not implemented" with
+// their own code, so callers and tests can tell them apart.
 
 export interface CommandInfo {
   readonly summary: string;
@@ -18,7 +20,14 @@ export const COMMANDS = {
 
 export type CommandName = keyof typeof COMMANDS;
 
+/** Commands that run the preflight. */
+export const PREFLIGHT_COMMANDS = ["sync", "initial-sync", "check"] as const satisfies readonly CommandName[];
+
 export const USAGE_EXIT_CODE = 2;
+/** The setup check failed; nothing was written. */
+export const SETUP_FAILED_EXIT_CODE = 3;
+/** The sync has no state; nothing was written; run initial sync first. */
+export const NO_STATE_EXIT_CODE = 4;
 
 export function isCommandName(value: string): value is CommandName {
   return Object.hasOwn(COMMANDS, value);

@@ -5,6 +5,46 @@ inputs:
     description: "What to run: `sync` (the recurring two-way sync) or `initial-sync` (the one-time sync that makes one side match the other)."
     required: false
     default: sync
+  linear-client-id:
+    description: "Client ID of the Linear OAuth app (client credentials, scopes read and write)."
+    required: true
+  linear-client-secret:
+    description: "Client secret of the Linear OAuth app."
+    required: true
+  linear-api-url:
+    description: "Linear API origin. Leave empty for Linear itself."
+    required: false
+    default: ""
+  github-token:
+    description: "Installation token of the sync's GitHub App (contents, pull requests and workflows write; checks and commit statuses read)."
+    required: true
+  github-api-url:
+    description: "GitHub REST API URL. Leave empty for the runner's API."
+    required: false
+    default: ""
+  repository:
+    description: "The repository as owner/name. Leave empty for the workflow's repository."
+    required: false
+    default: ""
+  tracked-branch:
+    description: "The branch the sync keeps equal to Linear."
+    required: false
+    default: main
+  sync-branch:
+    description: "The branch of the sync pull request."
+    required: false
+    default: mdbisync/linear
+  state-ref-prefix:
+    description: "Prefix of the sync's state refs."
+    required: false
+    default: refs/mdbisync
+  report-file:
+    description: "Path to write the run's report as JSON (names and states only). Leave empty for none."
+    required: false
+    default: ""
+outputs:
+  code:
+    description: "Why the run stopped before writing, for example `initial-sync-required`; empty when it did not stop."
 runs:
   using: node24
   main: dist/action-main.js
