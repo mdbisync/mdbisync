@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "id": "L2-37",
+  "slice": "mini",
+  "mode": "actions",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "git",
+      "action": "edit",
+      "args": {
+        "workflows": true
+      }
+    },
+    {
+      "kind": "run",
+      "action": "workflow",
+      "args": {
+        "event": "push"
+      }
+    },
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "workflow",
+      "args": {
+        "event": "workflow_dispatch"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "workflow",
+      "args": {
+        "event": "schedule"
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "workflows.events",
+        "operator": "contains-all",
+        "expected": [
+          "push",
+          "workflow_dispatch",
+          "schedule"
+        ]
+      },
+      {
+        "subject": "pullRequests.author",
+        "operator": "equal",
+        "expected": "app-bot"
+      },
+      {
+        "subject": "pullRequests.ciPassed",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "pullRequests.merger",
+        "operator": "equal",
+        "expected": "app-bot"
+      }
+    ]
+  }
+}

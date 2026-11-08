@@ -1,0 +1,42 @@
+[
+  {
+    "alias": "unsafe-punctuation",
+    "title": "Notes: draft?*",
+    "relativePathTemplate": "Notes%3A draft%3F%2A.md"
+  },
+  {
+    "alias": "leading-space",
+    "title": " leading",
+    "relativePathTemplate": "%20leading.md"
+  },
+  {
+    "alias": "leading-slash",
+    "title": "/part/notes",
+    "relativePathTemplate": "%00/part/notes.md"
+  },
+  {
+    "alias": "empty-segment",
+    "title": "part//notes",
+    "relativePathTemplate": "part/%00/notes.md"
+  },
+  {
+    "alias": "dot-segment",
+    "title": "../notes",
+    "relativePathTemplate": "%2E%2E/notes.md"
+  },
+  {
+    "alias": "literal-percent",
+    "title": "notes%3A",
+    "relativePathTemplate": "notes%253A.md"
+  },
+  {
+    "alias": "collision-a",
+    "title": "notes",
+    "relativePathTemplate": "notes--{documentId}.md"
+  },
+  {
+    "alias": "collision-b",
+    "title": "notes",
+    "relativePathTemplate": "notes--{documentId}.md"
+  }
+]

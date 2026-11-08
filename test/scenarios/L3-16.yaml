@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "id": "L3-16",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "linear",
+      "action": "trash",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "git",
+      "action": "edit",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "documents.id",
+        "operator": "same-as",
+        "expected": "before.documents.id"
+      },
+      {
+        "subject": "documents.comments",
+        "operator": "same-as",
+        "expected": "before.documents.comments"
+      },
+      {
+        "subject": "documents.body",
+        "operator": "same-as",
+        "expected": "tracked.body"
+      },
+      {
+        "subject": "documents.state",
+        "operator": "equal",
+        "expected": "active"
+      }
+    ]
+  },
+  "proposedRule": "The git edit wins over deletion in Linear; restore the same document from trash and retain comments."
+}

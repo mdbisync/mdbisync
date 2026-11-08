@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "id": "L4-13",
+  "slice": "full",
+  "mode": "actions",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "full"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "run",
+      "action": "soak",
+      "args": {
+        "durationSeconds": 86400,
+        "scheduleSeconds": 300,
+        "invariantIntervalSeconds": 3600,
+        "actors": [
+          "editor-a",
+          "editor-b",
+          "git"
+        ],
+        "randomSeed": 173
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "report.lostEditCount",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "report.hourlyInvariantChecks",
+        "operator": "at-least",
+        "expected": 24
+      },
+      {
+        "subject": "report.metrics",
+        "operator": "contains-all",
+        "expected": [
+          "scheduleDelay",
+          "runnerMinutes",
+          "activeLinearTokens"
+        ]
+      }
+    ]
+  }
+}
