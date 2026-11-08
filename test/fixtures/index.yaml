@@ -58,7 +58,11 @@ rules:
     title: "Git conflict marker lines are rewritten as headings, quotes or collapsible sections."
   - id: url-in-html
     title: "A URL inside raw HTML is turned into a Markdown link."
+  - id: block-first-in-list-item
+    title: "A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item."
 known_constructs:
+  - construct: sync-conflict-markers
+    class: unchanged
   - construct: heading-atx-h1
     class: unchanged
   - construct: heading-atx-h2
@@ -230,7 +234,7 @@ known_constructs:
   - construct: code-in-link
     class: fixable
   - construct: heading-in-list
-    class: fixable
+    class: lint-error
   - construct: task-in-quote
     class: fixable
   - construct: math-in-list
@@ -946,6 +950,7 @@ fixtures:
     construct: hard-break-backslash
     class: lint-error
     rule: hard-break-backslash
+    line: 1
     basis: known
     canary: kx-0d10d55c
   - file: "construct-singles/break-html.md"
@@ -1131,9 +1136,12 @@ fixtures:
   - file: "pairwise/heading-in-list.md"
     group: pairwise
     construct: heading-in-list
-    class: fixable
+    class: lint-error
+    rule: block-first-in-list-item
+    line: 1
     basis: known
     canary: kx-630c02ea
+    note: "Linear writes the marker, a blank line and the indented heading; Markdown reads that as an empty item and a heading outside the list"
   - file: "pairwise/task-in-quote.md"
     group: pairwise
     construct: task-in-quote
@@ -1273,6 +1281,7 @@ fixtures:
     construct: over-content-limit
     class: lint-error
     rule: content-too-long
+    line: 1
     basis: known
     canary: kx-08771544
   - file: "mermaid/mermaid-flowchart.md"
@@ -1382,6 +1391,7 @@ fixtures:
     construct: table-alignment
     class: lint-error
     rule: table-alignment
+    line: 1
     basis: known
     canary: kx-da7801ca
   - file: "tables/table-30-columns.md"
@@ -1479,6 +1489,7 @@ fixtures:
     construct: code-in-bold
     class: lint-error
     rule: code-in-emphasis
+    line: 1
     basis: known
     canary: kx-bd662ad0
   - file: "typography-scripts/underline-html.md"
@@ -1690,6 +1701,7 @@ fixtures:
     construct: link-reference
     class: lint-error
     rule: link-title
+    line: 1
     basis: known
     canary: kx-b3c01c3b
   - file: "links/reference-collapsed.md"
@@ -1733,6 +1745,7 @@ fixtures:
     construct: link-title
     class: lint-error
     rule: link-title
+    line: 1
     basis: known
     canary: kx-c23ef7e2
   - file: "links/anchor-only.md"
@@ -1950,6 +1963,7 @@ fixtures:
     construct: html-img
     class: lint-error
     rule: url-in-html
+    line: 1
     basis: known
     canary: kx-4218d8bb
   - file: "html-extensions/html-table.md"
@@ -1975,6 +1989,7 @@ fixtures:
     construct: conflict-markers-in-quote
     class: lint-error
     rule: git-conflict-marker
+    line: 1
     basis: known
     canary: kx-ee491350
     note: "blank quote lines keep the line before the equals line from being a setext heading"
@@ -2007,6 +2022,7 @@ fixtures:
     construct: conflict-markers
     class: lint-error
     rule: git-conflict-marker
+    line: 3
     basis: known
     canary: kx-354df3a7
     note: "unresolved git markers in a paragraph: Linear turns them into a heading and a collapsible section"
@@ -2015,6 +2031,7 @@ fixtures:
     construct: conflict-markers
     class: lint-error
     rule: git-conflict-marker
+    line: 2
     basis: known
     canary: kx-0e192afe
   - file: "conflict-markers/real-table.md"
@@ -2022,9 +2039,38 @@ fixtures:
     construct: conflict-markers
     class: lint-error
     rule: git-conflict-marker
+    line: 3
     basis: known
     canary: kx-9d18e02c
     note: "the marker lines end the table; Linear turns them into a heading and a collapsible section"
+  - file: "conflict-markers/sync-markers-paragraph.md"
+    group: conflict-markers
+    construct: sync-conflict-markers
+    class: unchanged
+    basis: known
+    canary: kx-c9433827
+    note: "the sync's marker paragraphs around two versions of a paragraph"
+  - file: "conflict-markers/sync-markers-list.md"
+    group: conflict-markers
+    construct: sync-conflict-markers
+    class: unchanged
+    basis: known
+    canary: kx-0e41fb45
+    note: "a line-level conflict in a flat list splits it around the marker paragraphs"
+  - file: "conflict-markers/sync-markers-table.md"
+    group: conflict-markers
+    construct: sync-conflict-markers
+    class: unchanged
+    basis: known
+    canary: kx-9f26fea3
+    note: "a conflict in a table takes the whole table"
+  - file: "conflict-markers/sync-markers-code.md"
+    group: conflict-markers
+    construct: sync-conflict-markers
+    class: unchanged
+    basis: known
+    canary: kx-6321d49d
+    note: "a conflict in a code block takes the whole fence"
   - file: "conflict-markers/equals-setext-lookalike.md"
     group: conflict-markers
     construct: conflict-markers-setext-lookalike
@@ -2036,6 +2082,7 @@ fixtures:
     construct: footnote
     class: lint-error
     rule: footnote
+    line: 1
     basis: known
     canary: kx-1c48b578
   - file: "lint-errors/footnote-named.md"
@@ -2043,6 +2090,7 @@ fixtures:
     construct: footnote
     class: lint-error
     rule: footnote
+    line: 1
     basis: known
     canary: kx-7d74c85e
   - file: "lint-errors/footnote-inline.md"
@@ -2050,6 +2098,7 @@ fixtures:
     construct: footnote
     class: lint-error
     rule: footnote
+    line: 1
     basis: known
     canary: kx-68f32f16
   - file: "lint-errors/subscript.md"
@@ -2057,6 +2106,7 @@ fixtures:
     construct: subscript-tilde
     class: lint-error
     rule: subscript
+    line: 1
     basis: known
     canary: kx-30e424d4
   - file: "lint-errors/table-escaped-pipe.md"
@@ -2064,6 +2114,7 @@ fixtures:
     construct: table-escaped-pipe-plain-cell
     class: lint-error
     rule: table-escaped-pipe
+    line: 3
     basis: known
     canary: kx-d1b9730f
   - file: "lint-errors/image-in-link.md"
@@ -2071,6 +2122,7 @@ fixtures:
     construct: image-in-link
     class: lint-error
     rule: image-in-link
+    line: 1
     basis: known
     canary: kx-59a1eafa
   - file: "lint-errors/duplicate-title/guide-upper.md"
@@ -2114,6 +2166,7 @@ fixtures:
     construct: image-in-link
     class: lint-error
     rule: image-in-link
+    line: 1
     basis: known
     canary: kx-d5ff24b6
   - file: "images/png.md"
@@ -2163,6 +2216,7 @@ fixtures:
     construct: image-title
     class: lint-error
     rule: image-title
+    line: 1
     basis: known
     canary: kx-93be94fc
   - file: "images/empty-alt.md"

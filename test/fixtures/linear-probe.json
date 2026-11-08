@@ -65,6 +65,22 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "conflict-markers/sync-markers-code.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/sync-markers-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/sync-markers-paragraph.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/sync-markers-table.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "construct-singles/blank-lines-many.md": {
       "yjs": "recorded",
       "fixedPoint": true

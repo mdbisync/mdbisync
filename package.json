@@ -23,6 +23,7 @@
   "dependencies": {
     "@actions/core": "3.0.1",
     "@linear/sdk": "99.0.0",
+    "gemoji": "8.1.0",
     "mdast-util-from-markdown": "2.1.0",
     "mdast-util-frontmatter": "2.0.1",
     "mdast-util-gfm": "3.1.0",
