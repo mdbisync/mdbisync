@@ -5,7 +5,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LinearClient } from '../../../src/linear/index.ts';
-import { Git } from '../../../src/state/index.ts';
+import { Git, readIds } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs, stripFrontMatter, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
@@ -167,6 +167,8 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
     if (!synced.has(source) || !target.endsWith('.md')) continue;
     const folder = owningFolder(target, folders);
     if (folder === null) continue;
+    // A team zone's own README would be titled "README" without the run's prefix, shared by every run.
+    if (folder.project === null && target === `${folder.folder}/README.md`) continue;
     const project = folder.project === null ? undefined : [...live.projects.values()].find((p) => p.name === folder.project);
     const team = folder.team === null ? undefined : live.teams.get(folder.team);
     const place = project !== undefined ? { projectId: project.id } : team !== undefined ? { teamId: team.id } : null;
@@ -229,6 +231,18 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
   },
 };
 
+/** Document ids in the run's ids state ref, or none when the engine recorded nothing. */
+async function recordedIds(ctx: RunContext): Promise<string[]> {
+  const sandbox = ctx.sandbox;
+  if (sandbox === undefined) return [];
+  const ref = `${ctx.names.refPrefix}/ids`;
+  if (!(await sandbox.runRefs()).some((entry) => entry.ref === ref)) return [];
+  const git = await ctx.person();
+  await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+  const ids = await readIds(git, (await git.text(['rev-parse', ref])).trim());
+  return [...ids.values()].map((entry) => entry.id);
+}
+
 async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string }> {
   const problems: string[] = [];
   const attempt = async (what: string, action: () => Promise<unknown>) => {
@@ -244,6 +258,14 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
     delete ctx.engine.pending;
   }
   ctx.checkpoints.resumeAll();
+  // Every document the run made, by id: what the harness seeded and what the engine recorded.
+  // Read the ids before the refs go.
+  const created = new Set(ctx.live?.seededDocuments ?? []);
+  if (ctx.live !== null) {
+    await attempt('ids', async () => {
+      for (const id of await recordedIds(ctx)) created.add(id);
+    });
+  }
   const sandbox = ctx.sandbox;
   if (sandbox !== undefined) {
     await attempt('refs', async () => {
@@ -259,6 +281,8 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
     for (const project of live.projects.values()) {
       await attempt(`project ${project.name}`, () => live.world.deleteProject(project, ctx.names.runId));
     }
+    // Project documents went with their projects; team-zone documents the run made go to the trash.
+    await attempt('created team-zone documents', () => live.world.trashTeamZoneDocuments([...created]));
     for (const team of live.tree.teamZones.keys()) {
       const teamId = live.teams.get(team)?.id;
       if (teamId === undefined) continue;

@@ -269,4 +269,26 @@ describe('sweeper', () => {
     assert.deepEqual(left, ['refs/heads/main', 'refs/heads/t/222222/main', 'refs/heads/t/333333/main']);
     live.done();
   });
+
+  it('removes stray README documents of a team zone only while no run holds the team', async () => {
+    const stateDir = fresh('sweep-readme-');
+    const trashed: string[] = [];
+    const targets = {
+      sandbox: { runRefs: async () => [] } as never,
+      rest: { pullRequests: async () => [], closePullRequest: async () => {} } as never,
+      world: {
+        runProjects: async () => [],
+        runTeamDocuments: async () => [],
+        strayTeamReadmes: async () => [{ id: 'r1', createdAt: '' }, { id: 'r2', createdAt: '' }],
+        client: { trashDocument: async (id: string) => void trashed.push(id) },
+      } as never,
+      teamIds: [],
+      teams: [{ id: 'team-1', key: 'ENG' }],
+    };
+    const held = await (await import('./locks.ts')).acquireLock('team-eng', { stateDir, runId: '444444', timeoutMs: 0 });
+    assert.equal((await sweep(targets, stateDir)).trashedDocuments, 0);
+    held.release();
+    assert.equal((await sweep(targets, stateDir)).trashedDocuments, 2);
+    assert.deepEqual(trashed, ['r1', 'r2']);
+  });
 });
