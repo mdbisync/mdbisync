@@ -128,8 +128,41 @@ function keys(value: ObjectValue, required: string[], optional: string[] = []) {
 function text(value: unknown): asserts value is string {
   assert.ok(typeof value === 'string' && value.trim().length > 0, 'expected nonempty text');
 }
+function oneOf(value: unknown, options: readonly string[], label: string): asserts value is string {
+  assert.ok(typeof value === 'string' && options.includes(value), `invalid ${label}`);
+}
 function list(value: unknown): asserts value is unknown[] {
   assert.ok(Array.isArray(value) && value.length > 0, 'expected nonempty array');
+}
+
+const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name path project ref scope service source storage target title'.split(' '));
+const booleanArguments = new Set('allFiles bypassHook compareGolden concurrencyGroup confirm coverAllConstructs includeEndpointLimits linearFormat mergeCommits replacePending samePath scheduled valid wait workflows'.split(' '));
+const numericArguments = new Set('characters cleanEdits conflictingDocuments count documents durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
+const arrayArguments = new Set('actors constructs events fixes measure names orderings outcomes sources variants'.split(' '));
+function validateArguments(kind: string, action: string, args: ObjectValue): void {
+  for (const [key, value] of Object.entries(args)) {
+    if (stringArguments.has(key)) text(value);
+    else if (booleanArguments.has(key)) assert.equal(typeof value, 'boolean', `${key} must be boolean`);
+    else if (numericArguments.has(key)) assert.ok(typeof value === 'number' && Number.isFinite(value) && value >= 0, `${key} must be a nonnegative number`);
+    else if (arrayArguments.has(key)) { list(value); value.forEach(text); }
+    else if (key === 'retryAfter') assert.equal(value, null);
+    else if (key === 'status') {
+      assert.ok((typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599) || ['pending', 'passed', 'failed'].includes(value as string), 'invalid response/check status');
+    } else assert.fail(`unknown argument ${key}`);
+  }
+  const required: Record<string, string[]> = {
+    'run.initial-sync': ['direction', 'confirm'],
+    'run.workflow': ['event'],
+    'git.move': ['destination'],
+    'linear.rename': ['title'],
+    'fault.pause': ['checkpoint'],
+    'kill.engine': ['checkpoint'],
+    'ui.verify-editor': ['requireIdleSeconds'],
+  };
+  for (const field of required[`${kind}.${action}`] ?? []) assert.ok(Object.hasOwn(args, field), `missing argument ${field}`);
+  if (args.direction !== undefined) oneOf(args.direction, ['git-to-linear', 'linear-to-git'], 'direction');
+  if (args.event !== undefined) oneOf(args.event, ['push', 'pull_request', 'workflow_dispatch', 'schedule'], 'event');
+  if (kind === 'ui' && action === 'verify-editor') assert.ok((args.requireIdleSeconds as number) >= 120);
 }
 
 /** The files intentionally use the JSON subset of YAML 1.2. Reject other syntax. */
@@ -140,11 +173,11 @@ export function validateScenario(value: unknown, filename: string): void {
   text(value.id);
   assert.match(value.id, idPattern);
   assert.equal(filename, `${value.id}.yaml`, 'filename must match ID');
-  assert.ok(['mini', 'bank', 'mid', 'full'].includes(String(value.slice)), 'invalid slice');
-  assert.ok(['local', 'actions', 'ui'].includes(String(value.mode)), 'invalid mode');
+  oneOf(value.slice, ['mini', 'bank', 'mid', 'full'], 'slice');
+  oneOf(value.mode, ['local', 'actions', 'ui'], 'mode');
   object(value.setup);
   keys(value.setup, ['state', 'fixtures', 'teamZoneLock']);
-  assert.ok(states.includes(String(value.setup.state)), 'invalid setup state');
+  oneOf(value.setup.state, states, 'setup state');
   assert.equal(typeof value.setup.teamZoneLock, 'boolean');
   list(value.setup.fixtures);
   value.setup.fixtures.forEach(text);
@@ -152,12 +185,13 @@ export function validateScenario(value: unknown, filename: string): void {
   for (const step of value.steps) {
     object(step);
     keys(step, ['kind', 'action', 'args']);
-    assert.ok(kinds.includes(String(step.kind)), 'invalid step kind');
+    oneOf(step.kind, kinds, 'step kind');
     text(step.action);
-    assert.ok(actions[String(step.kind)]?.includes(step.action), 'unknown action for step kind');
+    assert.ok(actions[step.kind]?.includes(step.action), 'unknown action for step kind');
     object(step.args);
+    validateArguments(step.kind, step.action, step.args);
     if (step.kind === 'linear' || step.kind === 'ui') {
-      assert.ok(['editor-a', 'editor-b'].includes(String(step.args.actor)), 'invalid editor role');
+      oneOf(step.args.actor, ['editor-a', 'editor-b'], 'editor role');
     }
     if (step.kind === 'ui') assert.equal(value.mode, 'ui', 'UI steps require UI mode');
   }
@@ -178,7 +212,7 @@ export function validateScenario(value: unknown, filename: string): void {
     keys(assertion, ['subject', 'operator', 'expected']);
     text(assertion.subject);
     assert.match(assertion.subject, /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)*$/);
-    assert.ok(['equal', 'same-as', 'contains-all', 'at-most', 'at-least'].includes(String(assertion.operator)), 'invalid assertion operator');
+    oneOf(assertion.operator, ['equal', 'same-as', 'contains-all', 'at-most', 'at-least'], 'assertion operator');
     if (assertion.operator === 'same-as') {
       text(assertion.expected);
       assert.match(assertion.expected, /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)*$/);
@@ -204,11 +238,17 @@ test('schema rejects malformed scenarios', () => {
     s => { s.id = 'L9-01'; },
     s => { s.version = 2; },
     s => { s.slice = 'small'; },
+    s => { s.slice = ['mini']; },
+    s => { s.mode = ['local']; },
+    s => { s.steps[0].kind = ['run']; },
     s => { s.mode = 'browser'; },
     s => { s.steps = []; },
     s => { s.steps[0].kind = 'shell'; },
     s => { s.steps[0].args = null; },
     s => { s.steps[0].action = 'typo'; },
+    s => { s.steps[0].args.confirm = 'true'; },
+    s => { delete s.steps[0].args.confirm; },
+    s => { s.steps[0].args.unknown = true; },
     s => { s.checks.assertions = []; },
     s => { s.checks.assertions[0].operator = 'truthy'; },
     s => { delete s.checks.invariants.I9; },

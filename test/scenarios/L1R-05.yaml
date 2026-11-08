@@ -70,6 +70,16 @@
         "subject": "documents.titles",
         "operator": "same-as",
         "expected": "before.documents.titles"
+      },
+      {
+        "subject": "paths.titleToPath",
+        "operator": "same-as",
+        "expected": "fixtures.unsafeTitlePaths"
+      },
+      {
+        "subject": "paths.decodedTitles",
+        "operator": "same-as",
+        "expected": "before.documents.titles"
       }
     ]
   },

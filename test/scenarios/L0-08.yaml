@@ -37,7 +37,8 @@
       "kind": "git",
       "action": "add",
       "args": {
-        "fixture": "unfixable"
+        "fixture": "unfixable",
+        "bypassHook": true
       }
     },
     {

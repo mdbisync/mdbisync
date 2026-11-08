@@ -46,7 +46,7 @@ Steps execute in order. `kind`, `action` and `args` form the adapter call:
 
 | Kind | Adapter responsibility |
 | --- | --- |
-| `git` | Apply and commit the stated file, annotation, branch, ref or PR operation; push normally. Run format hooks unless `bypassHook` is true. |
+| `git` | Apply and commit the stated file, annotation, branch, ref or PR operation; push normally. Run format hooks unless `bypassHook` is true; `scratch-hook` installs the hook and leaves its fixture uncommitted for the explicit hook invocation. |
 | `linear` | Apply the stated document operation using the selected editor role. |
 | `run` | Invoke the named command or orchestration operation and collect observations. |
 | `fault` | Configure a proxy response, engine checkpoint, setup failure or check result. `clear` removes injected faults; `resume` releases a paused engine. |
@@ -112,9 +112,16 @@ markers against both sides rather than assume success from a clean exit.
 
 `proposedRule` records a testable proposed behavior. The concrete checks remain
 binding until the behavior and its specification are deliberately revised.
-The unsafe-title proposal preserves the original title, percent-encodes unsafe
-path segments and disambiguates collisions using the document ID. It must be
-implemented as a reversible mapping; plain title normalization is insufficient.
+The unsafe-title proposal preserves the original title. Its independent inputs
+and expected relative paths are in `unsafe-title-samples.json`; the fixture
+loader seeds these aliases and substitutes each returned document ID into its
+expected template before any engine invocation. `fixtures.unsafeTitlePaths`
+is the resulting alias-to-path map, including the mapped project folder.
+Percent-encode unsafe characters (including a literal percent sign), leading
+spaces and dot-only segments; represent an empty path segment as `%00`. Append
+`.md`, and append `--{documentId}` before the extension for every colliding
+title. Decoding must recover the original title; unique arbitrary filenames
+cannot satisfy the mapping and reverse-mapping assertions.
 
 ## Catalog maintenance
 

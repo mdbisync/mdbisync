@@ -22,7 +22,8 @@
       "kind": "linear",
       "action": "edit",
       "args": {
-        "actor": "editor-a"
+        "actor": "editor-a",
+        "target": "first-document"
       }
     },
     {
@@ -34,18 +35,55 @@
       "kind": "git",
       "action": "ci-fix",
       "args": {
-        "orderings": [
-          "before-capture",
-          "after-capture"
-        ]
+        "target": "first-document"
       }
     },
     {
       "kind": "linear",
       "action": "edit",
       "args": {
-        "actor": "editor-b"
+        "actor": "editor-b",
+        "target": "second-document"
       }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a",
+        "target": "third-document"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "pause",
+      "args": {
+        "checkpoint": "after-capture-push-before-pr"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {
+        "wait": false
+      }
+    },
+    {
+      "kind": "git",
+      "action": "ci-fix",
+      "args": {
+        "target": "third-document"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "resume",
+      "args": {}
     },
     {
       "kind": "fault",
@@ -100,6 +138,19 @@
         "subject": "syncBranch.newCaptureRetained",
         "operator": "equal",
         "expected": true
+      },
+      {
+        "subject": "syncBranch.ciFixCommitCount",
+        "operator": "equal",
+        "expected": 2
+      },
+      {
+        "subject": "report.interleavingsCovered",
+        "operator": "contains-all",
+        "expected": [
+          "fix-before-capture",
+          "capture-before-fix"
+        ]
       }
     ]
   }

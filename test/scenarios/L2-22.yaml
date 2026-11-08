@@ -65,6 +65,16 @@
         "subject": "paths.rule",
         "operator": "equal",
         "expected": "percent-encode-unsafe-segments"
+      },
+      {
+        "subject": "tracked.documentPath",
+        "operator": "equal",
+        "expected": "project/Notes%3A draft%3F%2A.md"
+      },
+      {
+        "subject": "documents.title",
+        "operator": "equal",
+        "expected": "Notes: draft?*"
       }
     ]
   }
