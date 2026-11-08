@@ -1,0 +1,31 @@
+# Quality gate for people, CI and, later, the sync itself.
+# Test data under test/fixtures and test/corpus keeps its whitespace and
+# line endings on purpose, so the fixing hooks leave it alone.
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit, pre-push, manual]
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        exclude: ^test/corpus/
+      - id: detect-private-key
+        alias: security
+      - id: check-yaml
+      - id: check-json
+      - id: end-of-file-fixer
+        exclude: ^test/(fixtures|corpus)/
+      - id: trailing-whitespace
+        exclude: ^test/(fixtures|corpus)/
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: ^test/(fixtures|corpus)/
+  - repo: local
+    hooks:
+      - id: no-cyrillic
+        name: no Cyrillic characters
+        entry: node tools/check-no-cyrillic.ts
+        language: system
+        pass_filenames: false
+        always_run: true

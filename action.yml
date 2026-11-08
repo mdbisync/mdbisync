@@ -1,0 +1,11 @@
+name: mdbisync
+description: Two-way sync between Markdown files in a Git repository and Linear documents.
+inputs:
+  operation:
+    description: "What to run: `sync` (the recurring two-way sync) or `initial-sync` (the one-time sync that makes one side match the other)."
+    required: false
+    default: sync
+runs:
+  using: node24
+  main: dist/action-main.js
+  post: dist/action-post.js
