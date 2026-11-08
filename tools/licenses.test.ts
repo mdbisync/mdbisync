@@ -86,10 +86,16 @@ test("a version bump, a license change or a stale entry fails the check", () => 
 });
 
 test("a package without a license field or license file fails the check", () => {
-  const packages = [{ ...bundled("no-field", ""), license: "" }, { ...bundled("no-file", "MIT"), noticeFiles: [] }];
+  const packages = [
+    { ...bundled("no-field", ""), license: "" },
+    { ...bundled("no-file", "MIT"), noticeFiles: [] },
+    { ...bundled("notice-only", "Apache-2.0"), noticeFiles: [{ file: "NOTICE", text: "Notice\n" }] },
+    { ...bundled("nested-copying", "MIT"), noticeFiles: [{ file: "NOTICE", text: "Notice\n" }, { file: "lib/COPYING.txt", text: "MIT text\n" }] },
+  ];
   assert.deepEqual(findLicenseProblems(packages, inventoryOf(packages)), [
     "no-field@1.0.0: no SPDX license in package.json",
     "no-file@1.0.0: no license file to reproduce in the notices",
+    "notice-only@1.0.0: no license file to reproduce in the notices",
   ]);
 });
 

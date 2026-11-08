@@ -53,6 +53,8 @@ export function licenseAllowed(expression: string): boolean {
 }
 
 const NOTICE_FILE = /^(?:licen[cs]e|copying|notice)(?:[-._].*)?$/i;
+// A NOTICE file alone carries no license text; the check needs one of these.
+const LICENSE_FILE = /^(?:licen[cs]e|copying)(?:[-._].*)?$/i;
 
 export function readBundledPackage(path: string): BundledPackage {
   const manifest = JSON.parse(readFileSync(join(path, "package.json"), "utf8")) as {
@@ -128,7 +130,7 @@ export function findLicenseProblems(packages: readonly BundledPackage[], invento
     } else if (!licenseAllowed(pkg.license)) {
       problems.push(`${key}: license ${pkg.license} is not allowed`);
     }
-    if (pkg.noticeFiles.length === 0) {
+    if (!pkg.noticeFiles.some(({ file }) => LICENSE_FILE.test(file.split("/").at(-1) ?? ""))) {
       problems.push(`${key}: no license file to reproduce in the notices`);
     }
     const entry = listed.get(key);
