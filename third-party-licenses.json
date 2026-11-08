@@ -1,0 +1,32 @@
+[
+  {
+    "name": "@actions/core",
+    "version": "3.0.1",
+    "license": "MIT"
+  },
+  {
+    "name": "@actions/exec",
+    "version": "3.0.0",
+    "license": "MIT"
+  },
+  {
+    "name": "@actions/http-client",
+    "version": "4.0.1",
+    "license": "MIT"
+  },
+  {
+    "name": "@actions/io",
+    "version": "3.0.2",
+    "license": "MIT"
+  },
+  {
+    "name": "tunnel",
+    "version": "0.0.6",
+    "license": "MIT"
+  },
+  {
+    "name": "undici",
+    "version": "6.29.1",
+    "license": "MIT"
+  }
+]
