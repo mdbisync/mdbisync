@@ -7,7 +7,7 @@ import type { Rng } from "./rng.ts";
 import {
   asciiFiller, capitalize, EMOJI, EMOJI_SEQUENCES, isoDate, paragraph, person, SCRIPT_SAMPLES, sentence, slug, team, title, word,
 } from "./text.ts";
-import { HOMES, LOOSE, type Home } from "./tree.ts";
+import { BANK_HOME, HOMES, LOOSE, type Home } from "./tree.ts";
 
 type Context = {
   rng: Rng;
@@ -16,6 +16,7 @@ type Context = {
   files: CorpusFile[];
   /** Paths already taken, so generated names never collide. */
   taken: Set<string>;
+  fixtures: Map<string, CorpusFile>;
 };
 
 type DocOptions = {
@@ -57,6 +58,13 @@ function addDoc(ctx: Context, path: string, body: string | Buffer, group: Group,
   });
   ctx.files.push(file);
   return file;
+}
+
+/** Reuse the bank's observed class instead of maintaining a second rule list. */
+function fromFixture(ctx: Context, name: string): Pick<CorpusFile, "expected" | "rule" | "basis"> {
+  const fixture = ctx.fixtures.get(`${BANK_HOME}/${name}`);
+  if (!fixture?.expected || !fixture.basis) throw new Error(`missing fixture expectation: ${name}`);
+  return { expected: fixture.expected, rule: fixture.rule, basis: fixture.basis };
 }
 
 /** Writes a document whose body ends with its canary line. */
@@ -239,6 +247,7 @@ function specialDocuments(ctx: Context): void {
   doc(ctx, "docs/handbook/images", "remote-image", "work-documents", (canary) => `# Remote picture\n\n![remote chart](https://images.example.com/chart.png)\n\nReference: ${canary}`, { note: "a remote image URL" });
   const titled = ctx.assets.shared;
   doc(ctx, "docs/handbook/images", "titled-image", "work-documents", (canary, path) => `# Picture with a title\n\n${imageMarkdown(path, titled, "Team logo, light version")}\n\nReference: ${canary}`, {
+    ...fromFixture(ctx, "images/title.md"),
     links: [titled.path],
     note: "an image with a title",
   });
@@ -435,7 +444,10 @@ function tables(ctx: Context): void {
         body = table([["Name", "Value"], [word(rng), String(rng.int(1, 100))]]);
         break;
     }
-    addDoc(ctx, path, `# ${capitalize(kind.replace(/-/g, " "))} table\n\n${body}\n\nReference: ${canary}`, "tables", { canary, links, note: kind === "long" ? "long table" : null });
+    addDoc(ctx, path, `# ${capitalize(kind.replace(/-/g, " "))} table\n\n${body}\n\nReference: ${canary}`, "tables", {
+      canary, links, note: kind === "long" ? "long table" : null,
+      ...(kind === "aligned" ? fromFixture(ctx, "tables/table-alignment.md") : {}),
+    });
   }
   doc(ctx, "eng/backend/tables", "escaped-pipe-plain-cell", "tables", (canary) => `# Escaped pipe\n\n${table([["Choice", "Value"], ["either", "a \\| b"]])}\n\nReference: ${canary}`, {
     expected: "lint-error",
@@ -577,10 +589,18 @@ function conflictMarkers(ctx: Context): void {
     (s: string) => `\`\`\`diff\n${s}\n\`\`\``,
     (s: string) => `    ${s.split("\n").join("\n    ")}`,
   ];
+  const fixtures = [
+    "conflict-markers/in-code-fence.md",
+    "conflict-markers/in-quote.md",
+    "conflict-markers/in-inline-code.md",
+    "conflict-markers/diff3-in-fence.md",
+    "conflict-markers/in-indented-code.md",
+  ];
   for (let i = 0; i < 10; i++) {
     const form = forms[i % forms.length] as (s: string) => string;
     doc(ctx, "eng/backend/merges", `marker-lookalike-${i + 1}`, "conflict-markers", (canary) => `# How merges look\n\n${paragraph(rng)}\n\n${form(markers)}\n\nReference: ${canary}`, {
-      note: "conflict-marker lines that are not a conflict",
+      ...fromFixture(ctx, fixtures[i % forms.length] as string),
+      note: "git marker examples outside a sync conflict",
     });
   }
 }
@@ -643,9 +663,9 @@ function unsynced(ctx: Context): void {
   for (let i = 0; i < 3; i++) add(`${LOOSE}/config/feature-${i + 1}.json`, `{"enabled": ${rng.bool()}}\n`, { kind: "attachment" });
 }
 
-export function documents(rng: Rng, canaries: Canaries, assets: Assets, taken: Set<string>): CorpusFile[] {
+export function documents(rng: Rng, canaries: Canaries, assets: Assets, taken: Set<string>, fixtures: CorpusFile[]): CorpusFile[] {
   homeCursor = 0;
-  const ctx: Context = { rng, canaries, assets, files: [], taken };
+  const ctx: Context = { rng, canaries, assets, files: [], taken, fixtures: new Map(fixtures.map((f) => [f.path, f])) };
   specialDocuments(ctx);
   workDocuments(ctx, 40 - 1); // the titled-image document is the fortieth user of the shared image
   pairwise(ctx);

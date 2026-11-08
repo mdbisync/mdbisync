@@ -199,3 +199,31 @@ test("the corpus attributes keep CRLF documents byte-exact even with core.autocr
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("generated alignment, image titles and marker contexts follow the fixture bank", () => {
+  const built = corpus();
+  const cases = [
+    { matches: /\/tables\/aligned-/, fixture: "tables/table-alignment.md", count: 14 },
+    { matches: /handbook\/images\/titled-image\.md$/, fixture: "images/title.md", count: 1 },
+    ...[
+      "conflict-markers/in-code-fence.md",
+      "conflict-markers/in-quote.md",
+      "conflict-markers/in-inline-code.md",
+      "conflict-markers/diff3-in-fence.md",
+      "conflict-markers/in-indented-code.md",
+    ].map((fixture, i) => ({ matches: new RegExp(`merges/marker-lookalike-(${i + 1}|${i + 6})\\.md$`), fixture, count: 2 })),
+  ];
+  for (const { matches, fixture, count } of cases) {
+    const reference = built.manifest.files.find((f) => f.path === `docs/reference/${fixture}`);
+    assert.ok(reference, fixture);
+    const generated = built.manifest.files.filter((f) => matches.test(f.path));
+    assert.equal(generated.length, count, fixture);
+    for (const file of generated) {
+      assert.deepEqual(
+        [file.class, file.rule, file.basis],
+        [reference.class, reference.rule, reference.basis],
+        file.path,
+      );
+    }
+  }
+});
