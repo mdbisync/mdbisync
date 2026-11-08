@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Nodes } from 'mdast';
-import { parse, visit } from '../format/markdown.ts';
+import { parse, splitFile, visit } from '../format/markdown.ts';
 import { Git } from '../state/git.ts';
 import { detectConflicts, lines, lineText, markerLines, MARKERS } from './markers.ts';
 import type { Conflict } from './markers.ts';
@@ -62,11 +62,12 @@ function blockRanges(tokens: Token[], side: Side): Range[] {
   const ranges: Range[] = [];
   const add = (startLine: number, endLine: number) => {
     const start = tokenAtLine[startLine - 1];
-    const end = tokenAtLine[endLine - 1];
+    // An unclosed fence can end at column 1 of the virtual line after EOF.
+    const end = tokenAtLine[Math.min(endLine, source.length) - 1];
     if (start !== undefined && end !== undefined) ranges.push({ start, end: end + 1 });
   };
   visit(parse(text), (node) => {
-    if ((node.type === 'code' || node.type === 'table' ||
+    if ((['code', 'table', 'blockquote', 'inlineCode', 'html', 'heading'].includes(node.type) ||
       (node.type === 'list' && (node.ordered || nestedList(node)))) && node.position) {
       add(node.position.start.line, node.position.end.line);
     }
@@ -104,18 +105,63 @@ function conflictRanges(tokens: Token[]): Range[] {
   return merged;
 }
 
-function flatten(text: string): string {
-  const markers = markerLines(text);
-  return lines(text).filter((_, i) => !markers.has(i + 1)).join('').replace(/^\n|\n$/g, '');
+function withoutMarkers(tokens: Token[], side: Side): string[][] {
+  const projection = tokens.flatMap((token) => content(token, side)).join('');
+  const markers = markerLines(projection);
+  let line = 0;
+  // Classify markers in the complete document, before cutting out an arm:
+  // quote and multiline inline-code context may start outside a Git hunk.
+  return tokens.map((token) => content(token, side).filter((text) => {
+    line++;
+    return !markers.has(line) && !(markers.has(line - 1) && lineText(text) === '');
+  }));
+}
+
+/** EOF-terminated literal blocks must end before the following marker paragraph. */
+function completeBlocks(text: string): string {
+  const insertions: { offset: number; text: string }[] = [];
+  visit(parse(text), (node) => {
+    if ((node.type !== 'code' && node.type !== 'html') || !node.position) return;
+    const { start, end } = node.position;
+    const raw = text.slice(start.offset, end.offset);
+    let close: string;
+    if (node.type === 'code') {
+      const opener = /^(?: {0,3})(`{3,}|~{3,})/.exec(raw)?.[1];
+      if (!opener) return; // Indented code ends at a blank marker boundary.
+      const source = lines(raw);
+      const last = lineText(source.at(-1) ?? '');
+      const closing = new RegExp(`^[ >\\t]*${opener[0]}{${opener.length},}[ \\t]*$`);
+      // Container prefixes remain in raw source but not in the parsed value.
+      // A real closing fence adds a source line beyond the opener and value.
+      const valueLines = node.value === '' ? 0 : node.value.split('\n').length;
+      if (source.length > valueLines + 1 && closing.test(last)) return;
+      close = opener;
+    } else {
+      const tag = /^<(script|pre|style|textarea)(?:\s|>)/i.exec(raw)?.[1];
+      const terminator = raw.startsWith('<!--') ? '-->' : raw.startsWith('<?') ? '?>'
+        : raw.startsWith('<![CDATA[') ? ']]>' : /^<![A-Z]/.test(raw) ? '>'
+        : tag ? `</${tag}>` : undefined;
+      if (!terminator || raw.toLowerCase().includes(terminator.toLowerCase())) return;
+      close = terminator;
+    }
+    const lineStart = text.lastIndexOf('\n', start.offset! - 1) + 1;
+    const prefix = text.slice(lineStart, start.offset).replace(/[^ >\t]/g, ' ');
+    insertions.push({ offset: end.offset!, text: `${raw.endsWith('\n') ? '' : '\n'}${prefix}${close}\n` });
+  });
+  for (const insertion of insertions.sort((a, b) => b.offset - a.offset)) {
+    text = text.slice(0, insertion.offset) + insertion.text + text.slice(insertion.offset);
+  }
+  return text.replace(/\n$/, '');
 }
 
 function render(tokens: Token[], ranges: Range[]): string {
   let text = '';
   let cursor = 0;
+  const armsWithoutMarkers = { ours: withoutMarkers(tokens, 'ours'), theirs: withoutMarkers(tokens, 'theirs') };
   for (const range of ranges) {
     text += tokens.slice(cursor, range.start).map((token) => content(token, 'ours').join('')).join('');
     if (text && !text.endsWith('\n\n')) text += text.endsWith('\n') ? '\n' : '\n\n';
-    const arms = (side: Side) => flatten(tokens.slice(range.start, range.end).flatMap((token) => content(token, side)).join(''));
+    const arms = (side: Side) => completeBlocks(armsWithoutMarkers[side].slice(range.start, range.end).flat().join('').replace(/^\n|\n$/g, ''));
     text += `${MARKERS.git}\n\n${arms('ours')}\n\n${MARKERS.linear}\n\n${arms('theirs')}\n\n${MARKERS.end}\n`;
     cursor = range.end;
     const next = tokens[cursor];
@@ -126,23 +172,31 @@ function render(tokens: Token[], ranges: Range[]): string {
 
 /**
  * Three-way Markdown merge. `ours` is the tracked Git version, `theirs` is
- * the Linear version. Requires Git on PATH; no repository or network is used.
+ * the Linear version. Front matter belongs to Git: preserve ours and merge
+ * only the bodies. Requires Git on PATH; no repository or network is used.
  */
 export async function mergeMarkdown(base: string, ours: string, theirs: string): Promise<MergeResult> {
+  const gitFile = splitFile(ours);
+  const eol = ours.includes('\r\n') ? '\r\n' : '\n';
+  base = splitFile(base).body;
+  ours = gitFile.body;
+  theirs = splitFile(theirs).body;
   const dir = await mkdtemp(join(tmpdir(), 'markdown-merge-'));
   try {
     await Promise.all([['base', base], ['ours', ours], ['theirs', theirs]].map(([name, text]) => writeFile(join(dir, name!), text!, { mode: 0o600 })));
     // Pick a delimiter wider than any run in the input, so literal git markers
     // and labels can never be mistaken for merge-file's framing.
     let size = 7;
-    while ([base, ours, theirs].some((text) => ['<', '=', '>'].some((char) => text.includes(char.repeat(size))))) size++;
+    for (const text of [base, ours, theirs]) {
+      for (const run of text.matchAll(/<+|=+|>+/g)) size = Math.max(size, run[0].length + 1);
+    }
     const result = await new Git(dir).run([
       '-c', 'merge.conflictStyle=merge', 'merge-file', '--stdout', `--marker-size=${size}`,
       '-L', 'git', '-L', 'base', '-L', 'linear', 'ours', 'base', 'theirs',
     ], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
     const raw = result.stdout.toString('utf8');
-    const tokens = tokenize(raw, size);
-    const text = result.code === 0 ? raw : render(tokens, conflictRanges(tokens));
+    const tokens = tokenize(raw.replaceAll('\r\n', '\n'), size);
+    const text = gitFile.head + (result.code === 0 ? raw : render(tokens, conflictRanges(tokens)).replaceAll('\n', eol));
     return { text, conflicts: detectConflicts(text) };
   } finally {
     await rm(dir, { recursive: true, force: true });

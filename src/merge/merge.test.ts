@@ -155,3 +155,93 @@ test('clean front matter changes survive a body conflict', async () => {
   const result = await mergeMarkdown(base, base.replace('Before', 'After').replace('old', 'git'), base.replace('old', 'Linear'));
   assert.equal(result.text, `---\ntitle: After\n---\n\n${conflict('git', 'Linear')}`);
 });
+
+test('unclosed fences at EOF are complete before marker separators', async () => {
+  for (const fence of ['~~~', '```md']) {
+    const base = `${fence}\nold\n`;
+    const close = fence.startsWith('~') ? '~~~' : '```';
+    const result = await mergeMarkdown(base, base.replace('old', 'git'), base.replace('old', 'Linear'));
+    assert.equal(result.text, conflict(`${fence}\ngit\n${close}`, `${fence}\nLinear\n${close}`));
+    assert.equal(result.conflicts.length, 1);
+  }
+});
+
+test('conflicts preserve literal marker lines in lazy blockquote continuations', async () => {
+  const base = `> example\n${MARKERS.git}\nold\n`;
+  const ours = base.replace('old', 'git');
+  const theirs = base.replace(MARKERS.git, MARKERS.linear);
+  for (const text of [base, ours, theirs]) assert.deepEqual(detectConflicts(text), []);
+  const result = await mergeMarkdown(base, ours, theirs);
+  assert.equal(result.text, conflict(ours.trimEnd(), theirs.trimEnd()));
+  assert.equal(result.conflicts.length, 1);
+});
+
+test('multiline inline code remains literal inside both versions', async () => {
+  const base = '`first\nold\nlast`\n';
+  const ours = base.replace('old', 'git');
+  const theirs = base.replace('old', 'Linear');
+  const result = await mergeMarkdown(base, ours, theirs);
+  assert.equal(result.text, conflict(ours.trimEnd(), theirs.trimEnd()));
+  assert.equal(result.conflicts.length, 1);
+});
+
+test('conflicts in HTML comments are framed outside the complete comment', async () => {
+  const base = '<!--\nold\n-->\n';
+  const ours = base.replace('old', 'git');
+  const theirs = base.replace('old', 'Linear');
+  const result = await mergeMarkdown(base, ours, theirs);
+  assert.equal(result.text, conflict(ours.trimEnd(), theirs.trimEnd()));
+  assert.equal(result.conflicts.length, 1);
+});
+
+test('Git owns front matter; Linear snapshot metadata is kept out of the body merge', async () => {
+  const base = '---\ntitle: Before\n---\n\nbody\n';
+  const ours = base.replace('Before', 'After');
+  const theirs = base.replace('Before', 'Other').replace('body', 'updated');
+  assert.deepEqual(await mergeMarkdown(base, ours, theirs), { text: ours.replace('body', 'updated'), conflicts: [] });
+});
+
+for (const [name, block] of [
+  ['quoted fence', '> ```\n> old\n> ```'],
+  ['fence in a wide ordered list', '10. step\n\n    ```\n    old\n    ```'],
+  ['setext heading', 'old\n========'],
+] as const) {
+  test(`${name} keeps complete syntax without added fences`, async () => {
+    const result = await mergeMarkdown(`${block}\n`, `${block.replace('old', 'git')}\n`, `${block.replace('old', 'Linear')}\n`);
+    assert.equal(result.text, conflict(block.replace('old', 'git'), block.replace('old', 'Linear')));
+  });
+}
+
+for (const [open, close] of [['<!--', '-->'], ['<pre>', '</pre>'], ['<script>', '</script>'], ['<?', '?>'], ['<![CDATA[', ']]>']] as const) {
+  test(`EOF-terminated ${open} cannot swallow conflict framing`, async () => {
+    const result = await mergeMarkdown('old\n', `${open} draft\n`, 'Linear\n');
+    assert.equal(result.text, conflict(`${open} draft\n${close}`, 'Linear'));
+    assert.equal(result.conflicts.length, 1);
+    assert.equal(result.conflicts[0]?.linear, 'Linear');
+  });
+}
+
+test('conflicting CRLF text keeps CRLF without extra blank lines', async () => {
+  const base = 'intro\r\n\r\nold\r\n';
+  const result = await mergeMarkdown(base, base.replace('old', 'git'), base.replace('old', 'Linear'));
+  assert.equal(result.text, `intro\n\n${conflict('git', 'Linear')}`.replaceAll('\n', '\r\n'));
+});
+
+test('duplicate middle markers belong to one enclosing conflict region', () => {
+  const text = `${MARKERS.git}\na\n${MARKERS.linear}\nb\n${MARKERS.linear}\nc\n${MARKERS.end}\n`;
+  const found = detectConflicts(text);
+  assert.equal(found.length, 1);
+  assert.equal(found[0]?.endLine, 7);
+});
+
+test('repeated conflicts do not accumulate blank marker separators', async () => {
+  const base = conflict('old git', 'old Linear');
+  const result = await mergeMarkdown(base, base.replace('old git', 'new git'), base.replace('old git', 'new Linear'));
+  assert.ok(!result.text.includes('\n\n\n'));
+});
+
+test('long literal separators cannot collide with Git framing', async () => {
+  const prefix = `separator\n${'='.repeat(5000)}\n\n`;
+  const result = await mergeMarkdown(`${prefix}old\n`, `${prefix}git\n`, `${prefix}Linear\n`);
+  assert.equal(result.text, prefix + conflict('git', 'Linear'));
+});

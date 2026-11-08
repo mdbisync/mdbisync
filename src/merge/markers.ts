@@ -70,7 +70,7 @@ export function detectConflicts(text: string): Conflict[] {
         : { startLine: start, endLine: number, git: arm(source, start, middle - 1), linear: arm(source, middle, number - 1) });
       start = undefined;
       middle = undefined;
-    } else {
+    } else if (start === undefined) {
       found.push({ startLine: number, endLine: number });
     }
   }
