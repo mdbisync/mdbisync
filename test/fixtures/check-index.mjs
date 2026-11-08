@@ -3,7 +3,7 @@
 // Runs on Node 24 with no dependencies: `node test/fixtures/check-index.mjs [bank-dir]`.
 // Exits 1 and lists every problem when the bank and the index disagree.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,6 +16,7 @@ const CANARY_ANY = /kx-[0-9a-f]{8}/g;
 const CYRILLIC = /[\u0400-\u052F\u1C80-\u1C8F\u2DE0-\u2DFF\uA640-\uA69F]/u;
 const ROOT_FILES = new Set(['.gitattributes', 'index.yaml', 'README.md', 'check-index.mjs', 'check-index.test.mjs']);
 const ASSETS_DIR = 'assets';
+const MARKDOWN = /\.(md|markdown)$/;
 
 // ---------------------------------------------------------------------------
 // A parser for the small YAML subset index.yaml uses: top-level scalars and
@@ -35,10 +36,11 @@ export function parseIndex(text) {
     if ((m = /^([a-z_]+):\s*(.*)$/.exec(raw))) {
       item = null;
       if (m[2] === '') {
-        list = out[m[1]] = [];
+        list = [];
+        setKey(out, m[1], list, where);
       } else {
         list = null;
-        out[m[1]] = scalar(m[2], where);
+        setKey(out, m[1], scalar(m[2], where), where);
       }
       return;
     }
@@ -101,11 +103,30 @@ function walk(dir, base = dir) {
   return files;
 }
 
+// Fenced code blocks and code spans hold examples, not links: drop them
+// before scanning. Indented code is rare in link fixtures and is kept.
+function withoutCode(text) {
+  return text
+    .replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*$/gm, '')
+    .replace(/(`+)[^`]*?\1/g, '');
+}
+
+function decode(t) {
+  try {
+    return decodeURIComponent(t);
+  } catch {
+    return t;
+  }
+}
+
 // Relative targets of Markdown links and images, reference definitions and
 // HTML src/href attributes. External URLs, mail links and pure anchors are skipped.
 export function relativeTargets(text) {
+  text = withoutCode(text);
   const found = [];
-  const inline = /\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
+  // Destination: <...>, or a run without spaces that may hold balanced parentheses.
+  // Title: "...", '...' or (...).
+  const inline = /\]\(\s*(<[^>]*>|(?:[^()\s]|\([^()\s]*\))+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
   const refdef = /^ {0,3}\[(?!\^)[^\]]+\]:\s*(<[^>]*>|\S+)/gm; // not footnote definitions
   const html = /\b(?:src|href)="([^"]*)"/g;
   for (const re of [inline, refdef, html]) {
@@ -114,7 +135,7 @@ export function relativeTargets(text) {
   return found
     .map((t) => (t.startsWith('<') ? t.slice(1, -1) : t))
     .filter((t) => t && !t.startsWith('#') && !/^[a-z][a-z0-9+.-]*:/i.test(t))
-    .map((t) => decodeURIComponent(t.split('#')[0]));
+    .map((t) => decode(t.split('#')[0]));
 }
 
 export function checkBank(bankDir) {
@@ -139,7 +160,11 @@ export function checkBank(bankDir) {
 
   // Every file indexed, every indexed file present, no duplicates.
   const indexed = new Map();
-  for (const f of index.fixtures) {
+  for (const [i, f] of index.fixtures.entries()) {
+    if (typeof f.file !== 'string' || f.file === '') {
+      err(`index.yaml: fixture ${i + 1} has no file`);
+      f.file = `(fixture ${i + 1})`;
+    }
     if (indexed.has(f.file)) err(`${f.file}: indexed twice`);
     indexed.set(f.file, f);
   }
@@ -181,12 +206,12 @@ export function checkBank(bankDir) {
 
     // A file that is already in the target form must not end with a newline:
     // the target form has no final newline, so such a file would be fixable.
-    if (f.class === 'unchanged' && f.synced !== false && at.endsWith('.md') && text.endsWith('\n')) {
-      err(`${at}: unchanged fixture ends with a newline`);
+    if (f.class === 'unchanged' && f.synced !== false && MARKDOWN.test(at) && /[\r\n]$/.test(text)) {
+      err(`${at}: unchanged fixture ends with a line break`);
     }
 
     // Relative link and image targets resolve inside the bank.
-    if (/\.(md|markdown)$/.test(at) && f.synced !== false) {
+    if (MARKDOWN.test(at) && f.synced !== false) {
       let missing = 0;
       for (const target of relativeTargets(text)) {
         const resolved = normalize(join(dirname(at), target)).split(sep).join('/');
@@ -206,11 +231,19 @@ export function checkBank(bankDir) {
   for (const r of rules) {
     if (!index.fixtures.some((f) => f.rule === r)) err(`rule ${r}: no fixtures`);
   }
-  for (const k of index.known_constructs) {
-    const hit = index.fixtures.filter((f) => f.construct === k.construct);
-    if (!hit.length) err(`known construct ${k.construct}: no fixture`);
-    else if (!hit.some((f) => f.class === k.class && f.basis === 'known')) {
-      err(`known construct ${k.construct}: no fixture with class ${k.class} and basis known`);
+  // A known construct has a fixture with basis known, and no fixture of it
+  // contradicts the known class. Basis known is only for listed constructs.
+  const known = new Map(index.known_constructs.map((k) => [k.construct, k.class]));
+  for (const [construct, cls] of known) {
+    const hit = index.fixtures.filter((f) => f.construct === construct);
+    if (!hit.some((f) => f.basis === 'known')) err(`known construct ${construct}: no fixture with basis known`);
+    for (const f of hit) {
+      if (f.class !== cls) err(`${f.file}: class ${f.class} contradicts known class ${cls} of ${construct}`);
+    }
+  }
+  for (const f of index.fixtures) {
+    if (f.basis === 'known' && !known.has(f.construct)) {
+      err(`${f.file}: basis known, but ${f.construct} is not in known_constructs`);
     }
   }
   if (index.fixtures.length < MIN_FIXTURES) {
@@ -230,8 +263,17 @@ export function checkBank(bankDir) {
   };
 }
 
+function isMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
 const self = fileURLToPath(import.meta.url);
-if (process.argv[1] && resolve(process.argv[1]) === self) {
+if (isMain()) {
   const dir = resolve(process.argv[2] ?? dirname(self));
   const { errors, stats } = checkBank(dir);
   if (errors.length) {

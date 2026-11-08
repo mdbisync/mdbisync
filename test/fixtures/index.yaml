@@ -99,6 +99,14 @@ known_constructs:
     class: unchanged
   - construct: conflict-markers
     class: unchanged
+  - construct: conflict-markers-in-fence
+    class: unchanged
+  - construct: conflict-markers-inline-code
+    class: unchanged
+  - construct: conflict-markers-indented
+    class: unchanged
+  - construct: conflict-markers-diff3
+    class: unchanged
 assets:
   - file: "assets/pixel.png"
     kind: png
@@ -1498,8 +1506,9 @@ fixtures:
     group: conflict-markers
     construct: conflict-markers-in-quote
     class: unchanged
-    basis: known
+    basis: assumed
     canary: kx-ee491350
+    note: "blank quote lines keep the line before the equals line from being a setext heading"
   - file: "conflict-markers/in-inline-code.md"
     group: conflict-markers
     construct: conflict-markers-inline-code
@@ -1530,6 +1539,7 @@ fixtures:
     class: unchanged
     basis: known
     canary: kx-354df3a7
+    note: "outside a conflict the line before the equals line would be a setext heading; the markers take precedence"
   - file: "conflict-markers/real-list.md"
     group: conflict-markers
     construct: conflict-markers
@@ -1542,6 +1552,7 @@ fixtures:
     class: unchanged
     basis: known
     canary: kx-9d18e02c
+    note: "the marker lines end the table; the file is kept byte for byte"
   - file: "conflict-markers/equals-setext-lookalike.md"
     group: conflict-markers
     construct: conflict-markers-setext-lookalike

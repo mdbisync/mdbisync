@@ -39,8 +39,9 @@ Each fixture entry has:
 | `note` | free text |
 
 `known_constructs` lists the constructs whose behavior is already known,
-with their class. Every one needs a fixture of that class with basis
-`known`. The expected form after a round trip is recorded beside each
+with their class. Every one needs a fixture with basis `known`, every
+fixture of it must have that class, and basis `known` is used only for
+listed constructs. The expected form after a round trip is recorded beside each
 fixture by the format probe, not here.
 
 ## Rules for fixtures

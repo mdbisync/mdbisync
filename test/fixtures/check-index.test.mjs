@@ -60,14 +60,14 @@ test('a known construct without a fixture is reported', () => {
   const errors = withCopy((d) =>
     editIndex(d, 'known_constructs:\n', 'known_constructs:\n  - construct: never-seen\n    class: fixable\n'),
   );
-  assert.ok(errors.includes('known construct never-seen: no fixture'), errors.join('\n'));
+  assert.ok(errors.includes('known construct never-seen: no fixture with basis known'), errors.join('\n'));
 });
 
 test('a known construct with the wrong class is reported', () => {
   const errors = withCopy((d) =>
     editIndex(d, '  - construct: footnote\n    class: lint-error', '  - construct: footnote\n    class: fixable'),
   );
-  assert.ok(errors.some((e) => e.startsWith('known construct footnote: no fixture with class fixable')), errors.join('\n'));
+  assert.ok(errors.includes('lint-errors/footnote.md: class lint-error contradicts known class fixable of footnote'), errors.join('\n'));
 });
 
 test('a lint-error fixture without a rule is reported', () => {
@@ -89,6 +89,12 @@ test('a broken relative link is reported unless the fixture expects it', () => {
     writeFileSync(p, readFileSync(p, 'utf8').replace('paragraph-single.md', 'nowhere.md'));
   });
   assert.ok(errors.includes('links/relative.md: 1 relative target(s) do not exist'), errors.join('\n'));
+  // images/broken-reference.md is marked missing_target and passes in the real bank.
+  const fixed = withCopy((d) => {
+    const p = join(d, 'images', 'broken-reference.md');
+    writeFileSync(p, readFileSync(p, 'utf8').replace('does-not-exist.png', 'pixel.png'));
+  });
+  assert.ok(fixed.includes('images/broken-reference.md: marked missing_target but every target exists'), fixed.join('\n'));
 });
 
 test('an unused asset is reported', () => {
@@ -99,12 +105,108 @@ test('an unused asset is reported', () => {
   assert.ok(errors.includes('assets/spare.txt: asset not used by any fixture'), errors.join('\n'));
 });
 
-test('an unchanged fixture with a final newline is reported', () => {
+test('an unchanged fixture with a final line break is reported', () => {
+  for (const end of ['\n', '\r']) {
+    const errors = withCopy((d) => {
+      const p = join(d, 'tables', 'table-basic.md');
+      writeFileSync(p, readFileSync(p, 'utf8') + end);
+    });
+    assert.ok(errors.includes('tables/table-basic.md: unchanged fixture ends with a line break'), errors.join('\n'));
+  }
+});
+
+test('a fixture indexed twice is reported', () => {
   const errors = withCopy((d) => {
-    const p = join(d, 'tables', 'table-basic.md');
-    writeFileSync(p, readFileSync(p, 'utf8') + '\n');
+    const p = join(d, 'index.yaml');
+    const text = readFileSync(p, 'utf8');
+    const entry = text.match(/  - file: "tables\/table-basic\.md"\n(?: {4}.*\n)+/)[0];
+    writeFileSync(p, text + entry);
   });
-  assert.ok(errors.includes('tables/table-basic.md: unchanged fixture ends with a newline'), errors.join('\n'));
+  assert.ok(errors.includes('tables/table-basic.md: indexed twice'), errors.join('\n'));
+});
+
+test('a fixture entry without a file is reported, not a crash', () => {
+  const errors = withCopy((d) => {
+    const p = join(d, 'index.yaml');
+    writeFileSync(p, readFileSync(p, 'utf8') + '  - group: tables\n    construct: table\n');
+  });
+  assert.ok(errors.some((e) => /^index\.yaml: fixture \d+ has no file$/.test(e)), errors.join('\n'));
+});
+
+test('a duplicate top-level key is rejected', () => {
+  const errors = withCopy((d) => {
+    const p = join(d, 'index.yaml');
+    writeFileSync(p, readFileSync(p, 'utf8') + 'assets:\n');
+  });
+  assert.ok(errors.some((e) => e.endsWith('duplicate key assets')), errors.join('\n'));
+});
+
+test('a canary used twice or carried by another fixture is reported', () => {
+  const canaryOf = (text, file) => text.match(new RegExp(`  - file: "${file}"\\n(?: {4}.*\\n)*? {4}canary: (kx-[0-9a-f]{8})`))[1];
+  const errors = withCopy((d) => {
+    const p = join(d, 'index.yaml');
+    const text = readFileSync(p, 'utf8');
+    const a = canaryOf(text, 'tables/table-basic.md');
+    const b = canaryOf(text, 'tables/table-single-column.md');
+    writeFileSync(p, text.replace(`canary: ${b}`, `canary: ${a}`));
+  });
+  assert.ok(errors.some((e) => e.startsWith('tables/table-single-column.md: canary also used by')), errors.join('\n'));
+  const foreign = withCopy((d) => {
+    const p = join(d, 'tables', 'table-basic.md');
+    writeFileSync(p, readFileSync(p, 'utf8') + ' kx-0badf00d');
+  });
+  assert.ok(foreign.includes("tables/table-basic.md: carries another fixture's canary kx-0badf00d"), foreign.join('\n'));
+});
+
+test('a canary carried by the file name is accepted only there', () => {
+  const errors = withCopy((d) => editIndex(d, '    canary_in: name\n', ''));
+  assert.ok(errors.some((e) => /^size-spectrum\/empty-kx-[0-9a-f]{8}\.md: canary kx-[0-9a-f]{8} not found$/.test(e)), errors.join('\n'));
+});
+
+test('a rule on a fixture that is not a lint error is reported', () => {
+  const errors = withCopy((d) =>
+    editIndex(d, '  - file: "tables/table-basic.md"\n', '  - file: "tables/table-basic.md"\n    rule: footnote\n'),
+  );
+  assert.ok(errors.includes('tables/table-basic.md: only lint-error fixtures have a rule'), errors.join('\n'));
+});
+
+test('a fixture outside its group folder is reported', () => {
+  const errors = withCopy((d) =>
+    editIndex(d, '  - file: "tables/table-basic.md"\n    group: tables', '  - file: "tables/table-basic.md"\n    group: links'),
+  );
+  assert.ok(errors.includes('tables/table-basic.md: not in the folder of group links'), errors.join('\n'));
+});
+
+test('a fixture contradicting a known class is reported', () => {
+  const errors = withCopy((d) =>
+    editIndex(d, '  - file: "lint-errors/footnote-inline.md"\n    group: lint-errors\n    construct: footnote\n    class: lint-error\n    rule: footnote\n',
+      '  - file: "lint-errors/footnote-inline.md"\n    group: lint-errors\n    construct: footnote\n    class: unchanged\n'),
+  );
+  assert.ok(errors.includes('lint-errors/footnote-inline.md: class unchanged contradicts known class lint-error of footnote'), errors.join('\n'));
+});
+
+test('basis known for an unlisted construct is reported', () => {
+  const flagged = withCopy((d) => {
+    const p = join(d, 'index.yaml');
+    const text = readFileSync(p, 'utf8');
+    writeFileSync(p, text.replace(/(  - file: "tables\/table-basic\.md"\n(?: {4}.*\n)*? {4}basis: )assumed/, '$1known'));
+  });
+  assert.ok(flagged.includes('tables/table-basic.md: basis known, but table is not in known_constructs'), flagged.join('\n'));
+});
+
+test('the check runs when started through a symlink', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { symlinkSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'fixture-link-'));
+  try {
+    const link = join(dir, 'check.mjs');
+    symlinkSync(join(bank, 'check-index.mjs'), link);
+    const run = spawnSync(process.execPath, [link, bank], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /^fixture bank ok: /);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('the index parser rejects YAML outside its subset', () => {
@@ -122,6 +224,13 @@ test('relative targets skip external links, anchors and footnotes', () => {
     '![e](<dir/with space.png> "title") <img src="f.svg">',
     '[g]: g.md',
     '[^1]: a footnote',
+    "[h](h.md 'single') [i](i.md (paren)) [j](notes_(v2).md) [k](100%.md)",
+    '`[l](in-span.md)`',
+    '```',
+    '<img src="in-fence.png">',
+    '```',
   ].join('\n');
-  assert.deepEqual(relativeTargets(text).sort(), ['dir/with space.png', 'f.svg', 'g.md', 'x.md']);
+  assert.deepEqual(relativeTargets(text).sort(), [
+    '100%.md', 'dir/with space.png', 'f.svg', 'g.md', 'h.md', 'i.md', 'notes_(v2).md', 'x.md',
+  ]);
 });
