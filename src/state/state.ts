@@ -117,6 +117,15 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
     }
   }
 
+  // git treats a ref that already holds the new value as up to date and
+  // skips its lease, so the other refs would still move. Such a ref has
+  // moved away from what this run saw: refuse the push before sending it.
+  const before = await lsRemote(git, config.remote, updates.map((update) => update.ref));
+  const skipped = updates.filter((update) => update.next !== update.expected && before.get(update.ref) === update.next);
+  if (skipped.length > 0) {
+    return { ok: false, reason: 'stale', refs: skipped.map((update) => ({ ref: update.ref, message: 'already at the new value, not at the expected one' })) };
+  }
+
   const args = ['push', '--atomic', '--porcelain', '--no-verify', config.remote];
   for (const update of updates) args.push(`--force-with-lease=${update.ref}:${update.expected ?? ''}`);
   for (const update of updates) args.push(`${update.next}:${update.ref}`);
@@ -308,22 +317,22 @@ export async function readFiles(git: Git, config: StateConfig, commit: Oid, path
     const blob = blobs.get(entry.oid) as Buffer;
     const pointer = parseLfsPointer(blob);
     if (pointer === null) result.set(path, { ok: true, content: blob, lfs: false });
-    else if (!pointers.has(pointer.oid)) pointers.set(pointer.oid, { pointer, path });
+    else if (!pointers.has(entry.oid)) pointers.set(entry.oid, { pointer, path });
   }
 
-  // One download per object, a few at a time.
-  const lfs = new Map<string, LfsReadResult>();
+  // Keyed by the pointer file itself, so files with identical pointers share
+  // one read and any pointer that differs (size, extensions) is checked on
+  // its own. Objects already downloaded are read from the local LFS store.
+  const lfs = new Map<Oid, LfsReadResult>();
   if (pointers.size > 0) {
     const read = await lfsReader(git, config.remote);
-    const items = [...pointers.values()];
-    const results = await mapLimit(items, 4, (item) => read(item.pointer, item.path));
-    items.forEach((item, index) => lfs.set(item.pointer.oid, results[index] as LfsReadResult));
+    const items = [...pointers.entries()];
+    const results = await mapLimit(items, 4, ([, item]) => read(item.pointer, item.path));
+    items.forEach(([pointerBlob], index) => lfs.set(pointerBlob, results[index] as LfsReadResult));
   }
   for (const path of wanted) {
     if (result.has(path)) continue;
-    const entry = entries.get(path) as TreeEntry;
-    const pointer = parseLfsPointer(blobs.get(entry.oid) as Buffer) as LfsPointer;
-    const read = lfs.get(pointer.oid) as LfsReadResult;
+    const read = lfs.get((entries.get(path) as TreeEntry).oid) as LfsReadResult;
     result.set(path, read.ok ? { ok: true, content: read.content, lfs: true } : read);
   }
   return new Map([...wanted].map((path) => [path, result.get(path) as FileRead]));

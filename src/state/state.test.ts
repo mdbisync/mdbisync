@@ -179,6 +179,22 @@ describe('state: stores and atomic lease pushes', () => {
     assert.equal(await remoteRef(fixture, IDS), otherIds);
   });
 
+  it('refuses the push when a ref already holds the new value but not the expected one', async () => {
+    const fresh = resolveStateConfig({ refPrefix: 'refs/already' });
+    const writer = await fixture.clone('already-there');
+    const { tracked } = await fetchState(writer, fresh);
+    const next = await buildState(writer, tracked, 'already');
+    // Someone else already pushed this very ids commit.
+    assert.ok((await pushAtomic(writer, fresh, [{ ref: stateRef(fresh, 'ids'), expected: null, next: next.ids }])).ok);
+
+    const result = await pushAtomic(writer, fresh, [
+      { ref: stateRef(fresh, 'ids'), expected: null, next: next.ids },
+      { ref: stateRef(fresh, 'uploads'), expected: null, next: next.uploads },
+    ]);
+    assert.ok(!result.ok && result.reason === 'stale', JSON.stringify(result));
+    assert.equal(await remoteRef(fixture, stateRef(fresh, 'uploads')), null);
+  });
+
   it('refuses a state commit that lacks its file instead of reading it as empty', async () => {
     const git = await fixture.clone('damaged');
     const damaged = await commitTree(git, { parents: [], base: null, changes: new Map([['other.json', '{}\n']]), message: 'x', identity: IDENTITY });
@@ -317,6 +333,10 @@ describe('state: reading the tracked tree and LFS', () => {
     // A pointer whose object was never uploaded.
     const missing = randomBytes(64).toString('hex').slice(0, 64);
     files['docs/img/missing.png'] = `version https://git-lfs.github.com/spec/v1\noid sha256:${missing}\nsize 10\n`;
+    // Pointers to the same object as picture-0 that differ in size or name an extension.
+    const zero = createHash('sha256').update(images[0] as Buffer).digest('hex');
+    files['docs/img/wrong-size.png'] = `version https://git-lfs.github.com/spec/v1\noid sha256:${zero}\nsize ${(images[0] as Buffer).length + 1}\n`;
+    files['docs/img/same-object-extension.png'] = `version https://git-lfs.github.com/spec/v1\next-0-zip sha256:${'d'.repeat(64)}\noid sha256:${zero}\nsize ${(images[0] as Buffer).length}\n`;
     // A pointer naming a transforming extension; its object is never fetched.
     files['docs/img/extension.png'] = `version https://git-lfs.github.com/spec/v1\next-0-zip sha256:${'d'.repeat(64)}\noid sha256:${'e'.repeat(64)}\nsize 10\n`;
     await fixture.seed(files, { lfs: ['docs/img/*.png'] });
@@ -368,6 +388,18 @@ describe('state: reading the tracked tree and LFS', () => {
     const files = await readFiles(git, config, tracked, ['docs/img/picture-5.png']);
     const file = files.get('docs/img/picture-5.png');
     assert.ok(file?.ok && file.content.equals(images[5] as Buffer), JSON.stringify(file?.ok ? 'ok' : file));
+  });
+
+  it('checks each pointer on its own when pointers share an object, in any order', async () => {
+    const odd = ['docs/img/wrong-size.png', 'docs/img/same-object-extension.png'];
+    for (const order of [['docs/img/picture-0.png', ...odd], [...odd, 'docs/img/picture-0.png']]) {
+      const git = await fixture.clone(`shared-object-${order[0]?.length}`);
+      const { tracked } = await fetchState(git, config);
+      const files = await readFiles(git, config, tracked, order);
+      const valid = files.get('docs/img/picture-0.png');
+      assert.ok(valid?.ok && valid.content.equals(images[0] as Buffer), `valid pointer, order ${order.join(',')}`);
+      for (const path of odd) assert.equal(files.get(path)?.ok, false, `${path}, order ${order.join(',')}`);
+    }
   });
 
   it('refuses LFS pointers with extensions', async () => {
