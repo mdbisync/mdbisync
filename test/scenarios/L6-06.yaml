@@ -21,6 +21,14 @@
     },
     {
       "kind": "ui",
+      "action": "verify-editor",
+      "args": {
+        "actor": "editor-b",
+        "requireIdleSeconds": 120
+      }
+    },
+    {
+      "kind": "ui",
       "action": "type-during-write",
       "args": {
         "actor": "editor-b",

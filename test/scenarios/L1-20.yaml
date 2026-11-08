@@ -17,7 +17,8 @@
       "args": {
         "event": "workflow_dispatch",
         "command": "initial-sync",
-        "confirm": false
+        "confirm": false,
+        "direction": "git-to-linear"
       }
     },
     {
@@ -26,7 +27,8 @@
       "args": {
         "event": "workflow_dispatch",
         "command": "initial-sync",
-        "confirm": true
+        "confirm": true,
+        "direction": "git-to-linear"
       }
     }
   ],

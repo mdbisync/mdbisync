@@ -70,9 +70,12 @@ a single compound operation; their assertions inspect all items together. `befor
 `edited`, `input`, `fixtures`, `golden`, `corpus`, `expected`, `oracle` and
 `resolved` refer to independent fixture or oracle observations, never values
 computed from the actual result being checked. `runs.0` is the first explicit
-engine invocation, `runs.1` the second, and `runs.last` the final invocation.
-Internal recovery cycles retain their own evidence. Setup invocations and
-invariant idempotency probes do not change those indices.
+`kind: run` step, `runs.1` the second, and `runs.last` the final such step.
+This includes probe and pre-commit invocations. A compound `settle` or
+`resume-until-complete` step exposes a single aggregate result with its recovery
+flags and successful upload/write observations, while preserving individual
+cycle results under `cycles`. Setup invocations and invariant idempotency
+probes do not change those indices.
 
 Samples must cover every requested construct, not just select the first files.
 UI steps verify the editor and screen availability before input, collect DOM
