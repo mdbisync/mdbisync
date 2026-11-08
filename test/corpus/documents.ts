@@ -1,13 +1,19 @@
 // The generated Markdown groups of the corpus.
+//
+// Work documents, diagrams, tables, briefs with front matter, notes with
+// HTML and extensions, weekly digests with links, and localization pages
+// read like Kitewing's own documentation and live in its team and project
+// folders. Pairwise construct samples, size extremes, odd names, marker
+// lookalikes, lint errors and unusual typography live under eng/edge-cases/.
 
 import { posix } from "node:path";
 import type { AssetRef, Assets } from "./assets.ts";
+import { COMPANY, CUSTOMERS, DEPOTS, PEOPLE, PROFILES, SERVICES, TOPIC_KINDS, type Kind, type Profile, type Topic } from "./company.ts";
 import { CONTENT_LIMIT, destination, markdownFile, relativeLink, type Canaries, type CorpusFile, type Group } from "./model.ts";
 import type { Rng } from "./rng.ts";
-import {
-  asciiFiller, capitalize, EMOJI, EMOJI_SEQUENCES, isoDate, paragraph, person, SCRIPT_SAMPLES, sentence, slug, team, title, word,
-} from "./text.ts";
-import { BANK_HOME, HOMES, LOOSE, type Home } from "./tree.ts";
+import { asciiFiller, capitalize, EMOJI, EMOJI_SEQUENCES, isoDate, paragraph, person, SCRIPT_SAMPLES, sentence, team, title, word } from "./text.ts";
+import { BANK_HOME, EDGE, HOMES, LOCALIZATION, LOOSE, type Home } from "./tree.ts";
+import { slugify, weekDate, writeDocument, type Media } from "./writing.ts";
 
 type Context = {
   rng: Rng;
@@ -17,6 +23,8 @@ type Context = {
   /** Paths already taken, so generated names never collide. */
   taken: Set<string>;
   fixtures: Map<string, CorpusFile>;
+  /** Documents that embed the shared logo so far. */
+  sharedUsers: number;
 };
 
 type DocOptions = {
@@ -34,6 +42,32 @@ let homeCursor = 0;
 
 function nextHome(): Home {
   return HOMES[homeCursor++ % HOMES.length] as Home;
+}
+
+const ENG_HOMES = HOMES.filter((h) => h.team === "ENG");
+const TOPIC_HOMES = HOMES.filter((h) => (PROFILES[h.path] as Profile).topics.length > 0);
+
+/** Deals homes from a list in turn; the round number varies what each home gets. */
+class Dealer {
+  #n = 0;
+  readonly homes: Home[];
+  constructor(homes: Home[]) {
+    this.homes = homes;
+  }
+  next(): { home: Home; round: number } {
+    const n = this.#n++;
+    return { home: this.homes[n % this.homes.length] as Home, round: Math.floor(n / this.homes.length) };
+  }
+}
+
+function profileOf(home: Home): Profile {
+  return PROFILES[home.path] as Profile;
+}
+
+/** The home's topics, or every topic for a home that has none of its own. */
+function topicsOf(home: Home): readonly Topic[] {
+  const own = profileOf(home).topics;
+  return own.length > 0 ? own : Object.values(PROFILES).flatMap((p) => p.topics);
 }
 
 function uniquePath(ctx: Context, folder: string, name: string, ext = "md"): string {
@@ -67,6 +101,10 @@ function fromFixture(ctx: Context, name: string): Pick<CorpusFile, "expected" | 
   return { expected: fixture.expected, rule: fixture.rule, basis: fixture.basis };
 }
 
+function idLine(canary: string): string {
+  return `Doc ID: ${canary}`;
+}
+
 /** Writes a document whose body ends with its canary line. */
 function doc(ctx: Context, folder: string, name: string, group: Group, build: (canary: string, path: string) => string, options: DocOptions = {}): CorpusFile {
   const canary = ctx.canaries.take();
@@ -83,110 +121,96 @@ function linkMarkdown(from: string, ref: AssetRef): string {
   return `[${ref.label}](${destination(relativeLink(from, ref.path))})`;
 }
 
-function takeAsset(ctx: Context, home: Home, kind: AssetRef["kind"]): AssetRef | undefined {
+function takeAsset(ctx: Context, home: Home, kind: AssetRef["kind"], accept: (ref: AssetRef) => boolean = () => true): AssetRef | undefined {
   const queue = ctx.assets.queues.get(home.path) ?? [];
-  const i = queue.findIndex((a) => a.kind === kind);
+  const i = queue.findIndex((a) => a.kind === kind && accept(a));
   return i < 0 ? undefined : queue.splice(i, 1)[0];
+}
+
+function table(rows: string[][], align?: string[]): string {
+  const header = rows[0] as string[];
+  const sep = align ?? header.map(() => "---");
+  return [header, sep, ...rows.slice(1)].map((r) => `| ${r.join(" | ")} |`).join("\n");
+}
+
+/** The logo line under the heading, for the first documents of the handbook and the help center. */
+function withLogo(ctx: Context, path: string, body: string, links: string[]): string {
+  if (ctx.sharedUsers >= 39 || !(path.startsWith("docs/handbook/") || path.startsWith("support/"))) return body;
+  ctx.sharedUsers++;
+  links.push(ctx.assets.shared.path);
+  return body.replace(/^(# [^\n]*\n)/, `$1\n${imageMarkdown(path, ctx.assets.shared)}\n`);
 }
 
 // ---------------------------------------------------------------- work documents
 
-const TEMPLATES = ["meeting-notes", "spec", "runbook", "decision-record", "onboarding-guide", "changelog", "faq"] as const;
-const TEMPLATE_FOLDERS: Record<(typeof TEMPLATES)[number], string> = {
-  "meeting-notes": "meetings",
-  spec: "specs",
-  runbook: "runbooks",
-  "decision-record": "decisions",
-  "onboarding-guide": "onboarding",
-  changelog: "changelogs",
-  faq: "faq",
-};
-
-function workBody(ctx: Context, template: (typeof TEMPLATES)[number], heading: string, extra: string[]): string {
-  const { rng } = ctx;
-  const lines: string[] = [`# ${heading}`, ""];
-  switch (template) {
-    case "meeting-notes":
-      lines.push(`Date: ${isoDate(rng)}`, "", `Attendees: ${person(rng)}, ${person(rng)}, ${person(rng)}`, "", "## Agenda", "");
-      for (let i = 0; i < rng.int(2, 5); i++) lines.push(`1. ${sentence(rng)}`);
-      lines.push("", "## Notes", "", paragraph(rng), "", "## Action items", "");
-      for (let i = 0; i < rng.int(2, 4); i++) lines.push(`* [${rng.bool() ? "x" : " "}] ${person(rng)}: ${sentence(rng)}`);
-      break;
-    case "spec":
-      lines.push("## Summary", "", paragraph(rng), "", "## Goals", "");
-      for (let i = 0; i < 3; i++) lines.push(`* ${sentence(rng)}`);
-      lines.push("", "## Design", "", paragraph(rng), "", "```json", JSON.stringify({ [word(rng)]: rng.int(1, 100), enabled: rng.bool() }, null, 2), "```", "", "## Risks", "", paragraph(rng));
-      break;
-    case "runbook":
-      lines.push("## When to use", "", paragraph(rng), "", "## Steps", "");
-      for (let i = 0; i < rng.int(3, 7); i++) lines.push(`${i + 1}. ${sentence(rng)}`);
-      lines.push("", "```sh", `check-${word(rng)} --region ${rng.pick(["north", "south", "east", "west"])}`, "```", "", "> **Warning:** " + sentence(rng));
-      break;
-    case "decision-record":
-      lines.push("## Status", "", rng.pick(["Proposed", "Accepted", "Superseded"]), "", "## Context", "", paragraph(rng), "", "## Decision", "", paragraph(rng), "", "## Consequences", "", paragraph(rng));
-      break;
-    case "onboarding-guide":
-      lines.push(`Welcome to the ${team(rng)} team.`, "", "## First week", "");
-      for (let i = 0; i < 4; i++) lines.push(`* **Day ${i + 1}:** ${sentence(rng)}`);
-      lines.push("", "## Useful links", "", `* [Team page](https://www.example.com/${slug(team(rng))})`, `* [Handbook](https://www.example.com/handbook)`);
-      break;
-    case "changelog":
-      for (let v = 0; v < rng.int(2, 5); v++) {
-        lines.push(`## 1.${rng.int(0, 20)}.${rng.int(0, 9)} (${isoDate(rng)})`, "");
-        for (let i = 0; i < rng.int(1, 4); i++) lines.push(`* ${rng.pick(["Added", "Fixed", "Changed", "Removed"])}: ${sentence(rng)}`);
-        lines.push("");
-      }
-      break;
-    case "faq":
-      for (let i = 0; i < rng.int(3, 6); i++) lines.push(`### ${capitalize(word(rng))}: how does it work?`, "", paragraph(rng), "");
-      break;
-  }
-  lines.push("", ...extra);
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n")}`;
+function isDot(ref: AssetRef): boolean {
+  return ref.label.endsWith("status dot");
 }
 
-function workDocuments(ctx: Context, sharedUsers: number): void {
+type Planned = { home: Home; kind: Kind; topic: Topic | null; index: number };
+
+function plan(total: number): Planned[] {
+  const out: Planned[] = [];
+  for (const home of HOMES) {
+    const profile = profileOf(home);
+    for (const kind of profile.kinds.filter((k) => TOPIC_KINDS.includes(k))) {
+      profile.topics.forEach((topic, index) => out.push({ home, kind, topic, index }));
+    }
+  }
+  const series = HOMES.map((home) => ({ home, kinds: profileOf(home).kinds.filter((k) => !TOPIC_KINDS.includes(k)), next: new Map<Kind, number>() })).filter((s) => s.kinds.length > 0);
+  for (let round = 0; out.length < total; round++) {
+    for (const s of series) {
+      if (out.length >= total) break;
+      const kind = s.kinds[round % s.kinds.length] as Kind;
+      const index = s.next.get(kind) ?? 0;
+      s.next.set(kind, index + 1);
+      out.push({ home: s.home, kind, topic: null, index });
+    }
+  }
+  return out;
+}
+
+function workDocuments(ctx: Context): void {
   const { rng } = ctx;
-  let shared = 0;
-  const count = 800;
-  for (let i = 0; i < count; i++) {
-    const home = nextHome();
-    const template = TEMPLATES[i % TEMPLATES.length] as (typeof TEMPLATES)[number];
-    const heading = title(rng);
-    const folder = `${home.path}/${template === "runbook" && i % 9 === 0 ? "runbooks/2026/q4/storage" : TEMPLATE_FOLDERS[template]}`;
-    const path = uniquePath(ctx, folder, `${slug(heading)}`);
-    const extra: string[] = [];
-    const links: string[] = [];
-    let tooLarge: string | null = null;
+  for (const item of plan(800)) {
+    const media: Media[] = [];
+    const refs: AssetRef[] = [];
     for (const kind of ["image", "image", "attachment"] as const) {
       if (kind === "attachment" && !rng.bool(0.25)) continue;
-      const ref = takeAsset(ctx, home, kind);
-      if (!ref) continue;
-      extra.push(kind === "image" ? imageMarkdown(path, ref) : `Attached: ${linkMarkdown(path, ref)}`, "");
-      links.push(ref.path);
-      if (ref.tooLarge) tooLarge = ref.path;
+      // At most one tiny status dot per document.
+      const ref = takeAsset(ctx, item.home, kind, (a) => !(isDot(a) && refs.some(isDot)));
+      if (ref) refs.push(ref);
     }
-    if (shared < sharedUsers && i % 20 === 3) {
-      extra.push(imageMarkdown(path, ctx.assets.shared), "");
-      links.push(ctx.assets.shared.path);
-      shared++;
-    }
+    const draft = writeDocument({ rng: rng.fork(`${item.home.path}/${item.kind}/${item.index}/${item.topic?.title ?? ""}`), kind: item.kind, profile: profileOf(item.home), topic: item.topic, index: item.index, media: [] });
+    const path = uniquePath(ctx, `${item.home.path}/${draft.folder}`, draft.name);
+    for (const ref of refs) media.push({ markdown: ref.kind === "image" ? imageMarkdown(path, ref) : linkMarkdown(path, ref), kind: ref.kind, label: ref.label });
+    const final = writeDocument({ rng: rng.fork(`${item.home.path}/${item.kind}/${item.index}/${item.topic?.title ?? ""}`), kind: item.kind, profile: profileOf(item.home), topic: item.topic, index: item.index, media });
     const canary = ctx.canaries.take();
-    extra.push(`Reference: ${canary}`);
-    addDoc(ctx, path, workBody(ctx, template, heading, extra), "work-documents", {
+    const links = refs.map((r) => r.path);
+    const body = withLogo(ctx, path, `${final.body}\n${idLine(canary)}\n`, links);
+    const tooLarge = refs.find((r) => r.tooLarge);
+    addDoc(ctx, path, body, "work-documents", {
       canary,
       links,
-      ...(tooLarge === null ? {} : { rule: "upload-too-large", note: `embeds or links ${tooLarge}, over the upload limit` }),
+      ...(tooLarge === undefined ? {} : { rule: "upload-too-large", note: `embeds or links ${tooLarge.path}, over the upload limit` }),
     });
   }
-  // Documents for whatever is left in the queues: every asset is used at least once.
+  // Galleries for whatever is left in the queues: every asset is used at least once.
   for (const home of HOMES) {
     const queue = ctx.assets.queues.get(home.path) ?? [];
-    while (queue.length > 0) {
+    for (let set = 1; queue.length > 0; set++) {
       const batch = queue.splice(0, 6);
-      const path = uniquePath(ctx, `${home.path}/galleries`, `screenshots-${slug(word(rng))}`);
+      const path = uniquePath(ctx, `${home.path}/images`, `gallery-${set}`);
       const canary = ctx.canaries.take();
-      const body = [`# Screenshots for the ${word(rng)} review`, "", paragraph(rng), "", ...batch.flatMap((ref) => [ref.kind === "image" ? imageMarkdown(path, ref) : linkMarkdown(path, ref), ""]), `Reference: ${canary}`].join("\n");
+      const body = [
+        `# ${profileOf(home).name}: screens and charts, set ${set}`,
+        "",
+        `Pictures collected for the ${profileOf(home).name.toLowerCase()} pages. Reuse them in your documents rather than taking new screenshots.`,
+        "",
+        ...batch.flatMap((ref) => (ref.kind === "image" ? [`## ${capitalize(ref.label)}`, "", imageMarkdown(path, ref), ""] : [`* ${linkMarkdown(path, ref)}`, ""])),
+        idLine(canary),
+        "",
+      ].join("\n");
       const tooLarge = batch.find((r) => r.tooLarge);
       addDoc(ctx, path, body, "work-documents", {
         canary,
@@ -195,19 +219,32 @@ function workDocuments(ctx: Context, sharedUsers: number): void {
       });
     }
   }
-  // The shared image needs 40 documents in all.
-  while (shared < sharedUsers) {
-    const home = nextHome();
-    doc(ctx, `${home.path}/announcements`, `announcement-${shared + 1}`, "work-documents", (canary, path) => {
-      return `# Announcement\n\n${imageMarkdown(path, ctx.assets.shared)}\n\n${paragraph(rng)}\n\nReference: ${canary}`;
+  // The shared logo needs 40 documents in all: company news fills the rest.
+  for (let n = 1; ctx.sharedUsers < 39; n++) {
+    ctx.sharedUsers++;
+    doc(ctx, "docs/handbook/news", `company-news-${String(n).padStart(2, "0")}`, "work-documents", (canary, path) => {
+      const topic = rng.pick(Object.values(PROFILES).flatMap((p) => p.topics));
+      return [
+        `# Company news, issue ${n}`,
+        "",
+        imageMarkdown(path, ctx.assets.shared),
+        "",
+        `Welcome to issue ${n} of the ${COMPANY} news. This time: ${topic.title.toLowerCase()}.`,
+        "",
+        `${topic.summary} ${topic.problem}`,
+        "",
+        `A warm welcome to ${rng.pick(PEOPLE)}, who joined this month. Say hello in the team channel!`,
+        "",
+        idLine(canary),
+        "",
+      ].join("\n");
     }, { links: [ctx.assets.shared.path] });
-    shared++;
   }
 }
 
 /** A title path of exactly the given length, in segments of at most 120 characters. */
 export function longTitle(length: number): string {
-  const prefix = `long-titles/t${length}`;
+  const prefix = `edge-cases/long-titles/t${length}`;
   let rest = length - prefix.length;
   const segments = [prefix];
   while (rest > 0) {
@@ -224,7 +261,7 @@ export function longTitle(length: number): string {
   return segments.join("/");
 }
 
-/** Special work documents: long titles, deep paths, names in other scripts, image edge cases. */
+/** Special documents: long titles, a deep path, names in other scripts, image edge cases. */
 function specialDocuments(ctx: Context): void {
   const { rng } = ctx;
   // Titles are paths below the team folder, without ".md". A file name is
@@ -232,41 +269,69 @@ function specialDocuments(ctx: Context): void {
   for (const length of [100, 200, 250, 255, 256, 300]) {
     const titlePath = longTitle(length);
     const folder = `eng/${posix.dirname(titlePath)}`;
-    doc(ctx, folder, posix.basename(titlePath), "work-documents", (canary) => `# Long title\n\n${paragraph(rng)}\n\nReference: ${canary}`, {
+    doc(ctx, folder, posix.basename(titlePath), "work-documents", (canary) => `# A title of ${length} characters\n\nThe path of this document below the team folder is exactly ${length} characters long.\n\n${paragraph(rng)}\n\n${idLine(canary)}\n`, {
       note: `title "${titlePath}" is ${length} characters`,
     });
   }
-  // Six folders deep.
-  doc(ctx, "eng/infra/regions/north/storage/archive", "retention-policy", "work-documents", (canary) => `# Retention policy\n\n${paragraph(rng)}\n\nReference: ${canary}`, { note: "six folders deep" });
+  // Six folders deep, in the tidy part.
+  doc(ctx, "eng/infra/regions/north/storage/archive", "retention-policy", "work-documents", (canary) => [
+    "# Retention policy for archived storage",
+    "",
+    "Objects in the north region's archive tier are kept for seven years, then deleted by a lifecycle rule.",
+    "",
+    table([["Data", "Kept for", "Why"], ["Delivery records", "7 years", "Tax law"], ["Proof of delivery photos", "13 months", "Claims window plus one month"], ["Raw driver locations", "90 days", "Route quality analysis"]]),
+    "",
+    "Ask the infrastructure team before you change a lifecycle rule.",
+    "",
+    idLine(canary),
+    "",
+  ].join("\n"), { note: "six folders deep" });
   // Names with spaces, dots, parentheses, Greek, CJK and emoji.
   for (const name of ["meeting notes (draft)", "v2.1 release.plan", "Σημειώσεις συνάντησης", "会议记录", "🚀 launch checklist", "notes  with  double spaces"]) {
-    doc(ctx, "eng/backend/names", name, "work-documents", (canary) => `# ${name}\n\n${paragraph(rng)}\n\nReference: ${canary}`);
+    doc(ctx, `${EDGE}/names`, name, "work-documents", (canary) => `# ${name}\n\nThis file name has ${/\s{2}/.test(name) ? "double spaces" : /[^\x20-\x7e]/.test(name) ? "characters outside ASCII" : "spaces, dots or parentheses"}.\n\n${paragraph(rng)}\n\n${idLine(canary)}\n`);
   }
   // Image edge cases.
-  doc(ctx, "docs/handbook/images", "broken-image", "work-documents", (canary) => `# Missing picture\n\n![diagram that is not there](./missing/diagram.png)\n\nReference: ${canary}`, { note: "a broken image reference" });
-  doc(ctx, "docs/handbook/images", "remote-image", "work-documents", (canary) => `# Remote picture\n\n![remote chart](https://images.example.com/chart.png)\n\nReference: ${canary}`, { note: "a remote image URL" });
+  doc(ctx, `${EDGE}/images`, "broken-image", "work-documents", (canary) => `# Missing picture\n\n![diagram that is not there](./missing/diagram.png)\n\n${idLine(canary)}\n`, { note: "a broken image reference" });
+  doc(ctx, `${EDGE}/images`, "remote-image", "work-documents", (canary) => `# Remote picture\n\n![remote chart](https://images.example.com/chart.png)\n\n${idLine(canary)}\n`, { note: "a remote image URL" });
   const titled = ctx.assets.shared;
-  doc(ctx, "docs/handbook/images", "titled-image", "work-documents", (canary, path) => `# Picture with a title\n\n${imageMarkdown(path, titled, "Team logo, light version")}\n\nReference: ${canary}`, {
+  doc(ctx, `${EDGE}/images`, "titled-image", "work-documents", (canary, path) => `# Picture with a title\n\n${imageMarkdown(path, titled, "Company logo, light version")}\n\n${idLine(canary)}\n`, {
     ...fromFixture(ctx, "images/title.md"),
     links: [titled.path],
     note: "an image with a title",
   });
+  // Files over and near the upload limit.
+  const [scan, ...pdfs] = ctx.assets.oversized as [AssetRef, ...AssetRef[]];
+  doc(ctx, `${EDGE}/images`, "large-uploads", "work-documents", (canary, path) => [
+    "# Large uploads",
+    "",
+    imageMarkdown(path, scan),
+    "",
+    ...pdfs.map((p) => `* ${linkMarkdown(path, p)}`),
+    "",
+    idLine(canary),
+    "",
+  ].join("\n"), { links: ctx.assets.oversized.map((r) => r.path), rule: "upload-too-large", note: `embeds or links ${ctx.assets.oversized.filter((r) => r.tooLarge).map((r) => r.path).join(" and ")}, over the upload limit` });
 }
 
 // ---------------------------------------------------------------- pairwise
 
 const INLINE: [string, (rng: Rng) => string][] = [
-  ["code", (rng) => `\`${word(rng)}()\``],
+  ["code", () => `\`${pickService()}\``],
   ["bold", (rng) => `**${word(rng)}**`],
   ["italic", (rng) => `*${word(rng)}*`],
   ["strike", (rng) => `~~${word(rng)}~~`],
-  ["link", (rng) => `[${word(rng)}](https://www.example.com/${word(rng)})`],
+  ["link", (rng) => `[${word(rng)} notes](https://www.example.com/${word(rng)})`],
   ["math", () => "$a^2 + b^2$"],
   ["emoji", (rng) => rng.pick(EMOJI)],
   ["underline", (rng) => `<u>${word(rng)}</u>`],
   ["highlight", (rng) => `==${word(rng)}==`],
   ["bold-italic", (rng) => `***${word(rng)}***`],
 ];
+
+let serviceCursor = 0;
+function pickService(): string {
+  return SERVICES[serviceCursor++ % SERVICES.length] as string;
+}
 
 const OUTER = ["bullet", "ordered", "quote", "heading", "task", "table-cell", "nested-list", "alert"] as const;
 
@@ -292,7 +357,7 @@ function wrap(outer: (typeof OUTER)[number], inner: string, rng: Rng): string {
 }
 
 const BLOCKS: [string, (rng: Rng) => string][] = [
-  ["code-in-list", (rng) => `* ${sentence(rng)}\n\n  \`\`\`sh\n  run-${word(rng)} --check\n  \`\`\``],
+  ["code-in-list", () => `* Check the service first.\n\n  \`\`\`sh\n  kw status ${pickService()} --check\n  \`\`\``],
   ["list-in-quote", (rng) => `> ${sentence(rng)}\n>\n> * ${word(rng)}\n> * ${word(rng)}`],
   ["code-in-quote", (rng) => `> \`\`\`text\n> ${sentence(rng)}\n> \`\`\``],
   ["quote-in-list", (rng) => `* ${sentence(rng)}\n\n  > ${sentence(rng)}`],
@@ -307,14 +372,12 @@ function pairwise(ctx: Context): void {
   combos.push(...BLOCKS);
   while (n < 300) {
     const [name, make] = combos[n % combos.length] as [string, (rng: Rng) => string];
-    const home = nextHome();
     const imageRef = n % 15 === 0 ? ctx.assets.secondary : undefined;
-    const folder = `${home.path}/pairwise`;
-    const path = uniquePath(ctx, folder, `${name}-${Math.floor(n / combos.length) + 1}`);
+    const path = uniquePath(ctx, `${EDGE}/formatting`, `${name}-${Math.floor(n / combos.length) + 1}`);
     const canary = ctx.canaries.take();
     const parts = [`# ${capitalize(name.replace(/-/g, " "))}`, "", make(rng), ""];
     if (imageRef) parts.push(`* ${sentence(rng)} ${imageMarkdown(path, imageRef)}`, "", `| Preview |\n| -- |\n| ${imageMarkdown(path, imageRef)} |`, "");
-    parts.push(`Reference: ${canary}`);
+    parts.push(idLine(canary), "");
     addDoc(ctx, path, parts.join("\n"), "pairwise", { canary, links: imageRef ? [imageRef.path] : [] });
     n++;
   }
@@ -324,7 +387,7 @@ function pairwise(ctx: Context): void {
 
 function sizeSpectrum(ctx: Context): void {
   const { rng } = ctx;
-  const folder = "eng/infra/sizes";
+  const folder = `${EDGE}/sizes`;
   const named = (name: string, content: string, note: string) => {
     const canary = ctx.canaries.take();
     addDoc(ctx, uniquePath(ctx, folder, `${name}-${canary}`), content, "size-spectrum", { canary, canaryIn: "name", note });
@@ -336,12 +399,12 @@ function sizeSpectrum(ctx: Context): void {
   named("whitespace-only-3", " ", "a single space");
   const sized = (name: string, length: number, note: string, options: DocOptions = {}) => {
     const canary = ctx.canaries.take();
-    const head = `# ${capitalize(name)}\n\nReference: ${canary}\n\n`;
+    const head = `# ${capitalize(name.replace(/-/g, " "))}\n\n${idLine(canary)}\n\n`;
     addDoc(ctx, uniquePath(ctx, folder, name), head + asciiFiller(rng, length - head.length), "size-spectrum", { canary, note, ...options });
   };
   for (let i = 0; i < 5; i++) {
     const canary = ctx.canaries.take();
-    addDoc(ctx, uniquePath(ctx, folder, `one-line-${i + 1}`), `${sentence(rng)} Reference: ${canary}${i % 2 === 0 ? "\n" : ""}`, "size-spectrum", { canary, note: "one line" });
+    addDoc(ctx, uniquePath(ctx, folder, `one-line-${i + 1}`), `${sentence(rng)} ${idLine(canary)}${i % 2 === 0 ? "\n" : ""}`, "size-spectrum", { canary, note: "one line" });
   }
   const ladder: [string, number, number][] = [["size-1kb", 1_000, 8], ["size-10kb", 10_000, 8], ["size-100kb", 100_000, 5], ["size-240kb", 240_000, 4]];
   for (const [name, length, count] of ladder) for (let i = 0; i < count; i++) sized(`${name}-${i + 1}`, length, `${length} characters`);
@@ -350,7 +413,7 @@ function sizeSpectrum(ctx: Context): void {
   sized("size-260kb", 260_000, "260,000 characters, over Linear's limit", { expected: "lint-error", rule: "content-too-long", basis: "known" });
   for (let i = 0; i < 3; i++) {
     const canary = ctx.canaries.take();
-    const line = `Reference: ${canary} ${asciiFiller(rng, 100_000).replace(/\s+/g, " ")}`.slice(0, 100_000);
+    const line = `${idLine(canary)} ${asciiFiller(rng, 100_000).replace(/\s+/g, " ")}`.slice(0, 100_000);
     addDoc(ctx, uniquePath(ctx, folder, `single-line-100k-${i + 1}`), line, "size-spectrum", { canary, note: "one line of 100,000 characters" });
   }
   // Fill the group to at least 50 with mid sizes.
@@ -360,34 +423,104 @@ function sizeSpectrum(ctx: Context): void {
 
 // ---------------------------------------------------------------- mermaid
 
-const DIAGRAMS: Record<string, (rng: Rng) => string> = {
-  flowchart: (rng) => `flowchart LR\n    A[${capitalize(word(rng))}] --> B{Ready?}\n    B -->|yes| C[Ship]\n    B -->|no| D[Fix]`,
-  sequence: (rng) => `sequenceDiagram\n    participant ${person(rng)}\n    participant Service\n    Service->>Service: ${word(rng)}\n    Note right of Service: ${sentence(rng)}`,
-  class: (rng) => `classDiagram\n    class ${capitalize(word(rng))} {\n      +String name\n      +run()\n    }`,
-  state: () => "stateDiagram-v2\n    [*] --> Draft\n    Draft --> Review\n    Review --> Done\n    Done --> [*]",
-  er: () => "erDiagram\n    TEAM ||--o{ PROJECT : owns\n    PROJECT ||--|{ DOCUMENT : contains",
-  gantt: (rng) => `gantt\n    title ${title(rng)}\n    dateFormat YYYY-MM-DD\n    section Work\n    Design :a1, 2026-01-05, 10d\n    Build  :after a1, 20d`,
-  pie: (rng) => `pie title ${capitalize(word(rng))} split\n    "Done" : ${rng.int(10, 60)}\n    "Open" : ${rng.int(10, 60)}`,
-  journey: (rng) => `journey\n    title ${title(rng)}\n    section Start\n      Read the guide: 5: ${person(rng)}\n      Ask a question: 3: ${person(rng)}`,
-  gitGraph: () => "gitGraph\n    commit\n    branch feature\n    commit\n    checkout main\n    merge feature",
-  mindmap: (rng) => `mindmap\n  root((${capitalize(word(rng))}))\n    Goals\n    Risks\n    People`,
-  timeline: () => "timeline\n    title Release history\n    2025 : First release\n    2026 : Second release",
-  quadrant: () => "quadrantChart\n    title Effort and value\n    x-axis Low effort --> High effort\n    y-axis Low value --> High value\n    Task A: [0.3, 0.6]",
+type Diagram = { headline: string; caption: string; source: (rng: Rng, profile: Profile) => string };
+
+const DIAGRAMS: Record<string, Diagram> = {
+  flowchart: {
+    headline: "how work flows",
+    caption: "Each step hands its result to the next one; the dotted line is the feedback loop.",
+    source: (rng, p) => [`flowchart ${rng.bool() ? "LR" : "TD"}`, ...p.labels.map((l, i) => `    S${i}[${capitalize(l.toLowerCase())}]`), ...p.labels.slice(1).map((_, i) => `    S${i} --> S${i + 1}`), `    S${p.labels.length - 1} -. feedback .-> S0`].join("\n"),
+  },
+  sequence: {
+    headline: "a request end to end",
+    caption: "What happens between the console and the services when a planner publishes a route.",
+    source: (rng) => [
+      "sequenceDiagram",
+      "    actor Planner",
+      "    participant Console",
+      `    participant API as ${rng.pick(["dispatch-api", "order-intake"])}`,
+      "    participant Planner2 as route-planner",
+      "    Planner->>Console: Publish routes",
+      "    Console->>API: POST /v2/routes",
+      "    API->>Planner2: Plan request",
+      "    Planner2-->>API: Plan ready",
+      "    API-->>Console: 201 Created",
+      "    Note right of API: Drivers get the routes within a minute",
+    ].join("\n"),
+  },
+  class: {
+    headline: "the main entities",
+    caption: "The entities that every service shares.",
+    source: () => ["classDiagram", "    class Depot {", "      +String name", "      +openingHours()", "    }", "    class Route {", "      +Date day", "      +publish()", "    }", "    class Stop {", "      +String address", "      +Window window", "    }", "    Depot \"1\" --> \"*\" Route", "    Route \"1\" --> \"*\" Stop"].join("\n"),
+  },
+  state: {
+    headline: "the life of an order",
+    caption: "An order's states from the moment a shop sends it.",
+    source: () => ["stateDiagram-v2", "    [*] --> Received", "    Received --> Planned", "    Planned --> OutForDelivery", "    OutForDelivery --> Delivered", "    OutForDelivery --> Failed", "    Failed --> Planned: next day", "    Delivered --> [*]"].join("\n"),
+  },
+  er: {
+    headline: "the data model",
+    caption: "Tables and how they relate.",
+    source: () => ["erDiagram", "    DEPOT ||--o{ ROUTE : plans", "    ROUTE ||--|{ STOP : contains", "    ORDER ||--o{ PARCEL : ships", "    STOP }o--|| ORDER : serves"].join("\n"),
+  },
+  gantt: {
+    headline: "the plan for the quarter",
+    caption: "Dates are targets, not promises.",
+    source: (rng, p) => ["gantt", `    title ${p.name}, next quarter`, "    dateFormat YYYY-MM-DD", "    section Build", `    ${(p.topics[0]?.title ?? "First milestone").replace(/:/g, "")} :a1, ${weekDate(rng.int(40, 50))}, 14d`, `    ${(p.topics[1]?.title ?? "Second milestone").replace(/:/g, "")} :after a1, 21d`, "    section Rollout", "    Pilot depot :b1, after a1, 7d", "    All depots :after b1, 14d"].join("\n"),
+  },
+  pie: {
+    headline: "where the time goes",
+    caption: "Share of last month's engineering time.",
+    source: (rng) => ["pie title Engineering time last month", `    "New features" : ${rng.int(30, 50)}`, `    "Maintenance" : ${rng.int(15, 30)}`, `    "Incidents" : ${rng.int(5, 15)}`, `    "Support" : ${rng.int(5, 15)}`].join("\n"),
+  },
+  journey: {
+    headline: "a planner's morning",
+    caption: "Scores from interviews with planners: 5 is great, 1 is painful.",
+    source: (rng) => ["journey", "    title A planner's morning", "    section Before the vans leave", `      Import orders: ${rng.int(2, 5)}: Planner`, `      Check the plan: ${rng.int(2, 5)}: Planner`, `      Publish routes: ${rng.int(3, 5)}: Planner, Driver`, "    section During the day", `      Handle a new order: ${rng.int(1, 4)}: Planner`].join("\n"),
+  },
+  gitGraph: {
+    headline: "how releases are branched",
+    caption: "Fixes go to main first and are picked into the release branch.",
+    source: () => ["gitGraph", "    commit", "    commit", "    branch release", "    checkout release", "    commit", "    checkout main", "    commit id: \"fix\"", "    checkout release", "    cherry-pick id: \"fix\""].join("\n"),
+  },
+  mindmap: {
+    headline: "what we are working on",
+    caption: "Current work, grouped by theme.",
+    source: (_rng, p) => ["mindmap", `  root((${p.name}))`, ...p.topics.slice(0, 4).map((tp) => `    ${tp.title.replace(/[()]/g, "")}`)].join("\n"),
+  },
+  timeline: {
+    headline: "how we got here",
+    caption: "Milestones of the last two years.",
+    source: (_rng, p) => ["timeline", `    title ${p.name} history`, "    2024 : First version : Two depots", "    2025 : All depots in eu-west : Partner API", "    2026 : Three regions : Driver app 3"].join("\n"),
+  },
+  quadrant: {
+    headline: "what to do first",
+    caption: "Work items by effort and value, from the last planning meeting.",
+    source: (rng, p) => ["quadrantChart", "    title Effort and value", "    x-axis Low effort --> High effort", "    y-axis Low value --> High value", ...p.topics.slice(0, 4).map((tp) => `    ${tp.title.replace(/[:()]/g, "")}: [${(rng.int(10, 90) / 100).toFixed(2)}, ${(rng.int(10, 90) / 100).toFixed(2)}]`)].join("\n"),
+  },
 };
 
 function mermaid(ctx: Context): void {
   const { rng } = ctx;
   const kinds = Object.keys(DIAGRAMS);
+  const dealer = new Dealer(ENG_HOMES);
   for (let i = 0; i < 60; i++) {
-    const home = nextHome();
+    const { home, round } = dealer.next();
+    const profile = { ...profileOf(home), topics: topicsOf(home) };
     const count = 1 + (i % 4);
-    const chosen = Array.from({ length: count }, (_, k) => kinds[(i + k * 5) % kinds.length] as string);
+    const lead = (i % ENG_HOMES.length) + round * 5;
+    const chosen = Array.from({ length: count }, (_, k) => kinds[(lead + k * 5) % kinds.length] as string);
     const invalid = i % 20 === 7;
-    doc(ctx, `${home.path}/diagrams`, `diagrams-${chosen[0]}-${i + 1}`, "mermaid", (canary) => {
-      const parts = [`# ${title(rng)}`, "", paragraph(rng), ""];
-      for (const kind of chosen) parts.push("```mermaid", (DIAGRAMS[kind] as (r: Rng) => string)(rng), "```", "");
-      if (invalid) parts.push("```mermaid", "flowchart LR\n    A --> \n    this is not a diagram ((", "```", "");
-      parts.push(`Reference: ${canary}`);
+    const main = DIAGRAMS[chosen[0] as string] as Diagram;
+    const folder = invalid ? `${EDGE}/diagrams` : `${home.path}/architecture`;
+    doc(ctx, folder, slugify(main.headline), "mermaid", (canary) => {
+      const parts = [`# ${profile.name}: ${main.headline}`, "", profile.about, ""];
+      for (const kind of chosen) {
+        const d = DIAGRAMS[kind] as Diagram;
+        parts.push(`## ${capitalize(d.headline)}`, "", d.caption, "", "```mermaid", d.source(rng, profile), "```", "");
+      }
+      if (invalid) parts.push("## Draft", "", "This sketch was never finished.", "", "```mermaid", "flowchart LR\n    A --> \n    this is not a diagram ((", "```", "");
+      parts.push(idLine(canary), "");
       return parts.join("\n");
     }, { note: invalid ? `${chosen.join(", ")}, and an invalid diagram` : chosen.join(", ") });
   }
@@ -395,61 +528,89 @@ function mermaid(ctx: Context): void {
 
 // ---------------------------------------------------------------- tables
 
-function table(rows: string[][], align?: string[]): string {
-  const header = rows[0] as string[];
-  const sep = align ?? header.map(() => "--");
-  return [header, sep, ...rows.slice(1)].map((r) => `| ${r.join(" | ")} |`).join("\n");
-}
-
 function tables(ctx: Context): void {
   const { rng } = ctx;
   const kinds = ["aligned", "wide", "long", "empty-cells", "inline-marks", "code-pipes", "links-images", "unicode", "plain"] as const;
+  const dealer = new Dealer(ENG_HOMES);
   for (let i = 0; i < 120; i++) {
-    const home = nextHome();
-    const kind = kinds[i % kinds.length] as (typeof kinds)[number];
-    const folder = `${home.path}/tables`;
-    const path = uniquePath(ctx, folder, `${kind}-${i + 1}`);
-    const canary = ctx.canaries.take();
+    const { home, round } = dealer.next();
+    const profile = profileOf(home);
+    // Aligned tables keep their fixed positions; the other kinds rotate over the homes.
+    const kind = (i % kinds.length === 0 ? "aligned" : kinds[1 + ((i + round) % (kinds.length - 1))]) as (typeof kinds)[number];
     const links: string[] = [];
-    let body: string;
+    let heading: string;
+    let folder = `${home.path}/reference`;
+    let intro: string;
+    let body: (path: string) => string;
     switch (kind) {
       case "aligned":
-        body = table([["Left", "Center", "Right"], ...Array.from({ length: 4 }, () => [word(rng), word(rng), String(rng.int(1, 999))])], [":--", ":-:", "--:"]);
+        folder = `${EDGE}/tables`;
+        heading = "Aligned columns";
+        intro = "Column alignment set with colons in the separator row.";
+        body = () => table([["Depot", "Vans", "Deliveries"], ...Array.from({ length: 4 }, () => [rng.pick(DEPOTS), String(rng.int(4, 40)), String(rng.int(100, 999))])], [":--", ":-:", "--:"]);
         break;
-      case "wide":
-        body = table(Array.from({ length: 4 }, (_, r) => Array.from({ length: 30 }, (_, c) => (r === 0 ? `C${c + 1}` : String(rng.int(0, 99))))));
+      case "wide": {
+        const month = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][(i + round * 5) % 12] as string;
+        folder = `${home.path}/reports`;
+        heading = `Deliveries per day, ${month} 2026`;
+        intro = `One row per depot, one column per day of ${month}. Copied from the monthly export.`;
+        body = () => table([["Depot", ...Array.from({ length: 29 }, (_, d) => String(d + 1))], ...rng.shuffle(DEPOTS).slice(0, 3).map((dep) => [dep, ...Array.from({ length: 29 }, () => String(rng.int(80, 400)))])]);
         break;
-      case "long":
-        body = table([["#", "Item", "Owner"], ...Array.from({ length: i % 18 === 2 ? 500 : 60 }, (_, r) => [String(r + 1), word(rng), person(rng)])]);
+      }
+      case "long": {
+        const big = i % 18 === 2;
+        folder = `${home.path}/reports`;
+        heading = big ? `Parcel lockers, full list (${rng.pick(DEPOTS)} region)` : `Stops on route ${rng.int(10, 99)}, ${weekDate(rng.int(0, 60), rng.int(0, 4))}`;
+        intro = big ? "Every parcel locker we deliver to, with its slot count. Updated weekly." : "The planned order of stops, as published to the driver.";
+        body = () => big
+          ? table([["#", "Locker", "Depot", "Slots"], ...Array.from({ length: 500 }, (_, r) => [String(r + 1), `${rng.pick(["Station", "Mall", "Campus", "Library", "Garage", "Market"])} ${String(r + 1).padStart(3, "0")}`, rng.pick(DEPOTS), String(rng.int(12, 96))])])
+          : table([["#", "Customer", "Window", "Parcels"], ...Array.from({ length: 60 }, (_, r) => [String(r + 1), rng.pick(CUSTOMERS), `${String(8 + Math.floor(r / 8)).padStart(2, "0")}:00-${String(10 + Math.floor(r / 8)).padStart(2, "0")}:00`, String(rng.int(1, 6))])]);
         break;
+      }
       case "empty-cells":
-        body = table([["A", "B", "C"], ["", word(rng), ""], [word(rng), "", ""], ["", "", ""]]);
+        heading = `Feature availability by plan, ${["spring", "summer", "autumn", "winter"][round % 4]} ${2025 + Math.floor(round / 4)}`;
+        intro = "An empty cell means the feature is not available on that plan.";
+        body = () => table([["Feature", "Starter", "Team", "Enterprise"], ["Live arrival windows", "", "Yes", "Yes"], ["Multi-depot planning", "", "", "Yes"], ["Partner API", "Yes", "Yes", "Yes"], ["Proof of delivery photos", "", "Yes", ""]]);
         break;
       case "inline-marks":
-        body = table([["Mark", "Example"], ["bold", `**${word(rng)}**`], ["italic", `*${word(rng)}*`], ["strike", `~~${word(rng)}~~`], ["code", `\`${word(rng)}\``]]);
+        heading = `Service status, week of ${weekDate(round * 5 + (i % 5))}`;
+        intro = "Status of each service this week. Struck-through items are resolved.";
+        body = () => table([["Service", "Status", "Note"], ...rng.shuffle(SERVICES).slice(0, 4).map((s, k) => [`\`${s}\``, ["**Degraded**", "*Watching*", "~~Incident~~ resolved", "Healthy"][k] as string, ["Latency above target since Monday", "One alert last night", "Fixed by the rollback", "No issues"][k] as string])]);
         break;
       case "code-pipes":
-        body = table([["Expression", "Meaning"], ["`a \\| b`", "either"], ["`x \\|\\| y`", "logical or"]]);
+        heading = `Command cheat sheet: ${SERVICES[(i + round * 3) % SERVICES.length]}`;
+        intro = "Commands we use most. Pipes inside code are escaped so the table stays intact.";
+        body = () => table([["Command", "What it does"], ["`kw logs api \\| grep 500`", "Show server errors"], ["`kw routes list \\|\\| echo none`", "List routes or say none"], ["`kw deploys list`", "Recent deploys"]]);
         break;
       case "links-images": {
         const ref = ctx.assets.secondary;
         links.push(ref.path);
-        body = table([["Link", "Image"], [`[docs](https://www.example.com/${word(rng)})`, imageMarkdown(path, ref)]]);
+        heading = `Who to ask about ${lowerFirst(topicsOf(home)[round % topicsOf(home).length]?.title ?? "anything")}`;
+        intro = "Who to ask about what. A green check means the person is on call this week.";
+        body = (path) => table([["Name", "Ask about", "On call"], ...PEOPLE.slice((i * 3) % 18, ((i * 3) % 18) + 3).map((p, k) => [`[${p}](https://people.example.com/${slugify(p)})`, rng.pick(topicsOf(home)).title, k === 0 ? imageMarkdown(path, ref) : ""])]);
         break;
       }
       case "unicode":
-        body = table([["Script", "Text"], ...Object.entries(SCRIPT_SAMPLES).map(([k, v]) => [k, v[0] as string]), ["emoji", EMOJI_SEQUENCES.slice(0, 3).join(" ")]]);
+        folder = `${LOCALIZATION}/reference`;
+        heading = Math.floor(i / 9) === 0 ? "Language names" : `Language names, part ${Math.floor(i / 9) + 1}`;
+        intro = "How each language we support writes the sentence used in the driver app's onboarding screen.";
+        body = () => table([["Language", "Sample"], ...Object.entries(SCRIPT_SAMPLES).map(([k, v]) => [capitalize(k), v[0] as string]), ["Emoji", EMOJI_SEQUENCES.slice(0, 3).join(" ")]]);
         break;
       case "plain":
-        body = table([["Name", "Value"], [word(rng), String(rng.int(1, 100))]]);
+        heading = `Contacts for ${lowerFirst(topicsOf(home)[(round + 2) % topicsOf(home).length]?.title ?? "the team")}`;
+        intro = "The quickest way to reach the team.";
+        body = () => table([["Channel", "Use it for"], ["Team chat", "Questions and quick help"], ["Ticket queue", "Anything that can wait a day"]]);
         break;
     }
-    addDoc(ctx, path, `# ${capitalize(kind.replace(/-/g, " "))} table\n\n${body}\n\nReference: ${canary}`, "tables", {
-      canary, links, note: kind === "long" ? "long table" : null,
+    const name = kind === "aligned" ? `aligned-${i + 1}` : slugify(heading);
+    const path = uniquePath(ctx, folder, name);
+    const canary = ctx.canaries.take();
+    addDoc(ctx, path, `# ${heading}\n\n${intro}\n\n${body(path)}\n\n${idLine(canary)}\n`, "tables", {
+      canary, links, note: kind === "long" ? "long table" : kind === "wide" ? "30 columns" : null,
       ...(kind === "aligned" ? fromFixture(ctx, "tables/table-alignment.md") : {}),
     });
   }
-  doc(ctx, "eng/backend/tables", "escaped-pipe-plain-cell", "tables", (canary) => `# Escaped pipe\n\n${table([["Choice", "Value"], ["either", "a \\| b"]])}\n\nReference: ${canary}`, {
+  doc(ctx, `${EDGE}/tables`, "escaped-pipe-plain-cell", "tables", (canary) => `# Escaped pipe\n\n${table([["Choice", "Value"], ["either", "a \\| b"]])}\n\n${idLine(canary)}\n`, {
     expected: "lint-error",
     rule: "table-escaped-pipe",
     basis: "known",
@@ -459,28 +620,66 @@ function tables(ctx: Context): void {
 
 // ---------------------------------------------------------------- typography and scripts
 
+const LOCALES: Record<string, { folder: string; language: string; english: string[] }> = {
+  greek: { folder: "Ελληνικά (el)", language: "Greek", english: ["The meeting is tomorrow morning.", "Update the project board.", "All the best, everyone."] },
+  chinese: { folder: "中文 (zh)", language: "Chinese", english: ["The meeting notes have been updated.", "Please finish the review before Friday.", "The project plan needs more discussion."] },
+  japanese: { folder: "日本語 (ja)", language: "Japanese", english: ["The meeting is tomorrow morning.", "Please share the materials.", "I checked the progress."] },
+  korean: { folder: "한국어 (ko)", language: "Korean", english: ["The meeting is tomorrow morning.", "Please review the document.", "The schedule has changed."] },
+  arabic: { folder: "العربية (ar)", language: "Arabic", english: ["The meeting is tomorrow morning.", "Please review the plan.", "The schedule has been updated."] },
+  hebrew: { folder: "עברית (he)", language: "Hebrew", english: ["The meeting is tomorrow morning.", "Please update the document.", "The plan was approved."] },
+  devanagari: { folder: "हिन्दी (hi)", language: "Hindi", english: ["The meeting is tomorrow morning.", "Please review the plan.", "The list has been updated."] },
+  thai: { folder: "ไทย (th)", language: "Thai", english: ["The meeting is tomorrow morning.", "Please check the document.", "The plan has been approved."] },
+};
+const LOCALE_PAGES = ["Team phrases", "Glossary", "Style notes", "Review checklist", "Delivery messages", "Driver app strings", "Release note translation", "Support macros"];
+
 function typography(ctx: Context): void {
   const { rng } = ctx;
   const features: [string, (rng: Rng) => string][] = [
     ["marks", (r) => `**bold** *italic* ~~strike~~ \`code\` <u>underline</u> ==highlight== ^sup^ ***both*** **bold with *italic* inside** ${word(r)}`],
     ...Object.entries(SCRIPT_SAMPLES).map(([name, lines]): [string, (rng: Rng) => string] => [name, () => lines.join("\n\n")]),
     ["emoji", () => `${EMOJI.join(" ")}\n\n${EMOJI_SEQUENCES.join(" ")}`],
-    ["combining", () => "Cafe\u0301, nai\u0308ve, a\u0323\u0302, Z\u0335\u0321a\u0337l\u0336g\u0338o"],
+    ["combining", () => "Café, naïve, ậ, Z̵̡a̷l̶g̸o"],
     ["math-alphanumerics", () => "𝐁𝐨𝐥𝐝 𝐼𝑡𝑎𝑙𝑖𝑐 𝔉𝔯𝔞𝔨𝔱𝔲𝔯 𝕯𝖔𝖚𝖇𝖑𝖊 𝟘𝟙𝟚"],
-    ["spaces", () => "non\u00a0breaking, narrow\u202fno-break, zero\u200bwidth, joiner\u200d, thin\u2009space"],
-    ["quotes", () => "\u201cSmart quotes\u201d, \u2018single\u2019, \u00abguillemets\u00bb, \u201elow\u201c, em\u2014dash, en\u2013dash, ellipsis\u2026"],
+    ["spaces", () => "non breaking, narrow no-break, zero​width, joiner‍, thin space"],
+    ["quotes", () => "“Smart quotes”, ‘single’, «guillemets», „low“, em—dash, en–dash, ellipsis…"],
     ["tabs", (r) => `Column\tValue\n${word(r)}\t${r.int(1, 99)}\n\tindented with a tab`],
     ["bidi", () => `Mixed: English, ${SCRIPT_SAMPLES.arabic?.[0]} and ${SCRIPT_SAMPLES.hebrew?.[0]} in one line.`],
   ];
+  const pagesUsed = new Map<string, number>();
   for (let i = 0; i < 120; i++) {
-    const home = nextHome();
     const [name, make] = features[i % features.length] as [string, (rng: Rng) => string];
     const ending = i % 10 === 4 ? "crlf" : i % 10 === 7 ? "bom" : "lf";
     const canary = ctx.canaries.take();
-    let text = `# ${capitalize(name)} ${i + 1}\n\n${make(rng)}\n\n${paragraph(rng)}\n\nReference: ${canary}\n`;
+    const locale = LOCALES[name];
+    let text: string;
+    let path: string;
+    if (locale) {
+      const n = pagesUsed.get(name) ?? 0;
+      pagesUsed.set(name, n + 1);
+      const page = LOCALE_PAGES[n % LOCALE_PAGES.length] as string;
+      const samples = SCRIPT_SAMPLES[name] as string[];
+      path = uniquePath(ctx, `${LOCALIZATION}/${locale.folder}`, slugify(page));
+      text = [
+        `# ${locale.language}: ${page.toLowerCase()}`,
+        "",
+        `Reviewed by ${rng.pick(PEOPLE)} on ${weekDate(rng.int(10, 60))}. Keep translations short: driver app buttons have room for about twenty characters.`,
+        "",
+        table([["English", locale.language], ...locale.english.map((en, k) => [en, samples[k] as string])]),
+        "",
+        "## Sample paragraph",
+        "",
+        make(rng),
+        "",
+        idLine(canary),
+        "",
+      ].join("\n");
+    } else {
+      path = uniquePath(ctx, `${EDGE}/typography`, `${name}-${i + 1}`);
+      text = `# ${capitalize(name.replace(/-/g, " "))} ${i + 1}\n\n${make(rng)}\n\n${paragraph(rng)}\n\n${idLine(canary)}\n`;
+    }
     if (ending === "crlf") text = text.replace(/\n/g, "\r\n");
     const content = ending === "bom" ? Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]) : Buffer.from(text);
-    addDoc(ctx, uniquePath(ctx, `${home.path}/typography`, `${name}-${i + 1}`), content, "typography-scripts", {
+    addDoc(ctx, path, content, "typography-scripts", {
       canary,
       note: ending === "lf" ? null : ending === "crlf" ? "CRLF line endings" : "starts with a byte order mark",
     });
@@ -491,66 +690,96 @@ function typography(ctx: Context): void {
 
 function linksGroup(ctx: Context): void {
   const { rng } = ctx;
-  const folder = "eng/frontend/link-targets";
+  const folder = "eng/frontend/guides";
   // Targets first, so links can point at them; they count in the group too.
-  const targets: CorpusFile[] = [];
-  for (const name of ["overview", "setup guide", "faq (draft)", "notes.v1", "glossary"]) {
-    targets.push(doc(ctx, folder, name, "links", (canary) => `# ${capitalize(name)}\n\n## Details\n\n${paragraph(rng)}\n\nReference: ${canary}`));
-  }
+  const pages: [string, string, string][] = [
+    ["overview", "Web overview", "The dispatch console is a single-page app that talks to the dispatch API. Planners use it from the first import in the morning until the last van is back."],
+    ["setup guide", "Setup guide", "Install Node 24, clone the console repository and run the development server against the staging API. Ask for a staging account in the team channel."],
+    ["faq (draft)", "Frequently asked questions (draft)", "Answers to the questions new web engineers ask in their first month. This page is a draft: add your question at the end."],
+    ["notes.v1", "Architecture notes, version 1", "The first architecture notes, kept for history. Most of it still holds, but the state handling has changed since."],
+    ["glossary", "Glossary", "Depot: where vans load. Route: the ordered stops of one van for one day. Window: the time a customer accepts a delivery."],
+  ];
+  const targets = pages.map(([name, heading, text]) => doc(ctx, folder, name, "links", (canary) => `# ${heading}\n\n${text}\n\n## Details\n\n${paragraph(rng)}\n\n${idLine(canary)}\n`));
   const unsynced = `${LOOSE}/data/inventory.csv`;
   for (let i = 0; i < 75; i++) {
     const home = nextHome();
-    const path = uniquePath(ctx, `${home.path}/links`, `links-${i + 1}`);
+    const path = uniquePath(ctx, `${home.path}/digests`, `weekly-digest-${String(i + 1).padStart(2, "0")}`);
     const target = targets[i % targets.length] as CorpusFile;
     const rel = relativeLink(path, target.path);
     const forms = [
-      `See [the ${posix.basename(target.path, ".md")}](${destination(rel)}).`,
-      `Jump to [details](${destination(`${rel}#details`)}).`,
-      `Raw data lives in [the inventory](${destination(relativeLink(path, unsynced))}), which is not synchronized.`,
-      `Visit [the site](https://www.example.com/${word(rng)}) or <https://www.example.org/${word(rng)}>.`,
-      `Read [the guide][guide] later.\n\n[guide]: https://www.example.com/guide`,
-      `Write to [the team](mailto:team@example.com).`,
-      `A link with [parentheses](https://www.example.com/page_(draft)) and [spaces](<https://www.example.com/a page>).`,
+      `New to the console? Start with [the ${posix.basename(target.path, ".md")} page](${destination(rel)}).`,
+      `The [details section](${destination(`${rel}#details`)}) was updated this week.`,
+      `Raw numbers are in [the inventory export](${destination(relativeLink(path, unsynced))}), which stays in the shared workspace.`,
+      `Worth reading: [a post on route planning](https://www.example.com/${word(rng)}) and <https://www.example.org/${word(rng)}>.`,
+      `Read [the style guide][guide] before your next review.\n\n[guide]: https://www.example.com/guide`,
+      `Questions? Write to [the team](mailto:team@example.com).`,
+      `Two links people asked about: [the draft plan](https://www.example.com/page_(draft)) and [the shared notes](<https://www.example.com/a page>).`,
     ];
     const chosen = [forms[i % forms.length] as string, forms[(i + 3) % forms.length] as string];
     const canary = ctx.canaries.take();
     const links = chosen.some((f) => f.includes(rel)) ? [target.path] : [];
     if (chosen.some((f) => f.includes("inventory"))) links.push(unsynced);
-    addDoc(ctx, path, `# Links ${i + 1}\n\n${chosen.join("\n\n")}\n\nReference: ${canary}`, "links", { canary, links });
+    const tp = rng.pick(topicsOf(home));
+    addDoc(ctx, path, `# Weekly digest ${i + 1}: ${profileOf(home).name.toLowerCase()}\n\n${progressLine(tp)}\n\n${chosen.join("\n\n")}\n\n${idLine(canary)}\n`, "links", { canary, links });
   }
+}
+
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+function progressLine(tp: Topic): string {
+  return `This week: ${tp.title.toLowerCase()}. ${tp.summary}`;
 }
 
 // ---------------------------------------------------------------- front matter
 
 function frontMatter(ctx: Context): void {
   const { rng } = ctx;
+  const dealer = new Dealer(TOPIC_HOMES);
   for (let i = 0; i < 60; i++) {
-    const home = nextHome();
+    const { home, round } = dealer.next();
     const canary = ctx.canaries.take();
     const only = i % 10 === 9;
+    const tp = topicsOf(home)[round % topicsOf(home).length] as Topic;
+    const [owner, ...reviewers] = rng.shuffle(PEOPLE).slice(0, 3);
     const yaml = [
-      `title: "${title(rng)}"`,
-      `owner: ${person(rng)}`,
+      `title: "${tp.title}"`,
+      `owner: ${owner}`,
       `date: ${isoDate(rng)}`,
-      `tags: [${word(rng)}, ${word(rng)}]`,
+      `status: ${rng.pick(["draft", "in review", "approved"])}`,
+      `tags: [${slugify(profileOf(home).name)}, ${tp.system}]`,
       "reviewers:",
-      `  - ${person(rng)}`,
-      `  - ${person(rng)}`,
+      ...reviewers.map((r) => `  - ${r}`),
       "meta:",
       `  team: ${team(rng)}`,
-      "  limits:",
-      `    daily: ${rng.int(1, 100)}`,
+      "  budget:",
+      `    weeks: ${rng.int(2, 12)}`,
       "summary: |",
-      `  ${sentence(rng)}`,
-      `  ${sentence(rng)}`,
-      `note: "${SCRIPT_SAMPLES.greek?.[0]} ${rng.pick(EMOJI)}"`,
+      `  ${tp.summary}`,
+      `  ${tp.change}`,
+      `title_el: "${SCRIPT_SAMPLES.greek?.[0]} ${rng.pick(EMOJI)}"`,
       `reference: ${canary}`,
     ];
-    const body = only ? `---\n${yaml.join("\n")}\n---\n` : `---\n${yaml.join("\n")}\n---\n\n# ${title(rng)}\n\n${paragraph(rng)}\n`;
-    addDoc(ctx, uniquePath(ctx, `${home.path}/front-matter`, `${only ? "front-matter-only" : "with-front-matter"}-${i + 1}`), body, "front-matter", {
-      canary,
-      note: only ? "front matter only" : null,
-    });
+    if (only) {
+      addDoc(ctx, uniquePath(ctx, `${EDGE}/front-matter`, `metadata-only-${i + 1}`), `---\n${yaml.join("\n")}\n---\n`, "front-matter", { canary, note: "front matter only" });
+      continue;
+    }
+    const body = [
+      `# Brief: ${tp.title}`,
+      "",
+      "## Problem",
+      "",
+      tp.problem,
+      "",
+      "## What we will do",
+      "",
+      tp.change,
+      "",
+      `We will call it done when the ${tp.metric} is at or below ${tp.unit === "%" ? `${tp.after}%` : `${tp.after}${tp.unit ? ` ${tp.unit}` : ""}`}.`,
+      "",
+    ].join("\n");
+    addDoc(ctx, uniquePath(ctx, `${home.path}/briefs`, slugify(tp.title)), `---\n${yaml.join("\n")}\n---\n\n${body}`, "front-matter", { canary });
   }
 }
 
@@ -558,41 +787,44 @@ function frontMatter(ctx: Context): void {
 
 function htmlExtensions(ctx: Context): void {
   const { rng } = ctx;
-  const forms: [string, (rng: Rng) => string][] = [
-    ["html-block", (r) => `<div align="center">\n  <strong>${word(r)}</strong>\n</div>`],
-    ["comment", (r) => `<!-- ${sentence(r)} -->\n\n${sentence(r)}`],
-    ["details", (r) => `<details>\n<summary>${capitalize(word(r))}</summary>\n\n${paragraph(r)}\n\n</details>`],
-    ["definition-list", (r) => `${capitalize(word(r))}\n: ${sentence(r)}`],
-    ["alert-note", (r) => `> [!NOTE]\n> ${sentence(r)}`],
-    ["alert-warning", (r) => `> [!WARNING]\n> ${sentence(r)}`],
-    ["inline-math", () => "The ratio is $\\frac{a}{b}$ and $x_1 + x_2$."],
-    ["block-math", () => "$$\n\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}\n$$"],
-    ["emoji-shortcode", () => "Good work :smile: :rocket: :tada:"],
-    ["task-list", (r) => `* [ ] ${sentence(r)}\n* [x] ${sentence(r)}`],
+  const forms: [string, (rng: Rng, p: Profile, tp: Topic, n: number) => [string, string]][] = [
+    ["charter", (_r, p) => [`${p.name} team charter`, `<div align="center">\n  <strong>${p.about}</strong>\n</div>\n\nWe meet weekly, write things down and review each other's work within a day.`]],
+    ["draft", (_r, _p, tp) => [`Draft: ${tp.title.toLowerCase()}`, `<!-- Add last week's numbers before sharing. -->\n\n${tp.summary} ${tp.problem}`]],
+    ["review-notes", (_r, _p, tp) => [`${tp.title}: notes for reviewers`, `${tp.summary}\n\n<details>\n<summary>Background</summary>\n\n${tp.problem}\n\n</details>\n\n<details>\n<summary>What could go wrong</summary>\n\n${tp.risk}\n\n</details>`]],
+    ["glossary", (_r, p) => [`${p.name} glossary`, `Depot\n: A building where vans are loaded.\n\nRoute\n: The ordered stops of one van for one day.\n\nTime window\n: The hours in which a customer accepts a delivery.`]],
+    ["maintenance", (r) => [`Maintenance notice, ${weekDate(r.int(20, 60), r.int(0, 4))}`, `> [!NOTE]\n> The console will be read-only between 05:00 and 05:30 UTC while we upgrade the database. Drivers are not affected.`]],
+    ["known-issue", (_r, _p, tp) => [`Known issue: ${tp.title.toLowerCase()}`, `> [!WARNING]\n> ${tp.problem}\n\n${tp.change}`]],
+    ["capacity", (r) => [`Capacity estimate, ${r.pick(DEPOTS)} depot`, `With $v$ vans of $c$ parcels each and a fill rate of $f$, the depot ships $v \\times c \\times f$ parcels a day. Today that is $${r.int(10, 30)} \\times 120 \\times 0.8$.`]],
+    ["formula", () => ["How we estimate route length", "The planner estimates the length of a route with $n$ stops in an area $A$ as\n\n$$\nL \\approx 0.75 \\sqrt{n A}\n$$\n\nThe constant comes from our own routes of the last year."]],
+    ["kudos", (r) => [`Kudos, week ${r.int(1, 52)}`, `:tada: Thanks to ${r.pick(PEOPLE)} for the quick fix on Tuesday, and :rocket: to everyone who helped with the launch. :clap:`]],
+    ["checklist", (_r, _p, tp) => [`Checklist: ${tp.title.toLowerCase()}`, `* [ ] ${tp.change}\n* [x] Agree on the measure: ${tp.metric}\n* [ ] Tell support before the rollout`]],
   ];
+  const dealer = new Dealer(TOPIC_HOMES);
   for (let i = 0; i < 100; i++) {
-    const home = nextHome();
-    const [name, make] = forms[i % forms.length] as [string, (rng: Rng) => string];
-    doc(ctx, `${home.path}/extensions`, `${name}-${i + 1}`, "html-extensions", (canary) => `# ${capitalize(name.replace(/-/g, " "))}\n\n${make(rng)}\n\nReference: ${canary}`);
+    const { home, round } = dealer.next();
+    const profile = profileOf(home);
+    const tp = topicsOf(home)[round % topicsOf(home).length] as Topic;
+    const [name, make] = forms[i % forms.length] as [string, (rng: Rng, p: Profile, tp: Topic, n: number) => [string, string]];
+    const [heading, body] = make(rng, profile, tp, i);
+    doc(ctx, `${home.path}/notes`, slugify(heading), "html-extensions", (canary) => `# ${heading}\n\n${body}\n\n${idLine(canary)}\n`, { note: name });
   }
 }
 
 // ---------------------------------------------------------------- conflict-marker lookalikes
 
 function conflictMarkers(ctx: Context): void {
-  const { rng } = ctx;
   const markers = "<<<<<<< ours\nthe old line\n=======\nthe new line\n>>>>>>> theirs";
-  const forms: [string, (s: string) => string][] = [
-    ["conflict-markers/in-code-fence.md", (s) => `\`\`\`text\n${s}\n\`\`\``],
+  const forms: [string, string, (s: string) => string][] = [
+    ["conflict-markers/in-code-fence.md", "In a code block, the markers look like this:", (s) => `\`\`\`text\n${s}\n\`\`\``],
     // Blank quote lines prevent the equals marker from becoming a setext heading.
-    ["conflict-markers/in-quote.md", (s) => s.split("\n").map((l) => `> ${l}`).join("\n>\n")],
-    ["conflict-markers/in-inline-code.md", () => "Inline: `<<<<<<< ours` and `=======` and `>>>>>>> theirs`."],
-    ["conflict-markers/diff3-in-fence.md", (s) => `\`\`\`text\n${s.replace("=======", "||||||| base\nthe base line\n=======")}\n\`\`\``],
-    ["conflict-markers/in-indented-code.md", (s) => `    ${s.split("\n").join("\n    ")}`],
+    ["conflict-markers/in-quote.md", "Someone pasted the markers into a quote:", (s) => s.split("\n").map((l) => `> ${l}`).join("\n>\n")],
+    ["conflict-markers/in-inline-code.md", "The markers are", () => "`<<<<<<< ours` and `=======` and `>>>>>>> theirs`."],
+    ["conflict-markers/diff3-in-fence.md", "With the diff3 style, Git also shows the common base:", (s) => `\`\`\`text\n${s.replace("=======", "||||||| base\nthe base line\n=======")}\n\`\`\``],
+    ["conflict-markers/in-indented-code.md", "Indented four spaces, the markers are code:", (s) => `    ${s.split("\n").join("\n    ")}`],
   ];
   for (let i = 0; i < 10; i++) {
-    const [fixture, form] = forms[i % forms.length] as [string, (s: string) => string];
-    doc(ctx, "eng/backend/merges", `marker-lookalike-${i + 1}`, "conflict-markers", (canary) => `# How merges look\n\n${paragraph(rng)}\n\n${form(markers)}\n\nReference: ${canary}`, {
+    const [fixture, intro, form] = forms[i % forms.length] as [string, string, (s: string) => string];
+    doc(ctx, `${EDGE}/merges`, `marker-lookalike-${i + 1}`, "conflict-markers", (canary) => `# How merge conflicts look\n\nWhen two people change the same line, Git stops and marks both versions. ${intro}\n\n${form(markers)}\n\n${idLine(canary)}\n`, {
       ...fromFixture(ctx, fixture),
       note: "git marker examples outside a sync conflict",
     });
@@ -603,22 +835,22 @@ function conflictMarkers(ctx: Context): void {
 
 function lintErrors(ctx: Context): void {
   const { rng } = ctx;
-  const folder = "docs/handbook/needs-fixing";
+  const folder = `${EDGE}/needs-fixing`;
   const make = (rule: string, name: string, body: (canary: string, path: string) => string) =>
     // Every rule here has been observed in Linear, so its basis is "known".
     doc(ctx, folder, name, "lint-errors", body, { expected: "lint-error", rule, basis: "known" });
-  for (let i = 0; i < 8; i++) make("footnote", `footnote-${i + 1}`, (c) => `# Sources\n\n${sentence(rng)}[^${i + 1}]\n\n[^${i + 1}]: ${sentence(rng)}\n\nReference: ${c}`);
-  for (let i = 0; i < 7; i++) make("subscript", `subscript-${i + 1}`, (c) => `# Formula\n\nWater is H~2~O and ${word(rng)}~${i + 1}~ follows.\n\nReference: ${c}`);
-  for (let i = 0; i < 6; i++) make("table-escaped-pipe", `escaped-pipe-${i + 1}`, (c) => `# Options\n\n${table([["Option", "Values"], [word(rng), "a \\| b"]])}\n\nReference: ${c}`);
+  for (let i = 0; i < 8; i++) make("footnote", `footnote-${i + 1}`, (c) => `# Sources\n\n${sentence(rng)}[^${i + 1}]\n\n[^${i + 1}]: ${sentence(rng)}\n\n${idLine(c)}\n`);
+  for (let i = 0; i < 7; i++) make("subscript", `subscript-${i + 1}`, (c) => `# Formula\n\nWater is H~2~O and ${word(rng)}~${i + 1}~ follows.\n\n${idLine(c)}\n`);
+  for (let i = 0; i < 6; i++) make("table-escaped-pipe", `escaped-pipe-${i + 1}`, (c) => `# Options\n\n${table([["Option", "Values"], [word(rng), "a \\| b"]])}\n\n${idLine(c)}\n`);
   for (let i = 0; i < 6; i++) {
     make("image-in-link", `image-in-link-${i + 1}`, (c, path) => {
-      return `# Linked picture\n\n[${imageMarkdown(path, ctx.assets.secondary)}](https://www.example.com/${word(rng)})\n\nReference: ${c}`;
+      return `# Linked picture\n\n[${imageMarkdown(path, ctx.assets.secondary)}](https://www.example.com/${word(rng)})\n\n${idLine(c)}\n`;
     });
     (ctx.files.at(-1) as CorpusFile).links.push(ctx.assets.secondary.path);
   }
   for (const length of [CONTENT_LIMIT + 1, 260_000, 300_000]) {
     make("content-too-long", `too-long-${length}`, (c) => {
-      const head = `# Archive\n\nReference: ${c}\n\n`;
+      const head = `# Archive\n\n${idLine(c)}\n\n`;
       return head + asciiFiller(rng, length - head.length);
     });
   }
@@ -632,23 +864,24 @@ function unsynced(ctx: Context): void {
     ctx.taken.add(path);
     ctx.files.push(markdownFile({ path, content: typeof content === "string" ? Buffer.from(content) : content, group: "unsynced", synced: false, ...options }));
   };
-  const code: [string, (c: string) => string][] = [
-    ["ts", (c) => `// ${c}\nexport function total(values: number[]): number {\n  return values.reduce((a, b) => a + b, 0);\n}\n`],
-    ["py", (c) => `# ${c}\ndef total(values):\n    return sum(values)\n`],
-    ["sh", (c) => `#!/bin/sh\n# ${c}\necho "ready"\n`],
-    ["go", (c) => `// ${c}\npackage main\n\nfunc main() {}\n`],
+  const code: [string, string, (c: string) => string][] = [
+    ["export-routes", "py", (c) => `# ${c}\n"""Export yesterday's routes as CSV."""\nimport csv\nimport sys\n\n\ndef main(rows):\n    writer = csv.writer(sys.stdout)\n    writer.writerow(["route", "stops", "km"])\n    for row in rows:\n        writer.writerow(row)\n`],
+    ["check-depots", "sh", (c) => `#!/bin/sh\n# ${c}\n# Print the opening hours of every depot.\nfor depot in harbor northgate riverside; do\n  echo "$depot: 06:00"\ndone\n`],
+    ["route-totals", "ts", (c) => `// ${c}\nexport function totalKilometers(legs: number[]): number {\n  return legs.reduce((sum, leg) => sum + leg, 0);\n}\n`],
+    ["window-check", "go", (c) => `// ${c}\npackage main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("windows ok")\n}\n`],
   ];
   for (let i = 0; i < 12; i++) {
-    const [ext, make] = code[i % code.length] as [string, (c: string) => string];
+    const [base, ext, make] = code[i % code.length] as [string, string, (c: string) => string];
     const canary = ctx.canaries.take();
-    add(`${LOOSE}/scripts/tool-${i + 1}.${ext}`, make(canary), { canary, canaryIn: "content", kind: "other" });
+    add(`${LOOSE}/scripts/${base}-${Math.floor(i / code.length) + 1}.${ext}`, make(canary), { canary, canaryIn: "content", kind: "other" });
   }
   add(`${LOOSE}/data/inventory.csv`, `id,item,count\n1,${word(rng)},${rng.int(1, 99)}\n`, { kind: "attachment" });
-  for (let i = 0; i < 5; i++) add(`${LOOSE}/data/export-${i + 1}.csv`, `id,value\n1,${rng.int(1, 99)}\n`, { kind: "attachment" });
-  for (let i = 0; i < 6; i++) add(`${LOOSE}/config/settings-${i + 1}.yaml`, `name: ${word(rng)}\nenabled: ${rng.bool()}\n`, { kind: "other" });
+  for (let i = 0; i < 5; i++) add(`${LOOSE}/data/export-${i + 1}.csv`, `depot,deliveries\n${rng.pick(DEPOTS)},${rng.int(100, 999)}\n`, { kind: "attachment" });
+  for (let i = 0; i < 6; i++) add(`${LOOSE}/config/depot-${i + 1}.yaml`, `depot: ${rng.pick(DEPOTS)}\nopens: "0${rng.int(5, 7)}:00"\nlunch_break: ${rng.bool()}\n`, { kind: "other" });
   for (let i = 0; i < 12; i++) {
     const canary = ctx.canaries.take();
-    add(`${LOOSE}/notes/note-${i + 1}.md`, `# ${title(rng)}\n\n${paragraph(rng)}\n\nReference: ${canary}\n`, { canary, canaryIn: "content" });
+    const tp = title(rng);
+    add(`${LOOSE}/notes/${person(rng).toLowerCase()}-${i + 1}.md`, `# Personal notes: ${tp.toLowerCase()}\n\n${paragraph(rng)}\n\nDoc ID: ${canary}\n`, { canary, canaryIn: "content" });
   }
   // A binary file with a Markdown name; the canary is in its name.
   const canary = ctx.canaries.take();
@@ -659,9 +892,10 @@ function unsynced(ctx: Context): void {
 
 export function documents(rng: Rng, canaries: Canaries, assets: Assets, taken: Set<string>, fixtures: CorpusFile[]): CorpusFile[] {
   homeCursor = 0;
-  const ctx: Context = { rng, canaries, assets, files: [], taken, fixtures: new Map(fixtures.map((f) => [f.path, f])) };
+  serviceCursor = 0;
+  const ctx: Context = { rng, canaries, assets, files: [], taken, fixtures: new Map(fixtures.map((f) => [f.path, f])), sharedUsers: 0 };
   specialDocuments(ctx);
-  workDocuments(ctx, 40 - 1); // the titled-image document is the fortieth user of the shared image
+  workDocuments(ctx); // with the titled image, 40 documents embed the shared logo
   pairwise(ctx);
   sizeSpectrum(ctx);
   mermaid(ctx);
