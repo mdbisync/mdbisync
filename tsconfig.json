@@ -19,5 +19,5 @@
     "noEmit": true
   },
   "include": ["src", "tools", "test"],
-  "exclude": ["node_modules", "dist", "test/fixtures", "test/corpus"]
+  "exclude": ["node_modules", "dist", "test/fixtures", "test/corpus/out"]
 }

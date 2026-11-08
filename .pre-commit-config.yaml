@@ -1,5 +1,5 @@
 # Quality gate for people, CI and, later, the sync itself.
-# Test data under test/fixtures and test/corpus keeps its whitespace and
+# Test data under test/fixtures and test/corpus/out keeps its whitespace and
 # line endings on purpose, so the fixing hooks leave it alone.
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit, pre-push, manual]
@@ -9,18 +9,18 @@ repos:
     hooks:
       - id: check-merge-conflict
       - id: check-added-large-files
-        exclude: ^test/corpus/
+        exclude: ^test/corpus/out/
       - id: detect-private-key
         alias: security
       - id: check-yaml
       - id: check-json
       - id: end-of-file-fixer
-        exclude: ^test/(fixtures|corpus)/
+        exclude: ^test/(fixtures|corpus/out)/
       - id: trailing-whitespace
-        exclude: ^test/(fixtures|corpus)/
+        exclude: ^test/(fixtures|corpus/out)/
       - id: mixed-line-ending
         args: [--fix=lf]
-        exclude: ^test/(fixtures|corpus)/
+        exclude: ^test/(fixtures|corpus/out)/
   - repo: local
     hooks:
       - id: no-cyrillic
