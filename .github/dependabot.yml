@@ -8,6 +8,11 @@ updates:
       default-days: 14
     versioning-strategy: increase
     open-pull-requests-limit: 5
+    ignore:
+      # Type definitions follow the Node.js major the code runs on (24).
+      # A newer major would let code use APIs the runtime lacks.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
