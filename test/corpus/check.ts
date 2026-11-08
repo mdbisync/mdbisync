@@ -48,11 +48,14 @@ function utf8(bytes: Buffer): string | null {
 }
 
 /** Compare lint-error membership only; fixable formatting is not a content-loss error. */
-export function checkLintExpectations(root: string): string[] {
-  const manifest = JSON.parse(readFileSync(join(root, "corpus-slices", "manifest.json"), "utf8")) as Manifest;
+export function checkLintExpectations(
+  root: string,
+  manifest: Manifest = JSON.parse(readFileSync(join(root, "corpus-slices", "manifest.json"), "utf8")) as Manifest,
+): string[] {
   const documents = manifest.files.filter((f) => f.synced && f.kind === "markdown");
   const expected = new Set(documents.filter((f) => f.class === "lint-error").map((f) => f.path));
   const actual = new Map<string, Set<string>>();
+  const present: string[] = [];
   const problems: string[] = [];
   const record = (finding: Finding): void => {
     const rules = actual.get(finding.file) ?? new Set<string>();
@@ -62,16 +65,19 @@ export function checkLintExpectations(root: string): string[] {
   for (const file of documents) {
     const path = join(root, "corpus", file.path);
     if (!existsSync(path)) {
-      problems.push(`cannot lint missing file: ${file.path}`);
+      problems.push(`missing from the tree: ${file.path}`);
+      expected.delete(file.path);
       continue;
     }
+    present.push(file.path);
     for (const finding of lintText(file.path, readFileSync(path, "utf8"))) record(finding);
   }
-  for (const finding of duplicateTitles(documents.map((f) => f.path))) record(finding);
+  for (const finding of duplicateTitles(present)) record(finding);
   for (const path of [...expected].sort()) {
     if (!actual.has(path)) problems.push(`missing lint-error: ${path}`);
   }
-  for (const [path, rules] of [...actual].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+  for (const path of [...actual.keys()].sort()) {
+    const rules = actual.get(path)!;
     if (!expected.has(path)) problems.push(`unexpected lint-error: ${path} (${[...rules].sort().join(", ")})`);
   }
   return problems;
@@ -156,7 +162,11 @@ export function checkCorpus(root: string, options: { git?: boolean; lint?: boole
   }
 
   const documents = [...entries.values()].filter((e) => e.synced && e.kind === "markdown").length;
-  if (options.lint === true) problems.push(...checkLintExpectations(root));
+  if (options.lint === true) {
+    for (const problem of checkLintExpectations(root, manifest)) {
+      if (!problems.includes(problem)) problems.push(problem);
+    }
+  }
   return { problems, files: entries.size, documents, lfsBytes, nonLfsImages, groups };
 }
 
