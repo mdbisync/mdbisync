@@ -13,5 +13,20 @@ export {
   placeKey,
   planInitialSync,
 } from './plan.ts';
-export { planFromRepository } from './run.ts';
-export { DIRECTIONS, type Direction, type PlanReport, placeLabel, renderDryRun, toPlanReport } from './summary.ts';
+export { type PlanSources, planFromRepository, readPlanSources } from './run.ts';
+export { DIRECTIONS, type Direction, type PlanReport, placeLabel, renderConfirmed, renderDryRun, toPlanReport } from './summary.ts';
+export {
+  type ConfirmOptions,
+  type ConfirmedResult,
+  type FailedWrite,
+  type RecordResult,
+  type WriteStop,
+  FINAL_IDS_MESSAGE,
+  PROGRESS_BATCH,
+  PROGRESS_MESSAGE,
+  RECORD_MESSAGE,
+  SYNC_IDENTITY,
+  confirmInitialSync,
+  isProgressCommit,
+} from './confirm.ts';
+export { type BodyTransform, LeaveOutError, type TransformContext, type TransformInput, restoreBody, transformBody } from './transform.ts';

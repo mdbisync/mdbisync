@@ -29,12 +29,36 @@ export interface FakeDocument {
   createdAt: string;
   trashed?: boolean;
   archivedAt?: string;
+  /** The stored content. */
+  content?: string;
+}
+
+/** How the fake answers document writes. */
+export interface FakeWrites {
+  /** Mutations received so far. */
+  count: number;
+  /** Answer 429 from this mutation on (1-based), as Linear does when rate limited. */
+  rateLimitAt?: number;
+  /** Rejects a mutation with a GraphQL error when it returns true. */
+  reject?: (operation: string, variables: Record<string, unknown>) => boolean;
 }
 
 export interface FakeWorld {
   github: { tokenValid: boolean; missing: Set<string>; allowMergeCommit: boolean; rateLimited: boolean };
-  /** `unavailable`: the token endpoint answers 503, as in an outage. */
-  linear: { credentialsValid: boolean; unavailable: boolean; scope: string[]; teams: FakeTeam[]; projects: FakeProject[]; documents: FakeDocument[] };
+  /**
+   * `unavailable`: the token endpoint answers 503, as in an outage.
+   * `store`: what Linear stores for written content (the identity unless a test reformats).
+   */
+  linear: {
+    credentialsValid: boolean;
+    unavailable: boolean;
+    scope: string[];
+    teams: FakeTeam[];
+    projects: FakeProject[];
+    documents: FakeDocument[];
+    writes: FakeWrites;
+    store: (content: string) => string;
+  };
   /** `METHOD url` of every request. */
   requests: string[];
   /** Requests that would have changed something on either side. */
@@ -60,6 +84,8 @@ export function fakeWorld(): FakeWorld {
         { id: 'project-handbook', name: 'Handbook', teamIds: ['team-docs'] },
       ],
       documents: [],
+      writes: { count: 0 },
+      store: (content) => content,
     },
     requests: [],
     writes: [],
@@ -127,7 +153,15 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
   };
   if (/^\s*mutation/.test(query)) {
     world.writes.push(operationName);
-    return json(200, { data: {} });
+    const write = world.linear.writes;
+    write.count += 1;
+    if (write.rateLimitAt !== undefined && write.count >= write.rateLimitAt) {
+      return json(429, { errors: [{ message: 'Rate limit exceeded', extensions: { code: 'RATELIMITED' } }] });
+    }
+    if (write.reject?.(operationName, variables) === true) {
+      return json(200, { errors: [{ message: 'Rejected by the fake', extensions: { code: 'INVALID_INPUT' } }], data: null });
+    }
+    return json(200, { data: documentMutation(world, operationName, variables) ?? {} });
   }
   if (operationName === 'SetupTeams') {
     const refs = variables.refs as string[];
@@ -144,18 +178,38 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
   return json(400, { errors: [{ message: `unknown operation ${operationName}`, extensions: { code: 'INPUT_ERROR' } }] });
 }
 
-/** One project's or team zone's documents, oldest first, in pages of `first` after the cursor (an index). */
-function listDocuments(world: FakeWorld, variables: Record<string, unknown>) {
-  const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } } };
-  const projectId = filter.project?.id.eq;
-  const teamId = filter.team?.id.eq;
-  const matching = world.linear.documents
-    .filter((d) => (projectId !== undefined ? d.projectId === projectId : d.teamId === teamId && d.projectId === undefined))
-    .filter((d) => variables.includeArchived === true || (d.trashed !== true && d.archivedAt === undefined))
-    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
-  const start = variables.after === null ? 0 : Number(variables.after);
-  const end = start + Number(variables.first);
-  const nodes = matching.slice(start, end).map((d) => ({
+/** Applies a document create, update or trash to the fake's documents and answers like Linear; undefined for other mutations. */
+function documentMutation(world: FakeWorld, operation: string, variables: Record<string, unknown>): Record<string, unknown> | undefined {
+  const documents = world.linear.documents;
+  if (operation === 'CreateDocument') {
+    const input = variables.input as { id?: string; title: string; content?: string; projectId?: string; teamId?: string };
+    const document: FakeDocument = {
+      id: input.id ?? `doc-${documents.length + 1}`,
+      title: input.title,
+      content: world.linear.store(input.content ?? ''),
+      createdAt: new Date(Date.UTC(2026, 0, 2, 0, 0, documents.length)).toISOString(),
+      ...(input.projectId !== undefined ? { projectId: input.projectId } : { teamId: input.teamId as string }),
+    };
+    documents.push(document);
+    return { documentCreate: { success: true, document: documentNode(document, true) } };
+  }
+  if (operation === 'UpdateDocument') {
+    const document = documents.find((d) => d.id === variables.id);
+    if (document === undefined) return { documentUpdate: { success: false, document: null } };
+    const input = variables.input as { content?: string };
+    if (input.content !== undefined) document.content = world.linear.store(input.content);
+    return { documentUpdate: { success: true, document: documentNode(document, variables.withContent === true) } };
+  }
+  if (operation === 'TrashDocument') {
+    const document = documents.find((d) => d.id === variables.id);
+    if (document !== undefined) document.trashed = true;
+    return { documentDelete: { success: document !== undefined } };
+  }
+  return undefined;
+}
+
+function documentNode(d: FakeDocument, withContent: boolean) {
+  return {
     id: d.id,
     title: d.title,
     slugId: d.id,
@@ -168,6 +222,21 @@ function listDocuments(world: FakeWorld, variables: Record<string, unknown>) {
     updatedAt: d.createdAt,
     project: d.projectId !== undefined ? { id: d.projectId } : null,
     team: d.projectId === undefined && d.teamId !== undefined ? { id: d.teamId } : null,
-  }));
+    ...(withContent ? { content: d.content ?? '' } : {}),
+  };
+}
+
+/** One project's or team zone's documents, oldest first, in pages of `first` after the cursor (an index). */
+function listDocuments(world: FakeWorld, variables: Record<string, unknown>) {
+  const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } } };
+  const projectId = filter.project?.id.eq;
+  const teamId = filter.team?.id.eq;
+  const matching = world.linear.documents
+    .filter((d) => (projectId !== undefined ? d.projectId === projectId : d.teamId === teamId && d.projectId === undefined))
+    .filter((d) => variables.includeArchived === true || (d.trashed !== true && d.archivedAt === undefined))
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  const start = variables.after === null ? 0 : Number(variables.after);
+  const end = start + Number(variables.first);
+  const nodes = matching.slice(start, end).map((d) => documentNode(d, variables.withContent === true));
   return { nodes, pageInfo: { hasNextPage: end < matching.length, endCursor: end < matching.length ? String(end) : null } };
 }

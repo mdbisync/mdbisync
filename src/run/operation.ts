@@ -1,17 +1,28 @@
 // Runs one operation after its preflight: `check` stops there; an initial
 // sync from git to Linear without `confirm` plans and reports what it would
-// do. The other operations are not built yet and say so after a passed
-// preflight.
+// do, and with `confirm` makes Linear equal to the tracked branch and
+// records the state. The other operations are not built yet and say so after
+// a passed preflight.
 
-import { type PlanReport, planFromRepository, renderDryRun, toPlanReport } from '../initial-sync/index.ts';
+import {
+  type ConfirmedResult,
+  type PlanReport,
+  confirmInitialSync,
+  planFromRepository,
+  renderConfirmed,
+  renderDryRun,
+  toPlanReport,
+} from '../initial-sync/index.ts';
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
 import { type Operation, type PreflightOptions, type PreflightOutcome, runPreflight } from './preflight.ts';
 
 export interface OperationOutcome extends PreflightOutcome {
   /** The preflight passed, but the operation is not built yet; nothing was written. */
   notImplemented: boolean;
-  /** The initial sync's plan, for a dry run. */
+  /** The initial sync's plan. */
   plan?: PlanReport;
+  /** What a confirmed initial sync wrote and recorded. */
+  confirmed?: ConfirmedResult;
 }
 
 export async function runOperation(
@@ -21,31 +32,36 @@ export async function runOperation(
   options: PreflightOptions,
 ): Promise<OperationOutcome> {
   if (operation === 'initial-sync' && initialSync === undefined) throw new Error('initial sync needs its direction and confirm inputs');
-  const dryRun = operation === 'initial-sync' && isDryRunBuilt(initialSync as InitialSyncInputs);
+  const built = operation === 'initial-sync' && (initialSync as InitialSyncInputs).direction === 'git-to-linear';
+  const confirm = built && (initialSync as InitialSyncInputs).confirm;
   let plan: PlanReport | undefined;
-  let planSummary = '';
+  let confirmed: ConfirmedResult | undefined;
+  let workSummary = '';
   const preflight = await runPreflight(
     operation,
     inputs,
     options,
-    dryRun
+    built
       ? async (context) => {
-          const planned = await planFromRepository(context);
-          plan = toPlanReport(planned, (initialSync as InitialSyncInputs).direction, false);
-          planSummary = renderDryRun(planned);
+          if (confirm) {
+            const run = await confirmInitialSync(context, { config: inputs.state });
+            plan = toPlanReport(run.plan, 'git-to-linear', true);
+            confirmed = run.result;
+            workSummary = renderConfirmed(run.plan, run.result);
+          } else {
+            const planned = await planFromRepository(context);
+            plan = toPlanReport(planned, 'git-to-linear', false);
+            workSummary = renderDryRun(planned);
+          }
         }
       : undefined,
   );
   if (!preflight.ok) return { ...preflight, notImplemented: false };
-  const outcome: OperationOutcome = { ...preflight, notImplemented: operation !== 'check' && !dryRun };
+  const outcome: OperationOutcome = { ...preflight, notImplemented: operation !== 'check' && !built };
   if (plan !== undefined) {
     outcome.plan = plan;
-    outcome.summary = `${preflight.summary.trimEnd()}\n\n${planSummary}`;
+    outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;
   }
+  if (confirmed !== undefined) outcome.confirmed = confirmed;
   return outcome;
-}
-
-/** The dry run from git to Linear is built; a confirmed run and the other direction are not yet. */
-function isDryRunBuilt(inputs: InitialSyncInputs): boolean {
-  return inputs.direction === 'git-to-linear' && !inputs.confirm;
 }

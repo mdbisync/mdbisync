@@ -31,6 +31,8 @@ export const USAGE_EXIT_CODE = 2;
 export const SETUP_FAILED_EXIT_CODE = 3;
 /** The sync has no state; nothing was written; run initial sync first. */
 export const NO_STATE_EXIT_CODE = 4;
+/** A confirmed initial sync wrote part of its work and stopped; run it again with the same inputs. */
+export const INCOMPLETE_EXIT_CODE = 5;
 
 export function isCommandName(value: string): value is CommandName {
   return Object.hasOwn(COMMANDS, value);

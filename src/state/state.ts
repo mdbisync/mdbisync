@@ -222,11 +222,18 @@ export async function readUploads(git: Git, commit: Oid | null): Promise<UploadM
   return map;
 }
 
-/** Commits the id map on top of `parent`. Returns `parent` when nothing changed. */
-export function commitIds(git: Git, parent: Oid | null, ids: IdMap, identity: CommitIdentity): Promise<Oid> {
+export interface CommitStateOptions {
+  /** The commit message; a reader can tell a run's progress commits from its final one by it. */
+  message?: string;
+  /** Commit even when the file is unchanged, so the new message is recorded. */
+  always?: boolean;
+}
+
+/** Commits the id map on top of `parent`. Returns `parent` when nothing changed, unless `always`. */
+export function commitIds(git: Git, parent: Oid | null, ids: IdMap, identity: CommitIdentity, options: CommitStateOptions = {}): Promise<Oid> {
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
   const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry.saved === undefined ? { id: entry.id } : { id: entry.id, saved: entry.saved }]));
-  return commitJsonFile(git, parent, IDS_FILE, data, 'Update document ids', identity);
+  return commitJsonFile(git, parent, IDS_FILE, data, options.message ?? 'Update document ids', identity, options.always === true);
 }
 
 /** Commits the upload cache on top of `parent`. Returns `parent` when nothing changed. */
@@ -270,13 +277,22 @@ async function readJsonFile(git: Git, commit: Oid | null, file: string): Promise
   return data as Record<string, unknown>;
 }
 
-function commitJsonFile(git: Git, parent: Oid | null, file: string, data: unknown, message: string, identity: CommitIdentity): Promise<Oid> {
+function commitJsonFile(
+  git: Git,
+  parent: Oid | null,
+  file: string,
+  data: unknown,
+  message: string,
+  identity: CommitIdentity,
+  always = false,
+): Promise<Oid> {
   return commitTree(git, {
     parents: parent === null ? [] : [parent],
     base: null,
     changes: new Map([[file, `${JSON.stringify(data, null, 2)}\n`]]),
     message,
     identity,
+    skipIfUnchanged: !always,
   });
 }
 
