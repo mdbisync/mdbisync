@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"plain text block\n  keeps indentation","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-3e50e346","marks":{"attribution":"user"}}]}
+  ]
+}

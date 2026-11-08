@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"math_block","attrs":{"id":"<id>","language":"latex"},"children":[{"text":"E = mc^2","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-90c9efd0","marks":{"attribution":"user"}}]}
+  ]
+}

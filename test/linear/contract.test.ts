@@ -6,7 +6,7 @@
 // path for the JSON report of requests per operation).
 //
 // Everything written is neutral work text in two short-lived projects, which
-// are removed at the end. About 25 API requests per run.
+// are removed at the end. About 30 API requests per run.
 
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -14,6 +14,7 @@ import { writeFile } from 'node:fs/promises';
 import { after, before, describe, it } from 'node:test';
 
 import {
+  DocumentTooLongError,
   LinearClient,
   LinearGraphQLError,
   LinearTokenError,
@@ -39,8 +40,9 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   const suffix = randomBytes(3).toString('hex');
   const stats = new RequestStats();
   const perOperation: Record<string, number> = {};
-  // Every GraphQL response, without content: status, request id, codes and budget headers.
+  // Every OAuth and GraphQL attempt, without credentials, variables or content.
   const requests: LogEntry[] = [];
+  const hooks = { log: (entry: LogEntry) => requests.push(entry) };
   let token: RunToken | undefined;
   let linear: LinearClient;
   let teamId: string;
@@ -58,13 +60,21 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     }
   }
 
+  /** The operations a step sent, ignoring a retry of the same operation after a short Retry-After. */
+  async function operationsOf(step: () => Promise<unknown>): Promise<string[]> {
+    const before = new Map(stats.byOperation);
+    await step();
+    return [...stats.byOperation].filter(([name, count]) => count > (before.get(name) ?? 0)).map(([name]) => name).sort();
+  }
+
   before(async () => {
-    token = await measured('mint token', () => mintAppToken({ clientId: clientId!, clientSecret: clientSecret! }, { baseUrl, stats }));
+    token = await measured('mint token', () => mintAppToken({ clientId: clientId!, clientSecret: clientSecret! }, { baseUrl, stats, hooks }));
     linear = new LinearClient({
       token: token.accessToken,
+      auth: token.context,
       baseUrl,
       stats,
-      hooks: { log: (entry) => requests.push(entry) },
+      hooks,
     });
     const teams = await linear.request<{ teams: { nodes: Array<{ id: string; key: string }> } }>(
       'Teams',
@@ -99,7 +109,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     }
     if (token) {
       try {
-        await measured('revoke token', () => revokeToken(token!.accessToken, { baseUrl, stats }));
+        await measured('revoke token', () => revokeToken(token!.accessToken, { baseUrl, stats, hooks, auth: token!.context }));
       } catch (error) {
         cleanupErrors.push({ operation: 'oauth.revoke', error });
       }
@@ -141,9 +151,12 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   });
 
   it('creates documents in a project', async () => {
-    first = await measured('createDocument', () =>
-      linear.createDocument({ projectId: projectIds[0]! }, { title: 'Weekly planning', content: '# Goals\n\n- Review the backlog\n- Plan the demo\n' }),
-    );
+    const sent = await operationsOf(async () => {
+      first = await measured('createDocument', () =>
+        linear.createDocument({ projectId: projectIds[0]! }, { title: 'Weekly planning', content: '# Goals\n\n- Review the backlog\n- Plan the demo\n' }),
+      );
+    });
+    assert.deepEqual(sent, ['CreateDocument'], 'a create with its stored record needs no read-back');
     second = await linear.createDocument({ projectId: projectIds[0]! }, { title: 'Reading list', content: 'A short list of articles.\n' });
     assert.equal(first.title, 'Weekly planning');
     assert.equal(first.projectId, projectIds[0]);
@@ -151,10 +164,41 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     assert.ok(first.documentContentId);
   });
 
-  it('reads documents by ids in one request', async () => {
+  it('reads documents by ids in one request, with the content the create returned', async () => {
     const docs = await measured('getDocuments (2 ids)', () => linear.getDocuments([first.id, second.id], { withContent: true }));
     assert.deepEqual(docs.map((d) => d.id).sort(), [first.id, second.id].sort());
     assert.ok(docs.every((d) => typeof d.content === 'string' && d.content.length > 0));
+    const stored = new Map(docs.map((d) => [d.id, d.content]));
+    assert.equal(stored.get(first.id), first.content, 'the create payload is the stored content');
+    assert.equal(stored.get(second.id), second.content);
+  });
+
+  it('does not return project documents for a team filter', async () => {
+    // Narrowed to this run's documents, so the cost does not grow with the team zone.
+    const data = await measured('documents (team filter)', () =>
+      linear.request<{ documents: { nodes: Array<{ id: string }> } }>(
+        'TeamFilter',
+        'query',
+        `query TeamFilter($teamId: ID!, $ids: [ID!]!) {
+          documents(first: 5, filter: { and: [{ team: { id: { eq: $teamId } } }, { id: { in: $ids } }] }) { nodes { id } }
+        }`,
+        { teamId, ids: [first.id, second.id] },
+      ),
+    );
+    assert.deepEqual(data.documents.nodes, []);
+  });
+
+  it('accepts a title of 512 emoji: titles count code points, as content does', async () => {
+    const titled = await linear.updateDocument(second.id, { title: '\u{1F4DD}'.repeat(512) });
+    assert.equal([...titled.title].length, 512);
+    await linear.updateDocument(second.id, { title: 'Reading list' });
+  });
+
+  it('leaves out a too-long title without a request', async () => {
+    const before = stats.total;
+    const error = await linear.createDocument({ projectId: projectIds[0]! }, { title: 'T'.repeat(513) }).catch((e: unknown) => e);
+    assert.ok(error instanceof DocumentTooLongError);
+    assert.equal(stats.total, before);
   });
 
   it('lists the documents of a project with content', async () => {
@@ -163,8 +207,14 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   });
 
   it('updates content, renames, sets icon and color, and moves', async () => {
-    const updated = await measured('updateDocument (content)', () => linear.updateDocument(first.id, { content: '# Goals\n\n- Ship the demo\n' }));
+    let updated!: LinearDocument;
+    const sent = await operationsOf(async () => {
+      updated = await measured('updateDocument (content)', () => linear.updateDocument(first.id, { content: '# Goals\n\n- Ship the demo\n' }));
+    });
+    assert.deepEqual(sent, ['UpdateDocument'], 'an update with its stored record needs no read-back');
     assert.equal(typeof updated.content, 'string');
+    const [read] = await linear.getDocuments([first.id], { withContent: true });
+    assert.equal(read?.content, updated.content, 'the update payload is the stored content');
     const renamed = await measured('updateDocument (rename)', () => linear.updateDocument(first.id, { title: 'Weekly planning, revised' }));
     assert.equal(renamed.title, 'Weekly planning, revised');
     const styled = await measured('updateDocument (icon, color)', () => linear.updateDocument(first.id, { icon: 'Book', color: '#5e6ad2' }));

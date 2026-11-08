@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Thanks 👍🏻 👍🏽 👍🏿","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-6c05090e","marks":{"attribution":"user"}}]}
+  ]
+}

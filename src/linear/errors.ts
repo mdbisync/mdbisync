@@ -87,6 +87,38 @@ export class LinearNetworkError extends LinearError {
 /** Minting or revoking an OAuth token failed. */
 export class LinearTokenError extends LinearError {}
 
+/**
+ * A title or content is longer than Linear accepts. Raised before any request
+ * is sent, so the write counts as failed and the document is left out with
+ * this reason.
+ */
+export class DocumentTooLongError extends LinearError {
+  readonly field: 'title' | 'content';
+  readonly length: number;
+  readonly limit: number;
+
+  constructor(operation: string, refusal: { field: 'title' | 'content'; length: number; limit: number }) {
+    super(operation, `${operation}: ${refusal.field} is ${refusal.length} characters, Linear accepts at most ${refusal.limit}`);
+    this.field = refusal.field;
+    this.length = refusal.length;
+    this.limit = refusal.limit;
+  }
+}
+
+/**
+ * Linear applied a write, but reading back its stored record failed. Unlike
+ * other failures, the write took effect: `document` is the record from the
+ * write's own payload, so the caller can keep its id.
+ */
+export class LinearReadBackError extends LinearError {
+  readonly document: { id: string };
+
+  constructor(operation: string, document: { id: string }, cause?: unknown) {
+    super(operation, `${operation}: written, but reading back the stored record failed`, { cause });
+    this.document = document;
+  }
+}
+
 /** The file upload's PUT to storage failed. */
 export class LinearUploadError extends LinearError {}
 

@@ -41,6 +41,29 @@ test('an unindexed file is reported', () => {
   assert.ok(errors.includes('tables/extra.md: not in index.yaml'), errors.join('\n'));
 });
 
+test('recorded Linear forms beside a fixture are not fixtures', () => {
+  const errors = withCopy((d) => {
+    writeFileSync(join(d, 'tables', 'table-basic.linear.md'), readFileSync(join(d, 'tables', 'table-basic.md')));
+    writeFileSync(join(d, 'tables', 'table-basic.linear.yjs.json'), '{}');
+  });
+  assert.deepEqual(errors, []);
+});
+
+test('a recorded Linear form without its fixture is reported', () => {
+  const errors = withCopy((d) => writeFileSync(join(d, 'tables', 'gone.linear.md'), '| A |'));
+  assert.ok(errors.includes('tables/gone.linear.md: recorded Linear form without its fixture'), errors.join('\n'));
+});
+
+test('a recorded Linear form beside an unsynchronized fixture is reported', () => {
+  const errors = withCopy((d) => writeFileSync(join(d, 'unsynced', 'notes-above-annotation.linear.md'), 'Notes'));
+  assert.ok(errors.includes('unsynced/notes-above-annotation.linear.md: recorded Linear form without its fixture'), errors.join('\n'));
+});
+
+test('a probe manifest entry for a file that is not a synchronized fixture is reported', () => {
+  const errors = withCopy((d) => writeFileSync(join(d, 'linear-probe.json'), JSON.stringify({ version: 1, fixtures: { 'tables/gone.md': { yjs: 'none' } } })));
+  assert.ok(errors.includes('linear-probe.json: tables/gone.md is not a synchronized fixture'), errors.join('\n'));
+});
+
 test('an indexed file that is missing is reported', () => {
   const errors = withCopy((d) => rmSync(join(d, 'tables', 'table-basic.md')));
   assert.ok(errors.includes('tables/table-basic.md: indexed but missing'), errors.join('\n'));
@@ -222,12 +245,38 @@ test('a fixture contradicting a known class is reported', () => {
 });
 
 test('basis known for an unlisted construct is reported', () => {
-  const flagged = withCopy((d) => {
-    const p = join(d, 'index.yaml');
-    const text = readFileSync(p, 'utf8');
-    writeFileSync(p, text.replace(/(  - file: "tables\/table-basic\.md"\n(?: {4}.*\n)*? {4}basis: )assumed/, '$1known'));
+  const flagged = withCopy((d) => editIndex(d, '    rule: duplicate-title\n    basis: assumed\n    canary: kx-da467a89', '    rule: duplicate-title\n    basis: known\n    canary: kx-da467a89'));
+  assert.ok(flagged.includes('lint-errors/duplicate-title/guide-upper.md: basis known, but duplicate-title is not in known_constructs'), flagged.join('\n'));
+});
+
+test('a class that disagrees with the recorded Linear form is reported', () => {
+  const unchanged = withCopy((d) => writeFileSync(join(d, 'tables', 'table-basic.linear.md'), '| A |'));
+  assert.ok(unchanged.includes("tables/table-basic.md: class unchanged, but Linear's recorded form differs"), unchanged.join('\n'));
+  const fixable = withCopy((d) =>
+    writeFileSync(join(d, 'tables', 'table-separator-long.linear.md'), readFileSync(join(d, 'tables', 'table-separator-long.md'))),
+  );
+  assert.ok(fixable.includes("tables/table-separator-long.md: class fixable, but Linear's recorded form equals the source"), fixable.join('\n'));
+});
+
+test('a probed fixture must have basis known and its recorded form', () => {
+  const errors = withCopy((d) => {
+    editIndex(d, '    construct: table\n    class: unchanged\n    basis: known', '    construct: table\n    class: unchanged\n    basis: assumed');
+    rmSync(join(d, 'tables', 'table-separator-long.linear.md'));
   });
-  assert.ok(flagged.includes('tables/table-basic.md: basis known, but table is not in known_constructs'), flagged.join('\n'));
+  assert.ok(errors.includes('tables/table-basic.md: probed by Linear, so its basis must be known'), errors.join('\n'));
+  assert.ok(errors.includes('tables/table-separator-long.md: probed, but its recorded Linear form is missing'), errors.join('\n'));
+});
+
+test('a refused fixture must be a lint error, and a lint error needs its recorded form', () => {
+  const errors = withCopy((d) => {
+    const p = join(d, 'linear-probe.json');
+    const manifest = JSON.parse(readFileSync(p, 'utf8'));
+    manifest.fixtures['tables/table-basic.md'] = { yjs: 'none', refused: 'INVALID_INPUT' };
+    writeFileSync(p, JSON.stringify(manifest));
+    rmSync(join(d, 'tables', 'table-alignment.linear.md'));
+  });
+  assert.ok(errors.includes('tables/table-basic.md: Linear refused it, so its class must be lint-error'), errors.join('\n'));
+  assert.ok(errors.includes('tables/table-alignment.md: probed, but its recorded Linear form is missing'), errors.join('\n'));
 });
 
 test('the check runs when started through a symlink', async () => {

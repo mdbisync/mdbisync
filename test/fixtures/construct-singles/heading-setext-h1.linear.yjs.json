@@ -1,0 +1,10 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Project overview","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"The overview follows the heading.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-5eecee68","marks":{"attribution":"user"}}]}
+  ]
+}

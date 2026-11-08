@@ -1,0 +1,10 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Diagram of the invalid kind.","marks":{"attribution":"user"}}]},
+    {"type":"diagram","attrs":{"height":null,"id":"<id>","language":"mermaid","width":null},"children":[{"text":"flowchart TD\n  A --> \n  this is not valid -->> ((","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-73856d93","marks":{"attribution":"user"}}]}
+  ]
+}

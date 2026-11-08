@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Open ","marks":{"attribution":"user"}},{"text":"the notes","marks":{"attribution":"user","link":{"href":"target%20with%20spaces.md","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-7579b08f","marks":{"attribution":"user"}}]}
+  ]
+}

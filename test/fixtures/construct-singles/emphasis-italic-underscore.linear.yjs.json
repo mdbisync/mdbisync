@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"The ","marks":{"attribution":"user"}},{"text":"draft","marks":{"attribution":"user","em":{}}},{"text":" is ready for review.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-bd931670","marks":{"attribution":"user"}}]}
+  ]
+}

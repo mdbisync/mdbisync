@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"รายงานพร้อมให้ตรวจสอบแล้ว","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-8c579fdd","marks":{"attribution":"user"}}]}
+  ]
+}

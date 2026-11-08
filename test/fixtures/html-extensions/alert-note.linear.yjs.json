@@ -1,0 +1,15 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "callout",
+      "attrs": {"color":"#26b5ce","icon":"LightBulb"},
+      "children": [
+        {"type":"paragraph","children":[{"text":"Useful information.","marks":{"attribution":"user"}}]}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-80cc10f4","marks":{"attribution":"user"}}]}
+  ]
+}

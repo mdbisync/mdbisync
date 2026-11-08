@@ -2,17 +2,23 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
 import {
+  DocumentTooLongError,
+  LINEAR_FACTS,
   LinearClient,
   LinearGraphQLError,
   LinearHttpError,
   LinearNetworkError,
+  LinearReadBackError,
   LinearStoppedError,
   LinearTokenError,
   RequestStats,
   mintAppToken,
   revokeToken,
+  lengthRefusal,
+  linearLength,
   withRunToken,
   writeEach,
+  type LinearFacts,
   type LogEntry,
 } from '../../src/linear/index.ts';
 import { FakeLinear, fakeDocument, rateLimited } from './fake-linear.ts';
@@ -44,7 +50,7 @@ describe('Linear client against a fake Linear', () => {
     });
   });
 
-  function client(extra: Partial<ConstructorParameters<typeof LinearClient>[0]> = {}) {
+  function client(extra: Partial<ConstructorParameters<typeof LinearClient>[0]> = {}, facts?: LinearFacts) {
     return new LinearClient({
       token: 'run-token',
       baseUrl: `${fake.url}/`,
@@ -53,7 +59,7 @@ describe('Linear client against a fake Linear', () => {
       },
       hooks: { log: (entry) => logs.push(entry) },
       ...extra,
-    });
+    }, facts);
   }
 
   it('sends the operation name and bearer token, and counts requests per operation', async () => {
@@ -311,12 +317,12 @@ describe('Linear client against a fake Linear', () => {
       return { body: { data: { documents: { nodes: ids.slice(0, -1).map((id) => fakeDocument(id, { content: 'Body', trashed: true })) } } } };
     });
     const linear = client();
-    const ids = Array.from({ length: 250 }, (_, i) => `id${i}`);
+    const ids = Array.from({ length: 600 }, (_, i) => `id${i}`);
     const docs = await linear.getDocuments(ids, { withContent: true });
     assert.equal(fake.graphqlCount(), 3);
-    assert.deepEqual(fake.received.map((r) => (r.variables?.ids as string[]).length), [100, 100, 50]);
+    assert.deepEqual(fake.received.map((r) => (r.variables?.ids as string[]).length), [250, 250, 100]);
     assert.equal(fake.received[0]?.variables?.withContent, true);
-    assert.equal(docs.length, 247, 'ids Linear no longer has are absent');
+    assert.equal(docs.length, 597, 'ids Linear no longer has are absent');
     assert.equal(docs[0]?.trashed, true);
     assert.equal(docs[0]?.content, 'Body');
 
@@ -332,7 +338,7 @@ describe('Linear client against a fake Linear', () => {
         body: {
           data: {
             documents: {
-              nodes: [fakeDocument(`p${page}a`), fakeDocument(`p${page}b`)],
+              nodes: [fakeDocument(`p${page}a`, { project: null }), fakeDocument(`p${page}b`, { project: null })],
               pageInfo: { hasNextPage: page === 1, endCursor: page === 1 ? 'cursor-1' : null },
             },
           },
@@ -346,6 +352,93 @@ describe('Linear client against a fake Linear', () => {
     assert.deepEqual(fake.received[0]?.variables?.filter, { team: { id: { eq: 'team-9' } } });
     assert.equal(fake.received[0]?.variables?.includeArchived, true);
     assert.equal(fake.received[0]?.variables?.first, 2);
+  });
+
+  it('lists full pages of 250 by default', async () => {
+    fake.operations.set('ListDocuments', () => ({
+      body: { data: { documents: { nodes: [fakeDocument('a')], pageInfo: { hasNextPage: false, endCursor: null } } } },
+    }));
+    await client().listDocuments({ projectId: 'project-1' });
+    assert.equal(fake.received[0]?.variables?.first, 250);
+  });
+
+  it('keeps project documents out of a team zone listing', async () => {
+    fake.operations.set('ListDocuments', () => ({
+      body: {
+        data: {
+          documents: {
+            nodes: [fakeDocument('zone', { project: null, team: { id: 'team-9' } }), fakeDocument('in-project')],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    }));
+    const zone = await client().listDocuments({ teamId: 'team-9' }, { includeArchived: true });
+    assert.deepEqual(zone.map((d) => d.id), ['zone']);
+    assert.equal(fake.graphqlCount(), 1);
+  });
+
+  it('a write and its stored record cost one request when Linear returns stored content', async () => {
+    fake.operations.set('UpdateDocument', (request) => ({
+      body: { data: { documentUpdate: { success: true, document: fakeDocument('d1', { content: (request.variables?.input as { content?: string }).content }) } } },
+    }));
+    const linear = client();
+    const created = await linear.createDocument({ projectId: 'p' }, { title: 'Plan', content: 'Stored text' });
+    assert.equal(created.content, 'Stored text');
+    const updated = await linear.updateDocument(created.id, { content: 'New text' });
+    assert.equal(updated.content, 'New text');
+    assert.deepEqual(fake.received.map((r) => r.operation), ['CreateDocument', 'UpdateDocument']);
+  });
+
+  it('a write and its stored record cost two requests when Linear\'s payload may differ from what it stores', async () => {
+    fake.operations.set('UpdateDocument', () => ({ body: { data: { documentUpdate: { success: true, document: fakeDocument('d1', { content: 'payload' }) } } } }));
+    fake.operations.set('GetDocuments', (request) => ({
+      body: { data: { documents: { nodes: (request.variables?.ids as string[]).map((id) => fakeDocument(id, { content: 'stored' })) } } },
+    }));
+    const linear = client({}, { ...LINEAR_FACTS, mutationsReturnStoredContent: false });
+    const created = await linear.createDocument({ projectId: 'p' }, { title: 'Plan', content: 'Text' });
+    assert.equal(created.content, 'stored');
+    const updated = await linear.updateDocument(created.id, { content: 'Text 2' });
+    assert.equal(updated.content, 'stored');
+    await linear.updateDocument(created.id, { title: 'Renamed' });
+    assert.deepEqual(fake.received.map((r) => r.operation), ['CreateDocument', 'GetDocuments', 'UpdateDocument', 'GetDocuments', 'UpdateDocument']);
+    assert.equal(fake.received[1]?.variables?.withContent, true);
+  });
+
+  it('reports a write whose read-back failed as written, with its id', async () => {
+    let reads = 0;
+    fake.operations.set('GetDocuments', () => {
+      reads += 1;
+      return reads === 1 ? { status: 500, body: undefined } : { body: { data: { documents: { nodes: [] } } } };
+    });
+    const linear = client({}, { ...LINEAR_FACTS, mutationsReturnStoredContent: false });
+    const outcome = await writeEach(linear, ['First', 'Second'], (title) => linear.createDocument({ projectId: 'p' }, { title, content: 'Text' }));
+    assert.deepEqual(outcome.done, []);
+    const [failedRead, missing] = outcome.failed.map((f) => f.error);
+    assert.ok(failedRead instanceof LinearReadBackError && failedRead.document.id === 'd1' && failedRead.cause instanceof LinearHttpError);
+    assert.ok(missing instanceof LinearReadBackError && missing.document.id === 'd2');
+    assert.deepEqual(fake.received.map((r) => r.operation), ['CreateDocument', 'GetDocuments', 'CreateDocument', 'GetDocuments']);
+  });
+
+  it('leaves out a too-long title or content with a reason and sends nothing for it', async () => {
+    fake.operations.set('UpdateDocument', () => ({ body: { data: { documentUpdate: { success: true, document: fakeDocument('d') } } } }));
+    const linear = client();
+    const writes: Array<{ name: string; write: () => Promise<unknown> }> = [
+      { name: 'title 513', write: () => linear.createDocument({ projectId: 'p' }, { title: 'T'.repeat(513), content: 'x' }) },
+      { name: 'content 250001', write: () => linear.updateDocument('d', { content: 'a'.repeat(250_001) }) },
+      { name: 'emoji 250001', write: () => linear.updateDocument('d', { content: '\u{1F600}'.repeat(250_001) }) },
+      { name: 'title 512 emoji', write: () => linear.createDocument({ projectId: 'p' }, { title: '\u{1F600}'.repeat(512) }) },
+      { name: 'emoji 125001', write: () => linear.updateDocument('d', { content: '\u{1F600}'.repeat(125_001) }) },
+      { name: 'content 250000', write: () => linear.updateDocument('d', { content: 'a'.repeat(250_000) }) },
+    ];
+    const outcome = await writeEach(linear, writes, (w) => w.write());
+    assert.deepEqual(outcome.failed.map((f) => f.item.name), ['title 513', 'content 250001', 'emoji 250001']);
+    assert.deepEqual(outcome.done.map((d) => d.item.name), ['title 512 emoji', 'emoji 125001', 'content 250000']);
+    const [title, content] = outcome.failed.map((f) => f.error);
+    assert.ok(title instanceof DocumentTooLongError && title.field === 'title' && title.length === 513 && title.limit === 512);
+    assert.equal(title.message, 'CreateDocument: title is 513 characters, Linear accepts at most 512');
+    assert.ok(content instanceof DocumentTooLongError && content.field === 'content' && content.limit === 250_000);
+    assert.deepEqual(fake.received.map((r) => r.operation), ['CreateDocument', 'UpdateDocument', 'UpdateDocument']);
   });
 
   it('updates, trashes, restores and comments with one request each', async () => {
@@ -468,5 +561,26 @@ describe('run tokens against a fake Linear', () => {
     assert.ok(error instanceof LinearTokenError);
     assert.match(error.message, /invalid_client/);
     assert.ok(!error.message.includes('client-secret-value'));
+  });
+});
+
+describe('Linear facts', () => {
+  it('holds the measured values', () => {
+    assert.deepEqual({ ...LINEAR_FACTS }, {
+      mutationsReturnStoredContent: true,
+      maxTitleLength: 512,
+      maxContentLength: 250_000,
+      teamFilterIncludesProjectDocuments: false,
+    });
+    assert.ok(Object.isFrozen(LINEAR_FACTS));
+  });
+
+  it('counts length in code points, as Linear does', () => {
+    assert.equal(linearLength('\u{1F600}'.repeat(3)), 3);
+    assert.equal(linearLength('\u00e9t\u00e9'), 3);
+    assert.equal(linearLength(''), 0);
+    assert.equal(lengthRefusal({ title: 'Plan', content: '\u{1F600}'.repeat(125_001) }), undefined);
+    assert.deepEqual(lengthRefusal({ content: '\u{1F600}'.repeat(250_001) }), { field: 'content', length: 250_001, limit: 250_000 });
+    assert.deepEqual(lengthRefusal({ title: 'x'.repeat(513), content: 'a'.repeat(250_001) }), { field: 'title', length: 513, limit: 512 });
   });
 });

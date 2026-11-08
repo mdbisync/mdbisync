@@ -1,0 +1,1089 @@
+{
+  "version": 1,
+  "fixtures": {
+    "attachments/csv.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "attachments/json.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "attachments/pdf.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "attachments/several.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "attachments/txt.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "attachments/zip.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/diff3-in-fence.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/equals-setext-lookalike.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/in-code-fence.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/in-indented-code.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/in-inline-code.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/in-quote.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/real-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/real-paragraph.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/real-table.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "conflict-markers/short-markers.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/blank-lines-many.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/break-backslash.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/break-html.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/break-two-spaces.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-fence-blank-lines.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-fence-empty.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-fence-four-backticks.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-fence-javascript.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-fence-plain.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-fence-python.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-fence-tildes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-indented.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-inline-backtick.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/code-inline.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/emoji-literal.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/emoji-shortcode.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/emphasis-bold-asterisks.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/emphasis-bold-italic.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/emphasis-bold-underscores.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/emphasis-intraword.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/emphasis-italic-asterisk.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/emphasis-italic-underscore.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/emphasis-strikethrough.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/entities.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/escapes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/final-newline.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/final-newlines-many.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/heading-atx-h1.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/heading-atx-h2.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/heading-atx-h3.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/heading-atx-h4.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/heading-atx-h5.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/heading-atx-h6.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/heading-closing-hashes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/heading-no-space.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/heading-setext-h1.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/heading-setext-h2.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/hr-asterisks.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/hr-dashes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/hr-spaced.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/hr-underscores.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-bullet-dash.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-bullet-plus.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-bullet-star.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-item-paragraphs.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-loose.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-nested-deep.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-nested.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-ordered-in-bullet.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-ordered-paren.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-ordered-same-number.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-ordered-start.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/list-ordered.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/paragraph-multiple.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/paragraph-single.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/paragraph-soft-wrap.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/paragraph-trailing-spaces.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/quote-lazy.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/quote-nested.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/quote-paragraphs.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/quote.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/task-checked.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/task-mixed.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/task-nested.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/task-unchecked.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "construct-singles/task-uppercase-x.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "front-matter/annotation.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "front-matter/comments.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "front-matter/dates.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "front-matter/empty.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "front-matter/lists.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "front-matter/multiline.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "front-matter/nested-map.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "front-matter/only.md": {
+      "yjs": "none",
+      "fixedPoint": true
+    },
+    "front-matter/rule-after.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "front-matter/simple.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "front-matter/unicode.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/alert-caution.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/alert-important.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/alert-note.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/alert-tip.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/alert-warning.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/definition-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/details.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/emoji-shortcodes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/emoji-unknown-shortcode.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/html-block.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/html-comment-inline.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/html-comment.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/html-definition-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/html-img.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/html-kbd.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/html-span.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/html-sub.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/html-table.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/math-block-dollars-inline.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/math-block-dollars.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/math-fence.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/math-inline.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "html-extensions/task-markers.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/bmp.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/broken-reference.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/empty-alt.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/gif-animated.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/ico.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/inline-with-text.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/jpeg.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/png.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/reference.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/remote.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/several.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/shared-a.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/shared-b.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/spaces-in-path.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/svg.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/title.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "images/webp.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/anchor-only.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/autolink.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/bare-url.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/external-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/external.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/image-link-text.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/mailto.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/parentheses.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/reference-collapsed.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/reference-shortcut.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/reference.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/relative-anchor.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/relative-parent-folder.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/relative-same-folder.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/relative.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/spaces-angle.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/spaces-encoded.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/target with spaces.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/title.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "links/unsynced-file.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/badge-in-link.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/duplicate-title/cafe-nfc.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/duplicate-title/cafe-nfd.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/duplicate-title/guide-lower.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/duplicate-title/guide-upper.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/footnote-inline.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/footnote-named.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/footnote.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/image-in-link.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/subscript.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "lint-errors/table-escaped-pipe.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-class.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-er.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-flowchart.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-gantt.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-gitgraph.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-invalid.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-journey.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-mindmap.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-pie.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-quadrant.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-sequence.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-several.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-state.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "mermaid/mermaid-timeline.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/alert-with-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/bold-in-heading.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/code-in-heading.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/code-in-link.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/code-in-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/code-in-quote.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/details-with-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/heading-in-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/image-in-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/image-in-table.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/italic-in-heading.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/link-in-bold.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/link-in-heading.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/link-in-quote.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/list-in-quote.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/marks-in-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/marks-in-table-cell.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/math-in-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/mermaid-in-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/ordered-with-code.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/quote-in-list.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/table-in-quote.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/task-in-quote.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/task-with-link.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "pairwise/task-with-strike.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "size-spectrum/empty-kx-ae4a8ebe.md": {
+      "yjs": "none",
+      "fixedPoint": true
+    },
+    "size-spectrum/one-line.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "size-spectrum/single-line-100k.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "size-spectrum/size-100kb.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "size-spectrum/size-10kb.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "size-spectrum/size-1kb.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "size-spectrum/size-240kb.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "size-spectrum/size-260kb-over-limit.md": {
+      "yjs": "none",
+      "refused": "INVALID_INPUT"
+    },
+    "size-spectrum/whitespace-only-kx-2e6b7fa3.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-30-columns.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-500-rows.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-alignment.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-basic.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-code-pipe.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-empty-cells.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-header-only.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-images.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-inline-marks.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-links.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-no-outer-pipes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-ragged-rows.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-separator-long.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-separator-spaced.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-single-column.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "tables/table-unicode.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/arabic.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/bidi-mixed.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/bold-in-italic.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/bom.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/chinese.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/code-in-bold.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/combining-marks.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/cr-only.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/crlf.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/devanagari.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/emoji-flags.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/emoji-skin-tones.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/emoji-zwj.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/greek.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/hebrew.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/highlight.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/italic-in-bold.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/japanese.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/korean.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/math-alphanumerics.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/nbsp.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/nested-emphasis-deep.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/smart-quotes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/strike-with-bold.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/superscript.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/symbols.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/tabs.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/thai.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/underline-html.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "typography-scripts/zero-width-space.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "unsynced/markdown-extension/plan.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/changelog.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/decision-record.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/faq.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/glossary.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/incident-report.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/meeting-notes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/onboarding-guide.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/project-brief.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/release-plan.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/retrospective.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/runbook.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "work-documents/spec.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    }
+  }
+}

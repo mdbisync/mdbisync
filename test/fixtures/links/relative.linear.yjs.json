@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Read the ","marks":{"attribution":"user"}},{"text":"summary","marks":{"attribution":"user","link":{"href":"../construct-singles/paragraph-single.md","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-af288d5c","marks":{"attribution":"user"}}]}
+  ]
+}

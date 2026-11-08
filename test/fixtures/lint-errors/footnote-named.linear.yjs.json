@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Two notes","marks":{"attribution":"user"}},{"text":"^a","marks":{"attribution":"user","link":{"href":"First.","noEmbed":null}}},{"text":" and","marks":{"attribution":"user"}},{"text":"^b","marks":{"attribution":"user","link":{"href":"Second.","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-7d74c85e","marks":{"attribution":"user"}}]}
+  ]
+}

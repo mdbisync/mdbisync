@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Read the ","marks":{"attribution":"user"}},{"text":"announcement","marks":{"attribution":"user","link":{"href":"https://example.com/news/2024","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-427941c5","marks":{"attribution":"user"}}]}
+  ]
+}

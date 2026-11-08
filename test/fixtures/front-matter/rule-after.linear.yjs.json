@@ -1,0 +1,11 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Text.","marks":{"attribution":"user"}}]},
+    {"type":"horizontal_rule"},
+    {"type":"paragraph","children":[{"text":"A rule after the body.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-f38e059b","marks":{"attribution":"user"}}]}
+  ]
+}
