@@ -59,6 +59,13 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     }
   }
 
+  /** The operations a step sent, ignoring a retry of the same operation after a short Retry-After. */
+  async function operationsOf(step: () => Promise<unknown>): Promise<string[]> {
+    const before = new Map(stats.byOperation);
+    await step();
+    return [...stats.byOperation].filter(([name, count]) => count > (before.get(name) ?? 0)).map(([name]) => name).sort();
+  }
+
   before(async () => {
     token = await measured('mint token', () => mintAppToken({ clientId: clientId!, clientSecret: clientSecret! }, { baseUrl, stats }));
     linear = new LinearClient({
@@ -142,15 +149,17 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   });
 
   it('creates documents in a project', async () => {
-    first = await measured('createDocument', () =>
-      linear.createDocument({ projectId: projectIds[0]! }, { title: 'Weekly planning', content: '# Goals\n\n- Review the backlog\n- Plan the demo\n' }),
-    );
+    const sent = await operationsOf(async () => {
+      first = await measured('createDocument', () =>
+        linear.createDocument({ projectId: projectIds[0]! }, { title: 'Weekly planning', content: '# Goals\n\n- Review the backlog\n- Plan the demo\n' }),
+      );
+    });
+    assert.deepEqual(sent, ['CreateDocument'], 'a create with its stored record needs no read-back');
     second = await linear.createDocument({ projectId: projectIds[0]! }, { title: 'Reading list', content: 'A short list of articles.\n' });
     assert.equal(first.title, 'Weekly planning');
     assert.equal(first.projectId, projectIds[0]);
     assert.equal(typeof first.content, 'string');
     assert.ok(first.documentContentId);
-    assert.equal(perOperation.createDocument, 1, 'a create with its stored record is one request');
   });
 
   it('reads documents by ids in one request, with the content the create returned', async () => {
@@ -163,10 +172,24 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   });
 
   it('does not return project documents for a team filter', async () => {
-    const zone = await measured('listDocuments (team)', () => linear.listDocuments({ teamId }));
-    const ids = new Set(zone.map((d) => d.id));
-    assert.ok(!ids.has(first.id) && !ids.has(second.id));
-    assert.ok(zone.every((d) => d.projectId === null));
+    // Narrowed to this run's documents, so the cost does not grow with the team zone.
+    const data = await measured('documents (team filter)', () =>
+      linear.request<{ documents: { nodes: Array<{ id: string }> } }>(
+        'TeamFilter',
+        'query',
+        `query TeamFilter($teamId: ID!, $ids: [ID!]!) {
+          documents(first: 5, filter: { and: [{ team: { id: { eq: $teamId } } }, { id: { in: $ids } }] }) { nodes { id } }
+        }`,
+        { teamId, ids: [first.id, second.id] },
+      ),
+    );
+    assert.deepEqual(data.documents.nodes, []);
+  });
+
+  it('accepts a title of 512 emoji: titles count code points, as content does', async () => {
+    const titled = await linear.updateDocument(second.id, { title: '\u{1F4DD}'.repeat(512) });
+    assert.equal([...titled.title].length, 512);
+    await linear.updateDocument(second.id, { title: 'Reading list' });
   });
 
   it('leaves out a too-long title without a request', async () => {
@@ -182,9 +205,12 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   });
 
   it('updates content, renames, sets icon and color, and moves', async () => {
-    const updated = await measured('updateDocument (content)', () => linear.updateDocument(first.id, { content: '# Goals\n\n- Ship the demo\n' }));
+    let updated!: LinearDocument;
+    const sent = await operationsOf(async () => {
+      updated = await measured('updateDocument (content)', () => linear.updateDocument(first.id, { content: '# Goals\n\n- Ship the demo\n' }));
+    });
+    assert.deepEqual(sent, ['UpdateDocument'], 'an update with its stored record needs no read-back');
     assert.equal(typeof updated.content, 'string');
-    assert.equal(perOperation['updateDocument (content)'], 1, 'an update with its stored record is one request');
     const [read] = await linear.getDocuments([first.id], { withContent: true });
     assert.equal(read?.content, updated.content, 'the update payload is the stored content');
     const renamed = await measured('updateDocument (rename)', () => linear.updateDocument(first.id, { title: 'Weekly planning, revised' }));

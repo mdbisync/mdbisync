@@ -8,6 +8,7 @@ import {
   LinearGraphQLError,
   LinearHttpError,
   LinearNetworkError,
+  LinearReadBackError,
   LinearStoppedError,
   LinearTokenError,
   RequestStats,
@@ -337,7 +338,7 @@ describe('Linear client against a fake Linear', () => {
         body: {
           data: {
             documents: {
-              nodes: [fakeDocument(`p${page}a`), fakeDocument(`p${page}b`)],
+              nodes: [fakeDocument(`p${page}a`, { project: null }), fakeDocument(`p${page}b`, { project: null })],
               pageInfo: { hasNextPage: page === 1, endCursor: page === 1 ? 'cursor-1' : null },
             },
           },
@@ -361,7 +362,7 @@ describe('Linear client against a fake Linear', () => {
     assert.equal(fake.received[0]?.variables?.first, 250);
   });
 
-  it('lists a team zone as Linear returns it, and drops project documents only if Linear mixed them in', async () => {
+  it('keeps project documents out of a team zone listing', async () => {
     fake.operations.set('ListDocuments', () => ({
       body: {
         data: {
@@ -372,11 +373,9 @@ describe('Linear client against a fake Linear', () => {
         },
       },
     }));
-    const asMeasured = await client().listDocuments({ teamId: 'team-9' });
-    assert.deepEqual(asMeasured.map((d) => d.id), ['zone', 'in-project'], 'no client-side filter: Linear\'s team filter is the team zone');
-    const mixing = await client({}, { ...LINEAR_FACTS, teamFilterIncludesProjectDocuments: true }).listDocuments({ teamId: 'team-9' });
-    assert.deepEqual(mixing.map((d) => d.id), ['zone']);
-    assert.equal(fake.graphqlCount(), 2);
+    const zone = await client().listDocuments({ teamId: 'team-9' }, { includeArchived: true });
+    assert.deepEqual(zone.map((d) => d.id), ['zone']);
+    assert.equal(fake.graphqlCount(), 1);
   });
 
   it('a write and its stored record cost one request when Linear returns stored content', async () => {
@@ -404,6 +403,21 @@ describe('Linear client against a fake Linear', () => {
     await linear.updateDocument(created.id, { title: 'Renamed' });
     assert.deepEqual(fake.received.map((r) => r.operation), ['CreateDocument', 'GetDocuments', 'UpdateDocument', 'GetDocuments', 'UpdateDocument']);
     assert.equal(fake.received[1]?.variables?.withContent, true);
+  });
+
+  it('reports a write whose read-back failed as written, with its id', async () => {
+    let reads = 0;
+    fake.operations.set('GetDocuments', () => {
+      reads += 1;
+      return reads === 1 ? { status: 500, body: undefined } : { body: { data: { documents: { nodes: [] } } } };
+    });
+    const linear = client({}, { ...LINEAR_FACTS, mutationsReturnStoredContent: false });
+    const outcome = await writeEach(linear, ['First', 'Second'], (title) => linear.createDocument({ projectId: 'p' }, { title, content: 'Text' }));
+    assert.deepEqual(outcome.done, []);
+    const [failedRead, missing] = outcome.failed.map((f) => f.error);
+    assert.ok(failedRead instanceof LinearReadBackError && failedRead.document.id === 'd1' && failedRead.cause instanceof LinearHttpError);
+    assert.ok(missing instanceof LinearReadBackError && missing.document.id === 'd2');
+    assert.deepEqual(fake.received.map((r) => r.operation), ['CreateDocument', 'GetDocuments', 'CreateDocument', 'GetDocuments']);
   });
 
   it('leaves out a too-long title or content with a reason and sends nothing for it', async () => {

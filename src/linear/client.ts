@@ -1,7 +1,14 @@
 // The operations the engine needs from Linear, as our own GraphQL documents
 // (no lazy SDK models, so a relation never costs an extra request).
 
-import { DocumentTooLongError, LinearError, LinearStoppedError, LinearUploadError, type StopReason } from './errors.ts';
+import {
+  DocumentTooLongError,
+  LinearError,
+  LinearReadBackError,
+  LinearStoppedError,
+  LinearUploadError,
+  type StopReason,
+} from './errors.ts';
 import { LINEAR_FACTS, lengthRefusal, type LinearFacts } from './facts.ts';
 import { GraphQLTransport, type TransportOptions } from './transport.ts';
 
@@ -91,7 +98,10 @@ export interface RateLimitStatus {
 
 export interface EachResult<T, R> {
   done: Array<{ item: T; result: R }>;
-  /** Items Linear rejected or whose outcome is unknown (network error); not written. */
+  /**
+   * Items Linear rejected or whose outcome is unknown (network error); not
+   * recorded as written. With a `LinearReadBackError` the write was applied.
+   */
   failed: Array<{ item: T; error: LinearError }>;
   /** Items not tried. */
   notAttempted: T[];
@@ -164,9 +174,11 @@ export class LinearClient {
       return this.#pagedDocuments('ListDocuments', { project: { id: { eq: place.projectId } } }, options);
     }
     const documents = await this.#pagedDocuments('ListDocuments', { team: { id: { eq: place.teamId } } }, options);
-    // Linear's team filter returns only the team zone (`LINEAR_FACTS`); should
-    // that change, project documents still stay out of it.
-    return this.facts.teamFilterIncludesProjectDocuments ? documents.filter((d) => d.projectId === null) : documents;
+    // Linear's team filter already leaves project documents out
+    // (`LINEAR_FACTS.teamFilterIncludesProjectDocuments`), measured for live
+    // documents only; the check costs nothing and keeps any other project
+    // document out of the team zone.
+    return documents.filter((d) => d.projectId === null);
   }
 
   /**
@@ -197,8 +209,10 @@ export class LinearClient {
   /**
    * Creates a document and returns its record with the stored content. A
    * title or content longer than Linear accepts throws `DocumentTooLongError`
-   * without a request. Linear's payload holds the stored content, so this is
-   * one request; it reads the document back only when `facts` says otherwise.
+   * without a request. When `facts.mutationsReturnStoredContent` holds (as
+   * measured), the payload is the stored record and this is one request;
+   * otherwise a second request reads the document back. A failed read-back
+   * throws `LinearReadBackError`: the document was created.
    */
   async createDocument(place: DocumentPlace, input: CreateDocumentInput): Promise<LinearDocument> {
     this.#refuseTooLong('CreateDocument', input);
@@ -217,8 +231,8 @@ export class LinearClient {
   /**
    * Updates a document: content, rename (title), move (projectId or teamId),
    * icon and color. Like `createDocument`, refuses a too-long title or
-   * content without a request, and returns the stored content when the patch
-   * changes content, in one request.
+   * content without a request and returns the stored content of a content
+   * change: one request as measured, two when the facts call for a read-back.
    */
   async updateDocument(id: string, patch: DocumentPatch): Promise<LinearDocument> {
     this.#refuseTooLong('UpdateDocument', patch);
@@ -318,8 +332,15 @@ export class LinearClient {
   /** The written document's record with its stored content: the payload, or a read-back when the payload may differ. */
   async #storedRecord(operation: string, written: LinearDocument): Promise<LinearDocument> {
     if (this.facts.mutationsReturnStoredContent) return written;
-    const [stored] = await this.getDocuments([written.id], { withContent: true });
-    if (!stored) throw new LinearError(operation, `${operation}: the written document could not be read back`);
+    let stored: LinearDocument | undefined;
+    try {
+      [stored] = await this.getDocuments([written.id], { withContent: true });
+    } catch (error) {
+      // A stop stays a stop: writeEach then reports the write as interrupted.
+      if (error instanceof LinearStoppedError || !(error instanceof LinearError)) throw error;
+      throw new LinearReadBackError(operation, written, error);
+    }
+    if (!stored) throw new LinearReadBackError(operation, written);
     return stored;
   }
 
@@ -359,7 +380,7 @@ export class LinearClient {
  * Runs `write` for each item in order and always returns what happened, so
  * the caller can record `done` before anything else:
  * - an item Linear rejects (or whose request failed) goes to `failed` and the
- *   rest go on;
+ *   rest go on; a `LinearReadBackError` there was written all the same;
  * - when the client stops (rate limit or low budget) during an item, that
  *   item goes to `interrupted`, since a write of several requests may be
  *   partly applied; the rest go to `notAttempted`;

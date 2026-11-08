@@ -42,6 +42,8 @@ export const SWEEP_AGE_MS = 2 * 60 * 60 * 1000;
  */
 export const PROBE_FACTS: LinearFacts = Object.freeze({
   ...LINEAR_FACTS,
+  // Pinned, not inherited: a read-back inside the client would hide the raw
+  // payload the probe compares, whatever the last measurement said.
   mutationsReturnStoredContent: true,
   maxTitleLength: Number.POSITIVE_INFINITY,
   maxContentLength: Number.POSITIVE_INFINITY,

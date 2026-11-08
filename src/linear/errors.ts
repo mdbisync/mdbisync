@@ -105,6 +105,20 @@ export class DocumentTooLongError extends LinearError {
   }
 }
 
+/**
+ * Linear applied a write, but reading back its stored record failed. Unlike
+ * other failures, the write took effect: `document` is the record from the
+ * write's own payload, so the caller can keep its id.
+ */
+export class LinearReadBackError extends LinearError {
+  readonly document: { id: string };
+
+  constructor(operation: string, document: { id: string }, cause?: unknown) {
+    super(operation, `${operation}: written, but reading back the stored record failed`, { cause });
+    this.document = document;
+  }
+}
+
 /** The file upload's PUT to storage failed. */
 export class LinearUploadError extends LinearError {}
 
