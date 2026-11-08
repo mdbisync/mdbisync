@@ -123,7 +123,7 @@ describe('initial sync dry run', () => {
     assert.ok(!summary.includes(CANARY), 'the job summary holds content');
     assert.match(summary, /## Setup check/);
     assert.match(summary, /## Initial sync from git to Linear: dry run\n\nNothing was written\./);
-    assert.match(summary, /^\| eng\/backend\/retired\.md \| team "ENG" \|$/m);
+    assert.match(summary, /^\| eng\/backend\/retired\.md \| team "ENG" \| doc-retired \|$/m);
     assert.match(summary, /^\| combined\/Guide\.md \| duplicate-title \|  \| combined\/guide\.md \|$/m);
 
     // Mint, two setup reads, one list per place (three), revoke; nothing else.
