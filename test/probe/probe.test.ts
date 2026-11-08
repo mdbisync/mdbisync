@@ -13,7 +13,7 @@ import { LinearClient } from '../../src/linear/index.ts';
 import { FakeLinear, fakeDocument, type ReceivedRequest } from '../linear/fake-linear.ts';
 import { fromLinear, goldenMarkdownPath, goldenYjsPath, loadBank, toLinear } from './bank.ts';
 import { findLimit, isLeftover, runProbe } from './probe.ts';
-import { findDrift, writeRecord } from './record.ts';
+import { findDrift, refusalKey, writeRecord } from './record.ts';
 import { diffLines, keptOnlyInYjs, renderReport } from './report.ts';
 import { summarizeContentState } from './yjs-summary.ts';
 
@@ -216,8 +216,17 @@ describe('format probe against a fake Linear', () => {
     );
     const run = await probe();
     fake.operations.set('CreateDocument', original);
-    assert.match(run.fixtures[1]!.refused ?? '', /413/);
+    assert.equal(run.fixtures[1]!.refused, 'HTTP 413', 'no request id in the recorded refusal');
+    assert.equal(refusalKey('HTTP 413'), 'HTTP 413');
+    assert.equal(refusalKey('Linear error INVALID_INPUT: Argument Validation Error'), 'INVALID_INPUT');
     assert.equal(run.fixtures[0]!.fixedPoint, true);
+  });
+
+  it('ends the run as unfinished on a server error instead of recording a refusal', async () => {
+    const original = fake.operations.get('CreateDocument')!;
+    fake.operations.set('CreateDocument', () => ({ status: 502, body: {} }));
+    await assert.rejects(probe());
+    fake.operations.set('CreateDocument', original);
   });
 
   it('reports a project deletion that Linear does not confirm', async () => {

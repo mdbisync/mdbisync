@@ -535,12 +535,16 @@ export async function findLimit(refusalAt: (value: number) => Promise<string | u
 }
 
 /**
- * Linear answered and did not do the write: a GraphQL error, or an HTTP error
- * without one (for example 413 for a very large body). Network errors and a
- * stopped client are not refusals: their outcome is unknown or the run ends.
+ * Linear answered that the input is not acceptable: a GraphQL error, or an
+ * HTTP client error without one (for example 413 for a very large body). A
+ * server error (5xx), a network error or a stopped client says nothing about
+ * the input: the run ends as unfinished instead of recording a finding.
  */
-function isRefusal(error: unknown): boolean {
-  return error instanceof LinearGraphQLError || error instanceof LinearHttpError;
+export function isRefusal(error: unknown): boolean {
+  if (error instanceof LinearGraphQLError || error instanceof LinearHttpError) {
+    return error.httpStatus < 500;
+  }
+  return false;
 }
 
 function describe(error: unknown): string {
@@ -549,5 +553,7 @@ function describe(error: unknown): string {
     // Linear's request id changes on every call and says nothing about the refusal.
     return error.message.replace(/^[^:]*: /, '').replace(/ \(HTTP \d+, request [^)]*\)/, '');
   }
+  // Only the status: the request id differs on every call.
+  if (error instanceof LinearHttpError) return `HTTP ${error.httpStatus}`;
   return error instanceof Error ? error.message : String(error);
 }

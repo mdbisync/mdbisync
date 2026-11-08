@@ -65,9 +65,9 @@ function entryOf(result: FixtureResult): ManifestEntry {
   return entry;
 }
 
-/** Linear's error code, without the message text that may name values. */
-function refusalKey(refusal: string): string {
-  return refusal.match(/^Linear error ([A-Za-z_]+)/)?.[1] ?? refusal;
+/** Linear's error code or HTTP status, without text that may change between runs. */
+export function refusalKey(refusal: string): string {
+  return refusal.match(/^Linear error ([A-Za-z_]+)/)?.[1] ?? refusal.match(/^HTTP \d{3}/)?.[0] ?? refusal;
 }
 
 /**
