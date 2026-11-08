@@ -222,6 +222,27 @@ export async function readUploads(git: Git, commit: Oid | null): Promise<UploadM
   return map;
 }
 
+/**
+ * The subject of an `ids` commit made while an initial sync is still
+ * writing. Its body names the tracked commit the run writes from, as a
+ * `Tracked: <oid>` line. The sync does not run while `ids` is at such a
+ * commit: the map may hold only part of the documents.
+ */
+export const INITIAL_SYNC_PROGRESS = 'Initial sync in progress: document ids';
+
+export function initialSyncProgressMessage(tracked: Oid): string {
+  return `${INITIAL_SYNC_PROGRESS}\n\nTracked: ${tracked}\n`;
+}
+
+/** When `commit` is a progress commit of an unfinished initial sync, the tracked commit it names; otherwise null. */
+export async function readInitialSyncProgress(git: Git, commit: Oid | null): Promise<{ tracked: Oid | null } | null> {
+  if (commit === null) return null;
+  const message = (await git.run(['show', '-s', '--format=%B', commit])).stdout.toString('utf8');
+  const [subject] = message.split('\n');
+  if (subject !== INITIAL_SYNC_PROGRESS) return null;
+  return { tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message)?.[1] ?? null };
+}
+
 export interface CommitStateOptions {
   /** The commit message; a reader can tell a run's progress commits from its final one by it. */
   message?: string;

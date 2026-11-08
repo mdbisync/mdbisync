@@ -101,7 +101,7 @@ describe('links between synchronized documents in a confirmed initial sync', () 
     assert.deepEqual(again.report.initialSync?.unchanged, SYNCED_PATHS);
   });
 
-  it('L1-15 with links: a resumed run rewrites a recorded document that links one the stopped run never created', async () => {
+  it('L1-15 with links: a resumed run creates the documents a recorded one links with the ids that run chose', async () => {
     const world = fakeWorld();
     const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '2' };
     Object.assign(process.env, hooks);
@@ -112,16 +112,19 @@ describe('links between synchronized documents in a confirmed initial sync', () 
       for (const name of Object.keys(hooks)) delete process.env[name];
     }
     assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
-    // `eng/backend/notes.md` is written and recorded, linking the plan by the id this run chose for it.
+    // `eng/backend/notes.md` is written, linking the plan by the id this run chose for it; the plan is not created yet.
     const recorded = await readIds();
-    assert.deepEqual(Object.keys(recorded).sort(), ['eng/README.md', 'eng/backend/notes.md']);
+    const planId = recorded['eng/notes/plan.md']?.id;
+    assert.ok(planId !== undefined, 'the chosen id of the plan was not recorded');
+    assert.equal(world.linear.documents.some((d) => d.id === planId), false);
+    assert.equal(content(world, recorded['eng/backend/notes.md']?.id), `# Notes\n\nFollow [the plan](<${BASE}/${planId}>). ${CANARY}`);
 
     const second = await run(world);
     assert.equal(second.result.exitCode, 0, second.result.stderr);
     assert.equal(second.report.resumed, true);
-    assert.deepEqual(second.report.initialSync?.skippedCompleted, ['eng/README.md']);
-    assert.deepEqual(second.report.initialSync?.overwritten, ['eng/backend/notes.md']);
-    assert.equal((await readIds())['eng/backend/notes.md']?.id, recorded['eng/backend/notes.md']?.id);
+    // The link written by the stopped run is already right: the plan is created with the id it chose.
+    assert.deepEqual(second.report.initialSync?.skippedCompleted, ['eng/README.md', 'eng/backend/notes.md']);
+    assert.equal((await readIds())['eng/notes/plan.md']?.id, planId);
     await assertLinked(world);
   });
 });

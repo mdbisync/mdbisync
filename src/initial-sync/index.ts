@@ -27,7 +27,6 @@ export {
   RECORD_MESSAGE,
   SYNC_IDENTITY,
   confirmInitialSync,
-  isProgressCommit,
 } from './confirm.ts';
 export { type BodyTransform, LeaveOutError, type TransformContext, type TransformInput, restoreBody, transformBody } from './transform.ts';
 export { documentLinks, documentUrlBase, linksFromLinear, linksToLinear, relativeLink, resolveRelative, workspaceUrlKey } from './links.ts';

@@ -15,6 +15,9 @@ export { type LfsPointer, type LfsRead, type LfsReadResult, lfsReader, parseLfsP
 export { type CommitIdentity, type CommitSpec, type TreeEntry, checkRepoPath, commitTree, listTree, readBlobs, writeBlob } from './objects.ts';
 export {
   type CommitStateOptions,
+  INITIAL_SYNC_PROGRESS,
+  initialSyncProgressMessage,
+  readInitialSyncProgress,
   type FetchedState,
   type FileRead,
   IDS_FILE,
