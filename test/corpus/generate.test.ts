@@ -227,3 +227,17 @@ test("generated alignment, image titles and marker contexts follow the fixture b
     }
   }
 });
+
+test("generated quoted markers stay separate paragraphs and diff3 examples include the base", () => {
+  const built = corpus();
+  for (const n of [2, 7]) {
+    const quote = built.files.find((f) => f.path.endsWith(`/marker-lookalike-${n}.md`));
+    assert.ok(quote);
+    assert.match(quote.content.toString(), /> <<<<<<< ours\n>\n> the old line\n>\n> =======\n>\n> the new line\n>\n> >>>>>>> theirs/);
+  }
+  for (const n of [4, 9]) {
+    const diff3 = built.files.find((f) => f.path.endsWith(`/marker-lookalike-${n}.md`));
+    assert.ok(diff3);
+    assert.match(diff3.content.toString(), /```text\n<<<<<<< ours\nthe old line\n\|{7} base\nthe base line\n=======\nthe new line\n>>>>>>> theirs\n```/);
+  }
+});

@@ -60,7 +60,7 @@ function addDoc(ctx: Context, path: string, body: string | Buffer, group: Group,
   return file;
 }
 
-/** Reuse the bank's observed class instead of maintaining a second rule list. */
+/** Reuse the bank's observed classification for a generated example. */
 function fromFixture(ctx: Context, name: string): Pick<CorpusFile, "expected" | "rule" | "basis"> {
   const fixture = ctx.fixtures.get(`${BANK_HOME}/${name}`);
   if (!fixture?.expected || !fixture.basis) throw new Error(`missing fixture expectation: ${name}`);
@@ -582,24 +582,18 @@ function htmlExtensions(ctx: Context): void {
 function conflictMarkers(ctx: Context): void {
   const { rng } = ctx;
   const markers = "<<<<<<< ours\nthe old line\n=======\nthe new line\n>>>>>>> theirs";
-  const forms = [
-    (s: string) => `\`\`\`text\n${s}\n\`\`\``,
-    (s: string) => s.split("\n").map((l) => `> ${l}`).join("\n"),
-    () => "Inline: `<<<<<<< ours` and `=======` and `>>>>>>> theirs`.",
-    (s: string) => `\`\`\`diff\n${s}\n\`\`\``,
-    (s: string) => `    ${s.split("\n").join("\n    ")}`,
-  ];
-  const fixtures = [
-    "conflict-markers/in-code-fence.md",
-    "conflict-markers/in-quote.md",
-    "conflict-markers/in-inline-code.md",
-    "conflict-markers/diff3-in-fence.md",
-    "conflict-markers/in-indented-code.md",
+  const forms: [string, (s: string) => string][] = [
+    ["conflict-markers/in-code-fence.md", (s) => `\`\`\`text\n${s}\n\`\`\``],
+    // Blank quote lines prevent the equals marker from becoming a setext heading.
+    ["conflict-markers/in-quote.md", (s) => s.split("\n").map((l) => `> ${l}`).join("\n>\n")],
+    ["conflict-markers/in-inline-code.md", () => "Inline: `<<<<<<< ours` and `=======` and `>>>>>>> theirs`."],
+    ["conflict-markers/diff3-in-fence.md", (s) => `\`\`\`text\n${s.replace("=======", "||||||| base\nthe base line\n=======")}\n\`\`\``],
+    ["conflict-markers/in-indented-code.md", (s) => `    ${s.split("\n").join("\n    ")}`],
   ];
   for (let i = 0; i < 10; i++) {
-    const form = forms[i % forms.length] as (s: string) => string;
+    const [fixture, form] = forms[i % forms.length] as [string, (s: string) => string];
     doc(ctx, "eng/backend/merges", `marker-lookalike-${i + 1}`, "conflict-markers", (canary) => `# How merges look\n\n${paragraph(rng)}\n\n${form(markers)}\n\nReference: ${canary}`, {
-      ...fromFixture(ctx, fixtures[i % forms.length] as string),
+      ...fromFixture(ctx, fixture),
       note: "git marker examples outside a sync conflict",
     });
   }
