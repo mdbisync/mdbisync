@@ -1,8 +1,14 @@
 // GitHub Action `main` step. The `operation` input selects one of the two
-// entry points: the recurring sync or the one-time initial sync.
+// entry points: the recurring sync or the one-time initial sync. Both run
+// the preflight first (the sync's state and the setup check) and write
+// nothing when it fails.
 
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
+import { writeRunReport } from "../run/finish.ts";
+import { readInputs } from "../run/inputs.ts";
+import { runPreflight } from "../run/preflight.ts";
+import { Git } from "../state/index.ts";
 
 export const OPERATIONS = ["sync", "initial-sync"] as const;
 export type Operation = (typeof OPERATIONS)[number];
@@ -15,9 +21,22 @@ export function parseOperation(value: string): Operation {
   throw new Error(`unknown operation: ${operation} (expected one of: ${OPERATIONS.join(", ")})`);
 }
 
-export function run(): void {
+export async function run(): Promise<void> {
   try {
     const operation = parseOperation(core.getInput("operation"));
+    const inputs = readInputs((name) => core.getInput(name));
+    const outcome = await runPreflight(operation, inputs, {
+      git: new Git(process.env["GITHUB_WORKSPACE"] || process.cwd()),
+      warn: (message) => core.warning(message),
+    });
+    if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(outcome.summary).write();
+    else core.info(outcome.summary);
+    if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
+    core.setOutput("code", outcome.code ?? "");
+    if (!outcome.ok) {
+      core.setFailed(`${operation}: stopped before any write (${outcome.code})`);
+      return;
+    }
     core.setFailed(notImplementedMessage(operation));
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
@@ -25,5 +44,5 @@ export function run(): void {
 }
 
 if (import.meta.main) {
-  run();
+  await run();
 }

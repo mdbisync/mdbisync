@@ -24,7 +24,7 @@ for (const entry of [
   { label: "source", main: "src/action/main.ts", post: "src/action/post.ts", required: true },
   { label: "bundle", main: "dist/action-main.js", post: "dist/action-post.js", required },
 ]) {
-  test(`the ${entry.label} action steps report "not implemented"`, (t) => {
+  test(`the ${entry.label} action steps need their inputs, and post has nothing to clean up`, (t) => {
     if (!entry.required && !existsSync(entry.main)) {
       t.skip("not built; run `npm run build` first");
       return;
@@ -34,7 +34,7 @@ for (const entry of [
     for (const operation of OPERATIONS) {
       const child = spawnSync(process.execPath, [entry.main], { encoding: "utf8", env: { ...baseEnv, INPUT_OPERATION: operation } });
       assert.equal(child.status, 1, `${entry.main} ${operation}`);
-      assert.match(child.stdout, new RegExp(`::error::${operation}: not implemented`));
+      assert.match(child.stdout, /::error::the input linear-client-id is required/);
     }
     const post = spawnSync(process.execPath, [entry.post], { encoding: "utf8", env: baseEnv });
     assert.equal(post.status, 0);
