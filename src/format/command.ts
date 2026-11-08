@@ -63,7 +63,7 @@ export function runLint(paths: readonly string[], cwd: string = process.cwd()): 
   if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
   const findings = lintAll(files, cwd);
-  const failing = new Set(findings.map((finding) => finding.file));
+  const failing = new Set(findings.map((finding) => finding.file)); // duplicate titles included
   const unfixed = files.filter((file) => {
     if (failing.has(file)) return false;
     const text = readFileSync(join(cwd, file), 'utf8');
@@ -78,8 +78,11 @@ export function runFix(paths: readonly string[], cwd: string = process.cwd()): C
   const problem = badPaths(paths, cwd);
   if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
+  // A file whose title collides with another's is a lint finding too: leave it as it is.
+  const colliding = new Set(duplicateTitles(files).map((finding) => finding.file));
   const changed: string[] = [];
   for (const file of files) {
+    if (colliding.has(file)) continue;
     const path = join(cwd, file);
     const text = readFileSync(path, 'utf8');
     const fixed = fixText(text);

@@ -118,4 +118,3 @@ export function duplicateTitles(files: readonly string[]): Finding[] {
     .filter((group) => group.length > 1)
     .flatMap((group) => group.map((file) => ({ file, line: 1, rule: 'duplicate-title' as const, message: `${LINT_RULES['duplicate-title']} (${group.filter((other) => other !== file).join(', ')})` })));
 }
-

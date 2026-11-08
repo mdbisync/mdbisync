@@ -133,7 +133,7 @@ class Writer {
     const attachment = first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
     if (attachment) {
       // Linear turns a list item holding only a link to a file into a file block.
-      return `${marker} \n${indent}[${this.inline(attachment.children)}](${encodeSpaces(attachment.url)})`;
+      return `${marker} \n${indent}[${this.inline(attachment.children)}](${imageDestination(attachment.url)})`;
     }
     if (first === undefined) return marker;
     this.containers.push({ kind: 'item', indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
@@ -257,7 +257,7 @@ class Writer {
 
   /** Linear writes every link destination in angle brackets, without a title. */
   private link(children: readonly PhrasingContent[], url: string): string {
-    return `[${this.inline(children)}](<${encodeSpaces(url).replace(/</g, '%3C').replace(/>/g, '%3E')}>)`;
+    return `[${this.inline(children)}](<${destination(url).replace(/</g, '%3C').replace(/>/g, '%3E')}>)`;
   }
 
   /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
@@ -328,13 +328,21 @@ function insideLine(source: string, at: number): boolean {
   return before !== '' && !/^[ \t#]*$/.test(after);
 }
 
-function encodeSpaces(url: string): string {
-  return url.replace(/ /g, '%20');
+/**
+ * A destination as Markdown source for a decoded URL: spaces encoded, and
+ * what Markdown would read back differently escaped (a backslash before
+ * punctuation, an `&` that starts a character reference).
+ */
+function destination(url: string): string {
+  return url
+    .replace(/ /g, '%20')
+    .replace(/\\(?=[!-/:-@[-`{-~])/g, '\\\\')
+    .replace(/&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]{1,6};|[A-Za-z][A-Za-z0-9]{1,31};)/g, '&amp;');
 }
 
-/** Linear writes image destinations without angle brackets: characters that would end one are encoded. */
+/** Linear writes image and file destinations without angle brackets: characters that would end one are encoded. */
 function imageDestination(url: string): string {
-  return encodeSpaces(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
 /** A paragraph that holds only a link to a relative file other than Markdown: an attachment. */
@@ -353,4 +361,3 @@ function prefixLines(text: string, prefix: string, empty: string): string {
     .map((line) => (line === '' ? empty : prefix + line))
     .join('\n');
 }
-

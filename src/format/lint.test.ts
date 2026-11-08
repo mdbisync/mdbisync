@@ -97,6 +97,22 @@ describe('lint and fix commands', () => {
     assert.deepEqual(runFix(['nowhere'], dir), { exitCode: 2, stdout: '', stderr: 'no such file or folder: nowhere\n' });
   });
 
+  it('fix leaves files whose titles collide', () => {
+    const folder = join(dir, 'titles');
+    mkdirSync(folder);
+    try {
+      writeFileSync(join(folder, 'Guide.md'), '- a\n');
+      writeFileSync(join(folder, 'guide.md'), '- b\n');
+      const result = runFix(['titles'], dir);
+      assert.equal(result.exitCode, 1);
+      assert.equal(readFileSync(join(folder, 'Guide.md'), 'utf8'), '- a\n');
+      assert.equal(readFileSync(join(folder, 'guide.md'), 'utf8'), '- b\n');
+      assert.match(result.stdout, /titles\/Guide\.md:1: duplicate-title/);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it('does not follow symbolic links', () => {
     const outside = mkdtempSync(join(tmpdir(), 'format-outside-'));
     try {

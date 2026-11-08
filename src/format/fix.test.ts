@@ -109,8 +109,16 @@ describe('what fix leaves alone', () => {
     assert.equal(fixText('[a](https://example.com/?q=a&gt;b)'), '[a](<https://example.com/?q=a%3Eb>)');
   });
 
-  it('encodes spaces in a file block destination', () => {
+  it('encodes spaces and parentheses in a file block destination', () => {
     assert.equal(fixText('* [Report](<my report.pdf>)'), '* \n  [Report](my%20report.pdf)');
+    assert.equal(fixText('* [Report](<a)b.pdf>)'), '* \n  [Report](a%29b.pdf)');
+  });
+
+  it('keeps what a destination means: references and escapes stay escaped', () => {
+    const once = fixText('[a](<https://example.com/?q=&amp;copy;>)');
+    assert.equal(once, '[a](<https://example.com/?q=&amp;copy;>)');
+    assert.equal(fixText('[a](https://example.com/?a=1&b=2)'), '[a](<https://example.com/?a=1&b=2>)');
+    assert.equal(fixText('[a](<x\\\\*y>)'), '[a](<x\\\\*y>)');
   });
 
   it('keeps a tilde fence whose info string holds a backtick', () => {
