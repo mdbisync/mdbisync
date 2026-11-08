@@ -7,7 +7,7 @@
 // which the release ships next to the bundles.
 
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import type { Metafile } from "esbuild";
 import { packagePathOf } from "./lockfile.ts";
 
@@ -68,9 +68,12 @@ export function readBundledPackage(path: string): BundledPackage {
     version?: unknown;
     license?: unknown;
   };
-  const noticeFiles = readdirSync(path, { withFileTypes: true })
+  // Subfolders count too: a package may carry vendored code under its own
+  // license (undici's lib/web/fetch/LICENSE). Nested packages are separate.
+  const noticeFiles = readdirSync(path, { withFileTypes: true, recursive: true })
     .filter((entry) => entry.isFile() && NOTICE_FILE.test(entry.name))
-    .map((entry) => entry.name)
+    .map((entry) => relative(path, join(entry.parentPath, entry.name)).split(sep).join("/"))
+    .filter((file) => !file.split("/").includes("node_modules"))
     .sort()
     .map((file) => ({ file, text: readFileSync(join(path, file), "utf8") }));
   return {

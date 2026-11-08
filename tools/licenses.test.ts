@@ -94,10 +94,15 @@ test("package facts and license files are read from the package folder", () => {
     writeFileSync(join(path, "LICENSE"), "Apache license text\n");
     writeFileSync(join(path, "NOTICE"), "Required notice\n");
     writeFileSync(join(path, "index.js"), "export {};\n");
+    mkdirSync(join(path, "lib", "vendored"), { recursive: true });
+    writeFileSync(join(path, "lib", "vendored", "LICENSE"), "Vendored code license\n");
+    mkdirSync(join(path, "node_modules", "nested"), { recursive: true });
+    writeFileSync(join(path, "node_modules", "nested", "LICENSE"), "A separate package\n");
     const pkg = readBundledPackage(path);
     assert.equal(pkg.name, "pkg");
     assert.equal(pkg.license, "Apache-2.0");
-    assert.deepEqual(pkg.noticeFiles.map(({ file }) => file), ["LICENSE", "NOTICE"]);
+    assert.deepEqual(pkg.noticeFiles.map(({ file }) => file), ["LICENSE", "NOTICE", "lib/vendored/LICENSE"]);
+    assert.match(formatNotices([pkg]), /--- lib\/vendored\/LICENSE ---\n\nVendored code license/);
     const notices = formatNotices([pkg]);
     assert.match(notices, /pkg 2\.0\.0\nLicense: Apache-2\.0/);
     assert.match(notices, /Apache license text/);
