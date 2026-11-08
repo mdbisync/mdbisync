@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test \"src/**/*.test.ts\" \"tools/**/*.test.ts\" \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
     "check:install-scripts": "node tools/check-install-scripts.ts",
-    "check:cyrillic": "node tools/check-no-cyrillic.ts"
+    "check:cyrillic": "node tools/check-no-cyrillic.ts",
+    "check:fixtures": "node test/fixtures/check-index.mjs"
   },
   "dependencies": {
     "@actions/core": "3.0.1",

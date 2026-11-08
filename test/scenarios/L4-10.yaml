@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "id": "L4-10",
+  "slice": "mini",
+  "mode": "actions",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "run",
+      "action": "workflow-parallel",
+      "args": {
+        "events": [
+          "push",
+          "schedule"
+        ],
+        "replacePending": true
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "workflows.maxActiveInGroup",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "documents.allEditsPreserved",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

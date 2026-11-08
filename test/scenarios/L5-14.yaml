@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "id": "L5-14",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "git",
+      "action": "delete-refs",
+      "args": {
+        "names": [
+          "uploads"
+        ]
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "uploads.reuploaded",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "tracked.tip",
+        "operator": "same-as",
+        "expected": "before.tracked.tip"
+      }
+    ]
+  }
+}

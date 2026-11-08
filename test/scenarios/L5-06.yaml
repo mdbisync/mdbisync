@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "id": "L5-06",
+  "slice": "mid",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mid"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "git",
+      "action": "edit-many",
+      "args": {
+        "documents": 40
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "http",
+      "args": {
+        "status": 429,
+        "requestNumber": 30,
+        "retryAfter": null
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "clear",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "runs.0.writesAfterLimit",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "runs.0.progressRecorded",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "runs.0.exitStatus",
+        "operator": "equal",
+        "expected": "warning"
+      },
+      {
+        "subject": "runs.1.resumed",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

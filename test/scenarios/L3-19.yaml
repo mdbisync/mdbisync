@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "id": "L3-19",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "git",
+      "action": "move",
+      "args": {
+        "destination": "project/git-name.md"
+      }
+    },
+    {
+      "kind": "linear",
+      "action": "rename",
+      "args": {
+        "actor": "editor-a",
+        "title": "linear-name"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "tracked.documentPath",
+        "operator": "equal",
+        "expected": "project/git-name.md"
+      },
+      {
+        "subject": "documents.title",
+        "operator": "equal",
+        "expected": "git-name"
+      },
+      {
+        "subject": "documents.renameDecisionCommentPresent",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "documents.duplicateCount",
+        "operator": "equal",
+        "expected": 0
+      }
+    ]
+  },
+  "proposedRule": "The tracked branch path wins concurrent renames; reset the Linear title and add a decision comment without duplicating the document."
+}
