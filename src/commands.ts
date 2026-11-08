@@ -1,6 +1,6 @@
 // The commands of the command-line entry and their exit codes.
-// Every command is a stub for now: it reports "not implemented" and exits
-// with its own code, so callers and tests can tell the stubs apart.
+// A command that is not built yet reports "not implemented" and exits with
+// its own code, so callers and tests can tell the stubs apart.
 
 export interface CommandInfo {
   readonly summary: string;
@@ -23,6 +23,9 @@ export const USAGE_EXIT_CODE = 2;
 export function isCommandName(value: string): value is CommandName {
   return Object.hasOwn(COMMANDS, value);
 }
+
+/** Commands that run; the others are stubs. */
+export const IMPLEMENTED: ReadonlySet<CommandName> = new Set(["lint", "fix"]);
 
 export function notImplementedMessage(command: string): string {
   return `${command}: not implemented`;

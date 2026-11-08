@@ -64,6 +64,7 @@ test('release tree is self-contained and its tagged commit does not change main'
     await writeFile(join(source, 'dist/post.cjs'), 'console.log("post")');
     await writeFile(join(source, 'dist/cli.cjs'), '#!/usr/bin/env node\nconsole.log("cli")');
     await writeFile(join(source, 'dist/action.cjs.LEGAL.txt'), 'Bundled licenses\n');
+    await writeFile(join(source, 'dist/THIRD_PARTY_NOTICES.txt'), 'Third-party notices\n');
     await writeFile(join(source, 'dist/unexpected.cjs'), 'throw new Error("not a release file")');
     git('add', '.');
     git('commit', '-m', 'Create source fixture');
@@ -73,6 +74,7 @@ test('release tree is self-contained and its tagged commit does not change main'
     const manifest = JSON.parse(await readFile(join(output, 'release.json'), 'utf8'));
     assert.equal(manifest.source, parent);
     assert.match(manifest.files['dist/cli.cjs'], /^[a-f0-9]{64}$/);
+    assert.match(manifest.files['dist/THIRD_PARTY_NOTICES.txt'], /^[a-f0-9]{64}$/);
     await verifyReleaseDirectory(output, parent, options.version);
     await writeFile(join(output, 'dist/cli.cjs'), 'changed');
     await assert.rejects(verifyReleaseDirectory(output, parent, options.version), /checksum/);
@@ -103,6 +105,9 @@ test('release tree is self-contained and its tagged commit does not change main'
     await assert.rejects(tagRelease(parent, options.version, output, source), /already exists/);
     assert.equal(execFileSync(process.execPath, [join(output, 'dist/cli.cjs')], { encoding: 'utf8' }).trim(), 'cli');
     await assert.rejects(stageRelease({ ...options, sourceSha: 'bad' }), /SHA/);
+    await rm(join(source, 'dist/THIRD_PARTY_NOTICES.txt'));
+    await assert.rejects(stageRelease({ ...options, output: join(root, 'no-notices') }), /ENOENT/);
+    await writeFile(join(source, 'dist/THIRD_PARTY_NOTICES.txt'), 'Third-party notices\n');
     await rm(join(source, 'dist/post.cjs'));
     await assert.rejects(stageRelease({ ...options, output: join(root, 'missing') }), /ENOENT/);
   } finally {

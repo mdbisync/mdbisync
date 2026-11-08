@@ -36,7 +36,7 @@ jobs:
         run: npm run check:fixtures
       - name: Type check
         run: npm run typecheck
-      - name: Bundle
+      - name: Bundle and check bundled licenses
         run: npm run build
       - name: Test
         run: npm test
