@@ -1,0 +1,35 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "This is ==highlighted== text.",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-8dda2e7a",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

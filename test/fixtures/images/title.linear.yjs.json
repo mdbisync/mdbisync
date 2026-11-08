@@ -1,0 +1,34 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "image",
+      "attrs": {
+        "alt": "Banner",
+        "contentAttribution": {
+          "actorType": "user",
+          "userId": "<userId>"
+        },
+        "src": "../assets/banner.png",
+        "title": "Quarterly banner",
+        "uploadState": "finished"
+      }
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-93be94fc",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

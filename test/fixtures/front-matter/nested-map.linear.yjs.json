@@ -1,0 +1,57 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "code_block",
+      "attrs": {
+        "id": "<id>",
+        "language": "yaml"
+      },
+      "children": [
+        {
+          "text": "review:\n  owner: design\n  dates:\n    start: 2024-01-01\n    end: 2024-02-01",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "attrs": {
+        "id": "<id>",
+        "level": 1
+      },
+      "children": [
+        {
+          "text": "Nested map",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-2fe2ac98",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

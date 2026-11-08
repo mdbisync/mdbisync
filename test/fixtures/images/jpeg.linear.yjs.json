@@ -1,0 +1,33 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "image",
+      "attrs": {
+        "alt": "Photo",
+        "contentAttribution": {
+          "actorType": "user",
+          "userId": "<userId>"
+        },
+        "src": "../assets/photo.jpg",
+        "uploadState": "finished"
+      }
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-48879b65",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

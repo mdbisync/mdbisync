@@ -1,0 +1,208 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "table",
+      "attrs": {
+        "sizing": "fit"
+      },
+      "children": [
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_header",
+              "attrs": {
+                "colspan": 1,
+                "rowspan": 1
+              },
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {
+                      "text": "Item",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "table_header",
+              "attrs": {
+                "colspan": 1,
+                "rowspan": 1
+              },
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {
+                      "text": "Note",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {
+                "colspan": 1,
+                "rowspan": 1
+              },
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {
+                      "text": "Bold",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        },
+                        "strong": {}
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {
+                "colspan": 1,
+                "rowspan": 1
+              },
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {
+                      "text": "italic",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        },
+                        "em": {}
+                      }
+                    },
+                    {
+                      "text": " and ",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        }
+                      }
+                    },
+                    {
+                      "text": "code",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        },
+                        "code": {}
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {
+                "colspan": 1,
+                "rowspan": 1
+              },
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {
+                      "text": "old",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        },
+                        "strike": {}
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {
+                "colspan": 1,
+                "rowspan": 1
+              },
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {
+                      "text": "link",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        },
+                        "link": {
+                          "href": "https://example.com",
+                          "noEmbed": null
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-87a2683d",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

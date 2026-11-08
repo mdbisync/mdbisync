@@ -1,0 +1,113 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "Owner",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    },
+                    "strong": {}
+                  }
+                },
+                {
+                  "text": ": the platform group",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "Due",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    },
+                    "em": {}
+                  }
+                },
+                {
+                  "text": ": next week",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "code",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    },
+                    "code": {}
+                  }
+                },
+                {
+                  "text": ": ready",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-f864f803",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

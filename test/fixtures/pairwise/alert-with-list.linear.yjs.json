@@ -1,0 +1,87 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "callout",
+      "attrs": {
+        "color": "#26b5ce",
+        "icon": "LightBulb"
+      },
+      "children": [
+        {
+          "type": "paragraph",
+          "children": [
+            {
+              "text": "Before you start:",
+              "marks": {
+                "attribution": {
+                  "actorType": "user",
+                  "userId": "<userId>"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "bullet_list",
+          "children": [
+            {
+              "type": "list_item",
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {
+                      "text": "Back up the data",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "list_item",
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {
+                      "text": "Tell the team",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-b7e375d9",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

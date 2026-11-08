@@ -1,0 +1,220 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "heading",
+      "attrs": {
+        "id": "<id>",
+        "level": 1
+      },
+      "children": [
+        {
+          "text": "Changelog",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "attrs": {
+        "id": "<id>",
+        "level": 2
+      },
+      "children": [
+        {
+          "text": "2.1.0",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "attrs": {
+        "id": "<id>",
+        "level": 3
+      },
+      "children": [
+        {
+          "text": "Added",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "Dark mode for the settings page.",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "Export to CSV.",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "attrs": {
+        "id": "<id>",
+        "level": 3
+      },
+      "children": [
+        {
+          "text": "Fixed",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "Dates in reports now use the user's time zone.",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "attrs": {
+        "id": "<id>",
+        "level": 2
+      },
+      "children": [
+        {
+          "text": "2.0.1",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "attrs": {
+        "id": "<id>",
+        "level": 3
+      },
+      "children": [
+        {
+          "text": "Fixed",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "The login page no longer loops on expired sessions.",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-b15737c6",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

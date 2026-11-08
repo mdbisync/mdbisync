@@ -1,0 +1,61 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Before",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "image",
+      "attrs": {
+        "alt": "pixel",
+        "contentAttribution": {
+          "actorType": "user",
+          "userId": "<userId>"
+        },
+        "src": "../assets/pixel.png",
+        "uploadState": "finished"
+      }
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "after.",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-72e3775f",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Diagram of the gantt kind.",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "diagram",
+      "attrs": {
+        "height": null,
+        "id": "<id>",
+        "language": "mermaid",
+        "width": null
+      },
+      "children": [
+        {
+          "text": "gantt\n  title Release\n  dateFormat YYYY-MM-DD\n  section Build\n  Code :a1, 2024-01-01, 10d\n  Test :after a1, 5d",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-a6077dca",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "Status",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    },
+                    "link": {
+                      "href": "https://example.com/status",
+                      "noEmbed": null
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "Blog",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    },
+                    "link": {
+                      "href": "https://example.com/blog",
+                      "noEmbed": null
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-ad8b1cb0",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

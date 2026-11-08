@@ -1,0 +1,33 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "image",
+      "attrs": {
+        "alt": "Banner",
+        "contentAttribution": {
+          "actorType": "user",
+          "userId": "<userId>"
+        },
+        "src": "../assets/banner.png",
+        "uploadState": "finished"
+      }
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-dc48e202",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "image",
+      "attrs": {
+        "alt": "Pixel",
+        "contentAttribution": {
+          "actorType": "user",
+          "userId": "<userId>"
+        },
+        "src": "../assets/pixel.bmp",
+        "uploadState": "finished"
+      }
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-6dc60d9f",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

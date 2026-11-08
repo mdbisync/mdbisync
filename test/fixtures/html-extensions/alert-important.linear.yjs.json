@@ -1,0 +1,44 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "callout",
+      "attrs": {
+        "color": "#5e6ad2",
+        "icon": "Megaphone"
+      },
+      "children": [
+        {
+          "type": "paragraph",
+          "children": [
+            {
+              "text": "Key information.",
+              "marks": {
+                "attribution": {
+                  "actorType": "user",
+                  "userId": "<userId>"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-10bb911e",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

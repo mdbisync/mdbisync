@@ -1,0 +1,97 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "todo_list",
+      "children": [
+        {
+          "type": "todo_item",
+          "attrs": {
+            "done": false
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "Launch",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "todo_list",
+              "children": [
+                {
+                  "type": "todo_item",
+                  "attrs": {
+                    "done": true
+                  },
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "children": [
+                        {
+                          "text": "Write notes",
+                          "marks": {
+                            "attribution": {
+                              "actorType": "user",
+                              "userId": "<userId>"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "todo_item",
+                  "attrs": {
+                    "done": false
+                  },
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "children": [
+                        {
+                          "text": "Update site",
+                          "marks": {
+                            "attribution": {
+                              "actorType": "user",
+                              "userId": "<userId>"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-4fda3abe",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "horizontal_rule"
+    },
+    {
+      "type": "horizontal_rule"
+    },
+    {
+      "type": "heading",
+      "attrs": {
+        "id": "<id>",
+        "level": 1
+      },
+      "children": [
+        {
+          "text": "Empty front matter",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-83b9828d",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

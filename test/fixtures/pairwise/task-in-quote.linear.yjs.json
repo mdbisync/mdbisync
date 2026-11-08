@@ -1,0 +1,75 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "todo_list",
+          "children": [
+            {
+              "type": "todo_item",
+              "attrs": {
+                "done": false
+              },
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {
+                      "text": "Quoted task",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "todo_item",
+              "attrs": {
+                "done": true
+              },
+              "children": [
+                {
+                  "type": "paragraph",
+                  "children": [
+                    {
+                      "text": "Quoted done task",
+                      "marks": {
+                        "attribution": {
+                          "actorType": "user",
+                          "userId": "<userId>"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-904c9373",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "blockquote",
+      "children": [
+        {
+          "type": "paragraph",
+          "children": [
+            {
+              "text": "The quote starts here",
+              "marks": {
+                "attribution": {
+                  "actorType": "user",
+                  "userId": "<userId>"
+                }
+              }
+            },
+            {
+              "type": "hard_break"
+            },
+            {
+              "text": "and continues lazily on the next line.",
+              "marks": {
+                "attribution": {
+                  "actorType": "user",
+                  "userId": "<userId>"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-0060b4a5",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Diagram of the flowchart kind.",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "diagram",
+      "attrs": {
+        "height": null,
+        "id": "<id>",
+        "language": "mermaid",
+        "width": null
+      },
+      "children": [
+        {
+          "text": "flowchart TD\n  Start --> Check{Ready?}\n  Check -- yes --> Ship\n  Check -- no --> Fix --> Check",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-854e6c3d",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

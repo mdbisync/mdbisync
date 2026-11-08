@@ -1,0 +1,10 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph"
+    }
+  ]
+}

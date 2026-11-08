@@ -41,6 +41,19 @@ test('an unindexed file is reported', () => {
   assert.ok(errors.includes('tables/extra.md: not in index.yaml'), errors.join('\n'));
 });
 
+test('recorded Linear forms beside a fixture are not fixtures', () => {
+  const errors = withCopy((d) => {
+    writeFileSync(join(d, 'tables', 'table-basic.linear.md'), '| A |');
+    writeFileSync(join(d, 'tables', 'table-basic.linear.yjs.json'), '{}');
+  });
+  assert.deepEqual(errors, []);
+});
+
+test('a recorded Linear form without its fixture is reported', () => {
+  const errors = withCopy((d) => writeFileSync(join(d, 'tables', 'gone.linear.md'), '| A |'));
+  assert.ok(errors.includes('tables/gone.linear.md: recorded Linear form without its fixture'), errors.join('\n'));
+});
+
 test('an indexed file that is missing is reported', () => {
   const errors = withCopy((d) => rmSync(join(d, 'tables', 'table-basic.md')));
   assert.ok(errors.includes('tables/table-basic.md: indexed but missing'), errors.join('\n'));

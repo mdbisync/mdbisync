@@ -1,0 +1,44 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "callout",
+      "attrs": {
+        "color": "#f2994a",
+        "icon": "Alert"
+      },
+      "children": [
+        {
+          "type": "paragraph",
+          "children": [
+            {
+              "text": "Needs attention.",
+              "marks": {
+                "attribution": {
+                  "actorType": "user",
+                  "userId": "<userId>"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-fe76c48a",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

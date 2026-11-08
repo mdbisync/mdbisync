@@ -14,7 +14,9 @@ const CANARY = /^kx-[0-9a-f]{8}$/;
 const CANARY_ANY = /kx-[0-9a-f]{8}/g;
 // Cyrillic, Cyrillic Supplement, Extended-A/B/C. Non-Latin test text uses other scripts.
 const CYRILLIC = /[\u0400-\u052F\u1C80-\u1C8F\u2DE0-\u2DFF\uA640-\uA69F]/u;
-const ROOT_FILES = new Set(['.gitattributes', 'index.yaml', 'README.md', 'check-index.mjs', 'check-index.test.mjs']);
+const ROOT_FILES = new Set(['.gitattributes', 'index.yaml', 'README.md', 'check-index.mjs', 'check-index.test.mjs', 'linear-probe.json']);
+// Linear's recorded forms, written beside each fixture by the format probe.
+const PROBE_OUTPUT = /\.linear\.(md|yjs\.json)$/;
 const ASSETS_DIR = 'assets';
 const MARKDOWN = /\.(md|markdown)$/;
 
@@ -156,7 +158,8 @@ export function checkBank(bankDir) {
   const rules = new Set(index.rules.map((r) => r.id));
   const onDisk = walk(bankDir).filter((f) => !ROOT_FILES.has(f));
   const assetFiles = onDisk.filter((f) => f.startsWith(`${ASSETS_DIR}/`));
-  const fixtureFiles = onDisk.filter((f) => !f.startsWith(`${ASSETS_DIR}/`));
+  const probeOutputs = onDisk.filter((f) => PROBE_OUTPUT.test(f));
+  const fixtureFiles = onDisk.filter((f) => !f.startsWith(`${ASSETS_DIR}/`) && !PROBE_OUTPUT.test(f));
 
   // Every file indexed, every indexed file present, no duplicates.
   const indexed = new Map();
@@ -170,6 +173,10 @@ export function checkBank(bankDir) {
   }
   for (const f of fixtureFiles) if (!indexed.has(f)) err(`${f}: not in index.yaml`);
   for (const f of indexed.keys()) if (!fixtureFiles.includes(f)) err(`${f}: indexed but missing`);
+  for (const f of probeOutputs) {
+    const source = f.replace(PROBE_OUTPUT, '.md');
+    if (!indexed.has(source)) err(`${f}: recorded Linear form without its fixture`);
+  }
   const assetIndex = new Set(index.assets.map((a) => a.file));
   for (const f of assetFiles) if (!assetIndex.has(f)) err(`${f}: asset not in index.yaml`);
   for (const f of assetIndex) if (!assetFiles.includes(f)) err(`${f}: indexed asset missing`);

@@ -1,0 +1,71 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "todo_list",
+      "children": [
+        {
+          "type": "todo_item",
+          "attrs": {
+            "done": true
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "Order chairs",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    },
+                    "strike": {}
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "todo_item",
+          "attrs": {
+            "done": false
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "children": [
+                {
+                  "text": "Order tables",
+                  "marks": {
+                    "attribution": {
+                      "actorType": "user",
+                      "userId": "<userId>"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "children": [
+        {
+          "text": "Ref kx-cde149c7",
+          "marks": {
+            "attribution": {
+              "actorType": "user",
+              "userId": "<userId>"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
