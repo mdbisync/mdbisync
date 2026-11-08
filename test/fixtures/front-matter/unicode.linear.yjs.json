@@ -3,7 +3,6 @@
     "prosemirror"
   ],
   "content": [
-    {"type":"code_block","attrs":{"id":"<id>","language":"yaml"},"children":[{"text":"title: \"Σχέδιο 計画 🚀\"","marks":{"attribution":"user"}}]},
     {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Unicode in front matter","marks":{"attribution":"user"}}]},
     {"type":"paragraph","children":[{"text":"Ref kx-322376e1","marks":{"attribution":"user"}}]}
   ]
