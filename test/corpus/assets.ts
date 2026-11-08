@@ -205,7 +205,8 @@ export function makeAssets(rng: Rng): Assets {
   attach("scan-9mb", "pdf", encodePdf([{ lines: ["Scanned contract"], image: { width: 2000, height: 1500, rgb: rng.bytes(2000 * 1500 * 3) } }], "Scanned contract"), "scanned contract", "about 9 MB, under the upload limit");
   attach("scan-11mb", "pdf", encodePdf([{ lines: ["Scanned archive"], image: { width: 2000, height: 1920, rgb: rng.bytes(2000 * 1920 * 3) } }], "Scanned archive"), "scanned archive", "about 11 MB, over the upload limit");
   for (const format of ["woff2", "ttf", "otf"] as const) {
-    for (let i = 0; i < 3; i++) attach("typeface", format, encodeFontFile(format, `Sample Face ${i + 1}`), `${format} typeface`);
+    // The family name includes the format, so a .ttf and an .otf never share their bytes.
+    for (let i = 0; i < 3; i++) attach("typeface", format, encodeFontFile(format, `Sample Face ${format.toUpperCase()} ${i + 1}`), `${format} typeface`);
   }
   for (let i = 0; i < 6; i++) {
     attach("bundle", "zip", encodeZip([

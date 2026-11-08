@@ -172,6 +172,17 @@ test("every document in a slice has the annotation READMEs above it", () => {
   }
 });
 
+test("every generated image and attachment has its own content", () => {
+  // Uploads are deduplicated by content hash, so two equal files would test one upload.
+  const seen = new Map<string, string>();
+  for (const file of corpus().files) {
+    if ((file.kind !== "image" && file.kind !== "attachment") || file.bankGroup !== null || file.path.startsWith("loose/")) continue;
+    const digest = createHash("sha256").update(file.content).digest("hex");
+    assert.equal(seen.get(digest), undefined, `${file.path} has the same content as ${seen.get(digest)}`);
+    seen.set(digest, file.path);
+  }
+});
+
 test("the corpus attributes keep CRLF documents byte-exact even with core.autocrlf", () => {
   const repo = mkdtempSync(join(tmpdir(), "corpus-eol-"));
   try {
