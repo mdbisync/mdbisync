@@ -1,9 +1,26 @@
 // Bundles each entry point into one self-contained file under dist/, then
-// checks that no development-only package ended up in a bundle.
+// checks that no development-only package ended up in a bundle, checks the
+// licenses of the bundled packages and writes their notices.
+//
+// `npm run build -- --update-license-inventory` rewrites the inventory from
+// the bundles instead of checking it; review its diff like any dependency
+// change.
 
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { build, type Metafile } from "esbuild";
 import { readLockfile, packagePathOf, type LockedPackage } from "./lockfile.ts";
+import {
+  INVENTORY_FILE,
+  NOTICES_FILE,
+  bundledPackagePaths,
+  findLicenseProblems,
+  formatInventory,
+  formatNotices,
+  formatPackageList,
+  inventoryOf,
+  parseInventory,
+  readBundledPackage,
+} from "./licenses.ts";
 
 export const ENTRY_POINTS = {
   cli: "src/cli.ts",
@@ -50,7 +67,20 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  console.log(`Built ${Object.keys(ENTRY_POINTS).length} bundles in dist/.`);
+  const packages = bundledPackagePaths(result.metafile).map(readBundledPackage);
+  if (process.argv.includes("--update-license-inventory")) {
+    writeFileSync(INVENTORY_FILE, formatInventory(inventoryOf(packages)));
+    console.log(`Updated ${INVENTORY_FILE}.`);
+  }
+  const problems = findLicenseProblems(packages, parseInventory(readFileSync(INVENTORY_FILE, "utf8")));
+  if (problems.length > 0) {
+    console.error(`License check failed:\n${problems.map((line) => `  ${line}`).join("\n")}`);
+    process.exitCode = 1;
+    return;
+  }
+  writeFileSync(NOTICES_FILE, formatNotices(packages));
+  console.log(`License check passed for ${inventoryOf(packages).length} bundled packages:\n${formatPackageList(packages)}`);
+  console.log(`Built ${Object.keys(ENTRY_POINTS).length} bundles in dist/ with ${NOTICES_FILE}.`);
 }
 
 if (import.meta.main) {

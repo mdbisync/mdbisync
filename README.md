@@ -23,7 +23,7 @@ Requires Node 24.
 ```sh
 npm ci                  # exact versions from package-lock.json, install scripts off
 npm run typecheck       # tsc --noEmit
-npm run build           # esbuild bundles into dist/
+npm run build           # esbuild bundles into dist/, checks bundled licenses
 npm test                # node --test
 pre-commit run --all-files
 ```
@@ -77,6 +77,12 @@ isolated release commits. Keep the hook on an explicitly resolved release
 SHA. The release mechanism does not make unfinished commands
 functional; the development status above still applies.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) to run the tests, including live tests
+against your own Linear workspace, and [SECURITY.md](SECURITY.md) to report a
+vulnerability.
+
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The release bundles include third-party
+packages listed in `third-party-licenses.json`; every release ships their
+license texts in `dist/THIRD_PARTY_NOTICES.txt`.
