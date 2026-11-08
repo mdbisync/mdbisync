@@ -52,6 +52,12 @@ export interface TransformContext {
   linear: LinearClient;
   plan: InitialSyncPlan;
   /**
+   * Path → id of every document the run writes: a matched document's id, and
+   * for a new one the id the run will create it with, chosen before the first
+   * write so a document can link one created later in the same run.
+   */
+  documentIds: ReadonlyMap<string, string>;
+  /**
    * The upload cache, read from the `uploads` state ref. A transform adds
    * to it as it uploads; the run pushes it with the document ids, so an
    * upload is recorded no later than the document that uses it.

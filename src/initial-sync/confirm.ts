@@ -187,8 +187,15 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     ...plan.create.map((entry): Work => ({ kind: 'create', entry })),
   ].sort((a, b) => compare(a.entry.path, b.entry.path));
 
+  // New documents' ids are chosen before the first write, so a transform can link a document created later in the run.
+  const newIds = new Map(plan.create.map((entry) => [entry.path, newId()]));
+  const documentIds: ReadonlyMap<string, string> = new Map([
+    ...plan.overwrite.map((entry): [string, string] => [entry.path, entry.documentId]),
+    ...newIds,
+  ]);
+
   try {
-    for (const transform of transforms) await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads });
+    for (const transform of transforms) await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, documentIds, uploads });
 
     let written = 0;
     for (let index = 0; index < work.length; index += 1) {
@@ -203,14 +210,15 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
 
       const document = item.kind === 'overwrite' ? sources.documents.get(item.entry.documentId) : undefined;
       if (item.kind === 'overwrite' && document === undefined) throw new Error(`the planned document for ${path} was not listed`);
-      if (document !== undefined && resumed && previous.get(path)?.id === document.id) {
-        result.skippedCompleted.push(path);
-        remember(path, document);
-        continue;
-      }
-
       try {
         const body = await transformBody(transforms, path, splitFile(texts.get(path) as string).body);
+        // A document the unfinished run recorded is skipped while it holds what this run would write; it may not,
+        // when its file changed or it links a new document whose id that run chose and never created.
+        if (document !== undefined && resumed && previous.get(path)?.id === document.id && document.content === body) {
+          result.skippedCompleted.push(path);
+          remember(path, document);
+          continue;
+        }
         if (document !== undefined && document.content === body) {
           result.unchanged.push(path);
           remember(path, document);
@@ -220,7 +228,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         if (item.kind === 'create') {
           // Matching compares titles in NFC; a new title is written in that form too, so the next run matches it.
           const title = item.entry.title.normalize('NFC');
-          const created = await linear.createDocument(placeId(targets, item.entry.place), { id: newId(), title, content: body });
+          const created = await linear.createDocument(placeId(targets, item.entry.place), { id: newIds.get(path) as string, title, content: body });
           remember(path, created);
           result.created.push(path);
           await checkpoint('document-created-before-ids-push');

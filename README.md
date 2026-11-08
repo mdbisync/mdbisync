@@ -59,6 +59,12 @@ leaves out, and writes nothing. With `confirm: true`:
   written;
 - the documents of the annotated projects and team zones that match no file
   are moved to Linear's trash, from which they can be restored;
+- a relative link to another synchronized document, such as
+  `[setup](../guide.md#setup)`, becomes a link to that document in Linear
+  (`https://linear.app/<workspace>/document/<id>#setup`), also when the
+  document is created in the same run; the recorded file keeps the link as
+  it was written. Links to files that are not synchronized documents stay as
+  they are;
 - document ids go to `refs/mdbisync/ids` as the run goes, and at the end
   one push records `refs/mdbisync/linear` (the tracked branch with each
   synchronized file as Linear stores it), `ids` and `uploads`.

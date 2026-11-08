@@ -58,6 +58,8 @@ export interface FakeWorld {
     documents: FakeDocument[];
     writes: FakeWrites;
     store: (content: string) => string;
+    /** The workspace's URL key, in its document URLs. */
+    urlKey: string;
   };
   /** `METHOD url` of every request. */
   requests: string[];
@@ -86,6 +88,7 @@ export function fakeWorld(): FakeWorld {
       documents: [],
       writes: { count: 0 },
       store: (content) => content,
+      urlKey: 'example-team',
     },
     requests: [],
     writes: [],
@@ -175,6 +178,7 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
     return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
+  if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
   return json(400, { errors: [{ message: `unknown operation ${operationName}`, extensions: { code: 'INPUT_ERROR' } }] });
 }
