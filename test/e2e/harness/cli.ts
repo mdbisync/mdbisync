@@ -22,7 +22,7 @@ import { LinearWorld, editorClient } from './linear-world.ts';
 import { defaultStateDir } from './locks.ts';
 import { updateStatusPage, writeEvidence, writeRunReport, type HarnessReport } from './report.ts';
 import { loadExpectedRed } from './results.ts';
-import { runScenarios } from './runner.ts';
+import { runScenarios, skippedResult } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios, selectScenarios } from './spec.ts';
 import { sweep } from './sweeper.ts';
@@ -43,6 +43,7 @@ async function main(argv: string[]): Promise<number> {
       out: { type: 'string' },
       'status-page': { type: 'string' },
       'evidence-dir': { type: 'string' },
+      defer: { type: 'string' },
     },
   });
   const command = positionals[0] ?? 'help';
@@ -123,7 +124,11 @@ async function main(argv: string[]): Promise<number> {
       };
       process.on('SIGINT', onSignal);
       process.on('SIGTERM', onSignal);
-      const results = await runScenarios(scenarios, { config, governor, appClients, stateDir, outDir, expectedRed: loadExpectedRed(), log }, workers, stop);
+      // --defer: selected scenarios reported skipped (for example to keep a heavy one for a quiet budget window).
+      const deferred = new Set(list(values.defer) ?? []);
+      const ran = await runScenarios(scenarios.filter((s) => !deferred.has(s.id)), { config, governor, appClients, stateDir, outDir, expectedRed: loadExpectedRed(), log }, workers, stop);
+      const byId = new Map(ran.map((result) => [result.id, result]));
+      const results = scenarios.map((s) => byId.get(s.id) ?? skippedResult(s, 'deferred to a later run'));
       const report: HarnessReport = { harnessRunId, startedAt, finishedAt: new Date().toISOString(), host: hostname(), selection: cleanSelection, results };
       const files = writeRunReport(report, outDir);
       log(`report: ${files.markdown}`);

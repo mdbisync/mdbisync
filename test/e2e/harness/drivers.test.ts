@@ -250,6 +250,27 @@ describe('run tree from a slice', () => {
     assert.throws(() => buildRunTree({ slice: 'mini', paths: ['x/README.md'] }, new Map([['x/README.md', README('linear-project: OTHER')]]), names), /unknown project placeholder/);
   });
 
+  it('lays out the real corpus generator\'s slices', async () => {
+    const { buildCorpus } = await import('../../corpus/generate.ts');
+    const corpus = buildCorpus();
+    const text = new Map(corpus.files.map((file) => [file.path, file.content.toString('utf8')]));
+    const names = runNames('4f1a9c');
+    for (const slice of ['mini', 'bank', 'mid', 'full'] as const) {
+      const paths = corpus.slices[slice];
+      const readmes = new Map(paths.filter((path) => /(^|\/)README\.md$/.test(path)).map((path) => [path, text.get(path) ?? '']));
+      const tree = buildRunTree({ slice, paths }, readmes, names);
+      assert.equal(tree.paths.size, paths.filter((path) => !path.startsWith('.github/')).length, slice);
+      // Every project of the slice gets a run project, and only ENG has a team zone.
+      for (const [target, readme] of tree.rewritten) assert.doesNotMatch(readme, /PROJECT_[A-Z]+/, `${slice} ${target}`);
+      assert.deepEqual([...tree.teamZones.keys()], tree.teamZones.size === 0 ? [] : ['ENG'], slice);
+      // No two corpus files land on one path.
+      assert.equal(new Set(tree.paths.keys()).size, tree.paths.size, slice);
+    }
+    const mini = buildRunTree({ slice: 'mini', paths: corpus.slices.mini }, new Map(corpus.slices.mini.filter((p) => p.endsWith('README.md')).map((p) => [p, text.get(p) ?? ''])), names);
+    assert.ok(mini.projects.size >= 3, 'mini maps three projects');
+    assert.ok([...mini.paths.keys()].some((path) => path.startsWith('eng/4f1a9c/')), 'mini has team-zone documents below the run id');
+  });
+
   it('builds and pushes a run branch from the sandbox main, and deletes only run refs', async () => {
     const root = fresh('sandbox-');
     const remote = join(root, 'sandbox.git');
