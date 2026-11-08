@@ -49,6 +49,7 @@ function asset(path: string, content: Buffer, group: "images" | "attachments", n
     rule: tooLarge ? "upload-too-large" : null,
     basis: null,
     macosUnsafe: false,
+    bankGroup: null,
     links: [],
     note,
   };

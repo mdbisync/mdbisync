@@ -34,6 +34,7 @@ export type ManifestEntry = {
   rule: string | null;
   basis: string | null;
   macos_unsafe: boolean;
+  bank_group: string | null;
   links: string[];
   note: string | null;
 };
@@ -85,6 +86,7 @@ export function buildCorpus(seed: string = DEFAULT_SEED, bankDir: string = DEFAU
       rule: f.rule,
       basis: f.basis,
       macos_unsafe: f.macosUnsafe,
+      bank_group: f.bankGroup,
       links: [...f.links].sort(),
       note: f.note,
     })),

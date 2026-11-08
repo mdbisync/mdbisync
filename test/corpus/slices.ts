@@ -24,15 +24,18 @@ function isDocument(file: CorpusFile): boolean {
 export function closure(files: CorpusFile[], paths: Iterable<string>): string[] {
   const byPath = new Map(files.map((f) => [f.path, f]));
   const out = new Set<string>(SUPPORT);
-  for (const path of paths) {
+  // Every file added brings its own annotation READMEs and links, until nothing new is added.
+  const pending = [...paths];
+  for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
+    if (out.has(path) && !SUPPORT.includes(path)) continue;
     const file = byPath.get(path);
     if (!file) throw new Error(`slice names a path the corpus does not have: ${path}`);
     out.add(path);
     for (let dir = posix.dirname(path); dir !== "."; dir = posix.dirname(dir)) {
       const readme = byPath.get(`${dir}/README.md`);
-      if (readme && readme.group === "annotations") out.add(readme.path);
+      if (readme && readme.group === "annotations" && !out.has(readme.path)) pending.push(readme.path);
     }
-    for (const target of file.links) if (byPath.has(target)) out.add(target);
+    for (const target of file.links) if (byPath.has(target) && !out.has(target)) pending.push(target);
   }
   return [...out].sort();
 }

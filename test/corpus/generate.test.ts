@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
-import { linkTargets } from "./bank.ts";
+import { linkTargets, rewrite, targetPath } from "./bank.ts";
 import { checkCorpus } from "./check.ts";
 import { longTitle } from "./documents.ts";
 import { buildCorpus, writeCorpus } from "./generate.ts";
@@ -52,7 +52,7 @@ test("the same seed writes byte-identical trees, and the result passes the corpu
 });
 
 test("a different seed changes the generated content but not the layout rules", () => {
-  const one = buildCorpus("seed-one");
+  const one = corpus();
   const two = buildCorpus("seed-two");
   const text = (c: ReturnType<typeof buildCorpus>) => c.files.filter((f) => f.group === "work-documents").map((f) => f.content.toString()).join("");
   assert.notEqual(text(one), text(two));
@@ -119,6 +119,55 @@ test("every relative link a corpus document writes is in its dependency list", (
       const bare = (written.startsWith("<") ? written.slice(1, -1) : written).split("#")[0] as string;
       const target = posix.normalize(posix.join(posix.dirname(file.path), decodeURI(bare)));
       if (byPath.has(target)) assert.ok(file.links.includes(target), `${file.path} links to ${target} without listing it`);
+    }
+  }
+});
+
+test("HTML src and href count as links, and the HTML image fixture records its image", () => {
+  assert.deepEqual(linkTargets('<img src="../assets/banner.png" alt="x">\n<a href="https://www.example.com">y</a>\n'), [{ written: "../assets/banner.png", form: "html" }]);
+  const html = corpus().files.find((f) => f.path === "docs/reference/html-extensions/html-img.md");
+  assert.ok(html?.links.includes("docs/reference/assets/banner.png"));
+});
+
+test("bank fixtures whose links still reach their files are copied byte for byte", () => {
+  for (const name of ["links/spaces-angle.md", "links/spaces-encoded.md", "links/relative.md", "images/reference.md"]) {
+    const copied = corpus().files.find((f) => f.path === `docs/reference/${name}`);
+    assert.ok(copied, name);
+    assert.deepEqual(copied.content, readFileSync(join("test/fixtures", name)), name);
+  }
+});
+
+test("a malformed percent escape is kept as written, and replacements are literal", () => {
+  assert.equal(targetPath("100%.md"), "100%.md");
+  assert.equal(targetPath("<a%20b.md#part>"), "a b.md");
+  const text = "[a](old.md) and\n\n[ref]: old.md\n";
+  assert.equal(rewrite(text, { written: "old.md", form: "inline" }, "new $& name.md"), "[a](<new $& name.md>) and\n\n[ref]: old.md\n");
+  assert.equal(rewrite(text, { written: "old.md", form: "definition" }, "$1.md"), "[a](old.md) and\n\n[ref]: $1.md\n");
+});
+
+test("bank files above every annotation are unsynced, and every bank fixture keeps its bank group", () => {
+  const built = corpus();
+  for (const file of built.files.filter((f) => f.path.startsWith("loose/"))) {
+    assert.equal(file.synced, false, file.path);
+    assert.equal(file.group, "unsynced", file.path);
+  }
+  const bankFiles = built.manifest.files.filter((f) => f.path.startsWith("docs/reference/") && f.path !== "docs/reference/README.md");
+  assert.ok(bankFiles.length > 200);
+  for (const file of bankFiles) assert.ok(file.bank_group, file.path);
+});
+
+test("every document in a slice has the annotation READMEs above it", () => {
+  const built = corpus();
+  const byPath = new Map(built.files.map((f) => [f.path, f]));
+  for (const [slice, paths] of Object.entries(built.slices)) {
+    const inSlice = new Set(paths);
+    for (const path of paths) {
+      const file = byPath.get(path);
+      if (!file?.synced) continue;
+      for (let dir = posix.dirname(path); dir !== "."; dir = posix.dirname(dir)) {
+        const readme = byPath.get(`${dir}/README.md`);
+        if (readme?.group === "annotations") assert.ok(inSlice.has(readme.path), `${slice}: ${path} without ${readme.path}`);
+      }
     }
   }
 });

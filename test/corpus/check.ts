@@ -11,6 +11,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { findCyrillicLines } from "../../tools/check-no-cyrillic.ts";
 import type { Manifest, ManifestEntry } from "./generate.ts";
 import { GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, type Group } from "./model.ts";
 import { SLICES } from "./slices.ts";
@@ -24,7 +25,6 @@ export type CheckResult = {
   groups: Record<string, number>;
 };
 
-const CYRILLIC = /[\u0400-\u052f\u1c80-\u1c8f\u2de0-\u2dff\ua640-\ua69f]/u;
 const POINTER = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:[0-9a-f]{64}\nsize (\d+)\n$/;
 
 function walk(dir: string, base = dir): string[] {
@@ -87,12 +87,10 @@ export function checkCorpus(root: string, options: { git?: boolean } = {}): Chec
 
     // No Cyrillic in any text file; binary content is skipped.
     const text = pointer ? null : utf8(bytes);
-    if (text !== null) {
-      const lines = text.split("\n");
-      const line = lines.findIndex((l) => CYRILLIC.test(l));
-      if (line >= 0) problems.push(`Cyrillic character: ${entry.path}:${line + 1}`);
-    }
-    if (CYRILLIC.test(entry.path)) problems.push(`Cyrillic character in a path: ${entry.path}`);
+    // The same character set as the repository's own Cyrillic guard.
+    const line = text === null ? undefined : findCyrillicLines(text)[0];
+    if (line !== undefined) problems.push(`Cyrillic character: ${entry.path}:${line}`);
+    if (findCyrillicLines(entry.path).length > 0) problems.push(`Cyrillic character in a path: ${entry.path}`);
 
     // A canary in every Markdown file: in its bytes (a canary is ASCII, so this
     // covers binary files too), or in its name when the file holds no text.

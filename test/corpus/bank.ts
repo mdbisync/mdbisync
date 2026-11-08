@@ -1,10 +1,11 @@
-// Copies the fixture bank into the corpus: every fixture is a construct
-// single, keeping the bank's group, class, rule and canary.
+// Copies the fixture bank into the corpus. Every synced fixture counts as a
+// construct single in the corpus composition; the manifest keeps its bank
+// group, class, rule, basis and canary.
 
 import { readFileSync } from "node:fs";
 import { join, posix } from "node:path";
 import { parse } from "yaml";
-import { kindOf, type Canaries, type CorpusFile, type Expected } from "./model.ts";
+import { destination, kindOf, type Canaries, type CorpusFile, type Expected } from "./model.ts";
 import { BANK_HOME, COLLISIONS, LOOSE } from "./tree.ts";
 
 type BankEntry = {
@@ -41,27 +42,58 @@ function corpusPath(entry: BankEntry): string {
 }
 
 /** A relative link target as written, and the form it is written in. */
-type Target = { written: string; form: "inline" | "definition" };
+export type Target = { written: string; form: "inline" | "definition" | "html" };
 
 /**
  * Relative link targets in Markdown text, outside code: inline links and
- * images, and reference definitions (`[label]: target`), which reference-style
- * links and images resolve to. Footnote definitions (`[^1]: text`) are not links.
+ * images, reference definitions (`[label]: target`), which reference-style
+ * links and images resolve to, and HTML `src` and `href` attributes.
+ * Footnote definitions (`[^1]: text`) are not links.
  */
 export function linkTargets(text: string): Target[] {
   const withoutCode = text.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
   const found: Target[] = [];
   for (const m of withoutCode.matchAll(/\]\(\s*(<[^>]*>|[^)\s]+)/g)) found.push({ written: m[1] as string, form: "inline" });
   for (const m of withoutCode.matchAll(/^ {0,3}\[(?!\^)[^\]]+\]:[ \t]*(<[^>]*>|\S+)/gm)) found.push({ written: m[1] as string, form: "definition" });
+  for (const m of withoutCode.matchAll(/<[a-z][^>]*?\s(?:src|href)\s*=\s*"([^"]*)"/gi)) found.push({ written: m[1] as string, form: "html" });
   return found.filter(({ written }) => {
-    const target = written.startsWith("<") ? written.slice(1, -1) : written;
-    return !/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith("#");
+    const target = bare(written);
+    return target !== "" && !/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith("#") && !target.startsWith("/");
   });
 }
 
-function resolvedPath(written: string): string {
-  const target = written.startsWith("<") ? written.slice(1, -1) : written;
-  return decodeURI(target.split("#")[0] as string);
+/** The target without angle brackets. */
+function bare(written: string): string {
+  return written.startsWith("<") && written.endsWith(">") ? written.slice(1, -1) : written;
+}
+
+/** The file part of a target, percent-decoded; a malformed escape is kept as written. */
+export function targetPath(written: string): string {
+  const [file] = bare(written).split("#") as [string];
+  try {
+    return decodeURI(file);
+  } catch {
+    return file;
+  }
+}
+
+/** The anchor of a target, with its "#", or "". */
+function anchor(written: string): string {
+  const i = bare(written).indexOf("#");
+  return i < 0 ? "" : bare(written).slice(i);
+}
+
+/** Rewrites one link target in the text; replacement text is taken literally. */
+export function rewrite(text: string, target: Target, replacement: string): string {
+  const escaped = target.written.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  switch (target.form) {
+    case "inline":
+      return text.replace(new RegExp(`\\]\\(\\s*${escaped}`, "g"), () => `](${destination(replacement)}`);
+    case "definition":
+      return text.replace(new RegExp(`^( {0,3}\\[(?!\\^)[^\\]]+\\]:[ \\t]*)${escaped}`, "gm"), (_m, head: string) => `${head}${destination(replacement)}`);
+    case "html":
+      return text.replace(new RegExp(`(\\s(?:src|href)\\s*=\\s*")${escaped}"`, "gi"), (_m, head: string) => `${head}${encodeURI(replacement)}"`);
+  }
 }
 
 export function copyBank(bankDir: string, canaries: Canaries): BankCopy {
@@ -87,36 +119,37 @@ export function copyBank(bankDir: string, canaries: Canaries): BankCopy {
     const links: string[] = [];
     if (kindOf(entry.file) === "markdown") {
       let text = content.toString("utf8");
-      for (const { written, form } of linkTargets(text)) {
-        const target = resolvedPath(written);
-        const bankTarget = posix.normalize(posix.join(posix.dirname(entry.file), target));
+      for (const target of linkTargets(text)) {
+        const bankTarget = posix.normalize(posix.join(posix.dirname(entry.file), targetPath(target.written)));
         const corpusTarget = placed.get(bankTarget);
         if (corpusTarget === undefined) continue; // a broken link on purpose, or a link outside the bank
         links.push(corpusTarget);
-        const expectedHere = posix.relative(posix.dirname(path), corpusTarget);
-        if (expectedHere !== target) {
-          text = form === "inline"
-            ? text.split(`](${written})`).join(`](${expectedHere})`)
-            : text.replace(new RegExp(`(\\]:[ \\t]*)${written.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "g"), `$1${expectedHere}`);
+        // Rewrite only when the link, as written, no longer reaches its file.
+        const reachedNow = posix.normalize(posix.join(posix.dirname(path), targetPath(target.written)));
+        if (reachedNow !== corpusTarget) {
+          text = rewrite(text, target, `${posix.relative(posix.dirname(path), corpusTarget)}${anchor(target.written)}`);
           note = "link rewritten to the corpus layout";
         }
       }
       if (note !== null) content = Buffer.from(text, "utf8");
     }
     if (entry.canary !== undefined) canaries.reserve(entry.canary);
+    // Files placed above every annotation are never synchronized, whatever the bank says.
+    const synced = entry.synced !== false && !path.startsWith(`${LOOSE}/`) && kindOf(path) === "markdown";
     files.push({
       path,
       content,
-      group: entry.synced === false ? "unsynced" : "construct-singles",
+      group: synced ? "construct-singles" : "unsynced",
+      bankGroup: entry.group ?? null,
       kind: kindOf(path),
-      synced: entry.synced !== false && kindOf(path) === "markdown",
+      synced,
       canary: entry.canary ?? null,
       canaryIn: entry.canary_in === "name" ? "name" : entry.canary === undefined ? null : "content",
       expected: entry.class ?? null,
       rule: entry.rule ?? null,
       basis: entry.basis ?? null,
       macosUnsafe: entry.macos_unsafe === true,
-      links,
+      links: [...new Set(links)],
       note,
     });
   }
@@ -126,6 +159,7 @@ export function copyBank(bankDir: string, canaries: Canaries): BankCopy {
       path,
       content: readFileSync(join(bankDir, asset.file)),
       group: kindOf(path) === "image" ? "images" : "attachments",
+      bankGroup: "assets",
       kind: kindOf(path),
       synced: false,
       canary: null,

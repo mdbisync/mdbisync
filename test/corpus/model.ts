@@ -23,6 +23,8 @@ export type CorpusFile = {
   basis: "known" | "assumed" | null;
   /** True when the name collides with another on case- or normalization-insensitive file systems. */
   macosUnsafe: boolean;
+  /** For a file copied from the fixture bank, its group there ("assets" for bank assets). */
+  bankGroup: string | null;
   /** Corpus paths this file links to or embeds (documents, images, attachments). */
   links: string[];
   note: string | null;
@@ -171,6 +173,7 @@ export function markdownFile(fields: Partial<CorpusFile> & Pick<CorpusFile, "pat
     rule: null,
     basis: null,
     macosUnsafe: false,
+    bankGroup: null,
     links: [],
     note: null,
     ...fields,

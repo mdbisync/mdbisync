@@ -60,9 +60,10 @@ function addDoc(ctx: Context, path: string, body: string | Buffer, group: Group,
 }
 
 /** Writes a document whose body ends with its canary line. */
-function doc(ctx: Context, folder: string, name: string, group: Group, build: (canary: string) => string, options: DocOptions = {}): CorpusFile {
+function doc(ctx: Context, folder: string, name: string, group: Group, build: (canary: string, path: string) => string, options: DocOptions = {}): CorpusFile {
   const canary = ctx.canaries.take();
-  return addDoc(ctx, uniquePath(ctx, folder, name), build(canary), group, { ...options, canary });
+  const path = uniquePath(ctx, folder, name);
+  return addDoc(ctx, path, build(canary, path), group, { ...options, canary });
 }
 
 function imageMarkdown(from: string, ref: AssetRef, titleText?: string): string {
@@ -189,8 +190,7 @@ function workDocuments(ctx: Context, sharedUsers: number): void {
   // The shared image needs 40 documents in all.
   while (shared < sharedUsers) {
     const home = nextHome();
-    doc(ctx, `${home.path}/announcements`, `announcement-${shared + 1}`, "work-documents", (canary) => {
-      const path = `${home.path}/announcements/announcement-${shared + 1}.md`;
+    doc(ctx, `${home.path}/announcements`, `announcement-${shared + 1}`, "work-documents", (canary, path) => {
       return `# Announcement\n\n${imageMarkdown(path, ctx.assets.shared)}\n\n${paragraph(rng)}\n\nReference: ${canary}`;
     }, { links: [ctx.assets.shared.path] });
     shared++;
@@ -235,11 +235,10 @@ function specialDocuments(ctx: Context): void {
     doc(ctx, "eng/backend/names", name, "work-documents", (canary) => `# ${name}\n\n${paragraph(rng)}\n\nReference: ${canary}`);
   }
   // Image edge cases.
-  const path = (folder: string, name: string) => `${folder}/${name}.md`;
   doc(ctx, "docs/handbook/images", "broken-image", "work-documents", (canary) => `# Missing picture\n\n![diagram that is not there](./missing/diagram.png)\n\nReference: ${canary}`, { note: "a broken image reference" });
   doc(ctx, "docs/handbook/images", "remote-image", "work-documents", (canary) => `# Remote picture\n\n![remote chart](https://images.example.com/chart.png)\n\nReference: ${canary}`, { note: "a remote image URL" });
   const titled = ctx.assets.shared;
-  doc(ctx, "docs/handbook/images", "titled-image", "work-documents", (canary) => `# Picture with a title\n\n${imageMarkdown(path("docs/handbook/images", "titled-image"), titled, "Team logo, light version")}\n\nReference: ${canary}`, {
+  doc(ctx, "docs/handbook/images", "titled-image", "work-documents", (canary, path) => `# Picture with a title\n\n${imageMarkdown(path, titled, "Team logo, light version")}\n\nReference: ${canary}`, {
     links: [titled.path],
     note: "an image with a title",
   });
@@ -591,15 +590,14 @@ function conflictMarkers(ctx: Context): void {
 function lintErrors(ctx: Context): void {
   const { rng } = ctx;
   const folder = "docs/handbook/needs-fixing";
-  const make = (rule: string, name: string, body: (canary: string) => string) =>
+  const make = (rule: string, name: string, body: (canary: string, path: string) => string) =>
     // Every rule here has been observed in Linear, so its basis is "known".
     doc(ctx, folder, name, "lint-errors", body, { expected: "lint-error", rule, basis: "known" });
   for (let i = 0; i < 8; i++) make("footnote", `footnote-${i + 1}`, (c) => `# Sources\n\n${sentence(rng)}[^${i + 1}]\n\n[^${i + 1}]: ${sentence(rng)}\n\nReference: ${c}`);
   for (let i = 0; i < 7; i++) make("subscript", `subscript-${i + 1}`, (c) => `# Formula\n\nWater is H~2~O and ${word(rng)}~${i + 1}~ follows.\n\nReference: ${c}`);
   for (let i = 0; i < 6; i++) make("table-escaped-pipe", `escaped-pipe-${i + 1}`, (c) => `# Options\n\n${table([["Option", "Values"], [word(rng), "a \\| b"]])}\n\nReference: ${c}`);
   for (let i = 0; i < 6; i++) {
-    make("image-in-link", `image-in-link-${i + 1}`, (c) => {
-      const path = `${folder}/image-in-link-${i + 1}.md`;
+    make("image-in-link", `image-in-link-${i + 1}`, (c, path) => {
       return `# Linked picture\n\n[${imageMarkdown(path, ctx.assets.secondary)}](https://www.example.com/${word(rng)})\n\nReference: ${c}`;
     });
     (ctx.files.at(-1) as CorpusFile).links.push(ctx.assets.secondary.path);
