@@ -3,55 +3,8 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "code_block",
-      "attrs": {
-        "id": "<id>",
-        "language": "yaml"
-      },
-      "children": [
-        {
-          "text": "tags:\n  - planning\n  - budget\nreviewers: [north, south]",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 1
-      },
-      "children": [
-        {
-          "text": "Front matter with lists",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-f251f77d",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"code_block","attrs":{"id":"<id>","language":"yaml"},"children":[{"text":"tags:\n  - planning\n  - budget\nreviewers: [north, south]","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Front matter with lists","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-f251f77d","marks":{"attribution":"user"}}]}
   ]
 }

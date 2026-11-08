@@ -5,82 +5,28 @@
   "content": [
     {
       "type": "ordered_list",
-      "attrs": {
-        "order": 1
-      },
+      "attrs": {"order":1},
       "children": [
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Prepare",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Prepare","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Review",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Review","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Ship",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Ship","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-b43814e1",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-b43814e1","marks":{"attribution":"user"}}]}
   ]
 }

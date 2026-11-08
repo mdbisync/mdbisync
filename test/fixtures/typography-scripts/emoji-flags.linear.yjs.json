@@ -3,33 +3,7 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Offices: 🇯🇵 🇧🇷 🇮🇳",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-81e0391c",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Offices: 🇯🇵 🇧🇷 🇮🇳","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-81e0391c","marks":{"attribution":"user"}}]}
   ]
 }

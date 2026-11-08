@@ -91,10 +91,14 @@ export function toLinear(text: string, assets: AssetMap): string {
   return result;
 }
 
-/** Replaces uploaded asset URLs with the bank path, so recorded forms are stable across runs. */
+/**
+ * Replaces uploaded asset URLs with the bank path, so recorded forms are
+ * stable across runs. The path is percent-encoded like the upload URL it
+ * stands for, so a recorded form stays a valid link where the path has spaces.
+ */
 export function fromLinear(text: string, assets: AssetMap): string {
   let result = text;
-  for (const [file, url] of assets.urls) result = result.replaceAll(url, `../${file}`);
+  for (const [file, url] of assets.urls) result = result.replaceAll(url, assetSpellings(file).at(-1)!);
   return result;
 }
 

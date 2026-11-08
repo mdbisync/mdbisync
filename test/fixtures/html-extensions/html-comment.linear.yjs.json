@@ -3,61 +3,9 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Visible text.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "<!-- a note for editors -->",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "More visible text.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-7a4fc0ef",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Visible text.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"<!-- a note for editors -->","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"More visible text.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-7a4fc0ef","marks":{"attribution":"user"}}]}
   ]
 }

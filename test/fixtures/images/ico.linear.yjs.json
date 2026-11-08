@@ -5,29 +5,8 @@
   "content": [
     {
       "type": "image",
-      "attrs": {
-        "alt": "Icon",
-        "contentAttribution": {
-          "actorType": "user",
-          "userId": "<userId>"
-        },
-        "src": "../assets/icon.ico",
-        "uploadState": "finished"
-      }
+      "attrs": {"alt":"Icon","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/icon.ico","uploadState":"finished"}
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-7d55f861",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-7d55f861","marks":{"attribution":"user"}}]}
   ]
 }

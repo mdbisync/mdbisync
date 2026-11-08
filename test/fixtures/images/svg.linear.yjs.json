@@ -5,29 +5,8 @@
   "content": [
     {
       "type": "image",
-      "attrs": {
-        "alt": "Shapes",
-        "contentAttribution": {
-          "actorType": "user",
-          "userId": "<userId>"
-        },
-        "src": "../assets/shapes.svg",
-        "uploadState": "finished"
-      }
+      "attrs": {"alt":"Shapes","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/shapes.svg","uploadState":"finished"}
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-3f299f04",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-3f299f04","marks":{"attribution":"user"}}]}
   ]
 }

@@ -5,57 +5,23 @@
   "content": [
     {
       "type": "table",
-      "attrs": {
-        "sizing": "fit"
-      },
+      "attrs": {"sizing":"fit"},
       "children": [
         {
           "type": "table_row",
           "children": [
             {
               "type": "table_header",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Name",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Name","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_header",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Preview",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Preview","marks":{"attribution":"user"}}]}
               ]
             }
           ]
@@ -65,45 +31,18 @@
           "children": [
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Pixel",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Pixel","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
                 {
                   "type": "image",
-                  "attrs": {
-                    "alt": "pixel",
-                    "contentAttribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    },
-                    "src": "../assets/pixel.png",
-                    "uploadState": "finished"
-                  }
+                  "attrs": {"alt":"pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
                 }
               ]
             }
@@ -111,19 +50,6 @@
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-22a251d5",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-22a251d5","marks":{"attribution":"user"}}]}
   ]
 }

@@ -9,56 +9,17 @@
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "A remark from the review:",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            },
+            {"type":"paragraph","children":[{"text":"A remark from the review:","marks":{"attribution":"user"}}]},
             {
               "type": "blockquote",
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Keep the scope small.",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Keep the scope small.","marks":{"attribution":"user"}}]}
               ]
             }
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-71c3120f",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-71c3120f","marks":{"attribution":"user"}}]}
   ]
 }

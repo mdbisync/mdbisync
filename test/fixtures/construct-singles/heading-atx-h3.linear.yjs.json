@@ -3,51 +3,8 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 3
-      },
-      "children": [
-        {
-          "text": "Section heading level 3",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "A short paragraph under the heading.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-0cc1928c",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"heading","attrs":{"id":"<id>","level":3},"children":[{"text":"Section heading level 3","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"A short paragraph under the heading.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-0cc1928c","marks":{"attribution":"user"}}]}
   ]
 }

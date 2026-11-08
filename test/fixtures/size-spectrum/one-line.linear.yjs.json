@@ -3,19 +3,6 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "One line of text kx-fb7fe4bb",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"One line of text kx-fb7fe4bb","marks":{"attribution":"user"}}]}
   ]
 }

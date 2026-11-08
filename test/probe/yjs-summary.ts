@@ -56,8 +56,18 @@ function toNodes(item: unknown, mapString: (value: string) => string): YjsNode[]
 /** y-prosemirror may store a mark as `name--hash` so overlapping marks of one type can coexist. */
 function normalizeMarks(attributes: Record<string, unknown>, mapString: (value: string) => string): Record<string, unknown> {
   const marks: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(attributes)) marks[key.replace(/--.*$/, '')] = normalizeValue(key, value, mapString);
+  for (const [key, value] of Object.entries(attributes)) {
+    const name = key.replace(/--.*$/, '');
+    // Every text run carries who typed it; only the kind of author is stable, so
+    // the mark keeps just that and the record stays small.
+    marks[name] = name === 'attribution' ? attributionKind(value) : normalizeValue(key, value, mapString);
+  }
   return sortKeys(marks);
+}
+
+function attributionKind(value: unknown): string {
+  const kind = (value as { actorType?: unknown } | null)?.actorType;
+  return typeof kind === 'string' ? kind : 'unknown';
 }
 
 function normalizeRecord(record: Record<string, unknown>, mapString: (value: string) => string): Record<string, unknown> {

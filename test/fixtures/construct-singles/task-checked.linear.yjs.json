@@ -8,63 +8,20 @@
       "children": [
         {
           "type": "todo_item",
-          "attrs": {
-            "done": true
-          },
+          "attrs": {"done":true},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Draft the agenda",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Draft the agenda","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "todo_item",
-          "attrs": {
-            "done": true
-          },
+          "attrs": {"done":true},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Book the room",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Book the room","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-b7478126",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-b7478126","marks":{"attribution":"user"}}]}
   ]
 }

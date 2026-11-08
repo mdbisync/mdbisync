@@ -8,57 +8,23 @@
       "children": [
         {
           "type": "table",
-          "attrs": {
-            "sizing": "fit"
-          },
+          "attrs": {"sizing":"fit"},
           "children": [
             {
               "type": "table_row",
               "children": [
                 {
                   "type": "table_header",
-                  "attrs": {
-                    "colspan": 1,
-                    "rowspan": 1
-                  },
+                  "attrs": {"colspan":1,"rowspan":1},
                   "children": [
-                    {
-                      "type": "paragraph",
-                      "children": [
-                        {
-                          "text": "A",
-                          "marks": {
-                            "attribution": {
-                              "actorType": "user",
-                              "userId": "<userId>"
-                            }
-                          }
-                        }
-                      ]
-                    }
+                    {"type":"paragraph","children":[{"text":"A","marks":{"attribution":"user"}}]}
                   ]
                 },
                 {
                   "type": "table_header",
-                  "attrs": {
-                    "colspan": 1,
-                    "rowspan": 1
-                  },
+                  "attrs": {"colspan":1,"rowspan":1},
                   "children": [
-                    {
-                      "type": "paragraph",
-                      "children": [
-                        {
-                          "text": "B",
-                          "marks": {
-                            "attribution": {
-                              "actorType": "user",
-                              "userId": "<userId>"
-                            }
-                          }
-                        }
-                      ]
-                    }
+                    {"type":"paragraph","children":[{"text":"B","marks":{"attribution":"user"}}]}
                   ]
                 }
               ]
@@ -68,48 +34,16 @@
               "children": [
                 {
                   "type": "table_cell",
-                  "attrs": {
-                    "colspan": 1,
-                    "rowspan": 1
-                  },
+                  "attrs": {"colspan":1,"rowspan":1},
                   "children": [
-                    {
-                      "type": "paragraph",
-                      "children": [
-                        {
-                          "text": "1",
-                          "marks": {
-                            "attribution": {
-                              "actorType": "user",
-                              "userId": "<userId>"
-                            }
-                          }
-                        }
-                      ]
-                    }
+                    {"type":"paragraph","children":[{"text":"1","marks":{"attribution":"user"}}]}
                   ]
                 },
                 {
                   "type": "table_cell",
-                  "attrs": {
-                    "colspan": 1,
-                    "rowspan": 1
-                  },
+                  "attrs": {"colspan":1,"rowspan":1},
                   "children": [
-                    {
-                      "type": "paragraph",
-                      "children": [
-                        {
-                          "text": "2",
-                          "marks": {
-                            "attribution": {
-                              "actorType": "user",
-                              "userId": "<userId>"
-                            }
-                          }
-                        }
-                      ]
-                    }
+                    {"type":"paragraph","children":[{"text":"2","marks":{"attribution":"user"}}]}
                   ]
                 }
               ]
@@ -118,19 +52,6 @@
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-f180a2ee",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-f180a2ee","marks":{"attribution":"user"}}]}
   ]
 }

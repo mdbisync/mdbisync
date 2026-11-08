@@ -3,150 +3,36 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 1
-      },
-      "children": [
-        {
-          "text": "Export feature specification",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 2
-      },
-      "children": [
-        {
-          "text": "Goal",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Users can export a report as CSV from the reports page.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 2
-      },
-      "children": [
-        {
-          "text": "Requirements",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Export feature specification","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Goal","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Users can export a report as CSV from the reports page.","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Requirements","marks":{"attribution":"user"}}]},
     {
       "type": "table",
-      "attrs": {
-        "sizing": "fit"
-      },
+      "attrs": {"sizing":"fit"},
       "children": [
         {
           "type": "table_row",
           "children": [
             {
               "type": "table_header",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "ID",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"ID","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_header",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Requirement",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Requirement","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_header",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Priority",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Priority","marks":{"attribution":"user"}}]}
               ]
             }
           ]
@@ -156,71 +42,23 @@
           "children": [
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "R1",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"R1","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Export the visible columns",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Export the visible columns","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "High",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"High","marks":{"attribution":"user"}}]}
               ]
             }
           ]
@@ -230,71 +68,23 @@
           "children": [
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "R2",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"R2","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Keep the current filters",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Keep the current filters","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "High",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"High","marks":{"attribution":"user"}}]}
               ]
             }
           ]
@@ -304,187 +94,49 @@
           "children": [
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "R3",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"R3","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Name the file after the report",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Name the file after the report","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Medium",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Medium","marks":{"attribution":"user"}}]}
               ]
             }
           ]
         }
       ]
     },
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 2
-      },
-      "children": [
-        {
-          "text": "Out of scope",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Out of scope","marks":{"attribution":"user"}}]},
     {
       "type": "bullet_list",
       "children": [
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Scheduled exports",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Scheduled exports","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Other file formats",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Other file formats","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 2
-      },
-      "children": [
-        {
-          "text": "Example",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "code_block",
-      "attrs": {
-        "id": "<id>",
-        "language": "csv"
-      },
-      "children": [
-        {
-          "text": "date,region,total\n2024-01-01,north,120",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-34773676",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Example","marks":{"attribution":"user"}}]},
+    {"type":"code_block","attrs":{"id":"<id>","language":"csv"},"children":[{"text":"date,region,total\n2024-01-01,north,120","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-34773676","marks":{"attribution":"user"}}]}
   ]
 }

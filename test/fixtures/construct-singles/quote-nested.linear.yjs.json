@@ -6,54 +6,15 @@
     {
       "type": "blockquote",
       "children": [
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "Outer note",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        },
+        {"type":"paragraph","children":[{"text":"Outer note","marks":{"attribution":"user"}}]},
         {
           "type": "blockquote",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Inner note",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Inner note","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-b2ee8203",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-b2ee8203","marks":{"attribution":"user"}}]}
   ]
 }

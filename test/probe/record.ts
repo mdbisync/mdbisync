@@ -29,8 +29,33 @@ export function readManifest(bank: Bank): Manifest | undefined {
   return text === undefined ? undefined : (JSON.parse(text) as Manifest);
 }
 
+/**
+ * The Yjs tree as JSON: one line per node, and each text run with its marks
+ * on a single line, so large documents stay small and diffs stay readable.
+ */
 export function yjsText(result: FixtureResult): string | undefined {
-  return result.yjs === undefined ? undefined : `${JSON.stringify(result.yjs, null, 2)}\n`;
+  return result.yjs === undefined ? undefined : `${formatJson(result.yjs, '')}\n`;
+}
+
+function formatJson(value: unknown, indent: string): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  const inner = `${indent}  `;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]';
+    return `[\n${value.map((item) => inner + formatJson(item, inner)).join(',\n')}\n${indent}]`;
+  }
+  const record = value as Record<string, unknown>;
+  // Text runs, attribute maps and blocks that hold only text runs: one line each.
+  const textBlock = Array.isArray(record.children) && record.children.every((child) => typeof child === 'object' && child !== null && 'text' in child);
+  if ('text' in record || textBlock || !Object.values(record).some((v) => v !== null && typeof v === 'object' && !isFlat(v))) {
+    return JSON.stringify(record);
+  }
+  const entries = Object.entries(record).map(([key, item]) => `${inner}${JSON.stringify(key)}: ${formatJson(item, inner)}`);
+  return `{\n${entries.join(',\n')}\n${indent}}`;
+}
+
+function isFlat(value: unknown): boolean {
+  return !Array.isArray(value) && Object.values(value as Record<string, unknown>).every((v) => v === null || typeof v !== 'object');
 }
 
 function entryOf(result: FixtureResult): ManifestEntry {
@@ -75,11 +100,17 @@ export function findDrift(bank: Bank, run: ProbeRun): Drift[] {
     if (recorded.fixedPoint !== observed.fixedPoint) {
       drifts.push({ file: result.file, kind: 'fixed-point', detail: `recorded ${recorded.fixedPoint}, now ${observed.fixedPoint}` });
     }
-    if (!run.yjsBlocked && recorded.yjs === 'recorded') {
-      const yjs = readOptional(join(bank.dir, goldenYjsPath(result.file)));
+    if (!run.yjsBlocked) {
       const now = yjsText(result);
-      if (now !== undefined && yjs !== now) {
-        drifts.push({ file: result.file, kind: 'yjs', detail: firstDifference(yjs ?? '', now) });
+      if (recorded.yjs !== observed.yjs) {
+        drifts.push({
+          file: result.file,
+          kind: 'yjs',
+          detail: `recorded ${recorded.yjs === 'recorded' ? 'a Yjs state' : 'no Yjs state'}, now ${now === undefined ? `none (${result.yjsError ?? 'not read'})` : 'a Yjs state'}`,
+        });
+      } else if (now !== undefined) {
+        const yjs = readOptional(join(bank.dir, goldenYjsPath(result.file)));
+        if (yjs !== now) drifts.push({ file: result.file, kind: 'yjs', detail: firstDifference(yjs ?? '', now) });
       }
     }
   }

@@ -6,27 +6,9 @@
     {
       "type": "paragraph",
       "children": [
-        {
-          "text": "<details>",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "type": "hard_break"
-        },
-        {
-          "text": "<summary>Checklist</summary>",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
+        {"text":"<details>","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"<summary>Checklist</summary>","marks":{"attribution":"user"}}
       ]
     },
     {
@@ -35,70 +17,18 @@
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Item one",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Item one","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Item two",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Item two","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "</details>",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-fa8fb959",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"</details>","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-fa8fb959","marks":{"attribution":"user"}}]}
   ]
 }

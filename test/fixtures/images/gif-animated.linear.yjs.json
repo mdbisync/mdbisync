@@ -5,29 +5,8 @@
   "content": [
     {
       "type": "image",
-      "attrs": {
-        "alt": "Blink",
-        "contentAttribution": {
-          "actorType": "user",
-          "userId": "<userId>"
-        },
-        "src": "../assets/blink.gif",
-        "uploadState": "finished"
-      }
+      "attrs": {"alt":"Blink","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/blink.gif","uploadState":"finished"}
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-7376820d",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-7376820d","marks":{"attribution":"user"}}]}
   ]
 }

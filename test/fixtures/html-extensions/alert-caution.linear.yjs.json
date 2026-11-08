@@ -5,40 +5,11 @@
   "content": [
     {
       "type": "callout",
-      "attrs": {
-        "color": "#eb5757",
-        "icon": "Alert"
-      },
+      "attrs": {"color":"#eb5757","icon":"Alert"},
       "children": [
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "Negative outcome possible.",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        }
+        {"type":"paragraph","children":[{"text":"Negative outcome possible.","marks":{"attribution":"user"}}]}
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-a8c918ce",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-a8c918ce","marks":{"attribution":"user"}}]}
   ]
 }

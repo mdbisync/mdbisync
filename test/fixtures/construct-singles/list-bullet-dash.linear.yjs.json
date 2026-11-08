@@ -9,75 +9,23 @@
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Apples",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Apples","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Pears",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Pears","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Plums",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Plums","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-139b755f",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-139b755f","marks":{"attribution":"user"}}]}
   ]
 }

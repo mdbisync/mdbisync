@@ -6,66 +6,15 @@
     {
       "type": "paragraph",
       "children": [
-        {
-          "text": "<dl>",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "type": "hard_break"
-        },
-        {
-          "text": "  <dt>Term</dt>",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "type": "hard_break"
-        },
-        {
-          "text": "  <dd>Definition</dd>",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "type": "hard_break"
-        },
-        {
-          "text": "</dl>",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
+        {"text":"<dl>","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"  <dt>Term</dt>","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"  <dd>Definition</dd>","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"</dl>","marks":{"attribution":"user"}}
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-84f0eaa8",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-84f0eaa8","marks":{"attribution":"user"}}]}
   ]
 }

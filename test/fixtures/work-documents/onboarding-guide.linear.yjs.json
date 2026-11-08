@@ -3,289 +3,77 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 1
-      },
-      "children": [
-        {
-          "text": "Onboarding guide",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Welcome to the team. This page lists what to do in your first week.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 2
-      },
-      "children": [
-        {
-          "text": "Day one",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Onboarding guide","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Welcome to the team. This page lists what to do in your first week.","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Day one","marks":{"attribution":"user"}}]},
     {
       "type": "todo_list",
       "children": [
         {
           "type": "todo_item",
-          "attrs": {
-            "done": false
-          },
+          "attrs": {"done":false},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Collect your laptop",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Collect your laptop","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "todo_item",
-          "attrs": {
-            "done": false
-          },
+          "attrs": {"done":false},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Set up email and chat",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Set up email and chat","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "todo_item",
-          "attrs": {
-            "done": false
-          },
+          "attrs": {"done":false},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Meet your onboarding buddy",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Meet your onboarding buddy","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 2
-      },
-      "children": [
-        {
-          "text": "Week one",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Week one","marks":{"attribution":"user"}}]},
     {
       "type": "bullet_list",
       "children": [
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Read the architecture overview.",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Read the architecture overview.","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Shadow a support shift.",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Shadow a support shift.","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Ship a small change to production.",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Ship a small change to production.","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 2
-      },
-      "children": [
-        {
-          "text": "Useful links",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"Useful links","marks":{"attribution":"user"}}]},
     {
       "type": "bullet_list",
       "children": [
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Handbook",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    },
-                    "link": {
-                      "href": "https://example.com/handbook",
-                      "noEmbed": null
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Handbook","marks":{"attribution":"user","link":{"href":"https://example.com/handbook","noEmbed":null}}}]}
           ]
         },
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Holiday calendar",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    },
-                    "link": {
-                      "href": "https://example.com/calendar",
-                      "noEmbed": null
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Holiday calendar","marks":{"attribution":"user","link":{"href":"https://example.com/calendar","noEmbed":null}}}]}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-04a11b0b",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-04a11b0b","marks":{"attribution":"user"}}]}
   ]
 }

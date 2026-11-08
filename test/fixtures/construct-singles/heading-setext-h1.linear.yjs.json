@@ -3,51 +3,8 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 1
-      },
-      "children": [
-        {
-          "text": "Project overview",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "The overview follows the heading.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-5eecee68",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Project overview","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"The overview follows the heading.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-5eecee68","marks":{"attribution":"user"}}]}
   ]
 }

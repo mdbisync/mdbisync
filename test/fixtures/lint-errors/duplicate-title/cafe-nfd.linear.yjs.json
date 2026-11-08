@@ -3,51 +3,8 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 1
-      },
-      "children": [
-        {
-          "text": "café",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Menu, name in decomposed form.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-4bfa9699",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"café","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Menu, name in decomposed form.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-4bfa9699","marks":{"attribution":"user"}}]}
   ]
 }

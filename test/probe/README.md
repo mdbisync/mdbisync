@@ -13,9 +13,12 @@ fixture of the bank (`test/fixtures/`) it
    decoded Yjs tree as `<name>.linear.yjs.json`, and each fixture's fixed
    point and refusal in `test/fixtures/linear-probe.json`.
 
-Uploaded asset URLs are mapped back to their bank paths, and ids and users
-in the Yjs tree are replaced by placeholders, so the recorded forms do not
-change from run to run.
+Uploaded asset URLs are mapped back to their bank paths (percent-encoded,
+like the URL they stand for), and ids and users in the Yjs tree are
+replaced by placeholders, so the recorded forms do not change from run to
+run. A fixture that spells an asset path differently (for example in angle
+brackets) therefore shows a change that comes from the upload, not from
+Linear.
 
 It also measures what the engine depends on: the title and content length
 limits and how the content limit counts, upload size refusals, whether
@@ -37,14 +40,15 @@ npm run probe:format -- --update             # record this run's forms
 | `--update` | write this run's forms as the new record instead of comparing |
 | `--report <file>` | write a Markdown report: facts, one row per construct, Linear's changes |
 | `--report-title <title>` | front-matter title for the report |
-| `--json <file>` | the run's results as JSON, without fixture text |
+| `--json <file>` | the run's results as JSON, without fixture text, Linear forms or Yjs trees |
 | `--only <text>` | probe only fixtures whose path contains the text |
 | `--no-facts` | skip the limit and cost measurements (about 60 requests) |
 
 The OAuth app needs client credentials with read and write scopes. The
 probe mints a token for the run and revokes it at the end; it removes its
 project at the end, also on failure, and removes probe projects older than
-two hours left by killed runs. `LINEAR_TEST_TEAM_KEY` picks the team (default:
+two hours left by killed runs: only projects with the probe's exact name
+pattern that the app itself created. `LINEAR_TEST_TEAM_KEY` picks the team (default:
 the first one); `LINEAR_BASE_URL` puts a proxy in front of Linear.
 
 A full run sends about 650 API requests, one at a time. Exit codes: 0 no

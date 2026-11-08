@@ -5,57 +5,23 @@
   "content": [
     {
       "type": "table",
-      "attrs": {
-        "sizing": "fit"
-      },
+      "attrs": {"sizing":"fit"},
       "children": [
         {
           "type": "table_row",
           "children": [
             {
               "type": "table_header",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Name",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Name","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_header",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Count",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Count","marks":{"attribution":"user"}}]}
               ]
             }
           ]
@@ -65,67 +31,22 @@
           "children": [
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Chairs",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Chairs","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "12",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"12","marks":{"attribution":"user"}}]}
               ]
             }
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-789045e5",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-789045e5","marks":{"attribution":"user"}}]}
   ]
 }

@@ -3,52 +3,7 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "The ",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "text": "deadline",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            },
-            "strong": {}
-          }
-        },
-        {
-          "text": " is fixed.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-28e2347d",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"The ","marks":{"attribution":"user"}},{"text":"deadline","marks":{"attribution":"user","strong":{}}},{"text":" is fixed.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-28e2347d","marks":{"attribution":"user"}}]}
   ]
 }

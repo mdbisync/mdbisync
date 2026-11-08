@@ -3,87 +3,10 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "First diagram.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "diagram",
-      "attrs": {
-        "height": null,
-        "id": "<id>",
-        "language": "mermaid",
-        "width": null
-      },
-      "children": [
-        {
-          "text": "flowchart LR\n  A --> B",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Second diagram.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "diagram",
-      "attrs": {
-        "height": null,
-        "id": "<id>",
-        "language": "mermaid",
-        "width": null
-      },
-      "children": [
-        {
-          "text": "pie title Share\n  \"A\" : 1\n  \"B\" : 2",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-17653a24",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"First diagram.","marks":{"attribution":"user"}}]},
+    {"type":"diagram","attrs":{"height":null,"id":"<id>","language":"mermaid","width":null},"children":[{"text":"flowchart LR\n  A --> B","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Second diagram.","marks":{"attribution":"user"}}]},
+    {"type":"diagram","attrs":{"height":null,"id":"<id>","language":"mermaid","width":null},"children":[{"text":"pie title Share\n  \"A\" : 1\n  \"B\" : 2","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-17653a24","marks":{"attribution":"user"}}]}
   ]
 }

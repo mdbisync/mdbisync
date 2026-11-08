@@ -44,6 +44,7 @@ export function renderReport(run: ProbeRun, options: ReportOptions): string {
   out.push(`| Refused by Linear | ${refused.length} |`);
   out.push(`| Changed by Linear (form differs from the source) | ${changed.length} |`);
   out.push(`| No fixed point (second readback differs) | ${notFixed.length} |`);
+  out.push(`| Yjs state differs after writing the readback back | ${results.filter((r) => r.yjsStable === false).length} |`);
   out.push(`| Yjs state | ${run.yjsBlocked ? `env-blocked: ${cell(run.yjsBlocked)}` : `decoded for ${results.filter((r) => r.yjs).length}`} |`);
   out.push(`| Drift against the recorded forms | ${options.updated ? 'record updated by this run' : String(options.drift.length)} |`);
   out.push(`| API requests | ${requestsLine(run.requests)} |`);
@@ -70,7 +71,12 @@ export function renderReport(run: ProbeRun, options: ReportOptions): string {
   for (const result of results) {
     const klass = `${result.class}${result.rule ? ` (${result.rule})` : ''}${result.basis === 'assumed' ? ', assumed' : ''}`;
     const changedCell = result.refused !== undefined ? `refused: ${cell(result.refused)}` : result.first === result.source ? 'no' : 'yes';
-    const fixed = result.fixedPoint === undefined ? (result.secondRefused ? `refused: ${cell(result.secondRefused)}` : 'n/a') : result.fixedPoint ? 'yes' : '**no**';
+    const fixed =
+      result.fixedPoint === undefined
+        ? result.secondRefused
+          ? `refused: ${cell(result.secondRefused)}`
+          : 'n/a'
+        : `${result.fixedPoint ? 'yes' : '**no**'}${result.yjsStable === false ? ' (Yjs differs)' : ''}`;
     const nodes = result.yjs ? cell(describeSummary(result.yjs).join(', ')) : result.yjsError ? cell(result.yjsError) : 'n/a';
     out.push(`| \`${result.file}\` | ${result.construct} | ${klass} | ${changedCell} | ${fixed} | ${nodes} | ${cell(keptOnlyInYjs(result).join(', ') || '')} |`);
   }
@@ -102,9 +108,9 @@ function renderFacts(run: ProbeRun): string[] {
   out.push(`| Title length limit (characters) | ${limit(facts.titleLength)} |`);
   out.push(`| Content length limit (characters) | ${limit(facts.contentLength)} |`);
   if (facts.contentUnit) {
-    out.push(`| Content over the limit in UTF-16 units only (emoji, half the limit plus one) | ${cell(facts.contentUnit.utf16Units)} |`);
-    out.push(`| Content over the limit in UTF-8 bytes only (two-byte letters, the limit) | ${cell(facts.contentUnit.utf8Bytes)} |`);
-    out.push(`| Content over the limit in code points (emoji, the limit plus one) | ${cell(facts.contentUnit.codePoints)} |`);
+    out.push(`| Content over the limit only in UTF-8 bytes (two-byte letters, the limit) | ${cell(facts.contentUnit.utf8BytesOnly)} |`);
+    out.push(`| Content over the limit in UTF-16 units and bytes, within it in code points (emoji, half the limit plus one) | ${cell(facts.contentUnit.utf16AndBytes)} |`);
+    out.push(`| Content over the limit in every count (emoji, the limit plus one; control) | ${cell(facts.contentUnit.allCounts)} |`);
   }
   for (const upload of facts.uploads ?? []) {
     out.push(`| Upload of ${upload.declaredBytes.toLocaleString('en-US')} bytes (declared size; no bytes sent) | ${cell(upload.outcome)} |`);

@@ -3,55 +3,7 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Read the ",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "text": "announcement",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            },
-            "link": {
-              "href": "https://example.com/news/2024",
-              "noEmbed": null
-            }
-          }
-        },
-        {
-          "text": ".",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-427941c5",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Read the ","marks":{"attribution":"user"}},{"text":"announcement","marks":{"attribution":"user","link":{"href":"https://example.com/news/2024","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-427941c5","marks":{"attribution":"user"}}]}
   ]
 }

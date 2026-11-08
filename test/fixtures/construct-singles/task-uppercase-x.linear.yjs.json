@@ -8,41 +8,13 @@
       "children": [
         {
           "type": "todo_item",
-          "attrs": {
-            "done": true
-          },
+          "attrs": {"done":true},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Closed with an uppercase mark",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Closed with an uppercase mark","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-a530dbc8",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-a530dbc8","marks":{"attribution":"user"}}]}
   ]
 }

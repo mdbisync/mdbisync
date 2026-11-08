@@ -3,50 +3,7 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 2
-      },
-      "children": [
-        {
-          "text": "See the ",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "text": "status page",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            },
-            "link": {
-              "href": "https://example.com/status",
-              "noEmbed": null
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-f39ca72d",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"heading","attrs":{"id":"<id>","level":2},"children":[{"text":"See the ","marks":{"attribution":"user"}},{"text":"status page","marks":{"attribution":"user","link":{"href":"https://example.com/status","noEmbed":null}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-f39ca72d","marks":{"attribution":"user"}}]}
   ]
 }

@@ -8,85 +8,27 @@
       "children": [
         {
           "type": "todo_item",
-          "attrs": {
-            "done": true
-          },
+          "attrs": {"done":true},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Draft the agenda",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Draft the agenda","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "todo_item",
-          "attrs": {
-            "done": false
-          },
+          "attrs": {"done":false},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Book the room",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Book the room","marks":{"attribution":"user"}}]}
           ]
         },
         {
           "type": "todo_item",
-          "attrs": {
-            "done": false
-          },
+          "attrs": {"done":false},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Send invites",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Send invites","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-024396ca",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-024396ca","marks":{"attribution":"user"}}]}
   ]
 }

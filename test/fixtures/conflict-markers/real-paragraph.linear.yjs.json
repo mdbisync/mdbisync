@@ -3,118 +3,29 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Intro.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
+    {"type":"paragraph","children":[{"text":"Intro.","marks":{"attribution":"user"}}]},
     {
       "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 1
-      },
+      "attrs": {"id":"<id>","level":1},
       "children": [
-        {
-          "text": "<<<<<<< ours",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "type": "hard_break"
-        },
-        {
-          "text": "line from one side",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
+        {"text":"<<<<<<< ours","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"line from one side","marks":{"attribution":"user"}}
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "line from the other side",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
+    {"type":"paragraph","children":[{"text":"line from the other side","marks":{"attribution":"user"}}]},
     {
       "type": "collapsible_section",
-      "attrs": {
-        "id": "<id>",
-        "wasCopiedWhileOpen": null
-      },
+      "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
       "children": [
         {
           "type": "collapsible_heading",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "theirs",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"theirs","marks":{"attribution":"user"}}]}
           ]
         },
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "Outro.",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "Ref kx-354df3a7",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        }
+        {"type":"paragraph","children":[{"text":"Outro.","marks":{"attribution":"user"}}]},
+        {"type":"paragraph","children":[{"text":"Ref kx-354df3a7","marks":{"attribution":"user"}}]}
       ]
     }
   ]

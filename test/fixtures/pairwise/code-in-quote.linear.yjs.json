@@ -6,52 +6,10 @@
     {
       "type": "blockquote",
       "children": [
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "Example:",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        },
-        {
-          "type": "code_block",
-          "attrs": {
-            "id": "<id>"
-          },
-          "children": [
-            {
-              "text": "echo ready",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        }
+        {"type":"paragraph","children":[{"text":"Example:","marks":{"attribution":"user"}}]},
+        {"type":"code_block","attrs":{"id":"<id>"},"children":[{"text":"echo ready","marks":{"attribution":"user"}}]}
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-49cdc1ce",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-49cdc1ce","marks":{"attribution":"user"}}]}
   ]
 }

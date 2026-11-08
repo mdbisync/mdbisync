@@ -12,7 +12,7 @@ import * as Y from 'yjs';
 import { LinearClient } from '../../src/linear/index.ts';
 import { FakeLinear, fakeDocument, type ReceivedRequest } from '../linear/fake-linear.ts';
 import { fromLinear, goldenMarkdownPath, goldenYjsPath, loadBank, toLinear } from './bank.ts';
-import { findLimit, runProbe } from './probe.ts';
+import { findLimit, isLeftover, runProbe } from './probe.ts';
 import { findDrift, writeRecord } from './record.ts';
 import { diffLines, keptOnlyInYjs, renderReport } from './report.ts';
 import { summarizeContentState } from './yjs-summary.ts';
@@ -60,7 +60,7 @@ class FakeWorkspace {
   install(fake: FakeLinear): void {
     const data = (body: unknown) => ({ body: { data: body } });
     fake.operations.set('Teams', () => data({ teams: { nodes: [{ id: 'team-1', key: 'ENG' }] } }));
-    fake.operations.set('ProbeLeftovers', () => data({ projects: { nodes: [] } }));
+    fake.operations.set('ProbeLeftovers', () => data({ viewer: { id: 'app-user' }, projects: { nodes: [] } }));
     fake.operations.set('CreateProject', () => {
       const id = `project-${(this.#next += 1)}`;
       this.projects.add(id);
@@ -197,10 +197,41 @@ describe('format probe against a fake Linear', () => {
     assert.match(report, /-!\[Banner\]\(\.\.\/assets\/banner\.png "Quarterly banner"\)/);
   });
 
+  it('reports a Yjs state that can no longer be read as drift', async () => {
+    const original = fake.operations.get('ReadBack')!;
+    fake.operations.set('ReadBack', (r: ReceivedRequest) => {
+      const reply = original(r) as { body: { data: { documents: { nodes: Array<{ contentState: string | null }> } } } };
+      for (const node of reply.body.data.documents.nodes) node.contentState = null;
+      return reply;
+    });
+    const drift = findDrift(loadBank(bankDir), await probe());
+    fake.operations.set('ReadBack', original);
+    assert.ok(drift.some((d) => d.file === 'lists/star.md' && d.kind === 'yjs' && /recorded a Yjs state, now none/.test(d.detail)), JSON.stringify(drift));
+  });
+
+  it('records an HTTP refusal as a finding and goes on', async () => {
+    const original = fake.operations.get('CreateDocument')!;
+    fake.operations.set('CreateDocument', (r: ReceivedRequest) =>
+      (r.variables!.input as { title: string }).title.includes('kx-00000002') ? { status: 413, body: {} } : original(r),
+    );
+    const run = await probe();
+    fake.operations.set('CreateDocument', original);
+    assert.match(run.fixtures[1]!.refused ?? '', /413/);
+    assert.equal(run.fixtures[0]!.fixedPoint, true);
+  });
+
+  it('reports a project deletion that Linear does not confirm', async () => {
+    const original = fake.operations.get('DeleteProject')!;
+    fake.operations.set('DeleteProject', () => ({ body: { data: { projectDelete: { success: false } } } }));
+    const run = await probe();
+    fake.operations.set('DeleteProject', original);
+    assert.deepEqual(run.cleanup, ['run project NOT deleted: Linear did not confirm']);
+  });
+
   it('deletes its project when a run fails midway', async () => {
     const before = workspace.deletedProjects.length;
     const original = fake.operations.get('UpdateDocument')!;
-    fake.operations.set('UpdateDocument', () => ({ status: 500, body: {} }));
+    fake.operations.set('UpdateDocument', () => ({ reset: true }));
     await assert.rejects(probe());
     fake.operations.set('UpdateDocument', original);
     assert.equal(workspace.deletedProjects.length, before + 1);
@@ -208,6 +239,17 @@ describe('format probe against a fake Linear', () => {
 });
 
 describe('format probe helpers', () => {
+  it('sweeps only its own old projects', () => {
+    const now = Date.parse('2026-11-08T12:00:00Z');
+    const old = '2026-11-08T09:00:00Z';
+    const own = { id: 'app-user' };
+    assert.equal(isLeftover({ name: 'Format probe 20261108-a1b2c3', createdAt: old, creator: own }, 'app-user', now), true);
+    assert.equal(isLeftover({ name: 'Format probe 20261108-a1b2c3', createdAt: '2026-11-08T11:00:00Z', creator: own }, 'app-user', now), false, 'too young');
+    assert.equal(isLeftover({ name: 'Format probe migration', createdAt: old, creator: own }, 'app-user', now), false, 'not a run name');
+    assert.equal(isLeftover({ name: 'Format probe 20261108-a1b2c3', createdAt: old, creator: { id: 'someone' } }, 'app-user', now), false, 'made by someone else');
+    assert.equal(isLeftover({ name: 'Format probe 20261108-a1b2c3', createdAt: old, creator: null }, 'app-user', now), false, 'no creator');
+  });
+
   it('finds a limit by doubling and halving', async () => {
     const tried: number[] = [];
     const limit = await findLimit(async (value) => (tried.push(value), value > 512 ? 'too long' : undefined), 255, 100_000);
@@ -223,7 +265,8 @@ describe('format probe helpers', () => {
     const text = '![a](../assets/pixel copy.png) ![b](../assets/pixel%20copy.png)';
     const linear = toLinear(text, assets);
     assert.equal(linear, '![a](https://uploads.example.test/x/pixel.png) ![b](https://uploads.example.test/x/pixel.png)');
-    assert.equal(fromLinear(linear, assets), '![a](../assets/pixel copy.png) ![b](../assets/pixel copy.png)');
+    // Back to the percent-encoded path: still a valid link without angle brackets.
+    assert.equal(fromLinear(linear, assets), '![a](../assets/pixel%20copy.png) ![b](../assets/pixel%20copy.png)');
   });
 
   it('decodes marks and strips the y-prosemirror mark suffix', () => {

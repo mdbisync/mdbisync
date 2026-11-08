@@ -6,108 +6,25 @@
     {
       "type": "blockquote",
       "children": [
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "<<<<<<< ours",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "line from one side",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "=======",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "line from the other side",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        },
+        {"type":"paragraph","children":[{"text":"<<<<<<< ours","marks":{"attribution":"user"}}]},
+        {"type":"paragraph","children":[{"text":"line from one side","marks":{"attribution":"user"}}]},
+        {"type":"paragraph","children":[{"text":"=======","marks":{"attribution":"user"}}]},
+        {"type":"paragraph","children":[{"text":"line from the other side","marks":{"attribution":"user"}}]},
         {
           "type": "collapsible_section",
-          "attrs": {
-            "id": "<id>",
-            "wasCopiedWhileOpen": null
-          },
+          "attrs": {"id":"<id>","wasCopiedWhileOpen":null},
           "children": [
             {
               "type": "collapsible_heading",
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "theirs",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"theirs","marks":{"attribution":"user"}}]}
               ]
             },
-            {
-              "type": "paragraph"
-            }
+            {"type":"paragraph"}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-ee491350",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-ee491350","marks":{"attribution":"user"}}]}
   ]
 }

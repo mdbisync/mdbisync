@@ -3,55 +3,8 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "code_block",
-      "attrs": {
-        "id": "<id>",
-        "language": "yaml"
-      },
-      "children": [
-        {
-          "text": "summary: |\n  First line of the summary.\n  Second line of the summary.\nfolded: >\n  Folded text\n  on two lines.",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "heading",
-      "attrs": {
-        "id": "<id>",
-        "level": 1
-      },
-      "children": [
-        {
-          "text": "Multi-line strings",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-7feddb4c",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"code_block","attrs":{"id":"<id>","language":"yaml"},"children":[{"text":"summary: |\n  First line of the summary.\n  Second line of the summary.\nfolded: >\n  Folded text\n  on two lines.","marks":{"attribution":"user"}}]},
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Multi-line strings","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-7feddb4c","marks":{"attribution":"user"}}]}
   ]
 }

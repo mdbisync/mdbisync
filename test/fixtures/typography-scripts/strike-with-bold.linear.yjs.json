@@ -3,45 +3,7 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Cancelled",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            },
-            "strike": {},
-            "strong": {}
-          }
-        },
-        {
-          "text": " item",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            },
-            "strike": {}
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-c346eb11",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Cancelled","marks":{"attribution":"user","strike":{},"strong":{}}},{"text":" item","marks":{"attribution":"user","strike":{}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-c346eb11","marks":{"attribution":"user"}}]}
   ]
 }

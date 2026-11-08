@@ -6,6 +6,7 @@
 import {
   LinearClient,
   LinearGraphQLError,
+  LinearHttpError,
   LinearStoppedError,
   LinearUploadError,
   type RateLimitSnapshot,
@@ -27,6 +28,8 @@ import { summarizeContentState, type YjsSummary } from './yjs-summary.ts';
 
 /** Probe projects are named with this prefix and the run id; neutral work text. */
 export const PROJECT_PREFIX = 'Format probe ';
+/** The full name of a probe project: the prefix and a run id (date and six hex digits). */
+export const PROJECT_NAME = /^Format probe \d{8}-[0-9a-f]{6}$/;
 /** Leftover probe projects older than this are removed at the start of a run. */
 export const SWEEP_AGE_MS = 2 * 60 * 60 * 1000;
 /** Documents per read-back request; content state is several times the Markdown's size. */
@@ -75,7 +78,7 @@ export interface ProbeFacts {
   titleLength?: LimitFact;
   contentLength?: LimitFact;
   /** How the content limit counts: tried with characters of different widths at the limit. */
-  contentUnit?: { utf16Units: string; utf8Bytes: string; codePoints: string };
+  contentUnit?: { utf8BytesOnly: string; utf16AndBytes: string; allCounts: string };
   uploads?: Array<{ declaredBytes: number; outcome: string }>;
   mutationsReturnStoredContent?: { create: { same: number; different: number }; update: { same: number; different: number } };
   trashed?: Record<string, string>;
@@ -143,14 +146,24 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeRun> {
     }
   } finally {
     try {
-      await client.request('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id: projectId });
-      run.cleanup.push('run project deleted');
+      run.cleanup.push(await deleteProject(client, projectId) ? 'run project deleted' : 'run project NOT deleted: Linear did not confirm');
     } catch (error) {
       run.cleanup.push(`run project NOT deleted: ${describe(error)}`);
     }
     run.finishedAt = new Date(now()).toISOString();
   }
   return run;
+}
+
+/** Deletes a project; true when Linear confirms. */
+async function deleteProject(client: LinearClient, id: string): Promise<boolean> {
+  const data = await client.request<{ projectDelete: { success: boolean } }>(
+    'DeleteProject',
+    'mutation',
+    'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }',
+    { id },
+  );
+  return data.projectDelete.success === true;
 }
 
 async function findTeam(client: LinearClient, key: string | undefined): Promise<string> {
@@ -164,23 +177,33 @@ async function findTeam(client: LinearClient, key: string | undefined): Promise<
   return team.id;
 }
 
-/** Removes probe projects left by killed runs; never touches anything without the probe's prefix. */
+/**
+ * Removes probe projects left by killed runs: only projects with the probe's
+ * exact name pattern, created by this app's own user, and older than two hours.
+ */
 async function sweepLeftovers(client: LinearClient, now: number, run: ProbeRun, log: (line: string) => void): Promise<void> {
-  const data = await client.request<{ projects: { nodes: Array<{ id: string; name: string; createdAt: string }> } }>(
+  const data = await client.request<{
+    viewer: { id: string };
+    projects: { nodes: Array<{ id: string; name: string; createdAt: string; creator: { id: string } | null }> };
+  }>(
     'ProbeLeftovers',
     'query',
     `query ProbeLeftovers($prefix: String!) {
-      projects(first: 50, filter: { name: { startsWith: $prefix } }) { nodes { id name createdAt } }
+      viewer { id }
+      projects(first: 50, filter: { name: { startsWith: $prefix } }) { nodes { id name createdAt creator { id } } }
     }`,
     { prefix: PROJECT_PREFIX },
   );
   for (const project of data.projects.nodes) {
-    if (!project.name.startsWith(PROJECT_PREFIX)) continue;
-    if (now - Date.parse(project.createdAt) < SWEEP_AGE_MS) continue;
-    await client.request('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id: project.id });
-    run.cleanup.push(`leftover project from an earlier run deleted`);
-    log('deleted a leftover probe project');
+    if (!isLeftover(project, data.viewer.id, now)) continue;
+    const deleted = await deleteProject(client, project.id);
+    run.cleanup.push(deleted ? 'leftover probe project deleted' : 'leftover probe project NOT deleted: Linear did not confirm');
+    log(deleted ? 'deleted a leftover probe project' : 'a leftover probe project was not deleted');
   }
+}
+
+export function isLeftover(project: { name: string; createdAt: string; creator: { id: string } | null }, viewerId: string, now: number): boolean {
+  return PROJECT_NAME.test(project.name) && project.creator?.id === viewerId && now - Date.parse(project.createdAt) >= SWEEP_AGE_MS;
 }
 
 async function createProject(client: LinearClient, name: string, teamId: string): Promise<string> {
@@ -246,7 +269,7 @@ async function probeFixtures(
       );
       created.push({ result, id: document.id, returned: document.content });
     } catch (error) {
-      if (!(error instanceof LinearGraphQLError)) throw error;
+      if (!isRefusal(error)) throw error;
       result.refused = describe(error);
     }
   }
@@ -265,12 +288,12 @@ async function probeFixtures(
     rawFirst.set(entry.id, content);
     entry.result.first = fromLinear(content, assets);
     entry.result.createReturnedStored = entry.returned === document.content;
-    decodeInto(entry.result, document, assets, run, 'yjs');
+    decodeInto(entry.result, document, assets, run);
     try {
       const after = await client.updateDocument(entry.id, { content });
       updated.push({ result: entry.result, id: entry.id, returned: after.content });
     } catch (error) {
-      if (!(error instanceof LinearGraphQLError)) throw error;
+      if (!isRefusal(error)) throw error;
       entry.result.secondRefused = describe(error);
     }
   }
@@ -279,28 +302,31 @@ async function probeFixtures(
   const secondRead = await readBack(client, updated.map((u) => u.id), run);
   for (const entry of updated) {
     const document = secondRead.get(entry.id);
-    if (!document) continue;
+    if (!document) {
+      entry.result.secondRefused = 'written back, but the document was not found on reading it again';
+      continue;
+    }
     const content = document.content ?? '';
     entry.result.second = fromLinear(content, assets);
     entry.result.fixedPoint = content === rawFirst.get(entry.id);
     entry.result.updateReturnedStored = entry.returned === document.content;
     if (entry.result.yjs) {
-      const probe: FixtureResult = { ...entry.result };
-      delete probe.yjs;
-      decodeInto(probe, document, assets, run, 'yjs');
-      entry.result.yjsStable = probe.yjs !== undefined && JSON.stringify(probe.yjs) === JSON.stringify(entry.result.yjs);
+      const again: FixtureResult = { ...entry.result };
+      delete again.yjs;
+      decodeInto(again, document, assets, run);
+      entry.result.yjsStable = again.yjs !== undefined && JSON.stringify(again.yjs) === JSON.stringify(entry.result.yjs);
     }
   }
 }
 
-function decodeInto(result: FixtureResult, document: ReadDocument, assets: AssetMap, run: ProbeRun, key: 'yjs'): void {
+function decodeInto(result: FixtureResult, document: ReadDocument, assets: AssetMap, run: ProbeRun): void {
   if (run.yjsBlocked) return;
   if (typeof document.contentState !== 'string' || document.contentState === '') {
     result.yjsError = 'no content state returned';
     return;
   }
   try {
-    result[key] = summarizeContentState(document.contentState, { mapString: (value) => fromLinear(value, assets) });
+    result.yjs = summarizeContentState(document.contentState, { mapString: (value) => fromLinear(value, assets) });
   } catch (error) {
     result.yjsError = `decode failed: ${error instanceof Error ? error.message : String(error)}`;
   }
@@ -380,11 +406,14 @@ async function measureFacts(
       const refusal = await attempt(() => client.updateDocument(scratch.id, { content }));
       return refusal === undefined ? 'accepted' : `refused (${refusal})`;
     };
-    // Each content is over the limit in one way of counting and within it in the others.
+    // Two-byte letters at the limit are over it only in UTF-8 bytes. Emoji at
+    // half the limit plus one are over it in UTF-16 units and bytes, within it
+    // in code points. Emoji at the limit plus one are over it in every count:
+    // the control that the limit applies to emoji at all.
     facts.contentUnit = {
-      utf16Units: await outcome('\u{1F600}'.repeat(Math.floor(limit / 2) + 1)),
-      utf8Bytes: await outcome('\u00e9'.repeat(limit)),
-      codePoints: await outcome('\u{1F600}'.repeat(limit + 1)),
+      utf8BytesOnly: await outcome('\u00e9'.repeat(limit)),
+      utf16AndBytes: await outcome('\u{1F600}'.repeat(Math.floor(limit / 2) + 1)),
+      allCounts: await outcome('\u{1F600}'.repeat(limit + 1)),
     };
   }
 
@@ -464,7 +493,7 @@ async function attempt(write: () => Promise<unknown>): Promise<string | undefine
     await write();
     return undefined;
   } catch (error) {
-    if (error instanceof LinearGraphQLError) return describe(error);
+    if (isRefusal(error)) return describe(error);
     throw error;
   }
 }
@@ -503,6 +532,15 @@ export async function findLimit(refusalAt: (value: number) => Promise<string | u
     }
   }
   return refusal === undefined ? { accepted: low, refused: high, tries } : { accepted: low, refused: high, refusal, tries };
+}
+
+/**
+ * Linear answered and did not do the write: a GraphQL error, or an HTTP error
+ * without one (for example 413 for a very large body). Network errors and a
+ * stopped client are not refusals: their outcome is unknown or the run ends.
+ */
+function isRefusal(error: unknown): boolean {
+  return error instanceof LinearGraphQLError || error instanceof LinearHttpError;
 }
 
 function describe(error: unknown): string {

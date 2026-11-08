@@ -5,57 +5,23 @@
   "content": [
     {
       "type": "table",
-      "attrs": {
-        "sizing": "fit"
-      },
+      "attrs": {"sizing":"fit"},
       "children": [
         {
           "type": "table_row",
           "children": [
             {
               "type": "table_header",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Site",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Site","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_header",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Link",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Link","marks":{"attribution":"user"}}]}
               ]
             }
           ]
@@ -65,71 +31,22 @@
           "children": [
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "Docs",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"Docs","marks":{"attribution":"user"}}]}
               ]
             },
             {
               "type": "table_cell",
-              "attrs": {
-                "colspan": 1,
-                "rowspan": 1
-              },
+              "attrs": {"colspan":1,"rowspan":1},
               "children": [
-                {
-                  "type": "paragraph",
-                  "children": [
-                    {
-                      "text": "open",
-                      "marks": {
-                        "attribution": {
-                          "actorType": "user",
-                          "userId": "<userId>"
-                        },
-                        "link": {
-                          "href": "https://example.com/docs",
-                          "noEmbed": null
-                        }
-                      }
-                    }
-                  ]
-                }
+                {"type":"paragraph","children":[{"text":"open","marks":{"attribution":"user","link":{"href":"https://example.com/docs","noEmbed":null}}}]}
               ]
             }
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-d7771a45",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-d7771a45","marks":{"attribution":"user"}}]}
   ]
 }

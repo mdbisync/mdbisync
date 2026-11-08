@@ -54,6 +54,16 @@ test('a recorded Linear form without its fixture is reported', () => {
   assert.ok(errors.includes('tables/gone.linear.md: recorded Linear form without its fixture'), errors.join('\n'));
 });
 
+test('a recorded Linear form beside an unsynchronized fixture is reported', () => {
+  const errors = withCopy((d) => writeFileSync(join(d, 'unsynced', 'notes-above-annotation.linear.md'), 'Notes'));
+  assert.ok(errors.includes('unsynced/notes-above-annotation.linear.md: recorded Linear form without its fixture'), errors.join('\n'));
+});
+
+test('a probe manifest entry for a file that is not a synchronized fixture is reported', () => {
+  const errors = withCopy((d) => writeFileSync(join(d, 'linear-probe.json'), JSON.stringify({ version: 1, fixtures: { 'tables/gone.md': { yjs: 'none' } } })));
+  assert.ok(errors.includes('linear-probe.json: tables/gone.md is not a synchronized fixture'), errors.join('\n'));
+});
+
 test('an indexed file that is missing is reported', () => {
   const errors = withCopy((d) => rmSync(join(d, 'tables', 'table-basic.md')));
   assert.ok(errors.includes('tables/table-basic.md: indexed but missing'), errors.join('\n'));

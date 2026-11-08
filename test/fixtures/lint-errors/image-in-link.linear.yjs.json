@@ -5,29 +5,8 @@
   "content": [
     {
       "type": "image",
-      "attrs": {
-        "alt": "Banner",
-        "contentAttribution": {
-          "actorType": "user",
-          "userId": "<userId>"
-        },
-        "src": "../assets/banner.png",
-        "uploadState": "finished"
-      }
+      "attrs": {"alt":"Banner","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/banner.png","uploadState":"finished"}
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-59a1eafa",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-59a1eafa","marks":{"attribution":"user"}}]}
   ]
 }

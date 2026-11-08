@@ -3,51 +3,8 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Example of a conflict:",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "code_block",
-      "attrs": {
-        "id": "<id>",
-        "language": "text"
-      },
-      "children": [
-        {
-          "text": "<<<<<<< ours\nline from one side\n=======\nline from the other side\n>>>>>>> theirs",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-48f59191",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Example of a conflict:","marks":{"attribution":"user"}}]},
+    {"type":"code_block","attrs":{"id":"<id>","language":"text"},"children":[{"text":"<<<<<<< ours\nline from one side\n=======\nline from the other side\n>>>>>>> theirs","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-48f59191","marks":{"attribution":"user"}}]}
   ]
 }

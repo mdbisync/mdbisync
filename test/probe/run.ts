@@ -48,10 +48,15 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
   const runId = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex')}`;
 
   let run: ProbeRun;
+  let tokenLeftActive = false;
   try {
     run = await withRunToken(
       { clientId, clientSecret },
-      { baseUrl, stats, onRevokeError: () => console.error('format probe: the run token could not be revoked') },
+      { baseUrl, stats, onRevokeError: () => {
+          tokenLeftActive = true;
+          console.error('format probe: the run token could not be revoked');
+        },
+      },
       (token) => {
         const client = new LinearClient({
           token: token.accessToken,
@@ -87,7 +92,11 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
   const drift = values.update ? [] : findDrift(bank, run);
   if (values.update) writeRecord(bank, run);
   if (values.report) writeFileSync(values.report, renderReport(run, { title: values['report-title'], drift, updated: values.update }));
-  if (values.json) writeFileSync(values.json, `${JSON.stringify({ ...run, fixtures: run.fixtures.map(({ source: _s, yjs: _y, ...rest }) => rest), drift }, null, 2)}\n`);
+  if (values.json) {
+    // Results only: no fixture text, Linear forms or Yjs trees.
+    const fixtures = run.fixtures.map(({ source: _s, first: _f, second: _d, yjs: _y, ...rest }) => rest);
+    writeFileSync(values.json, `${JSON.stringify({ ...run, fixtures, drift }, null, 2)}\n`);
+  }
 
   const notFixed = run.fixtures.filter((r) => r.fixedPoint === false).length;
   console.error(
@@ -95,7 +104,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
       `${notFixed} without a fixed point, ${drift.length} drifted, ${stats.total} API requests`,
   );
   for (const entry of drift) console.error(`drift: ${entry.file}: ${entry.kind}: ${entry.detail}`);
-  if (run.cleanup.some((line) => line.includes('NOT deleted'))) return 2;
+  if (tokenLeftActive || run.cleanup.some((line) => line.includes('NOT deleted'))) return 2;
   return drift.length > 0 ? 1 : 0;
 }
 

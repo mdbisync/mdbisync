@@ -6,54 +6,13 @@
     {
       "type": "paragraph",
       "children": [
-        {
-          "text": "<table>",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "type": "hard_break"
-        },
-        {
-          "text": "  <tr><td>One</td><td>Two</td></tr>",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "type": "hard_break"
-        },
-        {
-          "text": "</table>",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
+        {"text":"<table>","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"  <tr><td>One</td><td>Two</td></tr>","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"</table>","marks":{"attribution":"user"}}
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-35825550",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-35825550","marks":{"attribution":"user"}}]}
   ]
 }

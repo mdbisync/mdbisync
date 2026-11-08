@@ -6,49 +6,10 @@
     {
       "type": "blockquote",
       "children": [
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "First paragraph of the quote.",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "children": [
-            {
-              "text": "Second paragraph of the quote.",
-              "marks": {
-                "attribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                }
-              }
-            }
-          ]
-        }
+        {"type":"paragraph","children":[{"text":"First paragraph of the quote.","marks":{"attribution":"user"}}]},
+        {"type":"paragraph","children":[{"text":"Second paragraph of the quote.","marks":{"attribution":"user"}}]}
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-65ddaa24",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-65ddaa24","marks":{"attribution":"user"}}]}
   ]
 }

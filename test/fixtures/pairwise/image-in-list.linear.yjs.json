@@ -9,68 +9,21 @@
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Logo:",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            },
+            {"type":"paragraph","children":[{"text":"Logo:","marks":{"attribution":"user"}}]},
             {
               "type": "image",
-              "attrs": {
-                "alt": "Logo",
-                "contentAttribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                },
-                "src": "../assets/banner.png",
-                "uploadState": "finished"
-              }
+              "attrs": {"alt":"Logo","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/banner.png","uploadState":"finished"}
             }
           ]
         },
         {
           "type": "list_item",
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Icon",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Icon","marks":{"attribution":"user"}}]}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-00c8d75a",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-00c8d75a","marks":{"attribution":"user"}}]}
   ]
 }

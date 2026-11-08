@@ -11,17 +11,7 @@
           "children": [
             {
               "type": "file",
-              "attrs": {
-                "contentAttribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                },
-                "href": "../assets/summary.pdf",
-                "mimetype": "application/pdf",
-                "name": "Summary",
-                "size": 591,
-                "uploadState": "finished"
-              }
+              "attrs": {"contentAttribution":{"actorType":"user","userId":"<userId>"},"href":"../assets/summary.pdf","mimetype":"application/pdf","name":"Summary","size":591,"uploadState":"finished"}
             }
           ]
         },
@@ -30,17 +20,7 @@
           "children": [
             {
               "type": "file",
-              "attrs": {
-                "contentAttribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                },
-                "href": "../assets/inventory.csv",
-                "mimetype": "text/csv",
-                "name": "Inventory",
-                "size": 30,
-                "uploadState": "finished"
-              }
+              "attrs": {"contentAttribution":{"actorType":"user","userId":"<userId>"},"href":"../assets/inventory.csv","mimetype":"text/csv","name":"Inventory","size":30,"uploadState":"finished"}
             }
           ]
         },
@@ -49,35 +29,12 @@
           "children": [
             {
               "type": "file",
-              "attrs": {
-                "contentAttribution": {
-                  "actorType": "user",
-                  "userId": "<userId>"
-                },
-                "href": "../assets/bundle.zip",
-                "mimetype": "application/zip",
-                "name": "Bundle",
-                "size": 150,
-                "uploadState": "finished"
-              }
+              "attrs": {"contentAttribution":{"actorType":"user","userId":"<userId>"},"href":"../assets/bundle.zip","mimetype":"application/zip","name":"Bundle","size":150,"uploadState":"finished"}
             }
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-e1618e6f",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-e1618e6f","marks":{"attribution":"user"}}]}
   ]
 }

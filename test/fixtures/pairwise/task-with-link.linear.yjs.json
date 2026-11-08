@@ -8,89 +8,20 @@
       "children": [
         {
           "type": "todo_item",
-          "attrs": {
-            "done": false
-          },
+          "attrs": {"done":false},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Read the ",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                },
-                {
-                  "text": "guide",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    },
-                    "link": {
-                      "href": "https://example.com/guide",
-                      "noEmbed": null
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Read the ","marks":{"attribution":"user"}},{"text":"guide","marks":{"attribution":"user","link":{"href":"https://example.com/guide","noEmbed":null}}}]}
           ]
         },
         {
           "type": "todo_item",
-          "attrs": {
-            "done": true
-          },
+          "attrs": {"done":true},
           "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "text": "Sign the ",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    }
-                  }
-                },
-                {
-                  "text": "form",
-                  "marks": {
-                    "attribution": {
-                      "actorType": "user",
-                      "userId": "<userId>"
-                    },
-                    "link": {
-                      "href": "https://example.com/form",
-                      "noEmbed": null
-                    }
-                  }
-                }
-              ]
-            }
+            {"type":"paragraph","children":[{"text":"Sign the ","marks":{"attribution":"user"}},{"text":"form","marks":{"attribution":"user","link":{"href":"https://example.com/form","noEmbed":null}}}]}
           ]
         }
       ]
     },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-c114bc2c",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Ref kx-c114bc2c","marks":{"attribution":"user"}}]}
   ]
 }

@@ -3,55 +3,7 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Raw data is in ",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "text": "data.csv",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            },
-            "link": {
-              "href": "../unsynced/data.csv",
-              "noEmbed": null
-            }
-          }
-        },
-        {
-          "text": ".",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-23f3e3c0",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Raw data is in ","marks":{"attribution":"user"}},{"text":"data.csv","marks":{"attribution":"user","link":{"href":"../unsynced/data.csv","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-23f3e3c0","marks":{"attribution":"user"}}]}
   ]
 }

@@ -3,55 +3,7 @@
     "prosemirror"
   ],
   "content": [
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Read the ",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        },
-        {
-          "text": "handbook",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            },
-            "link": {
-              "href": "https://example.com/handbook",
-              "noEmbed": null
-            }
-          }
-        },
-        {
-          "text": ".",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "type": "paragraph",
-      "children": [
-        {
-          "text": "Ref kx-5ba7ae46",
-          "marks": {
-            "attribution": {
-              "actorType": "user",
-              "userId": "<userId>"
-            }
-          }
-        }
-      ]
-    }
+    {"type":"paragraph","children":[{"text":"Read the ","marks":{"attribution":"user"}},{"text":"handbook","marks":{"attribution":"user","link":{"href":"https://example.com/handbook","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-5ba7ae46","marks":{"attribution":"user"}}]}
   ]
 }
