@@ -592,7 +592,7 @@ function lintErrors(ctx: Context): void {
   const { rng } = ctx;
   const folder = "docs/handbook/needs-fixing";
   const make = (rule: string, name: string, body: (canary: string) => string) =>
-    // Every rule here is one ADR-003 lists as observed in Linear.
+    // Every rule here has been observed in Linear, so its basis is "known".
     doc(ctx, folder, name, "lint-errors", body, { expected: "lint-error", rule, basis: "known" });
   for (let i = 0; i < 8; i++) make("footnote", `footnote-${i + 1}`, (c) => `# Sources\n\n${sentence(rng)}[^${i + 1}]\n\n[^${i + 1}]: ${sentence(rng)}\n\nReference: ${c}`);
   for (let i = 0; i < 7; i++) make("subscript", `subscript-${i + 1}`, (c) => `# Formula\n\nWater is H~2~O and ${word(rng)}~${i + 1}~ follows.\n\nReference: ${c}`);

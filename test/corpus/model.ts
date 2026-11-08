@@ -49,7 +49,7 @@ export const GROUPS = [
 ] as const;
 export type Group = (typeof GROUPS)[number];
 
-/** Minimum files per group, from the test plan's composition table. */
+/** Minimum number of files per group in the corpus. */
 export const MINIMUMS: Partial<Record<Group, number>> = {
   "construct-singles": 200,
   pairwise: 300,
