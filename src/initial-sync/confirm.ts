@@ -22,7 +22,14 @@
 
 import { randomUUID } from 'node:crypto';
 import { splitFile } from '../format/index.ts';
-import { type LinearDocument, LinearError, LinearStoppedError, type StopReason } from '../linear/index.ts';
+import {
+  DocumentTooLongError,
+  type LinearDocument,
+  LinearError,
+  LinearReadBackError,
+  LinearStoppedError,
+  type StopReason,
+} from '../linear/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import {
   type CommitIdentity,
@@ -31,7 +38,10 @@ import {
   type RefUpdate,
   type StateConfig,
   type StateSnapshot,
+  INITIAL_SYNC_PROGRESS,
   commitIds,
+  initialSyncProgressMessage,
+  readInitialSyncProgress,
   commitTree,
   commitUploads,
   pushAtomic,
@@ -45,7 +55,7 @@ import { readPlanSources } from './run.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from './transform.ts';
 
 /** The subject of an `ids` commit made while an initial sync is still writing. */
-export const PROGRESS_MESSAGE = 'Initial sync in progress: document ids';
+export const PROGRESS_MESSAGE = INITIAL_SYNC_PROGRESS;
 export const FINAL_IDS_MESSAGE = 'Initial sync: document ids';
 export const RECORD_MESSAGE = "Initial sync: Linear's state";
 export const UPLOADS_MESSAGE = 'Initial sync: upload cache';
@@ -101,6 +111,8 @@ export interface ConfirmedResult {
   stopped?: WriteStop;
   /** `ids` pushes while writing. */
   progressPushes: number;
+  /** Every document this run wrote has its id in the `ids` ref (false only when a ref moved under the run). */
+  progressRecorded: boolean;
   record: RecordResult | null;
 }
 
@@ -110,7 +122,10 @@ export interface RecordResult {
   moved: boolean;
   /** Synchronized files whose recorded text differs from the tracked branch: Linear reformatted them. */
   reformatted: string[];
+  /** The record commit's parents, as read back from git. */
   parents: Oid[];
+  /** Its one parent is the tracked commit the run wrote from. */
+  hasTrackedParent: boolean;
 }
 
 class StateMovedError extends Error {
@@ -136,7 +151,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   const texts = sources.input.texts;
 
   const expected: StateSnapshot = { ...fetched.state };
-  const resumed = await isProgressCommit(git, expected.ids);
+  const resumed = (await readInitialSyncProgress(git, expected.ids)) !== null;
   const previous = await readIds(git, expected.ids);
   const ids: IdMap = resumed ? new Map(previous) : new Map();
   const uploads = await readUploads(git, expected.uploads);
@@ -156,6 +171,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     failed: [],
     notAttempted: [],
     progressPushes: 0,
+    progressRecorded: true,
     record: null,
   };
 
@@ -168,7 +184,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   let unpushed = 0;
   const pushProgress = async () => {
     const updates: RefUpdate[] = [];
-    const idsCommit = await commitIds(git, expected.ids, ids, identity, { message: PROGRESS_MESSAGE, always: true });
+    const idsCommit = await commitIds(git, expected.ids, ids, identity, { message: initialSyncProgressMessage(fetched.tracked), always: true });
     updates.push({ ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit });
     if (uploads.size !== uploadsAtStart || expected.uploads !== null) {
       const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity);
@@ -187,10 +203,24 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     ...plan.create.map((entry): Work => ({ kind: 'create', entry })),
   ].sort((a, b) => compare(a.entry.path, b.entry.path));
 
+  // Every synchronized path's document id, known before the first write, so
+  // a transform can link to a document this run has yet to create. A new
+  // document's id is chosen here; a resumed run reuses the id its unfinished
+  // run chose (kept in the progress commits), so links written before the
+  // stop stay right.
+  const documentIds = new Map<string, string>();
+  for (const entry of plan.overwrite) documentIds.set(entry.path, entry.documentId);
+  for (const entry of plan.create) {
+    const chosen = resumed ? previous.get(entry.path)?.id : undefined;
+    documentIds.set(entry.path, chosen !== undefined && !sources.documents.has(chosen) ? chosen : newId());
+    ids.set(entry.path, { id: documentIds.get(entry.path) as string });
+  }
+
   try {
-    for (const transform of transforms) await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads });
+    for (const transform of transforms) await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads, documentIds });
 
     let written = 0;
+    let beforeWriteReached = false;
     for (let index = 0; index < work.length; index += 1) {
       const item = work[index] as Work;
       const { path } = item.entry;
@@ -203,24 +233,27 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
 
       const document = item.kind === 'overwrite' ? sources.documents.get(item.entry.documentId) : undefined;
       if (item.kind === 'overwrite' && document === undefined) throw new Error(`the planned document for ${path} was not listed`);
-      if (document !== undefined && resumed && previous.get(path)?.id === document.id) {
-        result.skippedCompleted.push(path);
-        remember(path, document);
-        continue;
-      }
 
       try {
         const body = await transformBody(transforms, path, splitFile(texts.get(path) as string).body);
+        // A document already holding the body is not written again. On a
+        // resumed run, that is how the documents the stopped run wrote are
+        // skipped; one whose file or Linear text changed since is written.
         if (document !== undefined && document.content === body) {
-          result.unchanged.push(path);
+          const completed = resumed && previous.get(path)?.id === document.id;
+          (completed ? result.skippedCompleted : result.unchanged).push(path);
           remember(path, document);
           continue;
         }
-        if (written === 0) await checkpoint('before-write');
+        if (!beforeWriteReached) {
+          beforeWriteReached = true;
+          await checkpoint('before-write');
+        }
         if (item.kind === 'create') {
           // Matching compares titles in NFC; a new title is written in that form too, so the next run matches it.
           const title = item.entry.title.normalize('NFC');
-          const created = await linear.createDocument(placeId(targets, item.entry.place), { id: newId(), title, content: body });
+          const id = documentIds.get(path) as string;
+          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body });
           remember(path, created);
           result.created.push(path);
           await checkpoint('document-created-before-ids-push');
@@ -236,11 +269,21 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           result.leftOutAtWrite.push({ path, rule: error.rule });
           continue;
         }
+        if (error instanceof DocumentTooLongError) {
+          // Refused before any request: the body grew past Linear's limit in a transform.
+          result.leftOutAtWrite.push({ path, rule: 'content-too-long' });
+          continue;
+        }
         if (error instanceof LinearStoppedError) {
           // The write may have been applied; the next run matches it by title.
           result.stopped = error.reason;
           result.notAttempted = work.slice(index).map((rest) => rest.entry.path);
           break;
+        }
+        if (error instanceof LinearReadBackError) {
+          // Written, but what Linear stored is unknown: keep the id, and let the next run read the content.
+          ids.set(path, { id: error.document.id });
+          unpushed += 1;
         }
         if (error instanceof LinearError) {
           result.failed.push({ path, operation: error.operation, error: describeError(error) });
@@ -288,6 +331,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const recorded = await record();
     if (recorded === null) {
       result.code = 'state-moved';
+      result.progressRecorded = unpushed === 0;
       return { plan, result };
     }
     result.record = recorded;
@@ -296,6 +340,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   } catch (error) {
     if (error instanceof StateMovedError) {
       result.code = 'state-moved';
+      result.progressRecorded = unpushed === 0;
       return { plan, result };
     }
     // A bug or a git failure: keep what was written before giving up.
@@ -324,7 +369,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
 
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
       message: FINAL_IDS_MESSAGE,
-      always: await isProgressCommit(git, expected.ids),
+      always: (await readInitialSyncProgress(git, expected.ids)) !== null,
     });
     const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity);
     const updates: RefUpdate[] = [
@@ -335,7 +380,9 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     ];
     const pushed = await pushAtomic(git, options.config, updates);
     if (!pushed.ok) return null;
-    return { linear: linearCommit, moved: linearCommit !== expected.linear, reformatted, parents: [tracked] };
+    const parents = (await git.text(['show', '-s', '--format=%P', linearCommit])).split(' ').filter(Boolean);
+    const hasTrackedParent = parents.length === 1 && parents[0] === tracked;
+    return { linear: linearCommit, moved: linearCommit !== expected.linear, reformatted, parents, hasTrackedParent };
   }
 
   /** Whether two record commits have the same tree and parents, so the newer one adds nothing. */
@@ -343,12 +390,6 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P', oid]);
     return (await describe(a)) === (await describe(b));
   }
-}
-
-/** Whether `ids` is at a progress commit of an initial sync that has not finished. */
-export async function isProgressCommit(git: RunContext['git'], commit: Oid | null): Promise<boolean> {
-  if (commit === null) return false;
-  return (await git.text(['show', '-s', '--format=%s', commit])) === PROGRESS_MESSAGE;
 }
 
 function describeError(error: LinearError): string {
