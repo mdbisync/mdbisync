@@ -1,16 +1,18 @@
 // Checks a corpus on disk against its manifest and the composition rules.
 //
-//   node test/corpus/check.ts <root> [--git]
+//   node test/corpus/check.ts <root> [--git] [--lint]
 //
 // <root> holds `corpus/` and `corpus-slices/`, as the generator writes them
 // and as they lie in the test repository. With --git the root is a checkout
 // made without LFS smudging, so every LFS file must be a pointer and no
-// other file may be one.
+// other file may be one. With --lint, the exact set of synced Markdown
+// paths with lint findings must equal the manifest's lint-error paths.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { duplicateTitles, lintText, type Finding } from "../../src/format/index.ts";
 import { findCyrillicLines } from "../../tools/check-no-cyrillic.ts";
 import type { Manifest, ManifestEntry } from "./generate.ts";
 import { gitattributes, GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, type Group } from "./model.ts";
@@ -45,7 +47,37 @@ function utf8(bytes: Buffer): string | null {
   }
 }
 
-export function checkCorpus(root: string, options: { git?: boolean } = {}): CheckResult {
+/** Compare lint-error membership only; fixable formatting is not a content-loss error. */
+export function checkLintExpectations(root: string): string[] {
+  const manifest = JSON.parse(readFileSync(join(root, "corpus-slices", "manifest.json"), "utf8")) as Manifest;
+  const documents = manifest.files.filter((f) => f.synced && f.kind === "markdown");
+  const expected = new Set(documents.filter((f) => f.class === "lint-error").map((f) => f.path));
+  const actual = new Map<string, Set<string>>();
+  const problems: string[] = [];
+  const record = (finding: Finding): void => {
+    const rules = actual.get(finding.file) ?? new Set<string>();
+    rules.add(finding.rule);
+    actual.set(finding.file, rules);
+  };
+  for (const file of documents) {
+    const path = join(root, "corpus", file.path);
+    if (!existsSync(path)) {
+      problems.push(`cannot lint missing file: ${file.path}`);
+      continue;
+    }
+    for (const finding of lintText(file.path, readFileSync(path, "utf8"))) record(finding);
+  }
+  for (const finding of duplicateTitles(documents.map((f) => f.path))) record(finding);
+  for (const path of [...expected].sort()) {
+    if (!actual.has(path)) problems.push(`missing lint-error: ${path}`);
+  }
+  for (const [path, rules] of [...actual].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+    if (!expected.has(path)) problems.push(`unexpected lint-error: ${path} (${[...rules].sort().join(", ")})`);
+  }
+  return problems;
+}
+
+export function checkCorpus(root: string, options: { git?: boolean; lint?: boolean } = {}): CheckResult {
   const problems: string[] = [];
   const treeDir = join(root, "corpus");
   const manifest = JSON.parse(readFileSync(join(root, "corpus-slices", "manifest.json"), "utf8")) as Manifest;
@@ -124,13 +156,14 @@ export function checkCorpus(root: string, options: { git?: boolean } = {}): Chec
   }
 
   const documents = [...entries.values()].filter((e) => e.synced && e.kind === "markdown").length;
+  if (options.lint === true) problems.push(...checkLintExpectations(root));
   return { problems, files: entries.size, documents, lfsBytes, nonLfsImages, groups };
 }
 
 function main(): void {
-  const { values, positionals } = parseArgs({ allowPositionals: true, options: { git: { type: "boolean", default: false } } });
+  const { values, positionals } = parseArgs({ allowPositionals: true, options: { git: { type: "boolean", default: false }, lint: { type: "boolean", default: false } } });
   const root = resolve(positionals[0] ?? ".");
-  const result = checkCorpus(root, { git: values.git });
+  const result = checkCorpus(root, { git: values.git, lint: values.lint });
   for (const problem of result.problems) console.error(problem);
   const groups = Object.entries(result.groups).map(([g, n]) => `${g} ${n}`).join(", ");
   console.log(
