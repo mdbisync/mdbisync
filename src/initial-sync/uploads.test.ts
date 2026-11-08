@@ -1,0 +1,280 @@
+// Files that documents embed or link, through the command line against a
+// local git remote with LFS and a fake Linear: each file is uploaded once by
+// its content hash, its URL is written into the documents, the cache is
+// recorded, and the recorded files map the URLs back to the tracked links.
+
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import { runCli } from '../cli.ts';
+import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
+import { type RunReport } from '../run/finish.ts';
+import { Git } from '../state/index.ts';
+import { type FakeUpload, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { type Fixture, countLocalLfsObjects, createFixture } from '../state/test-helpers.ts';
+import { DEFAULT_UPLOAD_LIMIT, findFileLinks, resolveTarget, restoreFileLinks } from './uploads.ts';
+
+const CANARY = 'kx-5d2a9e40';
+const PRE_COMMIT = `repos:
+  - repo: https://github.com/example/mdbisync
+    rev: 0123456789abcdef0123456789abcdef01234567
+    hooks:
+      - id: linear-format
+`;
+
+const DIAGRAM = Buffer.from(`diagram bytes ${'x'.repeat(300)}`);
+const PIXEL = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+const REPORT = Buffer.from('%PDF-1.4 report');
+const HUGE = Buffer.alloc(DEFAULT_UPLOAD_LIMIT + 1, 7);
+/** A pointer to an LFS object the remote does not have. */
+const LOST_POINTER = `version https://git-lfs.github.com/spec/v1\noid sha256:${'ab'.repeat(32)}\nsize 42\n`;
+
+const A_BODY = [
+  '# A',
+  '',
+  `![Diagram](../media/diagram.png) ${CANARY}`,
+  '',
+  'The [report](<files/report 2026.pdf>) and [the same](files/report%202026.pdf).',
+  '',
+  '[Other](b.md), [site](https://example.com/x.png), [missing](gone.png) and [section](#a).',
+].join('\n');
+const B_BODY = `# B\n\n![Diagram](../media/diagram.png)\n\n![Pixel](./pixel.png)\n\n${CANARY}`;
+const SHARED = ['c1', 'c2', 'c3', 'c4', 'c5'];
+
+const TREE: Record<string, string | Buffer> = {
+  'README.md': `# Repository\n\n${CANARY}\n`,
+  '.pre-commit-config.yaml': PRE_COMMIT,
+  'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}`,
+  'eng/media/diagram.png': DIAGRAM,
+  'eng/media/huge.png': HUGE,
+  'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}`,
+  'eng/notes/a.md': A_BODY,
+  'eng/notes/b.md': B_BODY,
+  'eng/notes/big.md': `# Big\n\n![Huge](../media/huge.png) and ![Diagram](../media/diagram.png)\n\n${CANARY}`,
+  'eng/notes/lost.md': `# Lost\n\n![Lost](lost.png)\n\n${CANARY}`,
+  'eng/notes/lost.png': LOST_POINTER,
+  'eng/notes/pixel.png': PIXEL,
+  'eng/notes/files/report 2026.pdf': REPORT,
+  ...Object.fromEntries(SHARED.map((name) => [`eng/notes/${name}.md`, `# ${name}\n\n![Diagram](../media/diagram.png)\n\n${CANARY}`])),
+};
+const LFS = ['eng/media/**', '*.pdf'];
+
+const sha = (content: Buffer) => createHash('sha256').update(content).digest('hex');
+
+describe('uploads of linked files in an initial sync', () => {
+  let fixture: Fixture;
+  let cwd: string;
+  const reportFile = () => join(fixture.root, 'report.json');
+  const summaryFile = () => join(fixture.root, 'summary.md');
+
+  beforeEach(async () => {
+    fixture = await createFixture();
+    await fixture.seed(TREE, { lfs: LFS });
+    cwd = (await fixture.clone('work')).dir;
+  });
+  afterEach(() => fixture.cleanup());
+
+  const run = async (world: FakeWorld) => {
+    await rm(reportFile(), { force: true });
+    await rm(summaryFile(), { force: true });
+    const env = {
+      PATH: process.env.PATH ?? '',
+      HOME: process.env.HOME ?? '',
+      MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
+      MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
+      MDBISYNC_LINEAR_API_URL: LINEAR_API,
+      MDBISYNC_GITHUB_TOKEN: 'gh-token',
+      MDBISYNC_GITHUB_API_URL: GITHUB_API,
+      MDBISYNC_REPOSITORY: 'owner/repo',
+      MDBISYNC_REPORT_FILE: reportFile(),
+      MDBISYNC_DIRECTION: 'git-to-linear',
+      MDBISYNC_CONFIRM: 'true',
+      GITHUB_STEP_SUMMARY: summaryFile(),
+    };
+    const result = await runCli(['initial-sync'], { env, cwd, fetch: fakeFetch(world) });
+    assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
+    const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
+    assert.ok(!summary.includes(CANARY), 'the job summary holds content');
+    const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
+    return { result, report, summary };
+  };
+
+  const show = (spec: string) => fixture.remote.text(['show', spec]);
+  const refs = async () => {
+    const text = await fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
+    return Object.fromEntries(text.split('\n').filter(Boolean).map((line) => line.split(' ') as [string, string]));
+  };
+  const document = (world: FakeWorld, title: string) => world.linear.documents.find((d) => d.title === title && d.trashed !== true);
+  const uploadOf = (world: FakeWorld, content: Buffer) => world.linear.uploads.filter((upload) => upload.bytes?.equals(content));
+
+  it('L1-07 and L1-08: uploads each linked file once by content hash, writes its URL and records the cache', async () => {
+    const world = fakeWorld();
+    const { result, report, summary } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+
+    // One upload per distinct file: the diagram linked from eight documents, the pixel, and the report linked twice.
+    assert.equal(world.linear.uploads.length, 3);
+    for (const content of [DIAGRAM, PIXEL, REPORT]) assert.equal(uploadOf(world, content).length, 1, 'uploaded once, bytes equal');
+    const [diagram, pixel, report2026] = [DIAGRAM, PIXEL, REPORT].map((content) => uploadOf(world, content)[0]) as [FakeUpload, FakeUpload, FakeUpload];
+    assert.equal(report2026.filename, 'report 2026.pdf');
+    assert.equal(report2026.contentType, 'application/pdf');
+    assert.equal(pixel.contentType, 'image/png');
+    assert.ok(diagram.assetUrl.startsWith(UPLOADS_HOST));
+
+    assert.equal(
+      document(world, 'a')?.content,
+      A_BODY.replace('../media/diagram.png', diagram.assetUrl).replace('<files/report 2026.pdf>', `<${report2026.assetUrl}>`).replace('(files/report%202026.pdf)', `(${report2026.assetUrl})`),
+      'links to other documents, other sites, missing files and anchors stay as they are',
+    );
+    assert.equal(document(world, 'b')?.content, B_BODY.replace('../media/diagram.png', diagram.assetUrl).replace('./pixel.png', pixel.assetUrl));
+    for (const name of SHARED) assert.ok(document(world, name)?.content?.includes(`![Diagram](${diagram.assetUrl})`));
+
+    const cache = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
+    assert.deepEqual(cache, Object.fromEntries([[sha(DIAGRAM), diagram.assetUrl], [sha(PIXEL), pixel.assetUrl], [sha(REPORT), report2026.assetUrl]].sort()));
+
+    // The record maps the URLs back: every written file equals the tracked one.
+    assert.equal(report.record?.reformattedCount, 0);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/a.md'), A_BODY);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/b.md'), B_BODY);
+
+    // A file over the upload limit leaves its document out, unread and not uploaded; so does an LFS object that is missing.
+    assert.deepEqual(report.initialSync?.leftOutAtWrite, [
+      { path: 'eng/notes/big.md', rule: 'upload-too-large' },
+      { path: 'eng/notes/lost.md', rule: 'upload-unreadable' },
+    ]);
+    assert.equal(document(world, 'big'), undefined);
+    assert.equal(document(world, 'lost'), undefined);
+    assert.match(summary, /\| eng\/notes\/big\.md \| upload-too-large \|/);
+    assert.match(summary, /\| eng\/notes\/lost\.md \| upload-unreadable \|/);
+    assert.equal(await countLocalLfsObjects(new Git(cwd)), 2, 'only the diagram and the report are downloaded');
+  });
+
+  it('L1-18: a second run uploads nothing and writes nothing', async () => {
+    const world = fakeWorld();
+    assert.equal((await run(world)).result.exitCode, 0);
+    const before = await refs();
+    const writes = world.linear.writes.count;
+
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(world.linear.uploads.length, 3);
+    assert.equal(world.linear.writes.count, writes);
+    assert.equal(report.writtenCount, 0);
+    assert.deepEqual(await refs(), before);
+  });
+
+  it('L5-11: a failed upload writes no document with a broken link; the next run uploads and writes it', async () => {
+    const world = fakeWorld();
+    world.linear.writes.reject = (operation, variables) => operation === 'FileUpload' && variables.filename === 'pixel.png';
+    const first = await run(world);
+    assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
+    assert.deepEqual(first.report.initialSync?.failed.map((failure) => failure.path), ['eng/notes/b.md']);
+    assert.equal(document(world, 'b'), undefined);
+    assert.equal(first.report.record, null);
+    // The uploads that worked are recorded with the ids, so the next run does not repeat them.
+    const cached = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
+    assert.deepEqual(Object.keys(cached).sort(), [sha(DIAGRAM), sha(REPORT)].sort());
+
+    delete world.linear.writes.reject;
+    const second = await run(world);
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.equal(uploadOf(world, PIXEL).length, 1);
+    assert.equal(uploadOf(world, DIAGRAM).length, 1, 'the diagram is not uploaded again');
+    assert.equal(document(world, 'b')?.content?.includes(uploadOf(world, PIXEL)[0]!.assetUrl), true);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/b.md'), B_BODY);
+  });
+
+  it('L1-15: a resumed run maps the links of the documents it skipped back to the tracked text', async () => {
+    const world = fakeWorld();
+    const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '3' };
+    Object.assign(process.env, hooks);
+    let first;
+    try {
+      first = await run(world);
+    } finally {
+      for (const name of Object.keys(hooks)) delete process.env[name];
+    }
+    assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
+    assert.ok(document(world, 'a') !== undefined, 'a was written before the stop');
+
+    const second = await run(world);
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.ok(second.report.initialSync?.skippedCompleted.includes('eng/notes/a.md'));
+    assert.equal(second.report.record?.reformattedCount, 0);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/a.md'), A_BODY);
+    assert.equal(world.linear.uploads.length, 3);
+  });
+
+  it('L5-14: with the upload cache lost, the files are uploaded again and the tracked branch stays', async () => {
+    const world = fakeWorld();
+    assert.equal((await run(world)).result.exitCode, 0);
+    const tracked = (await refs())['refs/heads/main'];
+    await fixture.remote.run(['update-ref', '-d', 'refs/mdbisync/uploads']);
+
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(world.linear.uploads.length, 6);
+    assert.equal(report.record?.reformattedCount, 0);
+    assert.equal((await refs())['refs/heads/main'], tracked);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/b.md'), B_BODY);
+  });
+});
+
+describe('file links in a document', () => {
+  const files = new Set(['docs/img/a.png', 'docs/files/a b.pdf', 'docs/x(1).png', 'top.zip']);
+  const isFile = (path: string) => files.has(path);
+  const targets = (body: string) => findFileLinks('docs/guide/page.md', body, isFile).map((link) => [link.raw, link.target]);
+
+  it('finds images, links and definitions to files, with the destination as written', () => {
+    assert.deepEqual(targets('![a](../img/a.png)'), [['../img/a.png', 'docs/img/a.png']]);
+    assert.deepEqual(targets('[a](<../files/a b.pdf>)'), [['../files/a b.pdf', 'docs/files/a b.pdf']]);
+    assert.deepEqual(targets('[a](../files/a%20b.pdf)'), [['../files/a%20b.pdf', 'docs/files/a b.pdf']]);
+    assert.deepEqual(targets('[a](../x\\(1\\).png)'), [['../x\\(1\\).png', 'docs/x(1).png']]);
+    assert.deepEqual(targets('[a](../x(1).png)'), [['../x(1).png', 'docs/x(1).png']]);
+    assert.deepEqual(targets('[a](../../top.zip#part)'), [['../../top.zip#part', 'top.zip']]);
+    assert.deepEqual(targets('![a][r]\n\n[r]: ../img/a.png'), [['../img/a.png', 'docs/img/a.png']]);
+    assert.deepEqual(targets('| x |\n| -- |\n| ![a](../img/a.png) |'), [['../img/a.png', 'docs/img/a.png']]);
+    assert.deepEqual(targets('[**bold** text](../img/a.png)'), [['../img/a.png', 'docs/img/a.png']]);
+  });
+
+  it('leaves other links alone', () => {
+    for (const body of [
+      '[a](https://example.com/a.png)',
+      '[a](/docs/img/a.png)',
+      '[a](#part)',
+      '[a](other.md)',
+      '[a](../img/missing.png)',
+      '[a](../../../outside.png)',
+      '`![a](../img/a.png)`',
+      '    ![a](../img/a.png)',
+      '<https://example.com/a.png>',
+    ]) {
+      assert.deepEqual(targets(body), [], body);
+    }
+  });
+
+  it('resolves destinations against the document folder', () => {
+    assert.equal(resolveTarget('a/b.md', './c.png'), 'a/c.png');
+    assert.equal(resolveTarget('b.md', 'c%2Fd.png'), 'c/d.png');
+    assert.equal(resolveTarget('b.md', '%E0%A4%A.png'), '%E0%A4%A.png');
+    assert.equal(resolveTarget('b.md', 'mailto:x@example.com'), null);
+    assert.equal(resolveTarget('b.md', '../c.png'), null);
+    assert.equal(resolveTarget('b.md', 'dir/'), null);
+  });
+
+  it('maps upload URLs back to each link as it was written, in order', () => {
+    const uploads = new Map([
+      ['1'.repeat(64), 'https://uploads.example.test/1'],
+      ['2'.repeat(64), 'https://uploads.example.test/12'],
+    ]);
+    const links = [
+      { raw: 'a.png', hash: '1'.repeat(64) },
+      { raw: './a.png', hash: '1'.repeat(64) },
+      { raw: 'b.png', hash: '2'.repeat(64) },
+    ];
+    const stored = '![x](https://uploads.example.test/1) ![y](https://uploads.example.test/1) ![z](https://uploads.example.test/12)';
+    assert.equal(restoreFileLinks(stored, links, uploads), '![x](a.png) ![y](./a.png) ![z](b.png)');
+  });
+});

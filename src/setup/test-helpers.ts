@@ -33,6 +33,18 @@ export interface FakeDocument {
   content?: string;
 }
 
+/** A file uploaded with `fileUpload`; `bytes` is set once the storage PUT arrived. */
+export interface FakeUpload {
+  filename: string;
+  contentType: string;
+  size: number;
+  assetUrl: string;
+  bytes?: Buffer;
+}
+
+/** Where the fake's asset URLs point. */
+export const UPLOADS_HOST = 'https://uploads.linear.test';
+
 /** How the fake answers document writes. */
 export interface FakeWrites {
   /** Mutations received so far. */
@@ -58,6 +70,7 @@ export interface FakeWorld {
     documents: FakeDocument[];
     writes: FakeWrites;
     store: (content: string) => string;
+    uploads: FakeUpload[];
   };
   /** `METHOD url` of every request. */
   requests: string[];
@@ -86,6 +99,7 @@ export function fakeWorld(): FakeWorld {
       documents: [],
       writes: { count: 0 },
       store: (content) => content,
+      uploads: [],
     },
     requests: [],
     writes: [],
@@ -146,6 +160,12 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     world.revoked += 1;
     return json(200, { success: true });
   }
+  if (path.startsWith('/storage/') && init?.method === 'PUT') {
+    const upload = world.linear.uploads[Number(path.slice('/storage/'.length))];
+    if (upload === undefined) return json(404, {});
+    upload.bytes = Buffer.from(init.body as Uint8Array);
+    return new Response(null, { status: 200 });
+  }
   if (path !== '/graphql') return json(404, {});
   const { query, variables, operationName } = JSON.parse(String(init?.body)) as {
     query: string;
@@ -200,6 +220,18 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     const input = variables.input as { content?: string };
     if (input.content !== undefined) document.content = world.linear.store(input.content);
     return { documentUpdate: { success: true, document: documentNode(document, variables.withContent === true) } };
+  }
+  if (operation === 'FileUpload') {
+    const index = world.linear.uploads.length;
+    const filename = String(variables.filename);
+    const upload: FakeUpload = {
+      filename,
+      contentType: String(variables.contentType),
+      size: Number(variables.size),
+      assetUrl: `${UPLOADS_HOST}/${index}/${encodeURIComponent(filename)}`,
+    };
+    world.linear.uploads.push(upload);
+    return { fileUpload: { success: true, uploadFile: { uploadUrl: `${LINEAR_API}/storage/${index}`, assetUrl: upload.assetUrl, headers: [] } } };
   }
   if (operation === 'TrashDocument') {
     const document = documents.find((d) => d.id === variables.id);
