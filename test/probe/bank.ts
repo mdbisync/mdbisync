@@ -60,6 +60,9 @@ export function readFixture(bank: Bank, fixture: BankFixture): string {
   return readFileSync(join(bank.dir, fixture.file), 'utf8');
 }
 
+/** The text the sync writes to Linear for a file: without its front matter. */
+export { sentForm } from '../fixtures/check-index.mjs';
+
 export function readOptional(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
 }

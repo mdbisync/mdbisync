@@ -3,7 +3,6 @@
     "prosemirror"
   ],
   "content": [
-    {"type":"code_block","attrs":{"id":"<id>","language":"yaml"},"children":[{"text":"# a comment inside the front matter\nowner: support","marks":{"attribution":"user"}}]},
     {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Comment in front matter","marks":{"attribution":"user"}}]},
     {"type":"paragraph","children":[{"text":"Ref kx-a961e039","marks":{"attribution":"user"}}]}
   ]

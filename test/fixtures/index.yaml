@@ -44,25 +44,477 @@ rules:
     title: "Documents over 250,000 characters are rejected."
   - id: duplicate-title
     title: "Two files map to one document title."
+  - id: table-alignment
+    title: "Table column alignment is dropped."
+  - id: link-title
+    title: "A link title is dropped."
+  - id: image-title
+    title: "An image title is dropped from the Markdown."
+  - id: code-in-emphasis
+    title: "Bold or italic around inline code is dropped from the code."
+  - id: hard-break-backslash
+    title: "A backslash line break becomes a plain line break."
+  - id: git-conflict-marker
+    title: "Git conflict marker lines are rewritten as headings, quotes or collapsible sections."
+  - id: url-in-html
+    title: "A URL inside raw HTML is turned into a Markdown link."
 known_constructs:
-  - construct: math-block-dollars
-    class: fixable
+  - construct: heading-atx-h1
+    class: unchanged
+  - construct: heading-atx-h2
+    class: unchanged
+  - construct: heading-atx-h3
+    class: unchanged
+  - construct: heading-atx-h4
+    class: unchanged
+  - construct: heading-atx-h5
+    class: unchanged
+  - construct: heading-atx-h6
+    class: unchanged
   - construct: heading-setext
     class: fixable
+  - construct: heading-closing-hashes
+    class: fixable
+  - construct: heading-no-space
+    class: unchanged
+  - construct: paragraph
+    class: unchanged
+  - construct: paragraph-multiple
+    class: unchanged
+  - construct: paragraph-soft-wrap
+    class: unchanged
+  - construct: trailing-whitespace
+    class: unchanged
+  - construct: bold-asterisks
+    class: unchanged
+  - construct: bold-underscores
+    class: fixable
+  - construct: italic-asterisk
+    class: unchanged
+  - construct: italic-underscore
+    class: fixable
+  - construct: bold-italic
+    class: unchanged
+  - construct: strikethrough
+    class: unchanged
+  - construct: emphasis-intraword
+    class: unchanged
+  - construct: code-inline
+    class: unchanged
+  - construct: code-inline-backtick
+    class: unchanged
+  - construct: bullet-star
+    class: unchanged
+  - construct: bullet-dash
+    class: fixable
+  - construct: bullet-plus
+    class: fixable
+  - construct: ordered-list
+    class: unchanged
+  - construct: ordered-list-start
+    class: unchanged
+  - construct: ordered-list-paren
+    class: fixable
+  - construct: ordered-list-same-number
+    class: fixable
+  - construct: list-nested
+    class: unchanged
+  - construct: list-nested-deep
+    class: unchanged
+  - construct: list-ordered-in-bullet
+    class: unchanged
+  - construct: list-loose
+    class: fixable
+  - construct: list-item-paragraphs
+    class: unchanged
+  - construct: task-unchecked
+    class: fixable
+  - construct: task-checked
+    class: fixable
+  - construct: task-mixed
+    class: fixable
+  - construct: task-nested
+    class: fixable
+  - construct: task-uppercase-x
+    class: fixable
+  - construct: blockquote
+    class: unchanged
+  - construct: blockquote-nested
+    class: unchanged
+  - construct: blockquote-paragraphs
+    class: unchanged
+  - construct: blockquote-lazy
+    class: fixable
+  - construct: code-fence-plain
+    class: unchanged
+  - construct: code-fence-language
+    class: unchanged
+  - construct: code-fence-tildes
+    class: fixable
+  - construct: code-fence-nested
+    class: unchanged
+  - construct: code-indented
+    class: fixable
+  - construct: code-fence-empty
+    class: unchanged
+  - construct: code-fence-blank-lines
+    class: unchanged
+  - construct: hr-dashes
+    class: unchanged
   - construct: hr-asterisks
     class: fixable
   - construct: hr-underscores
     class: fixable
+  - construct: hr-spaced
+    class: fixable
+  - construct: hard-break-spaces
+    class: unchanged
+  - construct: hard-break-backslash
+    class: lint-error
+  - construct: hard-break-html
+    class: unchanged
+  - construct: backslash-escapes
+    class: fixable
+  - construct: html-entities
+    class: fixable
   - construct: emoji-shortcode
     class: fixable
-  - construct: list-loose
-    class: fixable
-  - construct: bullet-dash
-    class: fixable
-  - construct: table-separator-long
-    class: fixable
+  - construct: emoji-literal
+    class: unchanged
   - construct: final-newline
     class: fixable
+  - construct: blank-lines-many
+    class: fixable
+  - construct: code-fence-in-list
+    class: unchanged
+  - construct: list-in-quote
+    class: unchanged
+  - construct: quote-in-list
+    class: unchanged
+  - construct: bold-in-heading
+    class: unchanged
+  - construct: code-in-heading
+    class: unchanged
+  - construct: link-in-heading
+    class: fixable
+  - construct: italic-in-heading
+    class: unchanged
+  - construct: marks-in-table-cell
+    class: fixable
+  - construct: image-in-list
+    class: unchanged
+  - construct: image-in-table
+    class: unchanged
+  - construct: task-with-link
+    class: fixable
+  - construct: task-with-strike
+    class: fixable
+  - construct: code-fence-in-quote
+    class: unchanged
+  - construct: table-in-quote
+    class: unchanged
+  - construct: link-in-quote
+    class: fixable
+  - construct: marks-in-list
+    class: unchanged
+  - construct: code-fence-in-ordered-list
+    class: unchanged
+  - construct: list-in-alert
+    class: unchanged
+  - construct: list-in-details
+    class: unchanged
+  - construct: mermaid-in-list
+    class: unchanged
+  - construct: link-in-bold
+    class: fixable
+  - construct: code-in-link
+    class: fixable
+  - construct: heading-in-list
+    class: fixable
+  - construct: task-in-quote
+    class: fixable
+  - construct: math-in-list
+    class: unchanged
+  - construct: work-meeting-notes
+    class: fixable
+  - construct: work-spec
+    class: unchanged
+  - construct: work-runbook
+    class: unchanged
+  - construct: work-decision-record
+    class: unchanged
+  - construct: work-onboarding-guide
+    class: fixable
+  - construct: work-changelog
+    class: unchanged
+  - construct: work-faq
+    class: unchanged
+  - construct: work-retrospective
+    class: unchanged
+  - construct: work-incident-report
+    class: fixable
+  - construct: work-release-plan
+    class: unchanged
+  - construct: work-project-brief
+    class: unchanged
+  - construct: work-glossary
+    class: unchanged
+  - construct: empty-file
+    class: unchanged
+  - construct: whitespace-only
+    class: fixable
+  - construct: one-line
+    class: unchanged
+  - construct: size-1kb
+    class: unchanged
+  - construct: size-10kb
+    class: unchanged
+  - construct: size-100kb
+    class: unchanged
+  - construct: size-240kb-under-limit
+    class: unchanged
+  - construct: single-line-100k-chars
+    class: unchanged
+  - construct: over-content-limit
+    class: lint-error
+  - construct: mermaid-fence
+    class: unchanged
+  - construct: mermaid-sequence
+    class: unchanged
+  - construct: mermaid-class
+    class: unchanged
+  - construct: mermaid-state
+    class: unchanged
+  - construct: mermaid-er
+    class: unchanged
+  - construct: mermaid-gantt
+    class: unchanged
+  - construct: mermaid-pie
+    class: unchanged
+  - construct: mermaid-journey
+    class: unchanged
+  - construct: mermaid-gitgraph
+    class: unchanged
+  - construct: mermaid-mindmap
+    class: unchanged
+  - construct: mermaid-timeline
+    class: unchanged
+  - construct: mermaid-quadrant
+    class: unchanged
+  - construct: mermaid-invalid
+    class: unchanged
+  - construct: mermaid-several
+    class: unchanged
+  - construct: table
+    class: unchanged
+  - construct: table-separator-long
+    class: fixable
+  - construct: table-alignment
+    class: lint-error
+  - construct: table-30-columns
+    class: unchanged
+  - construct: table-500-rows
+    class: unchanged
+  - construct: table-empty-cells
+    class: unchanged
+  - construct: table-inline-marks
+    class: unchanged
+  - construct: table-code-span-pipe
+    class: unchanged
+  - construct: table-links
+    class: fixable
+  - construct: table-images
+    class: unchanged
+  - construct: table-unicode
+    class: unchanged
+  - construct: table-no-outer-pipes
+    class: fixable
+  - construct: table-single-column
+    class: unchanged
+  - construct: table-header-only
+    class: unchanged
+  - construct: table-ragged-rows
+    class: fixable
+  - construct: bold-in-italic
+    class: unchanged
+  - construct: italic-in-bold
+    class: unchanged
+  - construct: strike-with-bold
+    class: unchanged
+  - construct: code-in-bold
+    class: lint-error
+  - construct: underline-html
+    class: unchanged
+  - construct: highlight
+    class: unchanged
+  - construct: superscript
+    class: unchanged
+  - construct: nested-emphasis-deep
+    class: unchanged
+  - construct: script-greek
+    class: unchanged
+  - construct: script-cjk-chinese
+    class: unchanged
+  - construct: script-cjk-japanese
+    class: unchanged
+  - construct: script-cjk-korean
+    class: unchanged
+  - construct: script-arabic-rtl
+    class: unchanged
+  - construct: script-hebrew-rtl
+    class: unchanged
+  - construct: script-bidi-mixed
+    class: unchanged
+  - construct: script-devanagari
+    class: unchanged
+  - construct: script-thai
+    class: unchanged
+  - construct: emoji-zwj-sequence
+    class: unchanged
+  - construct: emoji-skin-tones
+    class: unchanged
+  - construct: emoji-flags
+    class: unchanged
+  - construct: combining-marks
+    class: unchanged
+  - construct: math-alphanumerics
+    class: unchanged
+  - construct: non-breaking-space
+    class: unchanged
+  - construct: zero-width-space
+    class: unchanged
+  - construct: smart-quotes
+    class: unchanged
+  - construct: tab-characters
+    class: unchanged
+  - construct: symbols
+    class: unchanged
+  - construct: crlf-line-endings
+    class: fixable
+  - construct: byte-order-mark
+    class: unchanged
+  - construct: cr-line-endings
+    class: fixable
+  - construct: link-relative
+    class: fixable
+  - construct: link-relative-anchor
+    class: fixable
+  - construct: link-relative-nested
+    class: fixable
+  - construct: link-relative-same-folder
+    class: fixable
+  - construct: link-to-unsynced-file
+    class: fixable
+  - construct: link-external
+    class: fixable
+  - construct: autolink
+    class: fixable
+  - construct: autolink-literal
+    class: fixable
+  - construct: link-reference
+    class: lint-error
+  - construct: link-reference-collapsed
+    class: fixable
+  - construct: link-reference-shortcut
+    class: fixable
+  - construct: link-mailto
+    class: fixable
+  - construct: link-parentheses
+    class: fixable
+  - construct: link-spaces
+    class: fixable
+  - construct: link-spaces-encoded
+    class: fixable
+  - construct: link-title
+    class: lint-error
+  - construct: link-anchor-only
+    class: fixable
+  - construct: link-text-with-marks
+    class: fixable
+  - construct: file-name-with-spaces
+    class: unchanged
+  - construct: link-external-list
+    class: fixable
+  - construct: front-matter-simple
+    class: unchanged
+  - construct: front-matter-lists
+    class: unchanged
+  - construct: front-matter-nested-map
+    class: unchanged
+  - construct: front-matter-multiline
+    class: unchanged
+  - construct: front-matter-dates
+    class: unchanged
+  - construct: front-matter-unicode
+    class: unchanged
+  - construct: front-matter-comments
+    class: unchanged
+  - construct: front-matter-annotation
+    class: unchanged
+  - construct: front-matter-empty
+    class: unchanged
+  - construct: front-matter-then-rule
+    class: unchanged
+  - construct: front-matter-only
+    class: unchanged
+  - construct: html-block
+    class: unchanged
+  - construct: html-comment
+    class: unchanged
+  - construct: details
+    class: unchanged
+  - construct: definition-list
+    class: unchanged
+  - construct: html-definition-list
+    class: unchanged
+  - construct: alert
+    class: unchanged
+  - construct: alert-tip
+    class: unchanged
+  - construct: alert-important
+    class: unchanged
+  - construct: alert-warning
+    class: unchanged
+  - construct: alert-caution
+    class: unchanged
+  - construct: math-inline
+    class: fixable
+  - construct: math-block-dollars
+    class: fixable
+  - construct: math-dollars-in-paragraph
+    class: unchanged
+  - construct: math-fence
+    class: unchanged
+  - construct: emoji-shortcode-unknown
+    class: unchanged
+  - construct: html-inline
+    class: unchanged
+  - construct: html-kbd
+    class: unchanged
+  - construct: html-sub
+    class: unchanged
+  - construct: html-img
+    class: lint-error
+  - construct: html-table
+    class: unchanged
+  - construct: task-markers
+    class: fixable
+  - construct: conflict-markers-in-fence
+    class: unchanged
+  - construct: conflict-markers-in-quote
+    class: lint-error
+  - construct: conflict-markers-inline-code
+    class: unchanged
+  - construct: conflict-markers-indented
+    class: fixable
+  - construct: conflict-markers-diff3
+    class: unchanged
+  - construct: conflict-markers-short
+    class: unchanged
+  - construct: conflict-markers
+    class: lint-error
+  - construct: conflict-markers-setext-lookalike
+    class: unchanged
   - construct: footnote
     class: lint-error
   - construct: subscript-tilde
@@ -71,39 +523,51 @@ known_constructs:
     class: lint-error
   - construct: image-in-link
     class: lint-error
-  - construct: over-content-limit
-    class: lint-error
   - construct: image-relative-path
     class: unchanged
-  - construct: html-block
+  - construct: image-jpeg
     class: unchanged
-  - construct: html-comment
+  - construct: image-gif-animated
     class: unchanged
-  - construct: highlight
+  - construct: image-webp
     class: unchanged
-  - construct: underline-html
+  - construct: image-svg
     class: unchanged
-  - construct: superscript
+  - construct: image-bmp
     class: unchanged
-  - construct: math-inline
+  - construct: image-ico
     class: unchanged
-  - construct: definition-list
+  - construct: image-title
+    class: lint-error
+  - construct: image-empty-alt
     class: unchanged
-  - construct: alert
+  - construct: image-remote
     class: unchanged
-  - construct: mermaid-fence
+  - construct: image-reference
+    class: fixable
+  - construct: image-path-spaces
+    class: fixable
+  - construct: image-inline-text
+    class: fixable
+  - construct: image-shared
     class: unchanged
-  - construct: code-fence-language
+  - construct: image-several
     class: unchanged
-  - construct: conflict-markers
+  - construct: image-broken-reference
     class: unchanged
-  - construct: conflict-markers-in-fence
-    class: unchanged
-  - construct: conflict-markers-inline-code
-    class: unchanged
-  - construct: conflict-markers-indented
-    class: unchanged
-  - construct: conflict-markers-diff3
+  - construct: attachment-pdf
+    class: fixable
+  - construct: attachment-csv
+    class: fixable
+  - construct: attachment-json
+    class: fixable
+  - construct: attachment-txt
+    class: fixable
+  - construct: attachment-zip
+    class: fixable
+  - construct: attachment-several
+    class: fixable
+  - construct: markdown-extension-sibling
     class: unchanged
 assets:
   - file: "assets/pixel.png"
@@ -139,37 +603,37 @@ fixtures:
     group: construct-singles
     construct: heading-atx-h1
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-4105377f
   - file: "construct-singles/heading-atx-h2.md"
     group: construct-singles
     construct: heading-atx-h2
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-5c31c3fc
   - file: "construct-singles/heading-atx-h3.md"
     group: construct-singles
     construct: heading-atx-h3
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-0cc1928c
   - file: "construct-singles/heading-atx-h4.md"
     group: construct-singles
     construct: heading-atx-h4
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-421d9499
   - file: "construct-singles/heading-atx-h5.md"
     group: construct-singles
     construct: heading-atx-h5
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-456db602
   - file: "construct-singles/heading-atx-h6.md"
     group: construct-singles
     construct: heading-atx-h6
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b14d6906
   - file: "construct-singles/heading-setext-h1.md"
     group: construct-singles
@@ -187,97 +651,97 @@ fixtures:
     group: construct-singles
     construct: heading-closing-hashes
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-2d267599
   - file: "construct-singles/heading-no-space.md"
     group: construct-singles
     construct: heading-no-space
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-f101e197
   - file: "construct-singles/paragraph-single.md"
     group: construct-singles
     construct: paragraph
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-281db51b
   - file: "construct-singles/paragraph-multiple.md"
     group: construct-singles
     construct: paragraph-multiple
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-a2df436c
   - file: "construct-singles/paragraph-soft-wrap.md"
     group: construct-singles
     construct: paragraph-soft-wrap
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-fcb1e8bc
   - file: "construct-singles/paragraph-trailing-spaces.md"
     group: construct-singles
     construct: trailing-whitespace
-    class: fixable
-    basis: assumed
+    class: unchanged
+    basis: known
     canary: kx-dd64e4ef
   - file: "construct-singles/emphasis-bold-asterisks.md"
     group: construct-singles
     construct: bold-asterisks
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b0c8fc75
   - file: "construct-singles/emphasis-bold-underscores.md"
     group: construct-singles
     construct: bold-underscores
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-28e2347d
   - file: "construct-singles/emphasis-italic-asterisk.md"
     group: construct-singles
     construct: italic-asterisk
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-49921822
   - file: "construct-singles/emphasis-italic-underscore.md"
     group: construct-singles
     construct: italic-underscore
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-bd931670
   - file: "construct-singles/emphasis-bold-italic.md"
     group: construct-singles
     construct: bold-italic
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-fa47e2a5
   - file: "construct-singles/emphasis-strikethrough.md"
     group: construct-singles
     construct: strikethrough
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-6475a14d
   - file: "construct-singles/emphasis-intraword.md"
     group: construct-singles
     construct: emphasis-intraword
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-5c546736
   - file: "construct-singles/code-inline.md"
     group: construct-singles
     construct: code-inline
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-8a7c8028
   - file: "construct-singles/code-inline-backtick.md"
     group: construct-singles
     construct: code-inline-backtick
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-4a6b2264
   - file: "construct-singles/list-bullet-star.md"
     group: construct-singles
     construct: bullet-star
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-0b85fe7b
   - file: "construct-singles/list-bullet-dash.md"
     group: construct-singles
@@ -289,49 +753,49 @@ fixtures:
     group: construct-singles
     construct: bullet-plus
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-3a5e0952
   - file: "construct-singles/list-ordered.md"
     group: construct-singles
     construct: ordered-list
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-a72d6fe4
   - file: "construct-singles/list-ordered-start.md"
     group: construct-singles
     construct: ordered-list-start
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-3c4dffb0
   - file: "construct-singles/list-ordered-paren.md"
     group: construct-singles
     construct: ordered-list-paren
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-b43814e1
   - file: "construct-singles/list-ordered-same-number.md"
     group: construct-singles
     construct: ordered-list-same-number
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-7c041a23
   - file: "construct-singles/list-nested.md"
     group: construct-singles
     construct: list-nested
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-f72b0e77
   - file: "construct-singles/list-nested-deep.md"
     group: construct-singles
     construct: list-nested-deep
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-fa6574b5
   - file: "construct-singles/list-ordered-in-bullet.md"
     group: construct-singles
     construct: list-ordered-in-bullet
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-7e47392f
   - file: "construct-singles/list-loose.md"
     group: construct-singles
@@ -343,67 +807,67 @@ fixtures:
     group: construct-singles
     construct: list-item-paragraphs
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-e49d213e
   - file: "construct-singles/task-unchecked.md"
     group: construct-singles
     construct: task-unchecked
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-ed0ae971
   - file: "construct-singles/task-checked.md"
     group: construct-singles
     construct: task-checked
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-b7478126
   - file: "construct-singles/task-mixed.md"
     group: construct-singles
     construct: task-mixed
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-024396ca
   - file: "construct-singles/task-nested.md"
     group: construct-singles
     construct: task-nested
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-4fda3abe
   - file: "construct-singles/task-uppercase-x.md"
     group: construct-singles
     construct: task-uppercase-x
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-a530dbc8
   - file: "construct-singles/quote.md"
     group: construct-singles
     construct: blockquote
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-5d46b8b1
   - file: "construct-singles/quote-nested.md"
     group: construct-singles
     construct: blockquote-nested
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b2ee8203
   - file: "construct-singles/quote-paragraphs.md"
     group: construct-singles
     construct: blockquote-paragraphs
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-65ddaa24
   - file: "construct-singles/quote-lazy.md"
     group: construct-singles
     construct: blockquote-lazy
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-0060b4a5
   - file: "construct-singles/code-fence-plain.md"
     group: construct-singles
     construct: code-fence-plain
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-3e50e346
   - file: "construct-singles/code-fence-javascript.md"
     group: construct-singles
@@ -421,37 +885,37 @@ fixtures:
     group: construct-singles
     construct: code-fence-tildes
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-a3b829df
   - file: "construct-singles/code-fence-four-backticks.md"
     group: construct-singles
     construct: code-fence-nested
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b923fd17
   - file: "construct-singles/code-indented.md"
     group: construct-singles
     construct: code-indented
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-6d25f90f
   - file: "construct-singles/code-fence-empty.md"
     group: construct-singles
     construct: code-fence-empty
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-fca92626
   - file: "construct-singles/code-fence-blank-lines.md"
     group: construct-singles
     construct: code-fence-blank-lines
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-20cb0e8f
   - file: "construct-singles/hr-dashes.md"
     group: construct-singles
     construct: hr-dashes
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-c89cb0ba
   - file: "construct-singles/hr-asterisks.md"
     group: construct-singles
@@ -469,37 +933,38 @@ fixtures:
     group: construct-singles
     construct: hr-spaced
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-995cb3b6
   - file: "construct-singles/break-two-spaces.md"
     group: construct-singles
     construct: hard-break-spaces
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-fcb540f5
   - file: "construct-singles/break-backslash.md"
     group: construct-singles
     construct: hard-break-backslash
-    class: fixable
-    basis: assumed
+    class: lint-error
+    rule: hard-break-backslash
+    basis: known
     canary: kx-0d10d55c
   - file: "construct-singles/break-html.md"
     group: construct-singles
     construct: hard-break-html
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-d51aa7f6
   - file: "construct-singles/escapes.md"
     group: construct-singles
     construct: backslash-escapes
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-7d0ec9e8
   - file: "construct-singles/entities.md"
     group: construct-singles
     construct: html-entities
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-4c4de023
   - file: "construct-singles/emoji-shortcode.md"
     group: construct-singles
@@ -511,7 +976,7 @@ fixtures:
     group: construct-singles
     construct: emoji-literal
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-cd759cdf
   - file: "construct-singles/final-newline.md"
     group: construct-singles
@@ -529,279 +994,279 @@ fixtures:
     group: construct-singles
     construct: blank-lines-many
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-43257ab9
   - file: "pairwise/code-in-list.md"
     group: pairwise
     construct: code-fence-in-list
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-5a8e17da
   - file: "pairwise/list-in-quote.md"
     group: pairwise
     construct: list-in-quote
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-43cac966
   - file: "pairwise/quote-in-list.md"
     group: pairwise
     construct: quote-in-list
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-71c3120f
   - file: "pairwise/bold-in-heading.md"
     group: pairwise
     construct: bold-in-heading
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-8f529036
   - file: "pairwise/code-in-heading.md"
     group: pairwise
     construct: code-in-heading
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-ed447aba
   - file: "pairwise/link-in-heading.md"
     group: pairwise
     construct: link-in-heading
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-f39ca72d
   - file: "pairwise/italic-in-heading.md"
     group: pairwise
     construct: italic-in-heading
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-e9d8df6e
   - file: "pairwise/marks-in-table-cell.md"
     group: pairwise
     construct: marks-in-table-cell
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-87a2683d
   - file: "pairwise/image-in-list.md"
     group: pairwise
     construct: image-in-list
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-00c8d75a
   - file: "pairwise/image-in-table.md"
     group: pairwise
     construct: image-in-table
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-22a251d5
   - file: "pairwise/task-with-link.md"
     group: pairwise
     construct: task-with-link
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-c114bc2c
   - file: "pairwise/task-with-strike.md"
     group: pairwise
     construct: task-with-strike
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-cde149c7
   - file: "pairwise/code-in-quote.md"
     group: pairwise
     construct: code-fence-in-quote
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-49cdc1ce
   - file: "pairwise/table-in-quote.md"
     group: pairwise
     construct: table-in-quote
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-f180a2ee
   - file: "pairwise/link-in-quote.md"
     group: pairwise
     construct: link-in-quote
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-2c4689c6
   - file: "pairwise/marks-in-list.md"
     group: pairwise
     construct: marks-in-list
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-f864f803
   - file: "pairwise/ordered-with-code.md"
     group: pairwise
     construct: code-fence-in-ordered-list
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-0fa980a8
   - file: "pairwise/alert-with-list.md"
     group: pairwise
     construct: list-in-alert
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b7e375d9
   - file: "pairwise/details-with-list.md"
     group: pairwise
     construct: list-in-details
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-fa8fb959
   - file: "pairwise/mermaid-in-list.md"
     group: pairwise
     construct: mermaid-in-list
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-c6cc37b1
   - file: "pairwise/link-in-bold.md"
     group: pairwise
     construct: link-in-bold
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-7167dc36
   - file: "pairwise/code-in-link.md"
     group: pairwise
     construct: code-in-link
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-3e2f41b7
   - file: "pairwise/heading-in-list.md"
     group: pairwise
     construct: heading-in-list
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-630c02ea
   - file: "pairwise/task-in-quote.md"
     group: pairwise
     construct: task-in-quote
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-904c9373
   - file: "pairwise/math-in-list.md"
     group: pairwise
     construct: math-in-list
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-57ee2892
   - file: "work-documents/meeting-notes.md"
     group: work-documents
     construct: work-meeting-notes
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-9fe016d1
   - file: "work-documents/spec.md"
     group: work-documents
     construct: work-spec
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-34773676
   - file: "work-documents/runbook.md"
     group: work-documents
     construct: work-runbook
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-ce481f48
   - file: "work-documents/decision-record.md"
     group: work-documents
     construct: work-decision-record
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-4792bf7c
   - file: "work-documents/onboarding-guide.md"
     group: work-documents
     construct: work-onboarding-guide
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-04a11b0b
   - file: "work-documents/changelog.md"
     group: work-documents
     construct: work-changelog
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b15737c6
   - file: "work-documents/faq.md"
     group: work-documents
     construct: work-faq
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-11203372
   - file: "work-documents/retrospective.md"
     group: work-documents
     construct: work-retrospective
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-a2682fb4
   - file: "work-documents/incident-report.md"
     group: work-documents
     construct: work-incident-report
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-55d16289
   - file: "work-documents/release-plan.md"
     group: work-documents
     construct: work-release-plan
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-1e7b5d20
   - file: "work-documents/project-brief.md"
     group: work-documents
     construct: work-project-brief
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-0e7f8a0d
   - file: "work-documents/glossary.md"
     group: work-documents
     construct: work-glossary
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-05cc4755
   - file: "size-spectrum/empty-kx-ae4a8ebe.md"
     group: size-spectrum
     construct: empty-file
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-ae4a8ebe
     canary_in: name
   - file: "size-spectrum/whitespace-only-kx-2e6b7fa3.md"
     group: size-spectrum
     construct: whitespace-only
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-2e6b7fa3
     canary_in: name
   - file: "size-spectrum/one-line.md"
     group: size-spectrum
     construct: one-line
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-fb7fe4bb
   - file: "size-spectrum/size-1kb.md"
     group: size-spectrum
     construct: size-1kb
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-30096771
   - file: "size-spectrum/size-10kb.md"
     group: size-spectrum
     construct: size-10kb
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-25835426
   - file: "size-spectrum/size-100kb.md"
     group: size-spectrum
     construct: size-100kb
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-a6208752
   - file: "size-spectrum/size-240kb.md"
     group: size-spectrum
     construct: size-240kb-under-limit
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-18cf1555
   - file: "size-spectrum/single-line-100k.md"
     group: size-spectrum
     construct: single-line-100k-chars
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-216aa0ea
   - file: "size-spectrum/size-260kb-over-limit.md"
     group: size-spectrum
@@ -820,85 +1285,85 @@ fixtures:
     group: mermaid
     construct: mermaid-sequence
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-f3a1bf61
   - file: "mermaid/mermaid-class.md"
     group: mermaid
     construct: mermaid-class
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-8616c0f8
   - file: "mermaid/mermaid-state.md"
     group: mermaid
     construct: mermaid-state
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-7153ef2a
   - file: "mermaid/mermaid-er.md"
     group: mermaid
     construct: mermaid-er
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-bed501ba
   - file: "mermaid/mermaid-gantt.md"
     group: mermaid
     construct: mermaid-gantt
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-a6077dca
   - file: "mermaid/mermaid-pie.md"
     group: mermaid
     construct: mermaid-pie
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-ba289e7a
   - file: "mermaid/mermaid-journey.md"
     group: mermaid
     construct: mermaid-journey
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-36483850
   - file: "mermaid/mermaid-gitgraph.md"
     group: mermaid
     construct: mermaid-gitgraph
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-24905878
   - file: "mermaid/mermaid-mindmap.md"
     group: mermaid
     construct: mermaid-mindmap
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-63a6c6b7
   - file: "mermaid/mermaid-timeline.md"
     group: mermaid
     construct: mermaid-timeline
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-62a537b5
   - file: "mermaid/mermaid-quadrant.md"
     group: mermaid
     construct: mermaid-quadrant
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-8c9ba81b
   - file: "mermaid/mermaid-invalid.md"
     group: mermaid
     construct: mermaid-invalid
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-73856d93
   - file: "mermaid/mermaid-several.md"
     group: mermaid
     construct: mermaid-several
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-17653a24
   - file: "tables/table-basic.md"
     group: tables
     construct: table
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-8cb36319
   - file: "tables/table-separator-long.md"
     group: tables
@@ -915,104 +1380,106 @@ fixtures:
   - file: "tables/table-alignment.md"
     group: tables
     construct: table-alignment
-    class: unchanged
-    basis: assumed
+    class: lint-error
+    rule: table-alignment
+    basis: known
     canary: kx-da7801ca
   - file: "tables/table-30-columns.md"
     group: tables
     construct: table-30-columns
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-05bdf82c
   - file: "tables/table-500-rows.md"
     group: tables
     construct: table-500-rows
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b0665730
   - file: "tables/table-empty-cells.md"
     group: tables
     construct: table-empty-cells
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-5123bff2
   - file: "tables/table-inline-marks.md"
     group: tables
     construct: table-inline-marks
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-d8bdb364
   - file: "tables/table-code-pipe.md"
     group: tables
     construct: table-code-span-pipe
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-00ca2bec
   - file: "tables/table-links.md"
     group: tables
     construct: table-links
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-d7771a45
   - file: "tables/table-images.md"
     group: tables
     construct: table-images
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-c90d7823
   - file: "tables/table-unicode.md"
     group: tables
     construct: table-unicode
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-153c4127
   - file: "tables/table-no-outer-pipes.md"
     group: tables
     construct: table-no-outer-pipes
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-7aaa4112
   - file: "tables/table-single-column.md"
     group: tables
     construct: table-single-column
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-422f62b6
   - file: "tables/table-header-only.md"
     group: tables
     construct: table-header-only
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-07d140ac
   - file: "tables/table-ragged-rows.md"
     group: tables
     construct: table-ragged-rows
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-0d56e358
   - file: "typography-scripts/bold-in-italic.md"
     group: typography-scripts
     construct: bold-in-italic
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-bf59769e
   - file: "typography-scripts/italic-in-bold.md"
     group: typography-scripts
     construct: italic-in-bold
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-d4163016
   - file: "typography-scripts/strike-with-bold.md"
     group: typography-scripts
     construct: strike-with-bold
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-c346eb11
   - file: "typography-scripts/code-in-bold.md"
     group: typography-scripts
     construct: code-in-bold
-    class: unchanged
-    basis: assumed
+    class: lint-error
+    rule: code-in-emphasis
+    basis: known
     canary: kx-bd662ad0
   - file: "typography-scripts/underline-html.md"
     group: typography-scripts
@@ -1036,325 +1503,327 @@ fixtures:
     group: typography-scripts
     construct: nested-emphasis-deep
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-8190f966
   - file: "typography-scripts/greek.md"
     group: typography-scripts
     construct: script-greek
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-197e692c
   - file: "typography-scripts/chinese.md"
     group: typography-scripts
     construct: script-cjk-chinese
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-75d8f2a3
   - file: "typography-scripts/japanese.md"
     group: typography-scripts
     construct: script-cjk-japanese
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-f09df4e4
   - file: "typography-scripts/korean.md"
     group: typography-scripts
     construct: script-cjk-korean
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-88094a7b
   - file: "typography-scripts/arabic.md"
     group: typography-scripts
     construct: script-arabic-rtl
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-025fd340
   - file: "typography-scripts/hebrew.md"
     group: typography-scripts
     construct: script-hebrew-rtl
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-a10f04ba
   - file: "typography-scripts/bidi-mixed.md"
     group: typography-scripts
     construct: script-bidi-mixed
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-6460e61a
   - file: "typography-scripts/devanagari.md"
     group: typography-scripts
     construct: script-devanagari
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-a24a568c
   - file: "typography-scripts/thai.md"
     group: typography-scripts
     construct: script-thai
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-8c579fdd
   - file: "typography-scripts/emoji-zwj.md"
     group: typography-scripts
     construct: emoji-zwj-sequence
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-99c1a2a8
   - file: "typography-scripts/emoji-skin-tones.md"
     group: typography-scripts
     construct: emoji-skin-tones
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-6c05090e
   - file: "typography-scripts/emoji-flags.md"
     group: typography-scripts
     construct: emoji-flags
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-81e0391c
   - file: "typography-scripts/combining-marks.md"
     group: typography-scripts
     construct: combining-marks
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b340a37a
   - file: "typography-scripts/math-alphanumerics.md"
     group: typography-scripts
     construct: math-alphanumerics
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-147fc8fd
   - file: "typography-scripts/nbsp.md"
     group: typography-scripts
     construct: non-breaking-space
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-ddc3a38f
   - file: "typography-scripts/zero-width-space.md"
     group: typography-scripts
     construct: zero-width-space
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-0eaaf88f
   - file: "typography-scripts/smart-quotes.md"
     group: typography-scripts
     construct: smart-quotes
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-07a51f3d
   - file: "typography-scripts/tabs.md"
     group: typography-scripts
     construct: tab-characters
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-5bcc514b
   - file: "typography-scripts/symbols.md"
     group: typography-scripts
     construct: symbols
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-8b5e21dc
   - file: "typography-scripts/crlf.md"
     group: typography-scripts
     construct: crlf-line-endings
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-748d5036
   - file: "typography-scripts/bom.md"
     group: typography-scripts
     construct: byte-order-mark
-    class: fixable
-    basis: assumed
+    class: unchanged
+    basis: known
     canary: kx-0125cc3a
   - file: "typography-scripts/cr-only.md"
     group: typography-scripts
     construct: cr-line-endings
     class: fixable
-    basis: assumed
+    basis: known
     canary: kx-303c69d8
   - file: "links/relative.md"
     group: links
     construct: link-relative
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-af288d5c
   - file: "links/relative-anchor.md"
     group: links
     construct: link-relative-anchor
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-3e315224
   - file: "links/relative-parent-folder.md"
     group: links
     construct: link-relative-nested
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-ee1d2790
   - file: "links/relative-same-folder.md"
     group: links
     construct: link-relative-same-folder
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-da57aa3c
   - file: "links/unsynced-file.md"
     group: links
     construct: link-to-unsynced-file
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-23f3e3c0
   - file: "links/external.md"
     group: links
     construct: link-external
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-427941c5
   - file: "links/autolink.md"
     group: links
     construct: autolink
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-748a202d
   - file: "links/bare-url.md"
     group: links
     construct: autolink-literal
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-5fcfc282
   - file: "links/reference.md"
     group: links
     construct: link-reference
-    class: unchanged
-    basis: assumed
+    class: lint-error
+    rule: link-title
+    basis: known
     canary: kx-b3c01c3b
   - file: "links/reference-collapsed.md"
     group: links
     construct: link-reference-collapsed
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-5ba7ae46
   - file: "links/reference-shortcut.md"
     group: links
     construct: link-reference-shortcut
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-327ff36b
   - file: "links/mailto.md"
     group: links
     construct: link-mailto
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-fb512874
   - file: "links/parentheses.md"
     group: links
     construct: link-parentheses
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-b577ec04
   - file: "links/spaces-angle.md"
     group: links
     construct: link-spaces
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-da4d6289
   - file: "links/spaces-encoded.md"
     group: links
     construct: link-spaces-encoded
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-7579b08f
   - file: "links/title.md"
     group: links
     construct: link-title
-    class: unchanged
-    basis: assumed
+    class: lint-error
+    rule: link-title
+    basis: known
     canary: kx-c23ef7e2
   - file: "links/anchor-only.md"
     group: links
     construct: link-anchor-only
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-e4ba9f43
   - file: "links/image-link-text.md"
     group: links
     construct: link-text-with-marks
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-abc8ef6a
   - file: "links/target with spaces.md"
     group: links
     construct: file-name-with-spaces
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-83664e20
   - file: "links/external-list.md"
     group: links
     construct: link-external-list
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-ad8b1cb0
   - file: "front-matter/simple.md"
     group: front-matter
     construct: front-matter-simple
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-54647715
   - file: "front-matter/lists.md"
     group: front-matter
     construct: front-matter-lists
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-f251f77d
   - file: "front-matter/nested-map.md"
     group: front-matter
     construct: front-matter-nested-map
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-2fe2ac98
   - file: "front-matter/multiline.md"
     group: front-matter
     construct: front-matter-multiline
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-7feddb4c
   - file: "front-matter/dates.md"
     group: front-matter
     construct: front-matter-dates
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-6fc1e202
   - file: "front-matter/unicode.md"
     group: front-matter
     construct: front-matter-unicode
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-322376e1
   - file: "front-matter/comments.md"
     group: front-matter
     construct: front-matter-comments
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-a961e039
   - file: "front-matter/annotation.md"
     group: front-matter
     construct: front-matter-annotation
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-9d005f57
   - file: "front-matter/empty.md"
     group: front-matter
     construct: front-matter-empty
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-83b9828d
   - file: "front-matter/rule-after.md"
     group: front-matter
     construct: front-matter-then-rule
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-f38e059b
   - file: "front-matter/only.md"
     group: front-matter
     construct: front-matter-only
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-318e8ba0
   - file: "html-extensions/html-block.md"
     group: html-extensions
@@ -1378,7 +1847,7 @@ fixtures:
     group: html-extensions
     construct: details
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-72139202
   - file: "html-extensions/definition-list.md"
     group: html-extensions
@@ -1390,7 +1859,7 @@ fixtures:
     group: html-extensions
     construct: html-definition-list
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-84f0eaa8
   - file: "html-extensions/alert-note.md"
     group: html-extensions
@@ -1402,30 +1871,30 @@ fixtures:
     group: html-extensions
     construct: alert-tip
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-1ae0ce89
   - file: "html-extensions/alert-important.md"
     group: html-extensions
     construct: alert-important
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-10bb911e
   - file: "html-extensions/alert-warning.md"
     group: html-extensions
     construct: alert-warning
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-fe76c48a
   - file: "html-extensions/alert-caution.md"
     group: html-extensions
     construct: alert-caution
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-a8c918ce
   - file: "html-extensions/math-inline.md"
     group: html-extensions
     construct: math-inline
-    class: unchanged
+    class: fixable
     basis: known
     canary: kx-f47dfcd2
   - file: "html-extensions/math-block-dollars.md"
@@ -1436,15 +1905,15 @@ fixtures:
     canary: kx-5d241cd6
   - file: "html-extensions/math-block-dollars-inline.md"
     group: html-extensions
-    construct: math-block-dollars
-    class: fixable
+    construct: math-dollars-in-paragraph
+    class: unchanged
     basis: known
     canary: kx-722808a0
   - file: "html-extensions/math-fence.md"
     group: html-extensions
     construct: math-fence
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-90c9efd0
   - file: "html-extensions/emoji-shortcodes.md"
     group: html-extensions
@@ -1456,43 +1925,44 @@ fixtures:
     group: html-extensions
     construct: emoji-shortcode-unknown
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-77640d49
   - file: "html-extensions/html-span.md"
     group: html-extensions
     construct: html-inline
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b230dfe4
   - file: "html-extensions/html-kbd.md"
     group: html-extensions
     construct: html-kbd
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-bcb511ff
   - file: "html-extensions/html-sub.md"
     group: html-extensions
     construct: html-sub
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-99b5263c
   - file: "html-extensions/html-img.md"
     group: html-extensions
     construct: html-img
-    class: unchanged
-    basis: assumed
+    class: lint-error
+    rule: url-in-html
+    basis: known
     canary: kx-4218d8bb
   - file: "html-extensions/html-table.md"
     group: html-extensions
     construct: html-table
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-35825550
   - file: "html-extensions/task-markers.md"
     group: html-extensions
     construct: task-markers
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-981d1bd9
   - file: "conflict-markers/in-code-fence.md"
     group: conflict-markers
@@ -1503,8 +1973,9 @@ fixtures:
   - file: "conflict-markers/in-quote.md"
     group: conflict-markers
     construct: conflict-markers-in-quote
-    class: unchanged
-    basis: assumed
+    class: lint-error
+    rule: git-conflict-marker
+    basis: known
     canary: kx-ee491350
     note: "blank quote lines keep the line before the equals line from being a setext heading"
   - file: "conflict-markers/in-inline-code.md"
@@ -1516,7 +1987,7 @@ fixtures:
   - file: "conflict-markers/in-indented-code.md"
     group: conflict-markers
     construct: conflict-markers-indented
-    class: unchanged
+    class: fixable
     basis: known
     canary: kx-44b6e301
   - file: "conflict-markers/diff3-in-fence.md"
@@ -1529,33 +2000,36 @@ fixtures:
     group: conflict-markers
     construct: conflict-markers-short
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-a93c2b1e
   - file: "conflict-markers/real-paragraph.md"
     group: conflict-markers
     construct: conflict-markers
-    class: unchanged
+    class: lint-error
+    rule: git-conflict-marker
     basis: known
     canary: kx-354df3a7
-    note: "outside a conflict the line before the equals line would be a setext heading; the markers take precedence"
+    note: "unresolved git markers in a paragraph: Linear turns them into a heading and a collapsible section"
   - file: "conflict-markers/real-list.md"
     group: conflict-markers
     construct: conflict-markers
-    class: unchanged
+    class: lint-error
+    rule: git-conflict-marker
     basis: known
     canary: kx-0e192afe
   - file: "conflict-markers/real-table.md"
     group: conflict-markers
     construct: conflict-markers
-    class: unchanged
+    class: lint-error
+    rule: git-conflict-marker
     basis: known
     canary: kx-9d18e02c
-    note: "the marker lines end the table; the file is kept byte for byte"
+    note: "the marker lines end the table; Linear turns them into a heading and a collapsible section"
   - file: "conflict-markers/equals-setext-lookalike.md"
     group: conflict-markers
     construct: conflict-markers-setext-lookalike
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-5c7f9462
   - file: "lint-errors/footnote.md"
     group: lint-errors
@@ -1576,7 +2050,7 @@ fixtures:
     construct: footnote
     class: lint-error
     rule: footnote
-    basis: assumed
+    basis: known
     canary: kx-68f32f16
   - file: "lint-errors/subscript.md"
     group: lint-errors
@@ -1652,134 +2126,135 @@ fixtures:
     group: images
     construct: image-jpeg
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-48879b65
   - file: "images/gif-animated.md"
     group: images
     construct: image-gif-animated
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-7376820d
   - file: "images/webp.md"
     group: images
     construct: image-webp
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-c8e084f2
   - file: "images/svg.md"
     group: images
     construct: image-svg
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-3f299f04
   - file: "images/bmp.md"
     group: images
     construct: image-bmp
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-6dc60d9f
   - file: "images/ico.md"
     group: images
     construct: image-ico
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-7d55f861
   - file: "images/title.md"
     group: images
     construct: image-title
-    class: unchanged
-    basis: assumed
+    class: lint-error
+    rule: image-title
+    basis: known
     canary: kx-93be94fc
   - file: "images/empty-alt.md"
     group: images
     construct: image-empty-alt
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-f349a3bd
   - file: "images/remote.md"
     group: images
     construct: image-remote
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-2d27b0d2
   - file: "images/reference.md"
     group: images
     construct: image-reference
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-dc48e202
   - file: "images/spaces-in-path.md"
     group: images
     construct: image-path-spaces
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-9d553b3d
   - file: "images/inline-with-text.md"
     group: images
     construct: image-inline-text
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-72e3775f
   - file: "images/shared-a.md"
     group: images
     construct: image-shared
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-d39e774d
   - file: "images/shared-b.md"
     group: images
     construct: image-shared
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b6b7be47
   - file: "images/several.md"
     group: images
     construct: image-several
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-168dfc60
   - file: "images/broken-reference.md"
     group: images
     construct: image-broken-reference
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-cc5611cc
     missing_target: true
   - file: "attachments/pdf.md"
     group: attachments
     construct: attachment-pdf
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-a8d4d180
   - file: "attachments/csv.md"
     group: attachments
     construct: attachment-csv
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-b113b8d7
   - file: "attachments/json.md"
     group: attachments
     construct: attachment-json
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-9377d02f
   - file: "attachments/txt.md"
     group: attachments
     construct: attachment-txt
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-ac0ebe97
   - file: "attachments/zip.md"
     group: attachments
     construct: attachment-zip
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-45b6340c
   - file: "attachments/several.md"
     group: attachments
     construct: attachment-several
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-e1618e6f
   - file: "unsynced/script.py"
     group: unsynced
@@ -1813,7 +2288,7 @@ fixtures:
     group: unsynced
     construct: markdown-extension-sibling
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-adb18378
     note: "plan.markdown next to it is not synchronized, so the two do not collide"
   - file: "unsynced/markdown-extension/plan.markdown"

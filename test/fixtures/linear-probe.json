@@ -358,7 +358,7 @@
       "fixedPoint": true
     },
     "front-matter/only.md": {
-      "yjs": "recorded",
+      "yjs": "none",
       "fixedPoint": true
     },
     "front-matter/rule-after.md": {

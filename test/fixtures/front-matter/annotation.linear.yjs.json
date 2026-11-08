@@ -3,7 +3,6 @@
     "prosemirror"
   ],
   "content": [
-    {"type":"code_block","attrs":{"id":"<id>","language":"yaml"},"children":[{"text":"linear-team: ENG\nlinear-project: Field notes","marks":{"attribution":"user"}}]},
     {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Folder annotation keys","marks":{"attribution":"user"}}]},
     {"type":"paragraph","children":[{"text":"Ref kx-9d005f57","marks":{"attribution":"user"}}]}
   ]
