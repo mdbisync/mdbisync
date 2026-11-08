@@ -16,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
-import { LinearClient, RequestStats, withRunToken } from '../../src/linear/index.ts';
+import { LinearClient, RequestStats, withRunToken, type LogEntry } from '../../src/linear/index.ts';
 import { loadBank } from './bank.ts';
 import { runProbe, type ProbeRun } from './probe.ts';
 import { findDrift, writeRecord } from './record.ts';
@@ -47,12 +47,17 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
   const complexityLog = new Map<string, number | undefined>();
   const runId = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex')}`;
 
+  const requestLog: LogEntry[] = [];
+  const log = (entry: LogEntry) => {
+    requestLog.push(entry);
+    console.error(JSON.stringify({ runId, ...entry }));
+  };
   let run: ProbeRun;
   let tokenLeftActive = false;
   try {
     run = await withRunToken(
       { clientId, clientSecret },
-      { baseUrl, stats, onRevokeError: () => {
+      { baseUrl, stats, hooks: { log }, onRevokeError: () => {
           tokenLeftActive = true;
           console.error('format probe: the run token could not be revoked');
         },
@@ -60,9 +65,11 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
       (token) => {
         const client = new LinearClient({
           token: token.accessToken,
+          auth: token.context,
           baseUrl,
           stats,
           hooks: {
+            log,
             // The highest cost seen per operation: a full page costs more than a short one.
             afterResponse: (info) => {
               const cost = info.rateLimit.complexity;
@@ -85,6 +92,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
   } catch (error) {
     console.error(`format probe: run ${runId} failed: ${error instanceof Error ? error.message : String(error)}`);
     console.error(`format probe: ${stats.total} API requests sent`);
+    if (values.json) writeFileSync(values.json, `${JSON.stringify({ runId, failed: true, requests: stats.toJSON(), requestLog }, null, 2)}\n`);
     return 2;
   }
   run.requests = stats.toJSON();
@@ -95,7 +103,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
   if (values.json) {
     // Results only: no fixture text, Linear forms or Yjs trees.
     const fixtures = run.fixtures.map(({ source: _s, first: _f, second: _d, yjs: _y, ...rest }) => rest);
-    writeFileSync(values.json, `${JSON.stringify({ ...run, fixtures, drift }, null, 2)}\n`);
+    writeFileSync(values.json, `${JSON.stringify({ ...run, fixtures, drift, requestLog }, null, 2)}\n`);
   }
 
   const notFixed = run.fixtures.filter((r) => r.fixedPoint === false).length;

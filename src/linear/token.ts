@@ -3,9 +3,11 @@
 // The action's `post` step revokes a token left behind by a killed run with
 // `revokeToken`.
 
+import { authMetadata, emitLog, requestTiming, type AuthContext } from './diagnostics.ts';
+import { readRateLimitHeaders } from './rate-limit.ts';
 import { LinearTokenError } from './errors.ts';
 import { RequestStats } from './stats.ts';
-import { DEFAULT_BASE_URL, defaultFetch, trimSlash } from './transport.ts';
+import { DEFAULT_BASE_URL, defaultFetch, trimSlash, type LinearHooks, type LogEntry } from './transport.ts';
 
 export interface AppCredentials {
   clientId: string;
@@ -19,6 +21,9 @@ export interface TokenOptions {
   stats?: RequestStats;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  hooks?: Pick<LinearHooks, 'log'>;
+  /** Mint metadata, when revoking a token created by this run. */
+  auth?: AuthContext;
 }
 
 export interface RunToken {
@@ -26,28 +31,29 @@ export interface RunToken {
   /** Seconds until Linear expires the token. */
   expiresIn: number;
   scope: string[];
+  context: AuthContext;
 }
 
 export async function mintAppToken(credentials: AppCredentials, options: TokenOptions = {}): Promise<RunToken> {
+  const requestedScopes = credentials.scopes ?? ['read', 'write'];
   const body = new URLSearchParams({
     grant_type: 'client_credentials',
     client_id: credentials.clientId,
     client_secret: credentials.clientSecret,
-    scope: (credentials.scopes ?? ['read', 'write']).join(','),
+    scope: requestedScopes.join(','),
   });
-  const response = await oauthPost('oauth.token', '/oauth/token', body, options);
-  const json = (await readJson(response)) as Partial<{
-    access_token: string;
-    expires_in: number;
-    scope: string | string[];
-    error: string;
-  }>;
+  const { response, json } = await oauthPost('oauth.token', '/oauth/token', body, options, requestedScopes);
   if (!response.ok || typeof json.access_token !== 'string') {
-    const reason = typeof json.error === 'string' ? json.error : `HTTP ${response.status}`;
+    const reason = oauthErrorCode(json.error) ?? `HTTP ${response.status}`;
     throw new LinearTokenError('oauth.token', `oauth.token: Linear refused the token request (${reason})`);
   }
-  const scope = Array.isArray(json.scope) ? json.scope : (json.scope ?? '').split(/[ ,]+/).filter(Boolean);
-  return { accessToken: json.access_token, expiresIn: json.expires_in ?? 0, scope };
+  const scope = readScopes(json.scope);
+  return {
+    accessToken: json.access_token,
+    expiresIn: typeof json.expires_in === 'number' ? json.expires_in : 0,
+    scope,
+    context: { grantType: 'client_credentials', requestedScopes: [...requestedScopes], returnedScopes: [...scope] },
+  };
 }
 
 /**
@@ -56,8 +62,7 @@ export async function mintAppToken(credentials: AppCredentials, options: TokenOp
  * explicit `success: false` throws LinearTokenError.
  */
 export async function revokeToken(accessToken: string, options: TokenOptions = {}): Promise<void> {
-  const response = await oauthPost('oauth.revoke', '/oauth/revoke', new URLSearchParams({ token: accessToken }), options);
-  const json = (await readJson(response)) as { success?: unknown };
+  const { response, json } = await oauthPost('oauth.revoke', '/oauth/revoke', new URLSearchParams({ token: accessToken }), options);
   if (!response.ok || json.success === false) {
     throw new LinearTokenError('oauth.revoke', `oauth.revoke: Linear did not confirm the revocation (HTTP ${response.status})`);
   }
@@ -79,11 +84,19 @@ export async function withRunToken<T>(
     return await work(token);
   } finally {
     try {
-      await revokeToken(token.accessToken, options);
+      await revokeToken(token.accessToken, { ...options, auth: token.context });
     } catch (revokeError) {
       options.onRevokeError(revokeError);
     }
   }
+}
+
+interface OAuthBody {
+  access_token?: unknown;
+  expires_in?: unknown;
+  scope?: unknown;
+  error?: unknown;
+  success?: unknown;
 }
 
 async function oauthPost(
@@ -91,24 +104,57 @@ async function oauthPost(
   path: string,
   body: URLSearchParams,
   options: TokenOptions,
-): Promise<Response> {
+  requestedScopes?: string[],
+): Promise<{ response: Response; json: OAuthBody }> {
   const fetchImpl = options.fetch ?? defaultFetch;
+  const started = Date.now();
+  const info = {
+    operation, kind: 'oauth' as const, attempt: 1,
+    ...authMetadata(options.auth),
+    ...(requestedScopes ? { grantType: 'client_credentials' as const, requestedScopes: [...requestedScopes] } : {}),
+  };
   options.stats?.count(operation);
+  let response: Response;
   try {
-    return await fetchImpl(`${trimSlash(options.baseUrl ?? DEFAULT_BASE_URL)}${path}`, {
+    response = await fetchImpl(`${trimSlash(options.baseUrl ?? DEFAULT_BASE_URL)}${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body,
       signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
     });
   } catch (error) {
+    emitLog<LogEntry>(options.hooks?.log, { ...info, ...requestTiming(started), status: 'network-error', rateLimitHeaders: {} });
     throw new LinearTokenError(operation, `${operation}: request to Linear failed`, { cause: error });
   }
+  const json = await readJson(response);
+  emitLog<LogEntry>(options.hooks?.log, {
+    ...info, ...requestTiming(started), status: response.status,
+    ...(requestedScopes ? { returnedScopes: readScopes(json.scope) } : {}),
+    requestId: response.headers.get('x-request-id') ?? undefined,
+    errorCodes: json.error === undefined ? [] : [oauthErrorCode(json.error) ?? 'unknown'],
+    rateLimitHeaders: readRateLimitHeaders(response.headers).headers,
+  });
+  return { response, json };
 }
 
-async function readJson(response: Response): Promise<unknown> {
+/** OAuth errors are codes, never arbitrary response descriptions. */
+function oauthErrorCode(error: unknown): string | undefined {
+  return typeof error === 'string' && [
+    'invalid_request', 'invalid_client', 'invalid_grant', 'unauthorized_client',
+    'unsupported_grant_type', 'invalid_scope', 'access_denied', 'server_error',
+    'temporarily_unavailable', 'Error',
+  ].includes(error) ? error : undefined;
+}
+
+function readScopes(scope: unknown): string[] {
+  return Array.isArray(scope) ? scope.filter((s): s is string => typeof s === 'string')
+    : typeof scope === 'string' ? scope.split(/[ ,]+/).filter(Boolean) : [];
+}
+
+async function readJson(response: Response): Promise<OAuthBody> {
   try {
-    return await response.json();
+    const json: unknown = await response.json();
+    return json !== null && typeof json === 'object' ? json as OAuthBody : {};
   } catch {
     return {};
   }
