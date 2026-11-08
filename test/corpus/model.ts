@@ -103,6 +103,8 @@ export function isLfs(path: string): boolean {
 export function gitattributes(): string {
   const lfs = "filter=lfs diff=lfs merge=lfs -text";
   return [
+    "# Corpus files are byte-exact test data: no line-ending conversion, whatever core.autocrlf says.",
+    "* -text",
     "# Images and attachments are stored in Git LFS, by extension and by folder.",
     ...LFS_EXTENSIONS.flatMap((ext) => [`*.${ext} ${lfs}`, `*.${ext.toUpperCase()} ${lfs}`]),
     `**/${LFS_FOLDER}/** ${lfs}`,

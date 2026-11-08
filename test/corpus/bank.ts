@@ -40,17 +40,28 @@ function corpusPath(entry: BankEntry): string {
   return `${BANK_HOME}/${entry.file}`;
 }
 
-/** Relative link targets in Markdown text, outside code. */
-function linkTargets(text: string): string[] {
+/** A relative link target as written, and the form it is written in. */
+type Target = { written: string; form: "inline" | "definition" };
+
+/**
+ * Relative link targets in Markdown text, outside code: inline links and
+ * images, and reference definitions (`[label]: target`), which reference-style
+ * links and images resolve to. Footnote definitions (`[^1]: text`) are not links.
+ */
+export function linkTargets(text: string): Target[] {
   const withoutCode = text.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
-  const targets: string[] = [];
-  for (const m of withoutCode.matchAll(/\]\(\s*(<[^>]*>|[^)\s]+)/g)) {
-    let target = m[1] as string;
-    if (target.startsWith("<")) target = target.slice(1, -1);
-    if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("#")) continue;
-    targets.push(decodeURI(target.split("#")[0] as string));
-  }
-  return targets;
+  const found: Target[] = [];
+  for (const m of withoutCode.matchAll(/\]\(\s*(<[^>]*>|[^)\s]+)/g)) found.push({ written: m[1] as string, form: "inline" });
+  for (const m of withoutCode.matchAll(/^ {0,3}\[(?!\^)[^\]]+\]:[ \t]*(<[^>]*>|\S+)/gm)) found.push({ written: m[1] as string, form: "definition" });
+  return found.filter(({ written }) => {
+    const target = written.startsWith("<") ? written.slice(1, -1) : written;
+    return !/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith("#");
+  });
+}
+
+function resolvedPath(written: string): string {
+  const target = written.startsWith("<") ? written.slice(1, -1) : written;
+  return decodeURI(target.split("#")[0] as string);
 }
 
 export function copyBank(bankDir: string, canaries: Canaries): BankCopy {
@@ -76,14 +87,17 @@ export function copyBank(bankDir: string, canaries: Canaries): BankCopy {
     const links: string[] = [];
     if (kindOf(entry.file) === "markdown") {
       let text = content.toString("utf8");
-      for (const target of linkTargets(text)) {
+      for (const { written, form } of linkTargets(text)) {
+        const target = resolvedPath(written);
         const bankTarget = posix.normalize(posix.join(posix.dirname(entry.file), target));
         const corpusTarget = placed.get(bankTarget);
         if (corpusTarget === undefined) continue; // a broken link on purpose, or a link outside the bank
         links.push(corpusTarget);
         const expectedHere = posix.relative(posix.dirname(path), corpusTarget);
         if (expectedHere !== target) {
-          text = text.split(`](${target})`).join(`](${expectedHere})`);
+          text = form === "inline"
+            ? text.split(`](${written})`).join(`](${expectedHere})`)
+            : text.replace(new RegExp(`(\\]:[ \\t]*)${written.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "g"), `$1${expectedHere}`);
           note = "link rewritten to the corpus layout";
         }
       }

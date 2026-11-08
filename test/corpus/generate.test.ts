@@ -1,12 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
+import { linkTargets } from "./bank.ts";
 import { checkCorpus } from "./check.ts";
 import { longTitle } from "./documents.ts";
 import { buildCorpus, writeCorpus } from "./generate.ts";
+import { gitattributes } from "./model.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
 import { COLLISIONS } from "./tree.ts";
 
@@ -96,5 +99,43 @@ test("duplicate-title fixtures are taken from the bank once, never paired by the
   assert.deepEqual(generated, []);
   for (const excluded of built.manifest.excluded) {
     assert.ok(!built.files.some((f) => f.path.endsWith(excluded.file)), excluded.file);
+  }
+});
+
+test("reference definitions count as links; footnote definitions do not", () => {
+  const found = linkTargets("![Banner][banner]\n\n[banner]: ../assets/banner.png\n\nText[^1]\n\n[^1]: a note\n\n[site]: https://www.example.com\n");
+  assert.deepEqual(found, [{ written: "../assets/banner.png", form: "definition" }]);
+});
+
+test("every relative link a corpus document writes is in its dependency list", () => {
+  const built = corpus();
+  const byPath = new Map(built.files.map((f) => [f.path, f]));
+  const reference = byPath.get("docs/reference/images/reference.md");
+  assert.ok(reference, "the bank's reference-style image fixture is in the corpus");
+  assert.ok(reference.links.includes("docs/reference/assets/banner.png"), "a reference-style image records its image");
+  for (const file of built.files) {
+    if (file.kind !== "markdown") continue;
+    for (const { written } of linkTargets(file.content.toString("utf8"))) {
+      const bare = (written.startsWith("<") ? written.slice(1, -1) : written).split("#")[0] as string;
+      const target = posix.normalize(posix.join(posix.dirname(file.path), decodeURI(bare)));
+      if (byPath.has(target)) assert.ok(file.links.includes(target), `${file.path} links to ${target} without listing it`);
+    }
+  }
+});
+
+test("the corpus attributes keep CRLF documents byte-exact even with core.autocrlf", () => {
+  const repo = mkdtempSync(join(tmpdir(), "corpus-eol-"));
+  try {
+    const run = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+    run("init", "-q");
+    run("config", "core.autocrlf", "true");
+    writeFileSync(join(repo, ".gitattributes"), gitattributes());
+    const crlf = "# Title\r\n\r\nLine one\r\nLine two\r\n";
+    writeFileSync(join(repo, "doc.md"), crlf);
+    run("add", ".gitattributes", "doc.md");
+    assert.equal(run("cat-file", "-p", ":doc.md"), crlf);
+    assert.match(run("check-attr", "text", "doc.md"), /text: unset/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
   }
 });
