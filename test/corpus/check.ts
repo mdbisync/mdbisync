@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { findCyrillicLines } from "../../tools/check-no-cyrillic.ts";
 import type { Manifest, ManifestEntry } from "./generate.ts";
-import { GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, type Group } from "./model.ts";
+import { gitattributes, GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, type Group } from "./model.ts";
 import { SLICES } from "./slices.ts";
 
 export type CheckResult = {
@@ -56,6 +56,12 @@ export function checkCorpus(root: string, options: { git?: boolean } = {}): Chec
   for (const path of onDisk) if (!entries.has(path)) problems.push(`not in the manifest: ${path}`);
   for (const path of entries.keys()) if (!onDisk.has(path)) problems.push(`missing from the tree: ${path}`);
 
+  // The attributes on disk are exactly the rules the LFS flags below are checked
+  // against, so a changed .gitattributes cannot pass with routing that differs.
+  const attributesPath = join(treeDir, ".gitattributes");
+  const attributes = onDisk.has(".gitattributes") ? readFileSync(attributesPath, "utf8") : null;
+  if (attributes !== gitattributes()) problems.push(".gitattributes differs from the corpus LFS rules");
+
   // Counts per group.
   const groups: Record<string, number> = {};
   for (const entry of entries.values()) groups[entry.group] = (groups[entry.group] ?? 0) + 1;
@@ -74,7 +80,7 @@ export function checkCorpus(root: string, options: { git?: boolean } = {}): Chec
     const bytes = readFileSync(full);
     const pointer = POINTER.exec(bytes.toString("latin1"));
 
-    // LFS routing follows the .gitattributes rules.
+    // LFS routing follows the .gitattributes rules, checked above to be the ones on disk.
     if (entry.lfs !== isLfs(entry.path)) problems.push(`LFS flag does not match the attributes: ${entry.path}`);
     if (options.git === true) {
       if (entry.lfs && !pointer) problems.push(`expected an LFS pointer: ${entry.path}`);

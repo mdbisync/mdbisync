@@ -92,6 +92,12 @@ test("an LFS flag that disagrees with the attributes is reported", () => {
   });
 });
 
+test("a .gitattributes that routes files differently is reported", () => {
+  withChange("corpus/.gitattributes", (b) => Buffer.from(b.toString().replace("*.png ", "*.zzz ").replace("*.PNG ", "*.ZZZ ")), () => {
+    assert.ok(problems().includes(".gitattributes differs from the corpus LFS rules"));
+  });
+});
+
 test("in a git checkout, an LFS file must be a pointer", () => {
   const image = manifest.files.find((f) => f.kind === "image" && f.lfs)!;
   // The generated tree holds real content, so every LFS file is reported.
