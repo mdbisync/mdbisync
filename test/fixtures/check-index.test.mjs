@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { checkBank, parseIndex, relativeTargets, sentForm } from './check-index.mjs';
+import { checkBank, parseIndex, relativeTargets } from './check-index.mjs';
 
 const bank = dirname(fileURLToPath(import.meta.url));
 
@@ -267,12 +267,16 @@ test('a probed fixture must have basis known and its recorded form', () => {
   assert.ok(errors.includes('tables/table-separator-long.md: probed, but its recorded Linear form is missing'), errors.join('\n'));
 });
 
-test('front matter is not part of the text sent to Linear', () => {
-  assert.equal(sentForm('---\nowner: ops\n---\n\n# Title\n\nText.'), '# Title\n\nText.');
-  assert.equal(sentForm('---\r\na: 1\r\n---\r\nBody'), 'Body');
-  assert.equal(sentForm('---\nonly: front matter\n---'), '');
-  assert.equal(sentForm('Text.\n\n---\n\nMore.'), 'Text.\n\n---\n\nMore.');
-  assert.equal(sentForm('---\nno closing line'), '---\nno closing line');
+test('a refused fixture must be a lint error, and a lint error needs its recorded form', () => {
+  const errors = withCopy((d) => {
+    const p = join(d, 'linear-probe.json');
+    const manifest = JSON.parse(readFileSync(p, 'utf8'));
+    manifest.fixtures['tables/table-basic.md'] = { yjs: 'none', refused: 'INVALID_INPUT' };
+    writeFileSync(p, JSON.stringify(manifest));
+    rmSync(join(d, 'tables', 'table-alignment.linear.md'));
+  });
+  assert.ok(errors.includes('tables/table-basic.md: Linear refused it, so its class must be lint-error'), errors.join('\n'));
+  assert.ok(errors.includes('tables/table-alignment.md: probed, but its recorded Linear form is missing'), errors.join('\n'));
 });
 
 test('the check runs when started through a symlink', async () => {

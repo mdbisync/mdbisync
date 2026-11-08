@@ -11,7 +11,7 @@ import * as Y from 'yjs';
 
 import { LinearClient } from '../../src/linear/index.ts';
 import { FakeLinear, fakeDocument, type ReceivedRequest } from '../linear/fake-linear.ts';
-import { fromLinear, goldenMarkdownPath, goldenYjsPath, loadBank, readFixture, sentForm, toLinear } from './bank.ts';
+import { fromLinear, goldenMarkdownPath, goldenYjsPath, loadBank, sentForm, toLinear } from './bank.ts';
 import { findLimit, isLeftover, runProbe } from './probe.ts';
 import { findDrift, refusalKey, writeRecord } from './record.ts';
 import { diffLines, keptOnlyInYjs, renderReport } from './report.ts';
@@ -248,15 +248,14 @@ describe('format probe against a fake Linear', () => {
 });
 
 describe('format probe helpers', () => {
-  it('sends the text without front matter, by the same rule as the index check', async () => {
-    // The check is plain JavaScript with no type declarations; import it untyped.
-    const checkModule: string = '../fixtures/check-index.mjs';
-    const { sentForm: sentFormInCheck } = (await import(checkModule)) as { sentForm: (text: string) => string };
-    const bank = loadBank();
-    const texts = bank.fixtures.filter((f) => f.file.endsWith('.md')).map((f) => readFixture(bank, f));
-    for (const text of texts) assert.equal(sentForm(text), sentFormInCheck(text));
-    assert.equal(sentForm('---\nowner: ops\n---\n\n# Title'), '# Title');
-    assert.ok(texts.filter((text) => sentForm(text) !== text).length >= 10, 'the front-matter fixtures are cut');
+  it('sends the text without front matter', () => {
+    assert.equal(sentForm('---\nowner: ops\n---\n\n# Title\n\nText.'), '# Title\n\nText.');
+    assert.equal(sentForm('---\r\na: 1\r\n---\r\nBody'), 'Body');
+    assert.equal(sentForm('--- \na: 1\n---\nBody'), 'Body', 'trailing space after the opening line');
+    assert.equal(sentForm('\uFEFF---\na: 1\n---\nBody'), 'Body', 'byte order mark before the front matter');
+    assert.equal(sentForm('---\nonly: front matter\n---'), '');
+    assert.equal(sentForm('Text.\n\n---\n\nMore.'), 'Text.\n\n---\n\nMore.');
+    assert.equal(sentForm('---\nno closing line'), '---\nno closing line');
   });
 
   it('sweeps only its own old projects', () => {
