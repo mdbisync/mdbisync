@@ -1,0 +1,6 @@
+- id: linear-format
+  name: Format Markdown for Linear
+  entry: mdbisync fix
+  language: node
+  language_version: 24.15.0
+  types: [markdown]
