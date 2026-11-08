@@ -18,7 +18,7 @@ it('saves contract diagnostics when setup and token revocation both fail', { tim
       headers: { 'x-request-id': 'request-teams-failed' },
       body: { errors: [{ message: 'Entity not found: User', extensions: { code: 'INPUT_ERROR' } }] },
     };
-    if (request.path === '/oauth/revoke') return { status: 401, body: {} };
+    if (request.path === '/oauth/revoke') return { status: 401, headers: { 'x-request-id': 'request-revoke-failed' }, body: {} };
     return undefined;
   };
   try {
@@ -49,10 +49,21 @@ it('saves contract diagnostics when setup and token revocation both fail', { tim
     assert.deepEqual(report.cleanupErrors, [{ operation: 'oauth.revoke', error: 'oauth.revoke: Linear did not confirm the revocation (HTTP 401)' }]);
     assert.equal(report.stats.total, 3);
     assert.equal(report.perOperation['revoke token'], 1);
-    assert.equal(report.requests[0].requestId, 'request-teams-failed');
-    assert.deepEqual(report.requests[0].errorCodes, ['INPUT_ERROR']);
-    assert.equal(report.requests[0].status, 400);
-    assert.equal(report.requests[0].rateLimitHeaders['x-ratelimit-requests-limit'], '5000');
+    assert.deepEqual(report.requests.map((r: { operation: string }) => r.operation), ['oauth.token', 'Teams', 'oauth.revoke']);
+    assert.equal(report.requests[2].requestId, 'request-revoke-failed');
+    assert.equal(report.requests[2].status, 401);
+    assert.deepEqual(report.requests[0].requestedScopes, ['read', 'write']);
+    assert.deepEqual(report.requests[0].returnedScopes, ['read', 'write']);
+    for (const entry of report.requests) {
+      assert.ok(entry.startedAt.endsWith('Z'));
+      assert.ok(entry.finishedAt.endsWith('Z'));
+    }
+    assert.ok(!JSON.stringify(report).includes('test-secret'));
+    assert.ok(!JSON.stringify(report).includes('fake-token'));
+    assert.equal(report.requests[1].requestId, 'request-teams-failed');
+    assert.deepEqual(report.requests[1].errorCodes, ['INPUT_ERROR']);
+    assert.equal(report.requests[1].status, 400);
+    assert.equal(report.requests[1].rateLimitHeaders['x-ratelimit-requests-limit'], '5000');
     assert.deepEqual(fake.received.map((r) => r.path), ['/oauth/token', '/graphql', '/oauth/revoke']);
   } finally {
     await fake.stop();
