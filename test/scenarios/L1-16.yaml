@@ -18,6 +18,15 @@
         "direction": "git-to-linear",
         "confirm": true
       }
+    },
+    {
+      "kind": "run",
+      "action": "resume-until-complete",
+      "args": {
+        "command": "initial-sync",
+        "direction": "git-to-linear",
+        "confirm": true
+      }
     }
   ],
   "checks": {

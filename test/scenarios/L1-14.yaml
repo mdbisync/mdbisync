@@ -4,21 +4,13 @@
   "slice": "mini",
   "mode": "local",
   "setup": {
-    "state": "empty",
+    "state": "linear-seeded",
     "fixtures": [
-      "mini"
+      "matching-commented-archived-linear-only"
     ],
     "teamZoneLock": true
   },
   "steps": [
-    {
-      "kind": "linear",
-      "action": "seed",
-      "args": {
-        "actor": "editor-a",
-        "fixture": "matching-commented-archived-linear-only"
-      }
-    },
     {
       "kind": "run",
       "action": "initial-sync",

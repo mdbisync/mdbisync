@@ -27,17 +27,19 @@ the execution environment, never embedded credentials or account names.
 - `empty`: mapped projects exist, with no documents and no state refs.
 - `no-state`: configured repository with no sync state; test refusal to run.
 - `converged`: complete initial sync, with matching tracked files and documents.
-- `linear-seeded`: existing documents for reverse initial sync, no initial refs.
+- `linear-seeded`: existing documents for initial sync matching or import, no state refs.
 - `conflicted`: a converged fixture followed by an unresolved conflict, with the
   original icon, color and body saved as `beforeConflict` observations.
 
-`fixtures` names required semantic fixture groups within the slice. The harness
+`fixtures` names required semantic fixture groups for the slice. Supplemental
+fixtures can extend a slice when a scenario needs more documents or constructs. The harness
 resolves these groups, including custom images, comments, archived documents,
 security hooks and conflict markers; it must reject unknown fixture groups.
 Slice membership alone must not substitute for a requested fixture group.
 `teamZoneLock` requires serialization for any team zones used by that setup.
 Every setup must isolate branches, refs and documents, enforce the shared API
-budget and clean up in a finalizer, including after faults or cancellation.
+budget and clean up in a finalizer, including after faults or cancellation. Seeded fixture documents exist before
+the baseline snapshot; fixture setup writes do not count as scenario writes.
 Fixture text written to remote documents must be ordinary work content.
 
 Steps execute in order. `kind`, `action` and `args` form the adapter call:
@@ -63,7 +65,8 @@ not convergence. `probe`, `lint`, `fix`, `pre-commit`, `scan-canaries`, `cleanup
 
 An argument named `variants` or `orderings` expands into independent subcases,
 each with a fresh copy of setup and the complete step sequence and assertions.
-All subcases must pass. `before` is captured after setup, before the first step;
+All subcases must pass. `fixes` and `outcomes` instead name multiple items in
+a single compound operation; their assertions inspect all items together. `before` is captured after setup, before the first step;
 `edited`, `input`, `fixtures`, `golden`, `corpus`, `expected`, `oracle` and
 `resolved` refer to independent fixture or oracle observations, never values
 computed from the actual result being checked. `runs.0` is the first explicit

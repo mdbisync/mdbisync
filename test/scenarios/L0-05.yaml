@@ -60,7 +60,8 @@
         "required": true
       },
       "I9": {
-        "required": true
+        "required": false,
+        "reason": "The format probe deliberately writes and reads each fixture twice; the sync request-efficiency invariant does not measure probe traffic."
       }
     },
     "assertions": [

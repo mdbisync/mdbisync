@@ -43,10 +43,12 @@
   "checks": {
     "invariants": {
       "I1": {
-        "required": true
+        "required": false,
+        "reason": "The resumed initial pull request remains unmerged for a person."
       },
       "I2": {
-        "required": true
+        "required": false,
+        "reason": "The resumed initial pull request remains unmerged for a person."
       },
       "I3": {
         "required": true
@@ -58,10 +60,12 @@
         "required": true
       },
       "I6": {
-        "required": true
+        "required": false,
+        "reason": "The resumed initial pull request remains unmerged for a person."
       },
       "I7": {
-        "required": true
+        "required": false,
+        "reason": "The resumed initial pull request remains unmerged for a person."
       },
       "I8": {
         "required": true

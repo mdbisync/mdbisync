@@ -6,7 +6,7 @@
   "setup": {
     "state": "converged",
     "fixtures": [
-      "mid"
+      "full"
     ],
     "teamZoneLock": true
   },

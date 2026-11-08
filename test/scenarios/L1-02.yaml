@@ -13,8 +13,11 @@
   "steps": [
     {
       "kind": "run",
-      "action": "check",
-      "args": {}
+      "action": "initial-sync",
+      "args": {
+        "direction": "git-to-linear",
+        "confirm": false
+      }
     }
   ],
   "checks": {

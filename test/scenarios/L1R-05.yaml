@@ -4,26 +4,14 @@
   "slice": "mini",
   "mode": "local",
   "setup": {
-    "state": "empty",
+    "state": "linear-seeded",
     "fixtures": [
-      "mini"
+      "unsafe-titles",
+      "unsafe-title-samples"
     ],
     "teamZoneLock": true
   },
   "steps": [
-    {
-      "kind": "linear",
-      "action": "seed",
-      "args": {
-        "actor": "editor-a",
-        "fixture": "unsafe-titles",
-        "titles": [
-          "Notes: draft?*",
-          " leading",
-          "/part/notes"
-        ]
-      }
-    },
     {
       "kind": "run",
       "action": "initial-sync",

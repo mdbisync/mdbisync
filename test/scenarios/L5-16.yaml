@@ -12,6 +12,11 @@
   },
   "steps": [
     {
+      "kind": "git",
+      "action": "edit",
+      "args": {}
+    },
+    {
       "kind": "fault",
       "action": "stale-lease",
       "args": {

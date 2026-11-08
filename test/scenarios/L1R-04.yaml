@@ -4,21 +4,13 @@
   "slice": "mini",
   "mode": "local",
   "setup": {
-    "state": "empty",
+    "state": "linear-seeded",
     "fixtures": [
-      "mini"
+      "reverse-assets"
     ],
     "teamZoneLock": true
   },
   "steps": [
-    {
-      "kind": "linear",
-      "action": "seed",
-      "args": {
-        "actor": "editor-a",
-        "fixture": "reverse-assets"
-      }
-    },
     {
       "kind": "run",
       "action": "initial-sync",
