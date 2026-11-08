@@ -42,6 +42,14 @@ export function findDevPackagesInBundle(metafile: Metafile, packages: readonly L
   return [...bundled].sort();
 }
 
+// A failed check removes dist/, so no bundle that did not pass it is left
+// for a later test or packaging step to pick up.
+function fail(heading: string, lines: readonly string[]): void {
+  console.error(`${heading}\n${lines.map((line) => `  ${line}`).join("\n")}`);
+  rmSync("dist", { recursive: true, force: true });
+  process.exitCode = 1;
+}
+
 async function main(): Promise<void> {
   rmSync("dist", { recursive: true, force: true }); // no stale bundles
   const result = await build({
@@ -63,23 +71,22 @@ async function main(): Promise<void> {
   });
   const devPackages = findDevPackagesInBundle(result.metafile, readLockfile());
   if (devPackages.length > 0) {
-    console.error(`Development-only packages in a bundle:\n${devPackages.map((path) => `  ${path}`).join("\n")}`);
-    process.exitCode = 1;
+    fail("Development-only packages in a bundle:", devPackages);
     return;
   }
   const packages = bundledPackagePaths(result.metafile).map(readBundledPackage);
+  const found = inventoryOf(packages);
   if (process.argv.includes("--update-license-inventory")) {
-    writeFileSync(INVENTORY_FILE, formatInventory(inventoryOf(packages)));
+    writeFileSync(INVENTORY_FILE, formatInventory(found));
     console.log(`Updated ${INVENTORY_FILE}.`);
   }
   const problems = findLicenseProblems(packages, parseInventory(readFileSync(INVENTORY_FILE, "utf8")));
   if (problems.length > 0) {
-    console.error(`License check failed:\n${problems.map((line) => `  ${line}`).join("\n")}`);
-    process.exitCode = 1;
+    fail("License check failed:", problems);
     return;
   }
   writeFileSync(NOTICES_FILE, formatNotices(packages));
-  console.log(`License check passed for ${inventoryOf(packages).length} bundled packages:\n${formatPackageList(packages)}`);
+  console.log(`License check passed for ${found.length} bundled packages:\n${formatPackageList(found)}`);
   console.log(`Built ${Object.keys(ENTRY_POINTS).length} bundles in dist/ with ${NOTICES_FILE}.`);
 }
 

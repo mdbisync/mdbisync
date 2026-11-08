@@ -21,13 +21,21 @@ function bundled(name: string, license: string, version = "1.0.0"): BundledPacka
   return { path: `node_modules/${name}`, name, version, license, noticeFiles: [{ file: "LICENSE", text: `${license} text for ${name}\n` }] };
 }
 
-test("allowed licenses: single identifiers and flat OR or AND expressions", () => {
-  for (const license of ["MIT", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "(MIT OR GPL-3.0)", "MIT AND ISC"]) {
+test("only a single allowed SPDX identifier passes", () => {
+  for (const license of ["MIT", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0"]) {
     assert.equal(licenseAllowed(license), true, license);
   }
-  for (const license of ["GPL-3.0", "LGPL-2.1", "UNLICENSED", "SEE LICENSE IN LICENSE", "", "MIT AND GPL-3.0", "(MIT OR ISC) AND GPL-3.0"]) {
+  for (const license of ["GPL-3.0", "LGPL-2.1", "UNLICENSED", "SEE LICENSE IN LICENSE", "", "mit", "(MIT OR GPL-3.0)", "MIT AND ISC"]) {
     assert.equal(licenseAllowed(license), false, license);
   }
+});
+
+test("the same version installed at two paths is reported once", () => {
+  const packages = [bundled("twice", "GPL-3.0"), { ...bundled("twice", "GPL-3.0"), path: "node_modules/a/node_modules/twice" }];
+  assert.deepEqual(findLicenseProblems(packages, []), [
+    "twice@1.0.0: license GPL-3.0 is not allowed",
+    `twice@1.0.0: bundled but missing from ${INVENTORY_FILE}`,
+  ]);
 });
 
 test("only packages with code in a bundle count as bundled", () => {

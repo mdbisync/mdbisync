@@ -9,10 +9,11 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import type { Metafile } from "esbuild";
+import { NOTICES_FILE } from "../src/release/package.ts";
 import { packagePathOf } from "./lockfile.ts";
 
+export { NOTICES_FILE };
 export const INVENTORY_FILE = "third-party-licenses.json";
-export const NOTICES_FILE = "dist/THIRD_PARTY_NOTICES.txt";
 
 // Permissive licenses compatible with distributing the bundles under MIT.
 export const ALLOWED_LICENSES: ReadonlySet<string> = new Set(["MIT", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0"]);
@@ -44,20 +45,11 @@ export function bundledPackagePaths(metafile: Metafile): string[] {
   return [...paths].sort();
 }
 
-// Accepts a single SPDX identifier or a flat expression joined by only OR
-// (one allowed option is enough) or only AND (all must be allowed).
+// Only a single allowed SPDX identifier passes. A compound expression
+// (dual licensing, "A AND B") fails, so that admitting such a package is an
+// explicit decision that also records which license applies.
 export function licenseAllowed(expression: string): boolean {
-  const flat = expression.trim().replace(/^\((.*)\)$/, "$1").trim();
-  for (const operator of [" OR ", " AND "]) {
-    if (flat.includes(operator)) {
-      if (flat.includes(operator === " OR " ? " AND " : " OR ") || /[()]/.test(flat)) {
-        return false;
-      }
-      const ids = flat.split(operator).map((id) => id.trim());
-      return operator === " OR " ? ids.some((id) => ALLOWED_LICENSES.has(id)) : ids.every((id) => ALLOWED_LICENSES.has(id));
-    }
-  }
-  return ALLOWED_LICENSES.has(flat);
+  return ALLOWED_LICENSES.has(expression);
 }
 
 const NOTICE_FILE = /^(?:licen[cs]e|copying|notice)(?:[-._].*)?$/i;
@@ -90,12 +82,15 @@ export function entryKey(entry: Pick<InventoryEntry, "name" | "version">): strin
   return `${entry.name}@${entry.version}`;
 }
 
+// One package per name and version, sorted: the same version installed at
+// two paths is one package for licensing.
+export function uniquePackages(packages: readonly BundledPackage[]): BundledPackage[] {
+  const unique = new Map(packages.map((pkg) => [entryKey(pkg), pkg]));
+  return [...unique.values()].sort((a, b) => entryKey(a).localeCompare(entryKey(b)));
+}
+
 export function inventoryOf(packages: readonly BundledPackage[]): InventoryEntry[] {
-  const entries = new Map<string, InventoryEntry>();
-  for (const { name, version, license } of packages) {
-    entries.set(entryKey({ name, version }), { name, version, license });
-  }
-  return [...entries.values()].sort((a, b) => entryKey(a).localeCompare(entryKey(b)));
+  return uniquePackages(packages).map(({ name, version, license }) => ({ name, version, license }));
 }
 
 export function parseInventory(text: string): InventoryEntry[] {
@@ -121,7 +116,7 @@ export function findLicenseProblems(packages: readonly BundledPackage[], invento
   const problems: string[] = [];
   const listed = new Map(inventory.map((entry) => [entryKey(entry), entry]));
   const bundled = new Set<string>();
-  for (const pkg of packages) {
+  for (const pkg of uniquePackages(packages)) {
     const key = entryKey(pkg);
     bundled.add(key);
     if (pkg.name === "" || pkg.version === "") {
@@ -152,10 +147,8 @@ export function findLicenseProblems(packages: readonly BundledPackage[], invento
 }
 
 export function formatNotices(packages: readonly BundledPackage[]): string {
-  const unique = new Map(packages.map((pkg) => [entryKey(pkg), pkg]));
-  const sorted = [...unique.values()].sort((a, b) => entryKey(a).localeCompare(entryKey(b)));
   const rule = "=".repeat(78);
-  const sections = sorted.map((pkg) => {
+  const sections = uniquePackages(packages).map((pkg) => {
     const texts = pkg.noticeFiles.map(({ file, text }) => `--- ${file} ---\n\n${text.trimEnd()}\n`);
     return `${rule}\n${pkg.name} ${pkg.version}\nLicense: ${pkg.license}\n${rule}\n\n${texts.join("\n")}`;
   });
@@ -171,8 +164,8 @@ export function formatNotices(packages: readonly BundledPackage[]): string {
   return `${header}\n${sections.join("\n")}`;
 }
 
-export function formatPackageList(packages: readonly BundledPackage[]): string {
-  return inventoryOf(packages)
+export function formatPackageList(entries: readonly InventoryEntry[]): string {
+  return entries
     .map(({ name, version, license }) => `  ${name} ${version} ${license}`)
     .join("\n");
 }
