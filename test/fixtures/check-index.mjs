@@ -16,7 +16,7 @@ const CANARY_ANY = /kx-[0-9a-f]{8}/g;
 const CYRILLIC = /[\u0400-\u052F\u1C80-\u1C8F\u2DE0-\u2DFF\uA640-\uA69F]/u;
 // The format probe's manifest of fixed points and refusals.
 const PROBE_MANIFEST = 'linear-probe.json';
-const ROOT_FILES = new Set(['.gitattributes', 'index.yaml', 'README.md', 'check-index.mjs', 'check-index.test.mjs', PROBE_MANIFEST]);
+const ROOT_FILES = new Set(['.gitattributes', 'index.yaml', 'README.md', 'check-index.mjs', 'check-index.d.mts', 'check-index.test.mjs', PROBE_MANIFEST]);
 // Linear's recorded forms, written beside each fixture by the format probe.
 const PROBE_OUTPUT = /\.linear\.(md|yjs\.json)$/;
 const ASSETS_DIR = 'assets';
@@ -87,6 +87,44 @@ function scalar(s, where) {
 }
 
 // ---------------------------------------------------------------------------
+
+// The text the sync writes to Linear: front matter is never sent, so a
+// leading `---` block (after an optional byte order mark) and the blank lines
+// after it are cut off. The format probe imports this function, so the probe
+// and this check agree on what is sent.
+export function sentForm(text) {
+  const match = /^\uFEFF?---[ \t]*\r?\n(?:[^\n]*\n)*?---[ \t]*(?:\r?\n|$)/.exec(text);
+  return match ? text.slice(match[0].length).replace(/^(?:[ \t]*\r?\n)+/, '') : text;
+}
+
+// A class must agree with Linear's recorded form: `unchanged` only where
+// Linear keeps the sent text, `fixable` only where Linear changes it,
+// `lint-error` where Linear refuses the fixture. A lint-error fixture Linear
+// accepts may go either way (a title rule leaves the text alone). Every
+// accepted fixture has its recorded form, and every probed fixture has basis
+// known, except duplicate-title ones: a content probe cannot observe titles.
+function checkClassesAgainstProbe(bankDir, fixtures, manifest, sources, err) {
+  for (const f of fixtures) {
+    const entry = manifest.fixtures?.[f.file];
+    if (!entry) continue;
+    if (f.basis !== 'known' && f.rule !== 'duplicate-title') {
+      err(`${f.file}: probed by Linear, so its basis must be known`);
+    }
+    if (entry.refused !== undefined) {
+      if (f.class !== 'lint-error') err(`${f.file}: Linear refused it, so its class must be lint-error`);
+      continue;
+    }
+    const golden = join(bankDir, f.file.replace(MARKDOWN, '.linear.md'));
+    if (!existsSync(golden)) {
+      err(`${f.file}: probed, but its recorded Linear form is missing`);
+      continue;
+    }
+    if (f.class === 'lint-error') continue;
+    const kept = readFileSync(golden, 'utf8') === sentForm(sources.get(f.file));
+    if (f.class === 'unchanged' && !kept) err(`${f.file}: class unchanged, but Linear's recorded form differs`);
+    if (f.class === 'fixable' && kept) err(`${f.file}: class fixable, but Linear's recorded form equals the source`);
+  }
+}
 
 // Binary files (images, archives, a binary file named .md) are not valid UTF-8.
 function textOrNull(bytes) {
@@ -216,9 +254,9 @@ export function checkBank(bankDir) {
   for (const f of probeOutputs) {
     if (!probed(f.replace(PROBE_OUTPUT, '.md'))) err(`${f}: recorded Linear form without its fixture`);
   }
+  let manifest;
   const manifestText = existsSync(join(bankDir, PROBE_MANIFEST)) ? readFileSync(join(bankDir, PROBE_MANIFEST), 'utf8') : undefined;
   if (manifestText !== undefined) {
-    let manifest;
     try {
       manifest = JSON.parse(manifestText);
     } catch {
@@ -233,6 +271,8 @@ export function checkBank(bankDir) {
   for (const f of assetIndex) if (!assetFiles.includes(f)) err(`${f}: indexed asset missing`);
 
   // Fields, groups, classes and rules.
+  const onDiskFixtures = new Set(fixtureFiles);
+  const sources = new Map();
   const canaries = new Map();
   const assetUse = new Map([...assetIndex].map((a) => [a, 0]));
   for (const f of index.fixtures) {
@@ -252,9 +292,10 @@ export function checkBank(bankDir) {
       if (canaries.has(f.canary)) err(`${at}: canary also used by ${canaries.get(f.canary)}`);
       canaries.set(f.canary, at);
     }
-    if (!fixtureFiles.includes(at)) continue;
+    if (!onDiskFixtures.has(at)) continue;
     const bytes = readFileSync(join(bankDir, at));
     const text = bytes.toString('utf8');
+    sources.set(at, text);
     const latin = bytes.toString('latin1');
     const carrier = f.canary_in === 'name' ? at : latin;
     if (f.canary_in !== undefined && f.canary_in !== 'name') err(`${at}: canary_in can only be name`);
@@ -281,6 +322,7 @@ export function checkBank(bankDir) {
     }
   }
   for (const [a, n] of assetUse) if (n === 0) err(`${a}: asset not used by any fixture`);
+  if (manifest) checkClassesAgainstProbe(bankDir, index.fixtures.filter((f) => sources.has(f.file)), manifest, sources, err);
 
   // Coverage: every group, every rule and every known construct.
   for (const g of groups) {

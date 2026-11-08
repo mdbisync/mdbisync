@@ -21,6 +21,7 @@ import {
   linkedAssets,
   probedFixtures,
   readFixture,
+  sentForm,
   toLinear,
   type AssetMap,
   type Bank,
@@ -154,7 +155,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeRun> {
   log(`project created for run ${runId}`);
   try {
     const fixtures = probedFixtures(bank).filter((f) => options.only === undefined || f.file.includes(options.only));
-    const sources = fixtures.map((fixture) => readFixture(bank, fixture));
+    const sources = fixtures.map((fixture) => sentForm(readFixture(bank, fixture)));
     const assets = await uploadAssets(client, bank, sources, run, log);
     await probeFixtures(client, projectId, fixtures, sources, assets, run, log);
     if (options.facts !== false) {
