@@ -2,6 +2,7 @@
 // Command-line entry: `mdbisync <command>` and `mdbisync --version`.
 
 import { COMMANDS, USAGE_EXIT_CODE, isCommandName, notImplementedMessage } from "./commands.ts";
+import { runFix, runLint } from "./format/command.ts";
 import { VERSION } from "./version.ts";
 
 export interface CliResult {
@@ -13,7 +14,7 @@ export interface CliResult {
 export function usage(): string {
   const width = Math.max(...Object.keys(COMMANDS).map((name) => name.length));
   const lines = Object.entries(COMMANDS).map(([name, info]) => `  ${name.padEnd(width)}  ${info.summary}`);
-  return ["Usage: mdbisync <command>", "", "Commands:", ...lines, "", "Options:", "  --version  Print the version", "  --help     Print this help", ""].join("\n");
+  return ["Usage: mdbisync <command> [paths...]", "", "Commands:", ...lines, "", "Options:", "  --version  Print the version", "  --help     Print this help", ""].join("\n");
 }
 
 export function runCli(args: readonly string[]): CliResult {
@@ -24,6 +25,8 @@ export function runCli(args: readonly string[]): CliResult {
   if (first === "--help" || first === "-h") {
     return { exitCode: 0, stdout: usage(), stderr: "" };
   }
+  if (first === "lint") return runLint(args.slice(1));
+  if (first === "fix") return runFix(args.slice(1));
   if (first !== undefined && isCommandName(first)) {
     return { exitCode: COMMANDS[first].notImplementedExitCode, stdout: "", stderr: `${notImplementedMessage(first)}\n` };
   }
