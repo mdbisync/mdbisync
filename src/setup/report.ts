@@ -9,6 +9,7 @@ export const CHECK_NAMES = [
   'linear-format-hook',
   'annotations',
   'annotation-targets',
+  'left-out-files',
   'security-hooks',
 ] as const;
 export type CheckName = (typeof CHECK_NAMES)[number];

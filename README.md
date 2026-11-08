@@ -36,7 +36,8 @@ write and checks and commit statuses read, that merge commits are allowed,
 that `.pre-commit-config.yaml` has the `linear-format` hook, that every
 annotation is valid and its team and project exist in Linear, and
 whether pre-commit hooks marked `alias: security` exist (without them the run
-goes on and says that content is pushed unchecked). The result goes to the
+goes on and says that content is pushed unchecked). Files left out by a title
+collision are listed too, without stopping the run. The result goes to the
 job summary as names and states, never document content. `check` runs it
 alone.
 
