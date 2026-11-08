@@ -5,7 +5,7 @@
 
 import { LinearTokenError } from './errors.ts';
 import { RequestStats } from './stats.ts';
-import { DEFAULT_BASE_URL, trimSlash } from './transport.ts';
+import { DEFAULT_BASE_URL, defaultFetch, trimSlash } from './transport.ts';
 
 export interface AppCredentials {
   clientId: string;
@@ -50,40 +50,40 @@ export async function mintAppToken(credentials: AppCredentials, options: TokenOp
   return { accessToken: json.access_token, expiresIn: json.expires_in ?? 0, scope };
 }
 
-/** Revokes a token. Throws LinearTokenError when Linear does not confirm. */
+/**
+ * Revokes a token. A success status means revoked (Linear also answers
+ * `{"success": true}`, but an empty body is accepted); an error status or an
+ * explicit `success: false` throws LinearTokenError.
+ */
 export async function revokeToken(accessToken: string, options: TokenOptions = {}): Promise<void> {
   const response = await oauthPost('oauth.revoke', '/oauth/revoke', new URLSearchParams({ token: accessToken }), options);
   const json = (await readJson(response)) as { success?: unknown };
-  if (!response.ok || json.success !== true) {
+  if (!response.ok || json.success === false) {
     throw new LinearTokenError('oauth.revoke', `oauth.revoke: Linear did not confirm the revocation (HTTP ${response.status})`);
   }
 }
 
 /**
  * Mints a token, runs `work` with it and revokes it afterwards, whether `work`
- * succeeded or not. When `work` fails, its error is thrown and a failed
- * revocation goes to `onRevokeError`; when only the revocation fails, its
- * error is thrown, so a token left active is never silent.
+ * succeeded or not. A failed revocation never replaces the run's own outcome
+ * (its result or its error): it goes to `onRevokeError`, which the caller
+ * must give, so a token left active is reported, never silent.
  */
 export async function withRunToken<T>(
   credentials: AppCredentials,
-  options: TokenOptions & { onRevokeError?: (error: unknown) => void },
+  options: TokenOptions & { onRevokeError: (error: unknown) => void },
   work: (token: RunToken) => Promise<T>,
 ): Promise<T> {
   const token = await mintAppToken(credentials, options);
-  let result: T;
   try {
-    result = await work(token);
-  } catch (workError) {
+    return await work(token);
+  } finally {
     try {
       await revokeToken(token.accessToken, options);
     } catch (revokeError) {
-      options.onRevokeError?.(revokeError);
+      options.onRevokeError(revokeError);
     }
-    throw workError;
   }
-  await revokeToken(token.accessToken, options);
-  return result;
 }
 
 async function oauthPost(
@@ -92,7 +92,7 @@ async function oauthPost(
   body: URLSearchParams,
   options: TokenOptions,
 ): Promise<Response> {
-  const fetchImpl = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+  const fetchImpl = options.fetch ?? defaultFetch;
   options.stats?.count(operation);
   try {
     return await fetchImpl(`${trimSlash(options.baseUrl ?? DEFAULT_BASE_URL)}${path}`, {

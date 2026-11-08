@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "id": "L4-12",
+  "slice": "mid",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mid"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "run",
+      "action": "burst",
+      "args": {
+        "durationSeconds": 900,
+        "linearEditsPerMinute": 50,
+        "gitPushesPerMinute": 1
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "report.generatedLinearEdits",
+        "operator": "equal",
+        "expected": 750
+      },
+      {
+        "subject": "report.generatedGitPushes",
+        "operator": "equal",
+        "expected": 15
+      },
+      {
+        "subject": "report.lostEditCount",
+        "operator": "equal",
+        "expected": 0
+      }
+    ]
+  }
+}

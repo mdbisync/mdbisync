@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "id": "L4-08",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "pending"
+      }
+    },
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "git",
+      "action": "edit-sync-branch",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "passed"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "syncBranch.personCommitRetained",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "git.forcePushCount",
+        "operator": "equal",
+        "expected": 0
+      }
+    ]
+  }
+}

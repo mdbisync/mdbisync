@@ -44,14 +44,20 @@ export class LinearGraphQLError extends LinearError {
   readonly httpStatus: number;
   /** The referenced entity does not exist (for example a document removed from trash). */
   readonly notFound: boolean;
+  /** Linear's `x-request-id` of the answer. */
+  readonly requestId: string | undefined;
 
-  constructor(operation: string, httpStatus: number, error: GraphQLErrorShape) {
+  constructor(operation: string, httpStatus: number, error: GraphQLErrorShape, requestId?: string) {
     const code = stringOrUndefined(error.extensions?.code);
     const type = stringOrUndefined(error.extensions?.type);
-    super(operation, `${operation}: Linear error ${code ?? 'unknown'}: ${error.message ?? ''}`.trim());
+    super(
+      operation,
+      `${operation}: Linear error ${code ?? 'unknown'} (HTTP ${httpStatus}, request ${requestId ?? 'unknown'}): ${error.message ?? ''}`.trim(),
+    );
     this.code = code;
     this.type = type;
     this.httpStatus = httpStatus;
+    this.requestId = requestId;
     this.notFound = typeof error.message === 'string' && error.message.startsWith('Entity not found');
   }
 }
@@ -59,10 +65,12 @@ export class LinearGraphQLError extends LinearError {
 /** Linear answered with an HTTP error and no GraphQL error body (for example a 502). */
 export class LinearHttpError extends LinearError {
   readonly httpStatus: number;
+  readonly requestId: string | undefined;
 
-  constructor(operation: string, httpStatus: number) {
-    super(operation, `${operation}: Linear answered HTTP ${httpStatus}`);
+  constructor(operation: string, httpStatus: number, requestId?: string) {
+    super(operation, `${operation}: Linear answered HTTP ${httpStatus} (request ${requestId ?? 'unknown'})`);
     this.httpStatus = httpStatus;
+    this.requestId = requestId;
   }
 }
 

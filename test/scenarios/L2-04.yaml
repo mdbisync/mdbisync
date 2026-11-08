@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "id": "L2-04",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "git",
+      "action": "move",
+      "args": {
+        "destination": "same-project/renamed.md"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "resume-until-complete",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "documents.title",
+        "operator": "same-as",
+        "expected": "expected.pathTitle"
+      },
+      {
+        "subject": "documents.id",
+        "operator": "same-as",
+        "expected": "before.documents.id"
+      },
+      {
+        "subject": "documents.comments",
+        "operator": "same-as",
+        "expected": "before.documents.comments"
+      }
+    ]
+  }
+}

@@ -75,12 +75,13 @@ describe('Linear client against a fake Linear', () => {
     const linear = client();
     const titles = Array.from({ length: 40 }, (_, i) => `Note ${i + 1}`);
 
-    const outcome = await writeEach(titles, (title) => linear.createDocument({ projectId: 'project-1' }, { title }));
+    const outcome = await writeEach(linear, titles, (title) => linear.createDocument({ projectId: 'project-1' }, { title }));
 
     assert.equal(outcome.done.length, 29);
     assert.deepEqual(outcome.done.map((d) => d.item), titles.slice(0, 29));
     assert.equal(outcome.failed.length, 0);
-    assert.deepEqual(outcome.notAttempted, titles.slice(29));
+    assert.equal(outcome.interrupted?.item, titles[29], 'the item hit by the 429 may be partly applied');
+    assert.deepEqual(outcome.notAttempted, titles.slice(30));
     assert.deepEqual(outcome.stopped, { kind: 'rate-limited', operation: 'CreateDocument', retryAfterSeconds: undefined });
     assert.equal(fake.graphqlCount(), 30, 'nothing is sent after the 429');
 
@@ -97,6 +98,15 @@ describe('Linear client against a fake Linear', () => {
     assert.equal(linear.stopped, undefined);
     assert.equal(linear.stats.total, 2);
     assert.equal(logs[0]?.retryAfterSeconds, 2);
+  });
+
+  it('does not retry a short Retry-After when the budget is below the floor', async () => {
+    fake.fault = () => ({ ...rateLimited('1'), headers: { 'retry-after': '1', 'x-ratelimit-requests-remaining': '0' } });
+    const linear = client();
+    await assert.rejects(linear.createDocument({ teamId: 'team-1' }, { title: 'Plans' }), LinearStoppedError);
+    assert.equal(fake.graphqlCount(), 1);
+    assert.deepEqual(sleeps, []);
+    assert.equal(linear.stopped?.kind, 'rate-limited');
   });
 
   it('stops without retrying when Retry-After is long', async () => {
@@ -133,9 +143,10 @@ describe('Linear client against a fake Linear', () => {
           }
         : undefined;
     const linear = client();
-    const outcome = await writeEach(['a', 'b', 'c', 'd', 'e'], (title) => linear.createDocument({ projectId: 'p' }, { title }));
+    const outcome = await writeEach(linear, ['a', 'b', 'c', 'd', 'e'], (title) => linear.createDocument({ projectId: 'p' }, { title }));
     assert.deepEqual(outcome.done.map((d) => d.item), ['a', 'b', 'c'], 'the response that reported low budget is kept');
     assert.deepEqual(outcome.notAttempted, ['d', 'e']);
+    assert.equal(outcome.interrupted, undefined, 'the stop came between items');
     assert.deepEqual(outcome.stopped, {
       kind: 'budget-low',
       operation: 'CreateDocument',
@@ -168,7 +179,7 @@ describe('Linear client against a fake Linear', () => {
       return { body: { data: { documentUpdate: { success: true, document: fakeDocument(`u${index}`) } } } };
     };
     const linear = client();
-    const outcome = await writeEach(['gone', 'bad-gateway', 'reset', 'fine'], (id) => linear.updateDocument(id, { title: 'New title' }));
+    const outcome = await writeEach(linear, ['gone', 'bad-gateway', 'reset', 'fine'], (id) => linear.updateDocument(id, { title: 'New title' }));
     assert.deepEqual(outcome.done.map((d) => d.item), ['fine']);
     assert.deepEqual(outcome.failed.map((f) => f.item), ['gone', 'bad-gateway', 'reset']);
     const [notFound, badGateway, reset] = outcome.failed.map((f) => f.error);
@@ -176,6 +187,93 @@ describe('Linear client against a fake Linear', () => {
     assert.ok(badGateway instanceof LinearHttpError && badGateway.httpStatus === 502);
     assert.ok(reset instanceof LinearNetworkError);
     assert.equal(outcome.stopped, undefined);
+  });
+
+  it('carries Linear request ids and error codes into errors and logs', async () => {
+    fake.fault = (request, index) =>
+      index === 1
+        ? { headers: { 'x-request-id': 'req-1' }, body: { errors: [{ message: 'Entity not found: Project', extensions: { code: 'INPUT_ERROR' } }] } }
+        : { status: 503, headers: { 'x-request-id': 'req-2' }, body: undefined };
+    const linear = client();
+    const graphql = await linear.createDocument({ projectId: 'p' }, { title: 'One' }).catch((e: unknown) => e);
+    assert.ok(graphql instanceof LinearGraphQLError);
+    assert.equal(graphql.requestId, 'req-1');
+    assert.match(graphql.message, /INPUT_ERROR \(HTTP 200, request req-1\): Entity not found: Project/);
+    const http = await linear.rateLimitStatus().catch((e: unknown) => e);
+    assert.ok(http instanceof LinearHttpError);
+    assert.equal(http.requestId, 'req-2');
+    assert.deepEqual(
+      logs.map(({ operation, status, requestId, errorCodes }) => ({ operation, status, requestId, errorCodes })),
+      [
+        { operation: 'CreateDocument', status: 200, requestId: 'req-1', errorCodes: ['INPUT_ERROR'] },
+        { operation: 'RateLimitStatus', status: 503, requestId: 'req-2', errorCodes: undefined },
+      ],
+    );
+  });
+
+  it('marks a write interrupted when the client stops during it, and returns the rest untried', async () => {
+    fake.operations.set('CommentOnDocument', () => ({ body: { data: { commentCreate: { success: true, comment: { id: 'c' } } } } }));
+    fake.fault = (request, index) => (index === 4 ? rateLimited() : undefined);
+    const linear = client();
+    const outcome = await writeEach(linear, ['a', 'b', 'c'], async (title) => {
+      const doc = await linear.createDocument({ projectId: 'p' }, { title });
+      return linear.commentOnDocument(doc.documentContentId ?? '', 'Noted.');
+    });
+    assert.deepEqual(outcome.done.map((d) => d.item), ['a']);
+    assert.equal(outcome.interrupted?.item, 'b', 'its document exists but its comment does not');
+    assert.deepEqual(outcome.notAttempted, ['c']);
+  });
+
+  it('returns what finished when a write throws an error that is not Linear\'s', async () => {
+    const linear = client();
+    const bug = new TypeError('bug');
+    const outcome = await writeEach(linear, ['a', 'b', 'c'], async (title) => {
+      if (title === 'b') throw bug;
+      return linear.createDocument({ projectId: 'p' }, { title });
+    });
+    assert.deepEqual(outcome.done.map((d) => d.item), ['a']);
+    assert.deepEqual(outcome.aborted, { item: 'b', error: bug });
+    assert.deepEqual(outcome.notAttempted, ['c']);
+  });
+
+  it('does not send a request that waited in the governor while another stopped the client', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fake.fault = (request) => (request.operation === 'RateLimitStatus' ? rateLimited() : undefined);
+    const linear = client({
+      hooks: {
+        beforeRequest: async (info) => {
+          if (info.operation === 'CreateDocument') await gate;
+        },
+      },
+    });
+    const waiting = linear.createDocument({ projectId: 'p' }, { title: 'Late' }).catch((e: unknown) => e);
+    await assert.rejects(linear.rateLimitStatus(), LinearStoppedError);
+    release();
+    assert.ok((await waiting) instanceof LinearStoppedError);
+    assert.deepEqual(fake.received.map((r) => r.operation), ['RateLimitStatus']);
+  });
+
+  it('treats a mutation payload with success: false as a failure', async () => {
+    fake.operations.set('TrashDocument', () => ({ body: { data: { documentDelete: { success: false } } } }));
+    const linear = client();
+    await assert.rejects(linear.trashDocument('d'), /TrashDocument: Linear reported success: false/);
+  });
+
+  it('treats an unreadable body on a success status as an unknown outcome', async () => {
+    fake.fault = () => ({ status: 200, headers: { 'content-type': 'application/json' } });
+    const linear = client();
+    await assert.rejects(linear.createDocument({ projectId: 'p' }, { title: 'One' }), LinearNetworkError);
+  });
+
+  it('refuses a page that says more follow but gives no cursor', async () => {
+    fake.operations.set('ListDocuments', () => ({
+      body: { data: { documents: { nodes: [fakeDocument('a')], pageInfo: { hasNextPage: true, endCursor: null } } } },
+    }));
+    const linear = client();
+    await assert.rejects(linear.listDocuments({ projectId: 'p' }), /another page without a cursor/);
   });
 
   it('never logs content, variables or the token', async () => {
@@ -330,29 +428,38 @@ describe('run tokens against a fake Linear', () => {
 
   it('revokes the token when the run fails, and rethrows the run error', async () => {
     const failure = new Error('run failed');
-    await assert.rejects(withRunToken(credentials, { baseUrl: fake.url }, async () => { throw failure; }), (e) => e === failure);
+    await assert.rejects(withRunToken(credentials, { baseUrl: fake.url, onRevokeError: () => assert.fail('revoked') }, async () => { throw failure; }), (e) => e === failure);
     assert.deepEqual(fake.received.map((r) => r.path), ['/oauth/token', '/oauth/revoke']);
   });
 
   it('revokes the token when the run succeeds', async () => {
-    const result = await withRunToken(credentials, { baseUrl: fake.url }, async (token) => token.accessToken.length);
+    const result = await withRunToken(credentials, { baseUrl: fake.url, onRevokeError: () => assert.fail('revoked') }, async (token) => token.accessToken.length);
     assert.equal(result, 10);
     assert.deepEqual(fake.received.map((r) => r.path), ['/oauth/token', '/oauth/revoke']);
   });
 
   it('reports a failed revocation instead of hiding it', async () => {
     fake.fault = (request) => (request.path === '/oauth/revoke' ? { status: 500, body: { success: false } } : undefined);
-    await assert.rejects(withRunToken(credentials, { baseUrl: fake.url }, async () => 'ok'), LinearTokenError);
-
     const revokeErrors: unknown[] = [];
+    const result = await withRunToken(credentials, { baseUrl: fake.url, onRevokeError: (e) => revokeErrors.push(e) }, async () => 'written');
+    assert.equal(result, 'written', 'the run keeps its result');
+    assert.equal(revokeErrors.length, 1);
+
     await assert.rejects(
       withRunToken(credentials, { baseUrl: fake.url, onRevokeError: (e) => revokeErrors.push(e) }, async () => {
         throw new Error('run failed');
       }),
       /run failed/,
     );
-    assert.equal(revokeErrors.length, 1);
-    assert.ok(revokeErrors[0] instanceof LinearTokenError);
+    assert.equal(revokeErrors.length, 2);
+    assert.ok(revokeErrors.every((e) => e instanceof LinearTokenError));
+  });
+
+  it('accepts an empty success answer to a revocation, and refuses an explicit success: false', async () => {
+    fake.fault = (request) => (request.path === '/oauth/revoke' ? { status: 200 } : undefined);
+    await revokeToken('t', { baseUrl: fake.url });
+    fake.fault = (request) => (request.path === '/oauth/revoke' ? { body: { success: false } } : undefined);
+    await assert.rejects(revokeToken('t', { baseUrl: fake.url }), LinearTokenError);
   });
 
   it('refuses without echoing the client secret', async () => {

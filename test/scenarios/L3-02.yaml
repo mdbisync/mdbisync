@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "id": "L3-02",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "same-paragraph"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "git",
+      "action": "edit",
+      "args": {
+        "fixture": "same-paragraph",
+        "cleanEdits": 1
+      }
+    },
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a",
+        "fixture": "same-paragraph"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "conflicts.scope",
+        "operator": "equal",
+        "expected": "paragraph"
+      },
+      {
+        "subject": "conflicts.bothVersionsComplete",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "conflicts.markerParagraphCount",
+        "operator": "equal",
+        "expected": 3
+      },
+      {
+        "subject": "conflicts.icon",
+        "operator": "equal",
+        "expected": "Alert"
+      },
+      {
+        "subject": "conflicts.color",
+        "operator": "equal",
+        "expected": "orange"
+      },
+      {
+        "subject": "conflicts.resolutionCommentPresent",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "documents.cleanEditsSyncedSameRun",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

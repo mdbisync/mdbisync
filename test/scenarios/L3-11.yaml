@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "id": "L3-11",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "conflicted",
+    "fixtures": [
+      "custom-icon-color",
+      "open-conflict"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "linear",
+      "action": "edit-inside-markers",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "conflicts.markerSetCount",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "conflicts.markRetained",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "id": "L6-07",
+  "slice": "mini",
+  "mode": "ui",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "concurrent-edit"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "ui",
+      "action": "verify-editor",
+      "args": {
+        "actor": "editor-a",
+        "requireIdleSeconds": 120
+      }
+    },
+    {
+      "kind": "ui",
+      "action": "verify-editor",
+      "args": {
+        "actor": "editor-b",
+        "requireIdleSeconds": 120
+      }
+    },
+    {
+      "kind": "ui",
+      "action": "type-during-write",
+      "args": {
+        "actor": "editor-b",
+        "durationSeconds": 60,
+        "target": "same-paragraph"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    },
+    {
+      "kind": "ui",
+      "action": "assert-dom",
+      "args": {
+        "actor": "editor-a"
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": false,
+        "reason": "This scenario measures the accepted re-read/write race, including any observed loss; it must report the measured loss rather than assert zero."
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "report.metrics",
+        "operator": "contains-all",
+        "expected": [
+          "typingOutcome",
+          "lostCharacterCount",
+          "lossWindowMs"
+        ]
+      }
+    ]
+  }
+}

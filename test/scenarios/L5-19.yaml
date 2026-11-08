@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "id": "L5-19",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini",
+      "trashed-document"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "linear",
+      "action": "delete-permanently",
+      "args": {
+        "actor": "editor-a",
+        "fixture": "trashed-document"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "tracked.documentPathExists",
+        "operator": "equal",
+        "expected": false
+      },
+      {
+        "subject": "ids.deletedIdPresent",
+        "operator": "equal",
+        "expected": false
+      }
+    ]
+  }
+}

@@ -20,6 +20,7 @@ import {
   mintAppToken,
   revokeToken,
   type LinearDocument,
+  type LogEntry,
   type RunToken,
 } from '../../src/linear/index.ts';
 
@@ -37,6 +38,8 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   const suffix = randomBytes(3).toString('hex');
   const stats = new RequestStats();
   const perOperation: Record<string, number> = {};
+  // Every request, without content: operation, status, request id, error codes.
+  const requests: Array<Omit<LogEntry, 'rateLimitHeaders'>> = [];
   let token: RunToken;
   let linear: LinearClient;
   let teamId: string;
@@ -54,7 +57,12 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
 
   before(async () => {
     token = await measured('mint token', () => mintAppToken({ clientId: clientId!, clientSecret: clientSecret! }, { baseUrl, stats }));
-    linear = new LinearClient({ token: token.accessToken, baseUrl, stats });
+    linear = new LinearClient({
+      token: token.accessToken,
+      baseUrl,
+      stats,
+      hooks: { log: ({ rateLimitHeaders, ...entry }) => requests.push(entry) },
+    });
     const teams = await linear.request<{ teams: { nodes: Array<{ id: string; key: string }> } }>(
       'Teams',
       'query',
@@ -83,7 +91,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
       }
     } finally {
       await measured('revoke token', () => revokeToken(token.accessToken, { baseUrl, stats }));
-      const report = { perOperation, stats: stats.toJSON(), lastRateLimit: linear.transport.lastRateLimit?.headers };
+      const report = { perOperation, stats: stats.toJSON(), lastRateLimit: linear.transport.lastRateLimit?.headers, requests };
       console.log(JSON.stringify(report, null, 2));
       if (process.env.LINEAR_CONTRACT_REPORT) await writeFile(process.env.LINEAR_CONTRACT_REPORT, JSON.stringify(report, null, 2));
     }
