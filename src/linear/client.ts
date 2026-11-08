@@ -13,6 +13,8 @@ export const MAX_PAGE_SIZE = 250;
  * TODO(MDS-005-4): size from the measured complexity cost of these queries.
  */
 export const DEFAULT_PAGE_SIZE = 100;
+/** Longest wait for an upload's PUT to storage; files are at most a few MB. */
+export const UPLOAD_TIMEOUT_MS = 120_000;
 
 export interface LinearDocument {
   id: string;
@@ -89,8 +91,12 @@ export interface EachResult<T, R> {
   done: Array<{ item: T; result: R }>;
   /** Items Linear rejected or whose outcome is unknown (network error); not written. */
   failed: Array<{ item: T; error: LinearError }>;
-  /** Items not tried because the client stopped. */
+  /** Items not tried. */
   notAttempted: T[];
+  /** The item being written when the client stopped; it may be partly applied. */
+  interrupted?: { item: T; error: LinearStoppedError };
+  /** The item whose write threw an error that is not Linear's; the caller rethrows it. */
+  aborted?: { item: T; error: unknown };
   stopped?: StopReason;
 }
 
@@ -182,7 +188,7 @@ export class LinearClient {
   }
 
   async createDocument(place: DocumentPlace, input: CreateDocumentInput): Promise<LinearDocument> {
-    const data = await this.request<{ documentCreate: { document: RawDocument } }>(
+    const data = await this.request<{ documentCreate: { success: boolean; document: RawDocument } }>(
       'CreateDocument',
       'mutation',
       `mutation CreateDocument($input: DocumentCreateInput!, $withContent: Boolean!) {
@@ -190,7 +196,7 @@ export class LinearClient {
       }`,
       { input: { ...input, ...place }, withContent: true },
     );
-    return toDocument(data.documentCreate.document);
+    return toDocument(succeeded('CreateDocument', data.documentCreate).document);
   }
 
   /**
@@ -199,7 +205,7 @@ export class LinearClient {
    * whether that is the stored form is `LINEAR_FACTS.mutationsReturnStoredContent`.
    */
   async updateDocument(id: string, patch: DocumentPatch): Promise<LinearDocument> {
-    const data = await this.request<{ documentUpdate: { document: RawDocument } }>(
+    const data = await this.request<{ documentUpdate: { success: boolean; document: RawDocument } }>(
       'UpdateDocument',
       'mutation',
       `mutation UpdateDocument($id: String!, $input: DocumentUpdateInput!, $withContent: Boolean!) {
@@ -207,31 +213,33 @@ export class LinearClient {
       }`,
       { id, input: patch, withContent: patch.content !== undefined },
     );
-    return toDocument(data.documentUpdate.document);
+    return toDocument(succeeded('UpdateDocument', data.documentUpdate).document);
   }
 
   /** Moves a document to trash; it can be restored. Never deletes for good. */
   async trashDocument(id: string): Promise<void> {
-    await this.request<{ documentDelete: { success: boolean } }>(
+    const data = await this.request<{ documentDelete: { success: boolean } }>(
       'TrashDocument',
       'mutation',
       `mutation TrashDocument($id: String!) { documentDelete(id: $id) { success } }`,
       { id },
     );
+    succeeded('TrashDocument', data.documentDelete);
   }
 
   async restoreDocument(id: string): Promise<void> {
-    await this.request<{ documentUnarchive: { success: boolean } }>(
+    const data = await this.request<{ documentUnarchive: { success: boolean } }>(
       'RestoreDocument',
       'mutation',
       `mutation RestoreDocument($id: String!) { documentUnarchive(id: $id) { success } }`,
       { id },
     );
+    succeeded('RestoreDocument', data.documentUnarchive);
   }
 
   /** Comments on a document; `documentContentId` comes from the document. */
   async commentOnDocument(documentContentId: string, body: string): Promise<{ id: string }> {
-    const data = await this.request<{ commentCreate: { comment: { id: string } } }>(
+    const data = await this.request<{ commentCreate: { success: boolean; comment: { id: string } } }>(
       'CommentOnDocument',
       'mutation',
       `mutation CommentOnDocument($input: CommentCreateInput!) {
@@ -239,7 +247,7 @@ export class LinearClient {
       }`,
       { input: { documentContentId, body } },
     );
-    return data.commentCreate.comment;
+    return succeeded('CommentOnDocument', data.commentCreate).comment;
   }
 
   /**
@@ -248,7 +256,7 @@ export class LinearClient {
    */
   async uploadFile(input: UploadInput): Promise<{ assetUrl: string }> {
     const data = await this.request<{
-      fileUpload: { uploadFile: { uploadUrl: string; assetUrl: string; headers: Array<{ key: string; value: string }> } | null };
+      fileUpload: { success: boolean; uploadFile: { uploadUrl: string; assetUrl: string; headers: Array<{ key: string; value: string }> } | null };
     }>(
       'FileUpload',
       'mutation',
@@ -259,7 +267,7 @@ export class LinearClient {
       }`,
       { contentType: input.contentType, filename: input.filename, size: input.bytes.byteLength },
     );
-    const target = data.fileUpload.uploadFile;
+    const target = succeeded('FileUpload', data.fileUpload).uploadFile;
     if (!target) throw new LinearUploadError('FileUpload', 'FileUpload: Linear returned no upload target');
 
     const headers = new Headers({ 'content-type': input.contentType, 'cache-control': 'public, max-age=31536000' });
@@ -267,7 +275,12 @@ export class LinearClient {
     this.stats.storagePuts += 1;
     let response: Response;
     try {
-      response = await this.transport.fetch(target.uploadUrl, { method: 'PUT', headers, body: input.bytes });
+      response = await this.transport.fetch(target.uploadUrl, {
+        method: 'PUT',
+        headers,
+        body: input.bytes,
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+      });
     } catch (error) {
       throw new LinearUploadError('FileUpload.put', 'FileUpload.put: storage request failed', { cause: error });
     }
@@ -299,37 +312,68 @@ export class LinearClient {
         },
       );
       result.push(...data.documents.nodes.map(toDocument));
-      after = data.documents.pageInfo.hasNextPage ? data.documents.pageInfo.endCursor : null;
+      const { hasNextPage, endCursor } = data.documents.pageInfo;
+      if (hasNextPage && endCursor === null) {
+        throw new LinearError(operation, `${operation}: Linear reported another page without a cursor`);
+      }
+      after = hasNextPage ? endCursor : null;
     } while (after !== null);
     return result;
   }
 }
 
 /**
- * Runs `write` for each item in order. A rejected item is recorded as failed
- * and the rest go on; when the client stops (rate limit or low budget), the
- * remaining items are returned as not attempted. The caller records `done`.
+ * Runs `write` for each item in order and always returns what happened, so
+ * the caller can record `done` before anything else:
+ * - an item Linear rejects (or whose request failed) goes to `failed` and the
+ *   rest go on;
+ * - when the client stops (rate limit or low budget) during an item, that
+ *   item goes to `interrupted`, since a write of several requests may be
+ *   partly applied; the rest go to `notAttempted`;
+ * - when the client has already stopped, the rest go to `notAttempted`;
+ * - any other error (a bug, a governor's own failure) ends the loop: the item
+ *   goes to `aborted` and the rest to `notAttempted`; the caller records
+ *   `done` and then rethrows `aborted.error`.
  */
-export async function writeEach<T, R>(items: readonly T[], write: (item: T) => Promise<R>): Promise<EachResult<T, R>> {
+export async function writeEach<T, R>(
+  client: LinearClient,
+  items: readonly T[],
+  write: (item: T) => Promise<R>,
+): Promise<EachResult<T, R>> {
   const outcome: EachResult<T, R> = { done: [], failed: [], notAttempted: [] };
   for (let index = 0; index < items.length; index += 1) {
+    if (client.stopped) {
+      outcome.stopped = client.stopped;
+      outcome.notAttempted = items.slice(index);
+      return outcome;
+    }
     const item = items[index] as T;
     try {
       outcome.done.push({ item, result: await write(item) });
     } catch (error) {
       if (error instanceof LinearStoppedError) {
         outcome.stopped = error.reason;
-        outcome.notAttempted = items.slice(index);
+        outcome.interrupted = { item, error };
+        outcome.notAttempted = items.slice(index + 1);
         return outcome;
       }
       if (error instanceof LinearError) {
         outcome.failed.push({ item, error });
         continue;
       }
-      throw error;
+      outcome.aborted = { item, error };
+      outcome.notAttempted = items.slice(index + 1);
+      return outcome;
     }
   }
+  if (client.stopped) outcome.stopped = client.stopped;
   return outcome;
+}
+
+/** Throws when a mutation's payload reports `success: false` without an error. */
+function succeeded<P extends { success: boolean }>(operation: string, payload: P): P {
+  if (payload.success !== true) throw new LinearError(operation, `${operation}: Linear reported success: false`);
+  return payload;
 }
 
 function toDocument(raw: RawDocument): LinearDocument {

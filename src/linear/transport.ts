@@ -50,6 +50,10 @@ export interface LogEntry {
   status: number | 'network-error';
   durationMs: number;
   rateLimitHeaders: Record<string, string>;
+  /** Linear's `x-request-id`, for matching a failure with Linear's side. */
+  requestId?: string | undefined;
+  /** Codes of the GraphQL errors in the answer, for example INPUT_ERROR. */
+  errorCodes?: string[] | undefined;
   retryAfterSeconds?: number | undefined;
   stop?: StopReason | undefined;
 }
@@ -98,7 +102,7 @@ export class GraphQLTransport {
     this.#timeoutMs = options.timeoutMs ?? 60_000;
     this.#hooks = options.hooks ?? {};
     this.stats = options.stats ?? new RequestStats();
-    this.fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    this.fetch = options.fetch ?? defaultFetch;
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
@@ -122,6 +126,8 @@ export class GraphQLTransport {
       if (this.#stopped) throw new LinearStoppedError(operation, this.#stopped);
       const info: RequestInfo = { operation, kind, attempt };
       await this.#hooks.beforeRequest?.(info);
+      // Another request may have stopped the client while this one waited.
+      if (this.#stopped) throw new LinearStoppedError(operation, this.#stopped);
 
       const started = Date.now();
       this.stats.count(operation);
@@ -144,13 +150,24 @@ export class GraphQLTransport {
       await this.#hooks.afterResponse?.({ ...info, status: response.status, durationMs, rateLimit });
 
       let body: { data?: unknown; errors?: GraphQLErrorShape[] } | undefined;
+      let bodyError: unknown;
       try {
         body = (await response.json()) as typeof body;
-      } catch {
+      } catch (error) {
         body = undefined;
+        bodyError = error;
       }
 
-      const entry: LogEntry = { ...info, status: response.status, durationMs, rateLimitHeaders: rateLimit.headers };
+      const requestId = response.headers.get('x-request-id') ?? undefined;
+      const errorCodes = body?.errors?.map((error) => String(error.extensions?.code ?? 'unknown'));
+      const entry: LogEntry = {
+        ...info,
+        status: response.status,
+        durationMs,
+        rateLimitHeaders: rateLimit.headers,
+        ...(requestId === undefined ? {} : { requestId }),
+        ...(errorCodes === undefined ? {} : { errorCodes }),
+      };
 
       if (isRateLimited(response.status, body?.errors)) {
         const retryAfterSeconds = parseRetryAfter(response.headers.get('retry-after'));
@@ -169,9 +186,12 @@ export class GraphQLTransport {
       this.#log(low ? { ...entry, stop: low } : entry);
 
       const firstError = body?.errors?.[0];
-      if (firstError) throw new LinearGraphQLError(operation, response.status, firstError);
+      if (firstError) throw new LinearGraphQLError(operation, response.status, firstError, requestId);
+      // A success status with an unreadable body (cut connection, timeout while
+      // reading): the write may have been applied, so the outcome is unknown.
+      if (response.ok && body === undefined) throw new LinearNetworkError(operation, bodyError);
       if (!response.ok || body === undefined || body.data === undefined || body.data === null) {
-        throw new LinearHttpError(operation, response.status);
+        throw new LinearHttpError(operation, response.status, requestId);
       }
       return body.data as T;
     }
@@ -185,6 +205,9 @@ export class GraphQLTransport {
 function isRateLimited(status: number, errors: GraphQLErrorShape[] | undefined): boolean {
   return status === 429 || (errors ?? []).some((error) => error.extensions?.code === 'RATELIMITED');
 }
+
+/** The global fetch, called unbound. */
+export const defaultFetch: typeof fetch = (input, init) => globalThis.fetch(input, init);
 
 export function trimSlash(url: string): string {
   return url.replace(/\/+$/, '');
