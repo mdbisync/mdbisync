@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "id": "L6-09",
+  "slice": "mini",
+  "mode": "ui",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "image-document"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "ui",
+      "action": "verify-editor",
+      "args": {
+        "actor": "editor-a",
+        "requireIdleSeconds": 120
+      }
+    },
+    {
+      "kind": "ui",
+      "action": "paste-image",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    },
+    {
+      "kind": "ui",
+      "action": "assert-dom",
+      "args": {
+        "actor": "editor-a"
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "tracked.imageFileExists",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "tracked.imageLinksRelative",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

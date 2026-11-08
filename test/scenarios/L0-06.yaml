@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "id": "L0-06",
+  "slice": "bank",
+  "mode": "local",
+  "setup": {
+    "state": "empty",
+    "fixtures": [
+      "bank"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "run",
+      "action": "probe",
+      "args": {
+        "scheduled": true,
+        "compareGolden": true
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "golden-drift",
+      "args": {
+        "construct": "table"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "probe",
+      "args": {
+        "compareGolden": true
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": false,
+        "reason": "The probe measures drift without a sync baseline."
+      },
+      "I2": {
+        "required": false,
+        "reason": "The probe measures drift without a sync baseline."
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": false,
+        "reason": "The probe measures drift without a sync baseline."
+      },
+      "I7": {
+        "required": false,
+        "reason": "The probe measures drift without a sync baseline."
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": false,
+        "reason": "The format probe deliberately writes and reads each fixture twice; the sync request-efficiency invariant does not measure probe traffic."
+      }
+    },
+    "assertions": [
+      {
+        "subject": "runs.0.probe.drift",
+        "operator": "equal",
+        "expected": []
+      },
+      {
+        "subject": "runs.1.probe.drift",
+        "operator": "contains-all",
+        "expected": [
+          "table"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "id": "L1-15",
+  "slice": "mid",
+  "mode": "local",
+  "setup": {
+    "state": "empty",
+    "fixtures": [
+      "mid"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "fault",
+      "action": "budget",
+      "args": {
+        "stopAfterDocuments": 80
+      }
+    },
+    {
+      "kind": "run",
+      "action": "initial-sync",
+      "args": {
+        "confirm": true,
+        "direction": "git-to-linear"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "clear",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "initial-sync",
+      "args": {
+        "confirm": true,
+        "direction": "git-to-linear"
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "runs.0.writtenCount",
+        "operator": "equal",
+        "expected": 80
+      },
+      {
+        "subject": "runs.1.skippedCompletedCount",
+        "operator": "equal",
+        "expected": 80
+      },
+      {
+        "subject": "linear.finalRecordCount",
+        "operator": "equal",
+        "expected": 1
+      }
+    ]
+  }
+}
