@@ -90,6 +90,9 @@ describe('GitHub access', () => {
     const world = fakeWorld();
     world.github.rateLimited = true;
     await assert.rejects(checkGitHub(target(world)), /GitHub rate-limited the setup check while checking contents:write/);
+    const first = fakeWorld();
+    first.github.rateLimitedRepository = true;
+    await assert.rejects(checkGitHub(target(first)), /GitHub rate-limited the setup check while reading the repository/);
   });
 
   it('stops on disallowed merge commits and on a refused token', async () => {
@@ -121,6 +124,22 @@ describe('setup check', () => {
     assert.equal(targets?.projects.get('ENG\0Field notes')?.id, 'project-api');
     assert.equal(world.requests.filter((request) => request.startsWith(`POST ${LINEAR_API}`)).length, 2);
     assert.deepEqual(world.writes, []);
+  });
+
+  it('names the files a title collision leaves out, without stopping the run', async () => {
+    const leftOut = (path: string, other: string) => ({ path, rule: 'duplicate-title' as const, title: 'guide', collidesWith: [other] });
+    const map = { ...MINI, leftOut: [leftOut('eng/notes/guide.md', 'eng/notes/Guide.md'), leftOut('eng/notes/Guide.md', 'eng/notes/guide.md')] };
+    const { report } = await run(fakeWorld(), map);
+    assert.equal(report.ok, true);
+    assert.deepEqual(report.checks.find((check) => check.name === 'left-out-files'), {
+      name: 'left-out-files',
+      state: 'warning',
+      detail: '2 files left out, not synced: eng/notes/Guide.md (duplicate-title), eng/notes/guide.md (duplicate-title)',
+    });
+    const many = { ...MINI, leftOut: Array.from({ length: 23 }, (_, index) => leftOut(`f/${String(index).padStart(2, '0')}.md`, 'x')) };
+    const detail = (await run(fakeWorld(), many)).report.checks.find((check) => check.name === 'left-out-files')?.detail ?? '';
+    assert.match(detail, /^23 files left out, not synced: f\/00\.md \(duplicate-title\), .*f\/19\.md \(duplicate-title\), and 3 more$/);
+    assert.equal((await run(fakeWorld())).report.checks.find((check) => check.name === 'left-out-files')?.state, 'passed');
   });
 
   it('goes on without security hooks and says content is pushed unchecked', async () => {
