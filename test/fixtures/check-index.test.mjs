@@ -126,6 +126,20 @@ test('a colliding name needs its marker and a partner', () => {
   assert.ok(alone.includes('lint-errors/duplicate-title/guide-upper.md: name_as has no colliding partner'), alone.join('\n'));
   const elsewhere = withCopy((d) => editIndex(d, 'name_as: "lint-errors/duplicate-title/Guide.md"', 'name_as: "tables/Guide.md"'));
   assert.ok(elsewhere.includes('lint-errors/duplicate-title/guide-upper.md: name_as must be a .md name in the same folder'), elsewhere.join('\n'));
+  const number = withCopy((d) => editIndex(d, 'name_as: "lint-errors/duplicate-title/Guide.md"', 'name_as: 7'));
+  assert.ok(number.includes('lint-errors/duplicate-title/guide-upper.md: name_as must be a .md name in the same folder'), number.join('\n'));
+  const twice = withCopy((d) => editIndex(d, 'name_as: "lint-errors/duplicate-title/guide.md"', 'name_as: "lint-errors/duplicate-title/Guide.md"'));
+  assert.ok(twice.includes('lint-errors/duplicate-title/guide-lower.md: name_as also used by lint-errors/duplicate-title/guide-upper.md'), twice.join('\n'));
+  const clash = withCopy((d) => editIndex(d, 'name_as: "lint-errors/duplicate-title/guide.md"', 'name_as: "lint-errors/duplicate-title/GUIDE-UPPER.md"'));
+  assert.ok(clash.some((e) => e.startsWith('lint-errors/duplicate-title/guide-lower.md: name_as lint-errors/duplicate-title/GUIDE-UPPER.md collides with a committed file')), clash.join('\n'));
+});
+
+test('collision names fold case beyond plain lowercasing', () => {
+  const errors = withCopy((d) => {
+    editIndex(d, 'name_as: "lint-errors/duplicate-title/Guide.md"', 'name_as: "lint-errors/duplicate-title/\u039f\u0394\u039f\u03a3.md"');
+    editIndex(d, 'name_as: "lint-errors/duplicate-title/guide.md"', 'name_as: "lint-errors/duplicate-title/\u03bf\u03b4\u03bf\u03c3.md"');
+  });
+  assert.deepEqual(errors, []);
 });
 
 test('only .md files count as Markdown', () => {
@@ -134,7 +148,7 @@ test('only .md files count as Markdown', () => {
     writeFileSync(p, readFileSync(p, 'utf8') + ' [x](nowhere.md)');
     editIndex(d, '    synced: false\n    note: "ignored, so it does not collide with plan.md"', '    note: "ignored, so it does not collide with plan.md"');
   });
-  assert.ok(!errors.some((e) => e.startsWith('unsynced/markdown-extension/plan.markdown')), errors.join('\n'));
+  assert.deepEqual(errors, []);
 });
 
 test('a fixture indexed twice is reported', () => {
