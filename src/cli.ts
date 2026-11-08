@@ -11,6 +11,7 @@ import {
   isCommandName,
   notImplementedMessage,
 } from "./commands.ts";
+import { runFix, runLint } from "./format/command.ts";
 import { writeRunReport } from "./run/finish.ts";
 import { InputError, environmentName, readInputs } from "./run/inputs.ts";
 import { runPreflight } from "./run/preflight.ts";
@@ -34,7 +35,7 @@ export function usage(): string {
   const width = Math.max(...Object.keys(COMMANDS).map((name) => name.length));
   const lines = Object.entries(COMMANDS).map(([name, info]) => `  ${name.padEnd(width)}  ${info.summary}`);
   return [
-    "Usage: mdbisync <command>",
+    "Usage: mdbisync <command> [paths...]",
     "",
     "Commands:",
     ...lines,
@@ -57,6 +58,8 @@ export async function runCli(args: readonly string[], options: CliOptions = {}):
   if (first === "--help" || first === "-h") {
     return { exitCode: 0, stdout: usage(), stderr: "" };
   }
+  if (first === "lint") return runLint(args.slice(1));
+  if (first === "fix") return runFix(args.slice(1));
   if (first !== undefined && isCommandName(first)) {
     if ((PREFLIGHT_COMMANDS as readonly string[]).includes(first)) {
       return runPreflightCommand(first as (typeof PREFLIGHT_COMMANDS)[number], options);

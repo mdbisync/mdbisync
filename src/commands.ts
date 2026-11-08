@@ -1,8 +1,8 @@
 // The commands of the command-line entry and their exit codes.
 // `sync`, `initial-sync` and `check` run the preflight (the sync's state and
-// the setup check); after a passed preflight, `sync` and `initial-sync` and
-// the other commands are still stubs that report "not implemented" with
-// their own code, so callers and tests can tell them apart.
+// the setup check); `lint` and `fix` check and rewrite Markdown files. A
+// command that is not built yet reports "not implemented" and exits with its
+// own code, so callers and tests can tell the stubs apart.
 
 export interface CommandInfo {
   readonly summary: string;
@@ -19,6 +19,9 @@ export const COMMANDS = {
 } as const satisfies Record<string, CommandInfo>;
 
 export type CommandName = keyof typeof COMMANDS;
+
+/** Commands that check or rewrite Markdown files given as paths. */
+export const FORMAT_COMMANDS = ["lint", "fix"] as const satisfies readonly CommandName[];
 
 /** Commands that run the preflight. */
 export const PREFLIGHT_COMMANDS = ["sync", "initial-sync", "check"] as const satisfies readonly CommandName[];

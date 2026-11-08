@@ -1,0 +1,99 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Sync conflict: git version","marks":{"attribution":"user","strong":{}}}]},
+    {
+      "type": "table",
+      "attrs": {"sizing":"fit"},
+      "children": [
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"A","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"B","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"1","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"ours","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Sync conflict: Linear version","marks":{"attribution":"user","strong":{}}}]},
+    {
+      "type": "table",
+      "attrs": {"sizing":"fit"},
+      "children": [
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"A","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_header",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"B","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table_row",
+          "children": [
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"1","marks":{"attribution":"user"}}]}
+              ]
+            },
+            {
+              "type": "table_cell",
+              "attrs": {"colspan":1,"rowspan":1},
+              "children": [
+                {"type":"paragraph","children":[{"text":"theirs","marks":{"attribution":"user"}}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Sync conflict: end","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-9f26fea3","marks":{"attribution":"user"}}]}
+  ]
+}
