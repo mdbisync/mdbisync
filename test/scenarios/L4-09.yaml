@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "id": "L4-09",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "pending"
+      }
+    },
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a",
+        "target": "first-document"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "git",
+      "action": "ci-fix",
+      "args": {
+        "target": "first-document"
+      }
+    },
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-b",
+        "target": "second-document"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a",
+        "target": "third-document"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "pause",
+      "args": {
+        "checkpoint": "after-capture-push-before-pr"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {
+        "wait": false
+      }
+    },
+    {
+      "kind": "git",
+      "action": "ci-fix",
+      "args": {
+        "target": "third-document"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "resume",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "passed"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "syncBranch.ciFixRetained",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "syncBranch.newCaptureRetained",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "syncBranch.ciFixCommitCount",
+        "operator": "equal",
+        "expected": 2
+      },
+      {
+        "subject": "report.interleavingsCovered",
+        "operator": "contains-all",
+        "expected": [
+          "fix-before-capture",
+          "capture-before-fix"
+        ]
+      }
+    ]
+  }
+}
