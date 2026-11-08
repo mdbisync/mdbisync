@@ -72,6 +72,15 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   return inputs;
 }
 
+function stateConfig(trackedBranch: string, syncBranch: string, refPrefix: string): StateConfig {
+  try {
+    return resolveStateConfig({ trackedBranch, syncBranch, refPrefix });
+  } catch (error) {
+    if (error instanceof StateConfigError) throw new InputError(error.message);
+    throw error;
+  }
+}
+
 /** The initial sync's own inputs. */
 export interface InitialSyncInputs {
   direction: Direction;
@@ -87,13 +96,4 @@ export function readInitialSyncInputs(get: (name: InputName) => string): Initial
     throw new InputError(`the input direction ${given} (initial sync never picks a direction itself)`);
   }
   return { direction: direction as Direction, confirm: get('confirm').trim() === 'true' };
-}
-
-function stateConfig(trackedBranch: string, syncBranch: string, refPrefix: string): StateConfig {
-  try {
-    return resolveStateConfig({ trackedBranch, syncBranch, refPrefix });
-  } catch (error) {
-    if (error instanceof StateConfigError) throw new InputError(error.message);
-    throw error;
-  }
 }

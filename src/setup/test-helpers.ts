@@ -44,7 +44,7 @@ export interface FakeWrites {
 }
 
 export interface FakeWorld {
-  github: { tokenValid: boolean; missing: Set<string>; allowMergeCommit: boolean; rateLimited: boolean };
+  github: { tokenValid: boolean; missing: Set<string>; allowMergeCommit: boolean; rateLimited: boolean; rateLimitedRepository: boolean };
   /**
    * `unavailable`: the token endpoint answers 503, as in an outage.
    * `store`: what Linear stores for written content (the identity unless a test reformats).
@@ -70,7 +70,7 @@ export interface FakeWorld {
 
 export function fakeWorld(): FakeWorld {
   return {
-    github: { tokenValid: true, missing: new Set(), allowMergeCommit: true, rateLimited: false },
+    github: { tokenValid: true, missing: new Set(), allowMergeCommit: true, rateLimited: false, rateLimitedRepository: false },
     linear: {
       credentialsValid: true,
       unavailable: false,
@@ -111,6 +111,7 @@ function json(status: number, body: unknown): Response {
 
 function github(world: FakeWorld, method: string, path: string, init: RequestInit | undefined): Response {
   if (!world.github.tokenValid) return json(401, { message: 'Bad credentials' });
+  if (world.github.rateLimitedRepository) return json(403, { message: 'API rate limit exceeded for installation.' });
   const repo = /^\/repos\/[^/]+\/[^/]+/.exec(path);
   if (repo === null) return json(404, { message: 'Not Found' });
   const rest = path.slice(repo[0].length);

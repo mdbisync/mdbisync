@@ -36,6 +36,9 @@ export type UnsyncedReason = 'outside-annotations' | 'not-a-regular-file' | 'bin
 export interface UnsyncedFile {
   path: string;
   reason: UnsyncedReason;
+  /** Where the file would be synchronized, for a file under an annotation. */
+  title?: string;
+  place?: Place;
 }
 
 /**
@@ -45,6 +48,7 @@ export interface UnsyncedFile {
  */
 export interface LeftOutFile {
   path: string;
+  oid: Oid;
   rule: 'duplicate-title';
   title: string;
   place: Place;
@@ -103,14 +107,14 @@ export function mapFiles(
       continue;
     }
     if (!isRegularFile(entry)) {
-      unsynced.push({ path: entry.path, reason: 'not-a-regular-file' });
+      unsynced.push({ path: entry.path, reason: 'not-a-regular-file', title: titleOf(entry.path, zone), place: placeOf(zone) });
       continue;
     }
     const content = contents.get(entry.oid);
     if (content === undefined) throw new Error(`the content of ${entry.path} was not read`);
     const problem = contentProblem(content);
     if (problem !== null) {
-      unsynced.push({ path: entry.path, reason: problem });
+      unsynced.push({ path: entry.path, reason: problem, title: titleOf(entry.path, zone), place: placeOf(zone) });
       continue;
     }
     mapped.push({ path: entry.path, oid: entry.oid, title: titleOf(entry.path, zone), place: placeOf(zone) });
@@ -153,6 +157,7 @@ function separateCollisions(mapped: readonly MappedDocument[]): { documents: Map
     for (const document of group) {
       leftOut.push({
         path: document.path,
+        oid: document.oid,
         rule: 'duplicate-title',
         title: document.title,
         place: document.place,

@@ -55,6 +55,9 @@ export interface GitHubCheck {
 export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
   const request = requester(target);
   const repository = await request('GET', '');
+  if (repository.status === 403 && isRateLimited(repository)) {
+    throw new Error('GitHub rate-limited the setup check while reading the repository (HTTP 403); run again later');
+  }
   if (repository.status === 401 || repository.status === 403 || repository.status === 404) {
     const why = repository.status === 401 ? 'was refused' : 'cannot see the repository';
     const access = failed('github-access', 'github-credential-failed', `the GitHub token ${why} (HTTP ${repository.status})`);

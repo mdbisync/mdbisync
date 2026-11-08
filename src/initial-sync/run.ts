@@ -1,6 +1,7 @@
 // Reads what the initial sync plans with: the text of every mapped file of
-// the tracked branch and the live documents of every annotated place. Reads
-// only; one paged list per place.
+// the tracked branch (colliding ones included, so they are linted too) and
+// the live documents of every annotated place. Reads only; one paged list
+// per place.
 
 import { type LinearDocument } from '../linear/index.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -20,11 +21,12 @@ export interface PlanSources {
  */
 export async function readPlanSources(context: RunContext, options: { withContent?: boolean } = {}): Promise<PlanSources> {
   const { git, mapping, targets, linear } = context;
-  const blobs = await readBlobs(git, mapping.documents.map((document) => document.oid));
-  const texts = new Map(mapping.documents.map((document) => [document.path, (blobs.get(document.oid) as Buffer).toString('utf8')]));
+  const files = [...mapping.documents, ...mapping.leftOut];
+  const blobs = await readBlobs(git, files.map((file) => file.oid));
+  const texts = new Map(files.map((file) => [file.path, (blobs.get(file.oid) as Buffer).toString('utf8')]));
   const places: PlaceDocuments[] = [];
   const documents = new Map<string, LinearDocument>();
-  for (const { place } of annotatedPlaces(mapping.annotations)) {
+  for (const { place } of annotatedPlaces(mapping.zones)) {
     const listed = await linear.listDocuments(placeId(targets, place), { withContent: options.withContent ?? false });
     for (const document of listed) documents.set(document.id, document);
     places.push({ place, documents: listed });

@@ -5,7 +5,7 @@
 
 import { lintText } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearDocument, type LinearFacts, lengthRefusal } from '../linear/index.ts';
-import { type Annotation, type MappedDocument, type Place, type RepositoryMapping, type Zone, resolveZones } from '../mapping/index.ts';
+import { type MappedDocument, type Place, type RepositoryMapping, type Zone } from '../mapping/index.ts';
 import { type ResolvedTargets, projectKey } from '../setup/index.ts';
 
 /** Why a synchronized file stays in git only: a lint rule, a title collision, or a title Linear refuses. */
@@ -64,8 +64,7 @@ export interface PlanInput {
 }
 
 /** Every place an annotation makes: each project, and each team zone (a team folder without a project). */
-export function annotatedPlaces(annotations: readonly Annotation[]): Array<{ place: Place; folder: string }> {
-  const { zones } = resolveZones(annotations);
+export function annotatedPlaces(zones: ReadonlyMap<string, Zone>): Array<{ place: Place; folder: string }> {
   const places = new Map<string, { place: Place; folder: string }>();
   for (const zone of [...zones.values()].sort((a, b) => compare(zoneFolder(a), zoneFolder(b)))) {
     const place: Place = zone.project !== undefined ? { kind: 'project', team: zone.team, project: zone.project } : { kind: 'team', team: zone.team };
@@ -92,12 +91,12 @@ export function placeKey(place: Place): string {
 }
 
 /**
- * Builds the plan. A file is left out when the linter reports it,
- * when its title collides with another file's, or when its title is longer
- * than Linear accepts; a left-out file's document, if any, is neither
- * overwritten nor trashed. A document matches a file when its title equals
- * the file's title exactly; when several live documents share
- * that title, the oldest is the match and the others go to trash.
+ * Builds the plan. A file is left out when the linter reports it, when its
+ * title collides with another file's, when its title is longer than Linear
+ * accepts, or when git does not store it as text; a left-out file's
+ * document, if any, is neither overwritten nor trashed. A document matches
+ * a file by title (see `titleIn`); when several live documents share that
+ * title, the oldest is the match and the others go to trash.
  */
 export function planInitialSync(input: PlanInput): InitialSyncPlan {
   const facts = input.facts ?? LINEAR_FACTS;
@@ -111,26 +110,42 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
     leftOut.set(path, entry);
   };
 
-  for (const file of mapping.leftOut) leaveOut(file.path, [file.rule], [], file.collidesWith);
-  const synced: MappedDocument[] = [];
-  for (const document of mapping.documents) {
-    const text = input.texts.get(document.path);
-    if (text === undefined) throw new Error(`the text of ${document.path} was not read`);
-    const findings = lintText(document.path, text);
-    if (findings.length > 0) leaveOut(document.path, findings.map((f) => f.rule), findings.map((f) => f.line));
-    if (lengthRefusal({ title: document.title }, facts) !== undefined) leaveOut(document.path, ['title-too-long']);
-    if (findings.length === 0 && !leftOut.has(document.path)) synced.push(document);
-  }
+  const textOf = (path: string): string => {
+    const text = input.texts.get(path);
+    if (text === undefined) throw new Error(`the text of ${path} was not read`);
+    return text;
+  };
+  // Every reason a file stays in git only, so that fixing one does not reveal the next.
+  const lint = (path: string, title: string) => {
+    const findings = lintText(path, textOf(path));
+    if (findings.length > 0) leaveOut(path, findings.map((f) => f.rule), findings.map((f) => f.line));
+    if (lengthRefusal({ title }, facts) !== undefined) leaveOut(path, ['title-too-long']);
+  };
 
   // Titles of left-out files, by place: their documents stay untouched.
   const leftOutTitles = new Map<string, string>();
-  for (const document of mapping.documents) if (leftOut.has(document.path)) leftOutTitles.set(titleIn(document.place, document.title), document.path);
-  for (const file of mapping.leftOut) leftOutTitles.set(titleIn(file.place, file.title), file.path);
+  for (const file of mapping.leftOut) {
+    leaveOut(file.path, [file.rule], [], file.collidesWith);
+    lint(file.path, file.title);
+    leftOutTitles.set(titleIn(file.place, file.title), file.path);
+  }
+  // A Markdown file under an annotation that git does not store as text (in LFS, binary, a link).
+  for (const file of mapping.unsynced) {
+    if (file.place === undefined || file.title === undefined) continue;
+    leaveOut(file.path, [file.reason]);
+    leftOutTitles.set(titleIn(file.place, file.title), file.path);
+  }
+  const synced: MappedDocument[] = [];
+  for (const document of mapping.documents) {
+    lint(document.path, document.title);
+    if (leftOut.has(document.path)) leftOutTitles.set(titleIn(document.place, document.title), document.path);
+    else synced.push(document);
+  }
 
   const plan: InitialSyncPlan = { create: [], overwrite: [], trash: [], leftOut: [] };
   const filesByTitle = new Map(synced.map((document) => [titleIn(document.place, document.title), document]));
   const matched = new Set<string>();
-  const folders = new Map(annotatedPlaces(mapping.annotations).map(({ place, folder }) => [placeKey(place), folder]));
+  const folders = new Map(annotatedPlaces(mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
   for (const { place, documents } of input.places) {
     const oldestFirst = [...documents].sort((a, b) => compare(a.createdAt, b.createdAt) || compare(a.id, b.id));
     for (const document of oldestFirst) {
@@ -166,9 +181,13 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   return plan;
 }
 
-/** Exact titles: a document matches a file only when its title equals the file's title. */
+/**
+ * A document matches a file when its title equals the file's title in the
+ * same place, compared in Unicode NFC (a file name may be stored decomposed)
+ * and with case: a title that differs only in case is another document.
+ */
 function titleIn(place: Place, title: string): string {
-  return `${placeKey(place)}\0${title}`;
+  return `${placeKey(place)}\0${title.normalize('NFC')}`;
 }
 
 function zoneFolder(zone: Zone): string {

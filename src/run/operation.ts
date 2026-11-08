@@ -31,9 +31,10 @@ export async function runOperation(
   initialSync: InitialSyncInputs | undefined,
   options: PreflightOptions,
 ): Promise<OperationOutcome> {
-  if (operation === 'initial-sync' && initialSync === undefined) throw new Error('initial sync needs its direction and confirm inputs');
-  const built = operation === 'initial-sync' && (initialSync as InitialSyncInputs).direction === 'git-to-linear';
-  const confirm = built && (initialSync as InitialSyncInputs).confirm;
+  if ((operation === 'initial-sync') !== (initialSync !== undefined)) {
+    throw new Error('the direction and confirm inputs belong to an initial sync, and only to it');
+  }
+  const gitToLinear = initialSync?.direction === 'git-to-linear' ? initialSync : undefined;
   let plan: PlanReport | undefined;
   let confirmed: ConfirmedResult | undefined;
   let workSummary = '';
@@ -41,23 +42,23 @@ export async function runOperation(
     operation,
     inputs,
     options,
-    built
-      ? async (context) => {
-          if (confirm) {
+    gitToLinear === undefined
+      ? undefined
+      : async (context) => {
+          if (gitToLinear.confirm) {
             const run = await confirmInitialSync(context, { config: inputs.state });
-            plan = toPlanReport(run.plan, 'git-to-linear', true);
+            plan = toPlanReport(run.plan, gitToLinear.direction, true);
             confirmed = run.result;
             workSummary = renderConfirmed(run.plan, run.result);
           } else {
             const planned = await planFromRepository(context);
-            plan = toPlanReport(planned, 'git-to-linear', false);
+            plan = toPlanReport(planned, gitToLinear.direction, false);
             workSummary = renderDryRun(planned);
           }
-        }
-      : undefined,
+        },
   );
   if (!preflight.ok) return { ...preflight, notImplemented: false };
-  const outcome: OperationOutcome = { ...preflight, notImplemented: operation !== 'check' && !built };
+  const outcome: OperationOutcome = { ...preflight, notImplemented: operation !== 'check' && gitToLinear === undefined };
   if (plan !== undefined) {
     outcome.plan = plan;
     outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;

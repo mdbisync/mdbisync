@@ -52,10 +52,26 @@ export async function runSetupCheck(input: SetupInput): Promise<SetupResult> {
     checkLinearFormatHook(input.hooks),
     annotations,
     targets.result,
+    checkLeftOut(input.mapping),
     checkSecurityHooks(input.hooks),
   ];
   const report = buildReport(checks, securityHooks(input.hooks));
   return report.ok && targets.targets !== undefined ? { report, targets: targets.targets } : { report };
+}
+
+/** Paths named in the summary; the rest are counted. */
+export const LEFT_OUT_NAMED = 20;
+
+/**
+ * Files the mapping leaves out (title collisions) do not stop the run, but
+ * the report names them and the rule, so a passing check never hides them.
+ */
+function checkLeftOut(mapping: RepositoryMapping): CheckResult {
+  const files = [...mapping.leftOut].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  if (files.length === 0) return passed('left-out-files', 'no files left out');
+  const named = files.slice(0, LEFT_OUT_NAMED).map((file) => `${file.path} (${file.rule})`);
+  const more = files.length > LEFT_OUT_NAMED ? `, and ${files.length - LEFT_OUT_NAMED} more` : '';
+  return { name: 'left-out-files', state: 'warning', detail: `${files.length} files left out, not synced: ${named.join(', ')}${more}` };
 }
 
 function checkAnnotations(mapping: RepositoryMapping): CheckResult {

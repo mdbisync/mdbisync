@@ -7,7 +7,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
-import { COMMANDS, USAGE_EXIT_CODE } from '../commands.ts';
+import { COMMANDS, SETUP_FAILED_EXIT_CODE, USAGE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
@@ -123,7 +123,7 @@ describe('initial sync dry run', () => {
     assert.ok(!summary.includes(CANARY), 'the job summary holds content');
     assert.match(summary, /## Setup check/);
     assert.match(summary, /## Initial sync from git to Linear: dry run\n\nNothing was written\./);
-    assert.match(summary, /^\| eng\/backend\/retired\.md \| team "ENG" \|$/m);
+    assert.match(summary, /^\| eng\/backend\/retired\.md \| team "ENG" \| doc-retired \|$/m);
     assert.match(summary, /^\| combined\/Guide\.md \| duplicate-title \|  \| combined\/guide\.md \|$/m);
 
     // Mint, two setup reads, one list per place (three), revoke; nothing else.
@@ -160,6 +160,28 @@ describe('initial sync dry run', () => {
       assert.equal(result.exitCode, USAGE_EXIT_CODE);
       assert.match(result.stderr, /the input direction (is required|must be one of git-to-linear, linear-to-git)/);
       assert.deepEqual(world.requests, []);
+    }
+  });
+
+  it('two folders naming one team (by key and by name) stop the run before any document is listed', async () => {
+    const aliased = await createFixture();
+    try {
+      await aliased.seed({
+        'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n`,
+        'eng/notes.md': '# Notes\n',
+        'more/README.md': `---\nlinear-team: Engineering\n---\n\n# More\n`,
+        'more/notes.md': '# Notes\n',
+        '.pre-commit-config.yaml': PRE_COMMIT,
+      });
+      const world = fakeWorld();
+      world.linear.documents = [{ id: 'doc-notes', title: 'notes', teamId: 'team-eng', createdAt: '2026-01-01T00:00:01Z' }];
+      const result = await runCli(['initial-sync'], { env: env({ MDBISYNC_DIRECTION: 'git-to-linear' }), cwd: (await aliased.clone('work')).dir, fetch: fakeFetch(world) });
+      assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE, result.stderr);
+      assert.equal((await readReport()).code, 'annotation-target-shared');
+      assert.equal((await readReport()).summary, null);
+      assert.deepEqual(world.writes, []);
+    } finally {
+      await aliased.cleanup();
     }
   });
 
