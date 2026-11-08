@@ -3,7 +3,8 @@
 Two-way sync between Markdown files in a Git repository and Linear documents,
 run as a GitHub Action.
 
-**Status:** early development. `check` checks a repository's setup; `sync`
+**Status:** early development. `lint` and `fix` work on Markdown files.
+`check` checks a repository's setup; `sync`
 and `initial-sync` run the same check (and `sync` refuses to run without its
 state) and then answer "not implemented". Nothing writes yet.
 
@@ -32,7 +33,8 @@ and reported.
 Before it writes anything, every run checks that the Linear token works and
 may write, that the GitHub token has contents, pull requests and workflows
 write and checks and commit statuses read, that merge commits are allowed,
-that every annotation is valid and its team and project exist in Linear, and
+that `.pre-commit-config.yaml` has the `linear-format` hook, that every
+annotation is valid and its team and project exist in Linear, and
 whether pre-commit hooks marked `alias: security` exist (without them the run
 goes on and says that content is pushed unchecked). The result goes to the
 job summary as names and states, never document content. `check` runs it

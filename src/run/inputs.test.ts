@@ -27,6 +27,7 @@ it('takes the optional inputs when given', () => {
 it('names a missing input or a bad repository', () => {
   assert.throws(() => readInputs(given({}), {}), new InputError('the input linear-client-id is required'));
   assert.throws(() => readInputs(given(REQUIRED), {}), /the input repository must be "owner\/name"/);
+  assert.throws(() => readInputs(given({ ...REQUIRED, repository: 'o/r', 'sync-branch': 'main' }), {}), (error) => error instanceof InputError && /must differ/.test(error.message));
 });
 
 it('maps every input to an MDBISYNC_ environment variable', () => {

@@ -9,7 +9,7 @@ export {
   readAnnotation,
   resolveZones,
 } from './annotations.ts';
-export { type FrontMatter, findFrontMatter } from './front-matter.ts';
+export { type FrontMatter, findFrontMatter, parseQuietly } from './front-matter.ts';
 export {
   type LeftOutFile,
   MARKDOWN_EXTENSION,

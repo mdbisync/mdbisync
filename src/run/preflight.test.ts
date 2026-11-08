@@ -15,6 +15,10 @@ import { type RunReport } from './finish.ts';
 
 const CANARY = 'kx-5e7c0a11';
 const PRE_COMMIT = `repos:
+  - repo: https://github.com/example/mdbisync
+    rev: 0123456789abcdef0123456789abcdef01234567
+    hooks:
+      - id: linear-format
   - repo: local
     hooks:
       - id: no-test-secrets
@@ -92,6 +96,13 @@ describe('preflight', () => {
     assert.equal(world.revoked, 1);
   });
 
+  it('a Linear outage while minting is an error of the run, not a credential failure', async () => {
+    const world = fakeWorld();
+    world.linear.unavailable = true;
+    await assert.rejects(runCli(['check'], { env: env(), cwd, fetch: fakeFetch(world) }), /oauth\.token: Linear refused the token request/);
+    assert.deepEqual(world.writes, []);
+  });
+
   it('check passes with exit code 0', async () => {
     const { result } = await run('check', fakeWorld());
     assert.equal(result.exitCode, 0);
@@ -122,7 +133,22 @@ describe('preflight', () => {
       });
     }
 
-    it.todo('L5-04 no Linear-format hook: stops before any write (the hook check is pending)');
+    it('L5-04 no Linear-format hook: stops before any write and names it', async () => {
+      const hookless = PRE_COMMIT.slice(PRE_COMMIT.indexOf('  - repo: local'));
+      assert.ok(!hookless.includes('linear-format'));
+      await fixture.seed({ '.pre-commit-config.yaml': `repos:\n${hookless}` });
+      try {
+        const world = fakeWorld();
+        const result = await runCli(['sync'], { env: env(), cwd, fetch: fakeFetch(world) });
+        const report = JSON.parse(await readFile(join(fixture.root, 'report.json'), 'utf8')) as RunReport;
+        assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE);
+        assert.equal(report.code, 'linear-format-hook-required');
+        assert.ok(report.setupChecks.some((check) => check.name === 'linear-format-hook' && check.state === 'failed' && /no linear-format hook/.test(check.detail)));
+        assert.deepEqual(world.writes, []);
+      } finally {
+        await fixture.seed({ '.pre-commit-config.yaml': PRE_COMMIT });
+      }
+    });
 
     it('a correct setup lets the sync past the preflight', async () => {
       const { result, report } = await run('sync', fakeWorld());

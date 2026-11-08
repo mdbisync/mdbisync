@@ -33,7 +33,7 @@ function mapTree(files: Files): RepositoryMapping {
   const { zones, problems } = resolveZones(annotations);
   const wanted = new Set(candidateFiles(entries, zones).map((entry) => entry.oid));
   const contents = new Map([...blobs].filter(([oid]) => wanted.has(oid)));
-  return { annotations, problems: [...readProblems, ...problems], ...mapFiles(entries, zones, contents) };
+  return { annotations, zones, problems: [...readProblems, ...problems], ...mapFiles(entries, zones, contents) };
 }
 
 const team = (name: string) => `---\nlinear-team: ${name}\n---\n\n# Team\n`;
@@ -50,8 +50,10 @@ function summary(mapping: RepositoryMapping) {
 
 describe('front matter', () => {
   it('finds the block after an optional byte order mark and ends at the closing fence', () => {
-    assert.deepEqual(findFrontMatter('---\na: 1\n---\nbody'), { yaml: 'a: 1\n', end: 13 });
-    assert.equal(findFrontMatter('﻿---\r\na: 1\r\n...\r\n')?.yaml, 'a: 1\r\n');
+    assert.deepEqual(findFrontMatter('---\na: 1\n---\nbody'), { yaml: 'a: 1\n' });
+    assert.equal(findFrontMatter('﻿---\r\na: 1\r\n---\r\n\r\n# Body\n')?.yaml, 'a: 1\r\n');
+    // Only `---` closes front matter, as in the format module that strips it before Linear.
+    assert.equal(findFrontMatter('---\nlinear-team: ENG\n...\n# Team\n'), null);
     assert.equal(findFrontMatter('---\n---\n')?.yaml, '');
     assert.equal(findFrontMatter('# Title\n---\na: 1\n---\n'), null);
     assert.equal(findFrontMatter('---\na: 1\n'), null);
@@ -71,6 +73,19 @@ describe('annotations', () => {
     assert.deepEqual(readAnnotation('a/README.md', '---\ntitle: Notes\n---\n'), { annotation: null });
     assert.deepEqual(readAnnotation('a/README.md', '---\n: : bad yaml [\n---\n'), { annotation: null });
     assert.deepEqual(readAnnotation('a/README.md', '---\n- a list\n---\n'), { annotation: null });
+  });
+
+  it('parses front matter without printing parser warnings, which quote content', () => {
+    const warnings: string[] = [];
+    const listener = (warning: Error) => warnings.push(warning.message);
+    process.on('warning', listener);
+    try {
+      const result = readAnnotation('eng/README.md', '---\nsecret: !private kx-0badc0de\nlinear-team: ENG\n---\n');
+      assert.deepEqual(result, { annotation: { folder: 'eng', readme: 'eng/README.md', team: 'ENG' } });
+    } finally {
+      process.off('warning', listener);
+    }
+    assert.deepEqual(warnings, []);
   });
 
   it('reports annotations that are not valid, naming the file and key but no content', () => {

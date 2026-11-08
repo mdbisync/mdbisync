@@ -27,13 +27,16 @@ export interface ResolvedTargets {
   projects: Map<string, LinearProject>;
 }
 
+/** Half of Linear's largest page; see `resolveTargets`. */
+const TEAM_REFS_PER_REQUEST = 125;
+
 export function projectKey(team: string, project: string): string {
   return `${team}\0${project}`;
 }
 
 /** Whether an error means Linear refused the credentials, as opposed to any other failure. */
 export function isCredentialError(error: unknown): boolean {
-  if (error instanceof LinearTokenError) return true;
+  if (error instanceof LinearTokenError) return error.credentialsRefused;
   if (error instanceof LinearGraphQLError) {
     return error.httpStatus === 401 || error.code === 'AUTHENTICATION_ERROR';
   }
@@ -63,9 +66,10 @@ export async function resolveTargets(
   client: LinearClient,
   zones: Iterable<Zone>,
 ): Promise<{ result: CheckResult; credentials?: CheckResult; targets?: ResolvedTargets }> {
+  const zoneList = [...zones];
   const teamRefs = new Set<string>();
   const projectRefs = new Map<string, { team: string; project: string }>();
-  for (const zone of zones) {
+  for (const zone of zoneList) {
     teamRefs.add(zone.team);
     if (zone.project !== undefined) projectRefs.set(projectKey(zone.team, zone.project), { team: zone.team, project: zone.project });
   }
@@ -74,16 +78,23 @@ export async function resolveTargets(
   let teamNodes: LinearTeam[];
   let projectNodes: Array<LinearProject & { teams: { nodes: Array<{ id: string }> } }>;
   try {
+    // A team matches a reference by key or by name, so a batch of references
+    // matches at most twice as many teams: within one page when batches are
+    // half a page.
     const refs = [...teamRefs];
-    const teams = await client.request<{ teams: { nodes: LinearTeam[] } }>(
-      'SetupTeams',
-      'query',
-      `query SetupTeams($refs: [String!]!, $first: Int!) {
-        teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
-      }`,
-      { refs, first: Math.min(250, refs.length * 2) },
-    );
-    teamNodes = teams.teams.nodes;
+    teamNodes = [];
+    for (let start = 0; start < refs.length; start += TEAM_REFS_PER_REQUEST) {
+      const batch = refs.slice(start, start + TEAM_REFS_PER_REQUEST);
+      const teams = await client.request<{ teams: { nodes: LinearTeam[] } }>(
+        'SetupTeams',
+        'query',
+        `query SetupTeams($refs: [String!]!, $first: Int!) {
+          teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
+        }`,
+        { refs: batch, first: batch.length * 2 },
+      );
+      teamNodes.push(...teams.teams.nodes.filter((team) => !teamNodes.some((known) => known.id === team.id)));
+    }
     const names = [...new Set([...projectRefs.values()].map((ref) => ref.project))];
     projectNodes = [];
     if (names.length > 0) {
@@ -132,8 +143,34 @@ export async function resolveTargets(
   if (ambiguous.length > 0) {
     return { result: failed('annotation-targets', 'annotation-target-ambiguous', `more than one match in Linear: ${ambiguous.join(', ')}`) };
   }
+  const shared = sharedDestinations(zoneList, targets);
+  if (shared.length > 0) {
+    return { result: failed('annotation-targets', 'annotation-target-shared', `more than one folder maps to ${shared.join('; ')}`) };
+  }
   return {
     result: passed('annotation-targets', `found in Linear: ${targets.teams.size} teams, ${targets.projects.size} projects`),
     targets,
   };
+}
+
+/**
+ * Each Linear project, and each team's own documents (its team zone), must
+ * come from one folder: otherwise a document has two folders to live in,
+ * and titles that collide in Linear would not collide in the mapping (a
+ * team named by key in one folder and by name in another).
+ */
+function sharedDestinations(zones: readonly Zone[], targets: ResolvedTargets): string[] {
+  const folders = new Map<string, { label: string; folders: Set<string> }>();
+  for (const zone of zones) {
+    const team = targets.teams.get(zone.team) as LinearTeam;
+    const [id, label, folder] = zone.project === undefined
+      ? [`team\0${team.id}`, `the documents of team "${team.name}"`, zone.teamFolder]
+      : [`project\0${(targets.projects.get(projectKey(zone.team, zone.project)) as LinearProject).id}`, `project "${zone.project}"`, zone.projectFolder as string];
+    const entry = folders.get(id) ?? { label, folders: new Set<string>() };
+    entry.folders.add(folder === '' ? 'the repository root' : `${folder}/`);
+    folders.set(id, entry);
+  }
+  return [...folders.values()]
+    .filter((entry) => entry.folders.size > 1)
+    .map((entry) => `${entry.label} (${[...entry.folders].sort().join(', ')})`);
 }
