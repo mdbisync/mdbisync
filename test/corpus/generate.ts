@@ -59,7 +59,7 @@ export function buildCorpus(seed: string = DEFAULT_SEED, bankDir: string = DEFAU
   const tree = treeFiles(rng.fork("tree"), canaries);
   const assets = makeAssets(rng.fork("assets"));
   const taken = new Set<string>([...bank.files, ...tree, ...assets.files].map((f) => f.path));
-  const docs = documents(rng.fork("documents"), canaries, assets, taken);
+  const docs = documents(rng.fork("documents"), canaries, assets, taken, bank.files);
   const files = [...bank.files, ...tree, ...assets.files, ...docs].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 
   const seen = new Set<string>();
