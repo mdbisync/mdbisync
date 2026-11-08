@@ -23,7 +23,7 @@ function mapTree(files: Record<string, string>): { mapping: RepositoryMapping; t
   const { annotations } = collectAnnotations(readmes);
   const { zones } = resolveZones(annotations);
   const wanted = new Set(candidateFiles(entries, zones).map((e) => e.oid));
-  const mapping: RepositoryMapping = { annotations, problems: [], ...mapFiles(entries, zones, new Map([...blobs].filter(([oid]) => wanted.has(oid)))) };
+  const mapping: RepositoryMapping = { annotations, zones, problems: [], ...mapFiles(entries, zones, new Map([...blobs].filter(([oid]) => wanted.has(oid)))) };
   return { mapping, texts: new Map(mapping.documents.map((d) => [d.path, files[d.path] as string])) };
 }
 
@@ -68,7 +68,7 @@ const TREE = {
 describe('annotatedPlaces', () => {
   it('lists each project and each team zone once, with its folder; a team and project in one folder makes no team zone', () => {
     const { mapping } = mapTree(TREE);
-    assert.deepEqual(annotatedPlaces(mapping.annotations), [
+    assert.deepEqual(annotatedPlaces(mapping.zones), [
       { place: HANDBOOK, folder: 'combined' },
       { place: ENG, folder: 'eng' },
       { place: NOTES, folder: 'eng/notes' },

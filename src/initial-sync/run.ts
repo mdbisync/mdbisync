@@ -11,7 +11,7 @@ export async function planFromRepository(context: RunContext): Promise<InitialSy
   const blobs = await readBlobs(git, mapping.documents.map((document) => document.oid));
   const texts = new Map(mapping.documents.map((document) => [document.path, (blobs.get(document.oid) as Buffer).toString('utf8')]));
   const places: PlaceDocuments[] = [];
-  for (const { place } of annotatedPlaces(mapping.annotations)) {
+  for (const { place } of annotatedPlaces(mapping.zones)) {
     places.push({ place, documents: await linear.listDocuments(placeId(targets, place)) });
   }
   return planInitialSync({ mapping, texts, places, facts: linear.facts });

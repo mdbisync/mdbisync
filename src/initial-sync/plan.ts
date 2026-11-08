@@ -5,7 +5,7 @@
 
 import { lintText } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearDocument, type LinearFacts, lengthRefusal } from '../linear/index.ts';
-import { type Annotation, type MappedDocument, type Place, type RepositoryMapping, type Zone, resolveZones } from '../mapping/index.ts';
+import { type MappedDocument, type Place, type RepositoryMapping, type Zone } from '../mapping/index.ts';
 import { type ResolvedTargets, projectKey } from '../setup/index.ts';
 
 /** Why a synchronized file stays in git only: a lint rule, a title collision, or a title Linear refuses. */
@@ -64,8 +64,7 @@ export interface PlanInput {
 }
 
 /** Every place an annotation makes: each project, and each team zone (a team folder without a project). */
-export function annotatedPlaces(annotations: readonly Annotation[]): Array<{ place: Place; folder: string }> {
-  const { zones } = resolveZones(annotations);
+export function annotatedPlaces(zones: ReadonlyMap<string, Zone>): Array<{ place: Place; folder: string }> {
   const places = new Map<string, { place: Place; folder: string }>();
   for (const zone of [...zones.values()].sort((a, b) => compare(zoneFolder(a), zoneFolder(b)))) {
     const place: Place = zone.project !== undefined ? { kind: 'project', team: zone.team, project: zone.project } : { kind: 'team', team: zone.team };
@@ -130,7 +129,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   const plan: InitialSyncPlan = { create: [], overwrite: [], trash: [], leftOut: [] };
   const filesByTitle = new Map(synced.map((document) => [titleIn(document.place, document.title), document]));
   const matched = new Set<string>();
-  const folders = new Map(annotatedPlaces(mapping.annotations).map(({ place, folder }) => [placeKey(place), folder]));
+  const folders = new Map(annotatedPlaces(mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
   for (const { place, documents } of input.places) {
     const oldestFirst = [...documents].sort((a, b) => compare(a.createdAt, b.createdAt) || compare(a.id, b.id));
     for (const document of oldestFirst) {
