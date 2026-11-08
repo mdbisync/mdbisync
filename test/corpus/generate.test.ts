@@ -77,6 +77,9 @@ test("the slices are closed and the mini slice has its twelve documents", () => 
   }
   const documents = built.slices.mini.filter((p) => byPath.get(p)?.synced && byPath.get(p)?.kind === "markdown");
   assert.equal(documents.length, MINI_DOCUMENTS);
+  for (const slice of ["mini", "mid"] as const) {
+    assert.deepEqual(built.slices[slice].filter((p) => byPath.get(p)?.macosUnsafe), [], `${slice} holds a macOS-unsafe name`);
+  }
   assert.equal(built.slices.full.length, built.files.length);
 });
 

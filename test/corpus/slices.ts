@@ -62,7 +62,11 @@ function pickMini(files: CorpusFile[]): string[] {
 }
 
 function pickMid(files: CorpusFile[], rng: Rng): string[] {
-  const documents = files.filter((f) => isDocument(f) && f.group !== "annotations").sort((a, b) => (a.path < b.path ? -1 : 1));
+  // Colliding names only make sense as a pair and cannot be checked out on
+  // macOS, so they stay in the bank and full slices.
+  const documents = files
+    .filter((f) => isDocument(f) && f.group !== "annotations" && !f.macosUnsafe)
+    .sort((a, b) => (a.path < b.path ? -1 : 1));
   const groups = [...new Set(documents.map((f) => f.group))].sort();
   // Every group gets at least two documents, the rest in proportion to size.
   const share = new Map(groups.map((g) => [g, 2]));
