@@ -3,13 +3,17 @@
 // hook is configured.
 
 import { parse } from 'yaml';
-import { type CheckResult, failed, notChecked, passed } from './report.ts';
+import { type CheckResult, failed, passed } from './report.ts';
 
 export const PRE_COMMIT_CONFIG = '.pre-commit-config.yaml';
 export const SECURITY_ALIAS = 'security';
+export const LINEAR_FORMAT_HOOK = 'linear-format';
+/** pre-commit's names for hooks defined in the repository itself or by pre-commit. */
+const LOCAL_REPOS: ReadonlySet<string> = new Set(['local', 'meta']);
 
 export interface HookConfig {
-  hooks: Array<{ id: string; alias?: string }>;
+  /** Every hook with the `repo` it comes from. */
+  hooks: Array<{ id: string; repo: string; alias?: string }>;
   /** Set when the file exists but is not a pre-commit configuration. */
   invalid?: string;
 }
@@ -28,9 +32,10 @@ export function readHookConfig(text: string | null): HookConfig {
   const hooks: HookConfig['hooks'] = [];
   for (const repo of repos) {
     if (!isRecord(repo) || !Array.isArray(repo.hooks)) continue;
+    const source = typeof repo.repo === 'string' ? repo.repo : '';
     for (const hook of repo.hooks) {
       if (!isRecord(hook) || typeof hook.id !== 'string') continue;
-      hooks.push(typeof hook.alias === 'string' ? { id: hook.id, alias: hook.alias } : { id: hook.id });
+      hooks.push(typeof hook.alias === 'string' ? { id: hook.id, repo: source, alias: hook.alias } : { id: hook.id, repo: source });
     }
   }
   return { hooks };
@@ -48,13 +53,16 @@ export function checkSecurityHooks(config: HookConfig): CheckResult {
 }
 
 /**
- * PENDING: the Linear-format hook check. The hook and its id come with the
- * Linear-format normalizer; until then this item reports `not-checked` and
- * does not stop the run. An invalid configuration file already fails it.
+ * The Linear-format hook is required: without it, files reach Linear in a
+ * form Linear rewrites. It counts when a repository entry (not `local` or
+ * `meta`) lists the hook id, so the hook runs this project's released code.
  */
-export function checkLinearFormatHookPending(config: HookConfig): CheckResult {
+export function checkLinearFormatHook(config: HookConfig): CheckResult {
   if (config.invalid !== undefined) return failed('linear-format-hook', 'linear-format-hook-required', config.invalid);
-  return notChecked('linear-format-hook', 'the Linear-format hook check is not implemented yet');
+  const configured = config.hooks.some((hook) => hook.id === LINEAR_FORMAT_HOOK && !LOCAL_REPOS.has(hook.repo));
+  return configured
+    ? passed('linear-format-hook', `${PRE_COMMIT_CONFIG} has the ${LINEAR_FORMAT_HOOK} hook`)
+    : failed('linear-format-hook', 'linear-format-hook-required', `${PRE_COMMIT_CONFIG} has no ${LINEAR_FORMAT_HOOK} hook`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -5,7 +5,7 @@ import { type RepositoryMapping } from '../mapping/index.ts';
 import {
   CHECK_NAMES,
   checkGitHub,
-  checkLinearFormatHookPending,
+  checkLinearFormatHook,
   checkSyncState,
   readHookConfig,
   renderSetupSummary,
@@ -48,13 +48,19 @@ describe('pre-commit hooks', () => {
     assert.equal(readHookConfig('repos: [').invalid, '.pre-commit-config.yaml is not valid YAML');
   });
 
-  it('PENDING: the Linear-format hook item reports not-checked until the hook exists', () => {
-    assert.deepEqual(checkLinearFormatHookPending(readHookConfig(PRE_COMMIT)), {
+  it('requires the linear-format hook from a hook repository', () => {
+    assert.deepEqual(checkLinearFormatHook(readHookConfig(PRE_COMMIT)), {
       name: 'linear-format-hook',
-      state: 'not-checked',
-      detail: 'the Linear-format hook check is not implemented yet',
+      state: 'passed',
+      detail: '.pre-commit-config.yaml has the linear-format hook',
     });
-    assert.equal(checkLinearFormatHookPending(readHookConfig('repos: [')).code, 'linear-format-hook-required');
+    const local = 'repos:\n  - repo: local\n    hooks:\n      - id: linear-format\n        name: x\n        entry: x\n        language: system\n';
+    for (const text of [null, 'repos: []\n', local]) {
+      const result = checkLinearFormatHook(readHookConfig(text));
+      assert.equal(result.code, 'linear-format-hook-required', String(text));
+      assert.equal(result.detail, '.pre-commit-config.yaml has no linear-format hook');
+    }
+    assert.equal(checkLinearFormatHook(readHookConfig('repos: [')).detail, '.pre-commit-config.yaml is not valid YAML');
   });
 });
 
@@ -112,7 +118,7 @@ describe('setup check', () => {
   });
 
   it('goes on without security hooks and says content is pushed unchecked', async () => {
-    const { report } = await run(fakeWorld(), MINI, 'repos: []\n');
+    const { report } = await run(fakeWorld(), MINI, PRE_COMMIT.slice(0, PRE_COMMIT.indexOf('  - repo: local')));
     assert.equal(report.ok, true);
     assert.deepEqual(report.securityHooks, []);
     const item = report.checks.find((check) => check.name === 'security-hooks');
@@ -170,7 +176,7 @@ describe('setup check', () => {
     const summary = renderSetupSummary(report);
     assert.match(summary, /^## Setup check\n\nStopped before any write: `missing-permission`\./);
     assert.match(summary, /\| github-access \| FAILED \| the GitHub token lacks workflows:write \|/);
-    assert.match(summary, /\| linear-format-hook \| not checked \|/);
+    assert.match(summary, /\| linear-format-hook \| passed \|/);
   });
 });
 
