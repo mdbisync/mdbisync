@@ -245,3 +245,28 @@ test('long literal separators cannot collide with Git framing', async () => {
   const result = await mergeMarkdown(`${prefix}old\n`, `${prefix}git\n`, `${prefix}Linear\n`);
   assert.equal(result.text, prefix + conflict('git', 'Linear'));
 });
+
+test('CRLF Git snapshots merge cleanly with LF Linear edits', async () => {
+  const result = await mergeMarkdown('first\r\n\r\nsecond\r\n', 'updated\r\n\r\nsecond\r\n', 'first\n\nrevised\n');
+  assert.deepEqual(result, { text: 'updated\r\n\r\nrevised\r\n', conflicts: [] });
+});
+
+test('mixed newline styles do not widen a paragraph conflict to the document', async () => {
+  const result = await mergeMarkdown('intro\r\n\r\nold\r\n\r\nafter\r\n', 'intro\r\n\r\ngit\r\n\r\nafter\r\n', 'intro\n\nLinear\n\nafter\n');
+  assert.equal(result.text, `intro\n\n${conflict('git', 'Linear')}\nafter\n`.replaceAll('\n', '\r\n'));
+  assert.equal(result.conflicts.length, 1);
+});
+
+test('BOM-prefixed marker lines keep their source positions', () => {
+  assert.deepEqual(detectConflicts(`\uFEFF${MARKERS.git}\n`), [{ startLine: 1, endLine: 1 }]);
+  assert.deepEqual(detectConflicts(`\uFEFF${conflict('git', 'Linear')}`), [{ startLine: 1, endLine: 9, git: 'git', linear: 'Linear' }]);
+  const file = `\uFEFF---\ntitle: Sample\n---\n\n${conflict('git', 'Linear')}`;
+  assert.equal(detectConflicts(file)[0]?.startLine, 5);
+  assert.deepEqual(detectConflicts(`\uFEFF~~~\n${MARKERS.git}\n~~~\n`), []);
+});
+
+test('a new conflict at the beginning of a BOM-prefixed file is detected', async () => {
+  const result = await mergeMarkdown('\uFEFFold\n', '\uFEFFgit\n', 'Linear\n');
+  assert.equal(result.text, `\uFEFF${conflict('git', 'Linear')}`);
+  assert.deepEqual(result.conflicts, [{ startLine: 1, endLine: 9, git: 'git', linear: 'Linear' }]);
+});

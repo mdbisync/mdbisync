@@ -178,9 +178,11 @@ function render(tokens: Token[], ranges: Range[]): string {
 export async function mergeMarkdown(base: string, ours: string, theirs: string): Promise<MergeResult> {
   const gitFile = splitFile(ours);
   const eol = ours.includes('\r\n') ? '\r\n' : '\n';
-  base = splitFile(base).body;
-  ours = gitFile.body;
-  theirs = splitFile(theirs).body;
+  // Newline serialization is not an edit. Merge all bodies as LF, then
+  // restore the tracked Git file's newline style for clean and conflicted output.
+  base = splitFile(base).body.replaceAll('\r\n', '\n');
+  ours = gitFile.body.replaceAll('\r\n', '\n');
+  theirs = splitFile(theirs).body.replaceAll('\r\n', '\n');
   const dir = await mkdtemp(join(tmpdir(), 'markdown-merge-'));
   try {
     await Promise.all([['base', base], ['ours', ours], ['theirs', theirs]].map(([name, text]) => writeFile(join(dir, name!), text!, { mode: 0o600 })));
@@ -196,7 +198,7 @@ export async function mergeMarkdown(base: string, ours: string, theirs: string):
     ], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
     const raw = result.stdout.toString('utf8');
     const tokens = tokenize(raw.replaceAll('\r\n', '\n'), size);
-    const text = gitFile.head + (result.code === 0 ? raw : render(tokens, conflictRanges(tokens)).replaceAll('\n', eol));
+    const text = gitFile.head + (result.code === 0 ? raw : render(tokens, conflictRanges(tokens))).replaceAll('\n', eol);
     return { text, conflicts: detectConflicts(text) };
   } finally {
     await rm(dir, { recursive: true, force: true });

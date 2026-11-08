@@ -34,10 +34,10 @@ export function markerLines(text: string): Map<number, string> {
   });
   const values: readonly string[] = Object.values(MARKERS);
   const found = new Map<number, string>();
-  lines(text).forEach((text, i) => {
-    const number = i + 1;
+  lines(body).forEach((text, i) => {
+    const number = i + 1 + offset;
     const value = lineText(text);
-    if (number > offset && values.includes(value) && !excluded.some(([a, b]) => number >= a && number <= b)) {
+    if (values.includes(value) && !excluded.some(([a, b]) => number >= a && number <= b)) {
       found.set(number, value);
     }
   });
