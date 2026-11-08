@@ -60,6 +60,17 @@ export function readFixture(bank: Bank, fixture: BankFixture): string {
   return readFileSync(join(bank.dir, fixture.file), 'utf8');
 }
 
+/**
+ * The text the sync writes to Linear for a file: front matter is never sent,
+ * so a leading `---` block and the blank lines after it are cut off. The
+ * fixture index check (`check-index.mjs`) compares recorded forms with the
+ * same text and keeps its own copy of this rule; a test holds them equal.
+ */
+export function sentForm(text: string): string {
+  const match = /^---\r?\n(?:[^\n]*\n)*?---[ \t]*(?:\r?\n|$)/.exec(text);
+  return match ? text.slice(match[0].length).replace(/^(?:[ \t]*\r?\n)+/, '') : text;
+}
+
 export function readOptional(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
 }

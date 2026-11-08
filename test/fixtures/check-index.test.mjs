@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { checkBank, parseIndex, relativeTargets } from './check-index.mjs';
+import { checkBank, parseIndex, relativeTargets, sentForm } from './check-index.mjs';
 
 const bank = dirname(fileURLToPath(import.meta.url));
 
@@ -43,7 +43,7 @@ test('an unindexed file is reported', () => {
 
 test('recorded Linear forms beside a fixture are not fixtures', () => {
   const errors = withCopy((d) => {
-    writeFileSync(join(d, 'tables', 'table-basic.linear.md'), '| A |');
+    writeFileSync(join(d, 'tables', 'table-basic.linear.md'), readFileSync(join(d, 'tables', 'table-basic.md')));
     writeFileSync(join(d, 'tables', 'table-basic.linear.yjs.json'), '{}');
   });
   assert.deepEqual(errors, []);
@@ -245,12 +245,34 @@ test('a fixture contradicting a known class is reported', () => {
 });
 
 test('basis known for an unlisted construct is reported', () => {
-  const flagged = withCopy((d) => {
-    const p = join(d, 'index.yaml');
-    const text = readFileSync(p, 'utf8');
-    writeFileSync(p, text.replace(/(  - file: "tables\/table-basic\.md"\n(?: {4}.*\n)*? {4}basis: )assumed/, '$1known'));
+  const flagged = withCopy((d) => editIndex(d, '    rule: duplicate-title\n    basis: assumed\n    canary: kx-da467a89', '    rule: duplicate-title\n    basis: known\n    canary: kx-da467a89'));
+  assert.ok(flagged.includes('lint-errors/duplicate-title/guide-upper.md: basis known, but duplicate-title is not in known_constructs'), flagged.join('\n'));
+});
+
+test('a class that disagrees with the recorded Linear form is reported', () => {
+  const unchanged = withCopy((d) => writeFileSync(join(d, 'tables', 'table-basic.linear.md'), '| A |'));
+  assert.ok(unchanged.includes("tables/table-basic.md: class unchanged, but Linear's recorded form differs"), unchanged.join('\n'));
+  const fixable = withCopy((d) =>
+    writeFileSync(join(d, 'tables', 'table-separator-long.linear.md'), readFileSync(join(d, 'tables', 'table-separator-long.md'))),
+  );
+  assert.ok(fixable.includes("tables/table-separator-long.md: class fixable, but Linear's recorded form equals the source"), fixable.join('\n'));
+});
+
+test('a probed fixture must have basis known and its recorded form', () => {
+  const errors = withCopy((d) => {
+    editIndex(d, '    construct: table\n    class: unchanged\n    basis: known', '    construct: table\n    class: unchanged\n    basis: assumed');
+    rmSync(join(d, 'tables', 'table-separator-long.linear.md'));
   });
-  assert.ok(flagged.includes('tables/table-basic.md: basis known, but table is not in known_constructs'), flagged.join('\n'));
+  assert.ok(errors.includes('tables/table-basic.md: probed by Linear, so its basis must be known'), errors.join('\n'));
+  assert.ok(errors.includes('tables/table-separator-long.md: probed, but its recorded Linear form is missing'), errors.join('\n'));
+});
+
+test('front matter is not part of the text sent to Linear', () => {
+  assert.equal(sentForm('---\nowner: ops\n---\n\n# Title\n\nText.'), '# Title\n\nText.');
+  assert.equal(sentForm('---\r\na: 1\r\n---\r\nBody'), 'Body');
+  assert.equal(sentForm('---\nonly: front matter\n---'), '');
+  assert.equal(sentForm('Text.\n\n---\n\nMore.'), 'Text.\n\n---\n\nMore.');
+  assert.equal(sentForm('---\nno closing line'), '---\nno closing line');
 });
 
 test('the check runs when started through a symlink', async () => {

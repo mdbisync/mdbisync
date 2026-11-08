@@ -88,6 +88,37 @@ function scalar(s, where) {
 
 // ---------------------------------------------------------------------------
 
+// The text the sync writes to Linear: front matter is never sent, so a
+// leading `---` block and the blank lines after it are cut off. The format
+// probe keeps the same rule in test/probe/bank.ts; a test holds them equal.
+export function sentForm(text) {
+  const match = /^---\r?\n(?:[^\n]*\n)*?---[ \t]*(?:\r?\n|$)/.exec(text);
+  return match ? text.slice(match[0].length).replace(/^(?:[ \t]*\r?\n)+/, '') : text;
+}
+
+// A class must agree with Linear's recorded form: `unchanged` only where
+// Linear keeps the sent text, `fixable` only where Linear changes it.
+// `lint-error` fixtures may go either way (a title rule leaves the text
+// alone). A fixture Linear refused has no form to compare.
+function checkClassesAgainstProbe(bankDir, fixtures, manifest, err) {
+  for (const f of fixtures) {
+    const entry = manifest.fixtures?.[f.file];
+    if (!entry) continue;
+    if (f.basis !== 'known' && f.rule !== 'duplicate-title') {
+      err(`${f.file}: probed by Linear, so its basis must be known`);
+    }
+    if (entry.refused !== undefined || f.class === 'lint-error') continue;
+    const golden = join(bankDir, f.file.replace(MARKDOWN, '.linear.md'));
+    if (!existsSync(golden)) {
+      err(`${f.file}: probed, but its recorded Linear form is missing`);
+      continue;
+    }
+    const kept = readFileSync(golden, 'utf8') === sentForm(readFileSync(join(bankDir, f.file), 'utf8'));
+    if (f.class === 'unchanged' && !kept) err(`${f.file}: class unchanged, but Linear's recorded form differs`);
+    if (f.class === 'fixable' && kept) err(`${f.file}: class fixable, but Linear's recorded form equals the source`);
+  }
+}
+
 // Binary files (images, archives, a binary file named .md) are not valid UTF-8.
 function textOrNull(bytes) {
   try {
@@ -227,6 +258,7 @@ export function checkBank(bankDir) {
     for (const f of Object.keys(manifest?.fixtures ?? {})) {
       if (!probed(f)) err(`${PROBE_MANIFEST}: ${f} is not a synchronized fixture`);
     }
+    if (manifest) checkClassesAgainstProbe(bankDir, index.fixtures.filter((f) => fixtureFiles.includes(f.file)), manifest, err);
   }
   const assetIndex = new Set(index.assets.map((a) => a.file));
   for (const f of assetFiles) if (!assetIndex.has(f)) err(`${f}: asset not in index.yaml`);

@@ -1,7 +1,3 @@
-```yaml
-owner: ops
-```
-
 Text.
 
 ---
