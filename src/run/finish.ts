@@ -64,7 +64,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     resumed: confirmed?.resumed ?? false,
     stoppedEarly: confirmed?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
-    progressRecorded: confirmed === undefined || confirmed.code !== 'state-moved',
+    progressRecorded: confirmed?.progressRecorded ?? false,
     record:
       confirmed?.record == null
         ? null
@@ -72,7 +72,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
             kind: 'initial',
             commit: confirmed.record.linear,
             moved: confirmed.record.moved,
-            hasTrackedParent: confirmed.record.parents.length === 1,
+            hasTrackedParent: confirmed.record.hasTrackedParent,
             reformattedCount: confirmed.record.reformatted.length,
           },
   };

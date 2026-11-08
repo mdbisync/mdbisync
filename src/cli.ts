@@ -17,7 +17,6 @@ import { runFix, runLint } from "./format/command.ts";
 import { writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
-import { type Operation } from "./run/preflight.ts";
 import { Git } from "./state/index.ts";
 import { VERSION } from "./version.ts";
 
