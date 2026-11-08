@@ -4,13 +4,14 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { tagRelease } from '../../src/release/tag.ts';
 import { createReleaseCommit, releasePackage, stageRelease, validateAction, validateHooks, validateVersion } from '../../src/release/package.ts';
 
 const action = { runs: { using: 'node24', main: 'dist/action.cjs', post: 'dist/post.cjs', 'post-if': 'always()' } };
 
 test('release version must be an explicit semantic pre-release', () => {
   assert.equal(validateVersion('v0.1.0-rc.1'), '0.1.0-rc.1');
-  for (const value of ['v1.0.0', '1.0.0-rc.1', 'v01.0.0-rc.1', 'v1.0.0-01', 'v1.0.0-rc/1', '--help', 'v1.0.0-rc.1\n']) {
+  for (const value of ['v1.0.0', '1.0.0-rc.1', 'v01.0.0-rc.1', 'v1.0.0-01', 'v1.0.0-rc/1', '--help', 'v1.0.0-rc.1\n', 'v1.0.0-rc.1\r']) {
     assert.throws(() => validateVersion(value), /pre-release/);
   }
 });
@@ -18,7 +19,7 @@ test('release version must be an explicit semantic pre-release', () => {
 test('release package retains only the bundled executable contract', () => {
   assert.deepEqual(releasePackage({ name: 'mdbisync', bin: { mdbisync: 'dist/cli.cjs' }, dependencies: { example: '1.0.0' }, scripts: { prepare: 'npm install' } }, 'v0.1.0-rc.1'), {
     name: 'mdbisync', version: '0.1.0-rc.1', private: true, type: 'module',
-    engines: { node: '>=24' }, bin: { mdbisync: 'dist/cli.cjs' },
+    engines: { node: '>=24.2' }, bin: { mdbisync: 'dist/cli.cjs' },
   });
   assert.throws(() => releasePackage({ name: 'mdbisync', bin: { mdbisync: '../cli.js' } }, 'v0.1.0-rc.1'), /bundle/);
 });
@@ -53,7 +54,7 @@ test('release tree is self-contained and its tagged commit does not change main'
     const git = (...args: string[]) => execFileSync('git', ['-C', source, ...args], { encoding: 'utf8' }).trim();
     git('init', '-b', 'main');
     git('config', 'user.name', 'Release Test');
-    git('config', 'user.email', 'release@example.invalid');
+    git('config', 'user.email', 'release@example.com');
     await writeFile(join(source, 'README.md'), '# Example\n');
     await writeFile(join(source, 'LICENSE'), 'Example license\n');
     await writeFile(join(source, 'action.yml'), 'runs:\n  using: node24\n');
@@ -67,7 +68,7 @@ test('release tree is self-contained and its tagged commit does not change main'
     git('add', '.');
     git('commit', '-m', 'Create source fixture');
     const parent = git('rev-parse', 'HEAD');
-    const options = { source, output, version: 'v0.1.0-rc.1', sourceSha: parent, action };
+    const options = { source, output, version: 'v0.1.0-rc.1', sourceSha: parent, action, hooks: [{ language: 'node', entry: 'mdbisync lint' }] };
     await stageRelease(options);
     const manifest = JSON.parse(await readFile(join(output, 'release.json'), 'utf8'));
     assert.equal(manifest.source, parent);
@@ -77,8 +78,15 @@ test('release tree is self-contained and its tagged commit does not change main'
     assert.equal(git('rev-parse', `${release}^`), parent);
     assert.equal(git('show', `${release}:release.json`), (await readFile(join(output, 'release.json'), 'utf8')).trim());
     assert.equal(git('ls-tree', '-r', '--name-only', release).includes('unexpected.cjs'), false);
-    git('tag', '-a', options.version, release, '-m', options.version);
-    assert.equal(git('rev-parse', `${options.version}^{commit}`), release);
+    const remote = join(root, 'remote.git');
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'pipe' });
+    git('remote', 'add', 'origin', remote);
+    git('push', '--set-upstream', 'origin', 'main');
+    const tagged = await tagRelease(parent, options.version, output, source);
+    assert.equal(git('rev-parse', `${options.version}^{commit}`), tagged);
+    assert.match(git('ls-remote', '--tags', 'origin', `refs/tags/${options.version}^{}`), new RegExp(`^${tagged}`));
+    assert.equal(git('rev-parse', 'main'), parent);
+    await assert.rejects(tagRelease(parent, options.version, output, source), /already exists/);
     assert.equal(execFileSync(process.execPath, [join(output, 'dist/cli.cjs')], { encoding: 'utf8' }).trim(), 'cli');
     await assert.rejects(stageRelease({ ...options, sourceSha: 'bad' }), /SHA/);
     await rm(join(source, 'dist/post.cjs'));

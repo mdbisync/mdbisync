@@ -12,18 +12,18 @@ function record(value: unknown): Record<string, unknown> {
 export function validateVersion(version: string): string {
   const number = '(?:0|[1-9][0-9]*)';
   const identifier = '(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)';
-  if (!new RegExp(`^v${number}\\.${number}\\.${number}-${identifier}(?:\\.${identifier})*$`).test(version) || version.includes('\n')) {
+  if (!new RegExp(`^v${number}\\.${number}\\.${number}-${identifier}(?:\\.${identifier})*$`).test(version) || version.trim() !== version) {
     throw new Error('Expected a semantic pre-release tag such as v0.1.0-rc.1');
   }
   return version.slice(1);
 }
 
 function validateSha(sha: string): void {
-  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Expected a full lowercase source SHA');
+  if (sha.length !== 40 || !/^[a-f0-9]{40}$/.test(sha)) throw new Error('Expected a full lowercase source SHA');
 }
 
 function bundlePath(value: unknown): string {
-  if (typeof value !== 'string' || !/^dist\/[a-zA-Z0-9_-]+\.(?:cjs|js)$/.test(value)) {
+  if (typeof value !== 'string' || value.trim() !== value || !/^dist\/[a-zA-Z0-9_-]+\.(?:cjs|js)$/.test(value)) {
     throw new Error('Entry must point to a local JavaScript bundle in dist/');
   }
   return value;
@@ -64,16 +64,17 @@ export function releasePackage(source: unknown, version: string): Record<string,
   }
   return {
     name: pkg.name, version: validateVersion(version), private: true, type: 'module',
-    engines: { node: '>=24' }, bin: { mdbisync: bundlePath(bins.mdbisync) },
+    engines: { node: '>=24.2' }, bin: { mdbisync: bundlePath(bins.mdbisync) },
   };
 }
 
 export async function stageRelease(options: {
-  source: string; output: string; sourceSha: string; version: string; action: unknown;
+  source: string; output: string; sourceSha: string; version: string; action: unknown; hooks: unknown;
 }): Promise<void> {
   const { source, output, sourceSha, version, action } = options;
   validateSha(sourceSha);
   validateVersion(version);
+  validateHooks(options.hooks);
   const pkg = releasePackage(JSON.parse(await readFile(join(source, 'package.json'), 'utf8')), version);
   const cli = (pkg.bin as Record<string, string>).mdbisync!;
   const bundles = [...new Set([...validateAction(action), cli])].sort();
