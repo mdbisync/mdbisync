@@ -35,6 +35,7 @@ Each fixture entry has:
 | `construct` | what the file shows, as a short id |
 | `class` | expected class: `fixable` (the normalizer rewrites it to an equivalent form), `lint-error` (content would be lost; reported, not rewritten) or `unchanged` (already in the target form) |
 | `rule` | for `lint-error` only: one of the `rules` ids |
+| `line` | for `lint-error` only: the line `lint` names for the rule, front matter counted |
 | `basis` | `known` when the class was observed, `assumed` until the format probe confirms or corrects it; every fixture the probe writes to Linear has basis `known`, except `duplicate-title` ones (a content probe cannot observe titles) |
 | `canary` | the fixture's unique token, `kx-` and eight hex digits |
 | `canary_in` | `name` when the file cannot hold text (an empty file): the token is in the file name |

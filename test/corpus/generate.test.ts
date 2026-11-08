@@ -199,3 +199,45 @@ test("the corpus attributes keep CRLF documents byte-exact even with core.autocr
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("generated alignment, image titles and marker contexts follow the fixture bank", () => {
+  const built = corpus();
+  const cases = [
+    { matches: /\/tables\/aligned-/, fixture: "tables/table-alignment.md", count: 14 },
+    { matches: /handbook\/images\/titled-image\.md$/, fixture: "images/title.md", count: 1 },
+    ...[
+      "conflict-markers/in-code-fence.md",
+      "conflict-markers/in-quote.md",
+      "conflict-markers/in-inline-code.md",
+      "conflict-markers/diff3-in-fence.md",
+      "conflict-markers/in-indented-code.md",
+    ].map((fixture, i) => ({ matches: new RegExp(`merges/marker-lookalike-(${i + 1}|${i + 6})\\.md$`), fixture, count: 2 })),
+  ];
+  for (const { matches, fixture, count } of cases) {
+    const reference = built.manifest.files.find((f) => f.path === `docs/reference/${fixture}`);
+    assert.ok(reference, fixture);
+    const generated = built.manifest.files.filter((f) => matches.test(f.path));
+    assert.equal(generated.length, count, fixture);
+    for (const file of generated) {
+      assert.deepEqual(
+        [file.class, file.rule, file.basis],
+        [reference.class, reference.rule, reference.basis],
+        file.path,
+      );
+    }
+  }
+});
+
+test("generated quoted markers stay separate paragraphs and diff3 examples include the base", () => {
+  const built = corpus();
+  for (const n of [2, 7]) {
+    const quote = built.files.find((f) => f.path.endsWith(`/marker-lookalike-${n}.md`));
+    assert.ok(quote);
+    assert.match(quote.content.toString(), /> <<<<<<< ours\n>\n> the old line\n>\n> =======\n>\n> the new line\n>\n> >>>>>>> theirs/);
+  }
+  for (const n of [4, 9]) {
+    const diff3 = built.files.find((f) => f.path.endsWith(`/marker-lookalike-${n}.md`));
+    assert.ok(diff3);
+    assert.match(diff3.content.toString(), /```text\n<<<<<<< ours\nthe old line\n\|{7} base\nthe base line\n=======\nthe new line\n>>>>>>> theirs\n```/);
+  }
+});

@@ -2,11 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { COMMANDS, USAGE_EXIT_CODE } from "./commands.ts";
+import { COMMANDS, IMPLEMENTED, USAGE_EXIT_CODE, type CommandName } from "./commands.ts";
 import { runCli } from "./cli.ts";
 import { VERSION } from "./version.ts";
 
 const commandNames = Object.keys(COMMANDS);
+const stubNames = commandNames.filter((name) => !IMPLEMENTED.has(name as CommandName));
 
 test("every command has its own non-zero exit code", () => {
   const codes: number[] = Object.values(COMMANDS).map((info) => info.notImplementedExitCode);
@@ -20,7 +21,7 @@ test("the command set is the documented one", () => {
   assert.deepEqual(commandNames, ["sync", "initial-sync", "lint", "fix", "init", "check"]);
 });
 
-for (const name of commandNames) {
+for (const name of stubNames) {
   test(`${name} prints "not implemented" with its exit code`, () => {
     const result = runCli([name]);
     assert.equal(result.stderr, `${name}: not implemented\n`);
@@ -55,7 +56,7 @@ for (const entry of entries) {
       t.skip("not built; run `npm run build` first");
       return;
     }
-    for (const name of commandNames) {
+    for (const name of stubNames) {
       const child = spawnSync(process.execPath, [entry.file, name], { encoding: "utf8" });
       assert.equal(child.status, COMMANDS[name as keyof typeof COMMANDS].notImplementedExitCode, `${entry.file} ${name}`);
       assert.equal(child.stderr, `${name}: not implemented\n`);
