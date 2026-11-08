@@ -100,6 +100,15 @@ describe('Linear client against a fake Linear', () => {
     assert.equal(logs[0]?.retryAfterSeconds, 2);
   });
 
+  it('does not retry a short Retry-After when the budget is below the floor', async () => {
+    fake.fault = () => ({ ...rateLimited('1'), headers: { 'retry-after': '1', 'x-ratelimit-requests-remaining': '0' } });
+    const linear = client();
+    await assert.rejects(linear.createDocument({ teamId: 'team-1' }, { title: 'Plans' }), LinearStoppedError);
+    assert.equal(fake.graphqlCount(), 1);
+    assert.deepEqual(sleeps, []);
+    assert.equal(linear.stopped?.kind, 'rate-limited');
+  });
+
   it('stops without retrying when Retry-After is long', async () => {
     fake.fault = () => rateLimited('120');
     const linear = client();

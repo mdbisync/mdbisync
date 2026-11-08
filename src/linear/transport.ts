@@ -171,7 +171,9 @@ export class GraphQLTransport {
 
       if (isRateLimited(response.status, body?.errors)) {
         const retryAfterSeconds = parseRetryAfter(response.headers.get('retry-after'));
-        if (attempt === 1 && retryAfterSeconds !== undefined && retryAfterSeconds <= this.#maxRetryAfterSeconds) {
+        const shortWait = retryAfterSeconds !== undefined && retryAfterSeconds <= this.#maxRetryAfterSeconds;
+        // No retry when the same answer also says the budget is below the floor.
+        if (attempt === 1 && shortWait && !findLowBudget(operation, rateLimit, this.#floor)) {
           this.#log({ ...entry, retryAfterSeconds });
           await this.#sleep(retryAfterSeconds * 1000);
           continue;
