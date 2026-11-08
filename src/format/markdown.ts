@@ -15,7 +15,7 @@ export interface SplitFile {
 
 const BOM = '﻿';
 // A leading `---` line, any lines, and a closing `---` line.
-const FRONT_MATTER = /^---\r?\n(?:[^\n]*\n)*?---[ \t]*(?:\r?\n|$)/;
+const FRONT_MATTER = /^---[ \t]*\r?\n(?:[^\n]*\n)*?---[ \t]*(?:\r?\n|$)/;
 const LEADING_BLANK_LINES = /^(?:[ \t]*\r?\n)+/;
 
 /**

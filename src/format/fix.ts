@@ -4,6 +4,7 @@
 // rewrites. A file with a lint finding is left as it is: the author decides.
 
 import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
+import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
 import { lintText } from './lint.ts';
 import { end, parse, splitFile, start, visit } from './markdown.ts';
@@ -31,8 +32,15 @@ function fixBody(body: string): string {
 
 type Edit = { from: number; to: number; text: string };
 
+/** A container whose prefix starts each source line of its content: a quote, or a list item's indentation. */
+type Container = { kind: 'quote' } | { kind: 'item'; indent: number };
+
+// Characters that start a block when they open a line.
+const BLOCK_START = /^(?:[>#*+\-=_`~|]|\d{1,9}[.)])/;
+
 class Writer {
   private readonly definitions = new Map<string, Definition>();
+  private readonly containers: Container[] = [];
   private readonly source: string;
   private readonly tree: Root;
 
@@ -61,17 +69,24 @@ class Writer {
       case 'paragraph':
         return this.paragraph(node);
       case 'heading':
-        return [`${'#'.repeat(node.depth)} ${this.inline(node.children)}`.trimEnd()];
+        // A setext heading can span lines; an ATX heading is one line.
+        return [`${'#'.repeat(node.depth)} ${this.inline(node.children).replace(/[ \t]*\n[ \t]*/g, ' ')}`.trimEnd()];
       case 'thematicBreak':
         return ['---'];
-      case 'blockquote':
-        return [prefixLines(this.blocks(node.children), '> ', '>')];
+      case 'blockquote': {
+        this.containers.push({ kind: 'quote' });
+        const content = this.blocks(node.children);
+        this.containers.pop();
+        return [prefixLines(content, '> ', '>')];
+      }
       case 'list':
         return [this.list(node)];
       case 'code': {
-        const longest = Math.max(0, ...[...node.value.matchAll(/`+/g)].map((m) => m[0].length));
-        const fence = '`'.repeat(Math.max(3, longest + 1));
         const info = [node.lang, node.meta].filter(Boolean).join(' ');
+        // A backtick fence cannot carry a backtick in its info string; keep tildes then.
+        const mark = info.includes('`') ? '~' : '`';
+        const longest = Math.max(0, ...[...node.value.matchAll(mark === '`' ? /`+/g : /~+/g)].map((m) => m[0].length));
+        const fence = mark.repeat(Math.max(3, longest + 1));
         return [`${fence}${info}\n${node.value}${node.value === '' ? '' : '\n'}${fence}`];
       }
       case 'html':
@@ -118,9 +133,10 @@ class Writer {
     const attachment = first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
     if (attachment) {
       // Linear turns a list item holding only a link to a file into a file block.
-      return `${marker} \n${indent}[${this.inline(attachment.children)}](${attachment.url})`;
+      return `${marker} \n${indent}[${this.inline(attachment.children)}](${encodeSpaces(attachment.url)})`;
     }
     if (first === undefined) return marker;
+    this.containers.push({ kind: 'item', indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
     // Blocks of an item are a blank line apart, but a nested list follows
     // its paragraph on the next line. Lint refuses an item that starts with
     // another block, so the first block is a paragraph.
@@ -129,6 +145,7 @@ class Writer {
       if (index > 0) content += child.type === 'list' && item.children[index - 1]?.type === 'paragraph' ? '\n' : '\n\n';
       content += this.block(child).join('\n\n');
     });
+    this.containers.pop();
     return `${marker} ${prefixLines(content, indent, '').slice(indent.length)}`;
   }
 
@@ -147,9 +164,10 @@ class Writer {
   }
 
   /**
-   * Inline content copied from the source with targeted rewrites. Line
-   * prefixes of containers (quote markers, list indentation) and leading
-   * spaces of continuation lines are dropped; the caller writes its own.
+   * Inline content copied from the source with targeted rewrites. The line
+   * prefixes of the containers (quote markers, list indentation) are dropped,
+   * since the caller writes its own, and so is the insignificant indentation
+   * of continuation lines outside code spans.
    */
   private inline(children: readonly PhrasingContent[]): string {
     if (children.length === 0) return '';
@@ -157,6 +175,15 @@ class Writer {
     const to = end(children.at(-1)!);
     const edits: Edit[] = [];
     for (const child of children) this.inlineEdits(child, edits);
+    const code: Array<[number, number]> = [];
+    for (const child of children) {
+      visit(child, (node) => {
+        if (node.type === 'inlineCode') code.push([start(node), end(node)]);
+      });
+    }
+    for (let at = this.source.indexOf('\n', from); at !== -1 && at < to; at = this.source.indexOf('\n', at + 1)) {
+      edits.push(this.continuation(at + 1, code.some(([a, b]) => a <= at && at < b)));
+    }
     let out = '';
     let at = from;
     for (const edit of edits.sort((a, b) => a.from - b.from)) {
@@ -165,10 +192,26 @@ class Writer {
       at = edit.to;
     }
     out += this.source.slice(at, to);
-    return out
-      .split('\n')
-      .map((text, index) => (index === 0 ? text : text.replace(/^(?:[ \t]*>)*[ \t]*/, '')))
-      .join('\n');
+    return out;
+  }
+
+  /** The edit that removes a continuation line's container prefixes, starting at `lineStart`. */
+  private continuation(lineStart: number, inCode: boolean): Edit {
+    let at = lineStart;
+    const line = this.source.slice(lineStart, this.source.indexOf('\n', lineStart) === -1 ? undefined : this.source.indexOf('\n', lineStart));
+    for (const container of this.containers) {
+      const rest = this.source.slice(at, lineStart + line.length);
+      const prefix = container.kind === 'quote' ? /^ {0,3}> ?/.exec(rest) : new RegExp(`^ {0,${container.indent}}`).exec(rest);
+      if (!prefix) break; // a lazy line carries no further prefixes
+      at += prefix[0].length;
+    }
+    if (!inCode) {
+      const rest = this.source.slice(at, lineStart + line.length);
+      const space = /^[ \t]*/.exec(rest)![0];
+      // Indentation that keeps `>` or `#` literal stays, so the text does not turn into a block.
+      if (!BLOCK_START.test(rest.slice(space.length)) || space.length === 0) at += space.length;
+    }
+    return { from: lineStart, to: at, text: '' };
   }
 
   private inlineEdits(node: PhrasingContent, edits: Edit[]): void {
@@ -197,11 +240,11 @@ class Writer {
         return;
       }
       case 'image':
-        edits.push({ from, to, text: `![${node.alt ?? ''}](${encodeSpaces(node.url)})` });
+        edits.push({ from, to, text: `![${this.label(from + 1)}](${imageDestination(node.url)})` });
         return;
       case 'imageReference': {
         const definition = this.definitions.get(node.identifier);
-        if (definition) edits.push({ from, to, text: `![${node.alt ?? ''}](${encodeSpaces(definition.url)})` });
+        if (definition) edits.push({ from, to, text: `![${this.label(from + 1)}](${imageDestination(definition.url)})` });
         return;
       }
       case 'text':
@@ -214,7 +257,19 @@ class Writer {
 
   /** Linear writes every link destination in angle brackets, without a title. */
   private link(children: readonly PhrasingContent[], url: string): string {
-    return `[${this.inline(children)}](<${encodeSpaces(url)}>)`;
+    return `[${this.inline(children)}](<${encodeSpaces(url).replace(/</g, '%3C').replace(/>/g, '%3E')}>)`;
+  }
+
+  /** The bracketed label that opens at `open` (a `[`), as written, without its brackets. */
+  private label(open: number): string {
+    let depth = 0;
+    for (let at = open; at < this.source.length; at++) {
+      const char = this.source[at];
+      if (char === '\\') at++;
+      else if (char === '[') depth++;
+      else if (char === ']' && --depth === 0) return this.source.slice(open + 1, at);
+    }
+    return '';
   }
 }
 
@@ -222,26 +277,28 @@ class Writer {
 function textEdits(source: string, from: number, to: number): Edit[] {
   const edits: Edit[] = [];
   const raw = source.slice(from, to);
-  // Character references become the characters, unless that would make markup.
+  // Character references become the characters when that cannot make markup:
+  // characters outside ASCII, and `&` when no reference follows it.
   for (const match of raw.matchAll(/&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g)) {
     const char = decodeEntity(match[0]);
     const after = raw.slice(match.index + match[0].length);
-    if (char === undefined || /[\\`*_[\]<>#|~!]/.test(char) || char.trim() === '') continue;
-    if (char === '&' && /^[A-Za-z0-9#]+;/.test(after)) continue;
+    if (char === undefined || char.trim() === '') continue;
+    if (char === '&' ? /^[A-Za-z0-9#]+;/.test(after) : char.codePointAt(0)! < 0x80) continue;
     edits.push({ from: from + match.index, to: from + match.index + match[0].length, text: char });
   }
   // `:name:` shortcodes Linear knows become the emoji.
   for (const match of raw.matchAll(/:([a-z0-9_+-]+):/g)) {
-    const emoji = nameToEmoji[match[1]!];
+    const emoji = Object.hasOwn(nameToEmoji, match[1]!) ? nameToEmoji[match[1]!] : undefined;
     if (emoji) edits.push({ from: from + match.index, to: from + match.index + match[0].length, text: emoji });
   }
   // A backslash before a letter is a literal backslash; Linear doubles it.
-  // An escaped `#` inside a line needs no escape and Linear drops it.
+  // An escaped `#` inside a line needs no escape and Linear drops it; at the
+  // start of a line's content or at its end it stays (heading syntax).
   for (const match of raw.matchAll(/\\(.)/g)) {
     const at = from + match.index;
     const next = match[1]!;
     if (/[!-/:-@[-`{-~]/.test(next)) {
-      if (next === '#' && source[at - 1] !== '\n' && at !== 0) edits.push({ from: at, to: at + 1, text: '' });
+      if (next === '#' && insideLine(source, at)) edits.push({ from: at, to: at + 1, text: '' });
     } else {
       edits.push({ from: at, to: at + 1, text: '\\\\' });
     }
@@ -249,15 +306,35 @@ function textEdits(source: string, from: number, to: number): Edit[] {
   return edits;
 }
 
-let entityProbe: { decode(text: string): string } | undefined;
+/** The character a reference stands for, or undefined when it names none. */
 function decodeEntity(reference: string): string | undefined {
-  entityProbe ??= { decode: (text) => parse(text).children.map((node) => (node.type === 'paragraph' ? node.children.map((c) => (c.type === 'text' ? c.value : '')).join('') : '')).join('') };
-  const decoded = entityProbe.decode(reference);
-  return decoded === reference ? undefined : decoded;
+  const name = reference.slice(1, -1);
+  if (!name.startsWith('#')) {
+    const decoded = decodeNamedCharacterReference(name);
+    return decoded === false ? undefined : decoded;
+  }
+  const code = name[1] === 'x' || name[1] === 'X' ? Number.parseInt(name.slice(2), 16) : Number.parseInt(name.slice(1), 10);
+  // Like Markdown, an invalid code point stands for nothing we write.
+  if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return undefined;
+  return String.fromCodePoint(code);
+}
+
+/** Whether the character at `at` has line content before it and after it, ignoring container prefixes. */
+function insideLine(source: string, at: number): boolean {
+  const lineStart = source.lastIndexOf('\n', at - 1) + 1;
+  const lineEnd = source.indexOf('\n', at) === -1 ? source.length : source.indexOf('\n', at);
+  const before = source.slice(lineStart, at).replace(/^(?:[ \t]*(?:>|[*+-](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*/, '');
+  const after = source.slice(at + 2, lineEnd);
+  return before !== '' && !/^[ \t#]*$/.test(after);
 }
 
 function encodeSpaces(url: string): string {
   return url.replace(/ /g, '%20');
+}
+
+/** Linear writes image destinations without angle brackets: characters that would end one are encoded. */
+function imageDestination(url: string): string {
+  return encodeSpaces(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
 /** A paragraph that holds only a link to a relative file other than Markdown: an attachment. */

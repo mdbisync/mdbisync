@@ -2,11 +2,11 @@
 // scratch folder.
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
-import { runFix, runLint } from './command.ts';
+import { markdownFiles, runFix, runLint } from './command.ts';
 import { duplicateTitles, lintText } from './lint.ts';
 import { CONTENT_LIMIT, LINT_RULES, type LintRule } from './rules.ts';
 
@@ -24,6 +24,9 @@ const cases: Array<[LintRule, string, number]> = [
   ['hard-break-backslash', 'one\\\ntwo', 1],
   ['git-conflict-marker', 'Intro.\n\n<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs', 3],
   ['git-conflict-marker', '> <<<<<<< ours', 1],
+  ['git-conflict-marker', 'a\n\n>>>>>>> theirs', 3],
+  ['git-conflict-marker', '> >>>>>>> theirs', 1],
+  ['image-in-link', '[![a][i]](https://example.com)\n\n[i]: x.png', 1],
   ['url-in-html', '<img src="logo.png">', 1],
   ['url-in-html', '<a href="https://example.com">x</a>', 1],
   ['block-first-in-list-item', '* ## Heading\n* Plain', 1],
@@ -86,6 +89,29 @@ describe('lint and fix commands', () => {
     assert.equal(result.exitCode, 1);
     assert.equal(result.stdout, `docs/loss.md:1: subscript: ${LINT_RULES.subscript}\ndocs/fixable.md: not in Linear's form; run fix\n`);
     assert.equal(readFileSync(join(dir, 'docs', 'fixable.md'), 'utf8'), '- a\n- b\n');
+  });
+
+  it('takes absolute paths and refuses options and missing paths', () => {
+    assert.equal(runLint([join(dir, 'docs', 'kept.md')], dir).exitCode, 0);
+    assert.deepEqual(runLint(['--help'], dir), { exitCode: 2, stdout: '', stderr: 'unknown option: --help\n' });
+    assert.deepEqual(runFix(['nowhere'], dir), { exitCode: 2, stdout: '', stderr: 'no such file or folder: nowhere\n' });
+  });
+
+  it('does not follow symbolic links', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'format-outside-'));
+    try {
+      writeFileSync(join(outside, 'other.md'), '- outside\n');
+      symlinkSync(outside, join(dir, 'docs', 'link'));
+      symlinkSync(dir, join(dir, 'docs', 'loop'));
+      assert.deepEqual(markdownFiles(['docs'], dir), ['docs/fixable.md', 'docs/kept.md', 'docs/loss.md']);
+      runFix(['docs'], dir);
+      assert.equal(readFileSync(join(outside, 'other.md'), 'utf8'), '- outside\n');
+      writeFileSync(join(dir, 'docs', 'fixable.md'), '- a\n- b\n'); // as the next test expects
+    } finally {
+      rmSync(join(dir, 'docs', 'link'));
+      rmSync(join(dir, 'docs', 'loop'));
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('fix rewrites, reports what it leaves, and passes on the second run', () => {

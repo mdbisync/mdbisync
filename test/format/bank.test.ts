@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { duplicateTitles, fixText, lintText, splitFile } from '../../src/format/index.ts';
-import { goldenMarkdownPath, loadBank, readOptional, type BankFixture } from '../probe/bank.ts';
+import { goldenMarkdownPath, loadBank, readOptional, sentForm, type BankFixture } from '../probe/bank.ts';
 
 const bank = loadBank();
 const markdown = bank.fixtures.filter((fixture) => fixture.synced !== false && fixture.file.endsWith('.md'));
@@ -31,6 +31,13 @@ describe('fix on the fixture bank', () => {
       }
     });
   }
+});
+
+describe('front matter', () => {
+  it('fix splits off what the probe does not send', () => {
+    const samples = [...markdown.map(read), '--- \na: 1\n---\n\nBody', '\uFEFF---\na: 1\n---\nBody', '---\nno closing line'];
+    for (const text of samples) assert.equal(splitFile(text).body, sentForm(text).replace(/^\uFEFF/, ''), JSON.stringify(text.slice(0, 40)));
+  });
 });
 
 describe('lint on the fixture bank', () => {

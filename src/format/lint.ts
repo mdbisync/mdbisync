@@ -7,7 +7,7 @@ import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.
 import { end, line, lineCount, parse, splitFile, start, visit } from './markdown.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
-const QUOTE_PREFIX = /^(?: {0,3}> ?)+/;
+const QUOTE_PREFIX = /^ {0,3}> ?/;
 const URL_OR_LINK_ATTRIBUTE = /[a-z][a-z0-9+.-]*:\/\/|\b(?:src|href)\s*=/i;
 
 /** Lint findings for one file's text, ordered by line. */
@@ -68,7 +68,7 @@ function lintTree(tree: Root, body: string, report: (rule: LintRule, line: numbe
         break;
       case 'link':
         if (node.title) report('link-title', line(node));
-        if (node.children.some((child) => child.type === 'image')) report('image-in-link', line(node));
+        if (node.children.some((child) => child.type === 'image' || child.type === 'imageReference')) report('image-in-link', line(node));
         break;
       case 'linkReference': {
         const definition = definitions.get(node.identifier);
@@ -91,8 +91,19 @@ function lintTree(tree: Root, body: string, report: (rule: LintRule, line: numbe
   });
   // Git's own conflict markers, outside code: Linear turns them into headings,
   // quotes and collapsible sections.
+  // A closing marker `>>>>>>>` looks like quote prefixes: test the line
+  // before each quote prefix is taken off.
   body.split('\n').forEach((text, index) => {
-    if (!codeLines.has(index + 1) && GIT_MARKER.test(text.replace(QUOTE_PREFIX, ''))) report('git-conflict-marker', index + 1);
+    if (codeLines.has(index + 1)) return;
+    for (let rest = text; ; ) {
+      if (GIT_MARKER.test(rest)) {
+        report('git-conflict-marker', index + 1);
+        return;
+      }
+      const prefix = QUOTE_PREFIX.exec(rest);
+      if (!prefix) return;
+      rest = rest.slice(prefix[0].length);
+    }
   });
 }
 

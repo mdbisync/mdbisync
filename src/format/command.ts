@@ -1,8 +1,8 @@
 // The `lint` and `fix` commands: Markdown files given as paths (folders are
 // searched for `.md` files), checked or rewritten into Linear's form.
 
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
 import { fixText } from './fix.ts';
 import { duplicateTitles, lintText } from './lint.ts';
 import type { Finding } from './rules.ts';
@@ -16,21 +16,36 @@ export interface CommandResult {
 /** Folders never searched: version control and installed packages. */
 const SKIPPED_FOLDERS = new Set(['.git', 'node_modules']);
 
-/** `.md` files under the paths, as written relative to the working folder, sorted. */
+/** Exit code for a bad command line: an option or a path that does not exist. */
+export const USAGE_ERROR = 2;
+
+/**
+ * `.md` files under the paths, written relative to the working folder and
+ * sorted. Symbolic links are not followed, so a link cannot lead `fix` out
+ * of the given tree or into a loop.
+ */
 export function markdownFiles(paths: readonly string[], cwd: string = process.cwd()): string[] {
   const found = new Set<string>();
-  const walk = (path: string): void => {
-    const stat = statSync(join(cwd, path));
+  const walk = (absolute: string): void => {
+    const stat = lstatSync(absolute);
     if (stat.isDirectory()) {
-      for (const name of readdirSync(join(cwd, path))) {
-        if (!SKIPPED_FOLDERS.has(name)) walk(path === '.' ? name : `${path}/${name}`);
+      for (const name of readdirSync(absolute).sort()) {
+        if (!SKIPPED_FOLDERS.has(name)) walk(join(absolute, name));
       }
-    } else if (path.endsWith('.md')) {
-      found.add(relative(cwd, join(cwd, path)).split(sep).join('/'));
+    } else if (stat.isFile() && absolute.endsWith('.md')) {
+      found.add(relative(cwd, absolute).split(sep).join('/'));
     }
   };
-  for (const path of paths.length > 0 ? paths : ['.']) walk(path);
+  for (const path of paths.length > 0 ? paths : ['.']) walk(resolve(cwd, path));
   return [...found].sort();
+}
+
+/** A usage problem in the paths, or undefined: options are not supported, every path must exist. */
+function badPaths(paths: readonly string[], cwd: string): string | undefined {
+  const option = paths.find((path) => path.startsWith('-'));
+  if (option !== undefined) return `unknown option: ${option}`;
+  const missing = paths.find((path) => !existsSync(resolve(cwd, path)));
+  return missing === undefined ? undefined : `no such file or folder: ${missing}`;
 }
 
 function lintAll(files: readonly string[], cwd: string): Finding[] {
@@ -44,6 +59,8 @@ function describe(findings: readonly Finding[]): string {
 
 /** `lint`: exit 1 and one line per finding when Linear would lose or alter something, or a file is not in Linear's form. */
 export function runLint(paths: readonly string[], cwd: string = process.cwd()): CommandResult {
+  const problem = badPaths(paths, cwd);
+  if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
   const findings = lintAll(files, cwd);
   const failing = new Set(findings.map((finding) => finding.file));
@@ -58,6 +75,8 @@ export function runLint(paths: readonly string[], cwd: string = process.cwd()): 
 
 /** `fix`: rewrites files into Linear's form; exit 1 when a file changed or lint found a problem `fix` leaves to the author. */
 export function runFix(paths: readonly string[], cwd: string = process.cwd()): CommandResult {
+  const problem = badPaths(paths, cwd);
+  if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
   const changed: string[] = [];
   for (const file of files) {

@@ -70,6 +70,63 @@ describe('what fix leaves alone', () => {
     it(name, () => assert.equal(fixText(text), text));
   }
 
+  it('keeps text that would turn into markup', () => {
+    for (const text of [
+      '* \\# not a heading',
+      '> \\# not a heading',
+      'a\n\\# b',
+      '## Issue \\#',
+      '&#45; not a list',
+      'Text\n&#61;&#61;&#61;',
+      '&#36;&#36;',
+      '&#58;tada&#58;',
+      ':constructor: :toString:',
+    ]) {
+      assert.equal(fixText(text), text, text);
+    }
+  });
+
+  it('keeps a literal > or # at the start of a continuation line', () => {
+    assert.equal(fixText('a\n    > b'), 'a\n    > b');
+    assert.equal(fixText('a\n    # b'), 'a\n    # b');
+  });
+
+  it('keeps spaces that belong to a code span across lines', () => {
+    assert.equal(fixText('`a\n  b`'), '`a\n  b`');
+    assert.equal(fixText('> `a\n>   b`'), '> `a\n>   b`');
+  });
+
+  it('writes a setext heading of two lines as one ATX line', () => {
+    assert.equal(fixText('Title\nmore\n====='), '# Title more');
+  });
+
+  it('keeps image alt text and destinations valid', () => {
+    assert.equal(fixText('![a\\]b](x.png)'), '![a\\]b](x.png)');
+    assert.equal(fixText('![a](<a)b.png>)'), '![a](a%29b.png)');
+  });
+
+  it('encodes characters that would end an angle-bracket destination', () => {
+    assert.equal(fixText('[a](https://example.com/?q=a&gt;b)'), '[a](<https://example.com/?q=a%3Eb>)');
+  });
+
+  it('encodes spaces in a file block destination', () => {
+    assert.equal(fixText('* [Report](<my report.pdf>)'), '* \n  [Report](my%20report.pdf)');
+  });
+
+  it('keeps a tilde fence whose info string holds a backtick', () => {
+    assert.equal(fixText('~~~ foo`bar\nx\n~~~'), '~~~foo`bar\nx\n~~~');
+  });
+
+  it('settles a list that mixes task and plain items', () => {
+    const once = fixText('* [ ] a\n* b');
+    assert.equal(once, '- [ ] a\n\n* b');
+    assert.equal(fixText(once), once);
+  });
+
+  it('treats an opening line with trailing spaces as front matter', () => {
+    assert.equal(fixText('--- \ntitle: x\n---\n\n- a'), '--- \ntitle: x\n---\n\n* a');
+  });
+
   it('fixes the body after front matter and keeps the front matter', () => {
     assert.equal(fixText('---\na: 1\n---\n\n- item\n'), '---\na: 1\n---\n\n* item');
   });
