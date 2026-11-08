@@ -2,8 +2,7 @@
 // of a folder's `README.md` say which Linear team and project the folder
 // maps to. Folders without one inherit from their parent.
 
-import { parse } from 'yaml';
-import { findFrontMatter } from './front-matter.ts';
+import { findFrontMatter, parseQuietly } from './front-matter.ts';
 
 export const ANNOTATION_FILE = 'README.md';
 export const TEAM_KEY = 'linear-team';
@@ -48,7 +47,7 @@ export function readAnnotation(readme: string, text: string): ReadAnnotation {
 
   let data: unknown;
   try {
-    data = parse(frontMatter.yaml);
+    data = parseQuietly(frontMatter.yaml);
   } catch {
     if (!MENTIONS_KEY.test(frontMatter.yaml)) return { annotation: null };
     return { problem: { readme, kind: 'invalid-annotation', message: `${readme}: the front matter with ${TEAM_KEY} or ${PROJECT_KEY} is not valid YAML` } };

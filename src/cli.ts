@@ -16,6 +16,7 @@ import { runFix, runLint } from "./format/command.ts";
 import { writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
+import { type Operation } from "./run/preflight.ts";
 import { Git } from "./state/index.ts";
 import { VERSION } from "./version.ts";
 
@@ -65,7 +66,7 @@ export async function runCli(args: readonly string[], options: CliOptions = {}):
   if (first === "fix") return runFix(args.slice(1));
   if (first !== undefined && isCommandName(first)) {
     if ((PREFLIGHT_COMMANDS as readonly string[]).includes(first)) {
-      return runPreflightCommand(first as (typeof PREFLIGHT_COMMANDS)[number], options);
+      return runPreflightCommand(first as Operation, options);
     }
     return notImplemented(first);
   }
@@ -73,7 +74,7 @@ export async function runCli(args: readonly string[], options: CliOptions = {}):
   return { exitCode: USAGE_EXIT_CODE, stdout: "", stderr: `${problem}\n\n${usage()}` };
 }
 
-async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number], options: CliOptions): Promise<CliResult> {
+async function runPreflightCommand(command: Operation, options: CliOptions): Promise<CliResult> {
   const env = options.env ?? process.env;
   const input = (name: InputName) => env[environmentName(name)] ?? "";
   let inputs;

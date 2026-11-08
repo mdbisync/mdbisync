@@ -5,7 +5,7 @@
 // writes, and the report holds names and states only.
 
 import { type LinearClient } from '../linear/index.ts';
-import { type RepositoryMapping, resolveZones } from '../mapping/index.ts';
+import { type RepositoryMapping } from '../mapping/index.ts';
 import { type GitHubCheck } from './github.ts';
 import { type HookConfig, checkLinearFormatHook, checkSecurityHooks, securityHooks } from './hooks.ts';
 import { type ResolvedTargets, checkLinearScopes, linearCredentialFailure, resolveTargets } from './linear.ts';
@@ -37,7 +37,7 @@ export async function runSetupCheck(input: SetupInput): Promise<SetupResult> {
   } else {
     credentials = checkLinearScopes(input.linear.scope);
     if (credentials.state === 'passed' && annotations.state === 'passed') {
-      const resolved = await resolveTargets(input.linear.client, resolveZones(input.mapping.annotations).zones.values());
+      const resolved = await resolveTargets(input.linear.client, input.mapping.zones.values());
       if (resolved.credentials !== undefined) credentials = resolved.credentials;
       targets = resolved;
     } else if (annotations.state !== 'passed') {

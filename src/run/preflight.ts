@@ -2,7 +2,7 @@
 // its state, and every operation checks the setup. The run's Linear token
 // is minted here and revoked when the run's work is done, also on failure.
 
-import { LinearClient, RequestStats, mintAppToken, revokeToken } from '../linear/index.ts';
+import { LinearClient, RequestStats, withRunToken } from '../linear/index.ts';
 import { type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import {
   type FailureCode,
@@ -20,9 +20,10 @@ import {
 } from '../setup/index.ts';
 import { type FetchedState, type Git, fetchState } from '../state/index.ts';
 import { type RunInputs } from './inputs.ts';
+import { type PREFLIGHT_COMMANDS } from '../commands.ts';
 
-export const OPERATIONS = ['sync', 'initial-sync', 'check'] as const;
-export type Operation = (typeof OPERATIONS)[number];
+/** The operations that start with the preflight. */
+export type Operation = (typeof PREFLIGHT_COMMANDS)[number];
 
 /** What a run that passed its preflight works with. */
 export interface RunContext {
@@ -74,26 +75,24 @@ export async function runPreflight(
 
   const stats = new RequestStats();
   const tokenOptions = { baseUrl: inputs.linear.apiUrl, stats, ...(options.fetch ? { fetch: options.fetch } : {}) };
-  let token;
+  const credentials = { clientId: inputs.linear.clientId, clientSecret: inputs.linear.clientSecret };
+  const onRevokeError = (error: unknown) =>
+    options.warn(`the run's Linear token could not be revoked: ${error instanceof Error ? error.message : String(error)}`);
+  let minted = false;
   try {
-    token = await mintAppToken({ clientId: inputs.linear.clientId, clientSecret: inputs.linear.clientSecret }, tokenOptions);
+    return await withRunToken(credentials, { ...tokenOptions, onRevokeError }, async (token) => {
+      minted = true;
+      const linear = new LinearClient({ token: token.accessToken, baseUrl: inputs.linear.apiUrl, stats, ...(options.fetch ? { fetch: options.fetch } : {}) });
+      const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
+      if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear });
+      return outcome(operation, report);
+    });
   } catch (error) {
-    if (!isCredentialError(error)) throw error;
+    // Only Linear's refusal of the credentials is a setup failure; an outage or
+    // a lost request is an error of the run.
+    if (minted || !isCredentialError(error)) throw error;
     const { report } = await runSetupCheck({ mapping, hooks, github, linear: { error: 'Linear refused the OAuth app client credentials' } });
     return outcome(operation, report);
-  }
-
-  try {
-    const linear = new LinearClient({ token: token.accessToken, baseUrl: inputs.linear.apiUrl, stats, ...(options.fetch ? { fetch: options.fetch } : {}) });
-    const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
-    if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear });
-    return outcome(operation, report);
-  } finally {
-    try {
-      await revokeToken(token.accessToken, tokenOptions);
-    } catch (error) {
-      options.warn(`the run's Linear token could not be revoked: ${error instanceof Error ? error.message : String(error)}`);
-    }
   }
 }
 

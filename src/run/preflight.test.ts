@@ -96,6 +96,13 @@ describe('preflight', () => {
     assert.equal(world.revoked, 1);
   });
 
+  it('a Linear outage while minting is an error of the run, not a credential failure', async () => {
+    const world = fakeWorld();
+    world.linear.unavailable = true;
+    await assert.rejects(runCli(['check'], { env: env(), cwd, fetch: fakeFetch(world) }), /oauth\.token: Linear refused the token request/);
+    assert.deepEqual(world.writes, []);
+  });
+
   it('check passes with exit code 0', async () => {
     const { result } = await run('check', fakeWorld());
     assert.equal(result.exitCode, 0);

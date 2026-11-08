@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { LinearClient } from '../linear/index.ts';
-import { type RepositoryMapping } from '../mapping/index.ts';
+import { type RepositoryMapping, resolveZones } from '../mapping/index.ts';
 import {
   CHECK_NAMES,
   checkGitHub,
@@ -32,7 +32,7 @@ const PRE_COMMIT = `repos:
 const target = (world: ReturnType<typeof fakeWorld>) => ({ repository: 'owner/repo', token: 'gh-token', commit: 'a'.repeat(40), apiUrl: GITHUB_API, fetch: fakeFetch(world) });
 
 function mapping(annotations: RepositoryMapping['annotations']): RepositoryMapping {
-  return { annotations, problems: [], documents: [], unsynced: [], leftOut: [] };
+  return { annotations, zones: resolveZones(annotations).zones, problems: [], documents: [], unsynced: [], leftOut: [] };
 }
 
 const MINI = mapping([
@@ -84,6 +84,12 @@ describe('GitHub access', () => {
       assert.equal(result.access.detail, `the GitHub token lacks ${permission}${unchecked}`);
       assert.equal(result.mergeCommits.state, permission === 'contents:write' ? 'not-checked' : 'passed');
     }
+  });
+
+  it('treats a rate-limit 403 as an error of the run, not a missing permission', async () => {
+    const world = fakeWorld();
+    world.github.rateLimited = true;
+    await assert.rejects(checkGitHub(target(world)), /GitHub rate-limited the setup check while checking contents:write/);
   });
 
   it('stops on disallowed merge commits and on a refused token', async () => {
@@ -145,6 +151,43 @@ describe('setup check', () => {
       assert.match(report.checks.find((check) => check.name === 'annotation-targets')?.detail ?? '', named, label);
       assert.equal(targets, undefined, label);
     }
+  });
+
+  it('fails when two folders map to one Linear project or one team zone, also when named by key and by name', async () => {
+    const cases: Array<[RepositoryMapping, RegExp]> = [
+      [
+        mapping([
+          { folder: 'eng', readme: 'eng/README.md', team: 'ENG' },
+          { folder: 'platform', readme: 'platform/README.md', team: 'Engineering' },
+        ]),
+        /the documents of team "Engineering" \(eng\/, platform\/\)/,
+      ],
+      [
+        mapping([
+          { folder: 'a', readme: 'a/README.md', team: 'ENG', project: 'Field notes' },
+          { folder: 'b', readme: 'b/README.md', team: 'Engineering', project: 'Field notes' },
+        ]),
+        /project "Field notes" \(a\/, b\/\)/,
+      ],
+    ];
+    for (const [map, named] of cases) {
+      const { report, targets } = await run(fakeWorld(), map);
+      assert.equal(report.code, 'annotation-target-shared');
+      assert.match(report.checks.find((check) => check.name === 'annotation-targets')?.detail ?? '', named);
+      assert.equal(targets, undefined);
+    }
+  });
+
+  it('looks up many annotated teams in pages and finds every one', async () => {
+    const world = fakeWorld();
+    const many = Array.from({ length: 130 }, (_, index) => ({ id: `team-${index}`, key: `T${index}`, name: `Team ${index}` }));
+    world.linear.teams = many;
+    world.linear.projects = [];
+    const map = mapping(many.map((team, index) => ({ folder: `t${index}`, readme: `t${index}/README.md`, team: index % 2 === 0 ? team.key : team.name })));
+    const { report, targets } = await run(world, map);
+    assert.equal(report.ok, true, JSON.stringify(report.checks));
+    assert.equal(targets?.teams.size, 130);
+    assert.equal(world.requests.filter((request) => request.startsWith(`POST ${LINEAR_API}/graphql`)).length, 2);
   });
 
   it('fails on refused Linear credentials or a token without write', async () => {

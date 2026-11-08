@@ -2,7 +2,7 @@
 // which hooks are marked `alias: security`, and whether the Linear-format
 // hook is configured.
 
-import { parse } from 'yaml';
+import { parseQuietly } from '../mapping/front-matter.ts';
 import { type CheckResult, failed, passed } from './report.ts';
 
 export const PRE_COMMIT_CONFIG = '.pre-commit-config.yaml';
@@ -23,7 +23,7 @@ export function readHookConfig(text: string | null): HookConfig {
   if (text === null) return { hooks: [] };
   let data: unknown;
   try {
-    data = parse(text);
+    data = parseQuietly(text);
   } catch {
     return { hooks: [], invalid: `${PRE_COMMIT_CONFIG} is not valid YAML` };
   }

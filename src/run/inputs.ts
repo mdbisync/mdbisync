@@ -3,7 +3,7 @@
 // not belong in arguments). Empty means "not given".
 
 import { DIRECTIONS, type Direction } from '../initial-sync/summary.ts';
-import { type StateConfig, resolveStateConfig } from '../state/index.ts';
+import { type StateConfig, StateConfigError, resolveStateConfig } from '../state/index.ts';
 
 export const INPUT_NAMES = [
   'linear-client-id',
@@ -61,7 +61,7 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   const inputs: RunInputs = {
     linear,
     github: { token, repository },
-    state: resolveStateConfig({ trackedBranch: value('tracked-branch'), syncBranch: value('sync-branch'), refPrefix: value('state-ref-prefix') }),
+    state: stateConfig(value('tracked-branch'), value('sync-branch'), value('state-ref-prefix')),
   };
   const linearApiUrl = value('linear-api-url');
   if (linearApiUrl !== '') inputs.linear.apiUrl = linearApiUrl;
@@ -87,4 +87,13 @@ export function readInitialSyncInputs(get: (name: InputName) => string): Initial
     throw new InputError(`the input direction ${given} (initial sync never picks a direction itself)`);
   }
   return { direction: direction as Direction, confirm: get('confirm').trim() === 'true' };
+}
+
+function stateConfig(trackedBranch: string, syncBranch: string, refPrefix: string): StateConfig {
+  try {
+    return resolveStateConfig({ trackedBranch, syncBranch, refPrefix });
+  } catch (error) {
+    if (error instanceof StateConfigError) throw new InputError(error.message);
+    throw error;
+  }
 }

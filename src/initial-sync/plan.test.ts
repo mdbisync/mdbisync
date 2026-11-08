@@ -23,7 +23,7 @@ function mapTree(files: Record<string, string>): { mapping: RepositoryMapping; t
   const { annotations } = collectAnnotations(readmes);
   const { zones } = resolveZones(annotations);
   const wanted = new Set(candidateFiles(entries, zones).map((e) => e.oid));
-  const mapping: RepositoryMapping = { annotations, problems: [], ...mapFiles(entries, zones, new Map([...blobs].filter(([oid]) => wanted.has(oid)))) };
+  const mapping: RepositoryMapping = { annotations, problems: [], zones, ...mapFiles(entries, zones, new Map([...blobs].filter(([oid]) => wanted.has(oid)))) };
   return { mapping, texts: new Map(mapping.documents.map((d) => [d.path, files[d.path] as string])) };
 }
 
