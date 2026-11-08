@@ -33,7 +33,9 @@ export type BankCopy = {
 };
 
 function corpusPath(entry: BankEntry): string {
-  if (entry.name_as !== undefined) return `${COLLISIONS}/${entry.name_as}`;
+  // name_as is the colliding path within the bank; both names of a pair share
+  // a folder there, so their file names collide in the collisions folder too.
+  if (entry.name_as !== undefined) return `${COLLISIONS}/${posix.basename(entry.name_as)}`;
   if (entry.file.startsWith("unsynced/")) return `${BANK_UNSYNCED}/${entry.file.slice("unsynced/".length)}`;
   return `${BANK_HOME}/${entry.file}`;
 }
