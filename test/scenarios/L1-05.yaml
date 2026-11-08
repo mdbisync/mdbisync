@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "id": "L1-05",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "empty",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "run",
+      "action": "initial-sync",
+      "args": {
+        "direction": "git-to-linear",
+        "confirm": true
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "documents.mapping",
+        "operator": "same-as",
+        "expected": "expected.annotationMapping"
+      },
+      {
+        "subject": "documents.unsyncedPaths",
+        "operator": "equal",
+        "expected": []
+      }
+    ]
+  }
+}

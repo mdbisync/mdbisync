@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "id": "L3-18",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "git",
+      "action": "move",
+      "args": {
+        "destination": "project/guides/renamed.md"
+      }
+    },
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "documents.title",
+        "operator": "equal",
+        "expected": "guides/renamed"
+      },
+      {
+        "subject": "tracked.body",
+        "operator": "same-as",
+        "expected": "edited.linearBody"
+      }
+    ]
+  }
+}

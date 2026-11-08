@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "id": "L0-05",
+  "slice": "bank",
+  "mode": "local",
+  "setup": {
+    "state": "empty",
+    "fixtures": [
+      "bank"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "run",
+      "action": "probe",
+      "args": {
+        "passes": 2,
+        "measure": [
+          "title-limit",
+          "content-limit",
+          "mutation-stored-content",
+          "query-complexity",
+          "upload-limit",
+          "rate-headers",
+          "archive-trash-query",
+          "content-state"
+        ]
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": false,
+        "reason": "The probe measures format behavior without a sync baseline."
+      },
+      "I2": {
+        "required": false,
+        "reason": "The probe measures format behavior without a sync baseline."
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": false,
+        "reason": "The probe measures format behavior without a sync baseline."
+      },
+      "I7": {
+        "required": false,
+        "reason": "The probe measures format behavior without a sync baseline."
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": false,
+        "reason": "The format probe deliberately writes and reads each fixture twice; the sync request-efficiency invariant does not measure probe traffic."
+      }
+    },
+    "assertions": [
+      {
+        "subject": "probe.secondReadback",
+        "operator": "same-as",
+        "expected": "probe.firstReadback"
+      },
+      {
+        "subject": "probe.firstReadback",
+        "operator": "same-as",
+        "expected": "golden.linearForm"
+      },
+      {
+        "subject": "probe.drift",
+        "operator": "equal",
+        "expected": []
+      }
+    ]
+  }
+}
