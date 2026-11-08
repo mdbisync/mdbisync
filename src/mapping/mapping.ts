@@ -47,6 +47,7 @@ export interface LeftOutFile {
   path: string;
   rule: 'duplicate-title';
   title: string;
+  place: Place;
   collidesWith: string[];
 }
 
@@ -152,6 +153,7 @@ function separateCollisions(mapped: readonly MappedDocument[]): { documents: Map
         path: document.path,
         rule: 'duplicate-title',
         title: document.title,
+        place: document.place,
         collidesWith: group.filter((other) => other !== document).map((other) => other.path),
       });
     }

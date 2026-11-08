@@ -6,8 +6,8 @@
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
 import { writeRunReport } from "../run/finish.ts";
-import { readInputs } from "../run/inputs.ts";
-import { runPreflight } from "../run/preflight.ts";
+import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
+import { runOperation } from "../run/operation.ts";
 import { Git } from "../state/index.ts";
 
 export const OPERATIONS = ["sync", "initial-sync"] as const;
@@ -24,8 +24,10 @@ export function parseOperation(value: string): Operation {
 export async function run(): Promise<void> {
   try {
     const operation = parseOperation(core.getInput("operation"));
-    const inputs = readInputs((name) => core.getInput(name));
-    const outcome = await runPreflight(operation, inputs, {
+    const get = (name: InputName) => core.getInput(name);
+    const inputs = readInputs(get);
+    const initialSync = operation === "initial-sync" ? readInitialSyncInputs(get) : undefined;
+    const outcome = await runOperation(operation, inputs, initialSync, {
       git: new Git(process.env["GITHUB_WORKSPACE"] || process.cwd()),
       warn: (message) => core.warning(message),
     });
@@ -37,7 +39,7 @@ export async function run(): Promise<void> {
       core.setFailed(`${operation}: stopped before any write (${outcome.code})`);
       return;
     }
-    core.setFailed(notImplementedMessage(operation));
+    if (outcome.notImplemented) core.setFailed(notImplementedMessage(operation));
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
   }

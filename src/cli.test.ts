@@ -2,12 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { COMMANDS, IMPLEMENTED, PREFLIGHT_COMMANDS, USAGE_EXIT_CODE, type CommandName } from "./commands.ts";
+import { COMMANDS, FORMAT_COMMANDS, PREFLIGHT_COMMANDS, USAGE_EXIT_CODE } from "./commands.ts";
 import { runCli } from "./cli.ts";
 import { VERSION } from "./version.ts";
 
 const commandNames = Object.keys(COMMANDS);
-const stubNames = commandNames.filter((name) => !IMPLEMENTED.has(name as CommandName) && !(PREFLIGHT_COMMANDS as readonly string[]).includes(name));
+const stubNames = commandNames.filter((name) => ![...PREFLIGHT_COMMANDS, ...FORMAT_COMMANDS].includes(name as never));
 /** An environment without any MDBISYNC_* input. */
 const bareEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("MDBISYNC_") && key !== "GITHUB_REPOSITORY"));
 
