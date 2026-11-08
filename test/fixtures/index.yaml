@@ -44,7 +44,6 @@ rules:
     title: "Documents over 250,000 characters are rejected."
   - id: duplicate-title
     title: "Two files map to one document title."
-    covered_by: corpus
 known_constructs:
   - construct: math-block-dollars
     class: fixable
@@ -1600,6 +1599,46 @@ fixtures:
     rule: image-in-link
     basis: known
     canary: kx-59a1eafa
+  - file: "lint-errors/duplicate-title/guide-upper.md"
+    group: lint-errors
+    construct: duplicate-title
+    class: lint-error
+    rule: duplicate-title
+    basis: assumed
+    canary: kx-da467a89
+    name_as: "lint-errors/duplicate-title/Guide.md"
+    macos_unsafe: true
+    note: "written under name_as only on a case- and normalization-sensitive file system"
+  - file: "lint-errors/duplicate-title/guide-lower.md"
+    group: lint-errors
+    construct: duplicate-title
+    class: lint-error
+    rule: duplicate-title
+    basis: assumed
+    canary: kx-fe042609
+    name_as: "lint-errors/duplicate-title/guide.md"
+    macos_unsafe: true
+    note: "written under name_as only on a case- and normalization-sensitive file system"
+  - file: "lint-errors/duplicate-title/cafe-nfc.md"
+    group: lint-errors
+    construct: duplicate-title
+    class: lint-error
+    rule: duplicate-title
+    basis: assumed
+    canary: kx-870ca26e
+    name_as: "lint-errors/duplicate-title/café.md"
+    macos_unsafe: true
+    note: "written under name_as only on a case- and normalization-sensitive file system"
+  - file: "lint-errors/duplicate-title/cafe-nfd.md"
+    group: lint-errors
+    construct: duplicate-title
+    class: lint-error
+    rule: duplicate-title
+    basis: assumed
+    canary: kx-4bfa9699
+    name_as: "lint-errors/duplicate-title/café.md"
+    macos_unsafe: true
+    note: "written under name_as only on a case- and normalization-sensitive file system"
   - file: "lint-errors/badge-in-link.md"
     group: lint-errors
     construct: image-in-link

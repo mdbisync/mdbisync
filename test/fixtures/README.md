@@ -36,14 +36,19 @@ Each fixture entry has:
 | `canary_in` | `name` when the file cannot hold text (an empty file): the token is in the file name |
 | `synced` | `false` for files that are never synchronized |
 | `missing_target` | `true` when a broken relative link is the point of the fixture |
+| `name_as` | the colliding name a test writes the fixture under (see below) |
+| `macos_unsafe` | `true` together with `name_as` |
 | `note` | free text |
 
-A rule in `rules` needs at least one fixture, unless it has
-`covered_by: corpus`: its cases cannot live in the bank and the corpus
-generator builds them instead. For example, two file names that differ only
-in case or Unicode normalization cannot both be checked out on macOS. Only
-`.md` files are synchronized, so a `.markdown` file next to an `.md` file of
-the same name is ignored and does not collide with it.
+Every rule in `rules` needs at least one fixture. Only `.md` files are
+synchronized and treated as Markdown, so a `.markdown` file next to an
+`.md` file of the same name is ignored and does not collide with it.
+
+Two file names that differ only in case or Unicode normalization map to one
+title, but macOS and Windows cannot check both out. Such fixtures are
+committed under safe names, with `name_as` giving the name a test writes
+them under on a case- and normalization-sensitive file system, and
+`macos_unsafe: true`. Each `name_as` must collide with another fixture's.
 
 `known_constructs` lists the constructs whose behavior is already known,
 with their class. Every one needs a fixture with basis `known`, every

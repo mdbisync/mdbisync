@@ -115,11 +115,26 @@ test('an unchanged fixture with a final line break is reported', () => {
   }
 });
 
-test('a rule needs a fixture unless the corpus covers it', () => {
-  const errors = withCopy((d) => editIndex(d, '    covered_by: corpus\n', ''));
-  assert.ok(errors.includes('rule duplicate-title: no fixtures'), errors.join('\n'));
-  const wrong = withCopy((d) => editIndex(d, '    covered_by: corpus\n', '    covered_by: elsewhere\n'));
-  assert.ok(wrong.includes('rule duplicate-title: covered_by can only be corpus'), wrong.join('\n'));
+test('a colliding name needs its marker and a partner', () => {
+  const unmarked = withCopy((d) => {
+    const p = join(d, 'index.yaml');
+    const text = readFileSync(p, 'utf8');
+    writeFileSync(p, text.replace(/(name_as: "lint-errors\/duplicate-title\/Guide\.md"\n) {4}macos_unsafe: true\n/, '$1'));
+  });
+  assert.ok(unmarked.includes('lint-errors/duplicate-title/guide-upper.md: name_as and macos_unsafe: true go together'), unmarked.join('\n'));
+  const alone = withCopy((d) => editIndex(d, 'name_as: "lint-errors/duplicate-title/guide.md"', 'name_as: "lint-errors/duplicate-title/other.md"'));
+  assert.ok(alone.includes('lint-errors/duplicate-title/guide-upper.md: name_as has no colliding partner'), alone.join('\n'));
+  const elsewhere = withCopy((d) => editIndex(d, 'name_as: "lint-errors/duplicate-title/Guide.md"', 'name_as: "tables/Guide.md"'));
+  assert.ok(elsewhere.includes('lint-errors/duplicate-title/guide-upper.md: name_as must be a .md name in the same folder'), elsewhere.join('\n'));
+});
+
+test('only .md files count as Markdown', () => {
+  const errors = withCopy((d) => {
+    const p = join(d, 'unsynced', 'markdown-extension', 'plan.markdown');
+    writeFileSync(p, readFileSync(p, 'utf8') + ' [x](nowhere.md)');
+    editIndex(d, '    synced: false\n    note: "ignored, so it does not collide with plan.md"', '    note: "ignored, so it does not collide with plan.md"');
+  });
+  assert.ok(!errors.some((e) => e.startsWith('unsynced/markdown-extension/plan.markdown')), errors.join('\n'));
 });
 
 test('a fixture indexed twice is reported', () => {
