@@ -2,6 +2,7 @@
 // reads the same names from `MDBISYNC_*` environment variables (secrets do
 // not belong in arguments). Empty means "not given".
 
+import { DIRECTIONS, type Direction } from '../initial-sync/summary.ts';
 import { type StateConfig, StateConfigError, resolveStateConfig } from '../state/index.ts';
 
 export const INPUT_NAMES = [
@@ -15,6 +16,8 @@ export const INPUT_NAMES = [
   'sync-branch',
   'state-ref-prefix',
   'report-file',
+  'direction',
+  'confirm',
 ] as const;
 export type InputName = (typeof INPUT_NAMES)[number];
 
@@ -76,4 +79,21 @@ function stateConfig(trackedBranch: string, syncBranch: string, refPrefix: strin
     if (error instanceof StateConfigError) throw new InputError(error.message);
     throw error;
   }
+}
+
+/** The initial sync's own inputs. */
+export interface InitialSyncInputs {
+  direction: Direction;
+  /** Only the exact value `true` confirms; anything else is a dry run. */
+  confirm: boolean;
+}
+
+/** Reads `direction` (required, no default) and `confirm` for an initial sync. */
+export function readInitialSyncInputs(get: (name: InputName) => string): InitialSyncInputs {
+  const direction = get('direction').trim();
+  if (!(DIRECTIONS as readonly string[]).includes(direction)) {
+    const given = direction === '' ? 'is required' : `must be one of ${DIRECTIONS.join(', ')}, not "${direction}"`;
+    throw new InputError(`the input direction ${given} (initial sync never picks a direction itself)`);
+  }
+  return { direction: direction as Direction, confirm: get('confirm').trim() === 'true' };
 }

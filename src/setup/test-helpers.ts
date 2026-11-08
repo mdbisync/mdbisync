@@ -20,10 +20,21 @@ export interface FakeProject {
   teamIds: string[];
 }
 
+/** A document in a project, or in a team outside projects (the team zone). */
+export interface FakeDocument {
+  id: string;
+  title: string;
+  projectId?: string;
+  teamId?: string;
+  createdAt: string;
+  trashed?: boolean;
+  archivedAt?: string;
+}
+
 export interface FakeWorld {
   github: { tokenValid: boolean; missing: Set<string>; allowMergeCommit: boolean; rateLimited: boolean; rateLimitedRepository: boolean };
   /** `unavailable`: the token endpoint answers 503, as in an outage. */
-  linear: { credentialsValid: boolean; unavailable: boolean; scope: string[]; teams: FakeTeam[]; projects: FakeProject[] };
+  linear: { credentialsValid: boolean; unavailable: boolean; scope: string[]; teams: FakeTeam[]; projects: FakeProject[]; documents: FakeDocument[] };
   /** `METHOD url` of every request. */
   requests: string[];
   /** Requests that would have changed something on either side. */
@@ -48,6 +59,7 @@ export function fakeWorld(): FakeWorld {
         { id: 'project-api', name: 'Field notes', teamIds: ['team-eng'] },
         { id: 'project-handbook', name: 'Handbook', teamIds: ['team-docs'] },
       ],
+      documents: [],
     },
     requests: [],
     writes: [],
@@ -129,5 +141,34 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
     return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
+  if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
   return json(400, { errors: [{ message: `unknown operation ${operationName}`, extensions: { code: 'INPUT_ERROR' } }] });
+}
+
+/** One project's or team zone's documents, oldest first, in pages of `first` after the cursor (an index). */
+function listDocuments(world: FakeWorld, variables: Record<string, unknown>) {
+  const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } } };
+  const projectId = filter.project?.id.eq;
+  const teamId = filter.team?.id.eq;
+  const matching = world.linear.documents
+    .filter((d) => (projectId !== undefined ? d.projectId === projectId : d.teamId === teamId && d.projectId === undefined))
+    .filter((d) => variables.includeArchived === true || (d.trashed !== true && d.archivedAt === undefined))
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  const start = variables.after === null ? 0 : Number(variables.after);
+  const end = start + Number(variables.first);
+  const nodes = matching.slice(start, end).map((d) => ({
+    id: d.id,
+    title: d.title,
+    slugId: d.id,
+    icon: null,
+    color: null,
+    documentContentId: `content-${d.id}`,
+    trashed: d.trashed ?? null,
+    archivedAt: d.archivedAt ?? null,
+    createdAt: d.createdAt,
+    updatedAt: d.createdAt,
+    project: d.projectId !== undefined ? { id: d.projectId } : null,
+    team: d.projectId === undefined && d.teamId !== undefined ? { id: d.teamId } : null,
+  }));
+  return { nodes, pageInfo: { hasNextPage: end < matching.length, endCursor: end < matching.length ? String(end) : null } };
 }

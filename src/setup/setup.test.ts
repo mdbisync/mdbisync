@@ -127,7 +127,8 @@ describe('setup check', () => {
   });
 
   it('names the files a title collision leaves out, without stopping the run', async () => {
-    const leftOut = (path: string, other: string) => ({ path, rule: 'duplicate-title' as const, title: 'guide', collidesWith: [other] });
+    const place = { kind: 'project' as const, team: 'ENG', project: 'Field notes' };
+    const leftOut = (path: string, other: string) => ({ path, oid: '0'.repeat(40), rule: 'duplicate-title' as const, title: 'guide', place, collidesWith: [other] });
     const map = { ...MINI, leftOut: [leftOut('eng/notes/guide.md', 'eng/notes/Guide.md'), leftOut('eng/notes/Guide.md', 'eng/notes/guide.md')] };
     const { report } = await run(fakeWorld(), map);
     assert.equal(report.ok, true);

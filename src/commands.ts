@@ -1,8 +1,9 @@
 // The commands of the command-line entry and their exit codes.
 // `sync`, `initial-sync` and `check` run the preflight (the sync's state and
-// the setup check). A command that is not built yet, and `sync` and
-// `initial-sync` after a passed preflight, report "not implemented" and exit
-// with their own code, so callers and tests can tell the stubs apart.
+// the setup check). A command that is not built yet, and after a passed
+// preflight `sync` and every `initial-sync` but the dry run from git to
+// Linear, report "not implemented" and exit with their own code, so callers
+// and tests can tell the stubs apart.
 
 export interface CommandInfo {
   readonly summary: string;
