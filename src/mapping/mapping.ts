@@ -52,6 +52,8 @@ export interface LeftOutFile {
 
 export interface RepositoryMapping {
   annotations: Annotation[];
+  /** The effective team and project of each usable annotated folder. */
+  zones: Map<string, Zone>;
   /** Annotations the run cannot use; the setup check fails on any. */
   problems: AnnotationProblem[];
   documents: MappedDocument[];
@@ -125,7 +127,7 @@ export async function loadMapping(git: Git, commit: Oid): Promise<RepositoryMapp
   const { annotations, problems: readProblems } = collectAnnotations(readmes);
   const { zones, problems: zoneProblems } = resolveZones(annotations);
   const contents = await readBlobs(git, candidateFiles(entries, zones).map((entry) => entry.oid));
-  return { annotations, problems: [...readProblems, ...zoneProblems], ...mapFiles(entries, zones, contents) };
+  return { annotations, zones, problems: [...readProblems, ...zoneProblems], ...mapFiles(entries, zones, contents) };
 }
 
 /** The key under which two titles in one place are the same document title. */

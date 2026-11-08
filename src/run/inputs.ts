@@ -2,7 +2,7 @@
 // reads the same names from `MDBISYNC_*` environment variables (secrets do
 // not belong in arguments). Empty means "not given".
 
-import { type StateConfig, resolveStateConfig } from '../state/index.ts';
+import { type StateConfig, StateConfigError, resolveStateConfig } from '../state/index.ts';
 
 export const INPUT_NAMES = [
   'linear-client-id',
@@ -58,7 +58,7 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   const inputs: RunInputs = {
     linear,
     github: { token, repository },
-    state: resolveStateConfig({ trackedBranch: value('tracked-branch'), syncBranch: value('sync-branch'), refPrefix: value('state-ref-prefix') }),
+    state: stateConfig(value('tracked-branch'), value('sync-branch'), value('state-ref-prefix')),
   };
   const linearApiUrl = value('linear-api-url');
   if (linearApiUrl !== '') inputs.linear.apiUrl = linearApiUrl;
@@ -67,4 +67,13 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   const reportFile = value('report-file');
   if (reportFile !== '') inputs.reportFile = reportFile;
   return inputs;
+}
+
+function stateConfig(trackedBranch: string, syncBranch: string, refPrefix: string): StateConfig {
+  try {
+    return resolveStateConfig({ trackedBranch, syncBranch, refPrefix });
+  } catch (error) {
+    if (error instanceof StateConfigError) throw new InputError(error.message);
+    throw error;
+  }
 }

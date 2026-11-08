@@ -27,6 +27,7 @@ export type FailureCode =
   | 'no-annotations'
   | 'annotation-target-not-found'
   | 'annotation-target-ambiguous'
+  | 'annotation-target-shared'
   | 'initial-sync-required';
 
 export interface CheckResult {

@@ -21,8 +21,9 @@ export interface FakeProject {
 }
 
 export interface FakeWorld {
-  github: { tokenValid: boolean; missing: Set<string>; allowMergeCommit: boolean };
-  linear: { credentialsValid: boolean; scope: string[]; teams: FakeTeam[]; projects: FakeProject[] };
+  github: { tokenValid: boolean; missing: Set<string>; allowMergeCommit: boolean; rateLimited: boolean };
+  /** `unavailable`: the token endpoint answers 503, as in an outage. */
+  linear: { credentialsValid: boolean; unavailable: boolean; scope: string[]; teams: FakeTeam[]; projects: FakeProject[] };
   /** `METHOD url` of every request. */
   requests: string[];
   /** Requests that would have changed something on either side. */
@@ -34,9 +35,10 @@ export interface FakeWorld {
 
 export function fakeWorld(): FakeWorld {
   return {
-    github: { tokenValid: true, missing: new Set(), allowMergeCommit: true },
+    github: { tokenValid: true, missing: new Set(), allowMergeCommit: true, rateLimited: false },
     linear: {
       credentialsValid: true,
+      unavailable: false,
       scope: ['read', 'write'],
       teams: [
         { id: 'team-eng', key: 'ENG', name: 'Engineering' },
@@ -81,6 +83,7 @@ function github(world: FakeWorld, method: string, path: string, init: RequestIni
   }
   const probe = PERMISSION_PROBES.find((candidate) => candidate.method === method && rest === candidate.path(rest.split('/')[2] ?? ''));
   if (probe === undefined) return json(404, { message: 'Not Found' });
+  if (world.github.rateLimited) return json(403, { message: 'You have exceeded a secondary rate limit.' });
   if (world.github.missing.has(probe.permission)) return json(403, { message: 'Resource not accessible by integration' });
   if (method === 'GET') return json(200, []);
   const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -94,6 +97,7 @@ function github(world: FakeWorld, method: string, path: string, init: RequestIni
 }
 
 async function linear(world: FakeWorld, path: string, init: RequestInit | undefined): Promise<Response> {
+  if (path === '/oauth/token' && world.linear.unavailable) return json(503, { error: 'temporarily_unavailable' });
   if (path === '/oauth/token') {
     if (!world.linear.credentialsValid) return json(401, { error: 'invalid_client' });
     world.minted += 1;

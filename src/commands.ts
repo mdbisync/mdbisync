@@ -15,7 +15,7 @@ export const COMMANDS = {
   lint: { summary: "Report Markdown that Linear would change", notImplementedExitCode: 12 },
   fix: { summary: "Rewrite Markdown into the form Linear keeps", notImplementedExitCode: 13 },
   init: { summary: "Write the workflows and configuration into a repository", notImplementedExitCode: 14 },
-  check: { summary: "Check the setup without writing anything", notImplementedExitCode: 15 },
+  check: { summary: "Check the setup without changing Linear or the remote repository", notImplementedExitCode: 15 },
 } as const satisfies Record<string, CommandInfo>;
 
 export type CommandName = keyof typeof COMMANDS;

@@ -32,7 +32,9 @@ interface Probe {
 export const PERMISSION_PROBES: readonly Probe[] = [
   { permission: 'contents:write', method: 'POST', path: () => '/git/blobs', body: {} },
   { permission: 'pull_requests:write', method: 'POST', path: () => '/pulls', body: {} },
-  // A content update without `content` is rejected before the path is looked at.
+  // GitHub checks the workflows permission for this path first (403), and only
+  // then rejects the update for its missing `content` (422); measured with
+  // App tokens with and without the permission.
   {
     permission: 'workflows:write',
     method: 'PUT',
@@ -67,7 +69,11 @@ export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
       unknown.push(probe.permission);
       continue;
     }
-    const { status } = await request(probe.method, probe.path(target.commit), probe.body);
+    const answer = await request(probe.method, probe.path(target.commit), probe.body);
+    const { status } = answer;
+    if (status === 403 && isRateLimited(answer)) {
+      throw new Error(`GitHub rate-limited the setup check while checking ${probe.permission} (HTTP 403); run again later`);
+    }
     if (status === 403) missing.push(probe.permission);
     else if (!(status >= 200 && status < 300) && status !== 422) {
       throw new Error(`GitHub answered HTTP ${status} while checking ${probe.permission}`);
@@ -95,7 +101,7 @@ export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
 function requester(target: GitHubTarget) {
   const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}/repos/${target.repository}`;
   const fetchImpl = target.fetch ?? fetch;
-  return async (method: string, path: string, body?: Record<string, unknown>): Promise<{ status: number; json: unknown }> => {
+  return async (method: string, path: string, body?: Record<string, unknown>): Promise<Answer> => {
     const response = await fetchImpl(`${base}${path}`, {
       method,
       headers: {
@@ -113,8 +119,27 @@ function requester(target: GitHubTarget) {
     } catch {
       // A body that is not JSON carries nothing the check needs.
     }
-    return { status: response.status, json };
+    return { status: response.status, headers: response.headers, json };
   };
+}
+
+interface Answer {
+  status: number;
+  headers: Headers;
+  json: unknown;
+}
+
+/**
+ * GitHub answers a primary or secondary rate limit with 403 too; it is a
+ * wait, not a missing permission.
+ */
+function isRateLimited(answer: Answer): boolean {
+  const message = (answer.json as { message?: unknown } | null)?.message;
+  return (
+    answer.headers.has('retry-after') ||
+    answer.headers.get('x-ratelimit-remaining') === '0' ||
+    (typeof message === 'string' && /rate limit/i.test(message))
+  );
 }
 
 function ensureAnswered(status: number, what: string): void {
