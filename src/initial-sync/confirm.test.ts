@@ -224,10 +224,15 @@ describe('confirmed initial sync from git to Linear', () => {
     const after = await refs();
     assert.equal(after['refs/mdbisync/linear'], undefined, 'a stopped run recorded linear');
     assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', 'refs/mdbisync/ids']), PROGRESS_MESSAGE);
-    assert.deepEqual(Object.keys(await readIds()).sort(), SYNCED_PATHS.slice(0, 2));
+    // The progress commit holds the written documents' ids and the ids chosen for the ones still to create.
+    const progress = await readIds();
+    assert.deepEqual(Object.keys(progress).sort(), SYNCED_PATHS);
+    for (const path of SYNCED_PATHS.slice(0, 2)) assert.ok(live(world).some((d) => d.id === progress[path]?.id), `${path} is not written`);
 
     const second = await run(world);
     assert.equal(second.result.exitCode, 0, second.result.stderr);
+    // The resumed run creates the rest with the ids chosen before the stop, so links to them stay right.
+    assert.deepEqual(await readIds(), progress);
     assert.equal(second.report.resumed, true);
     assert.equal(second.report.skippedCompletedCount, 2);
     assert.equal(second.report.writtenCount, SYNCED_PATHS.length - 2);
@@ -253,7 +258,8 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE);
     assert.equal(first.report.code, 'stopped');
     assert.equal(first.report.writtenCount, 2);
-    assert.deepEqual(Object.keys(await readIds()).sort(), SYNCED_PATHS.slice(0, 2));
+    const progress = await readIds();
+    for (const path of SYNCED_PATHS.slice(0, 2)) assert.ok(live(world).some((d) => d.id === progress[path]?.id), `${path} is not recorded`);
     // The client stops at the 429 and sends nothing after it.
     assert.equal(world.linear.writes.count, 3);
 
@@ -287,8 +293,14 @@ describe('confirmed initial sync from git to Linear', () => {
     const world = fakeWorld();
     const values = env();
     const inputs = readInputs((name) => values[environmentName(name) as keyof typeof values] ?? '');
+    let preparedIds: Map<string, string> | undefined;
+    let writesAtPrepare = -1;
     const marker: BodyTransform = {
       name: 'marker',
+      prepare: async (context) => {
+        preparedIds = new Map(context.documentIds);
+        writesAtPrepare = world.linear.writes.count;
+      },
       apply: async ({ path, body }) => `${body}\n\n(from ${path})`,
       restore: ({ path, body }) => body.replace(`\n\n(from ${path})`, ''),
     };
@@ -314,6 +326,10 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.deepEqual(result?.record?.reformatted, []);
     assert.equal(await show('refs/mdbisync/linear:eng/backend/notes.md'), TREE['eng/backend/notes.md']);
     assert.equal((await readIds())['eng/notes/plan.md'], undefined);
+    // Before the first write, the transforms knew the id every new document was then created with.
+    assert.equal(writesAtPrepare, 0);
+    assert.deepEqual([...(preparedIds ?? new Map()).keys()].sort(), SYNCED_PATHS);
+    for (const [path, entry] of Object.entries(await readIds())) assert.equal(entry.id, preparedIds?.get(path), path);
   });
 
   it("records Linear's form of a file it reformatted, with the file's front matter, and leaves the tracked branch alone", async () => {

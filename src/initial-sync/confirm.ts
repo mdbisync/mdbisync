@@ -187,8 +187,21 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     ...plan.create.map((entry): Work => ({ kind: 'create', entry })),
   ].sort((a, b) => compare(a.entry.path, b.entry.path));
 
+  // Every synchronized path's document id, known before the first write, so
+  // a transform can link to a document this run has yet to create. A new
+  // document's id is chosen here; a resumed run reuses the id its unfinished
+  // run chose (kept in the progress commits), so links written before the
+  // stop stay right.
+  const documentIds = new Map<string, string>();
+  for (const entry of plan.overwrite) documentIds.set(entry.path, entry.documentId);
+  for (const entry of plan.create) {
+    const chosen = resumed ? previous.get(entry.path)?.id : undefined;
+    documentIds.set(entry.path, chosen !== undefined && !sources.documents.has(chosen) ? chosen : newId());
+    ids.set(entry.path, { id: documentIds.get(entry.path) as string });
+  }
+
   try {
-    for (const transform of transforms) await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads });
+    for (const transform of transforms) await transform.prepare?.({ git, tracked: fetched.tracked, linear, plan, uploads, documentIds });
 
     let written = 0;
     for (let index = 0; index < work.length; index += 1) {
@@ -220,7 +233,8 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         if (item.kind === 'create') {
           // Matching compares titles in NFC; a new title is written in that form too, so the next run matches it.
           const title = item.entry.title.normalize('NFC');
-          const created = await linear.createDocument(placeId(targets, item.entry.place), { id: newId(), title, content: body });
+          const id = documentIds.get(path) as string;
+          const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body });
           remember(path, created);
           result.created.push(path);
           await checkpoint('document-created-before-ids-push');

@@ -57,6 +57,12 @@ export interface TransformContext {
    * upload is recorded no later than the document that uses it.
    */
   uploads: UploadMap;
+  /**
+   * The Linear document id of every path the run writes or keeps: a matched
+   * document's id, or the id a new document will be created with. Known
+   * before the first write, and the same when a stopped run resumes.
+   */
+  documentIds: ReadonlyMap<string, string>;
 }
 
 /** Runs the transforms in order. */
