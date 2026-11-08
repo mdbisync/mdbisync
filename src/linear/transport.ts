@@ -39,6 +39,7 @@ export interface RequestInfo {
 
 export interface ResponseInfo extends RequestInfo {
   status: number;
+  /** Time to response headers; LogEntry.durationMs also includes reading the body. */
   durationMs: number;
   rateLimit: RateLimitSnapshot;
 }
@@ -57,6 +58,10 @@ export interface LogEntry extends Partial<AuthContext> {
   requestId?: string | undefined;
   /** Codes of the GraphQL errors in the answer, for example INPUT_ERROR. */
   errorCodes?: string[] | undefined;
+  /** OAuth revocation outcome, including a 200 with success:false. */
+  revocationConfirmed?: boolean;
+  /** The governor rejected the response before its body was read. */
+  responseHookFailed?: true;
   retryAfterSeconds?: number | undefined;
   stop?: StopReason | undefined;
 }
@@ -102,8 +107,7 @@ export class GraphQLTransport {
 
   constructor(options: TransportOptions) {
     this.#token = options.token;
-    this.#auth = options.auth === undefined ? undefined : { ...options.auth,
-      requestedScopes: [...options.auth.requestedScopes], returnedScopes: [...options.auth.returnedScopes] };
+    this.#auth = authMetadata(options.auth);
     this.baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
     this.#floor = { ...DEFAULT_BUDGET_FLOOR, ...options.budgetFloor };
     this.#maxRetryAfterSeconds = options.maxRetryAfterSeconds ?? 10;
@@ -153,13 +157,16 @@ export class GraphQLTransport {
       }
 
       const rateLimit = readRateLimitHeaders(response.headers);
+      const requestId = response.headers.get('x-request-id') ?? undefined;
       const durationMs = Date.now() - started;
       if (Object.keys(rateLimit.headers).length > 0) this.#lastRateLimit = rateLimit;
       try {
         await this.#hooks.afterResponse?.({ ...info, status: response.status, durationMs, rateLimit });
       } catch (error) {
+        await response.body?.cancel().catch(() => {});
         this.#log({ ...info, ...authMetadata(this.#auth), ...requestTiming(started), status: response.status,
-          requestId: response.headers.get('x-request-id') ?? undefined, rateLimitHeaders: rateLimit.headers });
+          requestId, rateLimitHeaders: rateLimit.headers, responseHookFailed: true,
+          ...(error instanceof LinearStoppedError ? { stop: error.reason } : {}) });
         throw error;
       }
 
@@ -172,7 +179,6 @@ export class GraphQLTransport {
         bodyError = error;
       }
 
-      const requestId = response.headers.get('x-request-id') ?? undefined;
       const errorCodes = body?.errors?.map((error) => String(error.extensions?.code ?? 'unknown'));
       const entry: LogEntry = {
         ...info,

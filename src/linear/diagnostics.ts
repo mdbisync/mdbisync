@@ -6,8 +6,8 @@ export interface AuthContext {
 }
 
 /** Pick the schema explicitly; callers may have extra fields at runtime. */
-export function authMetadata(context: AuthContext | undefined): Partial<AuthContext> {
-  return context === undefined ? {} : {
+export function authMetadata(context: AuthContext | undefined): AuthContext | undefined {
+  return context === undefined ? undefined : {
     grantType: context.grantType,
     requestedScopes: [...context.requestedScopes],
     returnedScopes: [...context.returnedScopes],
@@ -27,7 +27,7 @@ export function requestTiming(started: number) {
 /** Observability must not change a request's outcome or strand a minted token. */
 export function emitLog<T>(log: ((entry: T) => void) | undefined, entry: T): void {
   try {
-    log?.(entry);
+    void Promise.resolve(log?.(entry)).catch(() => {});
   } catch {
     // A caller owns its sink's health; request completion and cleanup take priority.
   }

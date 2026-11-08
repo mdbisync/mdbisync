@@ -64,7 +64,7 @@ describe('safe per-request lifecycle diagnostics', () => {
     assert.ok(!JSON.stringify(logs).includes(credentials.clientSecret));
   });
 
-  it('records each network failure once and still attempts owned cleanup', async () => {
+  it('records a failed owned revocation once', async () => {
     fake.fault = () => ({ reset: true });
     await assert.rejects(revokeToken(tokenValue, { baseUrl: fake.url, hooks: { log: e => logs.push(e) } }));
     assert.equal(logs.length, 1);
@@ -93,6 +93,7 @@ describe('safe per-request lifecycle diagnostics', () => {
     assertTimed(logs[0]!);
     assert.equal(logs[0]?.status, 400);
     assert.equal(logs[0]?.requestId, 'request-1');
+    assert.equal(logs[0]?.responseHookFailed, true);
   });
 
   it('records a GraphQL network failure without its exception details', async () => {
@@ -102,6 +103,38 @@ describe('safe per-request lifecycle diagnostics', () => {
     assertTimed(logs[0]!);
     assert.equal(logs[0]?.status, 'network-error');
     assert.ok(!JSON.stringify(logs).includes(content));
+  });
+
+  it('cleans up after a GraphQL network failure', async () => {
+    const reply = fake.fault!;
+    fake.fault = (request, index) => request.operation === 'Teams' ? { reset: true } : reply(request, index);
+    const hooks = { log: (entry: LogEntry) => logs.push(entry) };
+    await assert.rejects(withRunToken(credentials, { baseUrl: fake.url, hooks, onRevokeError: () => assert.fail('cleanup failed') }, async token => {
+      await new LinearClient({ token: token.accessToken, auth: token.context, baseUrl: fake.url, hooks }).request('Teams', 'query', 'query Teams { teams { nodes { id } } }');
+    }));
+    assert.deepEqual(logs.map(e => [e.operation, e.status]), [['oauth.token', 200], ['Teams', 'network-error'], ['oauth.revoke', 200]]);
+  });
+
+  it('does not attach an earlier token scope to a failed mint', async () => {
+    fake.fault = () => ({ reset: true });
+    await assert.rejects(mintAppToken(credentials, { baseUrl: fake.url, hooks: { log: e => logs.push(e) }, auth: {
+      grantType: 'client_credentials', requestedScopes: ['read'], returnedScopes: ['read'],
+    } }));
+    assert.deepEqual(logs[0]?.requestedScopes, ['read', 'write']);
+    assert.equal(logs[0]?.returnedScopes, undefined);
+  });
+
+  it('distinguishes a refused revocation payload from HTTP success', async () => {
+    fake.fault = () => ({ body: { success: false } });
+    await assert.rejects(revokeToken(tokenValue, { baseUrl: fake.url, hooks: { log: e => logs.push(e) } }));
+    assert.equal(logs[0]?.status, 200);
+    assert.equal(logs[0]?.revocationConfirmed, false);
+  });
+
+  it('an asynchronous sink failure cannot interrupt token cleanup', async () => {
+    await withRunToken(credentials, { baseUrl: fake.url, hooks: { log: async () => { throw new Error('sink unavailable'); } }, onRevokeError: () => assert.fail('cleanup failed') }, async () => undefined);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.deepEqual(fake.received.map(r => r.path), ['/oauth/token', '/oauth/revoke']);
   });
 
   it('a failing diagnostic sink cannot strand a newly minted token', async () => {

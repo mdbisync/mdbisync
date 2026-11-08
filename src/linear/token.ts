@@ -110,8 +110,7 @@ async function oauthPost(
   const started = Date.now();
   const info = {
     operation, kind: 'oauth' as const, attempt: 1,
-    ...authMetadata(options.auth),
-    ...(requestedScopes ? { grantType: 'client_credentials' as const, requestedScopes: [...requestedScopes] } : {}),
+    ...(requestedScopes ? { grantType: 'client_credentials' as const, requestedScopes: [...requestedScopes] } : authMetadata(options.auth)),
   };
   options.stats?.count(operation);
   let response: Response;
@@ -132,6 +131,7 @@ async function oauthPost(
     ...(requestedScopes ? { returnedScopes: readScopes(json.scope) } : {}),
     requestId: response.headers.get('x-request-id') ?? undefined,
     errorCodes: json.error === undefined ? [] : [oauthErrorCode(json.error) ?? 'unknown'],
+    ...(operation === 'oauth.revoke' ? { revocationConfirmed: response.ok && json.success !== false } : {}),
     rateLimitHeaders: readRateLimitHeaders(response.headers).headers,
   });
   return { response, json };
