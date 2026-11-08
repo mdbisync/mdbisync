@@ -6,11 +6,12 @@
 
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, readFiles, resolveStateConfig, stateRef } from '../../src/state/index.ts';
+import { countLocalLfsObjects } from '../../src/state/test-helpers.ts';
 
 const url = process.env.MDBISYNC_TEST_SANDBOX_URL ?? '';
 const run = randomBytes(3).toString('hex');
@@ -96,7 +97,6 @@ describe('state against the sandbox repository', { skip: url === '' ? 'MDBISYNC_
       const index = Number(/figure-(\d)/.exec(path)?.[1]);
       assert.ok(file?.ok && file.lfs && file.content.equals(images[index] as Buffer), path);
     }
-    const stored = await readdir(join(git.dir, '.git', 'lfs', 'objects'), { recursive: true, withFileTypes: true });
-    assert.equal(stored.filter((entry) => entry.isFile()).length, 3);
+    assert.equal(await countLocalLfsObjects(git), 3);
   });
 });

@@ -5,8 +5,8 @@
 // the other changes nothing.
 
 import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef } from './config.ts';
-import { type Git, GitError, type Oid } from './git.ts';
-import { parseLfsPointer, readLfsObject } from './lfs.ts';
+import { type Git, GitError, type Oid, mapLimit } from './git.ts';
+import { type LfsPointer, type LfsReadResult, lfsReader, parseLfsPointer } from './lfs.ts';
 import { type CommitIdentity, type TreeEntry, commitTree, listTree, readBlobs } from './objects.ts';
 
 /** The state refs as last fetched from the remote; null when a ref does not exist. */
@@ -98,12 +98,18 @@ export class NotFastForwardError extends Error {
  * (network, rights) throw.
  */
 export async function pushAtomic(git: Git, config: StateConfig, updates: readonly RefUpdate[]): Promise<PushResult> {
-  const changing = updates.filter((update) => update.next !== update.expected);
-  if (new Set(changing.map((update) => update.ref)).size !== changing.length) {
+  if (new Set(updates.map((update) => update.ref)).size !== updates.length) {
     throw new Error('a push names the same ref twice');
   }
+  const changing = updates.filter((update) => update.next !== update.expected);
   if (changing.length === 0) return { ok: true, updated: [] };
 
+  // Refs that keep their value still go into the push with their lease, so
+  // a run whose view of them is stale is refused as a whole. git checks
+  // those leases against the remote's advertisement; only the changing refs
+  // reach the remote's atomic transaction, so a move of an unchanged ref in
+  // the moment between the advertisement and that transaction is not seen.
+  // Runs of one repository share a concurrency group, which closes it.
   for (const update of changing) {
     if (update.expected !== null && update.replace !== true) {
       const ancestor = await git.run(['merge-base', '--is-ancestor', update.expected, update.next], { okCodes: [0, 1] });
@@ -112,14 +118,18 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   }
 
   const args = ['push', '--atomic', '--porcelain', '--no-verify', config.remote];
-  for (const update of changing) args.push(`--force-with-lease=${update.ref}:${update.expected ?? ''}`);
-  for (const update of changing) args.push(`${update.next}:${update.ref}`);
+  for (const update of updates) args.push(`--force-with-lease=${update.ref}:${update.expected ?? ''}`);
+  for (const update of updates) args.push(`${update.next}:${update.ref}`);
 
   const result = await git.run(args, { okCodes: [0, 1] });
   const lines = parsePorcelain(result.stdout.toString('utf8'));
 
   if (result.code === 0) {
-    for (const update of changing) await git.run(['update-ref', localRef(config, update.ref), update.next]);
+    // The local copies are only a record of the last value seen; if they
+    // cannot be written the remote still moved, and the next lease built
+    // from a stale copy is refused, so the push is still reported as done.
+    const input = changing.map((update) => `update ${localRef(config, update.ref)} ${update.next}\n`).join('');
+    await git.run(['update-ref', '--stdin'], { input, okCodes: [0, 1, 128] });
     return { ok: true, updated: changing.map((update) => update.ref) };
   }
 
@@ -132,7 +142,7 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   // leaves them where they were.
   const stale =
     rejected.some((line) => line.summary.includes('stale info')) ||
-    (await movedAway(git, config.remote, changing));
+    (await movedAway(git, config.remote, updates));
   return {
     ok: false,
     reason: stale ? 'stale' : 'rejected',
@@ -236,9 +246,11 @@ function isIdEntry(value: unknown): value is IdEntry {
 
 async function readJsonFile(git: Git, commit: Oid | null, file: string): Promise<Record<string, unknown>> {
   if (commit === null) return {};
-  const entry = (await listTree(git, commit)).find((item) => item.path === file);
-  if (entry === undefined) return {};
-  const blob = (await readBlobs(git, [entry.oid])).get(entry.oid) as Buffer;
+  // A state commit without its file is damaged state, not an empty map:
+  // reading it as empty would make the sync forget every id.
+  const read = await git.run(['cat-file', 'blob', `${commit}:${file}`], { okCodes: [0, 128] });
+  if (read.code !== 0) throw new Error(`${file} is missing in state commit ${commit}`);
+  const blob = read.stdout;
   let data: unknown;
   try {
     data = JSON.parse(blob.toString('utf8'));
@@ -282,6 +294,7 @@ export async function readFiles(git: Git, config: StateConfig, commit: Oid, path
     git,
     [...entries.values()].filter((entry) => entry.type === 'blob').map((entry) => entry.oid),
   );
+  const pointers = new Map<string, { pointer: LfsPointer; path: string }>();
   for (const path of wanted) {
     const entry = entries.get(path);
     if (entry === undefined) {
@@ -294,12 +307,24 @@ export async function readFiles(git: Git, config: StateConfig, commit: Oid, path
     }
     const blob = blobs.get(entry.oid) as Buffer;
     const pointer = parseLfsPointer(blob);
-    if (pointer === null) {
-      result.set(path, { ok: true, content: blob, lfs: false });
-      continue;
-    }
-    const lfs = await readLfsObject(git, config.remote, pointer, path);
-    result.set(path, lfs.ok ? { ok: true, content: lfs.content, lfs: true } : lfs);
+    if (pointer === null) result.set(path, { ok: true, content: blob, lfs: false });
+    else if (!pointers.has(pointer.oid)) pointers.set(pointer.oid, { pointer, path });
   }
-  return result;
+
+  // One download per object, a few at a time.
+  const lfs = new Map<string, LfsReadResult>();
+  if (pointers.size > 0) {
+    const read = await lfsReader(git, config.remote);
+    const items = [...pointers.values()];
+    const results = await mapLimit(items, 4, (item) => read(item.pointer, item.path));
+    items.forEach((item, index) => lfs.set(item.pointer.oid, results[index] as LfsReadResult));
+  }
+  for (const path of wanted) {
+    if (result.has(path)) continue;
+    const entry = entries.get(path) as TreeEntry;
+    const pointer = parseLfsPointer(blobs.get(entry.oid) as Buffer) as LfsPointer;
+    const read = lfs.get(pointer.oid) as LfsReadResult;
+    result.set(path, read.ok ? { ok: true, content: read.content, lfs: true } : read);
+  }
+  return new Map([...wanted].map((path) => [path, result.get(path) as FileRead]));
 }

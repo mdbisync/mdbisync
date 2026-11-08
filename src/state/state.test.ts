@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import {
   type Git,
@@ -158,6 +159,46 @@ describe('state: stores and atomic lease pushes', () => {
     assert.equal(await remoteRef(fixture, IDS), otherIds);
   });
 
+  it('keeps the lease of a ref the run did not change', async () => {
+    const writer = await fixture.clone('unchanged-writer');
+    const other = await fixture.clone('unchanged-other');
+    const seen = await fetchState(writer, config);
+    const otherSeen = await fetchState(other, config);
+
+    const otherIds = await commitIds(other, otherSeen.state.ids, new Map([['docs/y.md', { id: 'doc-y' }]]), IDENTITY);
+    assert.ok((await pushAtomic(other, config, [{ ref: IDS, expected: otherSeen.state.ids, next: otherIds }])).ok);
+
+    // The writer built its uploads from the ids it saw, which are now stale.
+    const uploads = await commitUploads(writer, seen.state.uploads, new Map([['c'.repeat(64), 'https://uploads.example.com/c']]), IDENTITY);
+    const result = await pushAtomic(writer, config, [
+      { ref: IDS, expected: seen.state.ids, next: seen.state.ids as string },
+      { ref: UPLOADS, expected: seen.state.uploads, next: uploads, replace: true },
+    ]);
+    assert.ok(!result.ok && result.reason === 'stale', JSON.stringify(result));
+    assert.equal(await remoteRef(fixture, UPLOADS), seen.state.uploads);
+    assert.equal(await remoteRef(fixture, IDS), otherIds);
+  });
+
+  it('refuses a state commit that lacks its file instead of reading it as empty', async () => {
+    const git = await fixture.clone('damaged');
+    const damaged = await commitTree(git, { parents: [], base: null, changes: new Map([['other.json', '{}\n']]), message: 'x', identity: IDENTITY });
+    await assert.rejects(readIds(git, damaged), /ids\.json is missing/);
+    await assert.rejects(readUploads(git, damaged), /uploads\.json is missing/);
+  });
+
+  it('builds commits with removed paths in a bare repository', async () => {
+    const tracked = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
+    const commit = await commitTree(fixture.remote, {
+      parents: [tracked],
+      base: tracked,
+      changes: new Map<string, string | null>([['docs/b.md', null], ['docs/a.md', '# A\n\nChanged.\n']]),
+      message: 'Remove a file',
+      identity: IDENTITY,
+    });
+    const paths = (await listTree(fixture.remote, commit)).map((entry) => entry.path).sort();
+    assert.ok(paths.includes('docs/a.md') && !paths.includes('docs/b.md'), paths.join(','));
+  });
+
   it('refuses to create a ref that already exists', async () => {
     const writer = await fixture.clone('creator-late');
     const { tracked } = await fetchState(writer, config);
@@ -276,6 +317,8 @@ describe('state: reading the tracked tree and LFS', () => {
     // A pointer whose object was never uploaded.
     const missing = randomBytes(64).toString('hex').slice(0, 64);
     files['docs/img/missing.png'] = `version https://git-lfs.github.com/spec/v1\noid sha256:${missing}\nsize 10\n`;
+    // A pointer naming a transforming extension; its object is never fetched.
+    files['docs/img/extension.png'] = `version https://git-lfs.github.com/spec/v1\next-0-zip sha256:${'d'.repeat(64)}\noid sha256:${'e'.repeat(64)}\nsize 10\n`;
     await fixture.seed(files, { lfs: ['docs/img/*.png'] });
   });
   after(async () => fixture.cleanup());
@@ -313,6 +356,26 @@ describe('state: reading the tracked tree and LFS', () => {
     const none = files.get('docs/none.md');
     assert.ok(none !== undefined && !none.ok && none.reason === 'not in the tree');
     assert.equal(await countLocalLfsObjects(git), 0);
+  });
+
+  it('reads LFS objects from the configured remote even when the branch tracks another', async () => {
+    const git = await fixture.clone('lfs-other-remote');
+    const { tracked } = await fetchState(git, config);
+    const empty = join(fixture.root, 'empty.git');
+    await fixture.remote.run(['init', '--quiet', '--bare', empty]);
+    await git.run(['remote', 'add', 'other', pathToFileURL(empty).href]);
+    await git.run(['config', 'branch.main.remote', 'other']);
+    const files = await readFiles(git, config, tracked, ['docs/img/picture-5.png']);
+    const file = files.get('docs/img/picture-5.png');
+    assert.ok(file?.ok && file.content.equals(images[5] as Buffer), JSON.stringify(file?.ok ? 'ok' : file));
+  });
+
+  it('refuses LFS pointers with extensions', async () => {
+    const git = await fixture.clone('lfs-extension');
+    const { tracked } = await fetchState(git, config);
+    const files = await readFiles(git, config, tracked, ['docs/img/extension.png']);
+    const file = files.get('docs/img/extension.png');
+    assert.ok(file !== undefined && !file.ok && /extensions/.test(file.reason));
   });
 
   it('lists the tracked tree with sizes', async () => {

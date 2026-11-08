@@ -53,6 +53,10 @@ export function resolveStateConfig(input: Partial<StateConfig> = {}): StateConfi
   if (config.trackedBranch === config.syncBranch) {
     throw new StateConfigError('the tracked branch and the sync branch must differ');
   }
+  // git cannot hold both "a" and "a/b" as refs.
+  if (config.syncBranch.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${config.syncBranch}/`)) {
+    throw new StateConfigError('one of the tracked branch and the sync branch is a folder of the other');
+  }
   const prefixProblem = refNameProblem(`${config.refPrefix}/linear`);
   if (prefixProblem !== null) {
     throw new StateConfigError(`refPrefix "${config.refPrefix}" is not a valid ref prefix: ${prefixProblem}`);

@@ -34,6 +34,8 @@ describe('state config', () => {
     ['a branch with "@{"', { syncBranch: 'a@{1}' }],
     ['the same tracked and sync branch', { trackedBranch: 'main', syncBranch: 'main' }],
     ['a remote with a slash', { remote: 'a/b' }],
+    ['a sync branch inside the tracked branch', { trackedBranch: 'main', syncBranch: 'main/sync' }],
+    ['a tracked branch that is the sync branch folder', { trackedBranch: 'mdbisync' }],
   ];
   for (const [name, input] of invalid) {
     it(`refuses ${name}`, () => {

@@ -7,11 +7,11 @@ const pointer = (body: string): Buffer => Buffer.from(`version https://git-lfs.g
 
 describe('LFS pointer', () => {
   it('parses a pointer file', () => {
-    assert.deepEqual(parseLfsPointer(pointer(`oid sha256:${OID}\nsize 12345\n`)), { oid: OID, size: 12345 });
+    assert.deepEqual(parseLfsPointer(pointer(`oid sha256:${OID}\nsize 12345\n`)), { oid: OID, size: 12345, extensions: false });
   });
 
   it('accepts extension keys', () => {
-    assert.deepEqual(parseLfsPointer(pointer(`ext-0-foo sha256:${'b'.repeat(64)}\noid sha256:${OID}\nsize 0\n`)), { oid: OID, size: 0 });
+    assert.deepEqual(parseLfsPointer(pointer(`ext-0-foo sha256:${'b'.repeat(64)}\noid sha256:${OID}\nsize 0\n`)), { oid: OID, size: 0, extensions: true });
   });
 
   it('returns null for content that is not a pointer', () => {
