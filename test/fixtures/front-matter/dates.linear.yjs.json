@@ -3,7 +3,6 @@
     "prosemirror"
   ],
   "content": [
-    {"type":"code_block","attrs":{"id":"<id>","language":"yaml"},"children":[{"text":"created: 2024-03-01\nupdated: 2024-03-15T10:30:00Z","marks":{"attribution":"user"}}]},
     {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Dates","marks":{"attribution":"user"}}]},
     {"type":"paragraph","children":[{"text":"Ref kx-6fc1e202","marks":{"attribution":"user"}}]}
   ]

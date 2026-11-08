@@ -18,7 +18,7 @@ import { parseArgs } from 'node:util';
 
 import { LinearClient, RequestStats, withRunToken, type LogEntry } from '../../src/linear/index.ts';
 import { loadBank } from './bank.ts';
-import { runProbe, type ProbeRun } from './probe.ts';
+import { PROBE_FACTS, runProbe, type ProbeRun } from './probe.ts';
 import { findDrift, writeRecord } from './record.ts';
 import { renderReport } from './report.ts';
 
@@ -76,7 +76,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
               if (cost !== undefined && cost > (complexityLog.get(info.operation) ?? -1)) complexityLog.set(info.operation, cost);
             },
           },
-        });
+        }, PROBE_FACTS);
         return runProbe({
           client,
           bank,

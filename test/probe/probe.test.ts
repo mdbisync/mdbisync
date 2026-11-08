@@ -11,8 +11,8 @@ import * as Y from 'yjs';
 
 import { LinearClient } from '../../src/linear/index.ts';
 import { FakeLinear, fakeDocument, type ReceivedRequest } from '../linear/fake-linear.ts';
-import { fromLinear, goldenMarkdownPath, goldenYjsPath, loadBank, toLinear } from './bank.ts';
-import { findLimit, isLeftover, runProbe } from './probe.ts';
+import { fromLinear, goldenMarkdownPath, goldenYjsPath, loadBank, sentForm, toLinear } from './bank.ts';
+import { PROBE_FACTS, findLimit, isLeftover, runProbe } from './probe.ts';
 import { findDrift, refusalKey, writeRecord } from './record.ts';
 import { diffLines, keptOnlyInYjs, renderReport } from './report.ts';
 import { summarizeContentState } from './yjs-summary.ts';
@@ -155,7 +155,7 @@ describe('format probe against a fake Linear', () => {
   });
 
   const probe = () =>
-    runProbe({ client: new LinearClient({ token: 'fake', baseUrl: fake.url }), bank: loadBank(bankDir), runId: 'test-run', facts: false });
+    runProbe({ client: new LinearClient({ token: 'fake', baseUrl: fake.url }, PROBE_FACTS), bank: loadBank(bankDir), runId: 'test-run', facts: false });
 
   it('records Linear forms, refusals and Yjs beside the fixtures, and deletes its project', async () => {
     const run = await probe();
@@ -248,6 +248,16 @@ describe('format probe against a fake Linear', () => {
 });
 
 describe('format probe helpers', () => {
+  it('sends the text without front matter', () => {
+    assert.equal(sentForm('---\nowner: ops\n---\n\n# Title\n\nText.'), '# Title\n\nText.');
+    assert.equal(sentForm('---\r\na: 1\r\n---\r\nBody'), 'Body');
+    assert.equal(sentForm('--- \na: 1\n---\nBody'), 'Body', 'trailing space after the opening line');
+    assert.equal(sentForm('\uFEFF---\na: 1\n---\nBody'), 'Body', 'byte order mark before the front matter');
+    assert.equal(sentForm('---\nonly: front matter\n---'), '');
+    assert.equal(sentForm('Text.\n\n---\n\nMore.'), 'Text.\n\n---\n\nMore.');
+    assert.equal(sentForm('---\nno closing line'), '---\nno closing line');
+  });
+
   it('sweeps only its own old projects', () => {
     const now = Date.parse('2026-11-08T12:00:00Z');
     const old = '2026-11-08T09:00:00Z';

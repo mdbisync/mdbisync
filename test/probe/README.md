@@ -5,7 +5,9 @@ by experiment instead of trusting documentation: for every synchronized
 fixture of the bank (`test/fixtures/`) it
 
 1. writes the fixture to a new Linear document in a short-lived project,
-   with links to bank assets replaced by freshly uploaded files;
+   as the sync would send it: without its front matter (and the blank
+   lines after it), with links to bank assets replaced by freshly uploaded
+   files;
 2. reads the document back, with its stored Yjs state (`contentState`);
 3. writes that readback again and reads once more, to see whether Linear's
    form is a fixed point;

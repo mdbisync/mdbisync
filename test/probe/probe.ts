@@ -4,11 +4,13 @@
 // findings, recorded in the result, never hidden.
 
 import {
+  LINEAR_FACTS,
   LinearClient,
   LinearGraphQLError,
   LinearHttpError,
   LinearStoppedError,
   LinearUploadError,
+  type LinearFacts,
   type RateLimitSnapshot,
 } from '../../src/linear/index.ts';
 import { readFileSync } from 'node:fs';
@@ -19,6 +21,7 @@ import {
   linkedAssets,
   probedFixtures,
   readFixture,
+  sentForm,
   toLinear,
   type AssetMap,
   type Bank,
@@ -32,6 +35,20 @@ export const PROJECT_PREFIX = 'Format probe ';
 export const PROJECT_NAME = /^Format probe \d{8}-[0-9a-f]{6}$/;
 /** Leftover probe projects older than this are removed at the start of a run. */
 export const SWEEP_AGE_MS = 2 * 60 * 60 * 1000;
+/**
+ * The facts the probe's client works with. The probe measures Linear rather
+ * than trusting what was measured before: it sends every title and content,
+ * however long, so Linear's own refusals are the findings, and it compares
+ * each write's raw payload with its own read-back.
+ */
+export const PROBE_FACTS: LinearFacts = Object.freeze({
+  ...LINEAR_FACTS,
+  // Pinned, not inherited: a read-back inside the client would hide the raw
+  // payload the probe compares, whatever the last measurement said.
+  mutationsReturnStoredContent: true,
+  maxTitleLength: Number.POSITIVE_INFINITY,
+  maxContentLength: Number.POSITIVE_INFINITY,
+});
 /** Documents per read-back request; content state is several times the Markdown's size. */
 export const READ_PAGE_SIZE = 20;
 
@@ -138,7 +155,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeRun> {
   log(`project created for run ${runId}`);
   try {
     const fixtures = probedFixtures(bank).filter((f) => options.only === undefined || f.file.includes(options.only));
-    const sources = fixtures.map((fixture) => readFixture(bank, fixture));
+    const sources = fixtures.map((fixture) => sentForm(readFixture(bank, fixture)));
     const assets = await uploadAssets(client, bank, sources, run, log);
     await probeFixtures(client, projectId, fixtures, sources, assets, run, log);
     if (options.facts !== false) {
