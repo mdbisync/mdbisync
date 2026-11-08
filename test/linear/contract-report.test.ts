@@ -3,11 +3,12 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { it } from 'node:test';
 
 import { FakeLinear } from './fake-linear.ts';
 
-it('saves contract diagnostics when setup and token revocation both fail', async () => {
+it('saves contract diagnostics when setup and token revocation both fail', { timeout: 15_000 }, async () => {
   const fake = await new FakeLinear().start();
   const directory = await mkdtemp(join(tmpdir(), 'contract-report-'));
   const reportPath = join(directory, 'report.json');
@@ -23,7 +24,7 @@ it('saves contract diagnostics when setup and token revocation both fail', async
   try {
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
-    const child = spawn(process.execPath, ['--test', '--test-reporter=tap', 'test/linear/contract.test.ts'], {
+    const child = spawn(process.execPath, ['--test', '--test-reporter=tap', fileURLToPath(new URL('./contract.test.ts', import.meta.url))], {
       env: {
         ...env,
         LINEAR_TEST_APP_CLIENT_ID: 'test-client',
@@ -32,6 +33,7 @@ it('saves contract diagnostics when setup and token revocation both fail', async
         LINEAR_CONTRACT_REPORT: reportPath,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 10_000,
     });
     let output = '';
     child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
@@ -44,6 +46,7 @@ it('saves contract diagnostics when setup and token revocation both fail', async
     assert.match(output, /Entity not found: User/);
     const report = JSON.parse(await readFile(reportPath, 'utf8'));
     assert.equal(report.cleanupFailed, true);
+    assert.deepEqual(report.cleanupErrors, [{ operation: 'oauth.revoke', error: 'oauth.revoke: Linear did not confirm the revocation (HTTP 401)' }]);
     assert.equal(report.stats.total, 3);
     assert.equal(report.perOperation['revoke token'], 1);
     assert.equal(report.requests[0].requestId, 'request-teams-failed');

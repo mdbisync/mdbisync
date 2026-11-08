@@ -16,6 +16,7 @@ import { after, before, describe, it } from 'node:test';
 import {
   LinearClient,
   LinearGraphQLError,
+  LinearTokenError,
   RequestStats,
   mintAppToken,
   revokeToken,
@@ -38,9 +39,9 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   const suffix = randomBytes(3).toString('hex');
   const stats = new RequestStats();
   const perOperation: Record<string, number> = {};
-  // Every request, without content: operation, status, request id, error codes.
+  // Every GraphQL response, without content: status, request id, codes and budget headers.
   const requests: LogEntry[] = [];
-  let token: RunToken;
+  let token: RunToken | undefined;
   let linear: LinearClient;
   let teamId: string;
   const projectIds: string[] = [];
@@ -86,28 +87,50 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   });
 
   after(async () => {
-    if (!linear) return;
-    const cleanupErrors: unknown[] = [];
-    try {
+    const cleanupErrors: Array<{ operation: string; projectId?: string; error: unknown }> = [];
+    if (linear) {
       for (const id of projectIds) {
         try {
           await linear.request('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id });
         } catch (error) {
-          cleanupErrors.push(error);
+          cleanupErrors.push({ operation: 'DeleteProject', projectId: id, error });
         }
       }
-    } finally {
+    }
+    if (token) {
       try {
-        await measured('revoke token', () => revokeToken(token.accessToken, { baseUrl, stats }));
+        await measured('revoke token', () => revokeToken(token!.accessToken, { baseUrl, stats }));
       } catch (error) {
-        cleanupErrors.push(error);
-      } finally {
-        const report = { perOperation, stats: stats.toJSON(), lastRateLimit: linear.transport.lastRateLimit?.headers, requests, cleanupFailed: cleanupErrors.length > 0 };
-        console.log(JSON.stringify(report, null, 2));
-        if (process.env.LINEAR_CONTRACT_REPORT) await writeFile(process.env.LINEAR_CONTRACT_REPORT, JSON.stringify(report, null, 2));
+        cleanupErrors.push({ operation: 'oauth.revoke', error });
       }
     }
-    if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Contract cleanup failed');
+    // Token errors contain only operation/status. GraphQL details are already
+    // in requests; avoid copying arbitrary server messages into the report.
+    const describeCleanup = ({ operation, projectId, error }: typeof cleanupErrors[number]) => ({
+      operation,
+      ...(projectId ? { projectId } : {}),
+      error: error instanceof LinearTokenError ? error.message : error instanceof Error ? error.name : 'Unknown error',
+    });
+    const report = {
+      perOperation,
+      stats: stats.toJSON(),
+      lastRateLimit: linear?.transport.lastRateLimit?.headers,
+      requests,
+      cleanupFailed: cleanupErrors.length > 0,
+      cleanupErrors: cleanupErrors.map(describeCleanup),
+    };
+    console.log(JSON.stringify(report, null, 2));
+    if (process.env.LINEAR_CONTRACT_REPORT) {
+      try {
+        await writeFile(process.env.LINEAR_CONTRACT_REPORT, JSON.stringify(report, null, 2));
+      } catch (error) {
+        cleanupErrors.push({ operation: 'write report', error });
+      }
+    }
+    if (cleanupErrors.length) {
+      const summary = cleanupErrors.map((entry) => JSON.stringify(describeCleanup(entry))).join('; ');
+      throw new AggregateError(cleanupErrors.map((entry) => entry.error), `Contract cleanup failed: ${summary}`);
+    }
   });
 
   it('reads the rate-limit status', async () => {
