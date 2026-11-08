@@ -40,8 +40,9 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   const suffix = randomBytes(3).toString('hex');
   const stats = new RequestStats();
   const perOperation: Record<string, number> = {};
-  // Every GraphQL response, without content: status, request id, codes and budget headers.
+  // Every OAuth and GraphQL attempt, without credentials, variables or content.
   const requests: LogEntry[] = [];
+  const hooks = { log: (entry: LogEntry) => requests.push(entry) };
   let token: RunToken | undefined;
   let linear: LinearClient;
   let teamId: string;
@@ -67,12 +68,13 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   }
 
   before(async () => {
-    token = await measured('mint token', () => mintAppToken({ clientId: clientId!, clientSecret: clientSecret! }, { baseUrl, stats }));
+    token = await measured('mint token', () => mintAppToken({ clientId: clientId!, clientSecret: clientSecret! }, { baseUrl, stats, hooks }));
     linear = new LinearClient({
       token: token.accessToken,
+      auth: token.context,
       baseUrl,
       stats,
-      hooks: { log: (entry) => requests.push(entry) },
+      hooks,
     });
     const teams = await linear.request<{ teams: { nodes: Array<{ id: string; key: string }> } }>(
       'Teams',
@@ -107,7 +109,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     }
     if (token) {
       try {
-        await measured('revoke token', () => revokeToken(token!.accessToken, { baseUrl, stats }));
+        await measured('revoke token', () => revokeToken(token!.accessToken, { baseUrl, stats, hooks, auth: token!.context }));
       } catch (error) {
         cleanupErrors.push({ operation: 'oauth.revoke', error });
       }
