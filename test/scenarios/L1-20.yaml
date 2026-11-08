@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "id": "L1-20",
+  "slice": "mini",
+  "mode": "actions",
+  "setup": {
+    "state": "empty",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "run",
+      "action": "workflow",
+      "args": {
+        "event": "workflow_dispatch",
+        "command": "initial-sync",
+        "confirm": false
+      }
+    },
+    {
+      "kind": "run",
+      "action": "workflow",
+      "args": {
+        "event": "workflow_dispatch",
+        "command": "initial-sync",
+        "confirm": true
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "runs.0.writes.total",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "runs.0.summary.plan.paths",
+        "operator": "same-as",
+        "expected": "expected.initialPlan.paths"
+      },
+      {
+        "subject": "runs.1.documents.content",
+        "operator": "same-as",
+        "expected": "golden.linearForm"
+      },
+      {
+        "subject": "writes.githubActor",
+        "operator": "equal",
+        "expected": "app-bot"
+      }
+    ]
+  }
+}

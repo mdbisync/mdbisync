@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "id": "L1R-03",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "empty",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "linear",
+      "action": "seed",
+      "args": {
+        "actor": "editor-a",
+        "fixture": "reverse-initial"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "initial-sync",
+      "args": {
+        "direction": "linear-to-git",
+        "confirm": true
+      }
+    },
+    {
+      "kind": "merge",
+      "action": "pull-request",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "runs.last.writes.total",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "cycle.normalEnabled",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

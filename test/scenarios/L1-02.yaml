@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "id": "L1-02",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "empty",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "run",
+      "action": "check",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": false,
+        "reason": "Setup validation does not establish a synchronized baseline."
+      },
+      "I2": {
+        "required": false,
+        "reason": "Setup validation does not establish a synchronized baseline."
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": false,
+        "reason": "Setup validation does not establish a synchronized baseline."
+      },
+      "I7": {
+        "required": false,
+        "reason": "Setup validation does not establish a synchronized baseline."
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "summary.setupChecks",
+        "operator": "same-as",
+        "expected": "setup.requiredChecks"
+      },
+      {
+        "subject": "summary.securityHooksReported",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

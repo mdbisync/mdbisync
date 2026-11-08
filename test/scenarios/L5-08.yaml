@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "id": "L5-08",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "fault",
+      "action": "budget-headers",
+      "args": {
+        "remaining": 1,
+        "includeEndpointLimits": true
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "clear",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "runs.0.stoppedEarly",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "runs.0.summary.endpointLimitHeadersPresent",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

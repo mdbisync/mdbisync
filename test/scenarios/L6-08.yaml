@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "id": "L6-08",
+  "slice": "mini",
+  "mode": "ui",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "concurrent-edit"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "ui",
+      "action": "verify-editor",
+      "args": {
+        "actor": "editor-a",
+        "requireIdleSeconds": 120
+      }
+    },
+    {
+      "kind": "ui",
+      "action": "type-two-editors",
+      "args": {
+        "actor": "editor-a",
+        "actors": [
+          "editor-a",
+          "editor-b"
+        ]
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
+    },
+    {
+      "kind": "ui",
+      "action": "assert-dom",
+      "args": {
+        "actor": "editor-a"
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "tracked.bothEditorChangesPresent",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

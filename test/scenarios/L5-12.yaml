@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "id": "L5-12",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "git",
+      "action": "image-add",
+      "args": {
+        "storage": "lfs"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "missing-lfs-object",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "summary.leftOutRules",
+        "operator": "contains-all",
+        "expected": [
+          "lfs-object-missing"
+        ]
+      },
+      {
+        "subject": "documents.otherChangesSynced",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}
