@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"See ","marks":{"attribution":"user"}},{"text":"external links","marks":{"attribution":"user","link":{"href":"external-list.md","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-da57aa3c","marks":{"attribution":"user"}}]}
+  ]
+}

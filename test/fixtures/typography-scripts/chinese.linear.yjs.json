@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"报告已准备好，请审阅。","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-75d8f2a3","marks":{"attribution":"user"}}]}
+  ]
+}

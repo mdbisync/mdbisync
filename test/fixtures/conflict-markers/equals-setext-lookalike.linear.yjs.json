@@ -1,0 +1,11 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Title text","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"=======","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Seven equals signs on their own line.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-5c7f9462","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"An inline note.^[Inline footnote text.]","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-68f32f16","marks":{"attribution":"user"}}]}
+  ]
+}

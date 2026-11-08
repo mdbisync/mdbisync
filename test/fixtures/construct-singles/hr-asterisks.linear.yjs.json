@@ -1,0 +1,11 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Above the rule.","marks":{"attribution":"user"}}]},
+    {"type":"horizontal_rule"},
+    {"type":"paragraph","children":[{"text":"Below the rule.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-6069dfa8","marks":{"attribution":"user"}}]}
+  ]
+}

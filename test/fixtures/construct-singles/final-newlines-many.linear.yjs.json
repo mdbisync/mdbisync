@@ -1,0 +1,8 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"kx-0b75a227 A paragraph that ends with three newlines.","marks":{"attribution":"user"}}]}
+  ]
+}

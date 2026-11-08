@@ -1,0 +1,13 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Another use of the shared image:","marks":{"attribution":"user"}}]},
+    {
+      "type": "image",
+      "attrs": {"alt":"Banner","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/banner.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-b6b7be47","marks":{"attribution":"user"}}]}
+  ]
+}

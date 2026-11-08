@@ -1,0 +1,16 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"First line","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"Second line","marks":{"attribution":"user"}}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-0d10d55c","marks":{"attribution":"user"}}]}
+  ]
+}

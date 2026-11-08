@@ -1,0 +1,8 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"code_block","attrs":{"id":"<id>","language":"yaml"},"children":[{"text":"owner: finance\nref: kx-318e8ba0","marks":{"attribution":"user"}}]}
+  ]
+}

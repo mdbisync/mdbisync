@@ -1,0 +1,18 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "paragraph",
+      "children": [
+        {"text":"This paragraph is wrapped","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"across several source lines","marks":{"attribution":"user"}},
+        {"type":"hard_break"},
+        {"text":"but renders as one block.","marks":{"attribution":"user"}}
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-fcb1e8bc","marks":{"attribution":"user"}}]}
+  ]
+}

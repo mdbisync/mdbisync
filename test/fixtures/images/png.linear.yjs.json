@@ -1,0 +1,12 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "image",
+      "attrs": {"alt":"Pixel","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/pixel.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-30101287","marks":{"attribution":"user"}}]}
+  ]
+}

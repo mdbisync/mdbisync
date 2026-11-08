@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Read the ","marks":{"attribution":"user","strong":{}}},{"text":"handbook","marks":{"attribution":"user","link":{"href":"https://example.com/handbook","noEmbed":null},"strong":{}}},{"text":" today.","marks":{"attribution":"user","strong":{}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-7167dc36","marks":{"attribution":"user"}}]}
+  ]
+}

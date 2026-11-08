@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"bold italic","marks":{"attribution":"user","em":{},"strong":{}}},{"text":" then italic","marks":{"attribution":"user","em":{}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-8190f966","marks":{"attribution":"user"}}]}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "image",
+      "attrs": {"alt":"Banner","contentAttribution":{"actorType":"user","userId":"<userId>"},"src":"../assets/banner.png","uploadState":"finished"}
+    },
+    {"type":"paragraph","children":[{"text":"The same image is used by several documents.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-d39e774d","marks":{"attribution":"user"}}]}
+  ]
+}

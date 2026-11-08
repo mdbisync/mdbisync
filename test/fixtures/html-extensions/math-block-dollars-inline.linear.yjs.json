@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Inline block: $$x^2 + y^2 = z^2$$","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-722808a0","marks":{"attribution":"user"}}]}
+  ]
+}
