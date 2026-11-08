@@ -12,6 +12,13 @@
   },
   "steps": [
     {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
       "kind": "run",
       "action": "parallel",
       "args": {

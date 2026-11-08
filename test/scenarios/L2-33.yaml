@@ -28,7 +28,7 @@
       "kind": "git",
       "action": "ci-fix",
       "args": {
-        "variants": [
+        "fixes": [
           "stable-fix",
           "linear-would-undo"
         ]

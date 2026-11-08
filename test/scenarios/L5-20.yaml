@@ -15,7 +15,7 @@
       "kind": "run",
       "action": "token-lifecycle",
       "args": {
-        "variants": [
+        "outcomes": [
           "success",
           "failure",
           "killed"

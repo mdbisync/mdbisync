@@ -1,7 +1,7 @@
 {
   "version": 1,
   "id": "L2-15",
-  "slice": "mid",
+  "slice": "full",
   "mode": "local",
   "setup": {
     "state": "converged",

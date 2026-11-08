@@ -12,6 +12,13 @@
   },
   "steps": [
     {
+      "kind": "git",
+      "action": "edit",
+      "args": {
+        "target": "first-paragraph"
+      }
+    },
+    {
       "kind": "fault",
       "action": "pause",
       "args": {

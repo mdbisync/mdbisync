@@ -6,7 +6,8 @@
   "setup": {
     "state": "converged",
     "fixtures": [
-      "mini"
+      "mini",
+      "trashed-document"
     ],
     "teamZoneLock": true
   },

@@ -12,6 +12,13 @@
   },
   "steps": [
     {
+      "kind": "git",
+      "action": "edit-many",
+      "args": {
+        "documents": 40
+      }
+    },
+    {
       "kind": "fault",
       "action": "http",
       "args": {

@@ -12,6 +12,13 @@
   },
   "steps": [
     {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "pending"
+      }
+    },
+    {
       "kind": "linear",
       "action": "edit",
       "args": {
@@ -38,6 +45,13 @@
       "action": "edit",
       "args": {
         "actor": "editor-b"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "passed"
       }
     },
     {

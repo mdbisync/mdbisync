@@ -15,7 +15,8 @@
       "kind": "git",
       "action": "edit",
       "args": {
-        "fixture": "same-paragraph"
+        "fixture": "same-paragraph",
+        "cleanEdits": 1
       }
     },
     {

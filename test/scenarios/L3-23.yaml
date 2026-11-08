@@ -15,7 +15,8 @@
       "kind": "git",
       "action": "edit",
       "args": {
-        "fixture": "three-editors"
+        "fixture": "three-editors",
+        "target": "third-paragraph"
       }
     },
     {
@@ -23,7 +24,8 @@
       "action": "edit",
       "args": {
         "actor": "editor-a",
-        "fixture": "three-editors"
+        "fixture": "three-editors",
+        "target": "first-paragraph"
       }
     },
     {
@@ -31,7 +33,7 @@
       "action": "edit",
       "args": {
         "actor": "editor-b",
-        "target": "third-paragraph"
+        "target": "second-paragraph"
       }
     },
     {

@@ -15,7 +15,9 @@
       "kind": "git",
       "action": "edit",
       "args": {
-        "fixture": "many-conflicts"
+        "fixture": "many-conflicts",
+        "conflictingDocuments": 20,
+        "cleanEdits": 100
       }
     },
     {
