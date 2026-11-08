@@ -23,6 +23,7 @@ import {
   type BudgetFloor,
   type RateLimitSnapshot,
 } from './rate-limit.ts';
+import { authMetadata, emitLog, requestTiming, type AuthContext } from './diagnostics.ts';
 import { RequestStats } from './stats.ts';
 
 export const DEFAULT_BASE_URL = 'https://api.linear.app';
@@ -38,22 +39,29 @@ export interface RequestInfo {
 
 export interface ResponseInfo extends RequestInfo {
   status: number;
+  /** Time to response headers; LogEntry.durationMs also includes reading the body. */
   durationMs: number;
   rateLimit: RateLimitSnapshot;
 }
 
 /** A log line about a request. It never holds content, variables or tokens. */
-export interface LogEntry {
+export interface LogEntry extends Partial<AuthContext> {
   operation: string;
-  kind: OperationKind;
+  kind: OperationKind | 'oauth';
   attempt: number;
   status: number | 'network-error';
   durationMs: number;
+  startedAt: string;
+  finishedAt: string;
   rateLimitHeaders: Record<string, string>;
   /** Linear's `x-request-id`, for matching a failure with Linear's side. */
   requestId?: string | undefined;
   /** Codes of the GraphQL errors in the answer, for example INPUT_ERROR. */
   errorCodes?: string[] | undefined;
+  /** OAuth revocation outcome, including a 200 with success:false. */
+  revocationConfirmed?: boolean;
+  /** The governor rejected the response before its body was read. */
+  responseHookFailed?: true;
   retryAfterSeconds?: number | undefined;
   stop?: StopReason | undefined;
 }
@@ -69,6 +77,8 @@ export interface LinearHooks {
 export interface TransportOptions {
   /** OAuth access token. */
   token: string;
+  /** Safe mint metadata for correlating this token's requests, never credentials. */
+  auth?: AuthContext;
   /** API origin; a test proxy can sit here. Defaults to https://api.linear.app. */
   baseUrl?: string | undefined;
   budgetFloor?: Partial<BudgetFloor>;
@@ -86,6 +96,7 @@ export class GraphQLTransport {
   readonly baseUrl: string;
   readonly fetch: typeof fetch;
   #token: string;
+  #auth: AuthContext | undefined;
   #floor: BudgetFloor;
   #maxRetryAfterSeconds: number;
   #timeoutMs: number;
@@ -96,6 +107,7 @@ export class GraphQLTransport {
 
   constructor(options: TransportOptions) {
     this.#token = options.token;
+    this.#auth = authMetadata(options.auth);
     this.baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
     this.#floor = { ...DEFAULT_BUDGET_FLOOR, ...options.budgetFloor };
     this.#maxRetryAfterSeconds = options.maxRetryAfterSeconds ?? 10;
@@ -140,14 +152,23 @@ export class GraphQLTransport {
           signal: AbortSignal.timeout(this.#timeoutMs),
         });
       } catch (error) {
-        this.#log({ ...info, status: 'network-error', durationMs: Date.now() - started, rateLimitHeaders: {} });
+        this.#log({ ...info, ...authMetadata(this.#auth), ...requestTiming(started), status: 'network-error', rateLimitHeaders: {} });
         throw new LinearNetworkError(operation, error);
       }
 
       const rateLimit = readRateLimitHeaders(response.headers);
+      const requestId = response.headers.get('x-request-id') ?? undefined;
       const durationMs = Date.now() - started;
       if (Object.keys(rateLimit.headers).length > 0) this.#lastRateLimit = rateLimit;
-      await this.#hooks.afterResponse?.({ ...info, status: response.status, durationMs, rateLimit });
+      try {
+        await this.#hooks.afterResponse?.({ ...info, status: response.status, durationMs, rateLimit });
+      } catch (error) {
+        await response.body?.cancel().catch(() => {});
+        this.#log({ ...info, ...authMetadata(this.#auth), ...requestTiming(started), status: response.status,
+          requestId, rateLimitHeaders: rateLimit.headers, responseHookFailed: true,
+          ...(error instanceof LinearStoppedError ? { stop: error.reason } : {}) });
+        throw error;
+      }
 
       let body: { data?: unknown; errors?: GraphQLErrorShape[] } | undefined;
       let bodyError: unknown;
@@ -158,12 +179,12 @@ export class GraphQLTransport {
         bodyError = error;
       }
 
-      const requestId = response.headers.get('x-request-id') ?? undefined;
       const errorCodes = body?.errors?.map((error) => String(error.extensions?.code ?? 'unknown'));
       const entry: LogEntry = {
         ...info,
+        ...authMetadata(this.#auth),
+        ...requestTiming(started),
         status: response.status,
-        durationMs,
         rateLimitHeaders: rateLimit.headers,
         ...(requestId === undefined ? {} : { requestId }),
         ...(errorCodes === undefined ? {} : { errorCodes }),
@@ -200,7 +221,7 @@ export class GraphQLTransport {
   }
 
   #log(entry: LogEntry): void {
-    this.#hooks.log?.(entry);
+    emitLog(this.#hooks.log, entry);
   }
 }
 

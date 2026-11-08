@@ -58,3 +58,11 @@ drift, 1 drift, 2 the run could not finish or left its project behind.
 
 If Linear stops serving `contentState` (an internal field), the probe
 reports the Yjs part as blocked and still checks the Markdown forms.
+
+Each OAuth and GraphQL attempt emits a JSON diagnostic line on stderr with
+the run id, UTC start/end, operation, status, request id and budget headers.
+Mint records include the requested/returned scopes and grant type, which
+follow the token into its query and revocation records. The `--json` result
+also retains this `requestLog` when setup or token revocation fails. These
+records contain no credentials, request variables, raw bodies or workspace
+content. A diagnostic sink failure does not change the request's outcome.
