@@ -41,9 +41,11 @@ describe('results', () => {
     assert.equal(classify(undefined, true).unexpectedPass, true);
   });
 
-  it('starts with every scenario on the expected-red list', () => {
+  it('lists only known scenarios as expected-red, and none of the offline format scenarios that pass', () => {
     const list = loadExpectedRed();
-    for (const scenario of scenarios) assert.ok(list.has(scenario.id), scenario.id);
+    const known = new Set(scenarios.map((scenario) => scenario.id));
+    for (const id of list) assert.ok(known.has(id), id);
+    for (const id of ['L0-01', 'L0-02', 'L0-03', 'L0-04', 'L0-07', 'L0-08']) assert.ok(!list.has(id), id);
   });
 
   it('has an executor for every step action', () => {
@@ -155,7 +157,8 @@ function deps(config: Partial<TestConfig> = {}) {
     appClients: new Map(),
     stateDir: fresh('runner-state-'),
     outDir: fresh('runner-out-'),
-    expectedRed: loadExpectedRed(),
+    // Every scenario on the list, so runner tests do not depend on which features have landed.
+    expectedRed: new Set(scenarios.map((scenario) => scenario.id)),
     log: () => {},
   };
 }
