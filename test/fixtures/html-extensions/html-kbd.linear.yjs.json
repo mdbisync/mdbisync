@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Press <kbd>Ctrl</kbd> + <kbd>S</kbd>.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-bcb511ff","marks":{"attribution":"user"}}]}
+  ]
+}

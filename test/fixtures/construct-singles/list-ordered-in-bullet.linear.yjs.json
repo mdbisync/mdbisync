@@ -1,0 +1,43 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Release","marks":{"attribution":"user"}}]},
+            {
+              "type": "ordered_list",
+              "attrs": {"order":1},
+              "children": [
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Tag","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Build","marks":{"attribution":"user"}}]}
+                  ]
+                },
+                {
+                  "type": "list_item",
+                  "children": [
+                    {"type":"paragraph","children":[{"text":"Publish","marks":{"attribution":"user"}}]}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-7e47392f","marks":{"attribution":"user"}}]}
+  ]
+}

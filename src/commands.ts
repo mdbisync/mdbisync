@@ -1,8 +1,8 @@
 // The commands of the command-line entry and their exit codes.
 // `sync`, `initial-sync` and `check` run the preflight (the sync's state and
-// the setup check); after a passed preflight, `sync` and `initial-sync` and
-// the other commands are still stubs that report "not implemented" with
-// their own code, so callers and tests can tell them apart.
+// the setup check). A command that is not built yet, and `sync` and
+// `initial-sync` after a passed preflight, report "not implemented" and exit
+// with their own code, so callers and tests can tell the stubs apart.
 
 export interface CommandInfo {
   readonly summary: string;
@@ -32,6 +32,9 @@ export const NO_STATE_EXIT_CODE = 4;
 export function isCommandName(value: string): value is CommandName {
   return Object.hasOwn(COMMANDS, value);
 }
+
+/** Commands that run; the others are stubs. */
+export const IMPLEMENTED: ReadonlySet<CommandName> = new Set(["lint", "fix"]);
 
 export function notImplementedMessage(command: string): string {
   return `${command}: not implemented`;

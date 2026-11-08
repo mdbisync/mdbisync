@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Column\tseparated\tby\ttabs","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-5bcc514b","marks":{"attribution":"user"}}]}
+  ]
+}

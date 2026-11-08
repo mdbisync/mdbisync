@@ -1,3 +1,5 @@
 node_modules/
 dist/
 *.tsbuildinfo
+# The generated corpus; it is published to the test repository, not here.
+test/corpus/out/

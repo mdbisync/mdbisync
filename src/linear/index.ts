@@ -1,4 +1,5 @@
 export * from './client.ts';
+export type { AuthContext } from './diagnostics.ts';
 export * from './errors.ts';
 export * from './facts.ts';
 export * from './rate-limit.ts';

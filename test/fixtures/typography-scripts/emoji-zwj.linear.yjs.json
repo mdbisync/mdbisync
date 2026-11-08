@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Team: 👩‍💻 👨‍👩‍👧‍👦 🏳️‍🌈","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-99c1a2a8","marks":{"attribution":"user"}}]}
+  ]
+}

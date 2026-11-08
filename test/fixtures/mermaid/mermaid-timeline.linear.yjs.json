@@ -1,0 +1,10 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Diagram of the timeline kind.","marks":{"attribution":"user"}}]},
+    {"type":"diagram","attrs":{"height":null,"id":"<id>","language":"mermaid","width":null},"children":[{"text":"timeline\n  title Year plan\n  Q1 : Hire\n  Q2 : Build\n  Q3 : Launch","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-62a537b5","marks":{"attribution":"user"}}]}
+  ]
+}

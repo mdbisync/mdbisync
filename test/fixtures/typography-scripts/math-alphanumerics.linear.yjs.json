@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"𝐀𝐁𝐂 and 𝕒𝕓𝕔 are styled letters.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-147fc8fd","marks":{"attribution":"user"}}]}
+  ]
+}

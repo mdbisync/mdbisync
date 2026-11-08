@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Multi-line strings","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-7feddb4c","marks":{"attribution":"user"}}]}
+  ]
+}

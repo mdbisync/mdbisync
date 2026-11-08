@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"An ","marks":{"attribution":"user","em":{}}},{"text":"important","marks":{"attribution":"user","em":{},"strong":{}}},{"text":" note","marks":{"attribution":"user","em":{}}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-bf59769e","marks":{"attribution":"user"}}]}
+  ]
+}

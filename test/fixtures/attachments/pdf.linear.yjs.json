@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"The ","marks":{"attribution":"user"}},{"text":"summary","marks":{"attribution":"user","link":{"href":"../assets/summary.pdf","noEmbed":null}}},{"text":" is attached.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-a8d4d180","marks":{"attribution":"user"}}]}
+  ]
+}

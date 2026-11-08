@@ -4,6 +4,9 @@ import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } fro
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+// Written by the build: license texts and notices of the bundled packages.
+export const NOTICES_FILE = 'dist/THIRD_PARTY_NOTICES.txt';
+
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected a mapping');
   return value as Record<string, unknown>;
@@ -82,7 +85,7 @@ export async function stageRelease(options: {
   const bundles = [...new Set([...validateAction(action), cli])].sort();
   const distFiles = await readdir(join(source, 'dist'));
   const notices = bundles.map((file) => `${file}.LEGAL.txt`).filter((file) => distFiles.includes(file.slice(5)));
-  const files = ['action.yml', '.pre-commit-hooks.yaml', 'LICENSE', 'README.md', ...notices, ...bundles];
+  const files = ['action.yml', '.pre-commit-hooks.yaml', 'LICENSE', 'README.md', NOTICES_FILE, ...notices, ...bundles];
   // Refuse symlinks and empty bundles before creating any release output.
   for (const file of files) {
     const info = await lstat(join(source, file));
@@ -107,7 +110,7 @@ export async function verifyReleaseDirectory(directory: string, sourceSha: strin
   const manifest = record(JSON.parse(await readFile(join(directory, 'release.json'), 'utf8')));
   if (manifest.source !== sourceSha || manifest.version !== version) throw new Error('Release provenance does not match the requested source and version');
   const hashes = record(manifest.files);
-  const required = ['action.yml', '.pre-commit-hooks.yaml', 'LICENSE', 'README.md', 'package.json'];
+  const required = ['action.yml', '.pre-commit-hooks.yaml', 'LICENSE', 'README.md', NOTICES_FILE, 'package.json'];
   for (const file of required) if (!(file in hashes)) throw new Error(`Missing release file: ${file}`);
   const actual: string[] = [];
   for (const file of await readdir(directory, { recursive: true })) {

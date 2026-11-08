@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"#notaheading is plain text without a space after the hash.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-f101e197","marks":{"attribution":"user"}}]}
+  ]
+}

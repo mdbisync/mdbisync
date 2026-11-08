@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Run ","marks":{"attribution":"user"}},{"text":"make build","marks":{"attribution":"user","code":{}}},{"text":" before the release.","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-8a7c8028","marks":{"attribution":"user"}}]}
+  ]
+}

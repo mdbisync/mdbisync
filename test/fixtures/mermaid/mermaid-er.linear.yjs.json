@@ -1,0 +1,10 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"Diagram of the er kind.","marks":{"attribution":"user"}}]},
+    {"type":"diagram","attrs":{"height":null,"id":"<id>","language":"mermaid","width":null},"children":[{"text":"erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  ORDER ||--|{ LINE : contains","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-bed501ba","marks":{"attribution":"user"}}]}
+  ]
+}

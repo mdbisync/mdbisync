@@ -1,0 +1,27 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "todo_list",
+      "children": [
+        {
+          "type": "todo_item",
+          "attrs": {"done":false},
+          "children": [
+            {"type":"paragraph","children":[{"text":"Draft the agenda","marks":{"attribution":"user"}}]}
+          ]
+        },
+        {
+          "type": "todo_item",
+          "attrs": {"done":false},
+          "children": [
+            {"type":"paragraph","children":[{"text":"Book the room","marks":{"attribution":"user"}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-ed0ae971","marks":{"attribution":"user"}}]}
+  ]
+}

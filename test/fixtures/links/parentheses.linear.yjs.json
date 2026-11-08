@@ -1,0 +1,9 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {"type":"paragraph","children":[{"text":"See ","marks":{"attribution":"user"}},{"text":"the article","marks":{"attribution":"user","link":{"href":"https://example.com/wiki/Plan_(draft)","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
+    {"type":"paragraph","children":[{"text":"Ref kx-b577ec04","marks":{"attribution":"user"}}]}
+  ]
+}
