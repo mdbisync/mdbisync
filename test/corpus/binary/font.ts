@@ -277,6 +277,11 @@ export function encodeTtf(family: string): Buffer {
   return sfnt(buildTables(family));
 }
 
+/** The font as a .ttf, .otf (TrueType outlines) or .woff2 file. */
+export function encodeFontFile(format: "ttf" | "otf" | "woff2", family: string): Buffer {
+  return format === "woff2" ? encodeWoff2(family) : encodeTtf(family);
+}
+
 function base128(value: number): number[] {
   const out: number[] = [];
   do {
