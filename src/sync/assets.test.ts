@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { it } from 'node:test';
+import { LinearReads } from '../linear/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
 import { captureAssets, createAssetCapture } from './assets.ts';
@@ -150,4 +154,31 @@ it('prefers previously linked files for cached links, images and definitions acr
     const moved = await next('docs/deeper/plan.md', content, new Map([[hash, url]]), previous, 'docs/plan.md');
     assert.equal(moved.body, expected.replaceAll('../assets/', '../../assets/'));
   } finally { await fixture.cleanup(); }
+});
+
+it('a download kept by the stage step is taken by the apply step without a request', async () => {
+  const fixture = await createFixture();
+  const dir = await mkdtemp(join(tmpdir(), 'kept-download-'));
+  try {
+    await fixture.seed({'plan.md': 'Plan.'});
+    const git = await fixture.clone('kept');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const body = '![Image](https://uploads.linear.app/workspace/image.png)';
+    let gets = 0;
+    const fetcher: typeof fetch = async () => { gets++; return new Response('image-bytes', {headers: {'content-type': 'image/png'}}); };
+    const recording = LinearReads.recording();
+    recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
+    const staged = await createAssetCapture(git, resolveStateConfig({}), base, fetcher, recording)('plan.md', body, new Map());
+    await recording.save(join(dir, 'reads.json'));
+    assert.equal(gets, 1);
+    const replaying = await LinearReads.replaying(join(dir, 'reads.json'));
+    assert.ok(replaying !== null);
+    const applied = await createAssetCapture(git, resolveStateConfig({}), base, fetcher, replaying)('plan.md', body, new Map());
+    assert.equal(gets, 1, 'the apply step downloaded again');
+    assert.deepEqual([...applied.files], [...staged.files]);
+    assert.equal(applied.body, staged.body);
+  } finally {
+    await rm(dir, {recursive: true, force: true});
+    await fixture.cleanup();
+  }
 });

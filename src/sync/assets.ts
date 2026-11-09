@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import { destinations, findFileLinks, restoreFileLinks, type WrittenLink } from '../initial-sync/uploads.ts';
+import { type LinearReads, uploadReadKey } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
 
 export interface CapturedAssets {
@@ -16,8 +17,11 @@ function isUpload(url: string): boolean {
 }
 
 /** The caller authenticates the allowed upload host. Redirects cannot forward credentials elsewhere. */
-async function download(url: string, fetcher: typeof fetch): Promise<{ bytes: Buffer; type: string }> {
+async function download(url: string, fetcher: typeof fetch, reads: LinearReads | undefined): Promise<{ bytes: Buffer; type: string }> {
   if (!isUpload(url)) throw new Error('asset destination is not allowed');
+  const key = uploadReadKey(url);
+  const kept = reads?.take(key);
+  if (kept !== undefined && kept.body.length <= LIMIT) return { bytes: kept.body, type: kept.type };
   const response = await fetcher(url, { redirect: 'manual', signal: AbortSignal.timeout(30_000) });
   if (response.status >= 300 && response.status < 400) throw new Error('asset redirect destination is not allowed');
   if (!response.ok || response.body === null || Number(response.headers.get('content-length') ?? 0) > LIMIT) throw new Error('asset could not be downloaded');
@@ -28,13 +32,15 @@ async function download(url: string, fetcher: typeof fetch): Promise<{ bytes: Bu
     if (size > LIMIT) throw new Error('asset exceeds the download limit');
     chunks.push(Buffer.from(chunk));
   }
-  return {bytes: Buffer.concat(chunks), type: response.headers.get('content-type')?.split(';')[0]?.trim() ?? ''};
+  const asset = {bytes: Buffer.concat(chunks), type: response.headers.get('content-type')?.split(';')[0]?.trim() ?? ''};
+  reads?.keep(key, { status: response.status, type: asset.type, body: asset.bytes });
+  return asset;
 }
 
 const EXTENSIONS: Readonly<Record<string, string>> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp', 'image/svg+xml': '.svg', 'image/avif': '.avif', 'application/pdf': '.pdf' };
 
 /** One lazily built hash index per capture, read in bounded batches. */
-export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fetcher: typeof fetch = fetch) {
+export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fetcher: typeof fetch = fetch, reads?: LinearReads) {
   const hashPaths = new Map<string, string>();
   const pathHashes = new Map<string, string>();
   let indexed = false;
@@ -121,7 +127,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       }
       if (assetPath === undefined) {
         let asset = downloaded.get(url);
-        if (asset === undefined) { asset = await download(url, fetcher); downloaded.set(url, asset); }
+        if (asset === undefined) { asset = await download(url, fetcher, reads); downloaded.set(url, asset); }
         hash = createHash('sha256').update(asset.bytes).digest('hex');
         assetPath = preferredPaths.get(hash) ?? hashPaths.get(hash);
         if (assetPath === undefined) {

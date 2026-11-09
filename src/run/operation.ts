@@ -23,8 +23,9 @@ import {
   uploadsTransform,
 } from '../initial-sync/index.ts';
 import { rm } from 'node:fs/promises';
+import { LinearReads } from '../linear/index.ts';
 import { type CycleResult, capture, renderSync, runSyncCycle } from '../sync/index.ts';
-import { type SecurityStep, answeringGate, stageNothing, stagingGate } from '../sync/staged.ts';
+import { type SecurityStep, answeringGate, readsFile, stageNothing, stagingGate } from '../sync/staged.ts';
 import { type RefusedPush, refusedPushes } from '../state/index.ts';
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
 import { type Operation, type PreflightOptions, type PreflightOutcome, type RunContext, runPreflight } from './preflight.ts';
@@ -70,13 +71,15 @@ export async function runOperation(
     return { operation, ok: true, notImplemented: false, refusedPushes: [], summary: renderStaged(0), staged: { sets: 0 } };
   }
   try {
-    const outcome = await runWithSecurity(operation, inputs, initialSync, options, security);
+    // The stage step keeps Linear's answers to its reads; the apply step's capture takes them instead of reading again.
+    const reads = security?.step === 'stage' ? LinearReads.recording() : security?.step === 'apply' ? await LinearReads.replaying(readsFile(security.folder)) : null;
+    const outcome = await runWithSecurity(operation, inputs, initialSync, reads === null ? options : { ...options, reads }, security);
+    if (security?.step !== 'stage' || !outcome.ok) return outcome;
     // The preflight passed without work to do (no annotated folder has a target): the hooks step still gets its command.
-    if (security?.step === 'stage' && outcome.ok && outcome.staged === undefined) {
-      await stageNothing(security.folder, null);
-      return { ...outcome, staged: { sets: 0 }, summary: `${outcome.summary.trimEnd()}\n\n${renderStaged(0)}` };
-    }
-    return outcome;
+    const staged = outcome.staged === undefined ? { ...outcome, staged: { sets: 0 }, summary: `${outcome.summary.trimEnd()}\n\n${renderStaged(0)}` } : outcome;
+    if (outcome.staged === undefined) await stageNothing(security.folder, null);
+    await reads?.save(readsFile(security.folder));
+    return staged;
   } finally {
     // The folder holds document content; the apply step is its last reader.
     if (security?.step === 'apply') await rm(security.folder, { recursive: true, force: true });

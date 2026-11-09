@@ -26,6 +26,7 @@ import {
 } from './rate-limit.ts';
 import { authMetadata, emitLog, requestTiming, type AuthContext } from './diagnostics.ts';
 import { RequestStats } from './stats.ts';
+import { type LinearReads, graphqlReadKey } from './reads.ts';
 
 export const DEFAULT_BASE_URL = 'https://api.linear.app';
 
@@ -76,8 +77,10 @@ export interface LinearHooks {
 }
 
 export interface TransportOptions {
-  /** OAuth access token. */
-  token: string;
+  /** OAuth access token, or how to get it when the first request needs one (a run whose reads are all kept needs none). */
+  token: string | (() => Promise<string>);
+  /** Answers kept from an earlier step of the job, or where to keep this one's (see reads.ts). */
+  reads?: LinearReads;
   /** Safe mint metadata for correlating this token's requests, never credentials. */
   auth?: AuthContext;
   /** API origin; a test proxy can sit here. Defaults to https://api.linear.app. */
@@ -96,7 +99,8 @@ export class GraphQLTransport {
   readonly stats: RequestStats;
   readonly baseUrl: string;
   readonly fetch: typeof fetch;
-  #token: string;
+  readonly reads?: LinearReads;
+  #token: string | (() => Promise<string>);
   #auth: AuthContext | undefined;
   #floor: BudgetFloor;
   #maxRetryAfterSeconds: number;
@@ -108,6 +112,7 @@ export class GraphQLTransport {
 
   constructor(options: TransportOptions) {
     this.#token = options.token;
+    if (options.reads !== undefined) this.reads = options.reads;
     this.#auth = authMetadata(options.auth);
     this.baseUrl = trimSlash(options.baseUrl ?? DEFAULT_BASE_URL);
     this.#floor = { ...DEFAULT_BUDGET_FLOOR, ...options.budgetFloor };
@@ -125,7 +130,11 @@ export class GraphQLTransport {
     if (target.protocol !== 'https:' || target.hostname !== 'uploads.linear.app' || target.username !== '' || target.password !== '' || target.port !== '') {
       throw new Error('upload destination is not allowed');
     }
-    return this.fetch(url, { ...init, method: 'GET', redirect: 'manual', headers: { authorization: `Bearer ${this.#token}` } });
+    return this.fetch(url, { ...init, method: 'GET', redirect: 'manual', headers: { authorization: `Bearer ${await this.#accessToken()}` } });
+  }
+
+  #accessToken(): Promise<string> {
+    return typeof this.#token === 'string' ? Promise.resolve(this.#token) : this.#token();
   }
 
   /** Why the client stopped, or undefined while it is running. */
@@ -144,21 +153,27 @@ export class GraphQLTransport {
     query: string,
     variables: Record<string, unknown> = {},
   ): Promise<T> {
+    const requestBody = JSON.stringify({ query, variables, operationName: operation });
+    // Only reads are kept and answered again; a write always reaches Linear.
+    const key = this.reads !== undefined && kind === 'query' ? graphqlReadKey(requestBody) : undefined;
     for (let attempt = 1; ; attempt += 1) {
       if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
+      const kept = attempt === 1 && key !== undefined ? this.reads?.take(key) : undefined;
+      if (kept !== undefined) return keptData<T>(operation, kept.status, kept.body);
       const info: RequestInfo = { operation, kind, attempt };
       await this.#hooks.beforeRequest?.(info);
       // Another request may have stopped the client while this one waited.
       if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
 
+      const token = await this.#accessToken();
       const started = Date.now();
       this.stats.count(operation);
       let response: Response;
       try {
         response = await this.fetch(`${this.baseUrl}/graphql`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#token}` },
-          body: JSON.stringify({ query, variables, operationName: operation }),
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: requestBody,
           signal: AbortSignal.timeout(this.#timeoutMs),
         });
       } catch (error) {
@@ -181,9 +196,11 @@ export class GraphQLTransport {
       }
 
       let body: { data?: unknown; errors?: GraphQLErrorShape[] } | undefined;
+      let text = '';
       let bodyError: unknown;
       try {
-        body = (await response.json()) as typeof body;
+        text = await response.text();
+        body = JSON.parse(text) as typeof body;
       } catch (error) {
         body = undefined;
         bodyError = error;
@@ -226,6 +243,7 @@ export class GraphQLTransport {
       if (!response.ok || body === undefined || body.data === undefined || body.data === null) {
         throw new LinearHttpError(operation, response.status, requestId);
       }
+      if (key !== undefined) this.reads?.keep(key, { status: response.status, type: 'application/json', body: Buffer.from(text, 'utf8') });
       return body.data as T;
     }
   }
@@ -239,6 +257,18 @@ export class GraphQLTransport {
   #log(entry: LogEntry): void {
     emitLog(this.#hooks.log, entry);
   }
+}
+
+/** A kept answer: only answers with data and no errors are kept, so anything else is an error of the record. */
+function keptData<T>(operation: string, status: number, bytes: Buffer): T {
+  let body: { data?: unknown; errors?: unknown } | undefined;
+  try {
+    body = JSON.parse(bytes.toString('utf8')) as typeof body;
+  } catch {
+    body = undefined;
+  }
+  if (body === undefined || body === null || body.errors !== undefined || body.data === undefined || body.data === null) throw new LinearHttpError(operation, status, undefined);
+  return body.data as T;
 }
 
 function isRateLimited(status: number, errors: GraphQLErrorShape[] | undefined): boolean {

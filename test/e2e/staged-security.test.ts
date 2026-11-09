@@ -52,6 +52,8 @@ describe('security hooks in a step of their own', { skip: linux ? false : 'needs
   let workspace: string;
   let runnerTemp: string;
   let minted: string[];
+  /** Every request that reaches Linear's API, by operation, in order. */
+  let linearRequests: string[];
 
   beforeEach(async () => {
     fixture = await createFixture();
@@ -123,6 +125,7 @@ for (const file of process.argv.slice(2)) {
     world.linear.documents.push({ id: 'plan', title: 'plan', content: 'Original.\n', projectId: 'project-api', createdAt: '2026-01-01T00:00:00Z' });
     // The fake worlds over HTTP, so the steps can run as processes of their own. Each Linear token is a secret of the run.
     minted = [];
+    linearRequests = [];
     const answer = fakeFetch(world);
     server = createServer((request, response) => {
       void (async () => {
@@ -131,6 +134,7 @@ for (const file of process.argv.slice(2)) {
         const body = Buffer.concat(chunks);
         const [, service, ...rest] = (request.url ?? '/').split('/');
         const target = `${service === 'linear' ? LINEAR_API : GITHUB_API}/${rest.join('/')}`;
+        if (service === 'linear') linearRequests.push(rest.join('/') === 'graphql' ? (JSON.parse(body.toString('utf8')) as { operationName: string }).operationName : rest.join('/'));
         const headers = Object.fromEntries(Object.entries(request.headers).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
         const reply = await answer(target, { method: request.method ?? 'GET', headers, ...(body.length > 0 ? { body: body.toString('utf8') } : {}) });
         let text = Buffer.from(await reply.arrayBuffer());
@@ -252,7 +256,42 @@ for (const file of process.argv.slice(2)) {
     // The staged content is gone from the runner's disk.
     assert.equal(existsSync(join(runnerTemp, STAGE_FOLDER)), false);
     assert.equal((await canaries()).length, 1 + more.length, 'a hook ran in the apply step');
-    assert.ok(minted.length === 2 && world.revoked === 2);
+    // The apply step took the stage step's reads and had nothing to write to Linear: it needed no token of its own.
+    assert.ok(minted.length === 1 && world.revoked === 1);
+  });
+
+  /** One staged run: the stage step, the hooks step and the apply step; the Linear requests of each action step. */
+  const stagedRun = async (name: string) => {
+    const before = linearRequests.length;
+    const stage = await action(`${name}-stage`, { operation: 'sync', 'security-step': 'stage', 'report-file': '' });
+    assert.equal(stage.status, 0, stage.stdout);
+    const staged = linearRequests.slice(before);
+    assert.equal((await hooksStep(stage)).status, 0);
+    const between = linearRequests.length;
+    const apply = await action(`${name}-apply`, { operation: 'sync', 'security-step': 'apply' });
+    assert.equal(apply.status, 0, apply.stdout);
+    return { stage: staged, apply: linearRequests.slice(between) };
+  };
+  /** The documents written to Linear so far, counted as I9 counts them. */
+  const written = () => world.writes.filter((operation) => /document(Create|Update)|(Create|Update)Document/i.test(operation)).length;
+
+  it('a staged run reads Linear once: the apply step answers its reads from the stage step, within I9', async () => {
+    edit('Edited in Linear.\n');
+    const run = await stagedRun('edit');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nEdited in Linear.\n');
+    // The apply step has nothing to write to Linear: every read it needs, the stage step made.
+    assert.deepEqual(run.apply, []);
+    const total = run.stage.length + run.apply.length;
+    assert.ok(total <= 1.5 * written() + 5, `${total} Linear requests for ${written()} written documents in one run: ${[...run.stage, '|', ...run.apply].join(', ')}`);
+    // The record of the reads holds document content: the apply step removes it with the rest of the folder.
+    assert.equal(existsSync(join(runnerTemp, STAGE_FOLDER)), false);
+  });
+
+  it('a staged run that changes nothing makes at most 5 Linear requests', async () => {
+    const run = await stagedRun('settled');
+    assert.deepEqual(run.apply, []);
+    assert.ok(run.stage.length <= 5, run.stage.join(', '));
+    assert.deepEqual([world.minted, world.revoked], [1, 1]);
   });
 
   it('control: hooks run inside the action\'s own step can read its secrets through /proc', async () => {
@@ -264,7 +303,7 @@ for (const file of process.argv.slice(2)) {
     assert.ok(found.has(appToken), 'the canary did not find the App token');
   });
 
-  it('a change the hooks have not seen is not pushed, and the next run takes it', async () => {
+  it('a change in Linear after the stage step waits for the next run; the apply step pushes what the hooks saw', async () => {
     edit('Seen by the hooks.\n');
     const stage = await action('stage', { operation: 'sync', 'security-step': 'stage', 'report-file': '' });
     assert.equal((await hooksStep(stage)).status, 0);
@@ -272,14 +311,19 @@ for (const file of process.argv.slice(2)) {
     edit('Unseen secret-like edit.\n');
     const apply = await action('apply', { operation: 'sync', 'security-step': 'apply' });
     assert.equal(apply.status, 0, apply.stdout);
-    assert.deepEqual((await report('apply')).capture.leftOut, [{ id: 'plan', rule: 'security-unchecked' }]);
+    assert.deepEqual((await report('apply')).capture.leftOut, []);
     assert.equal(await remoteHolds('Unseen secret-like edit'), false);
-    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nSeen by the hooks.\n');
+    // Linear's newer text stays: nothing from the run's git side was written over it.
+    assert.equal(world.linear.documents[0]!.content, 'Unseen secret-like edit.\n');
 
     // The next run's hooks see it, and it goes through.
     const again = await action('stage-2', { operation: 'sync', 'security-step': 'stage', 'report-file': '' });
     assert.equal((await hooksStep(again)).status, 0);
-    assert.equal((await action('apply-2', { operation: 'sync', 'security-step': 'apply' })).status, 0);
+    const next = await action('apply-2', { operation: 'sync', 'security-step': 'apply' });
+    // The fake GitHub has no merge for the first run's pull request, so this run ends at that step; the capture is what counts here.
+    assert.ok(next.status === 0 || /not finished \(github-failed\)/.test(next.stdout), next.stdout);
+    assert.deepEqual((await report('apply-2')).capture.leftOut, []);
     assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nUnseen secret-like edit.\n');
   });
 

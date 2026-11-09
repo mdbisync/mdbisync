@@ -275,7 +275,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       reservations.add(path);
     }
     const linkBase = [...work.values()].some((doc) => doc.content?.includes('https://linear.app/')) ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
-    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)));
+    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads);
     type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, Buffer | string>; checked?: string; compared?: { body: string; same: boolean } };
     const candidates = new Map<string, Candidate>();
     const resetTarget = (id: string, targets: Map<string, string> = documentIds) => {
@@ -350,9 +350,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           if (findings?.length === 0) findings = await gate.check(candidate.files);
         }
         if (findings === null) {
-          // The hooks have not seen this text (it changed in Linear after
-          // they ran): it stays out of this run, and the cursor holds, so
-          // the next run checks it.
+          // The hooks have not seen this text (the hooks step did not run,
+          // or the tracked branch moved after it): it stays out of this run,
+          // and the cursor holds, so the next run checks it.
           result.leftOut.push({id, rule: 'security-unchecked'});
           candidates.delete(id);
           resetTarget(id);
@@ -371,6 +371,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         candidate.checked = text;
       }
     }
+    // The stage step stops here: the reads it kept end, and the rest of the run reads Linear itself.
+    linear.transport.reads?.end();
     if (options.stageOnly === true) {
       // The staging gate passed every candidate. The apply step rejects some,
       // and the documents that link to them are written with the rejected
