@@ -329,4 +329,3 @@ export function paragraphEdit(text: string, target: unknown, token: string): str
   if (typeof target === 'string' && target.endsWith('paragraph')) return editParagraph(text, ordinalOf(target) ?? 0, token);
   return `${text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n`;
 }
-
