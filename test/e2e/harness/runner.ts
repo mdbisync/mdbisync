@@ -12,7 +12,7 @@ import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
-import { annotatedFolders, owningFolder, readAnnotation } from './corpus.ts';
+import { annotatedFolders, CORPUS_DIR, owningFolder, readAnnotation } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
 import { BudgetBlockedError, estimate, type Governor } from './governor.ts';
 import { SandboxRest, githubToken } from './github.ts';
@@ -24,7 +24,7 @@ import { classify, EnvBlockedError, ProductError, type CheckOutcome, type Scenar
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
-import { prepareFixtures, UNSAFE_TITLES } from './fixtures.ts';
+import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtures.ts';
 import { BEFORE_VIEW, takeStartView } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
 
@@ -121,7 +121,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     manifest = await sandbox.manifest();
     ctx.phase('tracked branch');
     created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names, {
-      checks: ctx.scenario.steps.some((step) => step.kind === 'fault' && step.action === 'checks'),
+      checks: publishesCheckWorkflow(ctx.scenario),
     });
   } catch (error) {
     if (error instanceof CorpusMissingError) throw new EnvBlockedError(`corpus: ${error.message}`);
@@ -229,7 +229,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   }
   // The scenario's own edits and runs start here: setup's edits are not the scenario's.
   ctx.engine.setupRuns = ctx.engine.results.length;
-  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.)/.test(key)) ctx.observations.delete(key);
+  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.)/.test(key)) ctx.observations.delete(key);
   await recordStart(ctx, live);
 }
 
@@ -443,6 +443,28 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
   return { ...result, harnessAppRequests: requests };
 }
 
+/**
+ * The sandbox's corpus for an offline scenario: the shared cache of its main
+ * branch, brought up to date. Nothing is pushed and Linear is not involved.
+ */
+async function corpusReader(deps: RunnerDeps, runId: string): Promise<Sandbox> {
+  const { config } = deps;
+  if (config.gitUrl === '') throw new EnvBlockedError('the corpus is on the sandbox repository, and none is configured (MDBISYNC_TEST_SANDBOX_URL)');
+  let token;
+  try {
+    token = await githubToken(config, 'local');
+  } catch (error) {
+    throw new EnvBlockedError(`GitHub token: ${(error as Error).message}`);
+  }
+  const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, stateDir: deps.stateDir, runId });
+  try {
+    await sandbox.refreshCache();
+  } catch (error) {
+    throw new EnvBlockedError(`the sandbox's corpus could not be read: ${(error as Error).message}`);
+  }
+  return sandbox;
+}
+
 async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: string): Promise<Omit<ScenarioResult, 'harnessAppRequests'>> {
   const names: RunNames = runNames(runId);
   const started = Date.now();
@@ -459,6 +481,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   let person: Git | undefined;
   let hooksInstalled = false;
   let engineDir: string | undefined;
+  let corpus: Promise<Sandbox> | undefined;
   let phase = 'admission';
   // Set when setup missed its deadline: setup stops at its next phase or lock wait, and creates nothing more.
   const abort = new AbortController();
@@ -501,6 +524,11 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
         engineDir = join(runDir, 'engine');
       }
       return engineDir;
+    },
+    async corpusFile(path) {
+      // A live run's setup refreshed the cache; an offline run reads the sandbox's main once, read-only.
+      corpus ??= ctx.live === null ? corpusReader(deps, runId) : Promise.resolve(ctx.live.sandbox);
+      return (await corpus).readMain(`${CORPUS_DIR}/${path}`);
     },
   };
   const locks: Lock[] = [];
