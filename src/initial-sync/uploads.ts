@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Nodes } from 'mdast';
-import { end, parse, splitFile, start, visit } from '../format/markdown.ts';
+import { end, parse, start, visit } from '../format/markdown.ts';
 import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
 import {
   type Git,
@@ -90,15 +90,24 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
     }
   };
 
-  const upload = async (target: string, file: LinkedFile): Promise<string> => {
+  /** Uploads the files not in the cache, read together; an unreadable one leaves the document out before any upload. */
+  const uploadMissing = async (targets: readonly string[]) => {
     const { git, tracked, linear, uploads } = context as TransformContext;
-    const read = (await readFiles(git, options.config, tracked, [target])).get(target);
-    if (read === undefined || !read.ok) {
-      throw new LeaveOutError(UPLOAD_UNREADABLE, `${target} cannot be read: ${read?.reason ?? 'unknown'}`);
+    const byHash = new Map<string, string>();
+    for (const target of targets) {
+      const { hash } = linked.get(target) as LinkedFile;
+      if (!uploads.has(hash) && !byHash.has(hash)) byHash.set(hash, target);
     }
-    const { assetUrl } = await linear.uploadFile({ filename: posix.basename(target), contentType: contentTypeOf(target), bytes: new Uint8Array(read.content) });
-    uploads.set(file.hash, assetUrl);
-    return assetUrl;
+    if (byHash.size === 0) return;
+    const reads = await readFiles(git, options.config, tracked, [...byHash.values()]);
+    for (const [target, read] of reads) {
+      if (!read.ok) throw new LeaveOutError(UPLOAD_UNREADABLE, `${target} cannot be read: ${read.reason}`);
+    }
+    for (const [hash, target] of byHash) {
+      const read = reads.get(target) as { ok: true; content: Buffer };
+      const { assetUrl } = await linear.uploadFile({ filename: posix.basename(target), contentType: contentTypeOf(target), bytes: new Uint8Array(read.content) });
+      uploads.set(hash, assetUrl);
+    }
   };
 
   return {
@@ -108,21 +117,6 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       context = ctx;
       for (const entry of await listTree(ctx.git, ctx.tracked)) {
         if (entry.type === 'blob' && entry.mode !== '120000' && !entry.path.endsWith(MARKDOWN_EXTENSION)) files.set(entry.path, entry);
-      }
-      // The links of every document to be written, from the tracked text, so
-      // the inverse also works for documents an earlier run wrote.
-      const paths = [...ctx.plan.create, ...ctx.plan.overwrite].map((entry) => entry.path);
-      const documents = await readFiles(ctx.git, options.config, ctx.tracked, paths);
-      const found = new Map<string, FileLink[]>();
-      for (const [path, read] of documents) {
-        if (!read.ok) continue;
-        const body = splitFile(read.content.toString('utf8')).body;
-        const fileLinks = findFileLinks(path, body, isFile);
-        if (fileLinks.length > 0) found.set(path, fileLinks);
-      }
-      await hashFiles(ctx.git, [...new Set([...found.values()].flat().map((link) => link.target))]);
-      for (const [path, fileLinks] of found) {
-        links.set(path, fileLinks.map((link) => ({ raw: link.raw, hash: (linked.get(link.target) as LinkedFile).hash })));
       }
     },
 
@@ -139,11 +133,9 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
           throw new LeaveOutError(UPLOAD_TOO_LARGE, `${link.target} has ${file.size} bytes, over the upload limit of ${limit}`);
         }
       }
-      const urls: string[] = [];
-      for (const link of fileLinks) {
-        const file = linked.get(link.target) as LinkedFile;
-        urls.push(context.uploads.get(file.hash) ?? (await upload(link.target, file)));
-      }
+      await uploadMissing(fileLinks.map((link) => link.target));
+      const { uploads } = context;
+      const urls = fileLinks.map((link) => uploads.get((linked.get(link.target) as LinkedFile).hash) as string);
       links.set(path, fileLinks.map((link) => ({ raw: link.raw, hash: (linked.get(link.target) as LinkedFile).hash })));
 
       let result = body;
