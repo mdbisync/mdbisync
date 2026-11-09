@@ -154,11 +154,11 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 
     const identity = options.identity ?? SYNC_IDENTITY;
     let head: Oid | null = sync;
-    if (open === null) {
-      // No pull request carries the branch, so what it holds beyond the tracked
-      // branch (a pull request closed unmerged, an initial sync's abandoned
-      // record) is not carried on: the new head holds exactly the tracked
-      // branch with Linear's state merged in.
+    if (open === null && (!pending || (await holdsInitialRecord(git, sync as Oid)))) {
+      // A merged branch can start again from Linear. An abandoned initial
+      // sync record is also left out: its destructive snapshot needs a
+      // person's approval. Ordinary unmerged changes stay on the branch,
+      // including a person's edits and CI fixes after a pull request closes.
       if (!result.needed) return result;
       head = await restart(git, sync, linear, wanted, identity);
     } else {
@@ -173,12 +173,15 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     }
     if (head === null) return { ...result, code: 'conflict' };
 
+    const headTree = await mergedTree(git, tracked, head);
+    // State records can be unmerged ancestors without adding any content.
+    if (open === null && headTree === trackedTree) return result;
+
     if (head !== sync) {
       const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: sync, next: head }]);
       if (!pushed.ok) return { ...result, code: 'state-moved' };
       result.branchMoved = true;
     }
-    const headTree = await mergedTree(git, tracked, head);
     if (headTree !== null) result.paths = (await git.text(['diff', '--name-only', '--no-renames', trackedTree, headTree])).split('\n').filter(Boolean);
 
     // An earlier refusal stays noted while it still applies: the same head on the same tracked branch.
