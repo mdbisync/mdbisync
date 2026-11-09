@@ -32,6 +32,7 @@ import { documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubj
 import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
 import { prerequisiteErrors } from './workflow-files.ts';
+import { parse as parseYaml } from 'yaml';
 
 const roots: string[] = [];
 const fresh = (prefix: string) => {
@@ -344,8 +345,8 @@ describe('workflows', () => {
     assert.deepEqual(dispatched, [99]);
     assert.deepEqual(ctx.observations.get('workflows.installed'), ['mdbisync-initial-sync.yml', 'pre-commit.yml']);
     const installed = await remoteGit.text(['show', `${ctx.names.trackedBranch}:.github/workflows/mdbisync-initial-sync.yml`]);
-    assert.match(installed, new RegExp(`push:\\n\\s+branches:\\n\\s+- ${ctx.names.trackedBranch.replace(/[/.]/g, '\\$&')}`));
-    assert.doesNotMatch(installed, /- main\b/, 'never a run on the default branch');
+    const on = (parseYaml(installed) as { on: Record<string, { branches?: string[] } | null> }).on;
+    assert.deepEqual(on['push'], { branches: [ctx.names.trackedBranch] }, 'registered by a push to the run\'s branch only, never the default branch');
     assert.equal(ctx.observations.get('runs.0.exitCode'), 0);
   });
 });
