@@ -262,14 +262,17 @@ export const INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear
 /**
  * Whether the pull request of an initial sync from Linear waits for a
  * person: `linear` is such a record, the sync branch (the pull request's
- * head) still points at it, and the tracked branch has not merged it. A
- * record that needed no pull request moves no sync branch, so it never waits.
+ * head) holds it, at its tip or under review commits a person pushed, and
+ * the tracked branch has not merged it. A record that needed no pull request
+ * moves no sync branch, so it never waits.
  */
 export async function initialPullRequestPending(git: Git, state: { linear: Oid | null; sync: Oid | null; tracked: Oid }): Promise<boolean> {
   const { linear, sync, tracked } = state;
-  if (linear === null || sync !== linear) return false;
+  if (linear === null || sync === null) return false;
   const [subject] = (await git.text(['show', '-s', '--format=%s', linear])).split('\n');
   if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
+  const onSync = sync === linear || (await git.run(['merge-base', '--is-ancestor', linear, sync], { okCodes: [0, 1] })).code === 0;
+  if (!onSync) return false;
   const merged = await git.run(['merge-base', '--is-ancestor', linear, tracked], { okCodes: [0, 1] });
   return merged.code !== 0;
 }

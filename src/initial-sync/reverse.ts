@@ -392,7 +392,9 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     // An earlier record's pull request still open is moved to the new record too, so it never merges stale text.
     const ownSync = fetched.sync !== null && fetched.sync !== commit && (await isOwnRecord(fetched.sync));
     if (changesTracked && fetched.sync !== null && fetched.sync !== commit && !ownSync) return 'sync-branch-changed';
-    const moveSync = fetched.sync !== commit && (changesTracked || ownSync);
+    // A record the tracked branch already merged has no open pull request to keep current.
+    const ownSyncOpen = ownSync && !(await mergedInto(fetched.sync as Oid, fetched.tracked));
+    const moveSync = fetched.sync !== commit && (changesTracked || ownSyncOpen);
 
     const synced = new Set(entries.map((entry) => entry.path));
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
@@ -424,6 +426,10 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
   async function sameRecord(a: Oid, b: Oid): Promise<boolean> {
     const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P%n%s', oid]);
     return (await describe(a)) === (await describe(b));
+  }
+
+  async function mergedInto(commit: Oid, into: Oid): Promise<boolean> {
+    return (await git.run(['merge-base', '--is-ancestor', commit, into], { okCodes: [0, 1] })).code === 0;
   }
 
   /** A record an initial sync from Linear made: its subject, the sync's identity, one parent. */

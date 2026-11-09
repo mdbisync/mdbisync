@@ -230,6 +230,16 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(after.report.code, null);
     // Merged, the tracked branch holds Linear's state: the synchronized folders equal `linear`.
     assert.equal(await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']), await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']));
+
+    // Running initial sync again with nothing new opens nothing and leaves the merged pull request's branch alone.
+    const syncBranch = (await refs())['refs/heads/mdbisync/linear'];
+    const rerun = await run(world);
+    assert.equal(rerun.result.exitCode, 0, rerun.result.stderr);
+    assert.equal(rerun.report.linearToGit?.pullRequest, null);
+    assert.equal((await refs())['refs/heads/mdbisync/linear'], syncBranch);
+    assert.equal(world.github.pullRequests.length, 1);
+    const afterRerun = await run(world, {}, 'sync');
+    assert.equal(afterRerun.result.exitCode, COMMANDS.sync.notImplementedExitCode, afterRerun.result.stderr);
   });
 
   it('runs again with nothing changed: refs stay, no second pull request', async () => {
@@ -402,6 +412,8 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(report.code, 'sync-branch-changed');
     assert.match(summary, /holds commits this sync did not make/);
     assert.deepEqual(await refs(), before);
+    // The pull request with the person's commit still waits for its merge.
+    assert.equal((await run(world, {}, 'sync')).report.code, 'initial-pull-request-pending');
   });
 
   it('a rerun after Linear changed moves the pull request to the new record and rewrites its description', async () => {
