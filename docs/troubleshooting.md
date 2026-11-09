@@ -32,11 +32,16 @@ The command line's exit code:
 | Exit code | Meaning |
 | --- | --- |
 | 0 | Done. |
-| 1 | An error the run did not expect; the message starts with `error:`. See [Errors that point to a bug](#errors-that-point-to-a-bug). |
-| 2 | The command or its inputs are wrong. Nothing ran. |
-| 3 | A setup error: the setup check failed, or a check failed on the sync pull request. Nothing was written. |
+| 1 | An error that stopped the run: the message starts with `error:`. Look it up on this page; see [Errors found during the run](#errors-found-during-the-run) and [Errors that point to a bug](#errors-that-point-to-a-bug). |
+| 2 | The command or its inputs are wrong. Nothing ran. See [Input errors](#input-errors). |
+| 3 | A setup error. Either the setup check failed and nothing was written, or a check failed (`check-failed`) or GitHub keeps refusing the merge (`merge-blocked`) on the sync pull request: then the run kept Linear's changes in its state and on the sync branch, but wrote no tracked-branch changes to Linear. |
 | 4 | The sync has no state: run an initial sync, or merge the pull request of the one that ran. Nothing was written. |
-| 5 | The run did not finish. A sync is partial and the next run goes on; run anything else again with the same inputs. |
+| 5 | The run did not finish. A sync is partial and the next run goes on; run an initial sync again with the same inputs. Except `container-cap`: running again fails the same way until a person makes room (see [`container-cap`](#container-cap)). |
+| 10 to 15 | `<command>: not implemented`: this build does not have the command. |
+
+The action has no exit code: its step fails, or warns for a partial sync,
+with the same last line. An error that stopped the run ends the action's
+step with the bare message, without `error:`.
 
 ## Last lines
 
@@ -53,7 +58,7 @@ The command line's exit code:
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
 | `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
 | `<command>: not implemented` | This build does not have the command. Use a release that has it. |
-| `error: <message>` | An error the run did not expect. Look the message up on this page; if it is not an input or request error, see [Errors that point to a bug](#errors-that-point-to-a-bug). |
+| `error: <message>` (the action: `<message>` alone) | An error stopped the run. Look the message up on this page. |
 
 ## Setup check
 
@@ -73,28 +78,30 @@ to check):
 | `left-out-files` | A warning that lists files left out by a title collision; the run goes on. |
 | `security-hooks` | A warning when no pre-commit hook is marked `alias: security`; the run goes on. |
 
-A failed check stops the run with one of these codes (exit code 3):
+A failed check stops the run with one of these codes (exit code 3). The
+last line and the summary row give its detail, shown here:
 
-| Code | Meaning | What to do |
-| --- | --- | --- |
-| `linear-credential-failed` | Linear refused the app's client ID or secret, or the token lacks a scope. | Check the `MDBISYNC_LINEAR_CLIENT_ID` and `MDBISYNC_LINEAR_CLIENT_SECRET` secrets, and that the Linear app has client credentials with read and write. |
-| `github-credential-failed` | The GitHub token cannot read the repository. | Check the GitHub App's installation on this repository and the `MDBISYNC_APP_CLIENT_ID` variable and `MDBISYNC_APP_PRIVATE_KEY` secret. |
-| `missing-permission` | The GitHub token lacks a permission, named in the detail. | Give the GitHub App contents, pull requests and workflows write, and checks and commit statuses read, then accept the new permissions on the installation. |
-| `merge-commits-required` | Merge commits are not allowed in the repository settings, or GitHub did not say. | Turn on **Allow merge commits** in the repository settings. |
-| `linear-format-hook-required` | `.pre-commit-config.yaml` is missing, cannot be read, or has no `linear-format` hook. | Add the hook, pinned to a release (see [usage.md](usage.md#pre-release-builds-and-pins)). |
-| `invalid-annotation` | A `README.md` front matter names a team or project in a way the run cannot use. The detail names the file. | Fix the front matter; see [Annotation problems](#annotation-problems). |
-| `no-annotations` | No folder has `linear-team` or `linear-project` in its `README.md` front matter. | Annotate at least one folder (see [usage.md](usage.md#folder-mapping)). |
-| `linear-teams-not-visible` | The Linear app saw no team at all, twice. | In Linear, give the app access to the annotated teams. |
-| `annotation-target-not-found` | An annotated team or project does not exist in Linear, or the app cannot see it. | Fix the name or key in the front matter, or give the app access to the team. |
-| `annotation-target-ambiguous` | More than one team or project in Linear matches an annotated name. | Name the team by its key, or rename one of the projects. |
-| `annotation-target-shared` | More than one folder maps to the same team or project. | Map each team or project from one folder only. |
+| Code | Detail | Meaning | What to do |
+| --- | --- | --- | --- |
+| `linear-credential-failed` | `the Linear token lacks the scope <scopes>`, or Linear's refusal of the token request | Linear refused the app's client ID or secret, or the token lacks a scope. | Check the `MDBISYNC_LINEAR_CLIENT_ID` and `MDBISYNC_LINEAR_CLIENT_SECRET` secrets, and that the Linear app has client credentials with read and write. |
+| `github-credential-failed` | `the GitHub token was refused (HTTP 401)`, `the GitHub token cannot see the repository (HTTP <status>)` | The GitHub token cannot read the repository. | Check the GitHub App's installation on this repository and the `MDBISYNC_APP_CLIENT_ID` variable and `MDBISYNC_APP_PRIVATE_KEY` secret. |
+| `missing-permission` | `the GitHub token lacks <permissions>`, perhaps with `(<permissions> not checked without it)` | The GitHub token lacks the permissions named. | Give the GitHub App contents, pull requests and workflows write, and checks and commit statuses read, then accept the new permissions on the installation. |
+| `merge-commits-required` | `merge commits are not allowed in the repository settings`, `GitHub did not show whether merge commits are allowed` | The repository does not allow merge commits, or GitHub did not say. | Turn on **Allow merge commits** in the repository settings. |
+| `linear-format-hook-required` | `.pre-commit-config.yaml has no linear-format hook`, `.pre-commit-config.yaml is not valid YAML`, `.pre-commit-config.yaml has no "repos" list` | The hook configuration is missing or broken. | Add the hook, pinned to a release (see [usage.md](usage.md#pre-release-builds-and-pins)). |
+| `invalid-annotation` | The problems, joined by `;` | A `README.md` front matter names a team or project in a way the run cannot use. | Fix the front matter; see [Annotation problems](#annotation-problems). |
+| `no-annotations` | `no folder has linear-team or linear-project in its README.md front matter` | Nothing is mapped. | Annotate at least one folder (see [usage.md](usage.md#folder-mapping)). |
+| `linear-teams-not-visible` | `the Linear app saw no team in two lookups, so none of the annotated teams (<teams>) can be found: check the app's team access in Linear` | The Linear app saw no team at all, twice. | In Linear, give the app access to the annotated teams. |
+| `annotation-target-not-found` | `not found in Linear: <names>` | An annotated team or project does not exist in Linear, or the app cannot see it. | Fix the name or key in the front matter, or give the app access to the team. |
+| `annotation-target-ambiguous` | `more than one match in Linear: <names>` | More than one team or project in Linear matches an annotated name. | Name the team by its key, or rename one of the projects. |
+| `annotation-target-shared` | `more than one folder maps to <names>` | More than one folder maps to the same team or project. | Map each team or project from one folder only. |
 
 The setup check can also end with:
 
 - `GitHub rate-limited the setup check while reading the repository (HTTP 403); run again later`
   or `GitHub rate-limited the setup check while checking <permission> (HTTP 403); run again later`:
   wait and run again.
-- `GitHub answered HTTP <status> while checking <permission>`: GitHub failed
+- `GitHub answered HTTP <status> while checking <permission>` or
+  `GitHub answered HTTP <status> while reading the repository`: GitHub failed
   a request; run again, and if it repeats, check GitHub's status.
 - `more than 250 Linear projects share the annotated names`: name fewer
   projects with the same name, or rename them in Linear.
@@ -157,7 +164,7 @@ Linear's changes reach the tracked branch through the sync pull request
 | `check-failed` | A check failed on the sync pull request: `Setup error: a check failed on the sync pull request`, with the check's name. The pull request stays open and the run writes no tracked-branch changes to Linear (exit code 3). | Make the repository's checks pass Linear's form of the files, or rerun the failed check on the pull request. A later run merges once they pass. |
 | `merge-refused` | GitHub did not merge the sync pull request this time: `GitHub did not merge the sync pull request (<reason>); a later run tries again.` | Nothing; a later run tries again. |
 | `merge-blocked` | GitHub refused to merge again, on the same head and for the same reason (exit code 3). | Let the sync's GitHub App merge into the tracked branch, for example by adjusting the branch's rules. A later run merges. |
-| `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. | If edits on the sync branch still conflict on a later run, merge the tracked branch into the sync branch and resolve the conflict there. |
+| `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. | If edits on the sync branch still conflict on a later run, merge both the tracked branch and the `linear` state ref (`refs/mdbisync/linear` by default) into the sync branch and resolve the conflicts there; the sync keeps those commits. |
 | `initial-pull-request-pending` | The sync branch holds an initial sync from Linear that no one has merged yet (exit code 4). | Review and merge it with a merge commit. |
 | `state-moved` | The sync branch moved while the run worked. | Nothing; the next run updates the pull request. |
 | `github-failed` | A GitHub request for the sync pull request failed or got no answer. | Nothing, unless it repeats; then check GitHub's status and the App's permissions. |
@@ -273,8 +280,8 @@ The `invalid-annotation` check names the `README.md` and the problem:
 
 ## Input errors
 
-These end the command with exit code 2 (the action fails) before anything
-runs:
+These end the command with exit code 2 before anything runs; the action's
+step fails with the same message:
 
 | Message | What to do |
 | --- | --- |
@@ -285,11 +292,20 @@ runs:
 | `the input document-cap must be a positive safe integer` | Give a whole number above zero. |
 | `the input merge-grace-seconds must be an integer from 0 to 120` | Give a whole number of seconds from 0 to 120. |
 | `the input direction is required (initial sync never picks a direction itself)`, `the input direction must be one of git-to-linear, linear-to-git, not "<value>" (initial sync never picks a direction itself)` | Choose `git-to-linear` or `linear-to-git`. |
-| `the direction and confirm inputs belong to an initial sync, and only to it` | Remove `direction` and `confirm` from the sync and check steps. |
 | `remote "<name>" is not a valid remote name` | Use a valid git remote name. |
 | `<tracked-branch or sync-branch> "<name>" is not a valid branch name: <problem>` (the problem can be `starts with "-"`) | Use a valid branch name. |
 | `the tracked branch and the sync branch must differ`, `one of the tracked branch and the sync branch is a folder of the other` | Choose two separate branch names, neither inside the other, such as `main` and `mdbisync/linear`. |
 | `refPrefix "<prefix>" is not a valid ref prefix: <problem>`, `refPrefix "<prefix>" must start with "refs/" and name a folder under it`, `refPrefix "<prefix>" must not be under refs/heads, refs/tags or refs/remotes` | Set `state-ref-prefix` to a folder under `refs/` of its own, such as the default `refs/mdbisync/`. |
+
+## Errors found during the run
+
+These stop the run once it has started: the command line prints
+`error: <message>` and exits with code 1, and the action's step fails with
+the message. Most come from the workflow's configuration:
+
+| Message | What to do |
+| --- | --- |
+| `the direction and confirm inputs belong to an initial sync, and only to it` | Remove `direction` and `confirm` from the sync and check steps. |
 | `unknown operation: <name> (expected one of: <operations>)` | Set the action's `operation` to `sync` or `initial-sync`. |
 | `unknown security-step: <name> (expected one of: <steps>, or empty)` | Set `security-step` to `stage` or `apply`, or leave it empty. |
 | `cleanup-tokens belongs before the stage step, not apply` | Move `cleanup-tokens: true` to the `stage` step. |
@@ -370,8 +386,9 @@ content).
 - `container documents were not read`
 - `Invalid merge-file conflict output`, `git merge-tree gave no tree`
 - `invalid repository path "<path>"`
+- `git object <id> is missing`, `git object <id> is a <type>, not a blob`
 - `a push names the same ref twice`
-- `ids.json has an invalid entry for a path`, `reserved-ids.json has an invalid entry`
+- `ids.json has an invalid entry for a path`; `reserved-ids.json`, `uploads.json` or `written.json` `has an invalid entry`
 - `<file> is missing in state commit <commit>`, `<file> in <commit> is not valid JSON`, `<file> in <commit> is not a JSON object`
 - `run initial sync first`
 - ``the sync writes to Linear only after initial sync has recorded `linear` ``

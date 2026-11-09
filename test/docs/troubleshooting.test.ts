@@ -8,11 +8,13 @@
 //   compared with one, the members of the code types below, the rules
 //   passed to the functions that leave files out, the setup check names and
 //   the lint rule names. Each must appear on the page in backticks.
-// - Messages: every string or template literal that builds an error or a
-//   run's last line: `new …Error(…)`, `super(…)` in an error class, a
-//   `message:` next to a code, kind or rule, a returned `<command>: …`
-//   line, and what the command line and the action write out. Each
-//   fixed part of ten letters or more must appear on the page, with the
+// - Messages: every string or template literal that builds an error, a
+//   run's last line or a setup check's detail: `new …Error(…)`, `super(…)`
+//   in an error class, `failed(…)` and a warning's `detail:`, a `message:`
+//   next to a code, kind or rule, a returned `<command>: …` line, and what
+//   the command line and the action write out, read up to the line where
+//   the call's parentheses close. Each fixed part of ten letters or more,
+//   and the longest part of each literal, must appear on the page, with the
 //   `${…}` parts left out.
 //
 // Out of scope: `src/release/` builds releases and is never run by users,
@@ -82,7 +84,7 @@ function collectCodes(files: Source[]): Map<string, string> {
   return codes;
 }
 
-/** Lines that build an error or a message a person reads. */
+/** Where a message a person reads starts: an error, a run's last line, a setup check's detail. */
 const MESSAGE_SITES = [
   /\bnew [A-Za-z]*Error\(/,
   /\bsuper\(/,
@@ -91,15 +93,26 @@ const MESSAGE_SITES = [
   /\bcore\.(?:setFailed|warning)\(/,
   /\.warn\(`/,
   /\bconst problem = /,
+  /\bconst given = /,
+  // A setup check that fails or warns: its detail ends the run's last line or fills its summary row.
+  /\bfailed\(\s*(?:'|$)/,
+  /\bstate: 'warning', detail: /,
 ];
+
+/** The most lines a message call may span. */
+const CALL_LINES = 12;
 
 /** The fixed parts of the message literals, each with a file that prints it. */
 function collectMessages(files: Source[]): Map<string, string> {
   const messages = new Map<string, string>();
-  const add = (parts: string[], path: string) => {
+  const words = (part: string) => part.replace(/\s+/g, ' ').trim();
+  const letters = (part: string) => part.replace(/[^A-Za-z]/g, '').length;
+  const add = (literal: string[], path: string) => {
+    const parts = literal.map(words).filter((part) => part.includes(' '));
+    // Every long fixed part, and the longest one even when interpolations cut the message into short pieces.
+    const longest = parts.reduce<string | undefined>((best, part) => (best === undefined || letters(part) > letters(best) ? part : best), undefined);
     for (const part of parts) {
-      const fixed = part.replace(/\s+/g, ' ').trim();
-      if (fixed.includes(' ') && fixed.replace(/[^A-Za-z]/g, '').length >= 10 && !messages.has(fixed)) messages.set(fixed, path);
+      if ((letters(part) >= 10 || (part === longest && letters(part) >= 5)) && !messages.has(part)) messages.set(part, path);
     }
   };
   for (const { path, text } of files) {
@@ -107,43 +120,53 @@ function collectMessages(files: Source[]): Map<string, string> {
     lines.forEach((line, index) => {
       // The command line's error output: the first literal after `stderr:`, not the normal output beside it.
       const stderr = /\bstderr:\s*(.*)$/.exec(line)?.[1];
-      if (stderr !== undefined) add(literals(stderr)[0] ?? [], path);
+      if (stderr !== undefined) add(scan(stderr).literals[0] ?? [], path);
       const nearby = lines.slice(Math.max(0, index - 2), index + 1).join('\n');
-      const isMessage = MESSAGE_SITES.some((site) => site.test(line)) || (/\bmessage:\s*['`]/.test(line) && /\b(?:code|kind|rule):/.test(nearby));
+      const site = MESSAGE_SITES.map((pattern) => pattern.exec(line)).find((match) => match !== null);
+      const isMessage = site !== undefined || (/\bmessage:\s*['`]/.test(line) && /\b(?:code|kind|rule):/.test(nearby));
       if (!isMessage) return;
-      // A call that opens its arguments on the next lines.
-      const call = line.trimEnd().endsWith('(') ? lines.slice(index, index + 3).join(' ') : line;
-      for (const literal of literals(call)) add(literal, path);
+      // From the site on, up to the line where its parentheses close: a call may spread its arguments over lines.
+      let call = line.slice(site?.index ?? 0);
+      for (let next = index + 1; next < Math.min(lines.length, index + CALL_LINES) && !balanced(call); next++) call += `\n${lines[next]}`;
+      for (const literal of scan(call).literals) add(literal, path);
     });
   }
   return messages;
 }
 
+/** Whether the code outside the literals closes as many parentheses as it opens. */
+function balanced(text: string): boolean {
+  const { code } = scan(text);
+  return [...code].filter((char) => char === '(').length <= [...code].filter((char) => char === ')').length;
+}
+
 /**
- * The string and template literals of a line, in order, each as its fixed
- * parts: a template's `${…}` parts, nested literals included, split it.
- * An escaped line break counts as a space.
+ * The string and template literals of a text, in order, each as its fixed
+ * parts (a template's `${…}` parts, nested literals included, split it),
+ * and the code outside them. An escaped line break counts as a space;
+ * a `//` comment runs to the end of its line.
  */
-function literals(line: string): string[][] {
+function scan(text: string): { literals: string[][]; code: string } {
   const found: string[][] = [];
+  let code = '';
   let at = 0;
   // Reads the literal that opens at `at`, moving past it.
   const read = (): string[] => {
-    const quote = line[at++]!;
+    const quote = text[at++]!;
     const parts: string[] = [];
     let part = '';
-    while (at < line.length && line[at] !== quote) {
-      if (line[at] === '\\') {
-        const escaped = line[at + 1] ?? '';
+    while (at < text.length && text[at] !== quote && (quote === '`' || text[at] !== '\n')) {
+      if (text[at] === '\\') {
+        const escaped = text[at + 1] ?? '';
         part += escaped === 'n' ? ' ' : escaped;
         at += 2;
-      } else if (quote === '`' && line.startsWith('${', at)) {
+      } else if (quote === '`' && text.startsWith('${', at)) {
         at += 2;
         skipExpression();
         parts.push(part);
         part = '';
       } else {
-        part += line[at++];
+        part += text[at++];
       }
     }
     at++;
@@ -153,8 +176,8 @@ function literals(line: string): string[][] {
   // Moves past the rest of a `${…}` expression and the literals inside it.
   const skipExpression = (): void => {
     let depth = 1;
-    while (at < line.length && depth > 0) {
-      const char = line[at]!;
+    while (at < text.length && depth > 0) {
+      const char = text[at]!;
       if (char === "'" || char === '"' || char === '`') {
         read();
         continue;
@@ -164,13 +187,15 @@ function literals(line: string): string[][] {
       at++;
     }
   };
-  while (at < line.length) {
-    const char = line[at]!;
+  while (at < text.length) {
+    const char = text[at]!;
     if (char === "'" || char === '"' || char === '`') found.push(read());
-    else if (line.startsWith('//', at)) break;
-    else at++;
+    else if (text.startsWith('//', at)) {
+      const end = text.indexOf('\n', at);
+      at = end === -1 ? text.length : end;
+    } else code += text[at++];
   }
-  return found;
+  return { literals: found, code };
 }
 
 const page = PAGE.replace(/\s+/g, ' ');
@@ -194,7 +219,7 @@ describe('troubleshooting page', () => {
       assert.ok(codes.has(code), `the code collector misses ${code}`);
     }
     const messages = [...collectMessages(files).keys()];
-    for (const message of ['run init at the repository root', 'is not a valid remote name', 'request to Linear failed (', 'setup error (', 'stopped by Linear before any write', 'missing command', 'could not be revoked:', 'does not exist: run initial sync first.']) {
+    for (const message of ['run init at the repository root', 'is not a valid remote name', 'request to Linear failed (', 'setup error (', 'stopped by Linear before any write', 'missing command', 'could not be revoked:', 'does not exist: run initial sync first.', 'the Linear app saw no team in two lookups', 'merge commits are not allowed', 'git object', 'must be one of']) {
       assert.ok(messages.some((found) => found.includes(message)), `the message collector misses "${message}"`);
     }
     assert.ok(!codes.has('stale') && !messages.includes('Capture Linear changes'), 'the collectors take internal values for messages');
