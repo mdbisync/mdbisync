@@ -15,6 +15,8 @@ const cases: Array<[LintRule, string, number]> = [
   ['footnote', 'An inline note.^[Text.]', 1],
   ['subscript', 'H~2~O', 1],
   ['table-escaped-pipe', '| A |\n| -- |\n| a \\| b |', 3],
+  ['table-hash-cell', '| A | B |\n| -- | -- |\n| 1 | 2 |\n| # | 3 |', 4],
+  ['table-hash-cell', 'Intro.\n\n> | Name | No. |\n> | -- | -- |\n> | Example |  # |', 5],
   ['image-in-link', '[![a](x.png)](https://example.com)', 1],
   ['table-alignment', '| A | B |\n| :-- | --: |\n| 1 | 2 |', 1],
   ['link-title', '[a](https://example.com "Title")', 1],
@@ -33,6 +35,11 @@ const cases: Array<[LintRule, string, number]> = [
 ];
 
 describe('lint rules', () => {
+  it('table-hash-cell spares a header hash, an escaped hash and a hash with other text', () => {
+    const text = '| # | `#` |\n| -- | -- |\n| \\# | **#** |\n| Issue # | `#` |';
+    assert.deepEqual(lintText('doc.md', text), []);
+  });
+
   for (const [rule, text, line] of cases) {
     it(`${rule}: ${JSON.stringify(text).slice(0, 40)}`, () => {
       const findings = lintText('doc.md', text);

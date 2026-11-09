@@ -60,6 +60,17 @@ function lintTree(tree: Root, body: string, report: (rule: LintRule, line: numbe
       case 'table':
         if (node.align?.some((align) => align !== null)) report('table-alignment', line(node));
         break;
+      case 'tableCell': {
+        // Linear reads a lone `#` in a body cell as an empty heading; the
+        // header row keeps it as text.
+        const [row, table] = ancestors.slice(-2).reverse();
+        const [only, ...rest] = node.children;
+        const bare = only?.type === 'text' && rest.length === 0 && body.slice(start(only), end(only)) === '#';
+        if (bare && table?.type === 'table' && table.children[0] !== row) {
+          report('table-hash-cell', line(node));
+        }
+        break;
+      }
       case 'text':
         if (ancestors.some((a) => a.type === 'tableCell') && body.slice(start(node), end(node)).includes('\\|')) {
           report('table-escaped-pipe', line(node));

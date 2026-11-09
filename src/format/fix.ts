@@ -183,19 +183,21 @@ class Writer {
 
   private table(node: Table): string {
     const width = node.children[0]?.children.length ?? 0;
-    const row = (cells: TableRow, isHeader: boolean): string => {
+    const row = (cells: TableRow): string => {
       const texts = Array.from({ length: width }, (_, index) => {
         const cell = cells.children[index];
         const text = cell ? this.inline(cell.children).trim() : '';
-        // Linear escapes a header cell containing only a hash. Apply this
-        // after inline rewrites, which drop an unnecessary hash escape.
-        return isHeader && text === '#' ? '\\#' : text;
+        // A cell containing only a hash keeps its escape: Linear writes a
+        // header cell's hash as `\#` and reads a bare one in a body cell as
+        // an empty heading (lint reports that one). Apply this after inline
+        // rewrites, which drop an unnecessary hash escape.
+        return text === '#' ? '\\#' : text;
       });
       return `| ${texts.join(' | ')} |`;
     };
     const [header, ...rows] = node.children;
     if (!header) return '';
-    return [row(header, true), `| ${Array.from({ length: width }, () => '--').join(' | ')} |`, ...rows.map((cells) => row(cells, false))].join('\n');
+    return [row(header), `| ${Array.from({ length: width }, () => '--').join(' | ')} |`, ...rows.map((cells) => row(cells))].join('\n');
   }
 
   /**
