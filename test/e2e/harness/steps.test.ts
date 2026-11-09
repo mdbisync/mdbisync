@@ -19,7 +19,7 @@ import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
-import { commitStaged, HookRejectedError, installHooks, personCommit, Sandbox } from './sandbox.ts';
+import { commitStaged, HookRejectedError, installFailure, installHooks, personCommit, Sandbox } from './sandbox.ts';
 import { engineEntry } from './engine.ts';
 import { preCommitConfig } from '../../corpus/tree.ts';
 import { loadScenarios } from './spec.ts';
@@ -469,15 +469,16 @@ const OTHER = { id: 'project-2', name: 'Garden plans aaaaaa', createdAt: '' };
 
 /**
  * A local hook repository standing in for the released hook: its
- * `linear-format` runs this checkout's fixer. Returns the corpus's own
- * pre-commit configuration pinned to that repository's commit.
+ * `linear-format` runs this checkout's fixer and leaves the environment it
+ * saw in `<root>/hook-env`. Returns the corpus's own pre-commit configuration
+ * pinned to that repository's commit.
  */
 async function localHookConfig(root: string): Promise<string> {
   const repo = join(root, 'hooks');
   const git = new Git(repo, IDENTITY);
   await new Git(root, IDENTITY).run(['init', '--quiet', '--initial-branch=main', repo]);
   writeFileSync(join(repo, '.pre-commit-hooks.yaml'), '- id: linear-format\n  name: Format Markdown for Linear\n  entry: ./fix.sh\n  language: script\n  types: [markdown]\n  require_serial: true\n');
-  writeFileSync(join(repo, 'fix.sh'), `#!/bin/sh\nexec node ${JSON.stringify(engineEntry())} fix "$@"\n`, { mode: 0o755 });
+  writeFileSync(join(repo, 'fix.sh'), `#!/bin/sh\nenv > ${JSON.stringify(join(root, 'hook-env'))}\nexec node ${JSON.stringify(engineEntry())} fix "$@"\n`, { mode: 0o755 });
   await git.run(['add', '--all']);
   await git.run(['commit', '--quiet', '-m', 'Hook']);
   const revision = (await git.text(['rev-parse', 'HEAD'])).trim();
@@ -666,6 +667,59 @@ describe('person commits through the repository hooks', () => {
     await installHooks(await ctx.person());
     // Nothing staged: git refuses the commit before any hook fails.
     await assert.rejects(commitStaged(await ctx.person(), [], 'Nothing', true), (error: unknown) => error instanceof GitError && !(error instanceof HookRejectedError));
+  });
+
+  // Values the harness can hold in its environment (test/e2e/harness/config.ts) and the sandbox's credential header.
+  const SECRETS = {
+    LINEAR_TEST_APP_CLIENT_SECRET: 'app-secret-value',
+    LINEAR_TEST_ALICE_API_KEY: 'editor-key-value',
+    SYNC_APP_PRIVATE_KEY: 'private-key-value',
+    GIT_CONFIG_VALUE_0: 'AUTHORIZATION: basic header-value',
+  };
+
+  it('installs the hooks with no secret in the installer\'s environment', async () => {
+    const { ctx } = await fakeRun({ hooks: true });
+    // A stand-in pre-commit first on PATH records the environment it was given.
+    const bin = fresh('fake-pre-commit-');
+    const seen = join(bin, 'env');
+    writeFileSync(join(bin, 'pre-commit'), `#!/bin/sh\nenv > ${JSON.stringify(seen)}\n`, { mode: 0o755 });
+    await installHooks(await ctx.person(), { env: { ...process.env, ...SECRETS, PATH: `${bin}:${process.env.PATH ?? ''}` } });
+    const env = readFileSync(seen, 'utf8');
+    for (const [name, value] of Object.entries(SECRETS)) {
+      assert.ok(!env.includes(name) && !env.includes(value), `${name} reached the installer`);
+    }
+    assert.match(env, /^PATH=/m);
+  });
+
+  it('runs the hooks of a commit with no secret in their environment', async () => {
+    const saved = Object.fromEntries(Object.keys(SECRETS).map((name) => [name, process.env[name]]));
+    Object.assign(process.env, SECRETS);
+    try {
+      const { ctx, rawFile } = await fakeRun({ hooks: true });
+      await commitAsPerson(ctx, new Map([['eng/platform/fixable.md', '# Plan\n\n*one*\n']]), 'Add a page');
+      const env = readFileSync(join(ctx.runDir, '..', 'hook-env'), 'utf8');
+      for (const [name, value] of Object.entries(SECRETS)) {
+        assert.ok(!env.includes(name) && !env.includes(value), `${name} reached the hook`);
+      }
+      assert.ok(!env.includes('AUTHORIZATION'), 'the sandbox credential header reached the hook');
+      assert.match(env, /^GIT_AUTHOR_NAME=/m);
+      assert.equal(await rawFile('eng/platform/fixable.md'), '# Plan\n\n*one*');
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
+  it('tells a network failure while installing from a defect of the released hook', () => {
+    for (const code of ['EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'E503', 'EALLOWGIT']) {
+      assert.ok(installFailure(`npm error code ${code}\n`) instanceof EnvBlockedError, code);
+    }
+    assert.ok(installFailure('An unexpected error has occurred\n') instanceof EnvBlockedError);
+    const defect = installFailure('npm error code EJSONPARSE\n');
+    assert.ok(defect instanceof ProductError && !(defect instanceof EnvBlockedError));
+    assert.match(defect.message, /npm EJSONPARSE/);
   });
 
   it('refuses to install hooks pinned to anything but a released commit', async () => {

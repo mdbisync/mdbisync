@@ -184,12 +184,13 @@ export class HookRejectedError extends ProductError {
  * must be pinned to a full commit SHA (the released hook), not a placeholder.
  * A clone without a pre-commit configuration has no hooks to install.
  *
- * The installation gets no credentials: the hooks are public, and npm runs
- * while they install. An npm that refuses pre-commit's Git package (older
- * than 11.16.0), a missing pre-commit, a fetch failure or a timeout blocks
- * the run; any other npm failure is the released hook's own defect.
+ * The installation sees only `hookEnv`: npm and the hooks' own install code
+ * run here, and they never get the harness's secrets. An npm that refuses
+ * pre-commit's Git package (older than 11.16.0), a network failure, a
+ * missing pre-commit or a timeout blocks the run; any other npm failure is
+ * the released hook's own defect.
  */
-export async function installHooks(git: Git, options: { env?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<void> {
+export async function installHooks(git: Git, options: { env?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<void> {
   const text = existsSync(join(git.dir, PRE_COMMIT_CONFIG)) ? readFileSync(join(git.dir, PRE_COMMIT_CONFIG), 'utf8') : null;
   if (text === null) return;
   let config: unknown;
@@ -212,7 +213,7 @@ export async function installHooks(git: Git, options: { env?: Record<string, str
     // Building a Node hook's environment runs npm, which can take minutes; the run's other work goes on meanwhile.
     await execFileAsync('pre-commit', ['install', '--install-hooks'], {
       cwd: git.dir,
-      env: { ...process.env, ...options.env },
+      env: hookEnv(options.env),
       maxBuffer: 16 * 1024 * 1024,
       timeout: options.timeoutMs ?? 15 * 60_000,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -222,12 +223,48 @@ export async function installHooks(git: Git, options: { env?: Record<string, str
     if (failure.name === 'AbortError') throw error;
     if (failure.code === 'ENOENT') throw new EnvBlockedError('pre-commit is not installed on this host');
     if (failure.killed === true) throw new EnvBlockedError("installing the repository's pre-commit hooks timed out");
-    // The reason without paths or output: npm's error code when there is one.
-    const code = /npm error code (\w+)/.exec(`${failure.stdout ?? ''}${failure.stderr ?? ''}`)?.[1];
-    if (code === 'EALLOWGIT') throw new EnvBlockedError("the repository's Node hooks need npm 11.16.0 or newer (npm EALLOWGIT)");
-    if (code !== undefined) throw new ProductError(`the repository's released pre-commit hooks could not be installed (npm ${code})`);
-    throw new EnvBlockedError("the repository's pre-commit hooks could not be installed");
+    throw installFailure(`${failure.stdout ?? ''}${failure.stderr ?? ''}`);
   }
+}
+
+/** Variables the hook installer and the hooks see: tool discovery, locale and caches, never the harness's secrets. */
+const HOOK_ENV_KEYS = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'XDG_CACHE_HOME', 'PRE_COMMIT_HOME'] as const;
+
+/** The allowlisted environment for pre-commit and what it starts (as engineEnv is for the engine). */
+export function hookEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const allowed: Record<string, string> = {};
+  for (const key of HOOK_ENV_KEYS) {
+    const value = env[key];
+    if (value !== undefined) allowed[key] = value;
+  }
+  return allowed;
+}
+
+/**
+ * Overrides for a git call whose hooks may install or run hook code: every
+ * inherited variable outside `hookEnv` and git's own `GIT_*` settings is
+ * removed, and the sandbox's credential header with every other
+ * environment-given git configuration is switched off. The commit identity
+ * stays.
+ */
+function hookCommitEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string | undefined> {
+  const keep = new Set<string>(HOOK_ENV_KEYS);
+  const overrides: Record<string, string | undefined> = {};
+  for (const key of Object.keys(env)) if (!keep.has(key) && !key.startsWith('GIT_')) overrides[key] = undefined;
+  return { ...overrides, GIT_CONFIG_COUNT: '0', GIT_CONFIG_KEY_0: undefined, GIT_CONFIG_VALUE_0: undefined };
+}
+
+/** npm's transport failures: the network or the registry, not the hook. */
+const NPM_NETWORK_CODES = new Set(['EAI_AGAIN', 'ENOTFOUND', 'ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH', 'EPIPE', 'ERR_SOCKET_TIMEOUT', 'EPROTO', 'FETCH_ERROR']);
+
+/** What a failed hook installation means, from pre-commit's output; the reason names npm's error code, never paths or output. */
+export function installFailure(output: string): Error {
+  const code = /npm error code (\w+)/.exec(output)?.[1];
+  if (code === undefined) return new EnvBlockedError("the repository's pre-commit hooks could not be installed");
+  if (code === 'EALLOWGIT') return new EnvBlockedError("the repository's Node hooks need npm 11.16.0 or newer (npm EALLOWGIT)");
+  // A registry outage answers with a 5xx status.
+  if (NPM_NETWORK_CODES.has(code) || /^E5\d\d$/.test(code)) return new EnvBlockedError(`the repository's pre-commit hooks could not be fetched (npm ${code})`);
+  return new ProductError(`the repository's released pre-commit hooks could not be installed (npm ${code})`);
 }
 
 /** The ids of the hooks pre-commit reports as failed. */
@@ -285,7 +322,8 @@ export async function commitStaged(git: Git, paths: readonly string[], message: 
   // The second try commits what the hooks fixed; a hook that fails again then refuses the files.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await git.run(['commit', '--quiet', '-m', message]);
+      // The hooks run here and may build a hook environment: they see only the allowlisted environment.
+      await git.run(['commit', '--quiet', '-m', message], { env: hookCommitEnv() });
       return;
     } catch (error) {
       if (!(error instanceof GitError)) throw error;
