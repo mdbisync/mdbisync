@@ -20,6 +20,7 @@ import { unfinishedMessage, writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
 import { Git } from "./state/index.ts";
+import { runInit, runTerminalInit } from "./init/command.ts";
 import { VERSION } from "./version.ts";
 
 export interface CliResult {
@@ -47,6 +48,8 @@ export function usage(): string {
     "Commands:",
     ...lines,
     "",
+    "init --help lists the repository setup flags.",
+    "",
     "Options:",
     "  --version  Print the version",
     "  --help     Print this help",
@@ -67,6 +70,7 @@ export async function runCli(args: readonly string[], options: CliOptions = {}):
   if (first === "--help" || first === "-h") {
     return { exitCode: 0, stdout: usage(), stderr: "" };
   }
+  if (first === "init") return runInit(args.slice(1), options);
   if (first === "lint") return runLint(args.slice(1));
   if (first === "fix") return runFix(args.slice(1));
   if (first !== undefined && isCommandName(first)) {
@@ -141,7 +145,7 @@ function notImplemented(command: CommandName): CliResult {
 
 async function main(): Promise<void> {
   try {
-    const result = await runCli(process.argv.slice(2), {
+    const result = process.argv[2] === "init" ? await runTerminalInit(process.argv.slice(3)) : await runCli(process.argv.slice(2), {
       log: (entry) => { process.stderr.write(`${JSON.stringify(entry)}\n`); },
       warn: (message) => { process.stderr.write(`warning: ${message}\n`); },
     });
