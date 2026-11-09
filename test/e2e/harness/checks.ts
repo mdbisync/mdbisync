@@ -33,6 +33,15 @@ export function mapImageLinks(content: string, urlToPath: ReadonlyMap<string, st
   return result;
 }
 
+/**
+ * The canaries I5 looks for: those in file content. A canary that is part of
+ * a file name (`canary_in: name`) appears wherever the path is listed, in
+ * summaries for example, and listing paths is allowed.
+ */
+export function contentCanaries<T extends { canary: string | null; canary_in?: 'content' | 'name' | null }>(files: readonly T[]): Array<T & { canary: string }> {
+  return files.filter((file): file is T & { canary: string } => file.canary !== null && file.canary_in !== 'name');
+}
+
 export interface CanaryHit {
   source: string;
   canary: string;
@@ -218,7 +227,8 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     const canaries = new Set<string>();
     if (world !== null) {
       const sources = new Set(world.tree.paths.values());
-      for (const file of world.manifest.files) if (file.canary !== null && sources.has(file.path)) canaries.add(file.canary);
+      // Content canaries only: a canary in a file name (canary_in: name) shows wherever paths are listed, which is allowed.
+      for (const file of contentCanaries(world.manifest.files)) if (sources.has(file.path)) canaries.add(file.canary);
     }
     const texts = new Map<string, string>();
     ctx.engine.results.forEach((result, index) => {

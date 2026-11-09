@@ -72,6 +72,17 @@ describe('check helpers', () => {
     assert.equal(sibling('eng/plan.md', 'notes.md'), 'eng/notes.md');
   });
 
+  it('look only for canaries in content, since paths may be listed', async () => {
+    const { contentCanaries } = await import('./checks.ts');
+    const files = [
+      { path: 'a.md', canary: 'kx-00000001', canary_in: 'content' as const },
+      { path: 'empty-kx-00000002.md', canary: 'kx-00000002', canary_in: 'name' as const },
+      { path: 'b.png', canary: null, canary_in: null },
+      { path: 'c.md', canary: 'kx-00000003' },
+    ];
+    assert.deepEqual(contentCanaries(files).map((file) => file.canary), ['kx-00000001', 'kx-00000003']);
+  });
+
   it('hold I9 at 1.5 requests per written document plus 5 per run', () => {
     assert.ok(budgetHolds(155, 100, 1));
     assert.ok(!budgetHolds(156, 100, 1));
