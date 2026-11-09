@@ -6,8 +6,11 @@ sync ([Linear to git](initial-sync-linear-to-git.md) has its own page), the sync
 Linear OAuth app, the GitHub App, the secrets and the workflows) are on
 [mdbisync.com](https://mdbisync.com/#setup). How Markdown is kept in
 Linear's form is in [linear-format.md](linear-format.md), and conflicts, when
-both sides change one document, in [conflicts.md](conflicts.md). What each
-message means and how to recover is in [troubleshooting.md](troubleshooting.md).
+both sides change one document, in [conflicts.md](conflicts.md). How a change
+travels each way after the initial sync, what people see, how long it takes
+and what each run's summary says is in [sync-cycle.md](sync-cycle.md). What
+each message means and how to recover is in
+[troubleshooting.md](troubleshooting.md).
 
 ## Generate repository files
 
