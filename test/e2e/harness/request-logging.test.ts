@@ -40,14 +40,14 @@ for (const mode of ['success', 'query-failure', 'mint-failure'] as const) {
       });
       assert.equal(child.error, undefined);
       assert.equal(child.status, mode === 'success' ? 0 : 1, child.stderr);
-      const entries = child.stderr.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line) as LogEntry & { runId: string; app: string });
+      const entries = child.stderr.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line) as LogEntry & { harnessRunId: string; app: string });
       assert.deepEqual(entries.map(e => [e.operation, e.status]), mode === 'success'
         ? [['oauth.token', 200], ['oauth.revoke', 200]]
         : mode === 'mint-failure' ? [['oauth.token', 200], ['oauth.token', 401], ['oauth.revoke', 200]]
         : [['oauth.token', 200], ['RateLimitStatus', 400], ['oauth.revoke', 401]]);
-      assert.equal(new Set(entries.map(e => e.runId)).size, 1);
+      assert.equal(new Set(entries.map(e => e.harnessRunId)).size, 1);
       for (const [index, entry] of entries.entries()) {
-        assert.ok(entry.runId);
+        assert.ok(entry.harnessRunId);
         assert.equal(entry.app, mode === 'mint-failure' && index === 1 ? 'app2' : 'app1');
         assert.equal(entry.requestId, `fake-request-${index + 1}`);
         assert.equal(entry.grantType, 'client_credentials');
@@ -62,6 +62,10 @@ for (const mode of ['success', 'query-failure', 'mint-failure'] as const) {
         assert.deepEqual(entries[1]?.errorCodes, ['INPUT_ERROR']);
         assert.equal(entries.at(-1)?.revocationConfirmed, false);
         assert.match(child.stderr, /a harness token was not revoked/);
+      }
+      if (mode !== 'query-failure') {
+        assert.equal(entries.at(-1)?.revocationConfirmed, true);
+        assert.doesNotMatch(child.stderr, /a harness token was not revoked/);
       }
       for (const secret of ['secret-token-canary', 'secret-client-id-canary', 'secret-client-key-canary', 'second-client-id-canary', 'second-client-key-canary', 'secret-cookie-canary', 'workspace-content-canary']) assert.ok(!`${child.stdout}${child.stderr}`.includes(secret), secret);
     } finally {

@@ -12,7 +12,7 @@
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { LinearClient, mintAppToken, revokeToken, type RunToken, type LogEntry } from '../../../src/linear/index.ts';
+import { LinearClient, mintAppToken, revokeToken, type RunToken, type LogEntry, type LinearHooks } from '../../../src/linear/index.ts';
 import { loadTestConfig } from './config.ts';
 import { REPO_ROOT } from './engine.ts';
 import { Governor, budgetFromStatus, estimate, type App } from './governor.ts';
@@ -76,16 +76,16 @@ async function main(argv: string[]): Promise<number> {
 
   // Live commands mint one token per OAuth app for the harness's own reads and revoke it at the end.
   const appClients = new Map<string, LinearClient>();
-  const tokens: Array<{ token: RunToken; app: string }> = [];
+  const tokens: Array<{ token: RunToken; hooks: LinearHooks }> = [];
   const harnessRunId = `${new Date().toISOString().slice(0, 10)}-${newRunId()}`;
   const hooksFor = (app: string) => ({
-    log: (entry: LogEntry) => { process.stderr.write(`${JSON.stringify({ runId: harnessRunId, app, ...entry })}\n`); },
+    log: (entry: LogEntry) => { process.stderr.write(`${JSON.stringify({ harnessRunId, app, ...entry })}\n`); },
   });
   try {
     for (const app of command === 'run' ? config.linearApps : []) {
       const hooks = hooksFor(app.name);
       const token = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
-      tokens.push({ token, app: app.name });
+      tokens.push({ token, hooks });
       appClients.set(app.name, new LinearClient({ token: token.accessToken, auth: token.context, hooks }));
     }
 
@@ -144,9 +144,9 @@ async function main(argv: string[]): Promise<number> {
     process.stdout.write('Usage: cli.ts run|plan|sweep|checklist [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
     return command === 'help' ? 0 : 2;
   } finally {
-    for (const { token, app } of tokens) {
+    for (const { token, hooks } of tokens) {
       try {
-        await revokeToken(token.accessToken, { hooks: hooksFor(app), auth: token.context });
+        await revokeToken(token.accessToken, { hooks, auth: token.context });
       } catch {
         log('warning: a harness token was not revoked; it expires on its own');
       }
