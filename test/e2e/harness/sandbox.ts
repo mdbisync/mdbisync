@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { parse } from 'yaml';
 import { validateSha } from '../../../src/release/package.ts';
+import { LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
 import { CORPUS_DIR, SLICES_DIR, buildRunTree, parseManifest, parseSlice, type Manifest, type RunTree } from './corpus.ts';
 import { gitAuthEnv } from './github.ts';
@@ -182,13 +183,25 @@ export class HookRejectedError extends ProductError {
  * now so the first commit does not pay for them. Every remote hook repository
  * must be pinned to a full commit SHA (the released hook), not a placeholder.
  * A clone without a pre-commit configuration has no hooks to install.
+ *
+ * The installation gets no credentials: the hooks are public, and npm runs
+ * while they install. An npm that refuses pre-commit's Git package (older
+ * than 11.16.0), a missing pre-commit, a fetch failure or a timeout blocks
+ * the run; any other npm failure is the released hook's own defect.
  */
-export async function installHooks(git: Git, env: Record<string, string> = {}): Promise<void> {
-  const file = join(git.dir, '.pre-commit-config.yaml');
-  if (!existsSync(file)) return;
-  const config = parse(readFileSync(file, 'utf8')) as { repos?: Array<{ repo?: unknown; rev?: unknown }> } | null;
-  for (const entry of config?.repos ?? []) {
-    if (entry.repo === 'local' || entry.repo === 'meta') continue;
+export async function installHooks(git: Git, options: { env?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<void> {
+  const text = existsSync(join(git.dir, PRE_COMMIT_CONFIG)) ? readFileSync(join(git.dir, PRE_COMMIT_CONFIG), 'utf8') : null;
+  if (text === null) return;
+  let config: unknown;
+  try {
+    config = parse(text);
+  } catch {
+    throw new EnvBlockedError(`the repository's ${PRE_COMMIT_CONFIG} is not valid YAML`);
+  }
+  const repos = (config as { repos?: unknown } | null)?.repos;
+  if (!Array.isArray(repos)) throw new EnvBlockedError(`the repository's ${PRE_COMMIT_CONFIG} has no "repos" list`);
+  for (const entry of repos as Array<{ repo?: unknown; rev?: unknown }>) {
+    if (typeof entry.repo === 'string' && LOCAL_REPOS.has(entry.repo)) continue;
     try {
       validateSha(String(entry.rev));
     } catch {
@@ -197,13 +210,23 @@ export async function installHooks(git: Git, env: Record<string, string> = {}): 
   }
   try {
     // Building a Node hook's environment runs npm, which can take minutes; the run's other work goes on meanwhile.
-    await execFileAsync('pre-commit', ['install', '--install-hooks'], { cwd: git.dir, env: { ...process.env, ...env }, maxBuffer: 16 * 1024 * 1024 });
+    await execFileAsync('pre-commit', ['install', '--install-hooks'], {
+      cwd: git.dir,
+      env: { ...process.env, ...options.env },
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: options.timeoutMs ?? 15 * 60_000,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
   } catch (error) {
-    const failure = error as { code?: unknown; stdout?: string; stderr?: string };
+    const failure = error as { code?: unknown; name?: unknown; killed?: boolean; stdout?: string; stderr?: string };
+    if (failure.name === 'AbortError') throw error;
     if (failure.code === 'ENOENT') throw new EnvBlockedError('pre-commit is not installed on this host');
+    if (failure.killed === true) throw new EnvBlockedError("installing the repository's pre-commit hooks timed out");
     // The reason without paths or output: npm's error code when there is one.
     const code = /npm error code (\w+)/.exec(`${failure.stdout ?? ''}${failure.stderr ?? ''}`)?.[1];
-    throw new EnvBlockedError(`the repository's pre-commit hooks could not be installed${code === undefined ? '' : ` (npm ${code}; the Node hooks need npm 11.16.0 or newer)`}`);
+    if (code === 'EALLOWGIT') throw new EnvBlockedError("the repository's Node hooks need npm 11.16.0 or newer (npm EALLOWGIT)");
+    if (code !== undefined) throw new ProductError(`the repository's released pre-commit hooks could not be installed (npm ${code})`);
+    throw new EnvBlockedError("the repository's pre-commit hooks could not be installed");
   }
 }
 
@@ -239,16 +262,26 @@ export async function personCommit(
       await git.run(['add', '--', path]);
     }
   }
-  if (options.verify) await commitThroughHooks(git, [...changes.keys()], message);
-  else await git.run(['commit', '--quiet', '--no-verify', '-m', message]);
+  await commitStaged(git, [...changes.keys()], message, options.verify);
   // Objects first, so a pushed pointer never names an object the server lacks (a bypassed pre-push hook would skip it).
   if (binary) await git.run(['lfs', 'push', 'origin', 'HEAD']);
   await git.run(['push', '--quiet', ...(options.verify ? [] : ['--no-verify']), 'origin', `HEAD:refs/heads/${options.branch ?? names.trackedBranch}`]);
   return (await git.text(['rev-parse', 'HEAD'])).trim();
 }
 
-async function commitThroughHooks(git: Git, paths: readonly string[], message: string): Promise<void> {
-  let output = '';
+/**
+ * Commits what is staged in a person's clone. With `verify`, through the
+ * clone's installed hooks: what a hook fixed among `paths` is staged and
+ * committed again, as a person does. A commit that still fails puts the
+ * clone back at its last commit; a hook's refusal is HookRejectedError, any
+ * other failure is git's own error.
+ */
+export async function commitStaged(git: Git, paths: readonly string[], message: string, verify: boolean): Promise<void> {
+  if (!verify) {
+    await git.run(['commit', '--quiet', '--no-verify', '-m', message]);
+    return;
+  }
+  let failure: GitError | undefined;
   // The second try commits what the hooks fixed; a hook that fails again then refuses the files.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -256,12 +289,14 @@ async function commitThroughHooks(git: Git, paths: readonly string[], message: s
       return;
     } catch (error) {
       if (!(error instanceof GitError)) throw error;
-      output = error.stderr;
+      failure = error;
     }
+    if (failedHooks(failure.stderr).length === 0) break;
     const fixed = (await git.text(['diff', '--name-only', '-z', '--', ...paths])).split('\0').filter((path) => path !== '');
     if (fixed.length === 0) break;
     await git.run(['add', '--', ...fixed]);
   }
   await git.run(['reset', '--quiet', '--hard', 'HEAD']);
-  throw new HookRejectedError(failedHooks(output));
+  const hooks = failedHooks(failure?.stderr ?? '');
+  throw hooks.length === 0 ? failure : new HookRejectedError(hooks);
 }

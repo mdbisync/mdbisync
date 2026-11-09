@@ -5,9 +5,9 @@ import { deflateRawSync } from 'node:zlib';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, describe, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 import type { LinearDocument } from '../../../src/linear/index.ts';
-import { Git } from '../../../src/state/index.ts';
+import { Git, GitError } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
@@ -19,7 +19,7 @@ import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
-import { HookRejectedError, installHooks, personCommit, Sandbox } from './sandbox.ts';
+import { commitStaged, HookRejectedError, installHooks, personCommit, Sandbox } from './sandbox.ts';
 import { engineEntry } from './engine.ts';
 import { preCommitConfig } from '../../corpus/tree.ts';
 import { loadScenarios } from './spec.ts';
@@ -496,8 +496,6 @@ async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
   await new Git(root, IDENTITY).run(['init', '--quiet', '--bare', '--initial-branch=main', remote]);
   const seed = new Git(join(root, 'seed'), IDENTITY);
   await new Git(root, IDENTITY).run(['init', '--quiet', '--initial-branch=main', join(root, 'seed')]);
-  // Hook environments of these tests stay in the test's own folder.
-  if (options.hooks === true) process.env.PRE_COMMIT_HOME = join(root, 'pre-commit');
   const hookConfig = options.hooks === true ? await localHookConfig(root) : 'repos:\n  - repo: https://github.com/example/hooks\n    rev: v1\n    hooks:\n      - id: linear-format\n  - repo: local\n    hooks:\n      - id: test-secret\n        alias: security\n';
   const files: Record<string, string> = {
     'eng/platform/README.md': `---\nlinear-project: ${PROJECT.name}\n---\n`,
@@ -597,6 +595,16 @@ async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
 }
 
 describe('person commits through the repository hooks', () => {
+  // Hook environments of these tests stay in a folder of their own; later tests see the variable as it was.
+  const saved = process.env.PRE_COMMIT_HOME;
+  before(() => {
+    process.env.PRE_COMMIT_HOME = fresh('pre-commit-');
+  });
+  after(() => {
+    if (saved === undefined) delete process.env.PRE_COMMIT_HOME;
+    else process.env.PRE_COMMIT_HOME = saved;
+  });
+
   it('commits the text the Linear-format hook fixed', async () => {
     const { ctx, rawFile } = await fakeRun({ hooks: true });
     // Linear's form has no final newline: the hook fixes it away.
@@ -608,6 +616,24 @@ describe('person commits through the repository hooks', () => {
     await runStep(ctx, { kind: 'git', action: 'add', args: {} });
     const added = await rawFile(ctx.observations.get('git.added') as string);
     assert.ok(added.startsWith('# Notes\n\n') && !added.endsWith('\n'), added);
+  });
+
+  it('moves through the hooks and records the text as committed', async () => {
+    const { ctx, rawFile } = await fakeRun({ hooks: true });
+    let installs = 0;
+    const install = ctx.personHooks.bind(ctx);
+    ctx.personHooks = async () => {
+      installs += 1;
+      await install();
+    };
+    await runStep(ctx, { kind: 'git', action: 'move', args: { target: 'eng/platform/notes.md' } });
+    const moved = (ctx.observations.get('git.moved') as { to: string }).to;
+    // The moved file is fixed into Linear's form on the way in.
+    assert.equal(await rawFile(moved), '# Notes\n\nKept short.');
+    assert.equal(installs, 1);
+    await runStep(ctx, { kind: 'git', action: 'edit', args: { target: 'eng/platform/plan.md' } });
+    assert.equal(ctx.observations.get('edited.gitBody'), await rawFile('eng/platform/plan.md'));
+    assert.equal((await (await ctx.person()).text(['status', '--porcelain'])).trim(), '');
   });
 
   it('fails a commit the hook refuses and commits it when the step bypasses the hook', async () => {
@@ -633,6 +659,13 @@ describe('person commits through the repository hooks', () => {
       (error: unknown) => error instanceof HookRejectedError && error.hooks.join() === 'test-secret' && !error.message.includes(secret),
     );
     assert.doesNotMatch(await remoteGit.text(['log', '-p', '--all']), new RegExp(secret));
+  });
+
+  it('reports a failure no hook caused as git\'s own error', async () => {
+    const { ctx } = await fakeRun({ hooks: true });
+    await installHooks(await ctx.person());
+    // Nothing staged: git refuses the commit before any hook fails.
+    await assert.rejects(commitStaged(await ctx.person(), [], 'Nothing', true), (error: unknown) => error instanceof GitError && !(error instanceof HookRejectedError));
   });
 
   it('refuses to install hooks pinned to anything but a released commit', async () => {

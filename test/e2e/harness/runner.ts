@@ -19,7 +19,7 @@ import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.t
 import { LinearWorld, editorClient, type Project } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
-import { CorpusMissingError, installHooks, PERSON, Sandbox } from './sandbox.ts';
+import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
 import { prepareFixtures, UNSAFE_TITLES } from './fixtures.ts';
@@ -437,7 +437,8 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
     async personHooks() {
       if (ctx.live === null) throw new Error('offline scenarios have no repository');
       if (hooksInstalled) return;
-      await installHooks(await ctx.person(), ctx.live.sandbox.env(PERSON));
+      // No sandbox credentials: npm runs while the public hooks install.
+      await installHooks(await ctx.person(), { signal: ctx.signal });
       hooksInstalled = true;
     },
     async engineClone() {
