@@ -22,7 +22,7 @@
 
 import { assessCapacity, capacityBlocked } from '../run/capacity.ts';
 import { createHash, randomUUID } from 'node:crypto';
-import { fixText, splitFile } from '../format/index.ts';
+import { fixText, sameMarkdown, splitFile } from '../format/index.ts';
 import {
   DocumentTooLongError,
   type LinearDocument,
@@ -461,9 +461,12 @@ function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-/** Whether Linear's content is the body, or the body in the form Linear stores (as the format module writes it). */
+/**
+ * Whether Linear's content is the body: the same document in any spelling,
+ * or the body in the form Linear stores (as the format module writes it).
+ */
 export function holdsBody(content: string, body: string): boolean {
-  return content === body || content === fixText(body);
+  return sameMarkdown(content, body) || content === fixText(body);
 }
 
 

@@ -23,7 +23,7 @@
 import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { documentPath } from './paths.ts';
-import { splitFile } from '../format/index.ts';
+import { sameMarkdown, splitFile } from '../format/index.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -588,7 +588,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       if (!(error instanceof LeaveOutError) && !(error instanceof UploadRefusedError)) throw error;
       return uncheckable;
     }
-    return (document.content ?? '') === expected;
+    return sameMarkdown(document.content ?? '', expected);
   }
 
   function resolves(place: Place): boolean {
@@ -634,7 +634,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     if (change.title) patch.title = file.title.normalize('NFC');
     if (change.place) Object.assign(patch, placePatch(file.place));
     const holds =
-      (patch.content === undefined || document.content === patch.content) &&
+      (patch.content === undefined || (document.content != null && sameMarkdown(document.content, patch.content))) &&
       (patch.title === undefined || document.title.normalize('NFC') === patch.title) &&
       (!change.place || inPlace(document, file.place));
     if (holds) {
@@ -679,7 +679,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       const live = current.get(adopted.id);
       const write = () => linear.updateDocument(adopted.id, { content: body });
       // Only a document the re-read returned has a window.
-      document = live === undefined ? await write() : live.content === body ? live : await timed(write);
+      document = live === undefined ? await write() : live.content != null && sameMarkdown(live.content, body) ? live : await timed(write);
       if (recreated === undefined) result.adopted.push(change.path);
     } else {
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });

@@ -7,7 +7,7 @@
 // A transform may make requests of its own (an upload); it must not write the
 // document itself.
 
-import { fixText } from '../format/index.ts';
+import { fixText, sameMarkdown } from '../format/index.ts';
 import { type LinearClient } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap } from '../state/index.ts';
 import { type InitialSyncPlan } from './plan.ts';
@@ -97,8 +97,11 @@ export async function transformBody(transforms: readonly BodyTransform[], path: 
  * the file.
  */
 export function restoreBody(transforms: readonly BodyTransform[], path: string, content: string, sent: string): string {
-  const kept = content === sent;
-  let current = content;
+  // Linear's own spelling of the same document (a final newline, an escape
+  // it adds) is not a reformat: the file keeps its text.
+  const kept = sameMarkdown(content, sent);
+  let current = sent;
+  if (!kept) current = content;
   for (const transform of [...transforms].reverse()) current = transform.restore({ path, body: current, kept });
   return kept ? current : fixText(current);
 }

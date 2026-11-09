@@ -1,6 +1,7 @@
 // Parsing helpers for the format module: the Markdown tree with source
 // positions, and the split between front matter and the body.
 
+import { isDeepStrictEqual } from 'node:util';
 import type { Nodes, Root } from 'mdast';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
@@ -41,6 +42,36 @@ export function lineCount(text: string): number {
 
 export function parse(body: string): Root {
   return fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+}
+
+/**
+ * Whether two bodies are the same document: equal text, or text that
+ * Markdown reads as the same tree. Linear can return a body it stored in a
+ * spelling of its own (a final newline, `\-6` for `-6` at the start of a
+ * table cell, `*` for `_`), which changes nothing in the document; the sync
+ * keeps the file's spelling for those.
+ */
+export function sameMarkdown(a: string, b: string): boolean {
+  if (a === b) return true;
+  return isDeepStrictEqual(withoutPositions(parse(a)), withoutPositions(parse(b)));
+}
+
+function withoutPositions(node: Nodes): unknown {
+  const { position: _position, ...rest } = node;
+  if ('url' in rest) rest.url = renderedUrl(rest.url);
+  if ('children' in node) return { ...rest, children: node.children.map(withoutPositions) };
+  return rest;
+}
+
+/**
+ * A destination as Markdown renders it: characters a URL cannot hold
+ * percent-encoded, escapes in upper case. `<a b.png>` and `a%20b.png` are
+ * the same destination.
+ */
+function renderedUrl(url: string): string {
+  return url
+    .replace(/%(?![0-9A-Fa-f]{2})|[^!#$%&'()*+,\-./0-9:;=?@A-Z[\]_a-z~]/gu, (char) => encodeURIComponent(char))
+    .replace(/%[0-9a-f]{2}/gi, (escape) => escape.toUpperCase());
 }
 
 export function start(node: Nodes): number {

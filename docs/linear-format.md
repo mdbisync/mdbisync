@@ -16,6 +16,12 @@ mdbisync keeps the synchronized branch in Linear's form:
 - neither of them rewrites a construct Linear would lose. A file with such a
   construct is left exactly as it is, and you decide what to keep.
 
+The sync itself compares a document with its file by what the Markdown
+says, not by its bytes. When Linear returns a document in a spelling of its
+own that reads as the same Markdown (a final newline, a backslash before a
+`-` that opens a table cell, `*` for `_`), the file keeps its text: no
+change is recorded and no sync pull request is opened for it.
+
 Both run as the `linear-format` pre-commit hook, which every synchronized
 repository needs (see [Install the hook](#install-the-hook)).
 

@@ -7,7 +7,7 @@ import { isMap, parseDocument, stringify } from 'yaml';
 import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
-import { lintText, splitFile } from '../format/index.ts';
+import { lintText, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
@@ -261,7 +261,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           if (candidate.previousBody !== undefined) linksToLinear(candidate.previousBody, path, map, seen);
           body = linksFromLinear(body, path, map, seen);
         }
-        const text = head + body;
+        // Linear's own spelling of the same document is no change: keep the file's text.
+        const newAssets = assets.files.size > 0 || [...assets.uploads].some(([hash, url]) => uploads.get(hash) !== url);
+        const kept = old?.path === path && candidate.previousBody !== undefined && !newAssets
+          && sameMarkdown(candidate.previousBody, body) ? previous.get(path)?.toString('utf8') : undefined;
+        const text = kept ?? head + body;
         candidate.files.set(path, text);
         if (candidate.checked === text) continue;
         const unchanged = old?.path === path && previous.get(path)?.equals(Buffer.from(text)) === true && assets.files.size === 0 && assets.uploads.size === 0;

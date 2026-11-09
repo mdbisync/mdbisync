@@ -444,7 +444,7 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
-  it("an image in angle brackets in a document Linear reformats is recorded in Linear's form, still an image; the next run writes nothing", async () => {
+  it('an image in angle brackets that Linear stores without them is recorded as the file spells it; no sync pull request, the next run writes nothing', async () => {
     // Like Linear: the stored text is in Linear's form, a link to an uploaded file stored as a file.
     world.linear.store = (content) => fixText(content.replaceAll(`${UPLOADS_HOST}/`, 'uploaded/')).replaceAll('uploaded/', `${UPLOADS_HOST}/`);
     await commit({
@@ -455,24 +455,10 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal(result.exitCode, 0, result.stderr);
     const [url] = uploadUrls((await documentOf('eng/notes/spaced.md')).content);
     assert.equal((await documentOf('eng/notes/spaced.md')).content, `# Spaced\n\n![Chart](${url})\n\n${CANARY}`, 'Linear dropped the brackets');
-    // The record keeps an image: Linear's form of the file, not the file's spelling without its brackets.
-    assert.match(await show('refs/mdbisync/linear:eng/notes/spaced.md'), /!\[Chart\]\(\.\.\/media\/chart%20copy\.png\)/);
-    // Linear's form differs from the file: the next run's sync pull request
-    // carries it to the tracked branch, and once it is merged a run
-    // writes nothing.
-    world.github.merge = async (pr, sha) => {
-      const base = await rev(`refs/heads/${pr.base}`);
-      const tree = (await fixture.remote.text(['merge-tree', '--write-tree', base, sha])).split('\n')[0] as string;
-      const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number}`], {
-        env: { GIT_AUTHOR_NAME: 'bot', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'bot', GIT_COMMITTER_EMAIL: 'bot@example.com' },
-      });
-      await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
-      return { sha: commit };
-    };
-    assert.deepEqual((await sync()).writes, ['POST /pulls']);
-    assert.deepEqual((await sync()).writes, ['PUT /pulls/1/merge']);
-    assert.match(await show('refs/heads/main:eng/notes/spaced.md'), /!\[Chart\]\(\.\.\/media\/chart%20copy\.png\)/);
-    // The run after the merge records it on `linear` and writes nothing to Linear (L2-34); the next one changes nothing.
+    // Linear's spelling of the same image is no change: the record keeps the file, brackets and all.
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/spaced.md'), `# Spaced\n\n![Chart](<../media/chart copy.png>)\n\n${CANARY}\n`);
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    // Nothing to carry to the tracked branch, and nothing to write again.
     assert.deepEqual((await sync()).writes, []);
     await assertIdempotent();
   });
