@@ -717,6 +717,57 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal((await run(world, {}, 'sync')).report.code, 'initial-pull-request-pending');
   });
 
+  for (const deleteBranch of [false, true]) {
+    it(`refuses an abandoned initial pull request with the sync branch ${deleteBranch ? 'deleted' : 'kept'}, then allows a new initial sync`, async () => {
+      const world = fakeWorld();
+      world.linear.documents = linearDocuments();
+      let mergeCalls = 0;
+      world.github.merge = async (pr, head) => {
+        mergeCalls += 1;
+        const base = await fixture.remote.text(['rev-parse', `refs/heads/${pr.base}`]);
+        const commit = await fixture.remote.text(['commit-tree', `${head}^{tree}`, '-p', base, '-p', head, '-m', 'Merge pull request'], {
+          env: { GIT_AUTHOR_NAME: 'GitHub', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'bot@example.com' },
+        });
+        await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
+        return { sha: commit };
+      };
+      assert.equal((await run(world)).result.exitCode, 0);
+      const initial = world.github.pullRequests[0];
+      assert.ok(initial);
+      initial.state = 'closed';
+      if (deleteBranch) await fixture.remote.run(['update-ref', '-d', 'refs/heads/mdbisync/linear']);
+      const before = await refs();
+      const writes = world.writes.length;
+      const requests = structuredClone(world.github.pullRequests);
+
+      const refused = await run(world, {}, 'sync');
+      assert.equal(refused.result.exitCode, NO_STATE_EXIT_CODE, refused.result.stderr);
+      assert.equal(refused.report.code, 'initial-pull-request-pending');
+      assert.match(refused.summary, /Closing the pull request or deleting its branch does not cancel/);
+      assert.deepEqual(await refs(), before, 'a remote ref moved');
+      assert.equal(world.writes.length, writes, 'the run wrote to an API');
+      assert.deepEqual(world.github.pullRequests, requests);
+      assert.equal(mergeCalls, 0);
+      assert.ok((await files('refs/heads/main')).includes('eng/backend/notes.md'));
+
+      // Replace the abandoned record with a fresh initial snapshot.
+      const plan = world.linear.documents.find((document) => document.id === 'doc-plan');
+      assert.ok(plan);
+      plan.content = `# Plan\n\nRevised steps. ${CANARY}`;
+      const restarted = await run(world);
+      assert.equal(restarted.result.exitCode, 0, restarted.result.stderr);
+      assert.notEqual(restarted.report.linearToGit?.record?.commit, before['refs/mdbisync/linear']);
+      assert.equal(world.github.pullRequests.length, 2);
+      assert.equal(world.github.pullRequests[1]?.state, 'open');
+      assert.equal((await run(world, {}, 'sync')).report.code, 'initial-pull-request-pending');
+      assert.equal(mergeCalls, 0);
+      await merge(world);
+      const synced = await run(world, {}, 'sync');
+      assert.equal(synced.result.exitCode, 0, synced.result.stderr);
+      assert.equal(mergeCalls, 0);
+    });
+  }
+
   it('opens no pull request when the tracked branch already equals Linear, and the sync then runs after other commits', async () => {
     const world = fakeWorld();
     assert.equal((await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' })).result.exitCode, 0);
