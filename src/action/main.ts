@@ -40,6 +40,11 @@ export async function run(): Promise<void> {
       core.setFailed(`${operation}: stopped before any write (${outcome.code})`);
       return;
     }
+    if (outcome.confirmed !== undefined && !outcome.confirmed.complete) {
+      core.setOutput("code", outcome.confirmed.code ?? "");
+      core.setFailed(`${operation}: not finished (${outcome.confirmed.code}); run it again with the same inputs`);
+      return;
+    }
     if (outcome.notImplemented) core.setFailed(notImplementedMessage(operation));
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));

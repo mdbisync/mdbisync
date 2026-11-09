@@ -14,6 +14,15 @@ export { Git, GitError, type Oid } from './git.ts';
 export { type LfsPointer, type LfsRead, type LfsReadResult, lfsReader, parseLfsPointer } from './lfs.ts';
 export { type CommitIdentity, type CommitSpec, type TreeEntry, checkRepoPath, commitTree, listTree, readBlobs, writeBlob } from './objects.ts';
 export {
+  type CommitStateOptions,
+  INITIAL_SYNC_PROGRESS,
+  initialSyncProgressMessage,
+  readInitialSyncProgress,
+  RESERVED_IDS_FILE,
+  type ReservedIds,
+  readReservedIds,
+  WRITTEN_FILE,
+  readWrittenHashes,
   type FetchedState,
   type FileRead,
   IDS_FILE,
