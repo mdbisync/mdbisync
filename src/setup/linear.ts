@@ -60,8 +60,10 @@ export function linearCredentialFailure(detail: string): CheckResult {
  * Looks up every annotated team (by key or name) and project (by name, in
  * its team): one request, plus one per further 125 team references. A
  * name that matches nothing, or more than one team or project, fails the
- * check and is named. A credential error is returned as a failed
- * `linear-credentials` item.
+ * check and is named. When no annotated team is found, the lookup is asked
+ * once more; when the token then sees no team at all, the check fails with
+ * `linear-teams-not-visible` rather than naming every team as missing. A
+ * credential error is returned as a failed `linear-credentials` item.
  */
 export async function resolveTargets(
   client: LinearClient,
@@ -76,26 +78,33 @@ export async function resolveTargets(
   }
   if (teamRefs.size === 0) return { result: notChecked('annotation-targets', 'no annotated folders') };
 
-  let teamNodes: LinearTeam[];
-  let projectNodes: Array<LinearProject & { teams: { nodes: Array<{ id: string }> } }>;
-  try {
-    // A team matches a reference by key or by name, so a batch of references
-    // matches at most twice as many teams: within one page when batches are
-    // half a page. The first request also looks up the projects, so a usual
-    // run resolves its targets in one request.
-    const refs = [...teamRefs];
-    const names = [...new Set([...projectRefs.values()].map((ref) => ref.project))];
-    teamNodes = [];
-    projectNodes = [];
+  type ProjectNode = LinearProject & { teams: { nodes: Array<{ id: string }> } };
+  const refs = [...teamRefs];
+  const names = [...new Set([...projectRefs.values()].map((ref) => ref.project))];
+  // A team matches a reference by key or by name, so a batch of references
+  // matches at most twice as many teams: within one page when batches are
+  // half a page. The first request also looks up the projects, so a usual
+  // run resolves its targets in one request. `probe` also asks whether the
+  // token sees any team at all.
+  const lookUp = async (probe: boolean) => {
+    const teamNodes: LinearTeam[] = [];
+    let projectNodes: ProjectNode[] = [];
+    let seesTeams: boolean | undefined;
     for (let start = 0; start < refs.length; start += TEAM_REFS_PER_REQUEST) {
       const batch = refs.slice(start, start + TEAM_REFS_PER_REQUEST);
-      const withProjects = start === 0 && names.length > 0;
-      const data = await client.request<{ teams: { nodes: LinearTeam[] }; projects?: { nodes: typeof projectNodes; pageInfo: { hasNextPage: boolean } } }>(
+      const first = start === 0;
+      const withProjects = first && names.length > 0;
+      const data = await client.request<{
+        teams: { nodes: LinearTeam[] };
+        projects?: { nodes: ProjectNode[]; pageInfo: { hasNextPage: boolean } };
+        visible?: { nodes: Array<{ id: string }> };
+      }>(
         'SetupTargets',
         'query',
         `query SetupTargets($refs: [String!]!, $first: Int!${withProjects ? ', $names: [String!]!' : ''}) {
           teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
           ${withProjects ? 'projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: 50) { nodes { id } } } pageInfo { hasNextPage } }' : ''}
+          ${probe && first ? 'visible: teams(first: 1) { nodes { id } }' : ''}
         }`,
         withProjects ? { refs: batch, first: batch.length * 2, names } : { refs: batch, first: batch.length * 2 },
       );
@@ -104,7 +113,31 @@ export async function resolveTargets(
         if (data.projects.pageInfo.hasNextPage) throw new Error('more than 250 Linear projects share the annotated names');
         projectNodes = data.projects.nodes;
       }
+      if (data.visible !== undefined) seesTeams = data.visible.nodes.length > 0;
     }
+    return { teamNodes, projectNodes, seesTeams };
+  };
+
+  let teamNodes: LinearTeam[];
+  let projectNodes: ProjectNode[];
+  try {
+    let found = await lookUp(false);
+    // No annotated team at all: Linear has answered a run's token so once
+    // while earlier runs saw every team. Ask once more, and whether the
+    // token sees any team, before stopping the run.
+    if (found.teamNodes.length === 0) {
+      found = await lookUp(true);
+      if (found.teamNodes.length === 0 && found.seesTeams === false) {
+        return {
+          result: failed(
+            'annotation-targets',
+            'linear-teams-not-visible',
+            `the Linear app sees no team, twice in a row, so none of the annotated teams (${[...refs].sort().map((ref) => `"${ref}"`).join(', ')}) can be found: check the app's team access in Linear`,
+          ),
+        };
+      }
+    }
+    ({ teamNodes, projectNodes } = found);
   } catch (error) {
     if (!isCredentialError(error)) throw error;
     return {
