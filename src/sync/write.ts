@@ -175,7 +175,17 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   });
 
   const creates = merge.changes.filter((change): change is CreateChange => change.kind === 'create');
-  const adoptable = await adoptableDocuments(creates);
+  let adoptable: Map<string, LinearDocument>;
+  try {
+    adoptable = await adoptableDocuments(creates);
+  } catch (error) {
+    // Stopped before any write: nothing to record, and the next run starts again.
+    if (!(error instanceof LinearStoppedError)) throw error;
+    result.stopped = error.reason;
+    result.notAttempted = merge.changes.map(changePath);
+    result.code = 'stopped';
+    return result;
+  }
   const documentIds = new Map<string, string>();
   for (const [path, entry] of ids) documentIds.set(path, entry.id);
   for (const change of merge.changes) if (change.kind === 'keep') documentIds.set(change.to, change.id);
@@ -263,7 +273,14 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       result.code = 'state-moved';
       return result;
     }
-    if (!(error instanceof StopWriting)) throw error;
+    if (error instanceof LinearStoppedError) {
+      // Stopped outside a document's write (preparing the transforms): no change is made from here on.
+      result.stopped = error.reason;
+      const started = new Set(notDone);
+      const rest = merge.changes.filter((change) => !started.has(change));
+      result.notAttempted = rest.map(changePath);
+      notDone.push(...rest);
+    } else if (!(error instanceof StopWriting)) throw error;
   }
   if (written > 0) result.changed = true;
 

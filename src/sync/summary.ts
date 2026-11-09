@@ -1,7 +1,7 @@
 // The sync run's job summary: paths, rule names and reasons only, never
 // document content.
 
-import { describeStop } from '../linear/index.ts';
+import { PARTIAL, renderStop } from '../run/exit.ts';
 import { type CycleResult } from './cycle.ts';
 import { type SkipReason } from './write.ts';
 
@@ -36,9 +36,9 @@ export function renderSync(result: CycleResult): string {
       '',
     );
   }
+  if (write.code !== undefined) lines.push(`This run is ${PARTIAL}: it recorded what it finished, and the next run goes on from there.`, '');
   if (write.stopped !== undefined) {
-    const why = write.stopped.kind === 'test-threshold' ? `the test threshold of ${write.stopped.documents} documents` : describeStop(write.stopped);
-    lines.push(`Stopped: ${why}. Not written yet: ${count(write.notAttempted.length, 'item')}.`, '');
+    lines.push(...renderStop(write.stopped), `Not written yet: ${count(write.notAttempted.length, 'item')}.`, '');
   }
   const table = (title: string, head: string[], rows: string[][]) => {
     if (rows.length === 0) return;

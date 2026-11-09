@@ -1,9 +1,14 @@
 // Errors raised by the Linear client. Messages carry operation names, HTTP
 // statuses and Linear's error codes only, never document content or tokens.
 
-/** Why the client stopped sending requests for the rest of the run. */
+/**
+ * Why the client stopped sending requests for the rest of the run. `limits`
+ * holds the `x-ratelimit-*` and `x-complexity` headers of the answer that
+ * stopped it (the hourly and endpoint limits, what remains and when they
+ * reset), when Linear sent any; they hold no content.
+ */
 export type StopReason =
-  | { kind: 'rate-limited'; operation: string; retryAfterSeconds?: number | undefined }
+  | { kind: 'rate-limited'; operation: string; retryAfterSeconds?: number | undefined; limits?: Record<string, string> }
   | {
       kind: 'budget-low';
       operation: string;
@@ -11,6 +16,7 @@ export type StopReason =
       header: string;
       remaining: number;
       threshold: number;
+      limits?: Record<string, string>;
     };
 
 export class LinearError extends Error {

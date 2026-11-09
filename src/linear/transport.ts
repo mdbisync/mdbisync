@@ -18,6 +18,7 @@ import {
 import {
   DEFAULT_BUDGET_FLOOR,
   findLowBudget,
+  limitsOf,
   parseRetryAfter,
   readRateLimitHeaders,
   type BudgetFloor,
@@ -199,7 +200,7 @@ export class GraphQLTransport {
           await this.#sleep(retryAfterSeconds * 1000);
           continue;
         }
-        this.#stopped = { kind: 'rate-limited', operation, retryAfterSeconds };
+        this.#stopped = { kind: 'rate-limited', operation, retryAfterSeconds, ...limitsOf(rateLimit) };
         this.#log({ ...entry, retryAfterSeconds, stop: this.#stopped });
         throw new LinearStoppedError(operation, this.#stopped);
       }

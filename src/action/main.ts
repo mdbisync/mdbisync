@@ -5,6 +5,7 @@
 
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
+import { PARTIAL, partialCode } from "../run/exit.ts";
 import { writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { runOperation } from "../run/operation.ts";
@@ -36,6 +37,13 @@ export async function run(): Promise<void> {
     else core.info(outcome.summary);
     if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
     core.setOutput("code", outcome.code ?? "");
+    // A partial run recorded what it finished; the next run goes on, so the job ends with a warning, not a failure.
+    const partial = partialCode(outcome);
+    if (partial !== undefined) {
+      core.setOutput("code", partial);
+      core.warning(`${operation}: ${PARTIAL} (${partial})`);
+      return;
+    }
     if (!outcome.ok) {
       core.setFailed(`${operation}: stopped before any write (${outcome.code})`);
       return;
@@ -43,13 +51,6 @@ export async function run(): Promise<void> {
     if (outcome.confirmed !== undefined && !outcome.confirmed.complete) {
       core.setOutput("code", outcome.confirmed.code ?? "");
       core.setFailed(`${operation}: not finished (${outcome.confirmed.code}); run it again with the same inputs`);
-      return;
-    }
-    // A sync that skipped documents succeeded (the next run takes them in); a stop, a refused push or a failed write did not.
-    const write = outcome.sync?.write;
-    if (write?.code !== undefined) {
-      core.setOutput("code", write.code);
-      core.setFailed(`${operation}: not finished (${write.code}); the next run goes on`);
       return;
     }
     if (outcome.notImplemented) core.setFailed(notImplementedMessage(operation));

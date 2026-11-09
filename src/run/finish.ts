@@ -4,6 +4,7 @@
 import { writeFile } from 'node:fs/promises';
 import { type ConfirmedResult, type PlanReport, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type SyncRecord, type WriteResult } from '../sync/index.ts';
+import { type ExitStatus, exitStatusOf } from './exit.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 
@@ -12,6 +13,10 @@ export interface RunReport {
   ok: boolean;
   /** Why the run stopped before writing, or why a confirmed initial sync or a sync run did not finish. */
   code: string | null;
+  /** `warning` for a partial run (it recorded what it finished; the next run goes on), `failure` when it could not run. */
+  exitStatus: ExitStatus;
+  /** Why Linear stopped the run, with the rate-limit headers of the answer that stopped it; null when it did not stop. */
+  stop: WriteStop | null;
   /**
    * The run finished its work: a confirmed initial sync recorded the state,
    * or a sync run made every change and recorded it with a merge commit.
@@ -85,7 +90,9 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
   return {
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? confirmed?.code ?? null,
+    code: outcome.code ?? confirmed?.code ?? (outcome.stopped === undefined ? null : 'stopped'),
+    exitStatus: exitStatusOf(outcome),
+    stop: outcome.stopped ?? confirmed?.stopped ?? null,
     complete: confirmed?.complete ?? false,
     changed: confirmed !== undefined && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true),
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
@@ -98,7 +105,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? 0,
     oversizeFiles: [...new Set((confirmed?.leftOutAtWrite ?? []).filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
     resumed: confirmed?.resumed ?? false,
-    stoppedEarly: confirmed?.stopped !== undefined,
+    stoppedEarly: confirmed?.stopped !== undefined || outcome.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
     progressRecorded: confirmed?.progressRecorded ?? false,
     record:
@@ -119,6 +126,8 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     operation: outcome.operation,
     ok: outcome.ok,
     code: outcome.code ?? write.code ?? null,
+    exitStatus: exitStatusOf(outcome),
+    stop: write.stopped ?? null,
     complete: write.complete,
     changed: write.changed,
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
