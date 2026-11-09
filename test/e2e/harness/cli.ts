@@ -95,7 +95,6 @@ async function main(argv: string[]): Promise<number> {
           rest: new SandboxRest(config, token.token),
           world,
           teamIds: teams.map((team) => team.id),
-          teams,
         },
         stateDir,
       );

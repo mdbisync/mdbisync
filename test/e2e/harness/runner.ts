@@ -26,6 +26,21 @@ import { renderUiChecklist } from './ui-checklist.ts';
 export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
 /** The longest setup, team-lock wait included; a full slice alone takes under a minute. */
 export const SETUP_TIMEOUT_MS = 15 * 60_000;
+/** How long a setup past its deadline gets to stop before cleanup runs anyway. */
+export const SETUP_STOP_MS = 2 * 60_000;
+
+/** Whether `work` settles (either way) within `ms`. */
+export async function settlesWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([work.then(() => true, () => true), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Rejects with `onTimeout()` when `work` has not settled in time. The work itself goes on unobserved. */
 export async function withDeadline<T>(work: Promise<T>, ms: number, onTimeout: () => Error): Promise<T> {
@@ -133,6 +148,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     for (const team of [...tree.teamZones.keys()].sort()) {
       try {
         locks.push(await acquireLock(`team-${team.toLowerCase()}`, {
+          signal: ctx.signal,
           stateDir: deps.stateDir,
           runId: ctx.names.runId,
           timeoutMs: TEAM_LOCK_TIMEOUT_MS,
@@ -330,8 +346,12 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
   let person: Git | undefined;
   let engineDir: string | undefined;
   let phase = 'admission';
+  // Set when setup missed its deadline: setup stops at its next phase or lock wait, and creates nothing more.
+  const abort = new AbortController();
   const ctx: RunContext = {
+    signal: abort.signal,
     phase(next: string) {
+      abort.signal.throwIfAborted();
       phase = next;
       log(`setup: ${next}`);
     },
@@ -370,6 +390,8 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
   const appName = deps.config.linearApps[0]?.name ?? 'app1';
   /** Set when the scenario reached its UI steps: its resources stay for the UI session. */
   let heldForUi = false;
+  /** Set when setup did not stop after its deadline: the run stays registered, so the sweeper removes what it makes later. */
+  let setupStuck = false;
   try {
     if (scenario.setup.state !== 'offline') {
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');
@@ -380,9 +402,17 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
         throw blocked;
       }
       ctx.proxy = await startFaultProxy('https://api.linear.app');
-      // A setup that hangs (seen twice on large slices, cause unknown) must not hold a worker and its locks forever.
-      await withDeadline(setupLive(ctx, deps, grant.app.name ?? appName, locks), SETUP_TIMEOUT_MS, () =>
-        new EnvBlockedError(`setup did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes (last phase: ${phase})`));
+      // A setup that does not finish must not hold a worker and its locks forever. On the deadline it is
+      // told to stop; cleanup waits until it has stopped, so nothing is created after the cleanup.
+      const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks);
+      try {
+        await withDeadline(setup, SETUP_TIMEOUT_MS, () =>
+          new EnvBlockedError(`setup did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes (last phase: ${phase})`));
+      } catch (late) {
+        abort.abort();
+        setupStuck = !(await settlesWithin(setup, SETUP_STOP_MS));
+        throw late;
+      }
       ctx.phase('steps');
     }
     const history: Array<Record<string, string>> = [await snapshotRefs(ctx)];
@@ -419,7 +449,8 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
     locks.splice(0).reverse().forEach((lock) => lock.release());
     grant?.release();
     clearInterval(heartbeat);
-    if (cleanupOutcome.ok && !heldForUi) registration.done();
+    if (setupStuck) cleanupOutcome = { ok: false, detail: `setup did not stop; ${cleanupOutcome.detail ?? 'cleaned up'}; the sweeper removes the rest once this process ends` };
+    if (cleanupOutcome.ok && !heldForUi && !setupStuck) registration.done();
     rmSync(join(runDir, 'person'), { recursive: true, force: true });
     rmSync(join(runDir, 'engine'), { recursive: true, force: true });
   }

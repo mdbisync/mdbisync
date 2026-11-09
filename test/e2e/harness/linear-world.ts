@@ -120,26 +120,6 @@ export class LinearWorld {
     return trashed;
   }
 
-  /**
-   * Team-zone documents titled exactly "README" that this editor created:
-   * leftovers of seeding a team zone's own annotation file, which carries no
-   * run prefix. Only the sweeper removes them, while it holds the team's lock.
-   */
-  async strayTeamReadmes(teamId: string): Promise<Array<{ id: string; createdAt: string }>> {
-    const data = await this.client.request<{
-      viewer: { id: string };
-      documents: { nodes: Array<{ id: string; title: string; createdAt: string; project: { id: string } | null; creator: { id: string } | null }> };
-    }>(
-      'StrayTeamReadmes',
-      'query',
-      'query StrayTeamReadmes($teamId: ID!) { viewer { id } documents(first: 250, filter: { team: { id: { eq: $teamId } }, title: { eq: "README" } }) { nodes { id title createdAt project { id } creator { id } } } }',
-      { teamId },
-    );
-    return data.documents.nodes
-      .filter((document) => document.title === 'README' && document.project === null && document.creator?.id === data.viewer.id)
-      .map(({ id, createdAt }) => ({ id, createdAt }));
-  }
-
   /** Moves a run's team-zone document to the trash. Refuses any other document. */
   async trashRunDocument(document: Pick<LinearDocument, 'id' | 'title' | 'projectId'>, runId: string): Promise<void> {
     if (document.projectId !== null || runOfTeamTitle(document.title) !== runId) {

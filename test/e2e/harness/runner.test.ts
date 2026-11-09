@@ -72,6 +72,26 @@ describe('check helpers', () => {
     assert.equal(sibling('eng/plan.md', 'notes.md'), 'eng/notes.md');
   });
 
+  it('read comments in small pages, under Linear\'s complexity limit', async () => {
+    const { commentsOf, COMMENT_DOCUMENTS_PER_PAGE, COMMENTS_PER_DOCUMENT } = await import('./checks.ts');
+    assert.ok(COMMENT_DOCUMENTS_PER_PAGE * COMMENTS_PER_DOCUMENT <= 2_500, 'a page must stay far below the 250 x 50 that Linear refused');
+    const pages = [
+      { nodes: [{ id: 'd1', project: { id: 'p' }, comments: { nodes: [{ body: 'one' }] } }], pageInfo: { hasNextPage: true, endCursor: 'c1' } },
+      { nodes: [{ id: 'd2', project: null, comments: { nodes: [] } }], pageInfo: { hasNextPage: false, endCursor: null } },
+    ];
+    const afters: unknown[] = [];
+    const client = {
+      request: async (_operation: string, _kind: string, query: string, variables?: Record<string, unknown>) => {
+        assert.match(query, new RegExp(`documents\\(first: ${COMMENT_DOCUMENTS_PER_PAGE}, after: \\$after`));
+        afters.push(variables?.after);
+        return { documents: pages[afters.length - 1] } as never;
+      },
+    };
+    const documents = await commentsOf(client as never, { project: { id: { eq: 'p' } } });
+    assert.deepEqual(afters, [null, 'c1']);
+    assert.deepEqual(documents, [{ id: 'd1', inProject: true, bodies: ['one'] }, { id: 'd2', inProject: false, bodies: [] }]);
+  });
+
   it('look only for canaries in content, since paths may be listed', async () => {
     const { contentCanaries } = await import('./checks.ts');
     const files = [
@@ -281,27 +301,6 @@ describe('sweeper', () => {
     live.done();
   });
 
-  it('removes stray README documents of a team zone only while no run holds the team', async () => {
-    const stateDir = fresh('sweep-readme-');
-    const trashed: string[] = [];
-    const targets = {
-      sandbox: { runRefs: async () => [] } as never,
-      rest: { pullRequests: async () => [], closePullRequest: async () => {} } as never,
-      world: {
-        runProjects: async () => [],
-        runTeamDocuments: async () => [],
-        strayTeamReadmes: async () => [{ id: 'r1', createdAt: '' }, { id: 'r2', createdAt: '' }],
-        client: { trashDocument: async (id: string) => void trashed.push(id) },
-      } as never,
-      teamIds: [],
-      teams: [{ id: 'team-1', key: 'ENG' }],
-    };
-    const held = await (await import('./locks.ts')).acquireLock('team-eng', { stateDir, runId: '444444', timeoutMs: 0 });
-    assert.equal((await sweep(targets, stateDir)).trashedDocuments, 0);
-    held.release();
-    assert.equal((await sweep(targets, stateDir)).trashedDocuments, 2);
-    assert.deepEqual(trashed, ['r1', 'r2']);
-  });
 });
 
 describe('setup deadline', () => {
@@ -309,5 +308,19 @@ describe('setup deadline', () => {
     const { withDeadline } = await import('./runner.ts');
     assert.equal(await withDeadline(Promise.resolve(7), 1_000, () => new Error('late')), 7);
     await assert.rejects(withDeadline(new Promise(() => {}), 20, () => new EnvBlockedError('setup did not finish')), EnvBlockedError);
+  });
+
+  it('stops a setup past its deadline: a lock wait ends, and cleanup knows whether setup stopped', async () => {
+    const { settlesWithin } = await import('./runner.ts');
+    const { acquireLock } = await import('./locks.ts');
+    const stateDir = fresh('setup-abort-');
+    const held = await acquireLock('team-eng', { stateDir, runId: '555555', timeoutMs: 0 });
+    const abort = new AbortController();
+    const waiting = acquireLock('team-eng', { stateDir, runId: '666666', timeoutMs: 60_000, pollMs: 20, signal: abort.signal });
+    abort.abort();
+    assert.equal(await settlesWithin(waiting, 1_000), true);
+    await assert.rejects(waiting);
+    held.release();
+    assert.equal(await settlesWithin(new Promise(() => {}), 20), false);
   });
 });

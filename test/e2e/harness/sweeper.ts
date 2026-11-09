@@ -7,7 +7,7 @@
 
 import { RUN_ID_PATTERN } from './isolation.ts';
 import type { LinearWorld } from './linear-world.ts';
-import { acquireLock, deadLocalRuns, forgetRun, liveRuns, LockTimeoutError } from './locks.ts';
+import { deadLocalRuns, forgetRun, liveRuns } from './locks.ts';
 import type { SandboxRest } from './github.ts';
 import type { Sandbox } from './sandbox.ts';
 
@@ -19,8 +19,6 @@ export interface SweepTargets {
   world: LinearWorld;
   /** Team ids whose team-zone documents may hold run documents. */
   teamIds: string[];
-  /** Teams whose zone may hold stray "README" documents of seeding. */
-  teams?: Array<{ id: string; key: string }>;
 }
 
 export interface SweepReport {
@@ -86,27 +84,6 @@ export async function sweep(targets: SweepTargets, stateDir: string, now = Date.
       report.deletedProjects.push(project.name);
     }
   });
-
-  // Stray "README" documents of team zones, made by the harness's editor: only while no run uses the team zone.
-  for (const team of targets.teams ?? []) {
-    await attempt(`stray README documents of team ${team.key}`, async () => {
-      let lock;
-      try {
-        lock = await acquireLock(`team-${team.key.toLowerCase()}`, { stateDir, runId: 'sweep0', timeoutMs: 0 });
-      } catch (error) {
-        if (error instanceof LockTimeoutError) return; // a run uses the team zone now
-        throw error;
-      }
-      try {
-        for (const document of await targets.world.strayTeamReadmes(team.id)) {
-          await targets.world.client.trashDocument(document.id);
-          report.trashedDocuments += 1;
-        }
-      } finally {
-        lock.release();
-      }
-    });
-  }
 
   for (const teamId of targets.teamIds) {
     await attempt('team-zone documents', async () => {
