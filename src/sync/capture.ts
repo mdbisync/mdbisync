@@ -30,6 +30,11 @@ export interface CaptureOptions {
   state: StateSnapshot;
   identity?: CommitIdentity;
   security?: SecurityGate;
+  /**
+   * The first of the staged security steps: read Linear's changes and ask
+   * the gate about them, then stop. Nothing is written to git or Linear.
+   */
+  stageOnly?: boolean;
   fetch?: typeof fetch;
 }
 
@@ -238,16 +243,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)));
     type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, Buffer | string>; checked?: string };
     const candidates = new Map<string, Candidate>();
-    const resetTarget = (id: string) => {
-      for (const [path, target] of documentIds) if (target === id) documentIds.delete(path);
+    const resetTarget = (id: string, targets: Map<string, string> = documentIds) => {
+      for (const [path, target] of targets) if (target === id) targets.delete(path);
       const old = byId.get(id);
-      if (old !== undefined && previous.has(old.path)) documentIds.set(old.path, id);
+      if (old !== undefined && previous.has(old.path)) targets.set(old.path, id);
     };
     for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
       const old = byId.get(doc.id);
       if (!live(doc)) {
         if (old !== undefined) {
-          if (old.entry.saved !== undefined) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
+          if (old.entry.saved !== undefined && options.stageOnly !== true) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
           removeBody(old.path);
           ids.delete(old.path);
           documentIds.delete(old.path);
@@ -273,30 +278,44 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     // A rejected target may change other documents' relative links. Recheck
     // only bodies that change as targets fall back to their accepted paths.
+    // A candidate's text with its links written against these targets.
+    const textOf = (candidate: Candidate, targets: ReadonlyMap<string, string>) => {
+      let body = candidate.assets.body;
+      if (linkBase !== undefined) {
+        const map = {base: linkBase, ids: new Map(targets)};
+        const seen: LinkSpellings = new Map();
+        if (candidate.previousBody !== undefined) linksToLinear(candidate.previousBody, candidate.path, map, seen);
+        body = linksFromLinear(body, candidate.path, map, seen);
+      }
+      return candidate.head + body;
+    };
     let again = true;
     while (again) {
       again = false;
       for (const [id, candidate] of candidates) {
         const {doc, path, head, assets} = candidate;
         const old = byId.get(id);
-        let body = assets.body;
-        if (linkBase !== undefined) {
-          const map = {base: linkBase, ids: new Map(documentIds)};
-          const seen: LinkSpellings = new Map();
-          if (candidate.previousBody !== undefined) linksToLinear(candidate.previousBody, path, map, seen);
-          body = linksFromLinear(body, path, map, seen);
-        }
-        const text = head + body;
+        const text = textOf(candidate, documentIds);
         candidate.files.set(path, text);
         if (candidate.checked === text) continue;
         const unchanged = old?.path === path && previous.get(path)?.equals(Buffer.from(text)) === true && assets.files.size === 0 && assets.uploads.size === 0;
-        let findings: SecurityFinding[] = [];
+        let findings: SecurityFinding[] | null = [];
         if (!unchanged || old?.entry.saved !== undefined) {
           // Upload URLs also enter the cache ref. Scan the original text so
           // localization cannot hide a secret embedded in a URL or its query.
           const original = head + (doc.content ?? '');
           if (original !== text) findings = await gate.check(new Map<string, Buffer | string>([[path, original], ...assets.files]));
-          if (findings.length === 0) findings = await gate.check(candidate.files);
+          if (findings?.length === 0) findings = await gate.check(candidate.files);
+        }
+        if (findings === null) {
+          // The hooks have not seen this text (it changed in Linear after
+          // they ran): it stays out of this run, and the cursor holds, so
+          // the next run checks it.
+          result.leftOut.push({id, rule: 'security-unchecked'});
+          candidates.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
         }
         if (findings.length > 0) {
           const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
@@ -309,6 +328,15 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         }
         candidate.checked = text;
       }
+    }
+    if (options.stageOnly === true) {
+      // The staging gate passed every candidate. The apply step rejects some,
+      // and the documents that link to them are written with the rejected
+      // targets' fallback links: stage those texts too, or they would wait
+      // for an answer on every run while the target stays rejected.
+      if (linkBase !== undefined) for (const set of linkVariants(candidates, textOf, resetTarget, documentIds)) await gate.check(set);
+      result.summary = `Staged ${candidates.size} changed documents for the security hooks.`;
+      return result;
     }
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);
@@ -396,6 +424,39 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     result.summary = renderCapture(result, gate.configured);
     return result;
   } finally { await gate.close?.(); }
+}
+
+/** Up to this many changed link targets, every combination of them rejected is staged; above it, each alone and all together. */
+const LINK_VARIANT_TARGETS = 4;
+
+/**
+ * The sets of files each candidate would be checked with when some of the
+ * other candidates it links to are rejected: its text with those targets'
+ * fallback links, and its embedded files.
+ */
+function linkVariants<C extends { path: string; files: Map<string, Buffer | string> }>(
+  candidates: ReadonlyMap<string, C>,
+  textOf: (candidate: C, targets: ReadonlyMap<string, string>) => string,
+  reset: (id: string, targets: Map<string, string>) => void,
+  documentIds: ReadonlyMap<string, string>,
+): Array<Map<string, Buffer | string>> {
+  const variants: Array<Map<string, Buffer | string>> = [];
+  const without = (rejected: readonly string[]) => {
+    const targets = new Map(documentIds);
+    for (const id of rejected) reset(id, targets);
+    return targets;
+  };
+  for (const [id, candidate] of candidates) {
+    const accepted = candidate.files.get(candidate.path);
+    const linked = [...candidates.keys()].filter((other) => other !== id && textOf(candidate, without([other])) !== accepted);
+    const combinations = linked.length <= LINK_VARIANT_TARGETS
+      ? Array.from({length: 2 ** linked.length - 1}, (_, mask) => linked.filter((_, bit) => ((mask + 1) >> bit) & 1))
+      : [...linked.map((other) => [other]), linked];
+    const texts = new Set(combinations.map((rejected) => textOf(candidate, without(rejected))));
+    texts.delete(accepted as string);
+    for (const text of texts) variants.push(new Map([...candidate.files, [candidate.path, text]]));
+  }
+  return variants;
 }
 
 /** Folder configuration remains at its original path; other metadata follows the body. */

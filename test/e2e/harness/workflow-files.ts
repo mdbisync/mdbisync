@@ -93,16 +93,22 @@ export function renderForRun(template: string, options: RunWorkflowOptions): str
 function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): void {
   const steps = job.get('steps');
   if (!isSeq(steps)) return;
+  const isAction = (item: unknown) => {
+    const uses = (item as YAMLMap).get('uses');
+    return typeof uses === 'string' && uses.startsWith(`${ACTION_REPOSITORY}@`);
+  };
+  // The stage step runs before the hooks step; the last action step is the one whose report the harness reads.
+  const last = steps.items.findLastIndex(isAction);
   for (let index = 0; index < steps.items.length; index += 1) {
     const step = steps.items[index] as YAMLMap;
-    const uses = step.get('uses');
-    if (typeof uses !== 'string' || !uses.startsWith(`${ACTION_REPOSITORY}@`)) continue;
+    if (!isAction(step)) continue;
     if (options.actionSha !== undefined) step.set('uses', `${ACTION_REPOSITORY}@${options.actionSha}`);
     if (!isMap(step.get('with'))) step.set('with', doc.createNode({}));
     const inputs = step.get('with') as YAMLMap;
     inputs.set('tracked-branch', options.trackedBranch);
     inputs.set('sync-branch', options.syncBranch);
     inputs.set('state-ref-prefix', options.refPrefix);
+    if (index !== last) continue;
     inputs.set('report-file', `${REPORT_DIR}/report.json`);
     steps.items.splice(index + 1, 0, doc.createNode({
       name: 'Keep the report for the harness',
