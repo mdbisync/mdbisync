@@ -10,6 +10,24 @@ import { smokeRelease } from '../../src/release/smoke.ts';
 
 const root = resolve(import.meta.dirname, '../..');
 
+test('CI and release install the same pinned pre-commit before tests', async () => {
+  const versions: string[] = [];
+  for (const [file, job] of [['ci.yml', 'check'], ['release.yml', 'build']] as const) {
+    const workflow = parse(await readFile(join(root, '.github/workflows', file), 'utf8'));
+    const steps = workflow.jobs[job].steps as { run?: string }[];
+    const installs = steps.flatMap((step, index) => {
+      const match = step.run?.trim().match(/^pipx install pre-commit==(\d+\.\d+\.\d+)$/);
+      return match ? [{ version: match[1]!, index }] : [];
+    });
+    assert.equal(installs.length, 1, `${file} must install exactly one pinned pre-commit`);
+    const tests = steps.flatMap((step, index) => /\bnpm test\b/.test(step.run ?? '') ? [index] : []);
+    assert.ok(tests.length > 0, `${file} must run tests`);
+    assert.ok(tests.every(index => installs[0]!.index < index), `${file} must install pre-commit before tests`);
+    versions.push(installs[0]!.version);
+  }
+  assert.equal(versions[0], versions[1], 'CI and release pre-commit versions must match');
+});
+
 test('action and hook metadata prohibit runtime installs', async () => {
   validateAction(parse(await readFile(join(root, 'action.yml'), 'utf8')));
   validateHooks(parse(await readFile(join(root, '.pre-commit-hooks.yaml'), 'utf8')));
