@@ -3,7 +3,8 @@
 Two-way sync between Markdown files in a Git repository and Linear documents,
 run as a GitHub Action.
 
-**Status:** early development. `lint` and `fix` work on Markdown files.
+**Status:** early development. `lint` and `fix` work on Markdown files
+([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)).
 `check` checks a repository's setup. `initial-sync` from git to Linear
 works, as a dry run and confirmed; `sync` and `initial-sync` from Linear to
 git run the same check (and `sync` refuses to run without its state) and
@@ -59,6 +60,12 @@ leaves out, and writes nothing. With `confirm: true`:
   written;
 - the documents of the annotated projects and team zones that match no file
   are moved to Linear's trash, from which they can be restored;
+- a relative link to another synchronized document, such as
+  `[setup](../guide.md#setup)`, becomes a link to that document in Linear
+  (`https://linear.app/<workspace>/document/<id>#setup`), also when the
+  document is created in the same run; the recorded file keeps the link as
+  it was written. Links to files that are not synchronized documents stay as
+  they are;
 - document ids go to `refs/mdbisync/ids` as the run goes, and at the end
   one push records `refs/mdbisync/linear` (the tracked branch with each
   synchronized file as Linear stores it), `ids` and `uploads`.
@@ -78,6 +85,7 @@ new confirmed run rebuilds them without duplicating documents.
 | `src/run/` | Inputs and the preflight every run starts with |
 | `src/mapping/` | Folder annotations and the mapping of files to documents |
 | `src/setup/` | The setup check and the refusal to sync without state |
+| `src/format/` | `lint` and `fix`: Markdown in Linear's form ([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)) |
 | `src/linear/` | Linear client |
 | `src/state/` | The sync's state refs, trees and LFS reads |
 | `action.yml` | Action metadata (`node24`, bundled `main` and `post`) |
@@ -93,6 +101,7 @@ npm ci                  # exact versions from package-lock.json, install scripts
 npm run typecheck       # tsc --noEmit
 npm run build           # esbuild bundles into dist/, checks bundled licenses
 npm test                # node --test
+npm run test:hooks       # requires pre-commit; offline scratch hook and CI checks
 pre-commit run --all-files
 ```
 
@@ -129,8 +138,29 @@ repos:
 ```
 
 The action runs its checked-in JavaScript bundles without installation.
-The hook needs Node 24.15.0, which pre-commit provisions when creating its
-environment; its package has no registry dependencies. Enable Dependabot's
+The hooks use Node 24 and npm already installed on your machine
+(`language_version: system`); no Node toolchain or registry dependencies are
+downloaded when installing or running them. Use npm 11.16.0 or newer: npm
+11.12.1 rejects pre-commit's local Git package installation. The release
+package contains only bundled code and has no install scripts.
+
+`linear-format` fixes Markdown into Linear's form and exits 1 when it changes
+a file; a second run passes. `linear-format-check` reports changes without
+writing them. Both refuse constructs Linear would lose, with a file, line and
+rule, leaving the file unchanged. Every rule, what `fix` changes, and the CI
+workflow that commits the fixes to pull requests ([examples/pre-commit.yml](https://github.com/mikhail-yaskou/mdbisync/blob/main/examples/pre-commit.yml))
+are described in [docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md).
+
+To generate the test corpus with the same pin, run:
+
+```sh
+node test/corpus/generate.ts --hook-rev <40-character-release-sha>
+```
+
+The generator requires an explicit release commit SHA and preserves the
+`corpus/` and `corpus-slices/` layout.
+
+Enable Dependabot's
 `github-actions` ecosystem in your repository to propose action SHA updates,
 then copy the proposed release SHA into the hook's `rev` in the same change.
 To update to a specific pre-release, resolve its annotated tag and use the

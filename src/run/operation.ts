@@ -8,6 +8,7 @@ import {
   type ConfirmedResult,
   type PlanReport,
   confirmInitialSync,
+  documentLinks,
   planFromRepository,
   renderConfirmed,
   renderDryRun,
@@ -49,14 +50,16 @@ export async function runOperation(
     options,
     operation === 'sync'
       ? async (context) => {
-          sync = await runSyncCycle(context, { config: inputs.state, transforms: () => [uploadsTransform({ config: inputs.state })] });
+          sync = await runSyncCycle(context, { config: inputs.state, transforms: () => [uploadsTransform({ config: inputs.state }), documentLinks()] });
           workSummary = renderSync(sync);
         }
       : gitToLinear === undefined
       ? undefined
       : async (context) => {
           if (gitToLinear.confirm) {
-            const run = await confirmInitialSync(context, { config: inputs.state, transforms: [uploadsTransform({ config: inputs.state })] });
+            // Uploads rewrite links to files that are not Markdown; document links, links to synchronized documents.
+            const transforms = [uploadsTransform({ config: inputs.state }), documentLinks()];
+            const run = await confirmInitialSync(context, { config: inputs.state, transforms });
             plan = toPlanReport(run.plan, gitToLinear.direction, true);
             confirmed = run.result;
             workSummary = renderConfirmed(run.plan, run.result);

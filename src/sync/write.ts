@@ -47,7 +47,7 @@ import {
   stateRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
-import { type CreateChange, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, mergeLocally } from './merge.ts';
+import { type CreateChange, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
@@ -214,13 +214,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const nextReserved = new Map([...reserved].filter(([path]) => resultFiles.has(path)));
   /** Paths of the merge result whose changes were not made: the record keeps the `linear` tip's version. */
   const notDone: DocumentChange[] = [];
+  // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
+  // before any upload of this run (preparing may upload ahead of the writes), so this run's uploads never count as
+  // what Linear held.
+  const tipUploads = new Map(uploads);
 
   let written = 0;
   try {
-    // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
-    // before any upload of this run (preparing may upload ahead of the writes), so this run's uploads never count as
-    // what Linear held.
-    const tipUploads = new Map(uploads);
     const plan = transformPlan();
     for (const transform of transforms) await transform.prepare?.({ git, tracked: candidate, linear, plan, uploads, documentIds });
     for (const transform of tipTransforms) await transform.prepare?.({ git, tracked: linearTip, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads: tipUploads, documentIds });
@@ -323,13 +323,17 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     for (const path of new Set([...linearFiles.keys(), ...resultFiles.keys()])) {
       if (!path.endsWith('.md') && linearFiles.get(path) !== resultFiles.get(path)) changedNames.add(path.slice(path.lastIndexOf('/') + 1));
     }
-    if (changedNames.size === 0) return;
-    for (const change of merge.unchanged) {
+    // A moved document is always compared: a relative link may now point at another file.
+    // Documents with the same text: those needing nothing, and those only renamed or moved (their write must
+    // carry the new link too).
+    const sameText = [...merge.unchanged, ...merge.changes.filter((change): change is KeepChange => change.kind === 'keep' && !change.content)];
+    for (const change of sameText) {
       const next = merge.result.get(change.to) as SideFile;
       const previous = merge.linear.get(change.from) as SideFile;
       const text = textOf(next);
-      // A cheap filter first: a link to a changed file names it.
-      if (![...changedNames].some((name) => text.includes(name) || text.includes(encodeURI(name)) || text.includes(encodeURIComponent(name)))) continue;
+      // A cheap filter first for documents that stay where they are: a link to a changed file names it.
+      const moved = change.from !== change.to;
+      if (!moved && ![...changedNames].some((name) => text.includes(name) || text.includes(encodeURI(name)) || text.includes(encodeURIComponent(name)))) continue;
       let differs: boolean;
       try {
         const written = await transformBody(transforms, change.to, splitFile(text).body);
@@ -339,7 +343,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError)) throw error;
         differs = true;
       }
-      if (differs) merge.changes.push({ ...change, content: true });
+      if (!differs) continue;
+      if (merge.changes.includes(change)) change.content = true;
+      else merge.changes.push({ ...change, content: true });
     }
     merge.changes.sort((a, b) => compare(changePath(a), changePath(b)));
   }
@@ -385,21 +391,42 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    * seen the document as it is now. Compared in Linear's form: the tip's
    * file through the transforms (images become their cached upload URLs).
    */
-  async function unchangedSinceCapture(document: LinearDocument, file: SideFile | undefined): Promise<boolean> {
+  async function unchangedSinceCapture(document: LinearDocument, path: string): Promise<boolean> {
     if (document.trashed || document.archivedAt !== null) return false;
-    // The tip's file was left out (a lint finding): Linear keeps an older text the tip does not show.
-    if (file === undefined) return true;
+    const synchronized = merge.linear.get(path);
+    if (synchronized !== undefined) return holdsVersion(document, synchronized, textOf(synchronized), tipTransforms, true);
+    // The tip does not synchronize the file (a lint finding, a collision, not text): it records the git text, and
+    // Linear holds the version it was last given. Without one there is nothing to compare with, and the document is
+    // not written.
+    const baseline = await lastSynchronized(git, linearTip as Oid, path, linear.facts);
+    if (baseline === null) return false;
+    // That version's links resolve against its own tree: its images may have changed since.
+    const baselineTransforms = options.transforms?.() ?? [];
+    const plan: InitialSyncPlan = { create: [], overwrite: [], trash: [], leftOut: [] };
+    for (const transform of baselineTransforms) {
+      await transform.prepare?.({ git, tracked: baseline.commit, linear: withoutUploads(linear), plan, uploads: tipUploads, documentIds });
+    }
+    return holdsVersion(document, baseline.file, baseline.text, baselineTransforms, false);
+  }
+
+  /**
+   * Whether a document holds a version of its file: title, project or team,
+   * and text in Linear's form. When the text cannot be put in Linear's form
+   * (a file it links to is gone or not in the upload cache), `uncheckable`
+   * is the answer: the tip's own file lets the write go ahead, an older
+   * version that cannot be checked does not.
+   */
+  async function holdsVersion(document: LinearDocument, file: SideFile, text: string, through: readonly BodyTransform[], uncheckable: boolean): Promise<boolean> {
     if (document.title.normalize('NFC') !== file.title.normalize('NFC')) return false;
     // Moved to another project or team in Linear: that move is the capture's to take in. A place the setup no longer
     // resolves (an annotation now names another project) cannot be checked.
     if (resolves(file.place) && !inPlace(document, file.place)) return false;
     let expected: string;
     try {
-      expected = await transformBody(tipTransforms, file.path, splitFile(textOf(file)).body);
+      expected = await transformBody(through, file.path, splitFile(text).body);
     } catch (error) {
-      // The tip's file cannot be put in Linear's form (a file it links to is gone): nothing to compare with.
-      if (error instanceof LeaveOutError || error instanceof UploadRefusedError) return true;
-      throw error;
+      if (!(error instanceof LeaveOutError) && !(error instanceof UploadRefusedError)) throw error;
+      return uncheckable;
     }
     return (document.content ?? '') === expected;
   }
@@ -429,7 +456,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       result.trashed.push(change.path);
       return true;
     }
-    if (!(await unchangedSinceCapture(document, merge.linear.get(change.path)))) return skip(change.path, 'edited-in-linear');
+    if (!(await unchangedSinceCapture(document, change.path))) return skip(change.path, 'edited-in-linear');
     await linear.trashDocument(change.id);
     nextIds.delete(change.path);
     result.trashed.push(change.path);
@@ -457,7 +484,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         readBack = document;
       }
     } else {
-      if (!(await unchangedSinceCapture(document, merge.linear.get(change.from)))) return skip(change.to, 'edited-in-linear');
+      if (!(await unchangedSinceCapture(document, change.from))) return skip(change.to, 'edited-in-linear');
       if (written === 0) await checkpoint('before-write');
       const updated = await linear.updateDocument(change.id, patch);
       // Without a content write the merge result's file stands: Linear holds its body already.
