@@ -53,8 +53,9 @@ const TREE: Record<string, string | Buffer> = {
   'eng/notes/a.md': A_BODY,
   'eng/notes/b.md': B_BODY,
   'eng/notes/big.md': `# Big\n\n![Huge](../media/huge.png) and ![Diagram](../media/diagram.png)\n\n${CANARY}`,
-  'eng/notes/lost.md': `# Lost\n\n![Lost](lost.png)\n\n${CANARY}`,
+  'eng/notes/lost.md': `# Lost\n\n[Data](only-lost.csv)\n\n![Lost](lost.png)\n\n${CANARY}`,
   'eng/notes/lost.png': LOST_POINTER,
+  'eng/notes/only-lost.csv': 'a,b\n1,2\n',
   'eng/notes/pixel.png': PIXEL,
   'eng/notes/files/report 2026.pdf': REPORT,
   ...Object.fromEntries(SHARED.map((name) => [`eng/notes/${name}.md`, `# ${name}\n\n![Diagram](../media/diagram.png)\n\n${CANARY}`])),
@@ -117,6 +118,12 @@ describe('uploads of linked files in an initial sync', () => {
     // One upload per distinct file: the diagram linked from eight documents, the pixel, and the report linked twice.
     assert.equal(world.linear.uploads.length, 3);
     for (const content of [DIAGRAM, PIXEL, REPORT]) assert.equal(uploadOf(world, content).length, 1, 'uploaded once, bytes equal');
+    // I9: the three files take one API request, before the first write; the over-limit and unreadable files are not sent.
+    assert.deepEqual(world.writes.filter((operation) => operation.startsWith('FileUpload')), ['FileUploads']);
+    // The batch goes out just before the first document that needs a file; a file only an unreadable document links is not sent.
+    const createdA = world.writes.findIndex((operation, index) => operation === 'CreateDocument' && index > world.writes.indexOf('FileUploads'));
+    assert.ok(createdA !== -1);
+    assert.equal(world.linear.uploads.some((upload) => upload.filename === 'only-lost.csv'), false);
     const [diagram, pixel, report2026] = [DIAGRAM, PIXEL, REPORT].map((content) => uploadOf(world, content)[0]) as [FakeUpload, FakeUpload, FakeUpload];
     assert.equal(report2026.filename, 'report 2026.pdf');
     assert.equal(report2026.contentType, 'application/pdf');
@@ -141,14 +148,33 @@ describe('uploads of linked files in an initial sync', () => {
 
     // A file over the upload limit leaves its document out, unread and not uploaded; so does an LFS object that is missing.
     assert.deepEqual(report.initialSync?.leftOutAtWrite, [
-      { path: 'eng/notes/big.md', rule: 'upload-too-large' },
-      { path: 'eng/notes/lost.md', rule: 'upload-unreadable' },
+      { path: 'eng/notes/big.md', rule: 'upload-too-large', files: ['eng/media/huge.png'] },
+      { path: 'eng/notes/lost.md', rule: 'upload-unreadable', files: ['eng/notes/lost.png'] },
     ]);
+    assert.deepEqual(report.oversizeFiles, ['eng/media/huge.png']);
     assert.equal(document(world, 'big'), undefined);
     assert.equal(document(world, 'lost'), undefined);
-    assert.match(summary, /\| eng\/notes\/big\.md \| upload-too-large \|/);
+    assert.match(summary, /\| eng\/notes\/big\.md \| upload-too-large \|  \| eng\/media\/huge\.png \|/);
     assert.match(summary, /\| eng\/notes\/lost\.md \| upload-unreadable \|/);
     assert.equal(await countLocalLfsObjects(new Git(cwd)), 2, 'only the diagram and the report are downloaded');
+  });
+
+  it('L5-07: a run stopped by the rate limit after a batch records its uploads; the next run does not repeat them', async () => {
+    const world = fakeWorld();
+    // Mutations: two README documents, the batch of three files, document a; the fifth is refused.
+    world.linear.writes.rateLimitAt = 5;
+    const first = await run(world);
+    assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
+    assert.equal(first.report.stoppedEarly, true);
+    assert.equal(world.linear.uploads.length, 3);
+    const cached = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
+    assert.deepEqual(Object.keys(cached).sort(), [sha(DIAGRAM), sha(PIXEL), sha(REPORT)].sort());
+
+    delete world.linear.writes.rateLimitAt;
+    const second = await run(world);
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.equal(world.linear.uploads.length, 3, 'nothing is uploaded again');
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/b.md'), B_BODY);
   });
 
   it('L1-18: a second run uploads nothing and writes nothing', async () => {
@@ -167,7 +193,8 @@ describe('uploads of linked files in an initial sync', () => {
 
   it('L5-11: a failed upload writes no document with a broken link; the next run uploads and writes it', async () => {
     const world = fakeWorld();
-    world.linear.writes.reject = (operation, variables) => operation === 'FileUpload' && variables.filename === 'pixel.png';
+    // Linear refuses the pixel, alone or in a batch: the batch before the first write fails, and each document then uploads its own.
+    world.linear.writes.reject = (operation, variables) => operation.startsWith('FileUpload') && Object.values(variables).includes('pixel.png');
     const first = await run(world);
     assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
     assert.deepEqual(first.report.initialSync?.failed.map((failure) => failure.path), ['eng/notes/b.md']);

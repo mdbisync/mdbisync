@@ -5,8 +5,9 @@ run as a GitHub Action.
 
 **Status:** early development. `lint` and `fix` work on Markdown files.
 `check` checks a repository's setup. `initial-sync` from git to Linear
-works, as a dry run and confirmed. `sync` currently captures Linear changes
-into its state ref; the remaining cycle steps are under development.
+works, as a dry run and confirmed. `sync` captures Linear changes into its state ref, then writes tracked-branch
+changes to Linear. Publishing captured changes through a sync pull request
+is under development.
 `initial-sync` from Linear to git still answers "not implemented".
 
 ## Folder mapping

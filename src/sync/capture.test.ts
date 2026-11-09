@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
 import { capture } from './capture.ts';
+import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 
@@ -46,6 +47,7 @@ describe('capture from Linear', () => {
   });
   afterEach(() => fixture.cleanup());
   const run = () => capture(context, { config, state: context.fetched.state, identity: IDENTITY });
+  const commentsOf = (id: string) => [...world.linear.comments.values()].filter((comment) => comment.documentContentId === `content-${id}`).map((comment) => comment.body);
   const refresh = async () => { context.fetched = await fetchState(context.git, config); };
   const text = async (path: string) => (await fixture.remote.run(['show', `${stateRef(config, 'linear')}:${path}`])).stdout.toString('utf8');
 
@@ -118,7 +120,7 @@ describe('capture from Linear', () => {
   it('returns a partial capture when document listing exhausts the budget', async () => {
     const before = {...context.fetched.state};
     const reason = {kind:'budget-low' as const, operation:'ListDocuments', header:'x-ratelimit-requests-remaining', remaining:10, threshold:100};
-    context.linear.listDocuments = async () => { throw new LinearStoppedError('ListDocuments', reason); };
+    context.linear.listDocumentsInPlaces = async () => { throw new LinearStoppedError('ListDocuments', reason); };
     const partial = await run();
     assert.equal(partial.ok, false);
     assert.equal(partial.code, 'stopped');
@@ -152,7 +154,7 @@ describe('capture from Linear', () => {
     const posted = (await readIds(context.git, resumed.state.ids)).get('docs/plan.md')!.saved!.notice!;
     assert.equal(posted.id, pending.id);
     assert.equal(posted.posted, true);
-    assert.equal(world.linear.documents[0]!.comments?.length, 1);
+    assert.equal(commentsOf('plan')?.length, 1);
   });
 
   it('preserves reserved document ids through capture and subsequent runs', async () => {
@@ -169,6 +171,19 @@ describe('capture from Linear', () => {
     const second = await run();
     assert.deepEqual(await readReservedIds(context.git, second.state.ids), reserved);
     assert.equal(second.state.ids, first.state.ids);
+  });
+
+  it('writes to an encoded captured filename without changing the Linear title', async () => {
+    world.linear.documents[0]!.title = 'question?';
+    const captured = await run();
+    const path = 'docs/question%3F.md';
+    const tracked = await commitTree(context.git, {parents:[captured.state.linear!], base:captured.state.linear, changes:new Map([[path, '---\ncategory: work\n---\n\nEdited in git.\n']]), message:'Edit document', identity:IDENTITY});
+    await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
+    await refresh();
+    const written = await writeTrackedToLinear(context, {config, state:captured.state});
+    assert.deepEqual(written.updated, [path]);
+    assert.equal(world.linear.documents[0]!.content, 'Edited in git.\n');
+    assert.equal(world.linear.documents[0]!.title, 'question?');
   });
 
   it('captures a new path, renames by id and moves across projects', async () => {
@@ -227,7 +242,7 @@ describe('capture from Linear', () => {
     assert.equal(decoration.notice?.posted, true);
     assert.equal(world.linear.documents[0]!.icon, 'Cross');
     assert.equal(world.linear.documents[0]!.color, '#EB5757');
-    const comments = world.linear.documents[0]!.comments ?? [];
+    const comments = commentsOf('plan') ?? [];
     assert.match(comments.join(''), /Hook `secret-check`, line 5/);
     assert.ok(!comments.join('').includes('blocked-value-731'));
     // The canary was assembled only at runtime, so no fixture script contains it verbatim.
@@ -312,10 +327,10 @@ describe('capture from Linear', () => {
     assert.equal(original.notice?.kind, 'conflict');
     assert.equal(original.notice?.posted, true);
     assert.equal(original.icon, 'Fire');
-    assert.equal(doc.comments?.length, 1);
+    assert.equal(commentsOf(doc.id)?.length, 1);
     await refresh();
     const repeated = await run();
-    assert.equal(doc.comments?.length, 1);
+    assert.equal(commentsOf(doc.id)?.length, 1);
     assert.deepEqual((await readIds(context.git, repeated.state.ids)).get('docs/plan.md')!.saved, original);
     await refresh();
     const blocked = await capture(context, {config, state:context.fetched.state, security:{configured:true, check:async()=>[{hook:'secret-check', line:5}]}});
@@ -326,22 +341,22 @@ describe('capture from Linear', () => {
     assert.equal(saved.notice?.kind, 'blocked');
     assert.equal(saved.notice?.posted, true);
     assert.notEqual(saved.notice?.id, original.notice?.id);
-    assert.equal(doc.comments?.length, 2);
+    assert.equal(commentsOf(doc.id)?.length, 2);
     await refresh();
     const revised = await capture(context, {config, state:context.fetched.state, security:{configured:true, check:async()=>[{hook:'secret-check', line:7}]}});
     const revisedNotice = (await readIds(context.git, revised.state.ids)).get('docs/plan.md')!.saved!.notice!;
     assert.equal(revisedNotice.id, saved.notice?.id);
     assert.notEqual(revisedNotice.bodyHash, saved.notice?.bodyHash);
     assert.equal(revisedNotice.posted, true);
-    assert.equal(doc.comments?.length, 2);
-    assert.match(doc.comments!.at(-1)!, /line 7/);
+    assert.equal(commentsOf(doc.id)?.length, 2);
+    assert.match(commentsOf(doc.id)!.at(-1)!, /line 7/);
     await refresh();
     doc.content = 'Resolved.\n';
     const cleared = await run();
     assert.equal(doc.icon, 'Fire');
     assert.equal(doc.color, '#123456');
     assert.equal((await readIds(context.git, cleared.state.ids)).get('docs/plan.md')!.saved, undefined);
-    assert.equal(doc.comments?.length, 2);
+    assert.equal(commentsOf(doc.id)?.length, 2);
   });
 
   it('recovers a posted notice after losing the receipt lease and preserves reserved ids', async () => {
@@ -364,23 +379,23 @@ describe('capture from Linear', () => {
     };
     const gate = {configured:true, check:async()=>[{hook:'secret-check', line:5}]};
     world.linear.documents[0]!.content = 'Rejected.\n';
-    world.linear.documents[0]!.comments = ['Existing note.'];
+    world.linear.comments.set('existing-note', {documentContentId:'content-plan', body:'Existing note.'});
     const interrupted = await capture(context, {config, state:context.fetched.state, security:gate});
     assert.equal(interrupted.ok, false);
     assert.equal(interrupted.code, 'state-moved');
-    assert.equal(world.linear.documents[0]!.comments?.length, 2);
+    assert.equal(commentsOf('plan')?.length, 2);
     await refresh();
     const pending = (await readIds(context.git, context.fetched.state.ids)).get('docs/plan.md')!.saved!.notice!;
     assert.equal(pending.posted, false);
     context.linear.ensureDocumentComment = ensure;
     const resumed = await capture(context, {config, state:context.fetched.state, security:gate});
     assert.equal(resumed.ok, true);
-    assert.equal(world.linear.documents[0]!.comments?.length, 2);
+    assert.equal(commentsOf('plan')?.length, 2);
     const posted = (await readIds(context.git, resumed.state.ids)).get('docs/plan.md')!.saved!.notice!;
     assert.equal(posted.id, pending.id);
     assert.equal(posted.posted, true);
     assert.deepEqual(await readReservedIds(context.git, resumed.state.ids), reserved);
-    assert.equal(world.linear.documents[0]!.comments![0], 'Existing note.');
+    assert.equal(commentsOf('plan')![0], 'Existing note.');
   });
 
   it('retries a security comment after its post-push delivery fails', async () => {
@@ -392,7 +407,7 @@ describe('capture from Linear', () => {
     await refresh();
     delete world.linear.writes.reject;
     await capture(context, {config, state: context.fetched.state, security: gate});
-    assert.match(world.linear.documents[0]!.comments?.join('') ?? '', /Hook `secret-check`, line 5/);
+    assert.match(commentsOf('plan')?.join('') ?? '', /Hook `secret-check`, line 5/);
   });
 
   it('keeps team-zone documents outside nested project folders', async () => {

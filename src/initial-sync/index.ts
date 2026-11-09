@@ -19,6 +19,7 @@ export {
   type ConfirmOptions,
   type ConfirmedResult,
   type FailedWrite,
+  type LeftOutAtWrite,
   type RecordResult,
   type WriteStop,
   FINAL_IDS_MESSAGE,

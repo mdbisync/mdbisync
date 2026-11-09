@@ -21,11 +21,14 @@ export interface TransformInput {
 /** Why a document cannot be written as it is; it is then left out and listed with the rule. */
 export class LeaveOutError extends Error {
   readonly rule: string;
+  /** The files that caused it, by repository path (a file over the upload limit). */
+  readonly files: readonly string[];
 
-  constructor(rule: string, message: string) {
+  constructor(rule: string, message: string, files: readonly string[] = []) {
     super(message);
     this.name = 'LeaveOutError';
     this.rule = rule;
+    this.files = files;
   }
 }
 

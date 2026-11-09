@@ -31,9 +31,6 @@ export interface FakeDocument {
   updatedAt?: string;
   icon?: string | null;
   color?: string | null;
-  comments?: string[];
-  /** Ids parallel to comments, including client-chosen notice ids. */
-  commentIds?: string[];
   trashed?: boolean;
   archivedAt?: string;
   /** The stored content. */
@@ -50,7 +47,7 @@ export interface FakeUpload {
 }
 
 /** Where the fake's asset URLs point. */
-export const UPLOADS_HOST = 'https://uploads.linear.test';
+export const UPLOADS_HOST = 'https://uploads.linear.app';
 
 /** How the fake answers document writes. */
 export interface FakeWrites {
@@ -75,10 +72,13 @@ export interface FakeWorld {
     teams: FakeTeam[];
     projects: FakeProject[];
     documents: FakeDocument[];
+    /** Optional deterministic query-boundary edits by a test user. */
+    beforeQuery?: (operation: string, variables: Record<string, unknown>) => void;
     writes: FakeWrites;
     store: (content: string) => string;
     uploads: FakeUpload[];
-    /** The workspace's URL key, in its document URLs. */
+    /** Comments on documents, by comment id. */
+    comments: Map<string, { documentContentId: string; body: string }>;
     urlKey: string;
   };
   /** `METHOD url` of every request. */
@@ -109,6 +109,7 @@ export function fakeWorld(): FakeWorld {
       writes: { count: 0 },
       store: (content) => content,
       uploads: [],
+      comments: new Map(),
       urlKey: 'example-team',
     },
     requests: [],
@@ -123,6 +124,10 @@ export function fakeFetch(world: FakeWorld): typeof fetch {
     const url = String(input);
     const method = init?.method ?? 'GET';
     world.requests.push(`${method} ${url}`);
+    if (method === 'GET' && url.startsWith(`${UPLOADS_HOST}/`)) {
+      const upload = world.linear.uploads.find((entry) => entry.assetUrl === url);
+      return upload?.bytes === undefined ? new Response(null, {status:404}) : new Response(upload.bytes, {headers:{'content-type':upload.contentType}});
+    }
     if (url.startsWith(GITHUB_API)) return github(world, method, url.slice(GITHUB_API.length), init);
     if (url.startsWith(LINEAR_API)) return linear(world, url.slice(LINEAR_API.length), init);
     throw new Error(`unexpected request to ${url}`);
@@ -194,6 +199,7 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     }
     return json(200, { data: documentMutation(world, operationName, variables) ?? {} });
   }
+  world.linear.beforeQuery?.(operationName, variables);
   if (operationName === 'SetupTeams') {
     const refs = variables.refs as string[];
     return json(200, { data: { teams: { nodes: world.linear.teams.filter((team) => refs.includes(team.key) || refs.includes(team.name)) } } });
@@ -205,13 +211,13 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
     return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
-  if (operationName === 'FindDocumentComment') {
-    const id = variables.id as string;
-    const document = world.linear.documents.find((doc) => doc.commentIds?.includes(id));
-    return json(200, {data:{comments:{nodes:document === undefined ? [] : [{id, documentContentId:`content-${document.id}`}]}}});
-  }
   if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
+  if (operationName === 'FindDocumentComment') {
+    const id = variables.id as string;
+    const comment = world.linear.comments.get(id);
+    return json(200, { data: { comments: { nodes: comment === undefined ? [] : [{ id, documentContentId: comment.documentContentId }] } } });
+  }
   if (operationName === 'GetDocuments') {
     // Read by id: trashed documents are included, unknown ids are absent.
     const ids = variables.ids as string[];
@@ -262,34 +268,16 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     touch(document);
     return { documentUpdate: { success: true, document: documentNode(document, variables.withContent === true) } };
   }
-  if (operation === 'CommentOnDocument') {
-    const input = variables.input as { documentContentId: string; body: string; id?: string };
-    const document = documents.find((d) => `content-${d.id}` === input.documentContentId);
-    const id = input.id ?? `comment-${document?.id ?? 'unknown'}-${document?.comments?.length ?? 0}`;
-    if (document !== undefined) {
-      document.commentIds ??= (document.comments ?? []).map((_, index) => `comment-${document.id}-${index}`);
-      (document.comments ??= []).push(input.body);
-      document.commentIds.push(id);
-    }
-    return { commentCreate: { success: document !== undefined, comment: { id } } };
-  }
-  if (operation === 'UpdateDocumentComment') {
-    const id = variables.id as string;
-    const document = documents.find((doc) => doc.commentIds?.includes(id));
-    if (document !== undefined) document.comments![document.commentIds!.indexOf(id)] = (variables.input as {body:string}).body;
-    return {commentUpdate:{success:document !== undefined, comment:{id}}};
-  }
   if (operation === 'FileUpload') {
-    const index = world.linear.uploads.length;
-    const filename = String(variables.filename);
-    const upload: FakeUpload = {
-      filename,
-      contentType: String(variables.contentType),
-      size: Number(variables.size),
-      assetUrl: `${UPLOADS_HOST}/${index}/${encodeURIComponent(filename)}`,
-    };
-    world.linear.uploads.push(upload);
-    return { fileUpload: { success: true, uploadFile: { uploadUrl: `${LINEAR_API}/storage/${index}`, assetUrl: upload.assetUrl, headers: [] } } };
+    return { fileUpload: fileUpload(world, String(variables.filename), String(variables.contentType), Number(variables.size)) };
+  }
+  if (operation === 'FileUploads') {
+    // One aliased `fileUpload` per file: f0, f1, … with variables filename0, filename1, …
+    const payload: Record<string, unknown> = {};
+    for (let index = 0; variables[`filename${index}`] !== undefined; index += 1) {
+      payload[`f${index}`] = fileUpload(world, String(variables[`filename${index}`]), String(variables[`contentType${index}`]), Number(variables[`size${index}`]));
+    }
+    return payload;
   }
   if (operation === 'TrashDocument') {
     const document = documents.find((d) => d.id === variables.id);
@@ -298,6 +286,17 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
       touch(document);
     }
     return { documentDelete: { success: document !== undefined } };
+  }
+  if (operation === 'CommentOnDocument') {
+    const input = variables.input as { id?: string; documentContentId: string; body: string };
+    const id = input.id ?? `comment-${world.linear.comments.size + 1}`;
+    world.linear.comments.set(id, { documentContentId: input.documentContentId, body: input.body });
+    return { commentCreate: { success: true, comment: { id } } };
+  }
+  if (operation === 'UpdateDocumentComment') {
+    const comment = world.linear.comments.get(variables.id as string);
+    if (comment !== undefined) comment.body = (variables.input as { body: string }).body;
+    return { commentUpdate: { success: comment !== undefined, comment: comment === undefined ? null : { id: variables.id } } };
   }
   if (operation === 'RestoreDocument') {
     const document = documents.find((d) => d.id === variables.id);
@@ -316,6 +315,14 @@ let clock = 0;
 export function touch(document: FakeDocument): void {
   clock += 1;
   document.updatedAt = new Date(Date.UTC(2026, 1, 1) + clock * 1000).toISOString();
+}
+
+/** Issues an upload target; the storage PUT to it fills in the bytes. */
+function fileUpload(world: FakeWorld, filename: string, contentType: string, size: number) {
+  const index = world.linear.uploads.length;
+  const upload: FakeUpload = { filename, contentType, size, assetUrl: `${UPLOADS_HOST}/${index}/${encodeURIComponent(filename)}` };
+  world.linear.uploads.push(upload);
+  return { success: true, uploadFile: { uploadUrl: `${LINEAR_API}/storage/${index}`, assetUrl: upload.assetUrl, headers: [] } };
 }
 
 function documentNode(d: FakeDocument, withContent: boolean) {
@@ -338,11 +345,11 @@ function documentNode(d: FakeDocument, withContent: boolean) {
 
 /** One project's or team zone's documents, oldest first, in pages of `first` after the cursor (an index). */
 function listDocuments(world: FakeWorld, variables: Record<string, unknown>) {
-  const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } } };
-  const projectId = filter.project?.id.eq;
-  const teamId = filter.team?.id.eq;
+  type Filter = {project?:{id:{eq:string}}; team?:{id:{eq:string}}; or?:Filter[]};
+  const filter = variables.filter as Filter;
+  const matches = (doc: FakeDocument, rule: Filter): boolean => rule.or !== undefined ? rule.or.some((nested) => matches(doc, nested)) : rule.project !== undefined ? doc.projectId === rule.project.id.eq : rule.team !== undefined && doc.teamId === rule.team.id.eq && doc.projectId === undefined;
   const matching = world.linear.documents
-    .filter((d) => (projectId !== undefined ? d.projectId === projectId : d.teamId === teamId && d.projectId === undefined))
+    .filter((d) => matches(d, filter))
     .filter((d) => variables.includeArchived === true || (d.trashed !== true && d.archivedAt === undefined))
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
   const start = variables.after === null ? 0 : Number(variables.after);

@@ -3,8 +3,10 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { loadMapping } from '../mapping/index.ts';
+import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
-import { splitFile } from '../format/index.ts';
+import { lintText, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearStoppedError, describeStop } from '../linear/index.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
@@ -51,7 +53,9 @@ async function readCursor(context: RunContext, state: StateSnapshot): Promise<st
 }
 
 export async function capture(context: RunContext, options: CaptureOptions): Promise<CaptureResult> {
-  const { git, linear, fetched, mapping, targets } = context;
+  const {git, linear, fetched} = context;
+  let mapping = context.mapping;
+  let targets = context.targets;
   const state = { ...options.state };
   const base = state.linear;
   if (base === null) throw new Error('run initial sync first');
@@ -63,6 +67,23 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], leftOut:[], summary:''};
   let published = false;
   try {
+    // Capture the old place before a git annotation change moves its documents.
+    const recorded = await loadMapping(git, base);
+    const zones = new Map(mapping.zones);
+    let changedPlace = false;
+    for (const [folder, old] of recorded.zones) {
+      const current = zones.get(folder);
+      if (current !== undefined && (old.team !== current.team || old.project !== current.project)) {
+        zones.set(folder, old);
+        changedPlace = true;
+      }
+    }
+    if (changedPlace) {
+      mapping = {...mapping, zones};
+      const resolved = await resolveTargets(linear, zones.values());
+      if (resolved.targets === undefined) throw new Error('the previously recorded document places could not be resolved');
+      targets = resolved.targets;
+    }
     const cursor = await readCursor(context, state);
     const entries = await listTree(git, base);
     const textEntries = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
@@ -71,11 +92,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const byId = new Map([...ids].map(([path, entry]) => [entry.id, { path, entry }]));
     const listed = new Map<string, LinearDocument>();
     const folders = new Map<string, string>();
-    for (const { place, folder } of annotatedPlaces(mapping.zones)) {
+    const places = annotatedPlaces(mapping.zones).map(({place, folder}) => {
       const resolved = placeId(targets, place);
       folders.set('projectId' in resolved ? `project:${resolved.projectId}` : `team:${resolved.teamId}`, folder);
-      for (const document of await linear.listDocuments(resolved, { includeArchived: true })) listed.set(document.id, document);
-    }
+      return resolved;
+    });
+    for (const document of await linear.listDocumentsInPlaces(places, {includeArchived:true})) listed.set(document.id, document);
     // Looking up known ids also finds trash, project moves and moves out of scope.
     const missing = [...byId.keys()].filter((id) => !listed.has(id));
     for (const document of await linear.getDocuments(missing)) listed.set(document.id, document);
@@ -209,6 +231,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       ids.set(candidate.path, old?.entry ?? {id});
       for (const [path, content] of candidate.files) {
+        // A git-only lint finding can be recorded without writing its body to
+        // Linear. An unchanged remote body must not undo that excluded file.
+        const prior = previous.get(path);
+        if (path === candidate.path && old?.path === path && prior !== undefined && lintText(path, prior.toString('utf8')).length > 0) {
+          const changedAt = await git.text(['log', '--first-parent', '-1', '--format=%H', base, '--', path]);
+          if (changedAt !== '') {
+            const before = await git.run(['cat-file', 'blob', `${changedAt}^:${path}`], {okCodes:[0,128]});
+            if (before.code === 0 && splitFile(before.stdout.toString('utf8')).body === splitFile(String(content)).body) continue;
+          }
+        }
         if (previous.get(path)?.equals(Buffer.from(content)) !== true) {
           changes.set(path, content);
           result.changed.push(path);
