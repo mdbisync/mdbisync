@@ -6,7 +6,8 @@
 // path for the JSON report of requests per operation).
 //
 // Everything written is neutral work text in two short-lived projects, which
-// are removed at the end. About 30 API requests per run.
+// are removed at the end; their documents end archived, never in the
+// trash. About 30 API requests per run.
 
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -25,6 +26,7 @@ import {
   type LogEntry,
   type RunToken,
 } from '../../src/linear/index.ts';
+import { cleanUpOwned, diagnoseTrashRead, type CleanupError, type CleanupResult, type TrashReadDiagnosis } from './contract-support.ts';
 
 const clientId = process.env.LINEAR_TEST_APP_CLIENT_ID;
 const clientSecret = process.env.LINEAR_TEST_APP_CLIENT_SECRET;
@@ -49,6 +51,9 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   const projectIds: string[] = [];
   let first: LinearDocument;
   let second: LinearDocument;
+  // Documents whose trash succeeded and that were not restored since.
+  const trashed = new Set<string>();
+  let trashRead: TrashReadDiagnosis | undefined;
 
   /** Runs one step and records how many API requests it took. */
   async function measured<T>(name: string, step: () => Promise<T>): Promise<T> {
@@ -97,15 +102,12 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   });
 
   after(async () => {
-    const cleanupErrors: Array<{ operation: string; projectId?: string; error: unknown }> = [];
+    const cleanupErrors: CleanupError[] = [];
+    let cleanup: CleanupResult | undefined;
     if (linear) {
-      for (const id of projectIds) {
-        try {
-          await linear.request('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id });
-        } catch (error) {
-          cleanupErrors.push({ operation: 'DeleteProject', projectId: id, error });
-        }
-      }
+      const documentIds = [first, second].filter((document) => document !== undefined).map((document) => document.id);
+      cleanup = await cleanUpOwned(linear, { projectIds, documentIds, trashed });
+      cleanupErrors.push(...cleanup.errors);
     }
     if (token) {
       try {
@@ -116,9 +118,10 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     }
     // Token errors contain only operation/status. GraphQL details are already
     // in requests; avoid copying arbitrary server messages into the report.
-    const describeCleanup = ({ operation, projectId, error }: typeof cleanupErrors[number]) => ({
+    const describeCleanup = ({ operation, projectId, documentId, error }: CleanupError) => ({
       operation,
       ...(projectId ? { projectId } : {}),
+      ...(documentId ? { documentId } : {}),
       error: error instanceof LinearTokenError ? error.message : error instanceof Error ? error.name : 'Unknown error',
     });
     const report = {
@@ -128,6 +131,9 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
       requests,
       cleanupFailed: cleanupErrors.length > 0,
       cleanupErrors: cleanupErrors.map(describeCleanup),
+      restoredInCleanup: cleanup?.restored ?? [],
+      finalDocuments: cleanup?.final ?? [],
+      ...(trashRead ? { trashRead } : {}),
     };
     console.log(JSON.stringify(report, null, 2));
     if (process.env.LINEAR_CONTRACT_REPORT) {
@@ -236,10 +242,13 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
 
   it('trashes and restores a document', async () => {
     await measured('trashDocument', () => linear.trashDocument(second.id));
-    const [trashed] = await linear.getDocuments([second.id]);
-    assert.ok(trashed, 'a trashed document is still read by id');
-    assert.equal(trashed.trashed, true);
+    trashed.add(second.id);
+    const [read] = await linear.getDocuments([second.id]);
+    assert.ok(read, 'a trashed document is still read by id');
+    if (read.trashed !== true) trashRead = await diagnoseTrashRead(linear, requests, read);
+    assert.equal(read.trashed, true);
     await measured('restoreDocument', () => linear.restoreDocument(second.id));
+    trashed.delete(second.id);
     const [restored] = await linear.getDocuments([second.id]);
     assert.equal(restored?.trashed, false);
   });
