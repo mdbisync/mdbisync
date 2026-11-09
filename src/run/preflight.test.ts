@@ -195,10 +195,11 @@ describe('preflight', () => {
           return original(input, init);
         };
       `);
+      await writeFile(join(fixture.root, 'action-state'), '');
       const fakeEnv: Record<string, string> = env();
       const actionEnv = Object.fromEntries(INPUT_NAMES.map(name => [`INPUT_${name.toUpperCase()}`, fakeEnv[environmentName(name)] ?? '']));
       const child = spawnSync(process.execPath, ['--import', injection, fileURLToPath(new URL(entry, import.meta.url)), 'check'], {
-        cwd, env: action ? { ...fakeEnv, ...actionEnv, INPUT_OPERATION: 'initial-sync', INPUT_DIRECTION: 'git-to-linear', GITHUB_WORKSPACE: cwd, GITHUB_OUTPUT: '', GITHUB_STATE: '', GITHUB_STEP_SUMMARY: '' } : fakeEnv,
+        cwd, env: action ? { ...fakeEnv, ...actionEnv, INPUT_OPERATION: 'initial-sync', INPUT_DIRECTION: 'git-to-linear', GITHUB_WORKSPACE: cwd, GITHUB_OUTPUT: '', GITHUB_STATE: join(fixture.root, 'action-state'), GITHUB_STEP_SUMMARY: '' } : fakeEnv,
         encoding: 'utf8', timeout: 15_000,
       });
       assert.equal(child.status, 1, child.stderr);
@@ -211,7 +212,9 @@ describe('preflight', () => {
       assert.ok(warning >= 0 && primary > warning, child.stderr);
       assert.match(lines[warning]!, /token could not be revoked/);
       assert.match(lines[primary]!, /Entity not found: User/);
-      for (const secret of ['client-id', 'client-secret', 'fake-token', 'gh-token', CANARY]) assert.ok(!`${child.stdout}${child.stderr}`.includes(secret), secret);
+      // The runner consumes mask commands; it never logs them.
+      const logged = `${child.stdout.replace(/^::add-mask::.*$/gm, '')}${child.stderr}`;
+      for (const secret of ['client-id', 'client-secret', 'fake-token', 'gh-token', CANARY]) assert.ok(!logged.includes(secret), secret);
     });
   }
 

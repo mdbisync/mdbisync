@@ -47,6 +47,26 @@ The command line reads the action's inputs (see `action.yml`) from
 environment variables: `MDBISYNC_LINEAR_CLIENT_ID` for `linear-client-id`,
 and so on.
 
+## Workflows
+
+Copy the workflow templates from
+[examples/](https://github.com/mikhail-yaskou/mdbisync/blob/main/examples)
+into `.github/workflows/`:
+
+- `mdbisync-initial-sync.yml` runs the initial sync by hand from the Actions
+  tab, with a `direction` and a `confirm` box (unchecked: a dry run). It
+  installs `pre-commit`, which the repository's security hooks need when
+  documents come from Linear.
+
+It shares the concurrency group `mdbisync` with the sync, so runs of one
+repository never overlap. It mints the GitHub App's installation token with
+`actions/create-github-app-token`, checks out without stored credentials,
+and gives the App token and the Linear secrets to the mdbisync step only.
+The action revokes the run's Linear token when it ends, and its post step
+revokes it again after a failed or cancelled run. A repository needs the
+variable `MDBISYNC_APP_CLIENT_ID` and the secrets `MDBISYNC_APP_PRIVATE_KEY`,
+`MDBISYNC_LINEAR_CLIENT_ID` and `MDBISYNC_LINEAR_CLIENT_SECRET`.
+
 ## Initial sync from git to Linear
 
 `initial-sync` with `direction: git-to-linear` makes Linear equal to the

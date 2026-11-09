@@ -21,7 +21,7 @@
 // adopted by its title.
 
 import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { documentPath } from './paths.ts';
 import { splitFile } from '../format/index.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
@@ -49,7 +49,7 @@ import {
   stateRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
-import { type CreateChange, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
+import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
@@ -58,6 +58,9 @@ export const IDS_MESSAGE = 'Sync: document ids';
 
 /** Documents read again in one request, just before they are written. */
 export const REREAD_BATCH = 50;
+
+/** Versions of the id map searched for the id of a document Linear removed. */
+export const ID_HISTORY_DEPTH = 100;
 
 export interface WriteOptions {
   documentCap?: number | undefined;
@@ -84,6 +87,8 @@ export interface WriteOptions {
   checkpoint?: (name: Checkpoint) => Promise<void>;
   /** The client-chosen id of a new document. */
   newId?: () => string;
+  /** The documents as this run's capture read them, by id: a removed document changed since then is not restored. */
+  captured?: ReadonlyMap<string, LinearDocument>;
 }
 
 /** Why a document was not written. */
@@ -107,6 +112,12 @@ export interface WriteResult {
   trashed: string[];
   /** Created by an earlier run that stopped before recording the id; found by title and written. */
   adopted: string[];
+  /** Documents Linear removed while git changed their files: restored with the same id and the git text. */
+  restored: string[];
+  /** Documents whose merged text holds conflict marker paragraphs. */
+  conflicts: string[];
+  /** Cases the structural conflict rules decided. */
+  decided: Decided[];
   skipped: Array<{ path: string; reason: SkipReason }>;
   /** Synchronized files the sync leaves out (lint, title, collisions); their documents stay as they were. */
   leftOut: Array<{ path: string; rules: string[] }>;
@@ -154,6 +165,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     created: [],
     trashed: [],
     adopted: [],
+    restored: [],
+    conflicts: [],
+    decided: [],
     skipped: [],
     leftOut: [],
     leftOutAtWrite: [],
@@ -195,7 +209,26 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // Step 3.
   const ids = await readIds(git, expected.ids);
   const reserved = await readReservedIds(git, expected.ids);
-  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts);
+  let idHistory: Oid[] | undefined;
+  const idVersions = new Map<Oid, IdMap>();
+  /** The id a path's document last had: now, or in an earlier version of the id map (a document Linear removed). */
+  const knownId = async (path: string): Promise<string | undefined> => {
+    const current = ids.get(path);
+    if (current !== undefined) return current.id;
+    idHistory ??= expected.ids === null ? [] : (await git.text(['rev-list', '--first-parent', '-n', String(ID_HISTORY_DEPTH), expected.ids])).split('\n').filter(Boolean);
+    // Newest first, one version at a time: the first match is the answer.
+    for (const commit of idHistory) {
+      let map = idVersions.get(commit);
+      if (map === undefined) {
+        map = await readIds(git, commit);
+        idVersions.set(commit, map);
+      }
+      const entry = map.get(path);
+      if (entry !== undefined) return entry.id;
+    }
+    return undefined;
+  };
+  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId });
   // Anything from here may write (linked-file changes are found later too): capacity, adoption and
   // reserved ids are decided on the containers as Linear lists them now, not as capture saw them.
   const containerListing = await readContainers();
@@ -203,6 +236,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // A separate const: the hoisted `adoptableDocuments` below does not see the narrowing above.
   const containers: Map<string, LinearDocument[]> = containerListing;
   result.leftOut = merge.leftOut;
+  await findGoneRestores();
   for (const path of merge.conflicts) if (merge.result.has(path) || merge.linear.has(path) || ids.has(path)) result.skipped.push({ path, reason: 'conflict' });
   for (const entry of merge.held) result.skipped.push({ path: entry.from, reason: 'renamed-to-unwritable' });
   await checkpoint('after-local-merge-before-record');
@@ -219,8 +253,15 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   });
 
   const creates = merge.changes.filter((change): change is CreateChange => change.kind === 'create');
-  const adoptable = await adoptableDocuments(creates);
-  const additions = creates.filter((change) => !adoptable.has(change.path)).map((change) => merge.result.get(change.path) as SideFile);
+  // A document to restore keeps its own id; it is never adopted by title.
+  const adoptable = await adoptableDocuments(creates.filter((change) => change.restore === undefined));
+  // A document restored where it already is (in that container's trash) adds nothing: the container counts it already.
+  const restoresInPlace = (change: CreateChange) => {
+    if (change.restore === undefined || change.restore.recreate !== undefined) return false;
+    const destination = merge.result.get(change.path) as SideFile;
+    return containers.get(containerKey(context, destination.place))?.some((document) => document.id === change.restore?.id) === true;
+  };
+  const additions = creates.filter((change) => !adoptable.has(change.path) && !restoresInPlace(change)).map((change) => merge.result.get(change.path) as SideFile);
   // Moves consume destination capacity too; do not subtract departures, since writes may arrive first.
   for (const change of merge.changes) {
     if (change.kind !== 'keep' || !change.place) continue;
@@ -263,10 +304,12 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   for (const change of merge.changes) if (change.kind === 'keep') documentIds.set(change.to, change.id);
   // A new document gets its id before any write, so documents written in this run can link to it. A new document an
   // earlier run did not create (left out, failed, refused or stopped) keeps the id reserved for it then, since documents
-  // written then may link to it; an id Linear already gives another document is not reused.
+  // written then may link to it; an id Linear already gives another document is not reused. A document to restore
+  // keeps its own id, or gets the one derived from it when Linear no longer has it.
   for (const change of creates) {
     const saved = reserved.get(change.path);
-    documentIds.set(change.path, adoptable.get(change.path)?.id ?? (saved !== undefined && !taken.has(saved) ? saved : newId()));
+    const restoreId = change.restore?.recreate ?? change.restore?.id;
+    documentIds.set(change.path, restoreId ?? adoptable.get(change.path)?.id ?? (saved !== undefined && !taken.has(saved) ? saved : newId()));
   }
 
   /** What Linear stores now for each path whose document this run wrote, with the body sent for it. */
@@ -366,6 +409,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     } else if (!(error instanceof StopWriting)) throw error;
   }
   if (written > 0) result.changed = true;
+  // Report only the conflicts and decided cases this run carried out.
+  const undone = new Set([
+    ...notDone.flatMap(pathsOf), ...result.notAttempted, ...result.skipped.map((entry) => entry.path),
+    ...result.failed.map((entry) => entry.path), ...result.leftOutAtWrite.map((entry) => entry.path),
+  ]);
+  result.conflicts = merge.marked.filter((path) => !undone.has(path));
+  result.decided = merge.decided.filter((entry) => !undone.has(entry.path));
 
   await checkpoint('after-write-before-record');
   const allDone = notDone.length === 0 && merge.conflicts.length === 0 && merge.held.length === 0;
@@ -460,6 +510,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   async function reread(batch: readonly DocumentChange[]): Promise<Map<string, LinearDocument>> {
     const wanted = batch.flatMap((change) => (change.kind === 'create' ? [] : [change.id]));
     for (const change of batch) if (change.kind === 'create' && adoptable.has(change.path)) wanted.push((adoptable.get(change.path) as LinearDocument).id);
+    for (const change of batch) if (change.kind === 'create' && change.restore !== undefined) wanted.push(change.restore.recreate ?? change.restore.id);
     const documents = wanted.length === 0 ? [] : await linear.getDocuments(wanted, { withContent: true });
     return new Map(documents.map((document) => [document.id, document]));
   }
@@ -575,6 +626,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         readBack = updated;
       }
     }
+    // The structural rules set Linear's title back: say so where people see it. The comment id follows from the
+    // document and the merge, so a run that repeats this merge after stopping finds its comment instead of adding one.
+    if (change.comment !== undefined && document.documentContentId !== null) {
+      await linear.ensureDocumentComment(document.documentContentId, change.comment, stableId('retitled', change.id, merge.base));
+    }
     const entry = nextIds.get(change.from);
     nextIds.delete(change.from);
     nextIds.set(change.to, entry !== undefined && entry.id === change.id ? entry : { id: change.id });
@@ -588,13 +644,16 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const file = merge.result.get(change.path) as SideFile;
     const body = await transformBody(transforms, change.path, splitFile(textOf(file)).body);
     const id = documentIds.get(change.path) as string;
+    if (change.restore !== undefined && change.restore.recreate === undefined) return restore(change, file, body, current);
     if (written === 0) await checkpoint('before-write');
-    const adopted = adoptable.get(change.path);
+    // Created again under its derived id by a run that stopped before recording it.
+    const recreated = change.restore?.recreate === undefined ? undefined : current.get(change.restore.recreate);
+    const adopted = adoptable.get(change.path) ?? recreated;
     let document: LinearDocument;
     if (adopted !== undefined) {
       const live = current.get(adopted.id);
       document = live !== undefined && live.content === body ? live : await linear.updateDocument(adopted.id, { content: body });
-      result.adopted.push(change.path);
+      if (recreated === undefined) result.adopted.push(change.path);
     } else {
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });
       await checkpoint('document-created-before-ids-push');
@@ -604,6 +663,59 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     result.created.push(change.path);
     await reconcileMark(change.path, document);
     return true;
+  }
+
+  /**
+   * The document Linear removed while git changed its file is restored with
+   * the same id, so its comments stay; the run summary, not a comment, says
+   * why. A document a person changed since the capture read it (restored,
+   * moved or edited) is left: the next capture takes that in.
+   */
+  async function restore(change: CreateChange, file: SideFile, body: string, current: ReadonlyMap<string, LinearDocument>): Promise<boolean> {
+    const removed = current.get((change.restore as NonNullable<CreateChange['restore']>).id);
+    if (removed === undefined) return skip(change.path, 'missing-in-linear');
+    const seen = options.captured?.get(removed.id);
+    const changed = seen === undefined
+      // Without the capture's read, only a document still in trash is known to be as the capture left it.
+      ? !removed.trashed && removed.archivedAt === null
+      : seen.updatedAt !== removed.updatedAt || seen.trashed !== removed.trashed || seen.projectId !== removed.projectId || seen.teamId !== removed.teamId;
+    if (changed) return skip(change.path, 'edited-in-linear');
+    if (written === 0) await checkpoint('before-write');
+    if (removed.trashed || removed.archivedAt !== null) await linear.restoreDocument(removed.id);
+    const document = await linear.updateDocument(removed.id, { content: body, title: file.title.normalize('NFC'), ...placePatch(file.place) });
+    result.restored.push(change.path);
+    stored.set(change.path, { content: document.content ?? '', sent: body });
+    nextIds.set(change.path, { id: document.id });
+    await reconcileMark(change.path, document);
+    return true;
+  }
+
+  /**
+   * Documents to restore that Linear no longer has at all are created again,
+   * and the summary says their comments are lost. Decided before the
+   * transforms run, so links to them carry the new id, which is derived from
+   * the old one: a run that stops after creating it finds it again. When
+   * Linear cannot be asked here, the write reads the documents again and
+   * skips those it does not find.
+   */
+  async function findGoneRestores(): Promise<void> {
+    const restoring = merge.changes.filter((change): change is CreateChange => change.kind === 'create' && change.restore !== undefined);
+    if (restoring.length === 0) return;
+    let found: LinearDocument[];
+    try {
+      found = await linear.getDocuments(restoring.map((change) => (change.restore as NonNullable<CreateChange['restore']>).id));
+    } catch (error) {
+      if (!(error instanceof LinearError)) throw error;
+      return;
+    }
+    const present = new Set(found.map((document) => document.id));
+    for (const change of restoring) {
+      const restore = change.restore as NonNullable<CreateChange['restore']>;
+      if (present.has(restore.id)) continue;
+      change.restore = { ...restore, recreate: stableId('recreated', restore.id) };
+      const entry = merge.decided.find((decided) => decided.path === change.path);
+      if (entry !== undefined) entry.summary = restore.gone;
+    }
   }
 
   /**
@@ -761,6 +873,12 @@ function pathsOf(change: DocumentChange): string[] {
   return [change.path];
 }
 
+/** A UUID that follows from its parts: a Linear id a repeated run must find again instead of making anew. */
+function stableId(...parts: string[]): string {
+  const hex = createHash('sha256').update(parts.join('\0')).digest('hex');
+  const variant = ((parseInt(hex[16] as string, 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
 
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
