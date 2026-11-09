@@ -80,6 +80,7 @@ describe('workflow templates rendered for a run', () => {
     assert.ok(files.has(WORKFLOW_FILES.sync));
     assert.ok(files.has(WORKFLOW_FILES['initial-sync']));
     assert.ok(files.has(WORKFLOW_FILES['pre-commit']));
+    assert.deepEqual([...runWorkflows(RUN, [WORKFLOW_FILES['initial-sync'], WORKFLOW_FILES['pre-commit']]).keys()], [WORKFLOW_FILES['initial-sync'], WORKFLOW_FILES['pre-commit']]);
     assert.equal(workflowFor('initial-sync'), 'mdbisync-initial-sync.yml');
     assert.equal(workflowFor('sync'), 'mdbisync.yml');
   });

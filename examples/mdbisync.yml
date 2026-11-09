@@ -1,6 +1,10 @@
 # Copy to .github/workflows/mdbisync.yml in a synchronized repository, next
-# to the initial sync workflow (mdbisync-initial-sync.yml). Run the initial
-# sync once first: until then this workflow writes nothing and says so.
+# to the initial sync workflow (mdbisync-initial-sync.yml).
+#
+# Keep this workflow disabled until the initial sync has finished: until
+# then each run writes nothing and fails with `initial-sync-required`, and
+# a sync queued in the shared group can replace a pending initial sync.
+# Disable it again before any later initial sync (recovery).
 #
 # Each run takes Linear's changes to main through the sync pull request,
 # which the sync merges once its checks pass, and writes main's changes to
@@ -14,7 +18,8 @@ name: mdbisync
 on:
   push:
     branches: [main]
-  # GitHub runs schedules only on the default branch, and may start them late.
+  # GitHub runs schedules only on the default branch, may start them late,
+  # and turns them off in a public repository after 60 days without activity.
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:

@@ -95,6 +95,15 @@ describe('workflow templates', () => {
           if (step.uses !== CHECKOUT) assert.ok(!/steps\.app-token/.test(text), `${file}: ${label} sees the App token`);
         }
       });
+
+      it('installs a pinned pre-commit before mdbisync, for the security hooks on content from Linear', () => {
+        const all = steps(file);
+        const action = all.findIndex((step) => step.uses?.startsWith(ACTION));
+        // A runner that brings its own pre-commit keeps it; otherwise the pinned version is installed.
+        const install = all.findIndex((step) => /^command -v pre-commit \|\| pipx install pre-commit==\d+\.\d+\.\d+$/.test(step.run?.trim() ?? ''));
+        assert.ok(install >= 0 && install < action, `${file}: pre-commit is not installed before the sync`);
+        assert.equal(all[install]?.env, undefined, `${file}: the install step gets an environment`);
+      });
     });
   }
 
@@ -109,14 +118,10 @@ describe('workflow templates', () => {
       assert.equal(on['workflow_dispatch'], null);
     });
 
-    it('runs the sync entry point after installing pre-commit for the security hooks', () => {
-      const all = steps(file);
+    it('runs the sync entry point', () => {
       const action = actionStep(file);
       assert.equal(action.with?.['operation'], 'sync');
       assert.equal(action.with?.['direction'], undefined);
-      const install = all.findIndex((step) => /pipx install pre-commit==\d+\.\d+\.\d+/.test(step.run ?? ''));
-      assert.ok(install >= 0 && install < all.findIndex((step) => step.uses === action.uses), 'pre-commit is installed before the sync');
-      assert.equal(all[install]?.env, undefined, 'the install step gets no environment');
     });
   });
 

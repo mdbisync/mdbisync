@@ -58,6 +58,10 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
           persist-credentials: false
+      # From Linear, the repository's hooks marked `alias: security` check
+      # Linear's documents before anything is pushed; they run with pre-commit.
+      - name: Install pre-commit
+        run: command -v pre-commit || pipx install pre-commit==4.6.2
       # The action revokes its Linear token when it ends, and again in its
       # post step after a failed or cancelled run.
       - uses: mikhail-yaskou/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2

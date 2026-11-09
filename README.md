@@ -56,14 +56,21 @@ into `.github/workflows/`:
 - `mdbisync-initial-sync.yml` runs the initial sync by hand from the Actions
   tab, with a `direction` and a `confirm` box (unchecked: a dry run).
 - `mdbisync.yml` runs the sync on every push to `main`, every five minutes
-  and by hand. GitHub runs schedules only on the default branch, and may
-  start them late. It installs `pre-commit` for the repository's security
-  hooks, which run in their own process with only `PATH` and `HOME` in
-  their environment.
+  and by hand. GitHub runs schedules only on the default branch, may start
+  them late, and turns them off in a public repository after 60 days
+  without activity. Until the initial sync has run, each sync run writes
+  nothing and fails with `initial-sync-required`.
 
 Both share the concurrency group `mdbisync`, so runs of one repository never
-overlap; disable the sync workflow while an initial sync runs, since a newer
-pending sync replaces a pending initial sync. Each mints the GitHub App's installation token with
+overlap. GitHub keeps one pending run per group and a newer one replaces it,
+so a sync queued behind a running one can replace a pending initial sync:
+disable the sync workflow before you start an initial sync, and enable it
+when the initial sync has finished.
+
+Both install `pre-commit`, which the repository's security hooks need on
+content from Linear. The hooks run in a child process of the mdbisync step
+whose environment holds no credentials; they still run on the runner that
+holds them, so use only hooks you trust. Each mints the GitHub App's installation token with
 `actions/create-github-app-token`, checks out without stored credentials,
 and gives the App token and the Linear secrets to the mdbisync step only.
 The action revokes the run's Linear token when it ends, and its post step
