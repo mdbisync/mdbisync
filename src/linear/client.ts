@@ -5,6 +5,8 @@ import {
   DocumentTooLongError,
   LinearError,
   LinearGraphQLError,
+  LinearHttpError,
+  LinearNetworkError,
   LinearReadBackError,
   LinearStoppedError,
   LinearUploadError,
@@ -367,11 +369,11 @@ export class LinearClient {
         let found = false;
         try { found = await find(); } catch { /* Preserve the original mutation failure. */ }
         if (found) {
-          // Linear's error answer refused this create, so the comment is another caller's. Without one (a lost
-          // answer, a server error) this create may be the one that was applied: it counts, so a zero-write
-          // check fails rather than passes on it.
-          const refused = error instanceof LinearGraphQLError && error.httpStatus < 500;
-          if (!refused) this.stats.wrote('CommentOnDocument');
+          // Only a create whose answer was lost (no answer, a server error) may be the one that was applied: it
+          // counts, so a zero-write check fails rather than passes on it. Any answer that refused it (an error,
+          // `success: false`) means the comment is another caller's.
+          const lost = error instanceof LinearNetworkError || ((error instanceof LinearHttpError || error instanceof LinearGraphQLError) && error.httpStatus >= 500);
+          if (lost) this.stats.wrote('CommentOnDocument');
           return existing();
         }
       }

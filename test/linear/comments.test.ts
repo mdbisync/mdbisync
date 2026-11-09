@@ -61,6 +61,17 @@ test('a notice another caller created first is found, and the refused create is 
   assert.equal(linear.stats.writes.get('CommentOnDocument'), undefined);
 });
 
+test('a create Linear answers with success: false is not counted when the other caller\'s notice is found', async (t) => {
+  const { fake, comments, linear } = await world(t);
+  fake.operations.set('CommentOnDocument', (request) => {
+    const input = request.variables?.input as { id: string; documentContentId: string };
+    comments.set(input.id, { id: input.id, documentContentId: input.documentContentId });
+    return { body: { data: { commentCreate: { success: false, comment: null } } } };
+  });
+  assert.deepEqual(await linear.ensureDocumentComment('content-one', 'Resolve the conflicting text.', id), { id, created: false });
+  assert.equal(linear.stats.writes.get('CommentOnDocument'), undefined);
+});
+
 test('an unconfirmed failed notice can be retried without losing its id', async (t) => {
   const { fake, comments, linear } = await world(t);
   const create = fake.operations.get('CommentOnDocument')!;

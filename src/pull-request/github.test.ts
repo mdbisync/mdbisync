@@ -25,6 +25,14 @@ describe('pull request writes', () => {
     assert.deepEqual(Object.fromEntries(merged.writes), { merged: 1 });
   });
 
+  it('counts a call GitHub accepted also when its answer breaks off while it is read', async () => {
+    const writes = new Map<string, number>();
+    const broken = new ReadableStream({ pull: (controller) => controller.error(new TypeError('terminated')) });
+    const fetch = (async () => new Response(broken, { status: 201 })) as typeof globalThis.fetch;
+    await assert.rejects(openPullRequest({ repository: 'owner/repo', token: 'token', apiUrl: 'https://api.example.test', fetch, writes }, spec), PullRequestError);
+    assert.deepEqual(Object.fromEntries(writes), { opened: 1 });
+  });
+
   it('counts no call GitHub refused', async () => {
     const opened = answering(422, { message: 'Validation Failed' });
     await assert.rejects(openPullRequest(opened.target, spec), PullRequestError);
