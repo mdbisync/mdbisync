@@ -155,7 +155,8 @@ the first sync finds nothing to write: it changes no document in Linear and
 opens no pull request. Documents the run left out are read again by the
 sync, which brings them in through an ordinary sync pull request. An annotation `README.md`
 that was kept without a document becomes a document once you edit its body
-in git.
+in git. From then on the sync keeps both sides equal; what happens when both
+sides change one document is in [conflicts.md](conflicts.md).
 
 ## Starting over instead of merging
 

@@ -8,7 +8,7 @@ import { lintText, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
-import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, isAncestor, listTree, readBlobs } from '../state/index.ts';
+import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
 
 /** A synchronized file of one side: its path, blob, Linear title and place. */
 export interface SideFile {
@@ -115,13 +115,7 @@ export interface HeldRename {
  * created.
  */
 export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdMap, facts: LinearFacts = LINEAR_FACTS, options: MergeOptions = {}): Promise<LocalMerge> {
-  const base = await git.text(['merge-base', linear, tracked]);
-  const merged = await git.run(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', linear, tracked], { okCodes: [0, 1] });
-  const [gitTree, ...rest] = merged.stdout.toString('utf8').split('\0');
-  if (gitTree === undefined || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error('git merge-tree gave no tree');
-  const unmerged = [...new Set(rest.filter((path) => path !== ''))].sort(compare);
-  const renames = await renamesBetween(git, base, tracked);
-  const resolved = await resolveConflicts(git, { base, linear, tracked, tree: gitTree, unmerged, renames, ids, knownId: options.knownId });
+  const { base, renames, resolved } = await mergeWithMarkers(git, linear, tracked, ids, options.knownId);
   const { tree, unresolved: conflicts } = resolved;
 
   const linearSide = await synchronizedFiles(git, linear, facts);
@@ -215,6 +209,61 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     held,
     texts: blobs,
   };
+}
+
+/** Versions of the id map searched for the id of a document Linear removed or renamed. */
+export const ID_HISTORY_DEPTH = 100;
+
+/**
+ * The id a path's document last had: in `ids`, the map at `idsCommit`, or
+ * in an earlier version of that map (a document Linear removed, or renamed
+ * since). Earlier versions are read once each, newest first, when needed.
+ */
+export function knownIdLookup(git: Git, idsCommit: Oid | null, ids: IdMap): (path: string) => Promise<string | undefined> {
+  let history: Oid[] | undefined;
+  const versions = new Map<Oid, IdMap>();
+  return async (path) => {
+    const current = ids.get(path);
+    if (current !== undefined) return current.id;
+    history ??= idsCommit === null ? [] : (await git.text(['rev-list', '--first-parent', '-n', String(ID_HISTORY_DEPTH), idsCommit])).split('\n').filter(Boolean);
+    // Newest first, one version at a time: the first match is the answer.
+    for (const commit of history) {
+      let map = versions.get(commit);
+      if (map === undefined) {
+        map = await readIds(git, commit);
+        versions.set(commit, map);
+      }
+      const entry = map.get(path);
+      if (entry !== undefined) return entry.id;
+    }
+    return undefined;
+  };
+}
+
+/** git's merge of two commits, with the documents it could not merge resolved by the structural rules and conflict markers. */
+export interface MarkedMerge {
+  /** The merge base of the two sides. */
+  base: Oid;
+  /** git's renames between the merge base and the git side. */
+  renames: Map<string, string>;
+  resolved: Resolved;
+}
+
+/**
+ * Merges `gitSide` into `linearSide` as step 3 does: git's merge, then the
+ * sync's own merge of each document git could not merge. In the markers,
+ * `gitSide`'s text is the git version and `linearSide`'s the Linear version.
+ * `ids` maps `linearSide`'s paths to documents. It writes objects only.
+ */
+export async function mergeWithMarkers(git: Git, linearSide: Oid, gitSide: Oid, ids: IdMap, knownId?: MergeOptions['knownId']): Promise<MarkedMerge> {
+  const base = await git.text(['merge-base', linearSide, gitSide]);
+  const merged = await git.run(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', linearSide, gitSide], { okCodes: [0, 1] });
+  const [gitTree, ...rest] = merged.stdout.toString('utf8').split('\0');
+  if (gitTree === undefined || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error('git merge-tree gave no tree');
+  const unmerged = [...new Set(rest.filter((path) => path !== ''))].sort(compare);
+  const renames = await renamesBetween(git, base, gitSide);
+  const resolved = await resolveConflicts(git, { base, linear: linearSide, tracked: gitSide, tree: gitTree, unmerged, renames, ids, knownId });
+  return { base, renames, resolved };
 }
 
 /** The path a change is listed under: where the document's file is after the run, or was before a trash. */
@@ -313,7 +362,7 @@ interface ConflictInput {
   knownId?: MergeOptions['knownId'];
 }
 
-interface Resolved {
+export interface Resolved {
   tree: Oid;
   unresolved: string[];
   /** A document's path on the `linear` tip → its path in the result, where the rules moved it. */
