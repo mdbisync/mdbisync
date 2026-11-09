@@ -26,9 +26,12 @@ test('front matter is merged apart from the body: either side\'s change is kept,
   // Both changed the same line: git's front matter.
   const overlap = await mergeMarkdown(base, file(head('c', 'x'), 'git\n'), file(head('b', 'x'), 'linear\n'));
   assert.ok(overlap.text.startsWith(file(head('c', 'x'), '')), overlap.text);
-  // A Linear side without front matter, as Linear holds it, leaves git's.
-  const linear = await mergeMarkdown(base, file(head('a', 'x'), 'git\n'), 'linear\n');
-  assert.ok(linear.text.startsWith(file(head('a', 'x'), '')), linear.text);
+  // A removal on the other side (a person's on the sync branch) is kept.
+  const removed = await mergeMarkdown(base, file(head('a', 'x'), 'git\n'), 'linear\n');
+  assert.ok(removed.text.startsWith(MARKERS.git), removed.text);
+  // A document Linear added has no front matter, and the git side's added one stays.
+  const added = await mergeMarkdown('', file(head('a', 'x'), 'git\n'), 'linear\n');
+  assert.ok(added.text.startsWith(file(head('a', 'x'), '')), added.text);
 });
 
 test('L3-02: both versions of a paragraph appear between marker paragraphs', async () => {

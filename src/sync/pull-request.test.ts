@@ -633,17 +633,22 @@ describe('sync: the sync pull request', () => {
     assert.ok(tracked.split(MARKERS.git).length <= 2, 'markers are nested or repeated');
   });
 
-  it('MDS-011-2C: a front matter edit pending on the sync branch survives a merge with a conflicting tracked edit', async () => {
-    await pendingBranchEdit('open');
-    await editRef(SYNC_BRANCH, PLAN, planText(BRANCH_EDIT).replace('owner: example', 'owner: reviewer'));
-    await editRef('refs/heads/main', PLAN, planText(LATER_EDIT.tracked));
-    const run = await sync();
-    assert.deepEqual(run.report.pullRequest?.marked, [PLAN]);
-    await settle();
-    const tracked = await show(`refs/heads/main:${PLAN}`);
-    assert.match(tracked, /^---\nowner: reviewer\n---\n/, 'the pending front matter edit was lost');
-    assertOneConflict(tracked, LATER_EDIT.tracked, BRANCH_EDIT);
-  });
+  for (const [change, branchFile, expected] of [
+    ['edit', planText(BRANCH_EDIT).replace('owner: example', 'owner: reviewer'), /^---\nowner: reviewer\n---\n/],
+    ['removal', `# Plan\n\n${BRANCH_EDIT} ${CANARY}\n`, /^# Plan\n/],
+  ] as const) {
+    it(`MDS-011-2C: a front matter ${change} pending on the sync branch survives a merge with a conflicting tracked edit`, async () => {
+      await pendingBranchEdit('open');
+      await editRef(SYNC_BRANCH, PLAN, branchFile);
+      await editRef('refs/heads/main', PLAN, planText(LATER_EDIT.tracked));
+      const run = await sync();
+      assert.deepEqual(run.report.pullRequest?.marked, [PLAN]);
+      await settle();
+      const tracked = await show(`refs/heads/main:${PLAN}`);
+      assert.match(tracked, expected, `the pending front matter ${change} was lost`);
+      assertOneConflict(tracked, LATER_EDIT.tracked, BRANCH_EDIT);
+    });
+  }
 
   it('MDS-011-2C: a Linear title change and rewrite against a pending sync-branch edit stays one document', async () => {
     await pendingBranchEdit('open');

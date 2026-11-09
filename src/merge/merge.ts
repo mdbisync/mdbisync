@@ -193,17 +193,19 @@ function render(tokens: Token[], ranges: Range[]): string {
 /**
  * The front matter of a merge: one side's when only that side changed it,
  * git's line merge when both did and their lines do not overlap, and the
- * git side's when they do. Markers cannot go into front matter, and Linear
- * has none, so a Linear side without front matter leaves the git side's.
+ * git side's when they do. Markers cannot go into front matter. Linear has
+ * none, but the Linear side of step 3 keeps the front matter its file had
+ * (capture), so only a side that changed its front matter changes the result.
  */
-async function mergeHeads(dir: string, heads: { base: string; ours: string; theirs: string }): Promise<string> {
-  // A Linear side without front matter is Linear's form, never a removal.
-  const none = heads.theirs.replace(/^﻿/, '') === '';
-  if (none || heads.theirs === heads.base || heads.ours === heads.theirs) return heads.ours;
-  if (heads.ours === heads.base) return heads.theirs;
+async function mergeHeads(dir: string, withBom: { base: string; ours: string; theirs: string }): Promise<string> {
+  // A byte order mark is serialization, not an edit: the git side's stays.
+  const bom = withBom.ours.startsWith('﻿') ? '﻿' : '';
+  const heads = Object.fromEntries(Object.entries(withBom).map(([name, text]) => [name, text.replace(/^﻿/, '')])) as typeof withBom;
+  if (heads.theirs === heads.base || heads.ours === heads.theirs) return bom + heads.ours;
+  if (heads.ours === heads.base) return bom + heads.theirs;
   await Promise.all(Object.entries(heads).map(([name, text]) => writeFile(join(dir, `head-${name}`), text, { mode: 0o600 })));
   const merged = await new Git(dir).run(['merge-file', '--stdout', 'head-ours', 'head-base', 'head-theirs'], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
-  return merged.code === 0 ? merged.stdout.toString('utf8') : heads.ours;
+  return bom + (merged.code === 0 ? merged.stdout.toString('utf8') : heads.ours);
 }
 
 /**
