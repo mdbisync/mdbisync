@@ -118,7 +118,8 @@ export async function predictUploadLeaveOuts(
   const limit = options.limit ?? DEFAULT_UPLOAD_LIMIT;
   const { files } = await treeFiles(git, tracked);
   const planned = plannedLinks(plan, files, texts);
-  const targets = [...planned.values()].flat();
+  // Each file once: several documents may link it.
+  const targets = [...new Set([...planned.values()].flat())];
   const linked = new Map<string, LinkedFile>();
   // Only a blob small enough to be a pointer is read: every other file's size is in the tree.
   await hashLinkedFiles(git, files, linked, targets, MAX_POINTER_SIZE);
@@ -143,7 +144,8 @@ export async function predictUploadLeaveOuts(
  * Why the write leaves out a document that links `targets` (each once, in
  * link order), or null: every file's size is checked first, so a file over
  * the limit is reported before one that cannot be read; then an LFS object
- * with LFS extensions whose content the upload cache does not hold.
+ * with LFS extensions whose content neither the upload cache holds nor
+ * another file of the document provides (the upload sends that file).
  */
 function judgeLinkedFiles(
   targets: readonly string[],
@@ -154,7 +156,8 @@ function judgeLinkedFiles(
   const file = (target: string) => linked.get(target) as LinkedFile;
   const oversize = targets.filter((target) => file(target).size > limit);
   if (oversize.length > 0) return { rule: UPLOAD_TOO_LARGE, files: oversize, message: `${oversize.join(', ')}: over the upload limit of ${limit} bytes` };
-  const unreadable = targets.filter((target) => file(target).extensions && !uploaded.has(file(target).hash));
+  const readable = new Set(targets.filter((target) => !file(target).extensions).map((target) => file(target).hash));
+  const unreadable = targets.filter((target) => file(target).extensions && !uploaded.has(file(target).hash) && !readable.has(file(target).hash));
   if (unreadable.length > 0) {
     return { rule: UPLOAD_UNREADABLE, files: unreadable, message: `${unreadable.join(', ')}: stored with LFS extensions, which are not supported` };
   }
@@ -241,13 +244,15 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
   // A blob over the limit is too large to be a pointer and is never read: only its size matters, since its document is left out.
   const hashFiles = (git: Git, paths: readonly string[]) => hashLinkedFiles(git, files, linked, paths, Math.max(limit, MAX_POINTER_SIZE));
 
-  /** The files of `targets` not in the cache, one path per content hash. */
+  /** The files of `targets` not in the cache, one path per content hash: a readable one when the content has one. */
   const missing = (targets: Iterable<string>): Map<string, string> => {
     const { uploads } = context as TransformContext;
     const byHash = new Map<string, string>();
     for (const target of targets) {
       const { hash } = linked.get(target) as LinkedFile;
-      if (!uploads.has(hash) && !byHash.has(hash)) byHash.set(hash, target);
+      if (uploads.has(hash)) continue;
+      const chosen = byHash.get(hash);
+      if (chosen === undefined || ((linked.get(chosen) as LinkedFile).extensions && !(linked.get(target) as LinkedFile).extensions)) byHash.set(hash, target);
     }
     return byHash;
   };

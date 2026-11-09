@@ -206,6 +206,9 @@ describe('initial sync dry run: documents the uploads would leave out', () => {
   const pointer = (size: number, oid: string, extension = '') => `version https://git-lfs.github.com/spec/v1\n${extension}oid sha256:${oid}\nsize ${size}\n`;
   const EXTENSION = `ext-0-foo sha256:${'ef'.repeat(32)}\n`;
   const LOGO = Buffer.alloc(2048, 3);
+  const MARK = Buffer.alloc(1500, 5);
+  const SEAL = Buffer.alloc(1600, 6);
+  const sha = (content: Buffer) => createHash('sha256').update(content).digest('hex');
   const UPLOAD_TREE = {
     '.pre-commit-config.yaml': PRE_COMMIT,
     'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
@@ -226,7 +229,16 @@ describe('initial sync dry run: documents the uploads would leave out', () => {
     'eng/a-logo.md': `# Logo\n\n![Logo](files/logo.bin)\n\n${CANARY}\n`,
     'eng/files/logo.bin': LOGO,
     'eng/b-logo.md': `# Logo again\n\n![Logo](raw/logo.bin)\n\n${CANARY}\n`,
-    'eng/raw/logo.bin': pointer(LOGO.length, createHash('sha256').update(LOGO).digest('hex'), EXTENSION),
+    'eng/raw/logo.bin': pointer(LOGO.length, sha(LOGO), EXTENSION),
+    // A second document linking the same file in git, larger than a pointer.
+    'eng/c-logo.md': `# Logo once more\n\n![Logo](files/logo.bin)\n\n${CANARY}\n`,
+    // One document links a file in git and a pointer with an extension to the same content, in both orders: the file is uploaded.
+    'eng/d-both.md': `# Both\n\n![Mark](files/mark.bin) ![Mark](raw/mark.bin)\n\n${CANARY}\n`,
+    'eng/files/mark.bin': MARK,
+    'eng/raw/mark.bin': pointer(MARK.length, sha(MARK), EXTENSION),
+    'eng/e-both.md': `# Both again\n\n![Seal](raw/seal.bin) ![Seal](files/seal.bin)\n\n${CANARY}\n`,
+    'eng/files/seal.bin': SEAL,
+    'eng/raw/seal.bin': pointer(SEAL.length, sha(SEAL), EXTENSION),
   };
 
   let fixture: Fixture;
@@ -278,7 +290,7 @@ describe('initial sync dry run: documents the uploads would leave out', () => {
     { path: 'eng/video.md', rule: 'upload-too-large', files: ['eng/raw/recording.mp4'] },
   ];
 
-  const WRITTEN = ['eng/README.md', 'eng/a-logo.md', 'eng/b-logo.md', 'eng/small.md'];
+  const WRITTEN = ['eng/README.md', 'eng/a-logo.md', 'eng/b-logo.md', 'eng/c-logo.md', 'eng/d-both.md', 'eng/e-both.md', 'eng/small.md'];
 
   it('lists a document linking a file over 10 MB as left out with upload-too-large and the file; uploads, downloads and writes nothing', async () => {
     const world = linearWithBig();
