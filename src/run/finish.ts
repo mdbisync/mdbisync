@@ -2,7 +2,7 @@
 // for tests and tooling. Names, paths and states only, no content.
 
 import { writeFile } from 'node:fs/promises';
-import { type CaptureResult } from '../capture/index.ts';
+import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type WriteStop } from '../initial-sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';

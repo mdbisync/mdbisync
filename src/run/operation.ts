@@ -3,7 +3,7 @@
 // do, and with `confirm` makes Linear equal to the tracked branch and
 // records the state. A sync captures Linear changes after its preflight.
 
-import { capture, type CaptureResult } from '../capture/index.ts';
+import { capture, type CaptureResult } from '../sync/capture.ts';
 import { checkpoint } from '../test-hooks.ts';
 import {
   type ConfirmedResult,
@@ -49,7 +49,7 @@ export async function runOperation(
     options,
     operation === 'sync'
       ? async (context) => {
-          captured = await capture(context, { config: inputs.state, ...(options.fetch ? {fetch: options.fetch} : {}) });
+          captured = await capture(context, { config: inputs.state, state: context.fetched.state, ...(options.fetch ? {fetch: options.fetch} : {}) });
           workSummary = captured.summary;
           if (captured.ok) await checkpoint('after-capture-push-before-pr');
         }

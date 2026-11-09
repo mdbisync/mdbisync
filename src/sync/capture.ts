@@ -9,7 +9,7 @@ import { type LinearDocument } from '../linear/index.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
-import { type CommitIdentity, type StateConfig, type FetchedState, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readUploads } from '../state/index.ts';
+import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readUploads } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { documentPath } from './paths.ts';
@@ -17,6 +17,8 @@ import { createAssetCapture, type CapturedAssets } from './assets.ts';
 
 export interface CaptureOptions {
   config: StateConfig;
+  /** The state refs left by the previous step, used as push leases. */
+  state: StateSnapshot;
   identity?: CommitIdentity;
   security?: SecurityGate;
   fetch?: typeof fetch;
@@ -25,7 +27,8 @@ export interface CaptureOptions {
 export interface CaptureResult {
   ok: boolean;
   code?: 'state-moved';
-  fetched: FetchedState;
+  /** The state refs after capture, or the input snapshot if its push lost the lease. */
+  state: StateSnapshot;
   /** Metadata for every observed document; selected changes also have content. Never serialize these. */
   documents: Map<string, LinearDocument>;
   blocked: Array<{ id: string; path: string; findings: SecurityFinding[] }>;
@@ -38,22 +41,23 @@ export interface CaptureResult {
 const CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
 
 /** Cursor is in ids history, so ordinary id commits by later steps cannot erase it. */
-async function readCursor(context: RunContext): Promise<string | null> {
-  if (context.fetched.state.ids === null) return null;
-  const log = await context.git.text(['log', '--format=%B', '--grep=^Capture-through:', '-1', context.fetched.state.ids]);
+async function readCursor(context: RunContext, state: StateSnapshot): Promise<string | null> {
+  if (state.ids === null) return null;
+  const log = await context.git.text(['log', '--format=%B', '--grep=^Capture-through:', '-1', state.ids]);
   return CURSOR.exec(log)?.[1] ?? null;
 }
 
 export async function capture(context: RunContext, options: CaptureOptions): Promise<CaptureResult> {
   const { git, linear, fetched, mapping, targets } = context;
-  const base = fetched.state.linear;
+  const state = { ...options.state };
+  const base = state.linear;
   if (base === null) throw new Error('run initial sync first');
   const identity = options.identity ?? SYNC_IDENTITY;
-  const ids = await readIds(git, fetched.state.ids);
-  const uploads = await readUploads(git, fetched.state.uploads);
+  const ids = await readIds(git, state.ids);
+  const uploads = await readUploads(git, state.uploads);
   const gate = options.security ?? await securityGate(git, fetched.tracked);
   try {
-    const cursor = await readCursor(context);
+    const cursor = await readCursor(context, state);
     const entries = await listTree(git, base);
     const textEntries = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
     const blobs = await readBlobs(git, textEntries.map((entry) => entry.oid));
@@ -101,7 +105,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     for (const doc of await linear.getDocuments(selected.filter(live).map((doc) => doc.id), { withContent: true })) { documents.set(doc.id, doc); work.set(doc.id, doc); }
     // Keep metadata for out-of-scope documents; never infer deletion from a missing page.
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
-    const result: CaptureResult = { ok: true, fetched, documents, blocked: [], changed: [], removed: [], leftOut: [], summary: '' };
+    const result: CaptureResult = { ok: true, state, documents, blocked: [], changed: [], removed: [], leftOut: [], summary: '' };
     const changes = new Map<string, Buffer | string | null>();
     const occupied = new Set(entries.map((entry) => entry.path));
     // Only files already present in the branch are link targets until their
@@ -219,17 +223,17 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // so documents sharing a timestamp or edited during pagination are not lost.
     const through = result.leftOut.length > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
     const message = through === null ? 'Capture document ids' : `Capture document ids\n\nCapture-through: ${through}`;
-    const idsCommit = await commitIds(git, fetched.state.ids, ids, identity, { message, always: through !== cursor });
-    const uploadsCommit = await commitUploads(git, fetched.state.uploads, uploads, identity);
+    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always: through !== cursor });
+    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity);
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes', identity });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.
     if (prepared.oids.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...prepared.oids]);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
-    const pushed = await pushAtomic(git, options.config, (['linear', 'ids', 'uploads'] as const).map((store) => ({ ref: stateRef(options.config, store), expected: fetched.state[store], next: next[store] })));
+    const pushed = await pushAtomic(git, options.config, (['linear', 'ids', 'uploads'] as const).map((store) => ({ ref: stateRef(options.config, store), expected: state[store], next: next[store] })));
     if (!pushed.ok) { result.ok = false; result.code = 'state-moved'; }
     else {
-      result.fetched = { ...fetched, state: next };
+      result.state = next;
       for (const blocked of result.blocked) {
         const doc = documents.get(blocked.id)!;
         if (doc.icon !== 'Cross' || doc.color !== '#EB5757') await linear.updateDocument(doc.id, { icon: 'Cross', color: '#EB5757' });

@@ -44,7 +44,7 @@ describe('capture from Linear', () => {
     context = { git, fetched: await fetchState(git, config), mapping, targets, linear };
   });
   afterEach(() => fixture.cleanup());
-  const run = () => capture(context, { config, identity: IDENTITY });
+  const run = () => capture(context, { config, state: context.fetched.state, identity: IDENTITY });
   const refresh = async () => { context.fetched = await fetchState(context.git, config); };
   const text = async (path: string) => (await fixture.remote.run(['show', `${stateRef(config, 'linear')}:${path}`])).stdout.toString('utf8');
 
@@ -69,9 +69,24 @@ describe('capture from Linear', () => {
     const result = await run();
     assert.equal(result.ok, true);
     assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nUpdated.\n');
-    const tip = result.fetched.state.linear;
+    const tip = result.state.linear;
     await refresh();
-    assert.equal((await run()).fetched.state.linear, tip);
+    assert.equal((await run()).state.linear, tip);
+  });
+
+  it('uses the supplied snapshot between steps without changing the run context', async () => {
+    const initial = { ...context.fetched.state };
+    world.linear.documents[0]!.content = 'First edit.\n';
+    const first = await capture(context, {config, state: initial});
+    assert.equal(first.ok, true);
+    assert.deepEqual(context.fetched.state, initial);
+    world.linear.documents[0]!.content = 'Next edit.\n';
+    world.linear.documents[0]!.updatedAt = '2026-02-01T00:00:00Z';
+    const second = await capture(context, {config, state: first.state});
+    assert.equal(second.ok, true);
+    assert.notEqual(second.state.linear, first.state.linear);
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nNext edit.\n');
+    assert.deepEqual(context.fetched.state, initial);
   });
 
   it('captures a new path, renames by id and moves across projects', async () => {
@@ -82,7 +97,7 @@ describe('capture from Linear', () => {
     Object.assign(world.linear.documents[0]!, { title: 'guides/renamed', projectId: 'project-handbook', updatedAt: '2026-01-03T00:00:00Z' });
     const result = await run();
     assert.equal(await text('other/guides/renamed.md'), '---\ncategory: work\n---\n\nOriginal.\n');
-    const ids = await readIds(context.git, result.fetched.state.ids);
+    const ids = await readIds(context.git, result.state.ids);
     assert.equal(ids.get('other/guides/renamed.md')?.id, 'plan');
     assert.equal(ids.has('docs/plan.md'), false);
   });
@@ -122,7 +137,7 @@ describe('capture from Linear', () => {
     assert.ok(!rejected.summary.includes('blocked-value-731'));
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
     assert.equal(await text('docs/safe.md'), 'Safe addition.\n');
-    const ids = await readIds(context.git, rejected.fetched.state.ids);
+    const ids = await readIds(context.git, rejected.state.ids);
     assert.deepEqual(ids.get('docs/plan.md')?.saved, {icon: 'Fire', color: '#123456'});
     assert.equal(world.linear.documents[0]!.icon, 'Cross');
     assert.equal(world.linear.documents[0]!.color, '#EB5757');
@@ -143,7 +158,7 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nCorrected.\n');
     assert.equal(world.linear.documents[0]!.icon, 'Fire');
     assert.equal(world.linear.documents[0]!.color, '#123456');
-    assert.equal((await readIds(context.git, accepted.fetched.state.ids)).get('docs/plan.md')?.saved, undefined);
+    assert.equal((await readIds(context.git, accepted.state.ids)).get('docs/plan.md')?.saved, undefined);
   });
 
   it('downloads a pasted image, records an LFS pointer and populates the upload cache', async () => {
@@ -151,7 +166,7 @@ describe('capture from Linear', () => {
     await refresh();
     const url = 'https://uploads.linear.app/workspace/pasted.png';
     Object.assign(world.linear.documents[0]!, {content: `![Image](${url})\n`, updatedAt: '2026-01-05T00:00:00Z'});
-    const result = await capture(context, { config, identity: IDENTITY, fetch: async () => new Response('image-bytes') });
+    const result = await capture(context, { config, state: context.fetched.state, identity: IDENTITY, fetch: async () => new Response('image-bytes') });
     assert.equal(result.ok, true);
     assert.equal(result.leftOut.length, 0);
     const image = result.changed.find((path) => path.endsWith('.png'));
@@ -160,7 +175,7 @@ describe('capture from Linear', () => {
     assert.ok((await text('docs/plan.md')).includes(image.slice('docs/'.length)));
     const uploads = await fixture.remote.text(['show', `${stateRef(config, 'uploads')}:uploads.json`]);
     assert.ok(uploads.includes(url));
-    const read = (await (await import('../state/index.ts')).readFiles(context.git, config, result.fetched.state.linear!, [image])).get(image)!;
+    const read = (await (await import('../state/index.ts')).readFiles(context.git, config, result.state.linear!, [image])).get(image)!;
     assert.equal(read.ok, true);
     if(read.ok) assert.equal(read.content.toString(), 'image-bytes');
   });
@@ -176,11 +191,11 @@ describe('capture from Linear', () => {
   it('retries an asset failure on an older document after accepting a newer document', async () => {
     world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/retry.png)\n';
     world.linear.documents.push({id: 'later', title: 'later', projectId: 'project-api', content: 'Later.\n', createdAt: '2026-01-04T00:00:00Z'});
-    const first = await capture(context, { config, fetch: async () => { throw new Error('Unavailable'); } });
+    const first = await capture(context, { config, state: context.fetched.state, fetch: async () => { throw new Error('Unavailable'); } });
     assert.equal(first.leftOut.length, 1);
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
     await refresh();
-    const next = await capture(context, { config, fetch: async () => new Response('image') });
+    const next = await capture(context, { config, state: context.fetched.state, fetch: async () => new Response('image') });
     assert.equal(next.leftOut.length, 0);
     assert.ok(next.changed.includes('docs/plan.md'));
   });
@@ -191,7 +206,7 @@ describe('capture from Linear', () => {
     await run();
     await refresh();
     Object.assign(world.linear.documents[1]!, {title: 'renamed', updatedAt: '2026-01-05T00:00:00Z'});
-    const blocked = await capture(context, {config, security: {configured: true, check: async (files) => files.has('docs/renamed.md') ? [{hook:'secret-check', line:1}] : []}});
+    const blocked = await capture(context, {config, state: context.fetched.state, security: {configured: true, check: async (files) => files.has('docs/renamed.md') ? [{hook:'secret-check', line:1}] : []}});
     assert.equal(blocked.blocked.length, 1);
     assert.ok((await text('docs/plan.md')).includes('<target.md>'));
     await refresh();
@@ -205,11 +220,11 @@ describe('capture from Linear', () => {
     const gate = {configured: true, check: async () => [{hook:'secret-check', line:5}]};
     world.linear.documents[0]!.content = 'Rejected.\n';
     world.linear.writes.reject = (operation) => operation === 'CommentOnDocument';
-    await assert.rejects(capture(context, {config, security: gate}));
+    await assert.rejects(capture(context, {config, state: context.fetched.state, security: gate}));
     assert.equal(world.linear.documents[0]!.icon, 'Cross');
     await refresh();
     delete world.linear.writes.reject;
-    await capture(context, {config, security: gate});
+    await capture(context, {config, state: context.fetched.state, security: gate});
     assert.match(world.linear.documents[0]!.comments?.join('') ?? '', /hook `secret-check`, line 5/);
   });
 
@@ -223,7 +238,7 @@ describe('capture from Linear', () => {
     context.targets.projects.set('Docs\0Research', {id:'project-research', name:'Research'});
     world.linear.documents.push({id:'team-only', title:'sub/team-only', teamId:'team-docs', content:'Team document.\n', createdAt:'2026-01-06T00:00:00Z'});
     const result = await run();
-    const ids = await readIds(context.git, result.fetched.state.ids);
+    const ids = await readIds(context.git, result.state.ids);
     const path = [...ids].find(([,entry]) => entry.id === 'team-only')?.[0];
     assert.ok(path);
     assert.ok(path.startsWith('team/'));
@@ -247,7 +262,7 @@ describe('capture from Linear', () => {
     await refresh();
     world.linear.documents.push({id:'blocked-new',title:'blocked-new',projectId:'project-api',content:'Rejected.\n',createdAt:'2026-01-07T00:00:00Z'});
     Object.assign(world.linear.documents[0]!, {content:'[New](https://linear.app/example-team/document/blocked-new)\n',updatedAt:'2026-01-07T00:00:00Z'});
-    const result = await capture(context,{config,security:{configured:true,check:async(files)=>files.has('docs/blocked-new.md')?[{hook:'secret-check',line:1}]:[]}});
+    const result = await capture(context,{config, state: context.fetched.state,security:{configured:true,check:async(files)=>files.has('docs/blocked-new.md')?[{hook:'secret-check',line:1}]:[]}});
     assert.equal(result.blocked.length,1);
     assert.ok((await text('docs/plan.md')).includes('https://linear.app/example-team/document/blocked-new'));
     assert.equal((await fixture.remote.run(['cat-file','-e',`${stateRef(config,'linear')}:docs/blocked-new.md`],{okCodes:[0,128]})).code,128);
@@ -257,7 +272,7 @@ describe('capture from Linear', () => {
     const secret = ['query','canary','731'].join('-');
     const url = `https://uploads.linear.app/workspace/image.png?access=${secret}`;
     world.linear.documents[0]!.content = `![Image](${url})\n`;
-    const result = await capture(context,{config,fetch:async()=>new Response('image'),security:{configured:true,check:async(files)=>[...files.values()].some((value)=>String(value).includes(secret))?[{hook:'secret-check',line:5}]:[]}});
+    const result = await capture(context,{config, state: context.fetched.state,fetch:async()=>new Response('image'),security:{configured:true,check:async(files)=>[...files.values()].some((value)=>String(value).includes(secret))?[{hook:'secret-check',line:5}]:[]}});
     assert.equal(result.blocked.length,1);
     assert.equal(await text('docs/plan.md'),TREE['docs/plan.md']);
     const remoteObjects = await fixture.remote.text(['cat-file','--batch-all-objects','--batch']);
@@ -278,12 +293,12 @@ describe('capture from Linear', () => {
   it('reports unchecked content every time and makes no content commit for icon-only updates', async () => {
     const first = await run();
     assert.match(first.summary, /pushed unchecked/);
-    const tip = first.fetched.state.linear;
+    const tip = first.state.linear;
     await refresh();
     Object.assign(world.linear.documents[0]!, { icon: 'Fire', color: '#123456', updatedAt: '2026-01-04T00:00:00Z' });
     const second = await run();
     assert.match(second.summary, /pushed unchecked/);
-    assert.equal(second.fetched.state.linear, tip);
+    assert.equal(second.state.linear, tip);
   });
 });
 
