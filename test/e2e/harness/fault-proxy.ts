@@ -3,10 +3,13 @@
 // the engine's requests (I9) and inject faults: an HTTP status at the n-th
 // request (429 with or without Retry-After, 500), a reset connection on a
 // write, low remaining-budget headers, a rejected document and a failed
-// upload. It never logs or keeps request or response bodies.
+// upload. It never logs or keeps request or response bodies; an observer
+// (the run's ownership record) sees each GraphQL request before it is
+// forwarded and Linear's answer, and keeps only the ids of what was created.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import type { WriteObserver } from './ownership.ts';
 
 export type Fault =
   /** Answer the n-th matching request after arming; GraphQL is the default target. */
@@ -159,7 +162,10 @@ function names(body: string, target: string): boolean {
  * same run (a run held for its UI steps and taken up again), so request
  * numbers and I9's counts go on from them.
  */
-export async function startFaultProxy(upstream: string, options: { fetch?: typeof fetch; history?: readonly ProxyRequestRecord[] } = {}): Promise<FaultProxy> {
+export async function startFaultProxy(
+  upstream: string,
+  options: { fetch?: typeof fetch; history?: readonly ProxyRequestRecord[]; observer?: WriteObserver } = {},
+): Promise<FaultProxy> {
   const forward = options.fetch ?? ((input: string | URL | Request, init?: RequestInit) => globalThis.fetch(input, init));
   const base = upstream.replace(/\/+$/, '');
   let faults: Array<Fault & { used?: number; matched?: number }> = [];
@@ -247,6 +253,8 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
       if (value === undefined || ['host', 'connection', 'content-length', 'accept-encoding'].includes(name)) continue;
       headers.set(name, Array.isArray(value) ? value.join(', ') : value);
     }
+    // What the request may create is on record before Linear sees it; a failing record keeps it from Linear.
+    if (isGraphql) options.observer?.before(text);
     let upstreamResponse: Response;
     try {
       upstreamResponse = await forward(`${base}${request.url ?? '/'}`, {
@@ -275,6 +283,7 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
       }
     }
     let payload: Buffer = Buffer.from(await upstreamResponse.arrayBuffer());
+    if (isGraphql) options.observer?.after(text, payload);
     // A lost answer only for a write Linear applied: a refused one (GraphQL errors come with HTTP 200) is passed
     // on as it is, and the fault stays armed for the next write.
     if (dropAnswer !== undefined && upstreamResponse.ok && writeApplied(payload)) {

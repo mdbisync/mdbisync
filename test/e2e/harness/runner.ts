@@ -20,6 +20,7 @@ import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.t
 import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
+import { OwnershipLedger, readOwnership, type WriteObserver } from './ownership.ts';
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
@@ -111,13 +112,24 @@ function projectTeams(readmes: ReadonlyMap<string, string>): Map<string, string>
 export async function liveWorld(
   deps: Pick<RunnerDeps, 'config' | 'appClients'>,
   appName: string,
-  parts: { sandbox: Sandbox; token: { token: string; source: 'app' | 'host' }; manifest: Manifest; tree: RunTree; known?: { teams: Map<string, Team>; documentUrlBase: string } },
+  parts: {
+    sandbox: Sandbox;
+    token: { token: string; source: 'app' | 'host' };
+    manifest: Manifest;
+    tree: RunTree;
+    known?: { teams: Map<string, Team>; documentUrlBase: string };
+    /** The run's ownership record: sees every write of the editors' clients. */
+    owned?: WriteObserver;
+  },
 ): Promise<LiveWorld> {
   const { config } = deps;
   const app = appFor(deps, appName);
   const appClient = deps.appClients.get(appName);
   if (appClient === undefined) throw new Error(`no harness client for app ${appName}`);
-  const editors = { 'editor-a': editorClient(config.editors['editor-a']), 'editor-b': editorClient(config.editors['editor-b']) };
+  const editors = {
+    'editor-a': editorClient(config.editors['editor-a'], undefined, parts.owned),
+    'editor-b': editorClient(config.editors['editor-b'], undefined, parts.owned),
+  };
   const world = new LinearWorld(editors['editor-a']);
   const teams = parts.known?.teams ?? new Map((await world.teams()).map((team) => [team.key, team]));
   // Links between synchronized documents are written as document URLs of this workspace.
@@ -178,9 +190,11 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   const { tree, commit } = created;
   ctx.ownCommits.push(commit);
   ctx.phase('linear teams');
-  const live = await liveWorld(deps, appName, { sandbox, token, manifest, tree });
+  const live = await liveWorld(deps, appName, { sandbox, token, manifest, tree, owned: ctx.owned });
   const { teams, world } = live;
   ctx.live = live;
+  // The team zones the run may write in, on record before anything is created there.
+  ctx.owned.scope([...tree.teamZones.keys()].flatMap((key) => teams.get(key)?.id ?? []));
 
   // The team lock: initial sync matches every document of an annotated team zone.
   ctx.phase('team lock');
@@ -411,9 +425,10 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
     delete ctx.engine.pending;
   }
   ctx.checkpoints.resumeAll();
-  // Every document the run made, by id: what the harness seeded and what the engine recorded.
+  // Every document the run made, by id: what the harness seeded, what the run's ownership record holds (every
+  // create, a team zone's README and a create whose answer was lost included) and what the engine recorded.
   // Read the ids before the refs go.
-  const created = new Set(ctx.live?.seededDocuments ?? []);
+  const created = new Set([...(ctx.live?.seededDocuments ?? []), ...(readOwnership(ctx.owned.stateDir, ctx.names.runId)?.documents.keys() ?? [])]);
   if (ctx.live !== null) {
     await attempt('ids', async () => {
       for (const id of await recordedIds(ctx)) created.add(id);
@@ -506,6 +521,7 @@ export function createRunContext(
     runDir,
     live: null,
     proxy: null,
+    owned: new OwnershipLedger(deps.stateDir, runId),
     checkpoints: new CheckpointControl(join(runDir, 'hooks')),
     engine: { results: [], setupRuns: 0, env: {}, restores: [] },
     edits: [],
@@ -654,7 +670,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
         if (blocked instanceof BudgetBlockedError) throw new EnvBlockedError(blocked.message);
         throw blocked;
       }
-      ctx.proxy = await startFaultProxy('https://api.linear.app');
+      ctx.proxy = await startFaultProxy('https://api.linear.app', { observer: ctx.owned });
       // A setup that does not finish must not hold a worker and its locks forever. On the deadline it is
       // told to stop; cleanup waits until it has stopped, so nothing is created after the cleanup.
       const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks);

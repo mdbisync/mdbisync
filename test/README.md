@@ -143,6 +143,21 @@ hours, so stop every run that uses a different state folder or another
 host before you sweep the shared repository and workspace. It needs the
 full live configuration below.
 
+Each run also keeps an ownership record in the state folder
+(`owned/<run>.jsonl`): every document id, project id and name, and team zone
+it creates in Linear, written as each is created. The engine's writes are
+recorded at the fault proxy; a create carries its own id, so it is on record
+before Linear sees it, even when Linear's answer is lost. Cleanup archives
+every recorded document, a team zone's README without the run's prefix
+included. When cleanup fails (an HTTP 503), the run stays registered, and
+`sweep` recovers it from its record alone, not by name patterns. It first
+refuses, changing nothing, when the record names a project that is not the
+run's or a live document outside the run's projects and team zones. It never
+deletes a project again that Linear already answered it deleted. It forgets
+the run only after its refs, open pull requests and projects read back gone
+and every document it created reads back archived and not trashed. The run's
+report keeps its failed cleanup.
+
 Locks and the shared budget ledger live in a state folder on the host
 (`MDBISYNC_HARNESS_STATE_DIR`, default `<tmp>/mdbisync-harness`); harness
 processes on one host share it.
