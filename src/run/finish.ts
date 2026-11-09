@@ -41,7 +41,7 @@ export interface RunReport {
   sync: SyncReport | null;
   /** A sync run's step 2, the sync pull request; null for other runs and when capture stopped before it. */
   pullRequest: PullRequestResult | null;
-  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'stopped'> | null;
+  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'writeBackWarnings' | 'stopped'> | null;
   /** Documents created or overwritten in Linear by this run. */
   writtenCount: number;
   /** Documents an unfinished earlier run had written, skipped by this one. */
@@ -294,5 +294,5 @@ export async function writeRunReport(path: string, outcome: OperationOutcome): P
 }
 
 function captureReport(captured: CaptureResult | undefined): RunReport['capture'] {
-  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, blocked:captured.blocked, leftOut:captured.leftOut, ...(captured.stopped ? {stopped:captured.stopped} : {})};
+  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, blocked:captured.blocked, leftOut:captured.leftOut, writeBackWarnings:captured.writeBackWarnings, ...(captured.stopped ? {stopped:captured.stopped} : {})};
 }

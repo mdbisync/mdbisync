@@ -46,6 +46,8 @@ export interface CaptureResult {
   changed: string[];
   removed: string[];
   leftOut: Array<{ id: string; rule: string }>;
+  /** Captured content that exceeds Linear's write limit; paths and counts only. */
+  writeBackWarnings: Array<{ path: string; code: 'linear-content-too-large-to-write-back'; length: number; limit: number }>;
   summary: string;
 }
 
@@ -70,7 +72,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   const uploads = await readUploads(git, state.uploads);
   const reserved = await readReservedIds(git, state.ids);
   const gate = options.security ?? await securityGate(git, fetched.tracked);
-  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], leftOut:[], summary:''};
+  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], leftOut:[], writeBackWarnings:[], summary:''};
   let published = false;
   try {
     // Capture the old place before a git annotation change moves its documents.
@@ -274,6 +276,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
     }
     for (const [id, candidate] of candidates) {
+      const refusal = lengthRefusal({content: candidate.doc.content ?? ''}, linear.facts);
+      if (refusal !== undefined) result.writeBackWarnings.push({path: candidate.path, code: 'linear-content-too-large-to-write-back', length: refusal.length, limit: refusal.limit});
       const old = byId.get(id);
       if (old !== undefined && old.path !== candidate.path) {
         removeBody(old.path);
@@ -309,7 +313,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     if (prepared.oids.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...prepared.oids]);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
     const pushed = await pushAtomic(git, options.config, (['linear', 'ids', 'uploads'] as const).map((store) => ({ ref: stateRef(options.config, store), expected: state[store], next: next[store] })));
-    if (!pushed.ok) { result.ok = false; result.code = 'state-moved'; }
+    if (!pushed.ok) { result.ok = false; result.code = 'state-moved'; result.writeBackWarnings = []; }
     else {
       result.state = next;
       published = true;
@@ -350,7 +354,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       result.code = 'linear-failed';
       result.failure = { operation: error.operation, error: describeLinearError(error as LinearError) };
     }
-    if (!published) { result.changed = []; result.removed = []; }
+    if (!published) { result.changed = []; result.removed = []; result.writeBackWarnings = []; }
     result.summary = renderCapture(result, gate.configured);
     return result;
   } finally { await gate.close?.(); }
@@ -381,6 +385,9 @@ function renderCapture(result: CaptureResult, configured: boolean): string {
   if (result.stopped !== undefined) summary += `\nCapture partial, will continue.\n\n${renderStop(result.stopped).join('\n')}`;
   if (result.failure !== undefined) summary += `\nCapture partial, will continue: Linear failed ${result.failure.operation} (${result.failure.error}).`;
   if (!configured) summary += '\nContent is pushed unchecked: no security hooks are configured.';
+  for (const warning of result.writeBackWarnings) {
+    summary += `\n${warning.code}: ${JSON.stringify(warning.path)} (${warning.length} characters; limit ${warning.limit}). Captured into git; Linear will not accept it back if it is changed in git while still over the limit.`;
+  }
   return summary;
 }
 
