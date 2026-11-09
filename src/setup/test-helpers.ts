@@ -339,16 +339,16 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     return json(200, { data: documentMutation(world, operationName, variables) ?? {} });
   }
   world.linear.beforeQuery?.(operationName, variables);
-  if (operationName === 'SetupTeams') {
+  if (operationName === 'SetupTargets') {
     const refs = variables.refs as string[];
-    return json(200, { data: { teams: { nodes: world.linear.teams.filter((team) => refs.includes(team.key) || refs.includes(team.name)) } } });
-  }
-  if (operationName === 'SetupProjects') {
+    const teams = { nodes: world.linear.teams.filter((team) => refs.includes(team.key) || refs.includes(team.name)) };
+    // The projects are asked for only when the query names them.
+    if (!Array.isArray(variables.names)) return json(200, { data: { teams } });
     const names = variables.names as string[];
     const nodes = world.linear.projects
       .filter((project) => names.includes(project.name))
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
-    return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
+    return json(200, { data: { teams, projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
   if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });

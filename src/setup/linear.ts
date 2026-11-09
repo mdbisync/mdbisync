@@ -58,9 +58,10 @@ export function linearCredentialFailure(detail: string): CheckResult {
 
 /**
  * Looks up every annotated team (by key or name) and project (by name, in
- * its team): two requests. A name that matches nothing, or more than one
- * team or project, fails the check and is named. A credential error is
- * returned as a failed `linear-credentials` item.
+ * its team): one request, plus one per further 125 team references. A
+ * name that matches nothing, or more than one team or project, fails the
+ * check and is named. A credential error is returned as a failed
+ * `linear-credentials` item.
  */
 export async function resolveTargets(
   client: LinearClient,
@@ -80,34 +81,33 @@ export async function resolveTargets(
   try {
     // A team matches a reference by key or by name, so a batch of references
     // matches at most twice as many teams: within one page when batches are
-    // half a page.
+    // half a page. The first request also looks up the projects, so a usual
+    // run resolves its targets in one request.
     const refs = [...teamRefs];
+    const names = [...new Set([...projectRefs.values()].map((ref) => ref.project))];
     teamNodes = [];
+    projectNodes = [];
     for (let start = 0; start < refs.length; start += TEAM_REFS_PER_REQUEST) {
       const batch = refs.slice(start, start + TEAM_REFS_PER_REQUEST);
-      const teams = await client.request<{ teams: { nodes: LinearTeam[] } }>(
-        'SetupTeams',
+      const withProjects = start === 0 && names.length > 0;
+      const data = await client.request<{ teams: { nodes: LinearTeam[] }; projects?: { nodes: typeof projectNodes; pageInfo: { hasNextPage: boolean } } }>(
+        'SetupTargets',
         'query',
-        `query SetupTeams($refs: [String!]!, $first: Int!) {
+        withProjects
+          ? `query SetupTargets($refs: [String!]!, $first: Int!, $names: [String!]!) {
+          teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
+          projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: 50) { nodes { id } } } pageInfo { hasNextPage } }
+        }`
+          : `query SetupTargets($refs: [String!]!, $first: Int!) {
           teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
         }`,
-        { refs: batch, first: batch.length * 2 },
+        withProjects ? { refs: batch, first: batch.length * 2, names } : { refs: batch, first: batch.length * 2 },
       );
-      teamNodes.push(...teams.teams.nodes.filter((team) => !teamNodes.some((known) => known.id === team.id)));
-    }
-    const names = [...new Set([...projectRefs.values()].map((ref) => ref.project))];
-    projectNodes = [];
-    if (names.length > 0) {
-      const projects = await client.request<{ projects: { nodes: typeof projectNodes; pageInfo: { hasNextPage: boolean } } }>(
-        'SetupProjects',
-        'query',
-        `query SetupProjects($names: [String!]!) {
-          projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: 50) { nodes { id } } } pageInfo { hasNextPage } }
-        }`,
-        { names },
-      );
-      if (projects.projects.pageInfo.hasNextPage) throw new Error('more than 250 Linear projects share the annotated names');
-      projectNodes = projects.projects.nodes;
+      teamNodes.push(...data.teams.nodes.filter((team) => !teamNodes.some((known) => known.id === team.id)));
+      if (data.projects !== undefined) {
+        if (data.projects.pageInfo.hasNextPage) throw new Error('more than 250 Linear projects share the annotated names');
+        projectNodes = data.projects.nodes;
+      }
     }
   } catch (error) {
     if (!isCredentialError(error)) throw error;

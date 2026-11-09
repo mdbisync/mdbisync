@@ -122,7 +122,7 @@ describe('setup check', () => {
     assert.equal(targets?.teams.get('ENG')?.id, 'team-eng');
     assert.equal(targets?.teams.get('Docs')?.id, 'team-docs');
     assert.equal(targets?.projects.get('ENG\0Field notes')?.id, 'project-api');
-    assert.equal(world.requests.filter((request) => request.startsWith(`POST ${LINEAR_API}`)).length, 2);
+    assert.equal(world.requests.filter((request) => request.startsWith(`POST ${LINEAR_API}`)).length, 1);
     assert.deepEqual(world.writes, []);
   });
 

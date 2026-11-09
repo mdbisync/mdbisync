@@ -35,12 +35,13 @@ describe('container document capacity', () => {
   async function run(command = 'initial-sync', confirm = false, cap = '10', fetchOverride?: typeof fetch, beforeCapacity?: () => void) {
     const reportFile = join(fixture.root, 'report.json');
     let refsBeforeWrite: string | undefined;
+    let listings = 0;
     const normal = fetchOverride ?? fakeFetch(world);
     const request: typeof fetch = async (url, init) => {
       if (command === 'sync' && refsBeforeWrite === undefined && String(url).endsWith('/graphql')) {
-        const query = JSON.parse(String(init?.body)) as {operationName?:string; variables?:{filter?:{or?:unknown}}};
-        // Capture lists all places together; the writer then reads each container.
-        if (query.operationName === 'ListDocuments' && query.variables?.filter?.or === undefined) {
+        const query = JSON.parse(String(init?.body)) as {operationName?:string};
+        // Capture lists the containers first; a run with something to write lists them again before writing.
+        if (query.operationName === 'ListDocuments' && ++listings === 2) {
           refsBeforeWrite = await refs();
           beforeCapacity?.();
         }
@@ -171,9 +172,11 @@ describe('container document capacity', () => {
       await fixture.seed({ 'eng/new.md': '# New\n' });
       const writesBefore = world.writes.length;
       const normal = fakeFetch(world);
+      let listings = 0;
+      // The writer's listing: the run's second, after capture's.
       const failedRead: typeof fetch = async (url, init) => {
         const query = String(url).endsWith('/graphql') ? JSON.parse(String(init?.body)) : undefined;
-        if (query?.operationName === 'ListDocuments' && query.variables?.filter?.or === undefined) {
+        if (query?.operationName === 'ListDocuments' && ++listings === 2) {
           return new Response(JSON.stringify({ errors: [{ message: 'Request refused', extensions: { code: rateLimited ? 'RATELIMITED' : 'FORBIDDEN' } }] }), {
             status: rateLimited ? 429 : 400, headers: { 'content-type': 'application/json', 'retry-after': '60' },
           });
