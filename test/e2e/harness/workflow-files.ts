@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMap, isSeq, parseDocument, type Document, type YAMLMap } from 'yaml';
 import type { CommandName } from '../../../src/commands.ts';
-import { REPORT_ARTIFACT } from './workflows.ts';
+import { PREREQUISITE_STEPS, REPORT_ARTIFACT } from './workflows.ts';
 
 const EXAMPLES = fileURLToPath(new URL('../../../examples/', import.meta.url));
 
@@ -79,15 +79,34 @@ export function renderForRun(template: string, options: RunWorkflowOptions): str
     else on.set(event, { branches: [options.trackedBranch] });
   }
   if (doc.getIn(['concurrency', 'group']) === 'mdbisync') doc.setIn(['concurrency', 'group'], options.group);
+  // GitHub dispatches a workflow only once it is registered, and a workflow
+  // that is not on the default branch is registered only when it runs on
+  // another event. A dispatch-only template therefore also runs on a push to
+  // the run's own branch with every job skipped: that run registers it and
+  // does nothing else. The default branch and the repository's settings stay
+  // as they are.
+  const register = isMap(on) && on.items.length === 1 && on.has('workflow_dispatch');
+  if (register) on.set('push', { branches: [options.trackedBranch] });
 
   const jobs = doc.get('jobs');
   if (!isMap(jobs)) throw new Error('the template has no jobs');
   for (const pair of jobs.items) {
     const job = pair.value as YAMLMap;
     job.set('runs-on', doc.createNode(SANDBOX_RUNNER));
+    if (register) job.set('if', dispatchOnly(job.get('if')));
     patchSteps(doc, job, options);
   }
   return doc.toString({ lineWidth: 0 });
+}
+
+/** The condition that keeps a registering push run from running a job. */
+export const DISPATCH_GUARD = "github.event_name == 'workflow_dispatch'";
+
+/** A job condition that holds only for a dispatch, keeping the job's own condition. */
+function dispatchOnly(condition: unknown): string {
+  if (condition === undefined || condition === null) return DISPATCH_GUARD;
+  const own = String(condition).replace(/^\s*\$\{\{\s*|\s*\}\}\s*$/g, '');
+  return `${DISPATCH_GUARD} && (${own})`;
 }
 
 function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): void {
@@ -120,6 +139,24 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
     }));
     index += 1;
   }
+}
+
+/**
+ * The errors the templates' prerequisite steps report when the runner lacks
+ * what they need (`echo '::error::…'` in the step's script), as GitHub writes
+ * them to the step's log.
+ */
+export function prerequisiteErrors(): string[] {
+  const errors = new Set<string>();
+  for (const file of Object.values(WORKFLOW_FILES)) {
+    if (!existsSync(join(EXAMPLES, file))) continue;
+    const jobs = (parseDocument(readTemplate(file)).toJS() as { jobs?: Record<string, { steps?: Array<{ name?: string; run?: string }> }> }).jobs ?? {};
+    for (const step of Object.values(jobs).flatMap((job) => job.steps ?? [])) {
+      if (step.name === undefined || !PREREQUISITE_STEPS.has(step.name)) continue;
+      for (const match of (step.run ?? '').matchAll(/::error::([^'"\n]+)/g)) errors.add(`##[error]${(match[1] as string).trim()}`);
+    }
+  }
+  return [...errors];
 }
 
 /** The templates that exist (of `only`, when given), rendered for one run, by their `.github/workflows/` file name. */

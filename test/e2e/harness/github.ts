@@ -118,6 +118,23 @@ export interface WorkflowRun {
   path?: string;
   actor?: { login: string } | null;
   triggering_actor?: { login: string } | null;
+  html_url?: string;
+}
+
+export interface WorkflowStep {
+  name: string;
+  number: number;
+  status: string;
+  conclusion: string | null;
+}
+
+export interface WorkflowJob {
+  id: number;
+  name: string;
+  conclusion: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  steps?: WorkflowStep[];
 }
 
 export class SandboxRest {
@@ -169,8 +186,21 @@ export class SandboxRest {
     }
   }
 
-  async dispatchWorkflow(file: string, ref: string, inputs: Record<string, string>): Promise<void> {
-    await this.request('POST', `/actions/workflows/${encodeURIComponent(file)}/dispatches`, { ref, inputs });
+  /** The id of a `.github/workflows/` file in the repository's Actions registry, or undefined while it is not registered. */
+  async workflowId(file: string): Promise<number | undefined> {
+    const data = await this.request<{ workflows: Array<{ id: number; path: string }> }>('GET', '/actions/workflows?per_page=100');
+    return data.workflows.find((workflow) => workflow.path === `.github/workflows/${file}`)?.id;
+  }
+
+  /** Dispatches a workflow, by its file name or its registry id, on `ref`. */
+  async dispatchWorkflow(workflow: string | number, ref: string, inputs: Record<string, string>): Promise<void> {
+    await this.request('POST', `/actions/workflows/${encodeURIComponent(String(workflow))}/dispatches`, { ref, inputs });
+  }
+
+  /** A run's jobs and their steps, in order. */
+  async runJobs(runId: number): Promise<WorkflowJob[]> {
+    const data = await this.request<{ jobs: WorkflowJob[] }>('GET', `/actions/runs/${runId}/jobs?per_page=100`);
+    return data.jobs;
   }
 
   async workflowRuns(branch: string): Promise<WorkflowRun[]> {

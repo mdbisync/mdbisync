@@ -37,8 +37,9 @@ import { writeError } from './fault-proxy.ts';
 import {
   commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
-import { jobSpans, maxOverlap, runResult, SCHEDULE_BLOCKED, waitForRun } from './workflows.ts';
-import { runWorkflows, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
+import type { WorkflowRun } from './github.ts';
+import { environmentBlocker, jobSpans, maxOverlap, runLogs, runResult, SCHEDULE_BLOCKED, waitForRegistration, waitForRun } from './workflows.ts';
+import { prerequisiteErrors, runWorkflows, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 
 export { documentId, documentPaths, resolveDestination, sibling, targetPath };
 
@@ -80,13 +81,18 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
   };
 }
 
-/** Records an engine result; a "not implemented" answer stops the scenario. */
-function settleResult(ctx: RunContext, result: EngineResult): void {
+/** Records an engine result as the scenario's next run. */
+function recordResult(ctx: RunContext, result: EngineResult): void {
   ctx.engine.results.push(result);
   const n = ctx.engine.results.length - 1 - ctx.engine.setupRuns;
   ctx.observations.set(`harness.runs.${n}.finishedAt`, Date.now());
   ctx.observations.set(`runs.${n}.exitCode`, result.exitCode);
   if (result.report !== null) for (const [key, value] of Object.entries(result.report)) ctx.observations.set(`runs.${n}.${key}`, value);
+}
+
+/** Records an engine result; a "not implemented" answer stops the scenario. */
+function settleResult(ctx: RunContext, result: EngineResult): void {
+  recordResult(ctx, result);
   if (result.notImplemented) throw new NotImplementedError(result.command, 'the engine command');
   if (result.timedOut) throw new ProductError(`${result.command} did not finish within ${ENGINE_TIMEOUT_MS / 60_000} minutes`);
 }
@@ -267,8 +273,10 @@ async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Prom
   await requireWorkflows(ctx, command);
   let run;
   if (event === 'workflow_dispatch') {
+    // The push that installed the workflow registers it (workflow-files.ts).
+    const workflow = await waitForRegistration(world.rest, workflowFor(command));
     const after = Date.now();
-    await world.rest.dispatchWorkflow(workflowFor(command), ctx.names.trackedBranch, workflowInputs(args));
+    await world.rest.dispatchWorkflow(workflow, ctx.names.trackedBranch, workflowInputs(args));
     run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: seenRuns(ctx) });
   } else if (event === 'push') {
     // The run the latest push to the tracked branch started.
@@ -281,7 +289,35 @@ async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Prom
     throw new Error(`run.workflow cannot start a ${event} run`);
   }
   recordWorkflowRun(ctx, run);
-  settleResult(ctx, await runResult(world.rest, run, command));
+  await settleWorkflowRun(ctx, run, command);
+}
+
+/**
+ * Records a finished workflow run as an engine run. A proven environment
+ * blocker (workflows.ts) stops the scenario at this run, with the run's
+ * result and evidence kept: no later step edits Linear or starts another run,
+ * and cleanup runs as after any stop. Any other failure is the run's result
+ * for the scenario's checks.
+ */
+async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: CommandName): Promise<void> {
+  const world = live(ctx);
+  const logs = await runLogs(world.rest, run);
+  const result = await runResult(world.rest, run, command, logs);
+  const blocker = run.conclusion === 'failure' ? environmentBlocker(run, await world.rest.runJobs(run.id), logs, prerequisiteErrors()) : undefined;
+  if (blocker === undefined) {
+    settleResult(ctx, result);
+    return;
+  }
+  recordResult(ctx, result);
+  const dir = join(ctx.runDir, 'workflows', String(run.id));
+  mkdirSync(dir, { recursive: true });
+  const { id, event, status, conclusion, head_branch, head_sha, html_url, created_at, updated_at } = run;
+  writeFileSync(join(dir, 'run.json'), `${JSON.stringify({ id, event, status, conclusion, head_branch, head_sha, html_url, created_at, updated_at }, null, 2)}\n`);
+  writeFileSync(join(dir, 'blocker.json'), `${JSON.stringify(blocker, null, 2)}\n`);
+  writeFileSync(join(dir, 'failed-step.txt'), logs.get(blocker.logFile) ?? '');
+  ctx.observations.set('workflows.blocker', blocker);
+  ctx.log(`first environment blocker: ${blocker.reason}; evidence in ${dir}`);
+  throw new EnvBlockedError(blocker.reason);
 }
 
 // --- the executors -------------------------------------------------------
@@ -428,9 +464,10 @@ const RUN: Record<string, Executor> = {
     const after = Date.now();
     // Start every event at once, plus one more when a pending run must be replaced by a newer one.
     const starts = [...events, ...(args.replacePending === true ? ['workflow_dispatch'] : [])];
+    const workflow = starts.includes('workflow_dispatch') ? await waitForRegistration(world.rest, SYNC_WORKFLOW) : SYNC_WORKFLOW;
     await Promise.all(starts.map(async (event) => {
       if (event === 'push') await loadDriver(ctx, async () => {}).gitEdit([targetPath(ctx)]);
-      else await world.rest.dispatchWorkflow(SYNC_WORKFLOW, ctx.names.trackedBranch, workflowInputs({}));
+      else await world.rest.dispatchWorkflow(workflow, ctx.names.trackedBranch, workflowInputs({}));
     }));
     const runs = [];
     for (const event of starts) {
@@ -441,7 +478,7 @@ const RUN: Record<string, Executor> = {
     ctx.observations.set('workflows.maxActiveInGroup', maxOverlap(await jobSpans(world.rest, runs)));
     for (const run of runs) {
       if (run.conclusion === 'cancelled') continue; // replaced by a newer run of the group
-      settleResult(ctx, await runResult(world.rest, run, 'sync'));
+      await settleWorkflowRun(ctx, run, 'sync');
     }
   },
   'run.token-lifecycle': async (ctx, args) => {

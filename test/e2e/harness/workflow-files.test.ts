@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { parse } from 'yaml';
-import { ACTION_REPOSITORY, pinnedActionSha, readTemplate, renderForRun, runWorkflows, SANDBOX_RUNNER, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
+import { ACTION_REPOSITORY, DISPATCH_GUARD, pinnedActionSha, prerequisiteErrors, readTemplate, renderForRun, runWorkflows, SANDBOX_RUNNER, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 import { REPORT_ARTIFACT } from './workflows.ts';
 
 const RUN = {
@@ -24,7 +24,11 @@ describe('workflow templates rendered for a run', () => {
     const text = renderForRun(template, { ...RUN, actionSha: SHA });
     const parsed = parse(text) as { concurrency: { group: string; 'cancel-in-progress': boolean }; on: Record<string, unknown> };
     assert.deepEqual(parsed.concurrency, { group: RUN.group, 'cancel-in-progress': false });
-    assert.deepEqual(Object.keys(parsed.on), ['workflow_dispatch']);
+    // Registered by a push to the run's own branch only, which runs no job.
+    assert.deepEqual(Object.keys(parsed.on), ['workflow_dispatch', 'push']);
+    assert.deepEqual(parsed.on['push'], { branches: [RUN.trackedBranch] });
+    assert.deepEqual(jobsOf(text).map((job) => (job as { if?: string }).if), [DISPATCH_GUARD]);
+    assert.deepEqual((parse(template) as { on: Record<string, unknown> }).on['workflow_dispatch'], parsed.on['workflow_dispatch'], 'the dispatch inputs stay the template\'s');
     assert.doesNotMatch(text, /(?:vars|secrets)\.MDBISYNC_/, 'a template name was left');
     assert.match(text, /vars\.SYNC_APP_CLIENT_ID/);
     assert.match(text, /secrets\.LINEAR_TEST_APP_CLIENT_SECRET/);
@@ -65,6 +69,27 @@ describe('workflow templates rendered for a run', () => {
     assert.deepEqual(parsed.on['push']?.branches, [RUN.trackedBranch]);
     assert.deepEqual(parsed.on['pull_request']?.branches, [RUN.trackedBranch]);
     assert.ok(Array.isArray(parsed.on['schedule']));
+  });
+
+  it('registers only dispatch-only templates, keeping a job\'s own condition', () => {
+    const dispatchOnly = 'on:\n  workflow_dispatch:\njobs:\n  a:\n    runs-on: ubuntu-latest\n    if: ${{ vars.ENABLED == \'true\' }}\n    steps: []\n  b:\n    runs-on: ubuntu-latest\n    steps: []\n';
+    const parsed = parse(renderForRun(dispatchOnly, RUN)) as { on: Record<string, unknown>; jobs: Record<string, { if?: string }> };
+    assert.deepEqual(parsed.on['push'], { branches: [RUN.trackedBranch] });
+    assert.equal(parsed.jobs['a']?.if, `${DISPATCH_GUARD} && (vars.ENABLED == 'true')`);
+    assert.equal(parsed.jobs['b']?.if, DISPATCH_GUARD);
+    for (const file of [WORKFLOW_FILES.sync, WORKFLOW_FILES['pre-commit']]) {
+      const rendered = parse(renderForRun(readTemplate(file), RUN)) as { on: Record<string, unknown> };
+      assert.deepEqual(Object.keys(rendered.on), Object.keys((parse(readTemplate(file)) as { on: Record<string, unknown> }).on), file);
+      assert.ok(jobsOf(renderForRun(readTemplate(file), RUN)).every((job) => (job as { if?: string }).if === undefined), file);
+    }
+  });
+
+  it('reads the prerequisite errors the templates\' install steps report, as log lines', () => {
+    const errors = prerequisiteErrors();
+    assert.ok(errors.length >= 3, errors.join('\n'));
+    assert.ok(errors.every((error) => error.startsWith('##[error]') && !/['"]/.test(error)));
+    assert.ok(errors.some((error) => error.includes('Install Python 3 with venv support')));
+    assert.ok(errors.some((error) => error.includes('venv support is required')));
   });
 
   it('refuses a secret or variable the sandbox has no name for', () => {
