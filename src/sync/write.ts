@@ -332,8 +332,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         const written = await transformBody(transforms, change.to, splitFile(text).body);
         differs = written !== (await transformBody(tipTransforms, change.from, splitFile(textOf(previous)).body));
       } catch (error) {
-        // Left out or stopped: the write reports it, or stops before it.
-        if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError)) throw error;
+        // An upload can fail while comparing an otherwise unchanged document.
+        // Queue it for the write loop, which reports its failure per document
+        // and preserves the previous record while other documents go on.
+        if (!(error instanceof LeaveOutError) && !(error instanceof LinearError)) throw error;
         differs = true;
       }
       if (differs) merge.changes.push({ ...change, content: true });
