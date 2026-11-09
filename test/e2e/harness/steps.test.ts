@@ -29,7 +29,10 @@ import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
 import { commitAsPerson, readRunIds } from './step-helpers.ts';
 import { documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
-import { maxOverlap, unzip, waitForRun } from './workflows.ts';
+import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
+import type { WorkflowJob, WorkflowRun } from './github.ts';
+import { prerequisiteErrors } from './workflow-files.ts';
+import { parse as parseYaml } from 'yaml';
 
 const roots: string[] = [];
 const fresh = (prefix: string) => {
@@ -230,6 +233,121 @@ describe('workflows', () => {
     const run = await waitForRun(rest as never, { branch: 't/aaaaaa/main', event: 'push', after: Date.now() - 1000, headSha: 'new', pollMs: 1 });
     assert.equal(run.id, 2);
     await assert.rejects(waitForRun(rest as never, { branch: 'b', event: 'workflow_dispatch', after: 0, appearMs: 0, pollMs: 1 }), ProductError);
+  });
+
+  /** The log of a step that failed because the runner lacks a command, as GitHub writes it. */
+  const missingCommand = (command: string) => `##[group]Run ${command} install x\nshell: /usr/bin/bash -e {0}\n##[endgroup]\n/runner/_temp/a.sh: line 1: ${command}: command not found\n##[error]Process completed with exit code 127.\n`;
+  const failedRun = (id: number, event = 'push'): WorkflowRun => ({ id, event, status: 'completed', conclusion: 'failure', created_at: new Date().toISOString() });
+  const jobWith = (failedStep: string, number: number): WorkflowJob => ({
+    id: 1, name: 'sync', conclusion: 'failure', started_at: null, completed_at: null,
+    steps: [
+      { name: 'Set up job', number: 1, status: 'completed', conclusion: 'success' },
+      { name: failedStep, number, status: 'completed', conclusion: 'failure' },
+      { name: 'Sync', number: number + 1, status: 'completed', conclusion: 'skipped' },
+    ],
+  });
+
+  it('prove an environment blocker only from a failed prerequisite step whose own log shows a missing command', () => {
+    const logs = new Map([['sync/4_Install pre-commit.txt', missingCommand('pipx')]]);
+    const blocker = environmentBlocker(failedRun(7), [jobWith('Install pre-commit', 4)], logs);
+    assert.deepEqual(blocker && { step: blocker.step, cause: blocker.cause, logFile: blocker.logFile }, { step: 'Install pre-commit', cause: 'pipx: command not found (exit 127)', logFile: 'sync/4_Install pre-commit.txt' });
+    assert.match(blocker?.reason ?? '', /pipx: command not found \(exit 127\) \(push run 7\)/);
+    // The template's own prerequisite error proves it too, and only a known one does.
+    const known = prerequisiteErrors();
+    const pythonMissing = new Map([['sync/4_Install pre-commit.txt', `${known.find((error) => error.includes('Python 3'))}\n##[error]Process completed with exit code 1.\n`]]);
+    assert.match(environmentBlocker(failedRun(7), [jobWith('Install pre-commit', 4)], pythonMissing, known)?.cause ?? '', /^Install Python 3/);
+    assert.equal(environmentBlocker(failedRun(7), [jobWith('Install pre-commit', 4)], pythonMissing), undefined);
+    // Not proven: the engine's own step failed, even with the same log.
+    assert.equal(environmentBlocker(failedRun(7), [jobWith('Sync', 4)], new Map([['sync/4_Sync.txt', missingCommand('pipx')]])), undefined);
+    // Not proven: the prerequisite failed for another reason, or its log is missing.
+    assert.equal(environmentBlocker(failedRun(7), [jobWith('Install pre-commit', 4)], new Map([['sync/4_Install pre-commit.txt', 'error: network\n##[error]Process completed with exit code 1.\n']])), undefined);
+    assert.equal(environmentBlocker(failedRun(7), [jobWith('Install pre-commit', 4)], new Map()), undefined);
+    // Not a failure at all.
+    assert.equal(environmentBlocker({ ...failedRun(7), conclusion: 'success' }, [jobWith('Install pre-commit', 4)], logs), undefined);
+    // Only the first failed step counts.
+    const earlier: WorkflowJob = { ...jobWith('Install pre-commit', 4), steps: [{ name: 'Get the GitHub App token', number: 2, status: 'completed', conclusion: 'failure' }, ...jobWith('Install pre-commit', 4).steps!] };
+    assert.equal(environmentBlocker(failedRun(7), [earlier], logs), undefined);
+  });
+
+  it('wait for a workflow to be registered, and fail as the harness when it never is', async () => {
+    let calls = 0;
+    const rest = { workflowId: async () => (++calls > 2 ? 42 : undefined) };
+    assert.equal(await waitForRegistration(rest as never, 'mdbisync-initial-sync.yml', { pollMs: 1 }), 42);
+    const never = { workflowId: async () => undefined };
+    await assert.rejects(waitForRegistration(never as never, 'mdbisync-initial-sync.yml', { timeoutMs: 0, pollMs: 1 }), (error: Error) => !(error instanceof EnvBlockedError) && /not in the repository's Actions registry/.test(error.message));
+  });
+
+  /** A sandbox's Actions for one run: the workflow registry, dispatches, runs, their jobs and logs. */
+  function fakeActions(ctx: RunContext, remoteGit: Git, options: { conclusion: string; jobs: WorkflowJob[]; logs: Record<string, string>; registeredAfter?: number }) {
+    const runs: WorkflowRun[] = [];
+    const dispatched: Array<string | number> = [];
+    let registryReads = 0;
+    const logZip = zip(Object.fromEntries(Object.entries(options.logs).map(([name, text]) => [name, { data: Buffer.from(text), deflate: true }])));
+    const rest = {
+      workflowExists: async () => true,
+      workflowId: async () => (++registryReads > (options.registeredAfter ?? 0) ? 99 : undefined),
+      dispatchWorkflow: async (workflow: string | number) => {
+        dispatched.push(workflow);
+        runs.push({ id: 500 + runs.length, event: 'workflow_dispatch', status: 'completed', conclusion: options.conclusion, created_at: new Date().toISOString(), path: '.github/workflows/mdbisync-initial-sync.yml' });
+      },
+      workflowRuns: async () => {
+        // Each push to the tracked branch starts a skipped registering run of the initial sync first, then the sync's run.
+        const tip = (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
+        if (!runs.some((run) => run.event === 'push' && run.head_sha === tip)) {
+          const at = Date.now();
+          runs.push({ id: 500 + runs.length, event: 'push', status: 'completed', conclusion: 'success', created_at: new Date(at).toISOString(), head_sha: tip, path: '.github/workflows/mdbisync-initial-sync.yml' });
+          runs.push({ id: 500 + runs.length, event: 'push', status: 'completed', conclusion: options.conclusion, created_at: new Date(at + 1).toISOString(), head_sha: tip, path: '.github/workflows/mdbisync.yml' });
+        }
+        return runs;
+      },
+      request: async (_method: string, path: string) => {
+        if (/^\/actions\/runs\/\d+\/artifacts$/.test(path)) return { artifacts: [] };
+        throw new Error(`unexpected ${path}`);
+      },
+      runJobs: async () => options.jobs,
+      download: async () => logZip,
+    };
+    Object.assign(ctx.live!, { rest, githubTokenSource: 'app' });
+    return { runs, dispatched };
+  }
+
+  it('stop at a push run\'s proven environment blocker, keeping the run\'s result and evidence', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    const logs = { 'sync/4_Install pre-commit.txt': missingCommand('pipx'), 'sync/1_Set up job.txt': 'ok\n' };
+    const { runs } = fakeActions(ctx, remoteGit, { conclusion: 'failure', jobs: [jobWith('Install pre-commit', 4)], logs });
+    await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+    await assert.rejects(STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' }), (error: Error) => error instanceof EnvBlockedError && /Install pre-commit.*pipx: command not found/.test(error.message));
+    assert.equal(ctx.engine.results.length, 1, 'the failed run is the scenario\'s run');
+    assert.equal(ctx.observations.get('runs.0.exitCode'), 1);
+    const run = (ctx.observations.get('workflows.runs') as Array<{ id: number }>)[0]!;
+    assert.equal(runs.find((candidate) => candidate.id === run.id)?.path, '.github/workflows/mdbisync.yml', 'the sync\'s push run, not another workflow\'s run on the same push');
+    const dir = join(ctx.runDir, 'workflows', String(run.id));
+    assert.equal(JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).conclusion, 'failure');
+    assert.equal(JSON.parse(readFileSync(join(dir, 'blocker.json'), 'utf8')).cause, 'pipx: command not found (exit 127)');
+    assert.equal(readFileSync(join(dir, 'failed-step.txt'), 'utf8'), logs['sync/4_Install pre-commit.txt']);
+  });
+
+  it('keep an unproven failure as the run\'s result, for the scenario\'s checks', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    fakeActions(ctx, remoteGit, { conclusion: 'failure', jobs: [jobWith('Sync', 4)], logs: { 'sync/4_Sync.txt': 'Error: boom\n##[error]Process completed with exit code 1.\n' } });
+    await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+    await STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' });
+    assert.equal(ctx.observations.get('runs.0.exitCode'), 1);
+    assert.equal(ctx.observations.has('workflows.blocker'), false);
+    assert.equal(existsSync(join(ctx.runDir, 'workflows')), false);
+  });
+
+  it('dispatch the initial sync by its registry id once its push has registered it', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    // Registered already: the waiting itself is covered above, without the step's 10-second poll.
+    const { dispatched } = fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {} });
+    await STEP_ACTIONS['run.workflow']!(ctx, { event: 'workflow_dispatch', command: 'initial-sync', confirm: false, direction: 'git-to-linear' });
+    assert.deepEqual(dispatched, [99]);
+    assert.deepEqual(ctx.observations.get('workflows.installed'), ['mdbisync-initial-sync.yml', 'pre-commit.yml']);
+    const installed = await remoteGit.text(['show', `${ctx.names.trackedBranch}:.github/workflows/mdbisync-initial-sync.yml`]);
+    const on = (parseYaml(installed) as { on: Record<string, { branches?: string[] } | null> }).on;
+    assert.deepEqual(on['push'], { branches: [ctx.names.trackedBranch] }, 'registered by a push to the run\'s branch only, never the default branch');
+    assert.equal(ctx.observations.get('runs.0.exitCode'), 0);
   });
 });
 
