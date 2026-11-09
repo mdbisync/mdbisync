@@ -16,7 +16,7 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, reviewDocument, seeded
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { linearLinks, sameAsFile } from './checks.ts';
+import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios } from './spec.ts';
@@ -272,26 +272,40 @@ describe('oracles', () => {
     assert.ok(sameAsFile('---\na: 1\n---\n![a](media/a.png)\n', '![a](https://uploads.linear.app/x/one)\n', 'eng/plan.md', { hashes, uploadsByHash: uploads }));
   });
 
-  it('map links to other synchronized documents to their URLs by id, fragment and brackets kept', () => {
+  it('map links to synchronized documents to their URLs by id, as the engine writes them', () => {
     const targets = {
-      hashes: new Map([['eng/media/a.png', 'h1']]),
-      uploadsByHash: new Map([['h1', 'https://uploads.linear.app/x/one']]),
+      hashes: new Map([['eng/media/a.png', 'h1'], ['eng/notes/asset.pdf', 'h2']]),
+      uploadsByHash: new Map([['h1', 'https://uploads.linear.app/x/one'], ['h2', 'https://uploads.linear.app/x/two']]),
       ids: new Map([['eng/guide.md', { id: 'g-1' }], ['eng/notes/plan.md', { id: 'p-1' }], ['docs/start.md', { id: 's-1' }]]),
       documentUrlBase: 'https://linear.app/acme/document',
     };
     const text = [
       'See [the guide](../guide.md#setup), [start](</docs/start.md>) and [self](plan.md#top).',
       'Not synced: [data](../data.csv). External: [site](https://example.com). Image: ![a](../media/a.png).',
+      'Odd labels: [a\\]b](<asset.pdf>) and [![badge](../media/a.png)](../guide.md).',
+      'Code stays: `[x](../guide.md)`',
+      '',
+      '```text',
+      '[y](../guide.md)',
+      '```',
       '',
       '[ref]: ../guide.md',
     ].join('\n');
     assert.equal(linearLinks(text, 'eng/notes/plan.md', targets), [
-      'See [the guide](https://linear.app/acme/document/g-1#setup), [start](<https://linear.app/acme/document/s-1>) and [self](plan.md#top).',
+      'See [the guide](<https://linear.app/acme/document/g-1#setup>), [start](<https://linear.app/acme/document/s-1>) and [self](<https://linear.app/acme/document/p-1#top>).',
       'Not synced: [data](../data.csv). External: [site](https://example.com). Image: ![a](https://uploads.linear.app/x/one).',
+      'Odd labels: [a\\]b](<https://uploads.linear.app/x/two>) and [![badge](https://uploads.linear.app/x/one)](<https://linear.app/acme/document/g-1>).',
+      'Code stays: `[x](../guide.md)`',
       '',
-      '[ref]: https://linear.app/acme/document/g-1',
+      '```text',
+      '[y](../guide.md)',
+      '```',
+      '',
+      '[ref]: <https://linear.app/acme/document/g-1>',
     ].join('\n'));
-    assert.deepEqual(documentLinks('[a](https://linear.app/acme/document/g-1#setup) [b](<https://linear.app/acme/document/s-1>) [c](https://linear.app/other/document/x)', targets.documentUrlBase), ['g-1#setup', 's-1']);
+    assert.deepEqual(documentLinks('[a](https://linear.app/acme/document/g-1#setup) [b](<https://linear.app/acme/document/s-1>) [c](https://linear.app/other/document/x) `[d](https://linear.app/acme/document/z)`', targets.documentUrlBase), ['g-1#setup', 's-1']);
+    // The way back gives relative links again.
+    assert.equal(gitLinks('[g](<https://linear.app/acme/document/g-1#setup>) ![a](https://uploads.linear.app/x/one)', 'eng/notes/plan.md', { ...targets, uploads: new Map([['https://uploads.linear.app/x/one', 'eng/media/a.png']]) }), '[g](<../guide.md#setup>) ![a](../media/a.png)');
   });
 
   it('leave a document deleted for good out of every list the proxy passes on', () => {
@@ -684,7 +698,7 @@ describe('subjects', () => {
     await git.run(['commit', '--quiet', '--all', '-m', 'Link the notes']);
     await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
     for (const file of ctx.live?.manifest.files ?? []) if (file.path === 'eng/platform/plan.md') file.group = 'links';
-    (linear.documents.get(plan) as LinearDocument).content = `# Plan\n\nSee [notes](https://linear.app/test/document/${notes}#dates) and [data](data.csv).\n`;
+    (linear.documents.get(plan) as LinearDocument).content = `# Plan\n\nSee [notes](<https://linear.app/test/document/${notes}#dates>) and [data](data.csv).\n`;
     refreshView(ctx);
     assert.deepEqual(await resolveSubject(ctx, 'documents.syncedLinks'), await resolveSubject(ctx, 'expected.linearUrls'));
     assert.deepEqual((await resolveSubject(ctx, 'documents.syncedLinks')).value, new Map([['eng/platform/plan.md', [`${notes}#dates`]]]));
@@ -693,7 +707,8 @@ describe('subjects', () => {
     assert.deepEqual(await resolveSubject(ctx, 'documents.unsyncedLinks'), await resolveSubject(ctx, 'input.unsyncedLinks'));
     const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
     const sides = await readSides(ctx);
-    assert.deepEqual((await INVARIANT_CHECKS.I1(ctx, async () => sides)).detail?.includes('plan.md') ?? false, false);
+    assert.ok(sameAsFile(sides.files.get('eng/platform/plan.md') as string, linear.documents.get(plan)?.content ?? '', 'eng/platform/plan.md', sides));
+    void INVARIANT_CHECKS;
     // A fragment lost on the way fails the anchor assertion.
     (linear.documents.get(plan) as LinearDocument).content = `# Plan\n\nSee [notes](https://linear.app/test/document/${notes}) and [data](data.csv).\n`;
     refreshView(ctx);

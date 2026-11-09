@@ -25,7 +25,7 @@ import type { LinearDocument } from '../../../src/linear/index.ts';
 import { listTree, readBlobs, readIds, readUploads, type Git } from '../../../src/state/index.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readFixture, readOptional } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, linearLinks, lfsSize, lostEdits, mapImageLinks, readSides, sameAsFile, snapshotRefs, stripFrontMatter, titleOf, type Sides } from './checks.ts';
+import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, snapshotRefs, stripFrontMatter, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { owningFolder, type Folder } from './corpus.ts';
@@ -157,7 +157,7 @@ function documentBody(view: View, path: string, document: LinearDocument | undef
   if (document === undefined) return null;
   const file = view.files.get(path);
   if (file !== undefined && sameAsFile(file, document.content ?? '', path, view)) return stripFrontMatter(file);
-  return mapImageLinks(document.content ?? '', view.uploads, path);
+  return gitLinks(document.content ?? '', path, view);
 }
 
 function fileBody(view: View, path: string): string | null {
@@ -308,25 +308,24 @@ function ownResults(ctx: RunContext) {
   return ctx.engine.results.slice(ctx.engine.setupRuns, end);
 }
 
-/** Relative link targets in Markdown (outside code), without anchors' titles. */
+/** Relative link and image destinations of a Markdown body (as the parser reads them; nothing in code). */
 export function relativeLinks(text: string): string[] {
-  const withoutCode = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
-  return [...withoutCode.matchAll(/\]\(\s*<?([^)\s>]+)>?/g)].map((match) => match[1] as string).filter((link) => !/^[a-z][a-z0-9+.-]*:/i.test(link) && !link.startsWith('#'));
+  return linkDestinations(text).map((destination) => destination.url).filter((url) => linkedFile('', url) !== undefined);
 }
 
 function imageLinks(text: string): string[] {
-  return [...text.matchAll(/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?/g)].map((match) => match[1] as string);
+  return linkDestinations(text).filter((destination) => destination.image).map((destination) => destination.url);
 }
 
+/** The repository file a link points to, by the same rule as the convergence check (empty when none). */
 function resolveLink(fromPath: string, link: string): string {
-  return posix.normalize(posix.join(posix.dirname(fromPath), decodeURI(link.split('#')[0] as string)));
+  return linkedFile(fromPath, link)?.path ?? '';
 }
 
-/** Slug ids of Linear document URLs a text links to. */
-/** Links to documents of the workspace in a text, as `<id>` or `<id>#<fragment>`. */
+/** Links (not images) to documents of the workspace in a body, as `<id>` or `<id>#<fragment>`, in text order. */
 export function documentLinks(text: string, base: string): string[] {
-  const escaped = base.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-  return [...text.matchAll(new RegExp(`${escaped}/([A-Za-z0-9-]+)(#[^\\s)>]*)?`, 'g'))].map((match) => `${match[1] as string}${match[2] ?? ''}`);
+  const prefix = `${base}/`;
+  return linkDestinations(text).filter((destination) => !destination.image && destination.url.startsWith(prefix)).map((destination) => destination.url.slice(prefix.length));
 }
 
 function manifestOf(ctx: RunContext) {
@@ -649,13 +648,13 @@ export const SUBJECTS: Record<string, Compute> = {
   'documents.supportedAnchorsPreserved': async (env) => {
     const view = await env.view();
     let anchored = 0;
-    for (const [path, text] of view.files) {
+    for (const path of groupPaths(env.ctx, 'links')) {
       const id = view.ids.get(path)?.id;
-      const actual = new Set(documentLinks(id === undefined ? '' : (view.documents.get(id)?.content ?? ''), view.documentUrlBase));
-      for (const expected of documentLinks(linearLinks(stripFrontMatter(text), path, view), view.documentUrlBase).filter((link) => link.includes('#'))) {
-        anchored += 1;
-        if (!actual.has(expected)) return false;
-      }
+      // Every occurrence counts: a fragment kept on one of two equal links does not cover the other.
+      const actual = documentLinks(id === undefined ? '' : (view.documents.get(id)?.content ?? ''), view.documentUrlBase).filter((link) => link.includes('#'));
+      const expected = documentLinks(linearLinks(stripFrontMatter(view.files.get(path) ?? ''), path, view), view.documentUrlBase).filter((link) => link.includes('#'));
+      anchored += expected.length;
+      if (JSON.stringify(sorted(actual)) !== JSON.stringify(sorted(expected))) return false;
     }
     if (anchored === 0) throw new Error('the slice has no link with a fragment to another synchronized document');
     return true;
