@@ -27,6 +27,8 @@ const PROJECT_WORDS = [
   'River survey',
   'Studio handbook',
   'Workshop agenda',
+  'Orchard calendar',
+  'Lighthouse journal',
 ] as const;
 
 /**
