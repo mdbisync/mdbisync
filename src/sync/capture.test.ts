@@ -213,6 +213,78 @@ describe('capture from Linear', () => {
     assert.equal((await fixture.remote.run(['cat-file', '-e', `${stateRef(config, 'linear')}:docs/plan.md`], { okCodes: [0, 128] })).code, 128);
   });
 
+  for (const change of ['trash', 'outside', 'rename', 'move'] as const) {
+    it(`preserves folder annotations when its README document undergoes ${change}`, async () => {
+      const readme = {id:'readme', title:'README', projectId:'project-api', content:'# Notes\n', createdAt:'2026-01-02T00:00:00Z'};
+      world.linear.documents.push(readme);
+      const ids = await readIds(context.git, context.fetched.state.ids);
+      ids.set('docs/README.md', {id:readme.id});
+      const tip = await commitIds(context.git, context.fetched.state.ids, ids, IDENTITY);
+      const carrier = TREE['docs/README.md'].replace('---\n', '---\ncategory: work\n');
+      const linearTip = await commitTree(context.git, {parents:[context.fetched.state.linear!], base:context.fetched.state.linear!, changes:new Map([['docs/README.md', carrier]]), identity:IDENTITY, message:'Keep document metadata'});
+      assert.equal((await pushAtomic(context.git, config, [
+        {ref:stateRef(config,'ids'), expected:context.fetched.state.ids, next:tip},
+        {ref:stateRef(config,'linear'), expected:context.fetched.state.linear, next:linearTip},
+      ])).ok, true);
+      await refresh();
+      if (change === 'trash') Object.assign(readme, {trashed:true});
+      if (change === 'outside') readme.projectId = 'outside';
+      if (change === 'rename') readme.title = 'sub/README';
+      if (change === 'move') readme.projectId = 'project-handbook';
+      const captured = await run();
+      assert.equal(captured.ok, true);
+      assert.equal(await text('docs/README.md'), carrier.replace('# Notes\n', ''));
+      const mapping = await loadMapping(context.git, captured.state.linear!);
+      assert.ok(mapping.documents.some((file) => file.path === 'docs/plan.md'));
+      assert.equal(mapping.problems.length, 0);
+      const capturedIds = await readIds(context.git, captured.state.ids);
+      assert.equal(capturedIds.has('docs/README.md'), false);
+      const moved = [...capturedIds].find(([,entry]) => entry.id === readme.id);
+      if (change === 'rename' || change === 'move') {
+        assert.ok(moved);
+        assert.ok((await text(moved[0])).includes('category: work'));
+        assert.ok(!(await text(moved[0])).includes('linear-team:'));
+        assert.ok(!(await text(moved[0])).includes('linear-project:'));
+      } else assert.equal(moved, undefined);
+      await fixture.seed({'docs/next.md':'A later tracked edit.\n'});
+      await refresh();
+      context.mapping = await loadMapping(context.git, context.fetched.tracked);
+      const written = await writeTrackedToLinear(context, {config, state:captured.state});
+      assert.equal(written.trashed.includes('docs/plan.md'), false);
+      assert.equal(world.linear.documents.find((doc) => doc.id === 'plan')?.trashed, undefined);
+      assert.equal(world.linear.documents.filter((doc) => doc.projectId === 'project-api' && doc.title === 'README' && !('trashed' in doc && doc.trashed)).length, 0, 'the annotation carrier must not recreate its removed document');
+    });
+  }
+
+  it('reserves an identity-only blocked path before allocating an earlier same-title document', async () => {
+    const blocked = {id:'z-blocked',title:'duplicate',projectId:'project-api',content:'Rejected body.\n',createdAt:'2026-01-03T00:00:00Z'};
+    world.linear.documents.push(blocked);
+    const security = {configured:true, check:async (files:ReadonlyMap<string, Buffer|string>) => [...files.values()].some((body) => String(body).includes('Rejected body.')) ? [{hook:'secret-check',line:1}] : []};
+    const first = await capture(context, {config, state:context.fetched.state, security});
+    assert.equal(first.blocked[0]?.path, 'docs/duplicate.md');
+    assert.equal((await fixture.remote.run(['cat-file','-e',`${first.state.linear}:docs/duplicate.md`], {okCodes:[0,128]})).code, 128);
+    await refresh();
+    world.linear.documents.push({id:'a-earlier',title:'duplicate',projectId:'project-api',content:'Accepted body.\n',createdAt:'2026-01-04T00:00:00Z'});
+    const second = await capture(context, {config, state:context.fetched.state, security});
+    assert.equal(second.ok, true);
+    const ids = await readIds(context.git, second.state.ids);
+    assert.equal(ids.get('docs/duplicate.md')?.id, blocked.id);
+    assert.ok(ids.get('docs/duplicate.md')?.saved);
+    const accepted = [...ids].find(([,entry]) => entry.id === 'a-earlier');
+    assert.ok(accepted);
+    assert.notEqual(accepted[0], 'docs/duplicate.md');
+    assert.equal(await text(accepted[0]), 'Accepted body.\n');
+    assert.equal(world.linear.documents.find((doc) => doc.id === blocked.id)?.icon, 'Cross');
+    await refresh();
+    Object.assign(blocked, {content:'Corrected body.\n',updatedAt:'2026-03-01T00:00:00Z'});
+    const third = await capture(context, {config, state:context.fetched.state, security});
+    const finalIds = await readIds(context.git, third.state.ids);
+    assert.equal(finalIds.get('docs/duplicate.md')?.id, blocked.id);
+    assert.equal(finalIds.get(accepted[0])?.id, 'a-earlier');
+    assert.equal(finalIds.get('docs/duplicate.md')?.saved, undefined);
+    assert.equal(await text('docs/duplicate.md'), 'Corrected body.\n');
+  });
+
   it('blocks a secret before any object write, saves appearance and restores it on correction', async () => {
     await fixture.seed({
       '.pre-commit-config.yaml': `repos:
