@@ -1651,21 +1651,27 @@ function pathsNamed(value: unknown): string[] {
  * - `linear`: documents the run created, overwrote, moved, restored or
  *   trashed in Linear, each path once, and never fewer than the report's own
  *   `writtenDocuments` and `writtenCount`.
- * - `git`: the state the run pushed: a capture that finished and took
- *   Linear's changes (a refused capture lists its candidates but pushed
- *   nothing), the `linear` record (a sync's merge or ordinary commit, an
- *   initial sync's record that moved), an initial sync's progress pushes, a
- *   moved sync branch. A run that reports `changed` while it names no write
- *   moved a state ref the report does not list (the `ids` or `uploads` ref
- *   alone): that counts as one.
+ * - `git`: the state the run pushed: a capture that lists Linear's changes,
+ *   the `linear` record (a sync's merge or ordinary commit, an initial
+ *   sync's record that moved), an initial sync's progress pushes, a moved
+ *   sync branch. A run that reports `changed` while it names no write moved
+ *   a state ref the report does not list (the `ids` or `uploads` ref alone):
+ *   that counts as one.
+ *
+ * A capture that did not finish (`ok: false`) still counts when it lists
+ * changes. One that published them and then stopped (a lost lease while it
+ * saved document marks, a Linear failure after the push) keeps its lists;
+ * one whose first push was refused keeps them too, though it pushed nothing.
+ * The report does not tell the two apart, so both count: an expected-zero
+ * assertion may then fail on a refused push, but never passes on a
+ * published one. (A capture that failed before it published clears its
+ * lists.)
  *
  * A security-blocked document is not counted. The capture lists it on every
  * run while it stays blocked, and the run reports `changed` for it, also
  * when its mark is already in place and nothing is written; the report does
  * not say whether this run wrote the mark. So `changed` does not count for a
- * run that lists a blocked document, nor for a sync whose capture did not
- * finish: that run stops after the capture, and its `changed` only says the
- * capture had candidates.
+ * run that lists a blocked document.
  * - `pullRequests`: pull requests the run opened, updated, merged or closed.
  * - `total`: their sum.
  *
@@ -1701,10 +1707,8 @@ export function runWrites(report: Record<string, unknown>): RunWrites {
   const reported = [report['writtenDocuments'], report['writtenCount']].filter((value): value is number => typeof value === 'number');
   const linear = Math.max(documents.size, ...reported);
 
-  const captured = capture?.['ok'] === true && namedList(capture['changed']).length + namedList(capture['removed']).length > 0;
+  const captured = namedList(capture?.['changed']).length + namedList(capture?.['removed']).length > 0;
   const blocked = namedList(capture?.['blocked']).length > 0;
-  // A sync whose capture did not finish ends there: its `changed` only says the capture had candidates.
-  const refused = capture !== null && capture['ok'] !== true;
   const initialRecord = recordOf(report['record']);
   const reverseRecord = recordOf(reverse?.['record']);
   const progress = (value: unknown) => (typeof value === 'number' ? value : 0);
@@ -1725,7 +1729,7 @@ export function runWrites(report: Record<string, unknown>): RunWrites {
     (reversePullRequest?.['opened'] === true || reversePullRequest?.['updated'] === true ? 1 : 0) +
     (typeof reverse?.['closedPullRequest'] === 'number' ? 1 : 0);
 
-  const git = named === 0 && linear === 0 && pullRequests === 0 && report['changed'] === true && !blocked && !refused ? 1 : named;
+  const git = named === 0 && linear === 0 && pullRequests === 0 && report['changed'] === true && !blocked ? 1 : named;
   return { linear, git, pullRequests, total: linear + git + pullRequests };
 }
 

@@ -122,13 +122,19 @@ describe('a run\'s writes, from its report', () => {
     assert.deepEqual(runWrites(blocked), { linear: 0, git: 0, pullRequests: 0, total: 0 });
   });
 
-  it('counts the capture only when it finished, not a refused one with its candidates', () => {
+  it('counts a capture that lists changes also when it did not finish', () => {
     const opened = runReport('sync-pull-request-opened');
+    const capture = opened['capture'] as Record<string, unknown>;
     assert.equal(runWrites({ ...opened, pullRequest: null }).git, 1);
-    const refused: Record<string, unknown> = { ...opened, ok: false, code: 'state-moved', pullRequest: null, sync: null, capture: { ...(opened['capture'] as object), ok: false } };
-    // The engine reports changed for its candidates, but the run stopped at the refused push.
-    assert.equal(refused['changed'], true);
-    assert.deepEqual(runWrites(refused), { linear: 0, git: 0, pullRequests: 0, total: 0 });
+    // Published, then a lost lease while it saved marks, or a Linear failure: it keeps its lists, and so does a
+    // capture whose first push was refused. The report does not tell them apart, so neither passes as zero writes.
+    for (const code of ['state-moved', 'stopped', 'linear-failed']) {
+      const unfinished: Record<string, unknown> = { ...opened, ok: false, code, pullRequest: null, sync: null, capture: { ...capture, ok: false } };
+      assert.deepEqual(runWrites(unfinished), { linear: 0, git: 1, pullRequests: 0, total: 1 }, code);
+    }
+    // One that failed before it published cleared its lists, and the run reports no change.
+    const cleared = { ...opened, ok: false, changed: false, code: 'linear-failed', pullRequest: null, sync: null, capture: { ...capture, ok: false, changed: [] } };
+    assert.deepEqual(runWrites(cleared), { linear: 0, git: 0, pullRequests: 0, total: 0 });
   });
 
   it('counts a merge and a closed pull request', () => {
