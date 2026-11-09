@@ -1,10 +1,11 @@
 # How the sync works
 
-After the initial sync, the sync workflow keeps git and Linear equal: an
-edit made on either side reaches the other side by itself. This page follows
-one run step by step, shows how a change travels each way, what people see
-in GitHub and in Linear, how long it takes, and what every line of a run's
-summary means.
+After the initial sync (from [git to Linear](initial-sync-git-to-linear.md)
+or from [Linear to git](initial-sync-linear-to-git.md)), the sync workflow
+keeps git and Linear equal: an edit made on either side reaches the other
+side by itself. This page follows one run step by step, shows how a change
+travels each way, what people see in GitHub and in Linear, how long it
+takes, and what every line of a run's summary means.
 
 In this page, "git" means the tracked branch (`main` by default), "the sync
 pull request" is the one pull request the sync opens and merges itself, and

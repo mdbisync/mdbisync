@@ -23,8 +23,8 @@ map to Linear and what every run checks is in [usage.md](usage.md).
   holds the version you trust.
 
 When git holds the version to keep, use `direction: git-to-linear` instead
-([usage.md](usage.md#initial-sync-from-git-to-linear)): it makes Linear equal
-to git and moves Linear-only documents to Linear's trash.
+([initial-sync-git-to-linear.md](initial-sync-git-to-linear.md)): it makes
+Linear equal to git and moves Linear-only documents to Linear's trash.
 
 ## Before you start
 

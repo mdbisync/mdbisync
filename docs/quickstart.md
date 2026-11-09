@@ -140,9 +140,10 @@ The sync needs a starting state, which initial sync creates. Copy
 the Actions tab, with a direction: `git-to-linear` makes Linear equal to
 git, `linear-to-git` opens a pull request that makes git equal to Linear.
 The first run is a dry run that lists what would change; run it again with
-`confirm` to write ([initial sync from git to
-Linear](usage.md#initial-sync-from-git-to-linear), [from Linear to
-git](usage.md#initial-sync-from-linear-to-git)).
+`confirm` to write. Each direction has its own page, with the steps and
+warnings: [initial sync from git to
+Linear](initial-sync-git-to-linear.md) and [from Linear to
+git](initial-sync-linear-to-git.md).
 
 The sync stops here until that is done: when no initial sync has run, when
 one stopped before it finished (run it again with the same inputs), or
