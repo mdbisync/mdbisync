@@ -269,15 +269,24 @@ async function parents(git: Git, commit: string): Promise<string[]> {
 /**
  * A path as specs write it: a run's project folder becomes `project/`
  * (specs name destinations by role, since each run has its own folders).
- * When a step moved the document out of its project, only that source
- * folder becomes `project/`: a path in any other project keeps its real
- * folder, so a document that stayed or went to the wrong project does not
- * read the same as its destination.
  */
 export function symbolicPath(ctx: RunContext, path: string): string {
-  const source = ctx.observations.get(MOVE_SOURCE_FOLDER) as string | undefined;
-  const folder = projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`) && (source === undefined || candidate.folder === source));
+  const folder = projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`));
   return folder === undefined ? path : `project/${path.slice(folder.folder.length + 1)}`;
+}
+
+/**
+ * Where a document a step moved across projects is, in the form its moved
+ * path and its recorded destination share: only the project it left reads
+ * as `project/`; a path in any other project keeps its real folder, so a
+ * document that stayed, or went to the wrong project, does not read the same
+ * as its destination. Without a cross-project move, the symbolic path.
+ */
+function movedPath(ctx: RunContext, path: string): string {
+  const source = ctx.observations.get(MOVE_SOURCE_FOLDER) as string | undefined;
+  if (source === undefined) return symbolicPath(ctx, path);
+  const folder = projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`));
+  return folder?.folder === source ? symbolicPath(ctx, path) : path;
 }
 
 /** Brings commits into the person's clone; returns the ones it has afterwards. */
@@ -891,7 +900,7 @@ export const SUBJECTS: Record<string, Compute> = {
     return new Map([...view.files.keys()].map((path) => [path, frontMatter(files.get(path)?.toString('utf8'))]));
   },
   'tracked.documentPath': async (env) => symbolicPath(env.ctx, (await target(env)).path),
-  'tracked.movedPath': async (env) => symbolicPath(env.ctx, (await target(env)).path),
+  'tracked.movedPath': async (env) => movedPath(env.ctx, (await target(env)).path),
   'tracked.createdPath': async (env) => {
     const view = await env.view();
     const id = observed(env.ctx, 'linear.created') as string;
@@ -1452,7 +1461,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const { documents, kept } = reverseSides(env.ctx, view);
     return sorted(new Set([...view.files.keys(), ...documents.keys()].filter((path) => !kept.has(path))));
   },
-  'expected.destinationPath': normalizedObservation('expected.destinationPath', (path, env) => symbolicPath(env.ctx, path as string)),
+  'expected.destinationPath': normalizedObservation('expected.destinationPath', (path, env) => movedPath(env.ctx, path as string)),
   'setup.requiredChecks': async () => [...REQUIRED_SETUP_CHECKS],
   'fixture.rule': async (env) => observed(env.ctx, 'fixture.rule'),
   // Which Linear-format hook the scratch repository ran: `published` (the corpus's pinned release) or `source`.

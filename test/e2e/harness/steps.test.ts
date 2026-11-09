@@ -17,7 +17,7 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { compare, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { assertionHolds, compare, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
@@ -1339,10 +1339,7 @@ describe('linear executors', () => {
     const held = new Map<string, boolean>();
     for (const assertion of scenario.checks.assertions) {
       if (subjects !== undefined && !subjects.includes(assertion.subject)) continue;
-      const actual = await resolveSubject(ctx, assertion.subject);
-      assert.ok(actual.known, assertion.subject);
-      const expected = assertion.operator === 'same-as' ? (await resolveSubject(ctx, String(assertion.expected))).value : assertion.expected;
-      held.set(assertion.subject, compare(assertion.operator, actual.value, expected));
+      held.set(assertion.subject, await assertionHolds(ctx, assertion));
     }
     return held;
   }
@@ -1363,6 +1360,8 @@ describe('linear executors', () => {
     await landAt('docs/handbook/plan.md');
     assert.deepEqual(await resolveSubject(ctx, 'tracked.movedPath'), { known: true, value: 'docs/handbook/plan.md' });
     assert.deepEqual(await scenarioAssertions(ctx, 'L2-25'), new Map([['tracked.movedPath', true]]));
+    // Other path subjects keep naming every project folder by its role.
+    assert.deepEqual(await resolveSubject(ctx, 'tracked.documentPath'), { known: true, value: 'project/plan.md' });
     // A document that stayed in its project reads `project/plan.md`, not the destination.
     await landAt('eng/platform/plan.md');
     assert.deepEqual(await resolveSubject(ctx, 'tracked.movedPath'), { known: true, value: 'project/plan.md' });

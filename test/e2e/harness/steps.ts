@@ -1166,7 +1166,7 @@ const LINEAR: Record<string, Executor> = {
     if (own === undefined || other === undefined || project === undefined) throw new EnvBlockedError('the slice needs a document in a project and a second project');
     await world.editors[editorOf(args)].updateDocument(id, { projectId: project.id });
     ctx.observations.set(MOVE_SOURCE_FOLDER, own.folder);
-    ctx.observations.set('expected.destinationPath', `${other.folder}${path.slice(own.folder.length)}`);
+    ctx.observations.set('expected.destinationPath', [other.folder, path.slice(own.folder.length + 1)].filter((part) => part !== '').join('/'));
   },
   'linear.metadata': async (ctx, args) => {
     const world = live(ctx);
