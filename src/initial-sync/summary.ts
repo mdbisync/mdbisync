@@ -113,10 +113,10 @@ export function renderConfirmed(plan: InitialSyncPlan, result: ConfirmedResult):
   table('Moved to trash', ['Path'], result.trashed.map((path) => [path]));
   table(
     'Left out',
-    ['Path', 'Rules', 'Lines', 'Collides with'],
+    ['Path', 'Rules', 'Lines', 'Collides with, or the files'],
     [
       ...plan.leftOut.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? []).join(', ')]),
-      ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, '', '']),
+      ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, '', (entry.files ?? []).join(', ')]),
     ],
   );
   if (result.record !== null && result.record.reformatted.length > 0) {

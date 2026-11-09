@@ -143,7 +143,7 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       }
       lfs ??= await lfsReader(git, options.config.remote);
       const read = await lfs(pointer, target);
-      if (!read.ok) throw new LeaveOutError(UPLOAD_UNREADABLE, `${target} cannot be read: ${read.reason}`);
+      if (!read.ok) throw new LeaveOutError(UPLOAD_UNREADABLE, `${target} cannot be read: ${read.reason}`, [target]);
       contents.set(hash, read.content);
     }
     for (const [hash, target] of byHash) {
@@ -171,11 +171,9 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       await hashFiles(context.git, fileLinks.map((link) => link.target));
 
       // Check every file first, so a document left out uploads nothing.
-      for (const link of fileLinks) {
-        const file = linked.get(link.target) as LinkedFile;
-        if (file.size > limit) {
-          throw new LeaveOutError(UPLOAD_TOO_LARGE, `${link.target} has ${file.size} bytes, over the upload limit of ${limit}`);
-        }
+      const oversize = [...new Set(fileLinks.map((link) => link.target))].filter((target) => (linked.get(target) as LinkedFile).size > limit);
+      if (oversize.length > 0) {
+        throw new LeaveOutError(UPLOAD_TOO_LARGE, `${oversize.join(', ')}: over the upload limit of ${limit} bytes`, oversize);
       }
       await uploadMissing(fileLinks.map((link) => link.target));
       const { uploads } = context;

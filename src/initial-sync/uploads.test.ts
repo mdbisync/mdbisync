@@ -141,12 +141,13 @@ describe('uploads of linked files in an initial sync', () => {
 
     // A file over the upload limit leaves its document out, unread and not uploaded; so does an LFS object that is missing.
     assert.deepEqual(report.initialSync?.leftOutAtWrite, [
-      { path: 'eng/notes/big.md', rule: 'upload-too-large' },
-      { path: 'eng/notes/lost.md', rule: 'upload-unreadable' },
+      { path: 'eng/notes/big.md', rule: 'upload-too-large', files: ['eng/media/huge.png'] },
+      { path: 'eng/notes/lost.md', rule: 'upload-unreadable', files: ['eng/notes/lost.png'] },
     ]);
+    assert.deepEqual(report.oversizeFiles, ['eng/media/huge.png']);
     assert.equal(document(world, 'big'), undefined);
     assert.equal(document(world, 'lost'), undefined);
-    assert.match(summary, /\| eng\/notes\/big\.md \| upload-too-large \|/);
+    assert.match(summary, /\| eng\/notes\/big\.md \| upload-too-large \|  \| eng\/media\/huge\.png \|/);
     assert.match(summary, /\| eng\/notes\/lost\.md \| upload-unreadable \|/);
     assert.equal(await countLocalLfsObjects(new Git(cwd)), 2, 'only the diagram and the report are downloaded');
   });
