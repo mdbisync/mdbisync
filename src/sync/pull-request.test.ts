@@ -15,6 +15,7 @@ import { type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_A
 import { INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
+import { CHECK_NAME } from '../../test/corpus/check-workflow.ts';
 
 const CANARY = 'kx-3c9d1e72';
 const PRE_COMMIT = `repos:
@@ -247,22 +248,74 @@ describe('sync: the sync pull request', () => {
     assert.match(await show('refs/heads/main:combined/guide.md'), /step by step/);
   });
 
-  it('a check that fails on the sync pull request is a setup error; the pull request is not merged', async () => {
+  it('L5-17: a failed check leaves the pull request open and Linear untouched, then merges after repair', async () => {
     await editInLinear('eng/notes/plan.md', `# Plan\n\nA new step. ${CANARY}\n`);
     await sync();
     checksOn(await rev(SYNC_BRANCH), [
       { name: 'lint', status: 'completed', conclusion: 'success' },
-      { name: 'secrets', status: 'completed', conclusion: 'failure' },
+      { name: CHECK_NAME, status: 'completed', conclusion: 'failure' },
       { name: 'build', status: 'in_progress' },
     ]);
+    // A tracked edit would write to Linear if the failed check did not stop
+    // the write step. It must remain pending until the check is repaired.
+    const path = 'combined/guide.md';
+    const content = `# Guide\n\nA pending tracked edit. ${CANARY}\n`;
+    const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], {input:content});
+    const commit = await commitFile(start, path, blob);
+    await fixture.remote.run(['update-ref', 'refs/heads/main', commit, start]);
+    start = commit;
+    const before = structuredClone(world.linear.documents);
     const failed = await sync();
     assert.equal(failed.result.exitCode, SETUP_FAILED_EXIT_CODE, failed.result.stderr);
     assert.match(failed.result.stderr, /setup error \(check-failed\)/);
-    assert.match(failed.summary, /Setup error: a check failed on the sync pull request \[#1\]\(.*\): `secrets`/);
+    assert.match(failed.summary, /Setup error: a check failed on the sync pull request \[#1\]\(.*\): `format`/);
+    assert.match(failed.summary, /writes no tracked-branch changes to Linear until the checks pass/);
+    assert.match(failed.summary, /rerun the failed check/);
     assert.equal(failed.report.pullRequest?.code, 'check-failed');
     assert.deepEqual(failed.writes, []);
     assert.equal(world.github.pullRequests[0]?.merged, false);
+    assert.equal(openPullRequests().length, 1);
+    assert.deepEqual(world.linear.documents, before);
+    assert.equal(failed.report.sync, null);
     assert.equal(await rev('refs/heads/main'), start);
+    checksOn(await rev(SYNC_BRANCH), [{name:CHECK_NAME, status:'completed', conclusion:'success'}]);
+    const repaired = await sync();
+    assert.equal(repaired.result.exitCode, 0, repaired.result.stderr);
+    assert.ok(repaired.report.pullRequest?.merged);
+    assert.equal(world.github.pullRequests.length, 1);
+    assert.equal(openPullRequests().length, 0);
+    assert.equal((await documentOf(path)).content, content);
+    assert.match(await show('refs/heads/main:eng/notes/plan.md'), /A new step/);
+  });
+
+  it('L5-22: captures a huge Linear document byte for byte, warns, and never writes an oversized git edit back', async () => {
+    const path = 'eng/notes/large.md';
+    const content = `${CANARY}\n\n${'a'.repeat(260_000)}\n`;
+    world.linear.documents.push({id:'large', title:'large', content, projectId:'project-api', createdAt:'2026-02-01T00:00:00Z'});
+    const before = structuredClone(world.linear.documents);
+    const captured = await sync();
+    assert.equal(captured.result.exitCode, 0, captured.result.stderr);
+    assert.equal(await show(`refs/mdbisync/linear:${path}`), content);
+    assert.deepEqual(captured.report.capture?.writeBackWarnings, [{path, code:'linear-content-too-large-to-write-back', length:content.length, limit:250_000}]);
+    assert.match(captured.summary, /Linear will not accept it back if it is changed in git/);
+    assert.match(captured.summary, /eng\/notes\/large\.md/);
+    assert.deepEqual(captured.writes, ['POST /pulls']);
+    checksOn(await rev(SYNC_BRANCH), [{name:CHECK_NAME, status:'completed', conclusion:'success'}]);
+    const merged = await sync();
+    assert.equal(merged.result.exitCode, 0, merged.result.stderr);
+    assert.equal(await show(`refs/heads/main:${path}`), content);
+    assert.deepEqual(merged.writes, ['PUT /pulls/1/merge']);
+    assert.deepEqual(world.linear.documents, before);
+
+    const base = await rev('refs/heads/main');
+    const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], {input:content + 'Another paragraph.\n'});
+    start = await commitFile(base, path, blob);
+    await fixture.remote.run(['update-ref', 'refs/heads/main', start, base]);
+    const edited = await sync();
+    assert.equal(edited.result.exitCode, 0, edited.result.stderr);
+    assert.ok(edited.report.sync?.leftOut.some((entry) => entry.path === path && entry.rules.includes('content-too-long')));
+    assert.deepEqual(edited.writes, []);
+    assert.deepEqual(world.linear.documents, before);
   });
 
   it('the GitHub Action fails on a failed check too, with the code as its output', async () => {
