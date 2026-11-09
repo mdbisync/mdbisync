@@ -11,7 +11,7 @@ import { checkpoint, CHECKPOINTS, HOOKS_DIR_ENV, HOOKS_ENV, hooksDir, testStopAf
 import { CheckpointControl } from './checkpoints.ts';
 import { annotatedFolders, buildRunTree, readAnnotation } from './corpus.ts';
 import { CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
-import { engineInputs, inputEnv, runEngine, startEngine } from './engine.ts';
+import { engineEnv, engineInputs, inputEnv, runEngine, startEngine } from './engine.ts';
 import { operationOf, startFaultProxy, writeApplied, writeError, writeFields } from './fault-proxy.ts';
 import { runNames } from './isolation.ts';
 import { Sandbox } from './sandbox.ts';
@@ -99,6 +99,18 @@ describe('engine driver', () => {
     assert.equal(env['MDBISYNC_DIRECTION'], 'git-to-linear');
     assert.equal(env['MDBISYNC_CONFIRM'], 'true');
     assert.equal(env['MDBISYNC_MERGE_GRACE_SECONDS'], '0');
+  });
+
+  it('passes a run\'s positive merge grace, never a silent default', () => {
+    const call = {
+      command: 'sync' as const, names: runNames('4f1a9c'), cwd: '/', repository: 'o/r',
+      hooksDir: '/h', reportFile: '/r.json', summaryFile: '/s.md', linearUrl: 'http://127.0.0.1:1',
+      credentials: { linearClientId: 'id', linearClientSecret: 'secret', githubToken: 'token' }, extraEnv: { MDBISYNC_MERGE_GRACE_SECONDS: '0' }, timeoutMs: 1000,
+    };
+    assert.equal(engineInputs({ ...call, mergeGraceSeconds: 60 })['MDBISYNC_MERGE_GRACE_SECONDS'], '60');
+    assert.equal(engineInputs({ ...call, mergeGraceSeconds: 20 })['MDBISYNC_MERGE_GRACE_SECONDS'], '20');
+    // The call's grace wins over a test-hook environment that tries to set the input.
+    assert.equal(engineEnv({ ...call, mergeGraceSeconds: 60 })['MDBISYNC_MERGE_GRACE_SECONDS'], '60');
   });
 
   it('recognizes a command that answers "not implemented", and only that', async () => {

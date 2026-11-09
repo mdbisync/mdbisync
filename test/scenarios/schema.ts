@@ -79,7 +79,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "run.scan-canaries": ["scope", "sources"],
   "run.settle": [],
   "run.soak": ["actors", "durationSeconds", "invariantIntervalSeconds", "randomSeed", "scheduleSeconds"],
-  "run.sync": ["wait"],
+  "run.sync": ["mergeGraceSeconds", "wait"],
   "run.token-lifecycle": ["outcomes"],
   "run.workflow": ["command", "confirm", "direction", "event"],
   "run.workflow-parallel": ["events", "replacePending"],
@@ -118,7 +118,7 @@ function list(value: unknown): asserts value is unknown[] {
 
 const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name operation path project ref scope service source storage target title'.split(' '));
 const booleanArguments = new Set('allFiles bypassHook compareGolden concurrencyGroup confirm coverAllConstructs includeEndpointLimits linearFormat mergeCommits replacePending samePath scheduled valid wait workflows'.split(' '));
-const numericArguments = new Set('characters cleanEdits conflictingDocuments count documents durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
+const numericArguments = new Set('characters cleanEdits conflictingDocuments count documents durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
 const arrayArguments = new Set('actors constructs events fixes measure names orderings outcomes sources variants'.split(' '));
 const requiredArguments: Record<string, string[]> = {
     'run.initial-sync': ['direction', 'confirm'],
@@ -139,6 +139,7 @@ function validateArguments(kind: string, action: string, args: ObjectValue): voi
     else if (numericArguments.has(key)) {
       assert.ok(typeof value === 'number' && Number.isFinite(value) && value >= 0, `${key} must be a nonnegative number`);
       if (key === 'rewriteFraction') assert.ok(value <= 1, 'rewriteFraction must be at most 1');
+      else if (key === 'mergeGraceSeconds') assert.ok(Number.isInteger(value) && value <= 120, 'mergeGraceSeconds must be an integer from 0 to 120');
       else assert.ok(Number.isInteger(value), `${key} must be an integer`);
     }
     else if (arrayArguments.has(key)) { list(value); value.forEach(text); }

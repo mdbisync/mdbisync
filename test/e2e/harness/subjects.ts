@@ -34,6 +34,7 @@ import type { RunContext } from './context.ts';
 import { owningFolder, type Folder } from './corpus.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
 import { isAppBot } from './workflows.ts';
+import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { documentPaths, projectFolders } from './step-helpers.ts';
 import { UNSAFE_TITLES } from './fixtures.ts';
@@ -409,7 +410,7 @@ function proxyRecordsSinceStart(ctx: RunContext) {
 }
 
 function documentWrites(ctx: RunContext): number {
-  return proxyRecordsSinceStart(ctx).filter((record) => !record.injected && record.status === 200 && record.kind === 'mutation' && /document(Create|Update|Delete|Unarchive)|(Create|Update|Trash|Restore)Document/i.test(record.operation)).length;
+  return proxyRecordsSinceStart(ctx).filter(isDocumentWrite).length;
 }
 
 async function gitWrites(ctx: RunContext): Promise<number> {
@@ -1027,6 +1028,12 @@ export const SUBJECTS: Record<string, Compute> = {
     await git.run(['fetch', '--quiet', 'origin', merged.merge_commit_sha], { okCodes: [0, 1, 128] });
     return (await parents(git, merged.merge_commit_sha)).length > 1 ? 'merge' : 'squash-or-rebase';
   },
+  // The merge commit of the one merged pull request; a run that merged it reports the same commit.
+  'pullRequests.mergeCommit': async (env) => {
+    const merged = (await pullRequestsSinceStart(env.ctx)).filter((pr) => pr.merged_at !== null);
+    if (merged.length !== 1) throw new ProductError(`${merged.length} sync pull requests merged, not exactly one`);
+    return (merged[0] as { merge_commit_sha?: string | null }).merge_commit_sha ?? null;
+  },
   'pullRequests.reopenedFromSameBranch': async (env) => (await pullRequestsSinceStart(env.ctx)).filter((pr) => pr.head.ref === env.ctx.names.syncBranch).length >= 2,
   'pullRequests.includesAllEdits': async (env) => {
     const view = await env.view();
@@ -1596,7 +1603,7 @@ export type SubjectSource = 'observed' | 'harness' | 'engine' | 'ui';
 /** Where a subject's value comes from, or null when nothing provides it (a harness gap). */
 export function subjectSource(subject: string): SubjectSource | null {
   const name = subject.startsWith('before.') ? subject.slice('before.'.length) : subject;
-  if (Object.hasOwn(SUBJECTS, name)) return 'harness';
+  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && QUIET_SUBJECT.test(name))) return 'harness';
   if (ENGINE_FAMILIES.some((pattern) => pattern.test(name))) return 'engine';
   if (name.startsWith('ui.')) return 'ui';
   return null;
@@ -1629,8 +1636,23 @@ function engineValue(ctx: RunContext, subject: string): unknown {
   return found.value;
 }
 
+/**
+ * Why run <n|last> of the scenario was not quiet (quiet.ts), empty when it
+ * was. The run must have been watched: a run without snapshots is no
+ * evidence either way.
+ */
+function quietValue(ctx: RunContext, subject: string): string[] {
+  const which = (QUIET_SUBJECT.exec(subject) as RegExpExecArray)[1] as string;
+  const index = which === 'last' ? ownResults(ctx).length - 1 : Number(which);
+  if (index < 0 || index >= ownResults(ctx).length) throw new ProductError(`the scenario has no engine run ${which} for ${subject}`);
+  const failures = ctx.observations.get(`harness.quiet.${index}`) as string[] | undefined;
+  if (failures === undefined) throw new Error(`engine run ${index} was not watched for ${subject}`);
+  return failures;
+}
+
 export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
   if (ctx.observations.has(subject)) return { known: true, value: ctx.observations.get(subject) };
+  if (QUIET_SUBJECT.test(subject)) return { known: true, value: quietValue(ctx, subject) };
   const before = subject.startsWith('before.');
   const name = before ? subject.slice('before.'.length) : subject;
   const compute = SUBJECTS[name];
