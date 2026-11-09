@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { deflateRawSync } from 'node:zlib';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -16,12 +17,13 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, reviewDocument, seeded
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { linkUploads, sameAsFile } from './checks.ts';
+import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
-import { encodeTitlePath, refreshView, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
+import { readRunIds } from './step-helpers.ts';
+import { documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
 import { maxOverlap, unzip, waitForRun } from './workflows.ts';
 
 const roots: string[] = [];
@@ -266,10 +268,46 @@ describe('oracles', () => {
     const hashes = new Map([['eng/media/a.png', 'h1'], ['eng/media/copy-of-a.png', 'h1'], ['eng/notes.pdf', 'h2']]);
     const uploads = new Map([['h1', 'https://uploads.linear.app/x/one'], ['h2', 'https://uploads.linear.app/x/two']]);
     const text = '![a](media/a.png) and ![b](<media/copy-of-a.png>) and [pdf](notes.pdf) and [web](https://example.com/a.png) and [anchor](#top)';
-    assert.equal(linkUploads(text, 'eng/plan.md', hashes, uploads), '![a](https://uploads.linear.app/x/one) and ![b](<https://uploads.linear.app/x/one>) and [pdf](https://uploads.linear.app/x/two) and [web](https://example.com/a.png) and [anchor](#top)');
+    assert.equal(linearLinks(text, 'eng/plan.md', { hashes, uploadsByHash: uploads }), '![a](https://uploads.linear.app/x/one) and ![b](<https://uploads.linear.app/x/one>) and [pdf](https://uploads.linear.app/x/two) and [web](https://example.com/a.png) and [anchor](#top)');
     // An attachment link as the fixer writes it keeps its angle brackets around the URL.
-    assert.equal(linkUploads('The [summary](<../assets/summary.pdf>)', 'eng/notes/plan.md', new Map([['eng/assets/summary.pdf', 'h2']]), uploads), 'The [summary](<https://uploads.linear.app/x/two>)');
+    assert.equal(linearLinks('The [summary](<../assets/summary.pdf>)', 'eng/notes/plan.md', { hashes: new Map([['eng/assets/summary.pdf', 'h2']]), uploadsByHash: uploads }), 'The [summary](<https://uploads.linear.app/x/two>)');
     assert.ok(sameAsFile('---\na: 1\n---\n![a](media/a.png)\n', '![a](https://uploads.linear.app/x/one)\n', 'eng/plan.md', { hashes, uploadsByHash: uploads }));
+  });
+
+  it('map links to synchronized documents to their URLs by id, as the engine writes them', () => {
+    const targets = {
+      hashes: new Map([['eng/media/a.png', 'h1'], ['eng/notes/asset.pdf', 'h2']]),
+      uploadsByHash: new Map([['h1', 'https://uploads.linear.app/x/one'], ['h2', 'https://uploads.linear.app/x/two']]),
+      ids: new Map([['eng/guide.md', { id: 'g-1' }], ['eng/notes/plan.md', { id: 'p-1' }], ['docs/start.md', { id: 's-1' }]]),
+      documentUrlBase: 'https://linear.app/acme/document',
+    };
+    const text = [
+      'See [the guide](../guide.md#setup), [start](</docs/start.md>) and [self](plan.md#top).',
+      'Not synced: [data](../data.csv). External: [site](https://example.com). Image: ![a](../media/a.png).',
+      'Odd labels: [a\\]b](<asset.pdf>) and [![badge](../media/a.png)](../guide.md).',
+      'Code stays: `[x](../guide.md)`',
+      '',
+      '```text',
+      '[y](../guide.md)',
+      '```',
+      '',
+      '[ref]: ../guide.md',
+    ].join('\n');
+    assert.equal(linearLinks(text, 'eng/notes/plan.md', targets), [
+      'See [the guide](<https://linear.app/acme/document/g-1#setup>), [start](<https://linear.app/acme/document/s-1>) and [self](<https://linear.app/acme/document/p-1#top>).',
+      'Not synced: [data](../data.csv). External: [site](https://example.com). Image: ![a](https://uploads.linear.app/x/one).',
+      'Odd labels: [a\\]b](<https://uploads.linear.app/x/two>) and [![badge](https://uploads.linear.app/x/one)](<https://linear.app/acme/document/g-1>).',
+      'Code stays: `[x](../guide.md)`',
+      '',
+      '```text',
+      '[y](../guide.md)',
+      '```',
+      '',
+      '[ref]: <https://linear.app/acme/document/g-1>',
+    ].join('\n'));
+    assert.deepEqual(documentLinks('[a](https://linear.app/acme/document/g-1#setup) [b](<https://linear.app/acme/document/s-1>) [c](https://linear.app/other/document/x) `[d](https://linear.app/acme/document/z)`', targets.documentUrlBase), ['g-1#setup', 's-1']);
+    // The way back gives relative links again.
+    assert.equal(gitLinks('[g](<https://linear.app/acme/document/g-1#setup>) ![a](https://uploads.linear.app/x/one)', 'eng/notes/plan.md', { ...targets, uploads: new Map([['https://uploads.linear.app/x/one', 'eng/media/a.png']]) }), '[g](<../guide.md#setup>) ![a](../media/a.png)');
   });
 
   it('leave a document deleted for good out of every list the proxy passes on', () => {
@@ -430,6 +468,7 @@ async function fakeRun(options: { review?: string } = {}) {
     engineApp: { clientId: 'id', clientSecret: 'secret' },
     seededDocuments: [],
     download: async () => Buffer.alloc(0),
+    documentUrlBase: 'https://linear.app/test/document',
   };
   let person: Git | undefined;
   const faults: unknown[] = [];
@@ -634,6 +673,14 @@ describe('subjects', () => {
     ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { code: 'nothing-to-do' } });
     assert.deepEqual(await resolveSubject(ctx, 'runs.last.summary.code'), { known: true, value: 'merge-commits-required' });
     assert.deepEqual(await resolveSubject(ctx, 'run.completed'), { known: true, value: false });
+    ctx.observations.delete('scenario.runsEnd');
+    // A sync's report has `summary: null` (an initial sync's plan goes there); its own fields are at the top.
+    ctx.engine.results.push({ command: 'sync', exitCode: 1, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { operation: 'sync', summary: null, endpointLimitHeadersPresent: true, rejectedDocumentNamed: true } });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.3.summary.endpointLimitHeadersPresent'), { known: true, value: true });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.3.summary.rejectedDocumentNamed'), { known: true, value: true });
+    // A plan under `summary` is still read there.
+    ctx.engine.results.push({ command: 'initial-sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { summary: { plan: { paths: ['a.md'] } }, plan: 'top-level' } });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.4.summary.plan.paths'), { known: true, value: ['a.md'] });
   });
 
   it('compute both sides of the target document from the world', async () => {
@@ -653,6 +700,33 @@ describe('subjects', () => {
     assert.deepEqual(await resolveSubject(ctx, 'documents.duplicateCount'), { known: true, value: 0 });
   });
 
+  it('check links between documents (L1-12) against the documents Linear holds', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    // plan.md links notes.md with a fragment and an unsynchronized file; Linear holds it with the document URL.
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    const notes = ids['eng/platform/notes.md']?.id as string;
+    const git = await ctx.person();
+    writeFileSync(join(git.dir, 'eng/platform/plan.md'), '# Plan\n\nSee [notes](notes.md#dates) and [data](data.csv).\n');
+    await git.run(['commit', '--quiet', '--all', '-m', 'Link the notes']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    for (const file of ctx.live?.manifest.files ?? []) if (file.path === 'eng/platform/plan.md') file.group = 'links';
+    (linear.documents.get(plan) as LinearDocument).content = `# Plan\n\nSee [notes](<https://linear.app/test/document/${notes}#dates>) and [data](data.csv).\n`;
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'documents.syncedLinks'), await resolveSubject(ctx, 'expected.linearUrls'));
+    assert.deepEqual((await resolveSubject(ctx, 'documents.syncedLinks')).value, new Map([['eng/platform/plan.md', [`${notes}#dates`]]]));
+    assert.deepEqual(await resolveSubject(ctx, 'documents.supportedAnchorsPreserved'), { known: true, value: true });
+    assert.deepEqual((await resolveSubject(ctx, 'documents.unsyncedLinks')).value, new Map([['eng/platform/plan.md', ['data.csv']]]));
+    assert.deepEqual(await resolveSubject(ctx, 'documents.unsyncedLinks'), await resolveSubject(ctx, 'input.unsyncedLinks'));
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const sides = await readSides(ctx);
+    assert.ok(sameAsFile(sides.files.get('eng/platform/plan.md') as string, linear.documents.get(plan)?.content ?? '', 'eng/platform/plan.md', sides));
+    void INVARIANT_CHECKS;
+    // A fragment lost on the way fails the anchor assertion.
+    (linear.documents.get(plan) as LinearDocument).content = `# Plan\n\nSee [notes](https://linear.app/test/document/${notes}) and [data](data.csv).\n`;
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'documents.supportedAnchorsPreserved'), { known: true, value: false });
+  });
+
   it('name the files left out for size by their manifest role, not by path', async () => {
     const { ctx } = await fakeRun();
     const files = ctx.live?.manifest.files ?? [];
@@ -660,6 +734,82 @@ describe('subjects', () => {
     ctx.live?.tree.paths.set('eng/platform/media/scan-11mb.pdf', 'eng/platform/media/scan-11mb.pdf');
     ctx.engine.results.push({ command: 'initial-sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: { summary: { oversizeFiles: ['eng/platform/media/scan-11mb.pdf', 'eng/platform/unknown.png'] } } });
     assert.deepEqual(await resolveSubject(ctx, 'summary.oversizeFiles'), { known: true, value: ['eng/platform/unknown.png', 'pdf-11mb'] });
+  });
+
+  it('evaluate every check when one fails because the engine lacks a command', async () => {
+    const { ctx } = await fakeRun();
+    const { INVARIANT_CHECKS, runChecks } = await import('./checks.ts');
+    const { NotImplementedError } = await import('./results.ts');
+    const invariants = Object.fromEntries(Object.keys(ctx.scenario.checks.invariants).map((id) => [id, { required: id === 'I6' || id === 'I8' }]));
+    ctx.scenario = { ...ctx.scenario, checks: { invariants: invariants as never, assertions: [{ subject: 'documents.duplicateCount', operator: 'equal', expected: 0 }, { subject: 'runs.0.summary.code', operator: 'equal', expected: 'x' }] } };
+    const original = INVARIANT_CHECKS.I6;
+    INVARIANT_CHECKS.I6 = async () => {
+      throw new NotImplementedError('sync');
+    };
+    try {
+      const outcomes = await runChecks(ctx);
+      assert.deepEqual(outcomes.map((outcome) => [outcome.name, outcome.ok]), [['I6', false], ['I8', true], ['documents.duplicateCount', true], ['runs.0.summary.code', false]]);
+      assert.match(outcomes[0]?.detail ?? '', /not implemented: sync/);
+    } finally {
+      INVARIANT_CHECKS.I6 = original;
+    }
+  });
+
+  it('keep parent-relative links: resolved from their own document, not from the repository root', async () => {
+    const { ctx } = await fakeRun();
+    assert.deepEqual(relativeLinks('[a](../assets/brief.pdf) [b](notes.md) [c](https://example.com) [d](#top) [e](//cdn.example.com/x)'), ['../assets/brief.pdf', 'notes.md']);
+    // An attachment linked as ../ from a nested document is an expected upload.
+    const git = await ctx.person();
+    spawnSync('mkdir', ['-p', join(git.dir, 'eng/platform/guides'), join(git.dir, 'eng/platform/assets')]);
+    writeFileSync(join(git.dir, 'eng/platform/guides/howto.md'), '# How to\n\nSee [the brief](../assets/brief.pdf).\n');
+    writeFileSync(join(git.dir, 'eng/platform/assets/brief.pdf'), 'pdf bytes');
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '-m', 'A nested guide']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    const files = ctx.live?.manifest.files ?? [];
+    files.push({ path: 'eng/platform/guides/howto.md', group: 'links', kind: 'markdown', synced: true, lfs: false, canary: null, class: null, rule: null });
+    files.push({ path: 'eng/platform/assets/brief.pdf', group: 'attachments', kind: 'attachment', synced: false, lfs: false, canary: null, class: null, rule: null });
+    ctx.live?.tree.paths.set('eng/platform/guides/howto.md', 'eng/platform/guides/howto.md');
+    ctx.live?.tree.paths.set('eng/platform/assets/brief.pdf', 'eng/platform/assets/brief.pdf');
+    // The guide has a document (an id), so its attachment is one Linear should hold.
+    const ids = await readRunIds(ctx);
+    const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify({ ...Object.fromEntries([...(ids ?? new Map())]), 'eng/platform/guides/howto.md': { id: 'doc-howto' } }) })).trim();
+    const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tids.json\n` })).trim();
+    const parent = (await git.text(['rev-parse', `${ctx.names.refPrefix}/ids`])).trim();
+    const commit = (await git.text(['commit-tree', tree, '-p', parent, '-m', 'ids'])).trim();
+    await git.run(['push', '--quiet', 'origin', `${commit}:${ctx.names.refPrefix}/ids`]);
+    refreshView(ctx);
+    const allowed = (await resolveSubject(ctx, 'assets.allowedBytes')).value as Map<string, string>;
+    assert.equal(allowed.get('eng/platform/assets/brief.pdf'), createHash('sha256').update('pdf bytes').digest('hex'));
+  });
+
+  it('check the upload cache only for documents the engine wrote, and read upload URLs in any link form', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const git = await ctx.person();
+    // An image in a document the engine left out (no id) and one in a written document.
+    writeFileSync(join(git.dir, 'eng/platform/left-out.md'), '![x](media/left.png)\n');
+    writeFileSync(join(git.dir, 'eng/platform/notes.md'), '# Notes\n\n![y](media/kept.png) and [the brief](<media/brief.pdf#page=2>)\n');
+    spawnSync('mkdir', ['-p', join(git.dir, 'eng/platform/media')]);
+    writeFileSync(join(git.dir, 'eng/platform/media/left.png'), 'left bytes');
+    writeFileSync(join(git.dir, 'eng/platform/media/kept.png'), 'kept bytes');
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '-m', 'Images']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    ctx.live?.tree.paths.set('eng/platform/left-out.md', 'eng/platform/left-out.md');
+    ctx.live?.manifest.files.push({ path: 'eng/platform/left-out.md', group: 'images', kind: 'markdown', synced: true, lfs: false, canary: null, class: null, rule: null });
+    refreshView(ctx);
+    // No uploads yet: the written document's image is missing from the cache.
+    assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: false });
+    // Once the written document's image is cached, the left-out document's image does not count.
+    const kept = createHash('sha256').update('kept bytes').digest('hex');
+    const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify({ [kept]: 'https://uploads.linear.app/x/kept' }) })).trim();
+    const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
+    const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
+    await git.run(['push', '--quiet', 'origin', `${commit}:${ctx.names.refPrefix}/uploads`]);
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: true });
+    void linear;
+    void ids;
   });
 
   it('read conflict marks by the palette names specs use, from Linear\'s hex colors', async () => {
