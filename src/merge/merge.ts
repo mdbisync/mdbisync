@@ -191,12 +191,31 @@ function render(tokens: Token[], ranges: Range[]): string {
 }
 
 /**
+ * The front matter of a merge: one side's when only that side changed it,
+ * git's line merge when both did and their lines do not overlap, and the
+ * git side's when they do. Markers cannot go into front matter. Linear has
+ * none, but the Linear side of step 3 keeps the front matter its file had
+ * (capture), so only a side that changed its front matter changes the result.
+ */
+async function mergeHeads(dir: string, withBom: { base: string; ours: string; theirs: string }): Promise<string> {
+  // A byte order mark is serialization, not an edit: the git side's stays.
+  const bom = withBom.ours.startsWith('﻿') ? '﻿' : '';
+  const heads = Object.fromEntries(Object.entries(withBom).map(([name, text]) => [name, text.replace(/^﻿/, '')])) as typeof withBom;
+  if (heads.theirs === heads.base || heads.ours === heads.theirs) return bom + heads.ours;
+  if (heads.ours === heads.base) return bom + heads.theirs;
+  await Promise.all(Object.entries(heads).map(([name, text]) => writeFile(join(dir, `head-${name}`), text, { mode: 0o600 })));
+  const merged = await new Git(dir).run(['merge-file', '--stdout', 'head-ours', 'head-base', 'head-theirs'], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
+  return bom + (merged.code === 0 ? merged.stdout.toString('utf8') : heads.ours);
+}
+
+/**
  * Three-way Markdown merge. `ours` is the tracked Git version, `theirs` is
- * the Linear version. Front matter belongs to Git: preserve ours and merge
- * only the bodies. Requires Git on PATH; no repository or network is used.
+ * the Linear version. Front matter is merged apart from the bodies
+ * (`mergeHeads`): conflicting front matter keeps ours. Requires Git on PATH; no repository or network is used.
  */
 export async function mergeMarkdown(base: string, ours: string, theirs: string): Promise<MergeResult> {
   const gitFile = splitFile(ours);
+  const heads = { base: splitFile(base).head, ours: gitFile.head, theirs: splitFile(theirs).head };
   const eol = ours.includes('\r\n') ? '\r\n' : '\n';
   // Newline serialization is not an edit. Merge all bodies as LF, then
   // restore the tracked Git file's newline style for clean and conflicted output.
@@ -205,6 +224,7 @@ export async function mergeMarkdown(base: string, ours: string, theirs: string):
   theirs = splitFile(theirs).body.replaceAll('\r\n', '\n');
   const dir = await mkdtemp(join(tmpdir(), 'markdown-merge-'));
   try {
+    const head = await mergeHeads(dir, heads);
     await Promise.all([['base', base], ['ours', ours], ['theirs', theirs]].map(([name, text]) => writeFile(join(dir, name!), text!, { mode: 0o600 })));
     // Pick a delimiter wider than any run in the input, so literal git markers
     // and labels can never be mistaken for merge-file's framing.
@@ -218,7 +238,7 @@ export async function mergeMarkdown(base: string, ours: string, theirs: string):
     ], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
     const raw = result.stdout.toString('utf8');
     const tokens = tokenize(raw.replaceAll('\r\n', '\n'), size);
-    const text = gitFile.head + (result.code === 0 ? raw : render(tokens, conflictRanges(tokens))).replaceAll('\n', eol);
+    const text = head + (result.code === 0 ? raw : render(tokens, conflictRanges(tokens))).replaceAll('\n', eol);
     return { text, conflicts: detectConflicts(text) };
   } finally {
     await rm(dir, { recursive: true, force: true });

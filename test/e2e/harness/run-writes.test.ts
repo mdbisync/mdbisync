@@ -39,7 +39,7 @@ const REVERSE_KEYS = {
   notAttempted: true, stopped: true, progressPushes: true, record: true, pullRequest: true, closedPullRequest: true,
 } satisfies Record<keyof ReverseReport, true>;
 const PULL_REQUEST_KEYS = {
-  needed: true, pullRequest: true, branchMoved: true, checks: true, merged: true, paths: true, code: true, status: true, reason: true,
+  needed: true, pullRequest: true, branchMoved: true, checks: true, merged: true, paths: true, marked: true, decided: true, code: true, status: true, reason: true,
 } satisfies Record<keyof PullRequestResult, true>;
 const CONFIRMED_KEYS = {
   complete: true, created: true, overwritten: true, unchanged: true, skippedCompleted: true, trashed: true,

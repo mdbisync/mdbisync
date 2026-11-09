@@ -164,7 +164,7 @@ Linear's changes reach the tracked branch through the sync pull request
 | `check-failed` | A check failed on the sync pull request: `Setup error: a check failed on the sync pull request`, with the check's name. The pull request stays open and the run writes no tracked-branch changes to Linear (exit code 3). | Make the repository's checks pass Linear's form of the files, or rerun the failed check on the pull request. A later run merges once they pass. |
 | `merge-refused` | GitHub did not merge the sync pull request this time: `GitHub did not merge the sync pull request (<reason>); a later run tries again.` | Nothing; a later run tries again. |
 | `merge-blocked` | GitHub refused to merge again, on the same head and for the same reason (exit code 3). | Let the sync's GitHub App merge into the tracked branch, for example by adjusting the branch's rules. A later run merges. |
-| `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. | If edits on the sync branch still conflict on a later run, merge both the tracked branch and the `linear` state ref (`refs/mdbisync/linear` by default) into the sync branch and resolve the conflicts there; the sync keeps those commits. |
+| `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. For documents the sync merges with conflict markers: this run into Linear's state, a later run into the sync branch. | Resolve the markers on either side ([conflicts.md](conflicts.md#resolving-a-conflict)). A conflicting file that is not a document waits: merge both the tracked branch and the `linear` state ref (`refs/mdbisync/linear` by default) into the sync branch and resolve it there; the sync keeps those commits. |
 | `initial-pull-request-pending` | The sync branch holds an initial sync from Linear that no one has merged yet (exit code 4). | Review and merge it with a merge commit. |
 | `state-moved` | The sync branch moved while the run worked. | Nothing; the next run updates the pull request. |
 | `github-failed` | A GitHub request for the sync pull request failed or got no answer. | Nothing, unless it repeats; then check GitHub's status and the App's permissions. |
@@ -212,7 +212,8 @@ table says which:
 | `git-path-wins` | Renamed differently on both sides: the git path wins, and the document gets the comment "The title was set back because the file was renamed in git at the same time. Rename it again to change it." |
 
 Text changed on both sides in the same lines gets conflict markers, which
-either side resolves by editing the text.
+either side resolves by editing the text; [conflicts.md](conflicts.md)
+shows how.
 
 ## Files left out
 

@@ -138,8 +138,10 @@ minutes, in both directions.
 
 How folders map to Linear, the checks every run makes, the sync pull request
 and how to pin a release: [docs/usage.md](docs/usage.md). How Markdown is kept
-in Linear's form: [docs/linear-format.md](docs/linear-format.md). What each
-message means, what to do about it, and how to recover with an initial sync:
+in Linear's form: [docs/linear-format.md](docs/linear-format.md). What
+happens when both sides change one document, and how to resolve a conflict:
+[docs/conflicts.md](docs/conflicts.md). What each message means, what to do
+about it, and how to recover with an initial sync:
 [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ### Tokens left by interrupted jobs
