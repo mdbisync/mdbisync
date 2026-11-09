@@ -137,8 +137,11 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   checks pass Linear's form.
 - After the merge, the next run finds nothing to write and opens no pull
   request.
-- While the sync branch holds an initial sync from Linear that a person has
-  not merged, `sync` adds nothing to it and writes nothing to Linear.
+- While the open pull request of an initial sync from Linear waits for a
+  person, `sync` adds nothing to its branch and writes nothing to Linear. A
+  pull request closed without a merge leaves its content behind: the next
+  sync pull request carries only the tracked branch with Linear's state
+  merged in.
 
 ## Layout
 
