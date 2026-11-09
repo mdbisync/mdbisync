@@ -83,7 +83,7 @@ describe('document links', () => {
 
   it('writes a fragment the parser decoded so that it reads back the same', () => {
     const map = ids({ 'eng/guide.md': 'id-guide' });
-    for (const body of ['[x](guide.md#a&amp;copy;)', '[x](<guide.md#a\\>b>)', '[x](guide.md#a&gt;b)', '[x](guide.md#a\\(b)']) {
+    for (const body of ['[x](guide.md#a&amp;copy;)', '[x](<guide.md#a\\>b>)', '[x](guide.md#a&gt;b)', '[x](guide.md#a\\(b)', '[x](guide.md#😀)', '[x](guide.md#über-𝔘)']) {
       const seen: LinkSpellings = new Map();
       const written = linksToLinear(body, 'eng/plan.md', map, seen);
       const [destination] = linkDestinations(written);

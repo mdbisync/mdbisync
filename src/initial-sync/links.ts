@@ -98,7 +98,8 @@ function destinationUrl(raw: string): string | undefined {
 
 /** Percent-encodes what a fragment cannot hold as it is in a link destination (the parser has resolved escapes and entities). */
 function encodeFragment(fragment: string): string {
-  return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/g, (char) => encodeURIComponent(char));
+  // By code point (`u`): a character outside the Basic Multilingual Plane is one match, not two lone surrogates.
+  return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/gu, (char) => encodeURIComponent(char));
 }
 
 /** Replaces destinations by offset; `replace` returns the new raw destination, or undefined to keep it. */
