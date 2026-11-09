@@ -110,6 +110,14 @@ function runProcess(command: string, args: string[], cwd: string, env: Record<st
   });
 }
 
+/** Verify the stage outputs, then launch trusted paths rather than environment values. */
+export async function runHooksStep(release: string, cwd: string, env: Record<string, string>): Promise<{ status: number; output: string }> {
+  const script = join(release, 'dist/action-hooks.js');
+  assert.equal(env['MDBISYNC_NODE'], process.execPath, 'unexpected Node executable from stage');
+  assert.equal(env['MDBISYNC_HOOKS'], script, 'unexpected hooks script from stage');
+  return runProcess(process.execPath, [script], cwd, env);
+}
+
 interface Job {
   fixture: Fixture;
   world: FakeWorld;
@@ -248,7 +256,7 @@ async function runTemplate(release: string, template: string, inputs: Record<str
       const env: Record<string, string> = { ...(await runnerEnv('hooks')), ...Object.fromEntries(Object.entries(hooks.env ?? {}).map(([key, value]) => [key, expand(value, context)])) };
       // The step's command, run without a shell: the node and script its environment names.
       assert.equal(hooks.run, HOOKS_RUN, `${template}: the hooks step's command`);
-      const result = await runProcess(env['MDBISYNC_NODE'] ?? '', [env['MDBISYNC_HOOKS'] ?? ''], workspace, env);
+      const result = await runHooksStep(release, workspace, env);
       assert.equal(result.status, 0, `${template} ${HOOKS_STEP}:\n${result.output}`);
       printed = result.output;
       if (job.canary) {
