@@ -84,6 +84,11 @@
         "subject": "pullRequests.tree",
         "operator": "same-as",
         "expected": "expected.linearTree"
+      },
+      {
+        "subject": "pullRequests.keptAnnotationReadmes",
+        "operator": "same-as",
+        "expected": "expected.keptAnnotationReadmes"
       }
     ]
   }

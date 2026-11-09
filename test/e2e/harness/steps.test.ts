@@ -17,7 +17,7 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { compare, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
@@ -1737,6 +1737,132 @@ describe('subjects', () => {
     assert.deepEqual(await resolveSubject(ctx, 'writes.git'), { known: true, value: 1 });
     void readFileSync;
   });
+});
+
+describe('initial sync from Linear: kept annotation READMEs (L1R-01, L1R-02, L1R-06)', () => {
+  // Two folders whose README holds only the folder's annotation: no Linear document maps to them, and the sync keeps them.
+  const KEPT = {
+    'eng/README.md': '---\nlinear-team: ENG\n---\n\nEngineering notes live in the folders below.\n',
+    'docs/README.md': '---\nlinear-team: DOCS\nowner: docs\n---\n\n# Docs\n\nThe handbook and its policies.\n',
+  };
+  // Files with a document (overwrite), a document without a file (create) and a file without a document (remove).
+  const OVERWRITTEN = ['docs/handbook/README.md', 'docs/handbook/faq.md', 'docs/handbook/policies/remote.md', 'docs/handbook/start.md', 'eng/platform/README.md', 'eng/platform/notes.md', 'eng/platform/plan.md', 'eng/platform/runbook.md'];
+  const CREATED = 'eng/platform/decisions/cache-warm-up.md';
+  const REMOVED = 'eng/platform/old.md';
+  const ACTIONS = [...OVERWRITTEN, CREATED, REMOVED].sort();
+
+  /** The mini case: ten actions (eight overwrites, one new file, one removal) and two kept READMEs. */
+  async function miniCase() {
+    const run = await fakeRun();
+    const { ctx, linear, ids } = run;
+    const git = await ctx.person();
+    const tracked: Record<string, string> = {
+      ...KEPT,
+      'eng/platform/runbook.md': '# Runbook\n\nRestart the worker.\n',
+      'docs/handbook/faq.md': '# FAQ\n\nAsk in the channel.\n',
+      'docs/handbook/policies/remote.md': '# Remote work\n\nTwo office days.\n',
+      [REMOVED]: '# Old\n\nNo longer used.\n',
+    };
+    for (const [path, text] of Object.entries(tracked)) {
+      mkdirSync(join(git.dir, path, '..'), { recursive: true });
+      writeFileSync(join(git.dir, path), text);
+    }
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '-m', 'Add the mini case files']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    // Linear is the model: its text differs from every tracked file's.
+    for (const [path, entry] of Object.entries(ids)) {
+      const document = linear.documents.get(entry.id) as LinearDocument;
+      document.content = `${[document.content?.trimEnd(), `Edited in Linear: ${path}.`].filter(Boolean).join('\n\n')}\n`;
+    }
+    linear.add({ projectId: PROJECT.id }, 'runbook', '# Runbook\n\nRestart the worker, then the queue.\n');
+    linear.add({ projectId: OTHER.id }, 'faq', '# FAQ\n\nAsk in the team channel.\n');
+    linear.add({ projectId: OTHER.id }, 'policies/remote', '# Remote work\n\nThree office days.\n');
+    linear.add({ projectId: PROJECT.id }, 'decisions/cache-warm-up', '# Cache warm-up\n\nWarm the route cache before traffic.\n');
+    refreshView(ctx);
+    return run;
+  }
+
+  /** Opens the pull request head the sync would: the tracked tree as Linear holds it, with `change` applied to the files. */
+  async function syncHead(ctx: RunContext, linear: FakeLinear, change: (files: Map<string, string>) => void = () => {}): Promise<void> {
+    const git = await ctx.person();
+    const files = new Map<string, string>(Object.entries(KEPT));
+    for (const document of linear.documents.values()) {
+      const folder = document.projectId === PROJECT.id ? 'eng/platform' : 'docs/handbook';
+      const path = `${folder}/${document.title}.md`;
+      // A file keeps its front matter (a project README's annotation) and takes Linear's body.
+      const original = existsSync(join(git.dir, path)) ? readFileSync(join(git.dir, path), 'utf8') : '';
+      const head = /^---\n[\s\S]*?\n---\n/.exec(original)?.[0] ?? '';
+      files.set(path, `${head}${document.content ?? ''}`);
+    }
+    change(files);
+    await git.run(['switch', '--quiet', '-c', 'sync-head']);
+    await git.run(['rm', '--quiet', '-r', 'eng', 'docs']);
+    for (const [path, text] of files) {
+      mkdirSync(join(git.dir, path, '..'), { recursive: true });
+      writeFileSync(join(git.dir, path), text);
+    }
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '-m', 'Initial sync from Linear']);
+    await git.run(['push', '--quiet', '--force', 'origin', `HEAD:refs/heads/${ctx.names.syncBranch}`]);
+    await git.run(['switch', '--quiet', '-']);
+    await git.run(['branch', '--quiet', '-D', 'sync-head']);
+  }
+
+  /** Whether every assertion of the scenario holds, by its own subjects. */
+  async function failing(ctx: RunContext, id: string): Promise<string[]> {
+    const scenario = scenarios.find((candidate) => candidate.id === id)!;
+    const failed: string[] = [];
+    for (const assertion of scenario.checks.assertions) {
+      // The subjects of the expectations; pull request counts, ids and writes need the engine's own run.
+      if (!/^(summary\.|files\.|pullRequests\.(tree|gitOnlyPaths|keptAnnotationReadmes)$)/.test(assertion.subject)) continue;
+      const { value } = await resolveSubject(ctx, assertion.subject);
+      const expected = assertion.operator === 'same-as' ? (await resolveSubject(ctx, String(assertion.expected))).value : assertion.expected;
+      if (!compare(assertion.operator, value, expected)) failed.push(assertion.subject);
+    }
+    return failed;
+  }
+
+  const dryRun = (paths: string[]): EngineResult => ({ command: 'initial-sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: { summary: { direction: 'linear-to-git', confirm: false, plan: { paths } } } });
+
+  it('expect the ten actions of the dry run, not the two kept READMEs (L1R-01)', async () => {
+    const { ctx } = await miniCase();
+    assert.deepEqual((await resolveSubject(ctx, 'expected.reversePlan.paths')).value, ACTIONS);
+    ctx.engine.results.push(dryRun(ACTIONS));
+    assert.deepEqual(await failing(ctx, 'L1R-01'), []);
+    // A plan that lists the kept READMEs as actions, or misses the removal or the new file, still fails.
+    for (const paths of [[...ACTIONS, ...Object.keys(KEPT)].sort(), ACTIONS.filter((path) => path !== REMOVED), ACTIONS.filter((path) => path !== CREATED)]) {
+      ctx.engine.results.push(dryRun(paths));
+      assert.deepEqual(await failing(ctx, 'L1R-01'), ['summary.plan.paths'], paths.join(', '));
+    }
+  });
+
+  it('expect the pull request to hold Linear\'s documents and the kept READMEs with their annotations and bodies (L1R-02, L1R-06)', async () => {
+    const { ctx, linear } = await miniCase();
+    await syncHead(ctx, linear);
+    const tree = (await resolveSubject(ctx, 'expected.linearTree')).value as Map<string, string>;
+    assert.deepEqual([...tree.keys()].sort(), [...OVERWRITTEN, CREATED, ...Object.keys(KEPT)].sort());
+    assert.equal(tree.get('docs/README.md'), '# Docs\n\nThe handbook and its policies.\n');
+    assert.deepEqual((await resolveSubject(ctx, 'expected.keptAnnotationReadmes')).value, new Map(Object.entries(KEPT)));
+    assert.deepEqual(await failing(ctx, 'L1R-02'), []);
+    assert.deepEqual(await failing(ctx, 'L1R-06'), []);
+  });
+
+  for (const [name, change, failed] of [
+    ['a kept README dropped', (files: Map<string, string>) => files.delete('eng/README.md'), ['pullRequests.tree', 'pullRequests.keptAnnotationReadmes']],
+    ['a kept README\'s body replaced', (files: Map<string, string>) => files.set('docs/README.md', '---\nlinear-team: DOCS\nowner: docs\n---\n\nSomething else.\n'), ['pullRequests.tree', 'pullRequests.keptAnnotationReadmes']],
+    ['a kept README\'s annotation changed', (files: Map<string, string>) => files.set('eng/README.md', KEPT['eng/README.md'].replace('ENG', 'OPS')), ['pullRequests.keptAnnotationReadmes']],
+    ['the file without a document kept', (files: Map<string, string>) => files.set(REMOVED, '# Old\n\nNo longer used.\n'), ['pullRequests.tree', 'pullRequests.gitOnlyPaths']],
+    ['the new document missing', (files: Map<string, string>) => files.delete(CREATED), ['pullRequests.tree']],
+    ['a document written twice', (files: Map<string, string>) => files.set('eng/platform/runbook-2.md', files.get('eng/platform/runbook.md') as string), ['pullRequests.tree', 'pullRequests.gitOnlyPaths', 'files.duplicateCount']],
+  ] as const) {
+    it(`fail when the pull request has ${name}`, async () => {
+      const { ctx, linear } = await miniCase();
+      await syncHead(ctx, linear, change);
+      const both = new Set([...(await failing(ctx, 'L1R-02')), ...(await failing(ctx, 'L1R-06'))]);
+      assert.deepEqual([...both].sort(), [...failed].sort());
+    });
+  }
 });
 
 describe('quiet runs through the harness', () => {

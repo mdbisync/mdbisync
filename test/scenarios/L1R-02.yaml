@@ -71,6 +71,11 @@
         "expected": "expected.linearTree"
       },
       {
+        "subject": "pullRequests.keptAnnotationReadmes",
+        "operator": "same-as",
+        "expected": "expected.keptAnnotationReadmes"
+      },
+      {
         "subject": "pullRequests.gitOnlyPaths",
         "operator": "equal",
         "expected": []
