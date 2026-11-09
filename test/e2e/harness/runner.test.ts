@@ -308,6 +308,8 @@ describe('runner', () => {
     const result = await withStubEngine(growing, () => runScenario(byId('L0-01'), deps()));
     assert.equal(result.result, 'expected-red');
     assert.match(result.reason ?? '', /checks failed: fix\.second\.bytes/);
+    assert.ok(result.checks.some((check) => check.name === 'fix.second.bytes' && !check.ok), 'a failing scenario keeps its check outcomes');
+    assert.ok(result.checks.some((check) => check.ok), 'and the ones that held');
     const idempotent = await withStubEngine('process.exitCode = 0;\n', () => runScenario(byId('L0-04'), deps()));
     assert.equal(idempotent.result, 'pass');
   });

@@ -12,13 +12,13 @@ import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
-import { annotatedFolders, CORPUS_DIR, owningFolder, readAnnotation } from './corpus.ts';
+import { annotatedFolders, CORPUS_DIR, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
 import { BudgetBlockedError, estimate, type Governor } from './governor.ts';
 import { SandboxRest, githubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
 import { withAppRequests } from './app-reads.ts';
-import { LinearWorld, editorClient, type Project } from './linear-world.ts';
+import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
@@ -28,6 +28,7 @@ import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtur
 import { projectFolders } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
+import { heldRunOf, saveHeldRun, UI_CHECKLIST_FILE } from './held-run.ts';
 
 export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
 /** A team zone holds about this many documents, trashed ones included (measured 2026-11-09: QUOTA_EXCEEDED at 1,000 trashed). */
@@ -78,7 +79,7 @@ export interface RunnerDeps {
   log: (line: string) => void;
 }
 
-function appFor(deps: RunnerDeps, name: string): LinearApp {
+function appFor(deps: Pick<RunnerDeps, 'config'>, name: string): LinearApp {
   const app = deps.config.linearApps.find((candidate) => candidate.name === name);
   if (app === undefined) throw new Error(`unknown app ${name}`);
   return app;
@@ -99,6 +100,52 @@ function projectTeams(readmes: ReadonlyMap<string, string>): Map<string, string>
     if (team !== null) teams.set(folder.project, team);
   }
   return teams;
+}
+
+/**
+ * The clients and handles of a live run around its sandbox and run tree:
+ * a new run's (no projects yet) or a held run's, made again in a later
+ * process. Reads the workspace's teams and its document URL prefix unless
+ * they are known (a held run saved them).
+ */
+export async function liveWorld(
+  deps: Pick<RunnerDeps, 'config' | 'appClients'>,
+  appName: string,
+  parts: { sandbox: Sandbox; token: { token: string; source: 'app' | 'host' }; manifest: Manifest; tree: RunTree; known?: { teams: Map<string, Team>; documentUrlBase: string } },
+): Promise<LiveWorld> {
+  const { config } = deps;
+  const app = appFor(deps, appName);
+  const appClient = deps.appClients.get(appName);
+  if (appClient === undefined) throw new Error(`no harness client for app ${appName}`);
+  const editors = { 'editor-a': editorClient(config.editors['editor-a']), 'editor-b': editorClient(config.editors['editor-b']) };
+  const world = new LinearWorld(editors['editor-a']);
+  const teams = parts.known?.teams ?? new Map((await world.teams()).map((team) => [team.key, team]));
+  // Links between synchronized documents are written as document URLs of this workspace.
+  const documentUrlBase = parts.known?.documentUrlBase
+    ?? `https://linear.app/${(await appClient.request<{ organization: { urlKey: string } }>('Organization', 'query', 'query Organization { organization { urlKey } }')).organization.urlKey}/document`;
+  return {
+    sandbox: parts.sandbox,
+    rest: new SandboxRest(config, parts.token.token),
+    githubToken: parts.token.token,
+    githubTokenSource: parts.token.source,
+    repository: `${config.owner}/${config.repo}`,
+    manifest: parts.manifest,
+    tree: parts.tree,
+    projects: new Map(),
+    teams,
+    app: appClient,
+    editors,
+    world,
+    engineApp: { clientId: app.clientId, clientSecret: app.clientSecret },
+    seededDocuments: [],
+    documentUrlBase,
+    async download(url) {
+      // Personal API keys go in the Authorization header as they are.
+      const response = await fetch(url, { headers: { authorization: config.editors['editor-a'] } });
+      if (!response.ok) throw new ProductError(`an upload URL answered HTTP ${response.status}`);
+      return Buffer.from(await response.arrayBuffer());
+    },
+  };
 }
 
 async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[]): Promise<void> {
@@ -130,57 +177,14 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   }
   const { tree, commit } = created;
   ctx.ownCommits.push(commit);
-  const app = appFor(deps, appName);
-  const appClient = deps.appClients.get(appName) as LinearClient;
-  const editors = { 'editor-a': editorClient(config.editors['editor-a']), 'editor-b': editorClient(config.editors['editor-b']) };
-  const world = new LinearWorld(editors['editor-a']);
   ctx.phase('linear teams');
-  const teams = new Map((await world.teams()).map((team) => [team.key, team]));
-  // Links between synchronized documents are written as document URLs of this workspace.
-  const organization = await appClient.request<{ organization: { urlKey: string } }>('Organization', 'query', 'query Organization { organization { urlKey } }');
-  const live: LiveWorld = {
-    sandbox,
-    rest: new SandboxRest(config, token.token),
-    githubToken: token.token,
-    githubTokenSource: token.source,
-    repository: `${config.owner}/${config.repo}`,
-    manifest,
-    tree,
-    projects: new Map(),
-    teams,
-    app: appClient,
-    editors,
-    world,
-    engineApp: { clientId: app.clientId, clientSecret: app.clientSecret },
-    seededDocuments: [],
-    documentUrlBase: `https://linear.app/${organization.organization.urlKey}/document`,
-    async download(url) {
-      // Personal API keys go in the Authorization header as they are.
-      const response = await fetch(url, { headers: { authorization: config.editors['editor-a'] } });
-      if (!response.ok) throw new ProductError(`an upload URL answered HTTP ${response.status}`);
-      return Buffer.from(await response.arrayBuffer());
-    },
-  };
+  const live = await liveWorld(deps, appName, { sandbox, token, manifest, tree });
+  const { teams, world } = live;
   ctx.live = live;
 
   // The team lock: initial sync matches every document of an annotated team zone.
   ctx.phase('team lock');
-  if (ctx.scenario.setup.teamZoneLock) {
-    for (const team of [...tree.teamZones.keys()].sort()) {
-      try {
-        locks.push(await acquireLock(`team-${team.toLowerCase()}`, {
-          signal: ctx.signal,
-          stateDir: deps.stateDir,
-          runId: ctx.names.runId,
-          timeoutMs: TEAM_LOCK_TIMEOUT_MS,
-          onWait: (holder) => ctx.log(`waiting for team ${team} (held by run ${holder?.runId ?? 'unknown'})`),
-        }));
-      } catch (error) {
-        if (error instanceof LockTimeoutError) throw new EnvBlockedError(`team lock ${team}: ${error.message}`);
-        throw error;
-      }
-    }
-  }
+  await takeTeamLocks(ctx, deps.stateDir, tree.teamZones.keys(), locks);
 
   // Trashed documents per team zone the run uses, counted once the team lock is held so another run's work
   // is not counted as this run's. They count against the zone's cap and cannot be purged. Only a measure:
@@ -452,7 +456,7 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
  * The sandbox's corpus for an offline scenario: the shared cache of its main
  * branch, brought up to date. Nothing is pushed and Linear is not involved.
  */
-async function corpusReader(deps: RunnerDeps, runId: string): Promise<Sandbox> {
+async function corpusReader(deps: Pick<RunnerDeps, 'config' | 'stateDir'>, runId: string): Promise<Sandbox> {
   const { config } = deps;
   if (config.gitUrl === '') throw new EnvBlockedError('the corpus is on the sandbox repository, and none is configured (MDBISYNC_TEST_SANDBOX_URL)');
   let token;
@@ -470,14 +474,14 @@ async function corpusReader(deps: RunnerDeps, runId: string): Promise<Sandbox> {
   return sandbox;
 }
 
-async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: string): Promise<Omit<ScenarioResult, 'harnessAppRequests'>> {
+/** A scenario run's context, before setup: no live world, no proxy, nothing recorded. */
+export function createRunContext(
+  scenario: Scenario,
+  runId: string,
+  runDir: string,
+  deps: Pick<RunnerDeps, 'config' | 'stateDir' | 'outDir' | 'log'>,
+): { ctx: RunContext; logLines: string[]; phase(): string; abort: AbortController } {
   const names: RunNames = runNames(runId);
-  const started = Date.now();
-  const runDir = join(deps.outDir, 'runs', `${scenario.id}-${runId}`);
-  mkdirSync(runDir, { recursive: true });
-  writeFileSync(join(runDir, 'canary-pending'), '');
-  const registration = registerRun(deps.stateDir, runId);
-  const heartbeat = setInterval(() => registration.heartbeat(), 60_000);
   const logLines: string[] = [];
   const log = (line: string) => {
     logLines.push(line);
@@ -536,13 +540,108 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       return (await corpus).readMain(`${CORPUS_DIR}/${path}`);
     },
   };
+  return { ctx, logLines, phase: () => phase, abort };
+}
+
+/** Saves what the engine and the remote side showed, before cleanup removes pull requests and comments. Collection errors are saved as errors. */
+export async function captureCanaryEvidence(ctx: RunContext): Promise<void> {
+  try {
+    if (ctx.observations.get('canary.pendingIncomplete')) throw new Error('pending engine output unavailable');
+    const evidence = await withDeadline(collectCanaryEvidence(ctx, { summariesOnly: false }), 30_000, () => new Error('canary collection timed out'));
+    writeFileSync(join(ctx.runDir, 'canary-evidence.tmp'), JSON.stringify(evidence));
+    renameSync(join(ctx.runDir, 'canary-evidence.tmp'), join(ctx.runDir, 'canary-evidence.json'));
+  } catch {
+    writeFileSync(join(ctx.runDir, 'canary-evidence.json'), JSON.stringify({ canaries: [], texts: {}, error: 'could not collect remote output' }));
+  }
+}
+
+/** Cleans a run up and counts its team zones' trash after it: a run should leave the trash as it found it. */
+export async function cleanupAndCount(ctx: RunContext): Promise<{ ok: boolean; detail?: string }> {
+  let outcome: { ok: boolean; detail?: string };
+  try {
+    outcome = await cleanup(ctx);
+  } catch (cleanupError) {
+    outcome = { ok: false, detail: (cleanupError as Error).message };
+  }
+  const trash = ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> | undefined;
+  if (trash !== undefined && ctx.live !== null) {
+    for (const [key, counts] of Object.entries(trash)) {
+      const teamId = ctx.live.teams.get(key)?.id;
+      if (teamId === undefined) continue;
+      try {
+        counts.after = await ctx.live.world.trashedInZone(teamId);
+        if (counts.after > counts.before) ctx.log(`warning: the run left ${counts.after - counts.before} more trashed documents in team ${key}'s zone`);
+      } catch (error) {
+        ctx.log(`could not count team ${key}'s trashed documents after the run: ${(error as Error).message}`);
+      }
+    }
+  }
+  return outcome;
+}
+
+/** Takes the team locks of the run's team zones, when the scenario asks for them. */
+export async function takeTeamLocks(ctx: RunContext, stateDir: string, teams: Iterable<string>, locks: Lock[]): Promise<void> {
+  if (!ctx.scenario.setup.teamZoneLock) return;
+  for (const team of [...teams].sort()) {
+    try {
+      locks.push(await acquireLock(`team-${team.toLowerCase()}`, {
+        signal: ctx.signal,
+        stateDir,
+        runId: ctx.names.runId,
+        timeoutMs: TEAM_LOCK_TIMEOUT_MS,
+        onWait: (holder) => ctx.log(`waiting for team ${team} (held by run ${holder?.runId ?? 'unknown'})`),
+      }));
+    } catch (error) {
+      if (error instanceof LockTimeoutError) throw new EnvBlockedError(`team lock ${team}: ${error.message}`);
+      throw error;
+    }
+  }
+}
+
+/** The scenario's result fields that do not depend on how it ended. */
+export function resultOf(
+  ctx: RunContext,
+  outcome: ReturnType<typeof classify>,
+  extra: { startedAt: number; budgetWaitMs: number; checks: CheckOutcome[]; cleanup: { ok: boolean; detail?: string } },
+): Omit<ScenarioResult, 'harnessAppRequests'> {
+  const { scenario } = ctx;
+  return {
+    id: scenario.id,
+    level: levelOf(scenario.id),
+    slice: scenario.slice,
+    mode: scenario.mode,
+    runId: ctx.names.runId,
+    ...outcome,
+    startedAt: new Date(extra.startedAt).toISOString(),
+    durationMs: Date.now() - extra.startedAt,
+    engineRequests: ctx.proxy?.requests.filter((record) => !record.injected).length ?? 0,
+    harnessRequests: ctx.live === null ? 0 : [...Object.values(ctx.live.editors)].reduce((sum, client) => sum + client.stats.total, 0),
+    budgetWaitMs: extra.budgetWaitMs,
+    checks: extra.checks,
+    cleanup: extra.cleanup,
+    ...(ctx.observations.has('metrics') ? { metrics: ctx.observations.get('metrics') as Record<string, unknown> } : {}),
+    ...(ctx.observations.has('zone.trash') ? { teamZoneTrash: ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> } : {}),
+  };
+}
+
+async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: string): Promise<Omit<ScenarioResult, 'harnessAppRequests'>> {
+  const started = Date.now();
+  const runDir = join(deps.outDir, 'runs', `${scenario.id}-${runId}`);
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'canary-pending'), '');
+  const registration = registerRun(deps.stateDir, runId);
+  const heartbeat = setInterval(() => registration.heartbeat(), 60_000);
+  const { ctx, logLines, phase, abort } = createRunContext(scenario, runId, runDir, deps);
+  const { names, log } = ctx;
   const locks: Lock[] = [];
   let grant: Awaited<ReturnType<Governor['admit']>> | undefined;
   let error: unknown;
   let checks: CheckOutcome[] = [];
   let cleanupOutcome: { ok: boolean; detail?: string } = { ok: true };
   const appName = deps.config.linearApps[0]?.name ?? 'app1';
-  /** Set when the scenario reached its UI steps: its resources stay for the UI session. */
+  /** The index of the first UI step, once the scenario reached it. */
+  let heldAt: number | undefined;
+  /** Set when the run was kept for the UI session: its resources stay until `ui-result` or the hold's end. */
   let heldForUi = false;
   /** Set when setup did not stop after its deadline: the run stays registered, so the sweeper removes what it makes later. */
   let setupStuck = false;
@@ -561,7 +660,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks);
       try {
         await withDeadline(setup, SETUP_TIMEOUT_MS, () =>
-          new EnvBlockedError(`setup did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes (last phase: ${phase})`));
+          new EnvBlockedError(`setup did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes (last phase: ${phase()})`));
       } catch (late) {
         abort.abort();
         setupStuck = !(await settlesWithin(setup, SETUP_STOP_MS));
@@ -571,61 +670,38 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     }
     const history: Array<Record<string, string>> = [await snapshotRefs(ctx)];
     ctx.observations.set('refHistory', history);
-    for (const step of scenario.steps) {
+    for (const [index, step] of scenario.steps.entries()) {
       if (step.kind === 'ui') {
-        writeFileSync(join(runDir, 'ui-checklist.md'), renderUiChecklist(scenario, names, ctx));
-        heldForUi = true;
-        throw new EnvBlockedError(`ui steps wait for the UI session: checklist ${join(runDir, 'ui-checklist.md')}`);
+        writeFileSync(join(runDir, UI_CHECKLIST_FILE), renderUiChecklist(scenario, names, ctx));
+        heldAt = index;
+        throw new EnvBlockedError(`ui steps wait for the UI session: checklist ${join(runDir, UI_CHECKLIST_FILE)}`);
       }
       log(`step ${step.kind}.${step.action}`);
       await runStep(ctx, step);
       history.push(await snapshotRefs(ctx));
     }
     checks = await runChecks(ctx);
-    const failed = checks.filter((check) => !check.ok);
-    if (failed.length > 0) {
-      throw new ProductError(`checks failed: ${failed.map((check) => `${check.name} (${check.detail ?? ''})`).join('; ')}`);
-    }
+    failOnChecks(checks);
   } catch (caught) {
     error = caught;
   } finally {
     await retainPendingOutput(ctx);
     // Capture output before cleanup removes remote pull requests and comments,
-    // even when a step or assertion failed. Persist collection errors as errors.
-    {
+    // even when a step or assertion failed.
+    await captureCanaryEvidence(ctx);
+    if (heldAt !== undefined) {
+      // What `ui-result` needs to take the run up again; a run that cannot be saved is cleaned up now.
+      const holdUntil = Date.now() + UI_HOLD_MS;
       try {
-        if (ctx.observations.get('canary.pendingIncomplete')) throw new Error('pending engine output unavailable');
-        const evidence = await withDeadline(collectCanaryEvidence(ctx, { summariesOnly: false }), 30_000, () => new Error('canary collection timed out'));
-        writeFileSync(join(runDir, 'canary-evidence.tmp'), JSON.stringify(evidence));
-        renameSync(join(runDir, 'canary-evidence.tmp'), join(runDir, 'canary-evidence.json'));
-      } catch {
-        writeFileSync(join(runDir, 'canary-evidence.json'), JSON.stringify({ canaries: [], texts: {}, error: 'could not collect remote output' }));
+        saveHeldRun(runDir, heldRunOf(ctx, { stepIndex: heldAt, appName: grant?.app.name ?? appName, holdUntil, startedAt: new Date(started).toISOString(), budgetWaitMs: grant?.waitedMs ?? 0, takeUpRequests: { harness: 0, harnessApp: 0 } }));
+        heldForUi = true;
+        registration.hold(holdUntil);
+        cleanupOutcome = { ok: true, detail: 'kept for the UI session; the sweeper removes it after the hold' };
+      } catch (saveError) {
+        error = new EnvBlockedError(`the run could not be kept for the UI session: ${(saveError as Error).message}`);
       }
     }
-    if (heldForUi) {
-      registration.hold(Date.now() + UI_HOLD_MS);
-      cleanupOutcome = { ok: true, detail: 'kept for the UI session; the sweeper removes it after the hold' };
-    } else {
-      try {
-        cleanupOutcome = await cleanup(ctx);
-      } catch (cleanupError) {
-        cleanupOutcome = { ok: false, detail: (cleanupError as Error).message };
-      }
-      // The zone's trash after cleanup: a run should leave it as it found it.
-      const trash = ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> | undefined;
-      if (trash !== undefined && ctx.live !== null) {
-        for (const [key, counts] of Object.entries(trash)) {
-          const teamId = ctx.live.teams.get(key)?.id;
-          if (teamId === undefined) continue;
-          try {
-            counts.after = await ctx.live.world.trashedInZone(teamId);
-            if (counts.after > counts.before) ctx.log(`warning: the run left ${counts.after - counts.before} more trashed documents in team ${key}'s zone`);
-          } catch (error) {
-            ctx.log(`could not count team ${key}'s trashed documents after the run: ${(error as Error).message}`);
-          }
-        }
-      }
-    }
+    if (!heldForUi) cleanupOutcome = await cleanupAndCount(ctx);
     await ctx.proxy?.close();
     locks.splice(0).reverse().forEach((lock) => lock.release());
     grant?.release();
@@ -639,23 +715,15 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   writeFileSync(join(runDir, 'harness.log'), logLines.join('\n'));
   rmSync(join(runDir, 'canary-pending'), { force: true });
-  return {
-    id: scenario.id,
-    level: levelOf(scenario.id),
-    slice: scenario.slice,
-    mode: scenario.mode,
-    runId,
-    ...outcome,
-    startedAt: new Date(started).toISOString(),
-    durationMs: Date.now() - started,
-    engineRequests: ctx.proxy?.requests.filter((record) => !record.injected).length ?? 0,
-    harnessRequests: ctx.live === null ? 0 : [...Object.values(ctx.live.editors)].reduce((sum, client) => sum + client.stats.total, 0),
-    budgetWaitMs: grant?.waitedMs ?? 0,
-    checks,
-    cleanup: cleanupOutcome,
-    ...(ctx.observations.has('metrics') ? { metrics: ctx.observations.get('metrics') as Record<string, unknown> } : {}),
-    ...(ctx.observations.has('zone.trash') ? { teamZoneTrash: ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> } : {}),
-  };
+  return resultOf(ctx, outcome, { startedAt: started, budgetWaitMs: grant?.waitedMs ?? 0, checks, cleanup: cleanupOutcome });
+}
+
+/** A check that does not hold fails the scenario as a product error; the outcomes stay in the result either way. */
+export function failOnChecks(checks: readonly CheckOutcome[]): void {
+  const failed = checks.filter((check) => !check.ok);
+  if (failed.length > 0) {
+    throw new ProductError(`checks failed: ${failed.map((check) => `${check.name} (${check.detail ?? ''})`).join('; ')}`);
+  }
 }
 
 export function skippedResult(scenario: Scenario, reason: string): ScenarioResult {

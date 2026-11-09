@@ -802,7 +802,7 @@ async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
     runDir: join(root, 'run'),
     live: liveWorld,
     sandbox,
-    proxy: { url: 'http://127.0.0.1:1', requests: [], tokens: () => [], setFaults: (next: readonly unknown[]) => void faults.push(...next), clearFaults: () => {}, counts: () => ({ total: 0, queries: 0, mutations: 0, injected: 0 }), resetCounters: () => {}, close: async () => {} },
+    proxy: { url: 'http://127.0.0.1:1', requests: [], tokens: () => [], setFaults: (next: readonly unknown[]) => void faults.push(...next), clearFaults: () => {}, armedFaults: () => faults.length, counts: () => ({ total: 0, queries: 0, mutations: 0, injected: 0 }), resetCounters: () => {}, close: async () => {} },
     checkpoints: new CheckpointControl(join(root, 'run', 'hooks')),
     engine: { results: [], setupRuns: 0, env: {}, restores: [] },
     edits: [],

@@ -5,12 +5,15 @@
 //   node test/e2e/harness/cli.ts plan  [same filters]   lists what would run, with budget estimates
 //   node test/e2e/harness/cli.ts sweep                  removes leftovers of dead or old runs
 //   node test/e2e/harness/cli.ts checklist --ids L6-05  prints a UI checklist without running
+//   node test/e2e/harness/cli.ts ui-result <run folder> <answered checklist> [--status-page <file>] [--evidence-dir <dir>]
+//        takes up a run held for its UI steps with the UI session's answers
 //
 // The test configuration comes from the environment and the test
 // configuration folder (see config.ts).
 
+import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { LinearClient, mintAppToken, revokeToken, type RunToken, type LogEntry, type LinearHooks } from '../../../src/linear/index.ts';
 import { countAppRequest } from './app-reads.ts';
@@ -27,7 +30,9 @@ import { runScenarios, skippedResult } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios, selectScenarios } from './spec.ts';
 import { sweep } from './sweeper.ts';
-import { renderUiChecklist } from './ui-checklist.ts';
+import { parseUiAnswers, renderUiChecklist } from './ui-checklist.ts';
+import { loadHeldRun } from './held-run.ts';
+import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-result.ts';
 
 const list = (value: string | undefined) => (value === undefined ? undefined : value.split(',').map((item) => item.trim()).filter(Boolean));
 
@@ -69,7 +74,7 @@ async function main(argv: string[]): Promise<number> {
 
   if (command === 'checklist') {
     for (const scenario of scenarios.filter((candidate) => candidate.mode === 'ui')) {
-      process.stdout.write(renderUiChecklist(scenario, runNames('000000'), { live: null }));
+      process.stdout.write(renderUiChecklist(scenario, runNames('000000'), { live: null, runDir: '<run folder>' }));
       process.stdout.write('\n');
     }
     return 0;
@@ -84,7 +89,7 @@ async function main(argv: string[]): Promise<number> {
     log: (entry: LogEntry) => { process.stderr.write(`${JSON.stringify({ harnessRunId, app, ...entry })}\n`); },
   });
   try {
-    for (const app of command === 'run' ? config.linearApps : []) {
+    for (const app of command === 'run' || command === 'ui-result' ? config.linearApps : []) {
       const hooks = hooksFor(app.name);
       const token = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
       tokens.push({ token, hooks });
@@ -143,7 +148,38 @@ async function main(argv: string[]): Promise<number> {
       return results.some((result) => result.result === 'fail') ? 1 : 0;
     }
 
-    process.stdout.write('Usage: cli.ts run|plan|sweep|checklist [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
+    if (command === 'ui-result') {
+      const [, runArg, checklistArg] = positionals;
+      if (runArg === undefined || checklistArg === undefined) throw new Error('usage: cli.ts ui-result <run folder> <answered checklist>');
+      const runDir = resolve(runArg);
+      const answers = parseUiAnswers(readFileSync(checklistArg, 'utf8'));
+      const held = loadHeldRun(runDir);
+      // The result goes over the run's entry in its report: a run folder without one is refused before anything changes.
+      reportEntry(reportDirOf(runDir), held.scenarioId, held.runId);
+      // Admission on the run's own app: its engine and the harness's reads go through that app.
+      const apps: App[] = config.linearApps.filter((app) => app.name === held.appName).map((app) => ({
+        name: app.name,
+        readBudget: async () => budgetFromStatus(await (appClients.get(app.name) as LinearClient).rateLimitStatus(), Date.now()),
+      }));
+      if (config.linearApps.length > 0 && apps.length === 0) throw new Error(`the held run uses app ${held.appName}, which the test configuration does not have`);
+      const governor = apps.length === 0 ? null : new Governor({ apps, stateDir, log });
+      const outcome = await takeUpHeldRun(runDir, answers, all, { config, governor, appClients, stateDir, expectedRed: loadExpectedRed(), log });
+      if (outcome.state === 'waiting') {
+        process.stdout.write(`ran ${outcome.ran.length === 0 ? 'no harness step' : outcome.ran.join(', ')}; the run stays held: answer item ${outcome.nextItem} and the ones after it, then hand the checklist back\n`);
+        return 0;
+      }
+      const { result } = outcome;
+      const { files, statusPage } = recordUiResult(runDir, result, {
+        catalog: all.map((scenario) => scenario.id),
+        ...(values['status-page'] === undefined ? {} : { statusPage: values['status-page'] }),
+        ...(values['evidence-dir'] === undefined ? {} : { evidenceDir: values['evidence-dir'] }),
+      });
+      if (statusPage === 'kept-newer') log(`status page: kept a newer result of ${result.id} from another run`);
+      process.stdout.write(`${result.id} ${result.runId}: ${result.result}${result.reason === undefined ? '' : ` (${result.reason})`}; cleanup ${result.cleanup.ok ? 'ok' : `failed: ${result.cleanup.detail ?? ''}`}; report ${files.markdown}\n`);
+      return result.result === 'fail' || !result.cleanup.ok ? 1 : 0;
+    }
+
+    process.stdout.write('Usage: cli.ts run|plan|sweep|checklist|ui-result [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
     return command === 'help' ? 0 : 2;
   } finally {
     for (const { token, hooks } of tokens) {

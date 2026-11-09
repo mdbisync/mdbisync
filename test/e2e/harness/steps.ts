@@ -1493,6 +1493,32 @@ export const STEP_ACTIONS: Record<string, Executor> = {
   }])),
 };
 
+/**
+ * Marks the edits of a document that the version kept no longer holds, when
+ * a person resolved its conflict in the UI: the harness did not see the
+ * conflicted text, but the conflict's edits are the document's own, and the
+ * ones missing from the kept version were discarded on purpose. I2 then no
+ * longer expects them.
+ */
+export function retireMissingFrom(ctx: Pick<RunContext, 'edits'>, path: string, kept: string): void {
+  for (const edit of ctx.edits) {
+    if (edit.path === path && !edit.removal && !kept.includes(edit.token)) edit.retired = true;
+  }
+}
+
+/** What the harness does once the UI session answered a UI step with pass. */
+const UI_AFTERMATH: Record<string, Executor> = {
+  // The session kept one version of the conflict: the other version's edits are gone on purpose.
+  'ui.resolve-markers': async (ctx, args) => {
+    const path = targetPath(ctx, args.target);
+    retireMissingFrom(ctx, path, (await linearContent(ctx, path)).content);
+  },
+};
+
+export async function afterUiStep(ctx: RunContext, step: Step): Promise<void> {
+  await UI_AFTERMATH[`${step.kind}.${step.action}`]?.(ctx, step.args);
+}
+
 export async function runStep(ctx: RunContext, step: Step): Promise<void> {
   const executor = STEP_ACTIONS[`${step.kind}.${step.action}`];
   if (executor === undefined) throw new HarnessGapError(`${step.kind}.${step.action}`);
