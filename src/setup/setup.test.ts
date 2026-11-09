@@ -267,7 +267,7 @@ describe('setup check', () => {
     const { report } = await run(world);
     const summary = renderSetupSummary(report);
     assert.match(summary, /^## Setup check\n\nStopped before any write: `missing-permission`\./);
-    assert.match(summary, /\| github-access \| FAILED \| the GitHub token lacks workflows:write \|/);
+    assert.match(summary, /\| github-access \| FAILED \| the GitHub token lacks workflows:write \(\[how to fix\]\(https:\/\/github\.com\/mdbisync\/mdbisync\/blob\/main\/docs\/quickstart\.md#github-app\)\) \|/);
     assert.match(summary, /\| linear-format-hook \| passed \|/);
   });
 

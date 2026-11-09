@@ -57,7 +57,7 @@ describe('the message of a run stopped before any write', () => {
     ], []);
     assert.equal(
       stoppedBeforeWritingMessage('sync', stopped({ code: setup.code, setup })),
-      'sync: stopped before any write (annotation-target-not-found): not found in Linear: project "Platform" of team "Engineering"',
+      'sync: stopped before any write (annotation-target-not-found): not found in Linear: project "Platform" of team "Engineering". How to fix it: https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#folder-annotations',
     );
   });
 
@@ -65,7 +65,7 @@ describe('the message of a run stopped before any write', () => {
     const refusal = { code: 'initial-sync-required' as const, message: 'the sync has no recorded state: run the initial sync first' };
     assert.equal(
       stoppedBeforeWritingMessage('sync', stopped({ code: refusal.code, refusal })),
-      'sync: stopped before any write (initial-sync-required): the sync has no recorded state: run the initial sync first',
+      'sync: stopped before any write (initial-sync-required): the sync has no recorded state: run the initial sync first. How to fix it: https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#initial-sync',
     );
   });
 
@@ -73,11 +73,15 @@ describe('the message of a run stopped before any write', () => {
     const setup = buildReport([failed('annotation-targets', 'annotation-target-not-found', 'not found in Linear: team "A\r\n::notice::B"')], []);
     assert.equal(
       stoppedBeforeWritingMessage('sync', stopped({ code: setup.code, setup })),
-      'sync: stopped before any write (annotation-target-not-found): not found in Linear: team "A ::notice::B"',
+      'sync: stopped before any write (annotation-target-not-found): not found in Linear: team "A ::notice::B". How to fix it: https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#folder-annotations',
     );
   });
 
-  it('is the code alone when nothing explains it', () => {
-    assert.equal(stoppedBeforeWritingMessage('check', stopped({ operation: 'check', code: 'no-annotations' })), 'check: stopped before any write (no-annotations)');
+  it('is the code and its fix link when nothing explains it', () => {
+    assert.equal(
+      stoppedBeforeWritingMessage('check', stopped({ operation: 'check', code: 'no-annotations' })),
+      'check: stopped before any write (no-annotations). How to fix it: https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#folder-annotations',
+    );
+    assert.equal(stoppedBeforeWritingMessage('sync', stopped({ code: 'stopped' })), 'sync: stopped before any write (stopped)');
   });
 });

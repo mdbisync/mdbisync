@@ -7,6 +7,7 @@
 // Linear's bad minutes does not fail its job. Other operations have no next
 // run to go on, so a stop fails them.
 
+import { fixUrl } from '../setup/fixes.ts';
 import { type PullRequestFailure, pullRequestFailure } from '../sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
 
@@ -58,8 +59,9 @@ export function exitStatusOf(outcome: OperationOutcome): ExitStatus {
  */
 export function stoppedBeforeWritingMessage(command: string, outcome: OperationOutcome): string {
   const detail = outcome.setup?.detail ?? outcome.refusal?.message;
+  const fix = fixUrl(outcome.code);
   // Names from README front matter may hold line breaks; one line keeps them from reading as further log lines.
-  return `${command}: stopped before any write (${outcome.code})${detail === undefined ? '' : `: ${detail.replace(/\s*[\r\n]+\s*/g, ' ')}`}`;
+  return `${command}: stopped before any write (${outcome.code})${detail === undefined ? '' : `: ${detail.replace(/\s*[\r\n]+\s*/g, ' ')}`}${fix === undefined ? '' : `. How to fix it: ${fix}`}`;
 }
 
 /** The message of a run that is not a sync, stopped by Linear before any write. */

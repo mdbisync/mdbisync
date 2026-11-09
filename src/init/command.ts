@@ -6,6 +6,8 @@ import templates from './workflows.json' with { type: 'json' };
 import type { CliResult } from '../cli.ts';
 import { ANNOTATION_FILE, TEAM_KEY, PROJECT_KEY, resolveZones } from '../mapping/annotations.ts';
 import { collectAnnotations } from '../mapping/mapping.ts';
+import { appCreationUrl } from '../setup/app.ts';
+import { QUICKSTART_URL } from '../setup/fixes.ts';
 import { LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
 import { findFrontMatter } from '../mapping/front-matter.ts';
 
@@ -217,7 +219,7 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, text);
     }
-    return { exitCode: 0, stderr: '', stdout: `${changes.size ? `Wrote ${changes.size} repository files.` : 'Repository files are already initialized.'}\n\nRemaining admin steps:\n1. Create a Linear OAuth app with read,write client credentials; set repository secrets MDBISYNC_LINEAR_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_SECRET.\n2. Install a GitHub App with contents, pull requests and workflows write, checks and commit statuses read. Set variable MDBISYNC_APP_CLIENT_ID and secret MDBISYNC_APP_PRIVATE_KEY.\n3. Allow merge commits; configure required checks for main.\n4. Install Node 24 and pre-commit; run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.\n5. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.\n` };
+    return { exitCode: 0, stderr: '', stdout: `${changes.size ? `Wrote ${changes.size} repository files.` : 'Repository files are already initialized.'}\n\nRemaining admin steps:\n1. Create a Linear OAuth app with read,write client credentials; set repository secrets MDBISYNC_LINEAR_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_SECRET.\n2. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set variable MDBISYNC_APP_CLIENT_ID and secret MDBISYNC_APP_PRIVATE_KEY.\n3. Allow merge commits; configure required checks for main.\n4. Install Node 24 and pre-commit; run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.\n5. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.\n` };
   } catch (error) {
     if (!(error instanceof InitError)) throw error;
     return { exitCode: 2, stdout: '', stderr: `init: ${error.message}\n\n${INIT_USAGE}` };
