@@ -10,16 +10,17 @@ import { linkTargets, rewrite, targetPath } from "./bank.ts";
 import { checkCorpus } from "./check.ts";
 import { longTitle } from "./documents.ts";
 import { buildCorpus, writeCorpus } from "./generate.ts";
-import { gitattributes } from "./model.ts";
+import { parse } from "yaml";
+import { CONTENT_LIMIT, gitattributes, SHARED_IMAGE_USERS } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
-import { lintText } from "../../src/format/index.ts";
-import { COLLISIONS, EDGE, LOOSE } from "./tree.ts";
+import { fixText, lintText } from "../../src/format/index.ts";
+import { COLLISIONS, EDGE, EDGE_ZONE, LOOSE, preCommitConfig } from "./tree.ts";
 
 // The default corpus, built once for the tests that only read it.
 let defaultCorpus: ReturnType<typeof buildCorpus> | undefined;
 function corpus(): ReturnType<typeof buildCorpus> {
-  defaultCorpus ??= buildCorpus();
+  defaultCorpus ??= buildCorpus("a".repeat(40));
   return defaultCorpus;
 }
 
@@ -37,8 +38,8 @@ test("the same seed writes byte-identical trees, and the result passes the corpu
   const a = mkdtempSync(join(tmpdir(), "corpus-a-"));
   const b = mkdtempSync(join(tmpdir(), "corpus-b-"));
   try {
-    writeCorpus(buildCorpus("determinism"), a, false);
-    writeCorpus(buildCorpus("determinism"), b, false);
+    writeCorpus(buildCorpus("a".repeat(40), "determinism"), a, false);
+    writeCorpus(buildCorpus("a".repeat(40), "determinism"), b, false);
     const left = treeDigest(a);
     const right = treeDigest(b);
     assert.ok(left.size >= 2000, `only ${left.size} files`);
@@ -56,7 +57,7 @@ test("the same seed writes byte-identical trees, and the result passes the corpu
 
 test("a different seed changes the generated content but not the layout rules", () => {
   const one = corpus();
-  const two = buildCorpus("seed-two");
+  const two = buildCorpus("a".repeat(40), "seed-two");
   const text = (c: ReturnType<typeof buildCorpus>) => c.files.filter((f) => f.group === "work-documents").map((f) => f.content.toString()).join("");
   assert.notEqual(text(one), text(two));
   assert.equal(one.files.filter((f) => f.group === "pairwise").length, two.files.filter((f) => f.group === "pairwise").length);
@@ -96,6 +97,16 @@ test("one image is used by exactly 40 documents, and two files are over the uplo
   assert.deepEqual(tooLarge.sort(), ["attachment", "image"]);
 });
 
+test("the mid slice holds the shared image and every document that embeds it", () => {
+  const built = corpus();
+  const mid = new Set(built.slices.mid);
+  const image = built.files.find((f) => f.role === "shared-image");
+  assert.ok(image && mid.has(image.path));
+  const users = built.files.filter((f) => f.synced && f.kind === "markdown" && f.links.includes(image.path));
+  assert.equal(users.length, SHARED_IMAGE_USERS);
+  assert.deepEqual(users.filter((f) => !mid.has(f.path)).map((f) => f.path), []);
+});
+
 test("duplicate-title fixtures are taken from the bank once, never paired by the generator", () => {
   const built = corpus();
   const generated = built.files.filter((f) => f.path.startsWith(`${COLLISIONS}/`) && f.group !== "construct-singles");
@@ -132,12 +143,44 @@ test("HTML src and href count as links, and the HTML image fixture records its i
   assert.ok(html?.links.includes("docs/reference/assets/banner.png"));
 });
 
-test("bank fixtures whose links still reach their files are copied byte for byte", () => {
+test("bank fixtures whose links still reach their files are copied unchanged, then in Linear's form", () => {
   for (const name of ["links/spaces-angle.md", "links/spaces-encoded.md", "links/relative.md", "images/reference.md"]) {
     const copied = corpus().files.find((f) => f.path === `docs/reference/${name}`);
     assert.ok(copied, name);
-    assert.deepEqual(copied.content, readFileSync(join("test/fixtures", name)), name);
+    assert.equal(copied.content.toString("utf8"), fixText(readFileSync(join("test/fixtures", name), "utf8")), name);
   }
+});
+
+test("every synced document outside the lint-error set is already in Linear's form", () => {
+  const files = corpus().files.filter((f) => f.synced && f.kind === "markdown");
+  for (const file of files) {
+    const text = file.content.toString("utf8");
+    if (file.expected === "lint-error") continue;
+    assert.equal(fixText(text), text, `${file.path} is not in Linear's form`);
+    assert.notEqual(file.expected, "fixable", `${file.path} is still classed fixable`);
+  }
+  // The lint-error files are written as generated: fix never touches them.
+  assert.ok(files.some((f) => f.expected === "lint-error"));
+});
+
+test("the size cases at Linear's limit keep their exact length in Linear's form", () => {
+  const files = corpus().files.filter((f) => f.group === "size-spectrum" && f.expected !== "lint-error");
+  for (const [name, length] of [["at-limit", CONTENT_LIMIT], ["at-limit-minus-one", CONTENT_LIMIT - 1], ["size-240kb-1", 240_000], ["size-1kb-1", 1_000]] as const) {
+    const file = files.find((f) => f.path.endsWith(`/${name}.md`));
+    assert.ok(file, name);
+    assert.equal([...file.content.toString("utf8")].length, length, name);
+  }
+});
+
+test("a file rewritten into Linear's form says so, and fix never changes a fixture Linear keeps as it is", () => {
+  const index = parse(readFileSync("test/fixtures/index.yaml", "utf8")) as { fixtures: { file: string; class?: string; basis?: string }[] };
+  const keptByLinear = new Set(index.fixtures.filter((f) => f.class === "unchanged" && f.basis === "known").map((f) => `docs/reference/${f.file}`));
+  for (const file of corpus().files) {
+    if (!file.note?.includes("Linear's form")) continue;
+    assert.ok(!keptByLinear.has(file.path), `${file.path}: Linear keeps the fixture as it is, but fix changes it`);
+  }
+  const rewritten = corpus().files.filter((f) => f.note?.includes("written in Linear's form"));
+  assert.ok(rewritten.length > 0);
 });
 
 test("a malformed percent escape is kept as written, and replacements are literal", () => {
@@ -223,8 +266,9 @@ test("generated alignment, image titles and marker contexts follow the fixture b
     assert.equal(generated.length, count, fixture);
     for (const file of generated) {
       assert.deepEqual(
-        [file.class, file.rule, file.basis],
-        [reference.class, reference.rule, reference.basis],
+        // The basis can differ: a bank copy may match the form the probe recorded, a generated file was never probed.
+        [file.class, file.rule],
+        [reference.class, reference.rule],
         file.path,
       );
     }
@@ -272,8 +316,20 @@ test("the linter flags exactly the documents the manifest classes as lint errors
 test("edge cases stay in the edge-case area and the Markdown reference, away from the everyday documents", () => {
   const edgeGroups = new Set(["pairwise", "size-spectrum", "conflict-markers", "lint-errors"]);
   for (const file of corpus().files) {
-    if (file.kind !== "markdown" || [`${EDGE}/`, "docs/reference/", `${LOOSE}/`].some((p) => file.path.startsWith(p))) continue;
-    assert.ok(!edgeGroups.has(file.group), `${file.path} (${file.group}) belongs in ${EDGE}`);
-    assert.notEqual(file.expected, "lint-error", `${file.path} is a lint error outside ${EDGE}`);
+    if (file.kind !== "markdown" || [`${EDGE}/`, `${EDGE_ZONE}/`, "docs/reference/", `${LOOSE}/`].some((p) => file.path.startsWith(p))) continue;
+    assert.ok(!edgeGroups.has(file.group), `${file.path} (${file.group}) belongs in ${EDGE} or ${EDGE_ZONE}`);
+    assert.notEqual(file.expected, "lint-error", `${file.path} is a lint error outside ${EDGE} and ${EDGE_ZONE}`);
   }
+});
+
+test("the corpus configuration requires and retains a full release commit pin", () => {
+  const revision = "1234567890abcdef1234567890abcdef12345678";
+  assert.match(preCommitConfig(revision), new RegExp(`rev: ${revision}`));
+  assert.match(preCommitConfig(revision), /id: linear-format/);
+  assert.match(preCommitConfig(revision), /alias: security/);
+  for (const invalid of ["", "main", "v0.1.0-rc.1", "HOOK_REV_PLACEHOLDER", "a".repeat(40) + "\n"]) {
+    assert.throws(() => preCommitConfig(invalid), /full lowercase commit SHA/);
+  }
+  const generated = corpus().files.find((file) => file.path === ".pre-commit-config.yaml")!;
+  assert.match(generated.content.toString(), /rev: a{40}\n/);
 });

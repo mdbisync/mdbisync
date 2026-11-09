@@ -1,6 +1,7 @@
 // The run's machine-readable report: what the job summary says, as JSON,
 // for tests and tooling. Names, paths and states only, no content.
 
+import { type ContainerCapacity } from './capacity.ts';
 import { writeFile } from 'node:fs/promises';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
@@ -9,6 +10,7 @@ import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 
 export interface RunReport {
+  capacity: ContainerCapacity[];
   operation: PreflightOutcome['operation'];
   ok: boolean;
   /** Why the run stopped before writing, or why a confirmed initial sync or a sync run did not finish. */
@@ -64,7 +66,9 @@ export interface ReverseReport {
   progressPushes: number;
   /** The record commit, which is also the pull request's head. */
   record: { commit: string; moved: boolean; hasTrackedParent: boolean; changesTracked: boolean } | null;
-  pullRequest: { number: number; url: string; opened: boolean } | null;
+  pullRequest: { number: number; url: string; opened: boolean; updated: boolean } | null;
+  /** An earlier run's pull request this run closed, because the tracked branch already equals Linear. */
+  closedPullRequest: number | null;
 }
 
 /** A sync run's writes to Linear, by path. */
@@ -105,6 +109,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
   const confirmed = outcome.confirmed;
   const reverse = outcome.reverse;
   return {
+    capacity: outcome.plan?.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
     code: outcome.code ?? outcome.captured?.code ?? pullRequestFailure(outcome.sync?.pullRequest)?.code ?? confirmed?.code ?? reverse?.code ?? null,
@@ -112,7 +117,8 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     changed:
       outcome.sync?.changed ??
       ((confirmed !== undefined && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true)) ||
-        reverse?.record?.moved === true),
+        (reverse !== undefined &&
+          (reverse.record?.moved === true || reverse.progressPushes > 0 || reverse.pullRequest?.opened === true || reverse.pullRequest?.updated === true || reverse.closedPullRequest !== undefined))),
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
     securityHooks: outcome.setup?.securityHooks ?? null,
     notImplemented: outcome.notImplemented,
@@ -123,7 +129,14 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     sync: null,
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? reverse?.skippedCompleted.length ?? 0,
-    oversizeFiles: [...new Set((confirmed?.leftOutAtWrite ?? []).filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
+    // A confirmed run finds them at the write; a dry run, before it, and lists them in its plan.
+    oversizeFiles: [
+      ...new Set(
+        confirmed !== undefined
+          ? confirmed.leftOutAtWrite.filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? [])
+          : (outcome.plan?.leftOutFiles ?? []).filter((entry) => entry.rules.includes(UPLOAD_TOO_LARGE)).flatMap((entry) => entry.files ?? []),
+      ),
+    ].sort(),
     resumed: confirmed?.resumed ?? reverse?.resumed ?? false,
     stoppedEarly: confirmed?.stopped !== undefined || reverse?.stopped !== undefined || outcome.captured?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
@@ -157,12 +170,17 @@ function toReverseReport(result: ReverseResult): ReverseReport {
       result.record === null
         ? null
         : { commit: result.record.linear, moved: result.record.moved, hasTrackedParent: result.record.hasTrackedParent, changesTracked: result.record.changesTracked },
-    pullRequest: result.pullRequest === null ? null : { number: result.pullRequest.number, url: result.pullRequest.url, opened: result.pullRequest.opened },
+    pullRequest:
+      result.pullRequest === null
+        ? null
+        : { number: result.pullRequest.number, url: result.pullRequest.url, opened: result.pullRequest.opened, updated: result.pullRequest.updated },
+    closedPullRequest: result.closedPullRequest ?? null,
   };
 }
 
 function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunReport {
   return {
+    capacity: write.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
     code: outcome.code ?? pullRequestFailure(outcome.sync?.pullRequest)?.code ?? write.code ?? null,
@@ -216,6 +234,14 @@ function toConfirmedReport(result: ConfirmedResult): ConfirmedReport {
     progressPushes: result.progressPushes,
     reformatted: result.record?.reformatted ?? [],
   };
+}
+
+/** The one-line failure of an initial sync that did not finish: why, and what to do next. */
+export function unfinishedMessage(command: string, code: string | undefined): string {
+  if (code === 'sync-branch-changed') {
+    return `${command}: not finished (${code}); merge or close the pull request of the sync branch and delete the branch, then run it again`;
+  }
+  return `${command}: not finished (${code}); run it again with the same inputs`;
 }
 
 export async function writeRunReport(path: string, outcome: OperationOutcome): Promise<void> {

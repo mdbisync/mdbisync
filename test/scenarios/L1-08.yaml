@@ -1,7 +1,7 @@
 {
   "version": 1,
   "id": "L1-08",
-  "slice": "mid",
+  "slice": "full",
   "mode": "local",
   "setup": {
     "state": "empty",

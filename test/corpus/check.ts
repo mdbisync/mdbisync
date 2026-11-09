@@ -6,16 +6,18 @@
 // and as they lie in the test repository. With --git the root is a checkout
 // made without LFS smudging, so every LFS file must be a pointer and no
 // other file may be one. With --lint, the exact set of synced Markdown
-// paths with lint findings must equal the manifest's lint-error paths.
+// paths with lint findings must equal the manifest's lint-error paths, and
+// every other synced Markdown file must already be in Linear's form: `fix`
+// leaves it byte for byte as it is.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { duplicateTitles, lintText, type Finding } from "../../src/format/index.ts";
+import { duplicateTitles, fixText, lintText, type Finding } from "../../src/format/index.ts";
 import { findCyrillicLines } from "../../tools/check-no-cyrillic.ts";
 import type { Manifest, ManifestEntry } from "./generate.ts";
-import { gitattributes, GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, ROLES, type Group } from "./model.ts";
+import { gitattributes, GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, ROLES, SHARED_IMAGE_SLICES, SHARED_IMAGE_USERS, type Group } from "./model.ts";
 import { SLICES } from "./slices.ts";
 
 export type CheckResult = {
@@ -79,6 +81,22 @@ export function checkLintExpectations(
   for (const path of [...actual.keys()].sort()) {
     const rules = actual.get(path)!;
     if (!expected.has(path)) problems.push(`unexpected lint-error: ${path} (${[...rules].sort().join(", ")})`);
+  }
+  return problems;
+}
+
+/** Synced Markdown files outside the lint-error set that `fix` would still change. */
+export function checkLinearForm(
+  root: string,
+  manifest: Manifest = JSON.parse(readFileSync(join(root, "corpus-slices", "manifest.json"), "utf8")) as Manifest,
+): string[] {
+  const problems: string[] = [];
+  for (const file of manifest.files) {
+    if (!file.synced || file.kind !== "markdown" || file.class === "lint-error") continue;
+    const path = join(root, "corpus", file.path);
+    if (!existsSync(path)) continue; // reported by the tree check
+    const text = readFileSync(path, "utf8");
+    if (fixText(text) !== text) problems.push(`not in Linear's form: ${file.path}`);
   }
   return problems;
 }
@@ -168,11 +186,21 @@ export function checkCorpus(root: string, options: { git?: boolean; lint?: boole
     const sorted = [...new Set(paths)].sort();
     if (sorted.length !== paths.length || sorted.some((p, i) => p !== paths[i])) problems.push(`slice ${slice} is not sorted or has duplicates`);
     for (const path of paths) if (!entries.has(path)) problems.push(`slice ${slice} names a path the corpus does not have: ${path}`);
+    // The slices that sync the shared-image case hold the shared image and every document that embeds it.
+    const image = [...entries.values()].find((e) => e.role === "shared-image");
+    if (image !== undefined && SHARED_IMAGE_SLICES.includes(slice)) {
+      const inSlice = new Set(paths);
+      const users = paths.filter((path) => {
+        const entry = entries.get(path);
+        return entry?.synced === true && entry.kind === "markdown" && entry.links.includes(image.path);
+      }).length;
+      if (!inSlice.has(image.path) || users !== SHARED_IMAGE_USERS) problems.push(`slice ${slice}: the shared image is embedded by ${users} documents, not ${SHARED_IMAGE_USERS}`);
+    }
   }
 
   const documents = [...entries.values()].filter((e) => e.synced && e.kind === "markdown").length;
   if (options.lint === true) {
-    for (const problem of checkLintExpectations(root, manifest)) {
+    for (const problem of [...checkLintExpectations(root, manifest), ...checkLinearForm(root, manifest)]) {
       if (!problems.includes(problem)) problems.push(problem);
     }
   }

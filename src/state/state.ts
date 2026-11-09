@@ -262,16 +262,22 @@ export const INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear
 /**
  * Whether the pull request of an initial sync from Linear waits for a
  * person: `linear` is such a record, the sync branch (the pull request's
- * head) still points at it, and the tracked branch has not merged it. A
- * record that needed no pull request moves no sync branch, so it never waits.
+ * head) holds it, at its tip or under review commits a person pushed, and
+ * the tracked branch has not merged it. A record that needed no pull request
+ * moves no sync branch, so it never waits.
  */
+/** Whether `commit` is `of` or one of its ancestors. */
+export async function isAncestor(git: Git, commit: Oid, of: Oid): Promise<boolean> {
+  return (await git.run(['merge-base', '--is-ancestor', commit, of], { okCodes: [0, 1] })).code === 0;
+}
+
 export async function initialPullRequestPending(git: Git, state: { linear: Oid | null; sync: Oid | null; tracked: Oid }): Promise<boolean> {
   const { linear, sync, tracked } = state;
-  if (linear === null || sync !== linear) return false;
+  if (linear === null || sync === null) return false;
   const [subject] = (await git.text(['show', '-s', '--format=%s', linear])).split('\n');
   if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
-  const merged = await git.run(['merge-base', '--is-ancestor', linear, tracked], { okCodes: [0, 1] });
-  return merged.code !== 0;
+  if (!(await isAncestor(git, linear, sync))) return false;
+  return !(await isAncestor(git, linear, tracked));
 }
 
 export interface CommitStateOptions {
@@ -304,22 +310,44 @@ export async function readReservedIds(git: Git, commit: Oid | null): Promise<Res
 }
 
 /**
- * Commits the id map (and the reserved ids, when there are any) on top of
- * `parent`. Returns `parent` when nothing changed, unless `always`.
+ * In a progress commit only: for each document the unfinished initial sync
+ * wrote, the SHA-256 (lowercase hex) of the text it sent. A resumed run
+ * skips a document whose text has the same hash, whatever form Linear
+ * stored it in.
+ */
+export const WRITTEN_FILE = 'written.json';
+
+export async function readWrittenHashes(git: Git, commit: Oid | null): Promise<Map<string, string>> {
+  if (commit === null) return new Map();
+  const read = await git.run(['cat-file', 'blob', `${commit}:${WRITTEN_FILE}`], { okCodes: [0, 128] });
+  if (read.code !== 0) return new Map();
+  const data = await readJsonFile(git, commit, WRITTEN_FILE);
+  const map = new Map<string, string>();
+  for (const [path, hash] of Object.entries(data)) {
+    if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) throw new Error(`${WRITTEN_FILE} has an invalid entry`);
+    map.set(path, hash);
+  }
+  return map;
+}
+
+/**
+ * Commits the id map (and, when there are any, the reserved ids and the
+ * written hashes) on top of `parent`. Returns `parent` when nothing
+ * changed, unless `always`.
  */
 export function commitIds(
   git: Git,
   parent: Oid | null,
   ids: IdMap,
   identity: CommitIdentity,
-  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string> } = {},
+  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string> } = {},
 ): Promise<Oid> {
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
   const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry.saved === undefined ? { id: entry.id } : { id: entry.id, saved: entry.saved }]));
   const files = new Map<string, unknown>([[IDS_FILE, data]]);
-  if (options.reserved !== undefined && options.reserved.size > 0) {
-    files.set(RESERVED_IDS_FILE, Object.fromEntries([...options.reserved.entries()].sort(([a], [b]) => compareStrings(a, b))));
-  }
+  const sorted = (map: ReadonlyMap<string, string>) => Object.fromEntries([...map.entries()].sort(([a], [b]) => compareStrings(a, b)));
+  if (options.reserved !== undefined && options.reserved.size > 0) files.set(RESERVED_IDS_FILE, sorted(options.reserved));
+  if (options.written !== undefined && options.written.size > 0) files.set(WRITTEN_FILE, sorted(options.written));
   return commitJsonFiles(git, parent, files, options.message ?? 'Update document ids', identity, options.always === true);
 }
 

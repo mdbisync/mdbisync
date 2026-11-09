@@ -3,12 +3,17 @@
 // title, and what a confirmed run would create, overwrite and move to trash.
 // Pure: the caller reads the files and lists the documents.
 
+import { type ContainerCapacity } from '../run/capacity.ts';
 import { lintText } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearDocument, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, type Zone } from '../mapping/index.ts';
 import { type ResolvedTargets, projectKey } from '../setup/index.ts';
 
-/** Why a synchronized file stays in git only: a lint rule, a title collision, or a title Linear refuses. */
+/**
+ * Why a synchronized file stays in git only: a lint rule, a title collision,
+ * or a title Linear refuses; in a dry run also a linked file the write would
+ * refuse (`upload-too-large`, `upload-unreadable`, see `leaveOutAtWrite`).
+ */
 export interface LeftOutEntry {
   path: string;
   /** Sorted, each rule once. */
@@ -19,6 +24,8 @@ export interface LeftOutEntry {
   collidesWith?: string[];
   /** The Linear document with the file's title, which the run leaves as it is. */
   documentId?: string;
+  /** For a rule found from the files the document links (`upload-too-large`, `upload-unreadable`): those files. */
+  files?: string[];
 }
 
 export interface CreateEntry {
@@ -43,13 +50,14 @@ export interface TrashEntry {
 }
 
 export interface InitialSyncPlan {
+  capacity?: ContainerCapacity[];
   create: CreateEntry[];
   overwrite: OverwriteEntry[];
   trash: TrashEntry[];
   leftOut: LeftOutEntry[];
 }
 
-/** One place's live documents (archived and trashed ones are not listed). */
+/** One place's documents; the planner ignores archived and trashed ones. */
 export interface PlaceDocuments {
   place: Place;
   documents: readonly LinearDocument[];
@@ -179,6 +187,32 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   plan.trash = byPath(plan.trash);
   plan.leftOut = byPath([...leftOut.values()]);
   return plan;
+}
+
+/**
+ * The plan with documents that the write would leave out (a linked file over
+ * the upload limit) moved from create and overwrite to the left-out files,
+ * with their rule and the files that cause it. An overwritten document stays
+ * as it is, as the confirmed run leaves it. The rest of the plan (the
+ * container counts) is kept as it is.
+ */
+export function leaveOutAtWrite(plan: InitialSyncPlan, entries: ReadonlyArray<{ path: string; rule: string; files: readonly string[] }>): InitialSyncPlan {
+  if (entries.length === 0) return plan;
+  const byPath = new Map(entries.map((entry) => [entry.path, entry]));
+  const leftOut = [...plan.leftOut];
+  const add = (path: string, documentId?: string) => {
+    const found = byPath.get(path);
+    if (found === undefined) return;
+    leftOut.push({ path, rules: [found.rule], lines: [], files: [...found.files], ...(documentId !== undefined ? { documentId } : {}) });
+  };
+  for (const entry of plan.create) add(entry.path);
+  for (const entry of plan.overwrite) add(entry.path, entry.documentId);
+  return {
+    ...plan,
+    create: plan.create.filter((entry) => !byPath.has(entry.path)),
+    overwrite: plan.overwrite.filter((entry) => !byPath.has(entry.path)),
+    leftOut: leftOut.sort((a, b) => compare(a.path, b.path)),
+  };
 }
 
 /**

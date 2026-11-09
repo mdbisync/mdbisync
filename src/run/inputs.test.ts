@@ -40,3 +40,10 @@ it('declares every input in action.yml', async () => {
   const actionYml = await readFile('action.yml', 'utf8');
   for (const name of INPUT_NAMES) assert.match(actionYml, new RegExp(`^  ${name}:$`, 'm'), name);
 });
+
+it('validates a configurable document cap before contacting services', () => {
+  for (const cap of ['0', '-1', '1.5', 'NaN', 'Infinity', '100x', '9007199254740992']) {
+    assert.throws(() => readInputs(given({ ...REQUIRED, repository: 'o/r', 'document-cap': cap }), {}), InputError);
+  }
+  assert.equal(readInputs(given({ ...REQUIRED, repository: 'o/r', 'document-cap': '42' }), {}).documentCap, 42);
+});

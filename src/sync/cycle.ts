@@ -17,6 +17,7 @@ import { type PullRequestResult, syncPullRequest } from './pull-request.ts';
 import { type WriteResult, writeTrackedToLinear } from './write.ts';
 
 export interface CycleOptions {
+  documentCap?: number | undefined;
   config: StateConfig;
   /** The repository the sync pull request is in, with the token the run acts as. */
   github: GitHubRepository;
@@ -48,6 +49,6 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   // Writing Linear from the tracked branch while that pull request waits would leave it to be merged over the new state.
   if (pullRequest.code === 'initial-pull-request-pending') return { complete: false, changed, capture: captured, pullRequest };
   const moved = pullRequest.branchMoved || pullRequest.merged !== null || pullRequest.pullRequest?.opened === true;
-  const write = await writeTrackedToLinear(context, { config: options.config, state:captured.state, ...(options.transforms ? { transforms: options.transforms } : {}) });
+  const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, state:captured.state, ...(options.transforms ? { transforms: options.transforms } : {}) });
   return {complete:write.complete && pullRequest.code === undefined, changed:changed || moved || write.changed, capture:captured, pullRequest, write};
 }

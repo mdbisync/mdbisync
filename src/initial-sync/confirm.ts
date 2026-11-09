@@ -20,8 +20,9 @@
 // like any other. Run again after the state is lost and the refs are
 // rebuilt, without duplicates.
 
-import { randomUUID } from 'node:crypto';
-import { splitFile } from '../format/index.ts';
+import { assessCapacity, capacityBlocked } from '../run/capacity.ts';
+import { createHash, randomUUID } from 'node:crypto';
+import { fixText, splitFile } from '../format/index.ts';
 import {
   DocumentTooLongError,
   type LinearDocument,
@@ -43,6 +44,7 @@ import {
   initialSyncProgressMessage,
   readInitialSyncProgress,
   readReservedIds,
+  readWrittenHashes,
   commitTree,
   commitUploads,
   pushAtomic,
@@ -68,6 +70,7 @@ export const SYNC_IDENTITY: CommitIdentity = Object.freeze({ name: 'mdbisync', e
 export const PROGRESS_BATCH = 25;
 
 export interface ConfirmOptions {
+  documentCap?: number | undefined;
   config: StateConfig;
   transforms?: readonly BodyTransform[];
   identity?: CommitIdentity;
@@ -100,7 +103,7 @@ export interface ConfirmedResult {
   /** Every document written, every extra one trashed and the state recorded. */
   complete: boolean;
   /** Why not complete. */
-  code?: 'stopped' | 'write-failed' | 'state-moved';
+  code?: 'stopped' | 'write-failed' | 'state-moved' | 'container-cap';
   /** The run continued an unfinished one: documents it had recorded were skipped. */
   resumed: boolean;
   created: string[];
@@ -156,16 +159,21 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
 
   const sources = await readPlanSources(context, { withContent: true });
   const plan = planInitialSync(sources.input);
+  plan.capacity = assessCapacity(context, sources.containers, plan.create, options.documentCap);
   const texts = sources.input.texts;
 
   const expected: StateSnapshot = { ...fetched.state };
   const resumed = (await readInitialSyncProgress(git, expected.ids)) !== null;
   const previous = await readIds(git, expected.ids);
+  /** What the stopped run sent, by path, when this run resumes it; and what this run has sent. */
+  const writtenBefore = resumed ? await readWrittenHashes(git, expected.ids) : new Map<string, string>();
+  const sentHashes = new Map(writtenBefore);
   const ids: IdMap = resumed ? new Map(previous) : new Map();
   const uploads = await readUploads(git, expected.uploads);
   const uploadsAtStart = uploads.size;
-  /** What Linear stores for each synchronized path. */
+  /** What Linear stores for each synchronized path, and the text this run sent or would send for it. */
   const stored = new Map<string, string>();
+  const sent = new Map<string, string>();
 
   const result: ConfirmedResult = {
     complete: false,
@@ -183,6 +191,12 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     record: null,
   };
 
+  if (capacityBlocked(plan.capacity)) {
+    result.code = 'container-cap';
+    result.notAttempted = [...plan.create, ...plan.overwrite, ...plan.trash].map((entry) => entry.path).sort();
+    return { plan, result };
+  }
+
   const remember = (path: string, document: LinearDocument) => {
     const before = previous.get(path);
     ids.set(path, before !== undefined && before.id === document.id && before.saved !== undefined ? { id: document.id, saved: before.saved } : { id: document.id });
@@ -190,9 +204,15 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   };
 
   let unpushed = 0;
+  /** The upload cache's size at the last push; uploads made since are recorded even when no document was. */
+  let uploadsPushed = uploads.size;
   const pushProgress = async () => {
     const updates: RefUpdate[] = [];
-    const idsCommit = await commitIds(git, expected.ids, ids, identity, { message: initialSyncProgressMessage(fetched.tracked), always: true });
+    const idsCommit = await commitIds(git, expected.ids, ids, identity, {
+      message: initialSyncProgressMessage(fetched.tracked),
+      always: true,
+      written: sentHashes,
+    });
     updates.push({ ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit });
     if (uploads.size !== uploadsAtStart || expected.uploads !== null) {
       const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity);
@@ -204,6 +224,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     if (updates.length > 1) expected.uploads = (updates[1] as RefUpdate).next;
     result.progressPushes += 1;
     unpushed = 0;
+    uploadsPushed = uploads.size;
   };
 
   const work: Work[] = [
@@ -220,9 +241,18 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   for (const entry of plan.overwrite) documentIds.set(entry.path, entry.documentId);
   // A file left out while writing on an earlier run keeps the id reserved for it then.
   const reserved = await readReservedIds(git, expected.ids);
+  const saved = new Map<string, string>();
   for (const entry of plan.create) {
     const chosen = (resumed ? previous.get(entry.path)?.id : undefined) ?? reserved.get(entry.path);
-    documentIds.set(entry.path, chosen !== undefined && !sources.documents.has(chosen) ? chosen : newId());
+    if (chosen !== undefined && !sources.documents.has(chosen)) saved.set(entry.path, chosen);
+  }
+  // An id absent from the listed containers may still exist elsewhere in
+  // Linear. Check before reusing it: create refuses an existing id.
+  const taken = new Set<string>();
+  if (saved.size > 0) for (const document of await linear.getDocuments([...new Set(saved.values())])) taken.add(document.id);
+  for (const entry of plan.create) {
+    const chosen = saved.get(entry.path);
+    documentIds.set(entry.path, chosen !== undefined && !taken.has(chosen) ? chosen : newId());
     ids.set(entry.path, { id: documentIds.get(entry.path) as string });
   }
 
@@ -245,13 +275,28 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       if (item.kind === 'overwrite' && document === undefined) throw new Error(`the planned document for ${path} was not listed`);
 
       try {
-        const body = await transformBody(transforms, path, splitFile(texts.get(path) as string).body);
-        // A document already holding the body is not written again. On a
-        // resumed run, that is how the documents the stopped run wrote are
-        // skipped; one whose file or Linear text changed since is written.
-        if (document !== undefined && document.content === body) {
-          const completed = resumed && previous.get(path)?.id === document.id;
-          (completed ? result.skippedCompleted : result.unchanged).push(path);
+        const source = splitFile(texts.get(path) as string).body;
+        const body = await transformBody(transforms, path, source);
+        const hash = sha256(body);
+        sent.set(path, body);
+        // A resumed run skips what the stopped run wrote, as long as the text
+        // to send is the same; a file changed since is written again.
+        if (document !== undefined && resumed && previous.get(path)?.id === document.id && writtenBefore.get(path) === hash) {
+          result.skippedCompleted.push(path);
+          sentHashes.set(path, hash);
+          remember(path, document);
+          continue;
+        }
+        // A document already holding the body, as sent or in the form Linear
+        // stores it, is not written again: files are often not in Linear's
+        // form, and writing them again would change nothing but the
+        // document's history. Linear's form can depend on what a transform
+        // wrote (a link to an uploaded file is stored as a file), so the
+        // content is also compared after the transforms' inverses, with the
+        // file's own body. Normalize the restored text too: restoring document
+        // links can put back their original spelling in otherwise formatted text.
+        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body)), source))) {
+          result.unchanged.push(path);
           remember(path, document);
           continue;
         }
@@ -265,11 +310,13 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           const id = documentIds.get(path) as string;
           const created = await linear.createDocument(placeId(targets, item.entry.place), { id, title, content: body });
           remember(path, created);
+          sentHashes.set(path, hash);
           result.created.push(path);
           await checkpoint('document-created-before-ids-push');
         } else {
           const updated = await linear.updateDocument(item.entry.documentId, { content: body });
           remember(path, updated);
+          sentHashes.set(path, hash);
           result.overwritten.push(path);
         }
         written += 1;
@@ -332,7 +379,10 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     }
 
     if (result.stopped !== undefined || result.failed.length > 0) {
-      if (unpushed > 0) await pushProgress();
+      // Always leave a progress commit: even a run that only trashed
+      // documents has changed Linear, and the sync must not run on the old
+      // state until initial sync finishes.
+      if (unpushed > 0 || uploads.size !== uploadsPushed || (await readInitialSyncProgress(git, expected.ids)) === null) await pushProgress();
       result.code = result.stopped !== undefined ? 'stopped' : 'write-failed';
       return { plan, result };
     }
@@ -354,7 +404,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       return { plan, result };
     }
     // A bug or a git failure: keep what was written before giving up.
-    if (unpushed > 0) await pushProgress().catch(() => undefined);
+    if (unpushed > 0 || uploads.size !== uploadsPushed) await pushProgress().catch(() => undefined);
     throw error;
   }
 
@@ -367,7 +417,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const reformatted: string[] = [];
     for (const path of [...synced].sort(compare)) {
       const text = texts.get(path) as string;
-      const file = splitFile(text).head + restoreBody(transforms, path, stored.get(path) ?? '');
+      const file = splitFile(text).head + restoreBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string);
       if (file !== text) {
         changes.set(path, file);
         reformatted.push(path);
@@ -406,6 +456,15 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P', oid]);
     return (await describe(a)) === (await describe(b));
   }
+}
+
+function sha256(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/** Whether Linear's content is the body, or the body in the form Linear stores (as the format module writes it). */
+export function holdsBody(content: string, body: string): boolean {
+  return content === body || content === fixText(body);
 }
 
 function describeError(error: LinearError): string {

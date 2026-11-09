@@ -3,7 +3,8 @@
 Two-way sync between Markdown files in a Git repository and Linear documents,
 run as a GitHub Action.
 
-**Status:** early development. `lint` and `fix` work on Markdown files.
+**Status:** early development. `lint` and `fix` work on Markdown files
+([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)).
 `check` checks a repository's setup. `initial-sync` works in both
 directions, as a dry run and confirmed. `sync` captures Linear changes into
 its state ref, takes them to the tracked branch through the sync pull
@@ -51,7 +52,13 @@ and so on.
 `initial-sync` with `direction: git-to-linear` makes Linear equal to the
 tracked branch. Without `confirm: true` it is a dry run: it lists by path
 what it would create, overwrite and move to Linear's trash, and the files it
-leaves out, and writes nothing. With `confirm: true`:
+leaves out, and writes nothing. The files left out include documents that
+link a file over Linear's 10 MB upload limit (`upload-too-large`) or an LFS
+object stored with LFS extensions, which the run cannot read
+(`upload-unreadable`), each with the files that
+cause it; the dry run judges a file in LFS by its pointer, so it uploads and
+downloads nothing. An LFS object missing from the remote is found only by
+the confirmed run. With `confirm: true`:
 
 - a document whose title is a file's path keeps its id, comments and history
   and gets the file's text (front matter stays in git); a file without a
@@ -74,6 +81,14 @@ A run that stops early (Linear's rate limit, a rejected write) records no
 the documents it already wrote, and a document created just before a crash
 is found by its title, not created twice. When the state refs are lost, a
 new confirmed run rebuilds them without duplicating documents.
+
+Before creating documents, the dry run and sync report containers at or above
+90% of their document cap. Counts include live, trashed and archived documents
+returned by Linear, plus planned additions; trashing documents frees no space.
+Above the cap, a confirmed initial sync or `sync` stops before uploads,
+document writes or state pushes and exits with code 5 (`container-cap`).
+Set the `document-cap` action input or `MDBISYNC_DOCUMENT_CAP` environment
+variable to a positive integer to override the default of 1,000.
 
 ## Initial sync from Linear to git
 
@@ -134,6 +149,7 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
 | `src/run/` | Inputs and the preflight every run starts with |
 | `src/mapping/` | Folder annotations and the mapping of files to documents |
 | `src/setup/` | The setup check and the refusal to sync without state |
+| `src/format/` | `lint` and `fix`: Markdown in Linear's form ([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)) |
 | `src/initial-sync/` | Initial sync in both directions: plan, dry run, confirmed run |
 | `src/pull-request/` | Pull requests through GitHub's REST API: open, update, read checks, merge |
 | `src/linear/` | Linear client |
@@ -155,6 +171,7 @@ npm ci                  # exact versions from package-lock.json, install scripts
 npm run typecheck       # tsc --noEmit
 npm run build           # esbuild bundles into dist/, checks bundled licenses
 npm test                # node --test
+npm run test:hooks       # requires pre-commit; offline scratch hook and CI checks
 pre-commit run --all-files
 ```
 
@@ -191,8 +208,29 @@ repos:
 ```
 
 The action runs its checked-in JavaScript bundles without installation.
-The hook needs Node 24.15.0, which pre-commit provisions when creating its
-environment; its package has no registry dependencies. Enable Dependabot's
+The hooks use Node 24 and npm already installed on your machine
+(`language_version: system`); no Node toolchain or registry dependencies are
+downloaded when installing or running them. Use npm 11.16.0 or newer: npm
+11.12.1 rejects pre-commit's local Git package installation. The release
+package contains only bundled code and has no install scripts.
+
+`linear-format` fixes Markdown into Linear's form and exits 1 when it changes
+a file; a second run passes. `linear-format-check` reports changes without
+writing them. Both refuse constructs Linear would lose, with a file, line and
+rule, leaving the file unchanged. Every rule, what `fix` changes, and the CI
+workflow that commits the fixes to pull requests ([examples/pre-commit.yml](https://github.com/mikhail-yaskou/mdbisync/blob/main/examples/pre-commit.yml))
+are described in [docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md).
+
+To generate the test corpus with the same pin, run:
+
+```sh
+node test/corpus/generate.ts --hook-rev <40-character-release-sha>
+```
+
+The generator requires an explicit release commit SHA and preserves the
+`corpus/` and `corpus-slices/` layout.
+
+Enable Dependabot's
 `github-actions` ecosystem in your repository to propose action SHA updates,
 then copy the proposed release SHA into the hook's `rev` in the same change.
 To update to a specific pre-release, resolve its annotated tag and use the

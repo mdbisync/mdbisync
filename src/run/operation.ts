@@ -54,22 +54,25 @@ export async function runOperation(
   let reverse: ReverseResult | undefined;
   let sync: CycleResult | undefined;
   let workSummary = '';
-  const github = { ...inputs.github, ...(options.fetch ? { fetch: options.fetch } : {}) };
+
+  // Uploads rewrite links to files that are not Markdown; document links, links to synchronized documents.
+  const transforms = () => [uploadsTransform({ config: inputs.state }), documentLinks()];
 
   const gitToLinear = async (context: RunContext, confirm: boolean) => {
     if (confirm) {
-      const run = await confirmInitialSync(context, { config: inputs.state, transforms: [uploadsTransform({ config: inputs.state }), documentLinks()] });
+      const run = await confirmInitialSync(context, { config: inputs.state, documentCap: inputs.documentCap, transforms: transforms() });
       plan = toPlanReport(run.plan, 'git-to-linear', true);
       confirmed = run.result;
       workSummary = renderConfirmed(run.plan, run.result);
     } else {
-      const planned = await planFromRepository(context);
+      const planned = await planFromRepository(context, inputs.documentCap);
       plan = toPlanReport(planned, 'git-to-linear', false);
       workSummary = renderDryRun(planned);
     }
   };
   const linearToGit = async (context: RunContext, confirm: boolean) => {
     if (confirm) {
+      const github = { ...inputs.github, ...(options.fetch ? { fetch: options.fetch } : {}) };
       const run = await confirmLinearToGit(context, { config: inputs.state, github });
       plan = toReversePlanReport(run.plan, true);
       reverse = run.result;
@@ -80,11 +83,12 @@ export async function runOperation(
       workSummary = renderReverseDryRun(planned);
     }
   };
-  const cycle = async (context: RunContext) => {
+  const syncCycle = async (context: RunContext) => {
     sync = await runSyncCycle(context, {
       config: inputs.state,
-      github,
-      transforms: () => [uploadsTransform({ config: inputs.state }), documentLinks()],
+      documentCap: inputs.documentCap,
+      github: { ...inputs.github, ...(options.fetch ? { fetch: options.fetch } : {}) },
+      transforms,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });
     workSummary = renderSync(sync);
@@ -96,7 +100,7 @@ export async function runOperation(
     inputs,
     refusePending ? { ...options, refusePendingInitialPullRequest: true } : options,
     operation === 'sync'
-      ? cycle
+      ? syncCycle
       : initialSync === undefined
         ? undefined
         : (context) => (initialSync.direction === 'git-to-linear' ? gitToLinear : linearToGit)(context, initialSync.confirm),

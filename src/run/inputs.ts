@@ -16,6 +16,7 @@ export const INPUT_NAMES = [
   'sync-branch',
   'state-ref-prefix',
   'report-file',
+  'document-cap',
   'direction',
   'confirm',
 ] as const;
@@ -27,6 +28,7 @@ export interface RunInputs {
   state: StateConfig;
   /** Where to write the run's report as JSON; for tests and tooling. */
   reportFile?: string;
+  documentCap?: number;
 }
 
 export class InputError extends Error {
@@ -69,6 +71,11 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   if (githubApiUrl !== '') inputs.github.apiUrl = githubApiUrl;
   const reportFile = value('report-file');
   if (reportFile !== '') inputs.reportFile = reportFile;
+  const cap = value('document-cap');
+  if (cap !== '') {
+    if (!/^[1-9][0-9]*$/.test(cap) || !Number.isSafeInteger(Number(cap))) throw new InputError('the input document-cap must be a positive safe integer');
+    inputs.documentCap = Number(cap);
+  }
   return inputs;
 }
 

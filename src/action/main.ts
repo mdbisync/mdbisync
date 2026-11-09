@@ -6,7 +6,7 @@
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
 import { pullRequestFailure } from "../sync/index.ts";
-import { writeRunReport } from "../run/finish.ts";
+import { unfinishedMessage, writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { runOperation } from "../run/operation.ts";
 import { Git } from "../state/index.ts";
@@ -41,10 +41,15 @@ export async function run(): Promise<void> {
       core.setFailed(`${operation}: stopped before any write (${outcome.code})`);
       return;
     }
+    if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write?.code === 'container-cap') {
+      core.setOutput("code", "container-cap");
+      core.setFailed(`${operation}: stopped before any write (container-cap); reduce additions or check document-cap`);
+      return;
+    }
     const unfinished = outcome.confirmed ?? outcome.reverse;
     if (unfinished !== undefined && !unfinished.complete) {
       core.setOutput("code", unfinished.code ?? "");
-      core.setFailed(`${operation}: not finished (${unfinished.code}); run it again with the same inputs`);
+      core.setFailed(unfinishedMessage(operation, unfinished.code));
       return;
     }
     if (outcome.captured?.stopped !== undefined) {

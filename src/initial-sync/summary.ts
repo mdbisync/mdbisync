@@ -1,8 +1,9 @@
+import { cell, placeLabel } from '../run/summary.ts';
 // The initial sync's job summary and its machine-readable form: paths,
 // places and rule names only, never document content.
 
+import { type ContainerCapacity, renderCapacity } from '../run/capacity.ts';
 import { describeStop } from '../linear/index.ts';
-import { type Place } from '../mapping/index.ts';
 import { type ConfirmedResult } from './confirm.ts';
 import { type InitialSyncPlan, type LeftOutEntry } from './plan.ts';
 import { type ReversePlan, type ReverseResult } from './reverse.ts';
@@ -12,6 +13,7 @@ export type Direction = (typeof DIRECTIONS)[number];
 
 /** The plan in the run report; every path list is sorted. */
 export interface PlanReport {
+  capacity: ContainerCapacity[];
   direction: Direction;
   confirm: boolean;
   plan: {
@@ -33,6 +35,7 @@ export interface PlanReport {
 export function toPlanReport(plan: InitialSyncPlan, direction: Direction, confirm: boolean): PlanReport {
   const paths = (entries: Array<{ path: string }>) => entries.map((entry) => entry.path);
   return {
+    capacity: plan.capacity ?? [],
     direction,
     confirm,
     plan: {
@@ -65,13 +68,15 @@ export function renderDryRun(plan: InitialSyncPlan): string {
   pushTable(lines, 'Overwrite', ['Path', 'In Linear', 'Document'], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
   pushTable(lines, 'Move to trash', ['Path', 'In Linear', 'Document'], plan.trash.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
   pushTable(lines, 'Left out', LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
-  return lines.join('\n');
+  return lines.join('\n') + renderCapacity(plan.capacity ?? []);
 }
 
 /** Markdown for the job summary of a confirmed run: counts, paths and rule names, never content. */
 export function renderConfirmed(plan: InitialSyncPlan, result: ConfirmedResult): string {
   const outcome = result.complete
     ? 'Linear now equals the tracked branch, and the sync state is recorded.'
+    : result.code === 'container-cap'
+      ? 'Nothing was written. Reduce planned additions or increase document-cap after checking the container limit.'
     : result.code === 'state-moved'
       ? 'A state ref moved while this run was writing, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done.'
       : 'The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already written are skipped.';
@@ -107,7 +112,7 @@ export function renderConfirmed(plan: InitialSyncPlan, result: ConfirmedResult):
       '',
     );
   }
-  return lines.join('\n');
+  return lines.join('\n') + renderCapacity(plan.capacity ?? []);
 }
 
 /** The plan of an initial sync from Linear in the run report. */
@@ -126,6 +131,8 @@ export function toReversePlanReport(plan: ReversePlan, confirm: boolean): PlanRe
     leftOut: paths(plan.leftOut),
     leftOutFiles: plan.leftOut,
     collisionPaths: plan.leftOut.filter((entry) => entry.rules.includes('duplicate-title')).map((entry) => entry.path),
+    // Nothing is created in Linear, so no container comes closer to its document cap.
+    capacity: [],
   };
 }
 
@@ -155,7 +162,7 @@ export function renderReverseDryRun(plan: ReversePlan): string {
 export function renderReverseConfirmed(plan: ReversePlan, result: ReverseResult): string {
   const outcome = result.complete
     ? result.pullRequest === null
-      ? 'The tracked branch already equals Linear: no pull request is needed. The sync state is recorded.'
+      ? `The tracked branch already equals Linear: no pull request is needed. The sync state is recorded.${result.closedPullRequest === undefined ? '' : ` Pull request #${result.closedPullRequest} of an earlier run had nothing left to carry and is closed.`}`
       : `The sync state is recorded and pull request #${result.pullRequest.number} ${result.pullRequest.opened ? 'is open' : 'was already open'}. A person reviews and merges it; the sync does not run until it is merged.`
     : result.code === 'state-moved'
       ? 'A state ref moved while this run was working, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done.'
@@ -184,10 +191,10 @@ export function renderReverseConfirmed(plan: ReversePlan, result: ReverseResult)
   return lines.join('\n');
 }
 
-const LEFT_OUT_HEAD = ['Path', 'Rules', 'Lines', 'Collides with'];
+const LEFT_OUT_HEAD = ['Path', 'Rules', 'Lines', 'Collides with, or the files'];
 
 function leftOutRows(entries: readonly LeftOutEntry[]): string[][] {
-  return entries.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? []).join(', ')]);
+  return entries.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? entry.files ?? []).join(', ')]);
 }
 
 /** Adds a table section; an empty one says "None." when `always`, and is skipped otherwise. */
@@ -203,18 +210,13 @@ function pushTable(lines: string[], title: string, head: string[], rows: string[
   lines.push('');
 }
 
-export function placeLabel(place: Place): string {
-  return place.kind === 'project' ? `project "${place.project}" of team "${place.team}"` : `team "${place.team}"`;
-}
+export { placeLabel };
 
 function count(n: number, noun: string, plural = `${noun}s`): string {
   return `${n} ${n === 1 ? noun : plural}`;
 }
 
-/** A table cell: pipes, backslashes and line breaks would break the row. */
-function cell(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
-}
+
 
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;

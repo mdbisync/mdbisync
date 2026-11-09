@@ -8,7 +8,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
-import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
+import { COMMANDS, INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
@@ -223,19 +223,27 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.writes.length, writes);
     assert.equal(world.github.pullRequests[0]?.merged, false);
 
-    // After the merge the sync runs. It writes nothing to Linear: the tracked
-    // branch holds Linear's state, except the one document the initial sync
-    // left out for its title, which capture takes in under the file name rule
-    // and the sync pull request carries to the tracked branch.
+    // L1R-03: after the merge the sync runs, and finds nothing to write to Linear (I6).
     await merge(world);
-    const writesBeforeSync = world.writes.length;
+    const mutationsBefore = linearMutations(world).length;
     const after = await run(world, {}, 'sync');
     assert.equal(after.result.exitCode, 0, after.result.stderr);
     assert.equal(after.report.code, null);
-    assert.deepEqual(world.writes.slice(writesBeforeSync), ['POST /pulls']);
-    assert.equal(await fixture.remote.text(['diff', '--name-status', 'refs/heads/main', 'refs/mdbisync/linear']), 'A\teng/notes/Q3%3A plans%3F.md');
-    assert.equal(world.github.pullRequests.length, 2);
-    assert.deepEqual(after.report.pullRequest?.paths, ['eng/notes/Q3%3A plans%3F.md']);
+    assert.equal(after.report.writtenCount, 0);
+    assert.equal(linearMutations(world).length, mutationsBefore, 'the sync wrote to Linear after the merge');
+    // Merged, the tracked branch holds Linear's state: the synchronized folders equal `linear`.
+    assert.equal(await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']), await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']));
+
+    // Running initial sync again with nothing new opens nothing and leaves the merged pull request's branch alone.
+    const syncBranch = (await refs())['refs/heads/mdbisync/linear'];
+    const rerun = await run(world);
+    assert.equal(rerun.result.exitCode, 0, rerun.result.stderr);
+    assert.equal(rerun.report.linearToGit?.pullRequest, null);
+    assert.equal((await refs())['refs/heads/mdbisync/linear'], syncBranch);
+    assert.equal(world.github.pullRequests.length, 1);
+    const afterRerun = await run(world, {}, 'sync');
+    assert.equal(afterRerun.result.exitCode, 0, afterRerun.result.stderr);
+    assert.equal(afterRerun.report.code, null);
   });
 
   it('runs again with nothing changed: refs stay, no second pull request', async () => {
@@ -358,6 +366,44 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal((await readIds())['eng/notes/fenced.md'], undefined);
     // The annotation-only README ended at its fence: the body starts on the next line.
     assert.equal(await show('refs/mdbisync/linear:eng/notes/README.md'), `---\nlinear-project: Field notes\n---\n# Field notes\n\n${CANARY}`);
+    // The description counts only the files the pull request carries.
+    assert.match(world.github.pullRequests[0]?.body ?? '', /- 2 files are new/);
+  });
+
+  it('keeps an existing file and its document id when the document reads as front matter', async () => {
+    const world = fakeWorld();
+    // The tracked file has no front matter, so the document's fence would become one.
+    world.linear.documents = [...linearDocuments(), doc('doc-notes', 'backend/notes', { teamId: 'team-eng' }, `---\nstatus: draft\n---\nNotes. ${CANARY}`)];
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{ path: 'eng/backend/notes.md', rule: 'front-matter-boundary' }]);
+    assert.ok(!(report.linearToGit?.overwritten ?? []).includes('eng/backend/notes.md'));
+    // The file keeps the tracked text, and stays the document's file.
+    assert.equal(await show('refs/mdbisync/linear:eng/backend/notes.md'), TREE['eng/backend/notes.md']);
+    assert.equal((await readIds())['eng/backend/notes.md'], 'doc-notes');
+    assert.match(world.github.pullRequests[0]?.body ?? '', /- 4 files take Linear's text/);
+  });
+
+  it('a rerun that finds the tracked branch equal to Linear closes the earlier open pull request, and the sync runs', async () => {
+    const world = fakeWorld();
+    assert.equal((await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' })).result.exitCode, 0);
+    for (const store of ['linear', 'ids', 'uploads']) await fixture.remote.run(['update-ref', '-d', `refs/mdbisync/${store}`]);
+    const plan = world.linear.documents.find((d) => d.title === 'plan' && d.projectId === 'project-api') as FakeDocument;
+    const original = plan.content as string;
+    plan.content = `# Plan\n\nChanged in Linear. ${CANARY}`;
+    assert.equal((await run(world)).result.exitCode, 0);
+    assert.equal(world.github.pullRequests[0]?.state, 'open');
+    const branch = (await refs())['refs/heads/mdbisync/linear'];
+
+    plan.content = original;
+    const { result, report, summary } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(report.linearToGit?.closedPullRequest, 1);
+    assert.equal(world.github.pullRequests[0]?.state, 'closed');
+    assert.equal((await refs())['refs/heads/mdbisync/linear'], branch, 'the sync branch moved');
+    assert.match(summary, /Pull request #1 of an earlier run had nothing left to carry and is closed/);
+    const sync = await run(world, {}, 'sync');
+    assert.equal(sync.result.exitCode, 0, sync.result.stderr);
   });
 
   it('records its own marker even when an earlier record from the other direction has the same tree', async () => {
@@ -389,7 +435,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     await fixture.seed({ 'src/app.txt': 'unrelated work\n' });
     const sync = await run(world, {}, 'sync');
     assert.equal(sync.result.exitCode, 0, sync.result.stderr);
-    assert.equal(sync.report.code, null);
+    assert.notEqual(sync.report.code, 'initial-pull-request-pending');
   });
 
   it('does not overwrite commits a person pushed to the open pull request', async () => {
@@ -409,6 +455,8 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(report.code, 'sync-branch-changed');
     assert.match(summary, /holds commits this sync did not make/);
     assert.deepEqual(await refs(), before);
+    // The pull request with the person's commit still waits for its merge.
+    assert.equal((await run(world, {}, 'sync')).report.code, 'initial-pull-request-pending');
   });
 
   it('a rerun after Linear changed moves the pull request to the new record and rewrites its description', async () => {

@@ -9,6 +9,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
+import { fixText } from '../format/index.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git } from '../state/index.ts';
@@ -177,6 +178,71 @@ describe('uploads of linked files in an initial sync', () => {
     assert.equal(await show('refs/mdbisync/linear:eng/notes/b.md'), B_BODY);
   });
 
+  it('L1-18: a file not in Linear form whose attachments Linear stores as files is not written again', async () => {
+    await fixture.seed({ 'eng/notes/list.md': `# List\n\n* [Diagram](../media/diagram.png)\n* [Notes](b.md)\n\n${CANARY}` });
+    const world = fakeWorld();
+    // Like Linear: a link to an uploaded file is stored as a file, the form `fix` gives a relative link to a file.
+    world.linear.store = (content) => fixText(content.replaceAll(`${UPLOADS_HOST}/`, 'uploaded/')).replaceAll('uploaded/', `${UPLOADS_HOST}/`);
+    assert.equal((await run(world)).result.exitCode, 0);
+    const stored = document(world, 'list')?.content ?? '';
+    assert.ok(stored.startsWith('# List\n\n* \n'), 'the fake stores the list as files');
+    const writes = world.linear.writes.count;
+
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(world.linear.writes.count, writes, 'the second run wrote again');
+    assert.ok(report.initialSync?.unchanged.includes('eng/notes/list.md'));
+  });
+
+  it("L1-18: an image in angle brackets that Linear reformats is recorded in Linear's form, still an image, and not written again", async () => {
+    await fixture.seed({ 'eng/notes/spaced.md': `# Spaced\n\n![Pixel](<pixel copy.png>)\n\n${CANARY}`, 'eng/notes/pixel copy.png': PIXEL });
+    const world = fakeWorld();
+    // Like Linear: the stored text is in Linear's form, a link to an uploaded file stored as a file.
+    world.linear.store = (content) => fixText(content.replaceAll(`${UPLOADS_HOST}/`, 'uploaded/')).replaceAll('uploaded/', `${UPLOADS_HOST}/`);
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    const pixel = uploadOf(world, PIXEL)[0] as FakeUpload;
+    assert.equal(document(world, 'spaced')?.content, `# Spaced\n\n![Pixel](${pixel.assetUrl})\n\n${CANARY}`, 'Linear dropped the brackets');
+    // The record is Linear's form of the file: the image keeps a destination that still makes it an image.
+    const recorded = await show('refs/mdbisync/linear:eng/notes/spaced.md');
+    assert.equal(recorded, `# Spaced\n\n![Pixel](pixel%20copy.png)\n\n${CANARY}`);
+    assert.equal(recorded, fixText(`# Spaced\n\n![Pixel](<pixel copy.png>)\n\n${CANARY}`));
+    assert.ok(first.report.record?.reformattedCount !== undefined && first.report.record.reformattedCount > 0);
+
+    const writes = world.linear.writes.count;
+    const second = await run(world);
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.equal(world.linear.writes.count, writes, 'the second run wrote again');
+    assert.ok(second.report.initialSync?.unchanged.includes('eng/notes/spaced.md'));
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/spaced.md'), recorded);
+  });
+
+  it('a stop right after a batch records the new uploads even when no document was written since the last push', async () => {
+    const world = fakeWorld();
+    // First run: the two README documents, then a stop; their ids are pushed.
+    const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '2' };
+    Object.assign(process.env, hooks);
+    try {
+      assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+    } finally {
+      for (const name of Object.keys(hooks)) delete process.env[name];
+    }
+    assert.equal(world.linear.uploads.length, 0);
+    // Resumed run: the README documents are skipped, the batch for a is uploaded (mutation 3)
+    // and the create of a is refused (mutation 4), with no document written since the last push.
+    world.linear.writes.rateLimitAt = 4;
+    const second = await run(world);
+    assert.equal(second.result.exitCode, INCOMPLETE_EXIT_CODE, second.result.stderr);
+    assert.equal(second.report.writtenCount, 0);
+    assert.equal(world.linear.uploads.length, 3);
+    const cached = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
+    assert.equal(Object.keys(cached).length, 3, 'the batch uploaded before the stop is recorded');
+
+    delete world.linear.writes.rateLimitAt;
+    assert.equal((await run(world)).result.exitCode, 0);
+    assert.equal(world.linear.uploads.length, 3, 'nothing is uploaded again');
+  });
+
   it('L1-18: a second run uploads nothing and writes nothing', async () => {
     const world = fakeWorld();
     assert.equal((await run(world)).result.exitCode, 0);
@@ -252,11 +318,11 @@ describe('uploads of linked files in an initial sync', () => {
 describe('file links in a document', () => {
   const files = new Set(['docs/img/a.png', 'docs/files/a b.pdf', 'docs/x(1).png', 'top.zip', 'docs/guide/a&b.png']);
   const isFile = (path: string) => files.has(path);
-  const targets = (body: string) => findFileLinks('docs/guide/page.md', body, isFile).map((link) => [link.raw, link.target]);
+  const targets = (body: string) => findFileLinks('docs/guide/page.md', body, isFile).map((link) => [link.written, link.target]);
 
   it('finds images, links and definitions to files, with the destination as written', () => {
     assert.deepEqual(targets('![a](../img/a.png)'), [['../img/a.png', 'docs/img/a.png']]);
-    assert.deepEqual(targets('[a](<../files/a b.pdf>)'), [['../files/a b.pdf', 'docs/files/a b.pdf']]);
+    assert.deepEqual(targets('[a](<../files/a b.pdf>)'), [['<../files/a b.pdf>', 'docs/files/a b.pdf']], 'with its angle brackets');
     assert.deepEqual(targets('[a](../files/a%20b.pdf)'), [['../files/a%20b.pdf', 'docs/files/a b.pdf']]);
     assert.deepEqual(targets('[a](../x\\(1\\).png)'), [['../x\\(1\\).png', 'docs/x(1).png']]);
     assert.deepEqual(targets('[a](../x(1).png)'), [['../x(1).png', 'docs/x(1).png']]);
@@ -266,6 +332,12 @@ describe('file links in a document', () => {
     assert.deepEqual(targets('[**bold** text](../img/a.png)'), [['../img/a.png', 'docs/img/a.png']]);
     assert.deepEqual(targets('![x](a&amp;b.png)'), [['a&amp;b.png', 'docs/guide/a&b.png']], 'character references');
     assert.deepEqual(targets('![see [x](y) here](../img/a.png)'), [['../img/a.png', 'docs/img/a.png']], 'brackets in the alt text');
+    const same = '![see [x](../img/a.png) here](../img/a.png)';
+    assert.deepEqual(
+      findFileLinks('docs/guide/page.md', same, isFile).map((link) => link.from),
+      [same.lastIndexOf('../img/a.png')],
+      'a link in the alt text to the same file: the image destination is the one replaced',
+    );
     assert.deepEqual(targets('[a](../img/a.png "Title")'), [['../img/a.png', 'docs/img/a.png']]);
   });
 
@@ -306,17 +378,23 @@ describe('file links in a document', () => {
       ['2'.repeat(64), 'https://uploads.example.test/12'],
     ]);
     const links = [
-      { raw: 'a.png', hash: '1'.repeat(64), suffix: '' },
-      { raw: './a.png', hash: '1'.repeat(64), suffix: '' },
-      { raw: 'b.png#p', hash: '2'.repeat(64), suffix: '#p' },
+      { written: 'a.png', hash: '1'.repeat(64), suffix: '' },
+      { written: './a.png', hash: '1'.repeat(64), suffix: '' },
+      { written: '<b.png#p>', hash: '2'.repeat(64), suffix: '#p' },
+      { written: '<c d.png>', hash: '1'.repeat(64), suffix: '' },
+      { written: 'e.png#q', hash: '2'.repeat(64), suffix: '#q' },
     ];
     const stored = [
       'Pasted: `https://uploads.example.test/1` and ![old](https://uploads.example.test/1?v=2)',
       '![x](https://uploads.example.test/1) ![y](https://uploads.example.test/1) [z](<https://uploads.example.test/12#p>)',
+      // Linear dropped the brackets: the spelling keeps its own, so the image stays an image.
+      '![w](https://uploads.example.test/1)',
+      // Linear added brackets the file did not have: the file's spelling comes back without them.
+      '[v](<https://uploads.example.test/12#q>)',
     ].join('\n\n');
     assert.equal(
       restoreFileLinks(stored, links, uploads),
-      'Pasted: `https://uploads.example.test/1` and ![old](https://uploads.example.test/1?v=2)\n\n![x](a.png) ![y](./a.png) [z](<b.png#p>)',
+      'Pasted: `https://uploads.example.test/1` and ![old](https://uploads.example.test/1?v=2)\n\n![x](a.png) ![y](./a.png) [z](<b.png#p>)\n\n![w](<c d.png>)\n\n[v](e.png#q)',
       'only the written destinations are mapped back',
     );
   });
