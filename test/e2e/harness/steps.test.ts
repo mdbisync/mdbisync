@@ -671,6 +671,14 @@ describe('subjects', () => {
     ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { code: 'nothing-to-do' } });
     assert.deepEqual(await resolveSubject(ctx, 'runs.last.summary.code'), { known: true, value: 'merge-commits-required' });
     assert.deepEqual(await resolveSubject(ctx, 'run.completed'), { known: true, value: false });
+    ctx.observations.delete('scenario.runsEnd');
+    // A sync's report has `summary: null` (an initial sync's plan goes there); its own fields are at the top.
+    ctx.engine.results.push({ command: 'sync', exitCode: 1, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { operation: 'sync', summary: null, endpointLimitHeadersPresent: true, rejectedDocumentNamed: true } });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.3.summary.endpointLimitHeadersPresent'), { known: true, value: true });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.3.summary.rejectedDocumentNamed'), { known: true, value: true });
+    // A plan under `summary` is still read there.
+    ctx.engine.results.push({ command: 'initial-sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { summary: { plan: { paths: ['a.md'] } }, plan: 'top-level' } });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.4.summary.plan.paths'), { known: true, value: ['a.md'] });
   });
 
   it('compute both sides of the target document from the world', async () => {

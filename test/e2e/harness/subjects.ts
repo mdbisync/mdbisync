@@ -1584,7 +1584,10 @@ function engineValue(ctx: RunContext, subject: string): unknown {
   if (result === undefined) throw new ProductError(`the scenario has no engine run ${runMatch?.[1] ?? 'last'} for ${subject}`);
   if (result.report === null) throw new ProductError(`engine run ${index} wrote no report, so it gives no ${subject}`);
   // The report is the job summary in structured form: `summary.code` is the report's `code`.
-  if (path[0] === 'summary' && !Object.hasOwn(result.report, 'summary')) path.shift();
+  // A sync's report has `summary: null` (that field holds an initial sync's plan), so a `summary` that does not
+  // hold the next key sends the path to the top level.
+  const nested = result.report['summary'];
+  if (path[0] === 'summary' && (nested === null || typeof nested !== 'object' || !Object.hasOwn(nested, path[1] as string))) path.shift();
   const found = pathValue(result.report, path);
   if (!found.found) throw new ProductError(`the engine's report gives no ${path.join('.')}`);
   return found.value;
