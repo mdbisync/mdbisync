@@ -32,8 +32,12 @@ const BUDGET = {
 const PAUSE_MS = 50;
 
 interface Faults {
-  /** After the second CreateDocument, this many GetDocuments answers leave out the created documents (`second`: only the later one). */
-  hiddenCreateReads?: { reads: number; hide: 'both' | 'second' };
+  /**
+   * After the second CreateDocument, this many GetDocuments answers leave out
+   * the created documents (`second`: only the later one; `error`: answer 503
+   * instead).
+   */
+  hiddenCreateReads?: { reads: number; hide: 'both' | 'second' | 'error' };
   /** After a TrashDocument, this many GetDocuments answers show the document as before the trash. */
   staleTrashReads?: number;
   /** TrashDocument is applied, but answered with a 503. */
@@ -89,8 +93,9 @@ async function serve(world: FakeWorld, faults: Faults): Promise<Served> {
       const id = (JSON.parse(text) as { data?: { documentCreate?: { document?: { id: string } } } }).data?.documentCreate?.document?.id;
       if (id && created.push(id) === 2) hiddenReads = faults.hiddenCreateReads.reads;
     }
-    if (operationName === 'GetDocuments' && hiddenReads > 0) {
+    if (operationName === 'GetDocuments' && hiddenReads > 0 && response.ok) {
       hiddenReads -= 1;
+      if (faults.hiddenCreateReads!.hide === 'error') return { status: 503, headers, text: '{}' };
       const hidden = faults.hiddenCreateReads!.hide === 'both' ? created : created.slice(1);
       const body = JSON.parse(text) as { data: { documents: { nodes: Array<{ id: string }> } } };
       body.data.documents.nodes = body.data.documents.nodes.filter((node) => !hidden.includes(node.id));
@@ -225,7 +230,9 @@ function assertArchivedNotTrashed(world: FakeWorld): void {
 /** The created documents were read this many times, each in one request, and no create was repeated. */
 function assertCreateReads(run: Run, reads: number): void {
   const afterCreates = run.operations.lastIndexOf('CreateDocument') + 1;
-  assert.deepEqual(run.operations.slice(afterCreates, run.operations.indexOf('TeamFilter')), Array(reads).fill('GetDocuments'));
+  const teamFilter = run.operations.indexOf('TeamFilter');
+  assert.ok(teamFilter > afterCreates, 'the next test ran after the reads');
+  assert.deepEqual(run.operations.slice(afterCreates, teamFilter), Array(reads).fill('GetDocuments'));
   assert.equal(run.operations.filter((op) => op === 'CreateDocument').length, 2);
   assert.equal(run.report.createdRead!.reads.length, reads);
 }
@@ -258,7 +265,8 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
     assert.equal(diagnosis.createRequestIds.length, 2);
     assert.ok(diagnosis.createRequestIds.every((id) => /^fake-\d+$/.test(id ?? '')));
     assert.deepEqual(diagnosis.reads.map((r) => [r.returned.length, [...r.missing].sort()]), [[0, [...ids].sort()], [2, []]]);
-    assert.notEqual(diagnosis.reads[0]!.requestId, diagnosis.reads[1]!.requestId);
+    assert.deepEqual(diagnosis.reads.map((r) => r.requestIds.length), [1, 1], 'each read is one request');
+    assert.notEqual(diagnosis.reads[0]!.requestIds[0], diagnosis.reads[1]!.requestIds[0]);
     assert.ok(diagnosis.reads.every((r) => Number.isFinite(r.sinceCreateMs) && r.sinceCreateMs! >= 0));
     assert.ok(diagnosis.reads[1]!.sinceCreateMs! > diagnosis.reads[0]!.sinceCreateMs!);
     assertCreateReads(run, 2);
@@ -287,8 +295,22 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
     const diagnosis = run.report.createdRead!;
     assert.equal(diagnosis.reads.length, 3);
     assert.ok(diagnosis.reads.every((r) => r.returned.length === 0 && r.missing.length === 2 && r.error === undefined));
-    assert.equal(new Set(diagnosis.reads.map((r) => r.requestId)).size, 3);
+    assert.equal(new Set(diagnosis.reads.flatMap((r) => r.requestIds)).size, 3);
     assertCreateReads(run, 3);
+    assert.equal(run.report.cleanupFailed, false, run.output);
+    assertArchivedNotTrashed(world);
+  });
+
+  it('fails on a failed read of created documents with its own error, without more reads', async () => {
+    const world = fakeWorld();
+    const run = await runContract(world, { hiddenCreateReads: { reads: 1, hide: 'error' } });
+    assert.equal(run.code, 1, run.output);
+    assert.match(run.output, /^\s*not ok \d+ - reads documents by ids in one request, with the content the create returned$/m);
+    assert.match(run.output, /LinearHttpError/);
+    assert.doesNotMatch(run.output, /created documents must be read within/);
+    const diagnosis = run.report.createdRead!;
+    assert.deepEqual(diagnosis.reads.map((r) => [r.error, r.returned, r.requestIds.length]), [['LinearHttpError', [], 1]]);
+    assertCreateReads(run, 1);
     assert.equal(run.report.cleanupFailed, false, run.output);
     assertArchivedNotTrashed(world);
   });

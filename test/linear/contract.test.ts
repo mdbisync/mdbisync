@@ -188,8 +188,9 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
 
   it('reads documents by ids in one request, with the content the create returned', async () => {
     const ids = [first.id, second.id];
-    const { documents: docs, diagnosis } = await measured('getDocuments (2 ids)', () => readCreated(linear, requests, ids, { pauseMs }));
-    createdRead = diagnosis;
+    const { documents: docs, diagnosis } = await readCreated(linear, requests, ids, { pauseMs, record: (d) => (createdRead = d) });
+    // The cost of one read; the reads that waited out lag are in createdRead.
+    perOperation['getDocuments (2 ids)'] = diagnosis.reads[0]!.requestIds.length;
     assert.deepEqual(
       docs.map((d) => d.id).sort(),
       [...ids].sort(),
