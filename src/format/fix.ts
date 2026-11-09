@@ -156,15 +156,18 @@ class Writer {
     const indent = ' '.repeat(marker.split(' ')[0]!.length + 1);
     const [first] = item.children;
     const attachment = first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
-    // A link to a file that does not exist is not uploaded: Linear keeps it as a link.
-    if (attachment && this.options.linkedFileExists?.(attachment.url) !== false) {
+    const path = attachment?.url.split(/[?#]/)[0] ?? '';
+    // A link to a file that does not exist is not uploaded: Linear keeps it
+    // as a link. So it does for an uploaded MP3 in a bullet item: the link
+    // stays on the item's line, in angle brackets, as below.
+    if (attachment && this.options.linkedFileExists?.(attachment.url) !== false && !(marker === '*' && AUDIO.test(path))) {
       const label = this.inline(attachment.children);
       const destination = imageDestination(attachment.url);
       // Linear turns a list item holding only a link to an uploaded file into
       // a block: a video player for a video, which it writes on the item's
       // line, and a file block for any other file, which it writes below.
       // The video form is recorded for bullet items only.
-      if (marker === '*' && VIDEO.test(attachment.url.split(/[?#]/)[0]!)) return `${marker} [${label}](${destination})`;
+      if (marker === '*' && VIDEO.test(path)) return `${marker} [${label}](${destination})`;
       return `${marker} \n${indent}[${label}](${destination})`;
     }
     if (first === undefined) return marker;
@@ -391,6 +394,9 @@ export function relativeLinkUrls(text: string): Set<string> {
 
 /** Video files Linear stores as a video block (recorded for these three; other types are unconfirmed). */
 const VIDEO = /\.(?:mp4|mov|webm)$/i;
+
+/** Audio Linear keeps as a link in a bullet item (recorded for MP3; other types are unconfirmed). */
+const AUDIO = /\.mp3$/i;
 
 /** A paragraph that holds only a link to a relative file other than Markdown: an attachment. */
 function attachmentLink(paragraph: Paragraph): Link | undefined {
