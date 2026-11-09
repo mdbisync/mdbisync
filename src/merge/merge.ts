@@ -132,8 +132,8 @@ function completeBlocks(text: string): string {
       const last = lineText(source.at(-1) ?? '');
       // A closing fence: container prefixes, then at least as many of the
       // opener's characters, then only spaces or tabs.
-      const fence = last.replace(/^[ >\t]*/, '').replace(/[ \t]*$/, '');
-      const closing = fence.length >= opener.length && [...fence].every((char) => char === opener[0]);
+      const fence = /^[ >\t]*(`{3,}|~{3,})[ \t]*$/.exec(last)?.[1];
+      const closing = fence !== undefined && fence[0] === opener[0] && fence.length >= opener.length;
       // Container prefixes remain in raw source but not in the parsed value.
       // A real closing fence adds a source line beyond the opener and value.
       const valueLines = node.value === '' ? 0 : node.value.split('\n').length;
@@ -151,7 +151,9 @@ function completeBlocks(text: string): string {
     const prefix = text.slice(lineStart, start.offset).replace(/[^ >\t]/g, ' ');
     insertions.push({ offset: end.offset!, text: `${raw.endsWith('\n') ? '' : '\n'}${prefix}${close}\n` });
   });
-  // The completed text is a new value: the source the visit reads stays as parsed.
+  // A separate variable, not `text`: the visit above reads `text`, and static
+  // analysis that merges a captured variable's assignments would otherwise
+  // see the inserted end strings flow into the source it parses.
   let completed = text;
   for (const insertion of insertions.sort((a, b) => b.offset - a.offset)) {
     completed = completed.slice(0, insertion.offset) + insertion.text + completed.slice(insertion.offset);
