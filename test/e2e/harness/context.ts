@@ -94,6 +94,8 @@ export interface RunContext {
   signal: AbortSignal;
   /** A clone of the tracked branch where people commit; made on first use. */
   person(): Promise<Git>;
+  /** Installs the repository's pre-commit hooks in the person's clone, once; commits that do not bypass the hooks call it first. */
+  personHooks(): Promise<void>;
   /** The working clone the engine runs in; made on first use. */
   engineClone(): Promise<string>;
 }
