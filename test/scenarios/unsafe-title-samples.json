@@ -7,7 +7,7 @@
   {
     "alias": "leading-space",
     "title": " leading",
-    "relativePathTemplate": "%20leading.md"
+    "relativePathTemplate": " leading.md"
   },
   {
     "alias": "leading-slash",
@@ -32,11 +32,11 @@
   {
     "alias": "collision-a",
     "title": "notes",
-    "relativePathTemplate": "notes--{documentId}.md"
+    "relativePathTemplate": "notes.md"
   },
   {
     "alias": "collision-b",
     "title": "notes",
-    "relativePathTemplate": "notes--{documentId}.md"
+    "relativePathTemplate": "notes~{documentIdHash}.md"
   }
 ]
