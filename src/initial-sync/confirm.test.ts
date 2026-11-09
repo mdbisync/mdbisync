@@ -7,7 +7,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
-import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
+import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { environmentName, readInputs } from '../run/inputs.ts';
 import { runPreflight } from '../run/preflight.ts';
@@ -229,6 +229,11 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.deepEqual(Object.keys(progress).sort(), SYNCED_PATHS);
     for (const path of SYNCED_PATHS.slice(0, 2)) assert.ok(live(world).some((d) => d.id === progress[path]?.id), `${path} is not written`);
 
+    // The sync does not run on a half-written id map.
+    const sync = await runCli(['sync'], { env: { ...env(), MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }, cwd, fetch: fakeFetch(world) });
+    assert.equal(sync.exitCode, NO_STATE_EXIT_CODE, sync.stderr);
+    assert.match(sync.stdout, /An initial sync stopped before it finished/);
+
     const second = await run(world);
     assert.equal(second.result.exitCode, 0, second.result.stderr);
     // The resumed run creates the rest with the ids chosen before the stop, so links to them stay right.
@@ -238,6 +243,24 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(second.report.writtenCount, SYNCED_PATHS.length - 2);
     assert.equal(await fixture.remote.text(['rev-list', '--count', 'refs/mdbisync/linear', '^refs/heads/main']), '1');
     await assertConverged(world);
+  });
+
+  it('a resumed run writes again a document whose file changed after the stop', async () => {
+    const world = fakeWorld();
+    world.linear.writes.rateLimitAt = 3;
+    assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+    const [changed] = SYNCED_PATHS as [string];
+    assert.ok(live(world).some((d) => d.content === SYNCED[changed as keyof typeof SYNCED].body), `${changed} was not written by the first run`);
+    await fixture.seed({ [changed]: `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\nRevised. ${CANARY}` });
+
+    delete world.linear.writes.rateLimitAt;
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(report.resumed, true);
+    assert.ok(report.initialSync?.overwritten.includes(changed), `${changed} was skipped`);
+    const id = (await readIds())[changed]?.id;
+    assert.equal(world.linear.documents.find((d) => d.id === id)?.content, `# Handbook\n\nRevised. ${CANARY}`);
+    assert.equal(report.record?.reformattedCount, 0);
   });
 
   it('L1-17: a document created before its id was pushed is adopted by its title, not created again', async () => {
@@ -308,6 +331,8 @@ describe('confirmed initial sync from git to Linear', () => {
       name: 'leave-out',
       apply: async ({ path, body }) => {
         if (path === 'eng/notes/plan.md') throw new LeaveOutError('upload-too-large', 'an embedded file is over the upload limit');
+        // A body a transform makes longer than Linear accepts is left out, not sent.
+        if (path === 'eng/README.md') return body + 'x'.repeat(250_001);
         return body;
       },
       restore: ({ body }) => body,
@@ -318,7 +343,11 @@ describe('confirmed initial sync from git to Linear', () => {
     });
     assert.equal(outcome.ok, true);
     assert.equal(result?.complete, true);
-    assert.deepEqual(result?.leftOutAtWrite, [{ path: 'eng/notes/plan.md', rule: 'upload-too-large' }]);
+    assert.deepEqual(result?.leftOutAtWrite, [
+      { path: 'eng/README.md', rule: 'content-too-long' },
+      { path: 'eng/notes/plan.md', rule: 'upload-too-large' },
+    ]);
+    assert.deepEqual(result?.failed, []);
     const notes = world.linear.documents.find((d) => d.title === 'backend/notes');
     assert.equal(notes?.content, `${SYNCED['eng/backend/notes.md'].body}\n\n(from eng/backend/notes.md)`);
     assert.equal(world.linear.documents.some((d) => d.title === 'plan'), false);
