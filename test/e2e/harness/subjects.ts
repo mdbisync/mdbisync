@@ -16,6 +16,7 @@
 // A subject that none of these knows is a harness gap; the scenario-set
 // test keeps that list empty.
 
+import { collectCanaryEvidence } from './checks.ts';
 import { scanNight } from './night-scan.ts';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -1281,11 +1282,11 @@ export const SUBJECTS: Record<string, Compute> = {
     return reportField(report, 'securityHooks') !== undefined && setupChecksOf(report).some((check) => check.name === 'security-hooks');
   },
   'scan.canaryMatches': async (env) => {
-    const root = process.env['MDBISYNC_CANARY_EVIDENCE_ROOT'];
-    if (!root) throw new Error('all-run-evidence scan needs MDBISYNC_CANARY_EVIDENCE_ROOT');
-    const previous = scanNight(root);
-    const current = await canaryScan(env.ctx, { summariesOnly: false });
-    return sorted(new Set([...previous.matches, ...current].map((hit) => hit.source)));
+    const root = process.env['MDBISYNC_CANARY_EVIDENCE_ROOT'] ?? env.ctx.observations.get('canary.evidenceRoot') as string | undefined;
+    if (!root) throw new EnvBlockedError('all-run-evidence scan needs MDBISYNC_CANARY_EVIDENCE_ROOT');
+    const evidence = await collectCanaryEvidence(env.ctx, { summariesOnly: false });
+    const result = scanNight(root, { directory: env.ctx.runDir, evidence });
+    return sorted(new Set(result.matches.map((hit) => hit.source)));
   },
   'hook.fixes': async (env) => {
     const { path } = await target(env);

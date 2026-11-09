@@ -92,7 +92,7 @@ describe('workflow templates', () => {
 
       it('gives the App token to checkout and mdbisync, and the Linear secrets to mdbisync only', () => {
         const actions = actionSteps(file);
-        assert.equal(actions[0].with?.['cleanup-tokens'], true);
+        assert.equal(actions[0].with?.['cleanup-tokens'], false);
         assert.equal(actions[1].with?.['cleanup-tokens'], undefined);
         for (const action of actions) {
           assert.equal(action.with?.['github-token'], '${{ steps.app-token.outputs.token }}');

@@ -4,7 +4,7 @@
 
 import { collectCanaryEvidence } from './checks.ts';
 import { createHash } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts';
 import { Git, readIds } from '../../../src/state/index.ts';
@@ -340,6 +340,20 @@ async function recordedIds(ctx: RunContext): Promise<string[]> {
   return [...ids.values()].map((entry) => entry.id);
 }
 
+/** Preserve a killed engine's diagnostics before the remote fixtures disappear. */
+export async function retainPendingOutput(ctx: Pick<RunContext, 'engine' | 'observations' | 'checkpoints'>): Promise<void> {
+  if (ctx.engine.pending === undefined) return;
+  ctx.engine.pending.kill();
+  try {
+    ctx.engine.results.push(await withDeadline(ctx.engine.pending.done, 35_000, () => new Error('pending engine did not stop')));
+  } catch {
+    ctx.observations.set('canary.pendingIncomplete', true);
+  } finally {
+    delete ctx.engine.pending;
+    ctx.checkpoints.resumeAll();
+  }
+}
+
 async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string }> {
   const problems: string[] = [];
   const attempt = async (what: string, action: () => Promise<unknown>) => {
@@ -410,6 +424,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   const started = Date.now();
   const runDir = join(deps.outDir, 'runs', `${scenario.id}-${runId}`);
   mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'canary-pending'), '');
   const registration = registerRun(deps.stateDir, runId);
   const heartbeat = setInterval(() => registration.heartbeat(), 60_000);
   const logLines: string[] = [];
@@ -439,7 +454,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     engine: { results: [], setupRuns: 0, env: {}, restores: [] },
     edits: [],
     ownCommits: [],
-    observations: new Map(),
+    observations: new Map([['canary.evidenceRoot', deps.outDir]]),
     uiSteps: 0,
     sequence: 0,
     log,
@@ -517,12 +532,15 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   } catch (caught) {
     error = caught;
   } finally {
+    await retainPendingOutput(ctx);
     // Capture output before cleanup removes remote pull requests and comments,
     // even when a step or assertion failed. Persist collection errors as errors.
     {
       try {
-        const evidence = await collectCanaryEvidence(ctx, { summariesOnly: false });
-        writeFileSync(join(runDir, 'canary-evidence.json'), JSON.stringify(evidence));
+        if (ctx.observations.get('canary.pendingIncomplete')) throw new Error('pending engine output unavailable');
+        const evidence = await withDeadline(collectCanaryEvidence(ctx, { summariesOnly: false }), 30_000, () => new Error('canary collection timed out'));
+        writeFileSync(join(runDir, 'canary-evidence.tmp'), JSON.stringify(evidence));
+        renameSync(join(runDir, 'canary-evidence.tmp'), join(runDir, 'canary-evidence.json'));
       } catch {
         writeFileSync(join(runDir, 'canary-evidence.json'), JSON.stringify({ canaries: [], texts: {}, error: 'could not collect remote output' }));
       }
@@ -563,6 +581,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   const outcome = classify(error, deps.expectedRed.has(scenario.id));
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   writeFileSync(join(runDir, 'harness.log'), logLines.join('\n'));
+  rmSync(join(runDir, 'canary-pending'), { force: true });
   return {
     id: scenario.id,
     level: levelOf(scenario.id),
@@ -601,16 +620,22 @@ export async function runScenarios(
   stop: { requested: boolean } = { requested: false },
 ): Promise<ScenarioResult[]> {
   const results: ScenarioResult[] = new Array(scenarios.length);
+  const ordinary = scenarios.map((_, index) => index).filter((index) => scenarios[index]?.id !== 'L5-21');
   let next = 0;
   const worker = async () => {
     for (;;) {
-      const index = next;
-      next += 1;
+      const index = ordinary[next++];
+      if (index === undefined) return;
       const scenario = scenarios[index];
       if (scenario === undefined) return;
       results[index] = stop.requested ? skippedResult(scenario, 'the harness was stopped before this scenario') : await runScenario(scenario, deps);
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(workers, scenarios.length)) }, worker));
+  // The batch scan runs after all producer workers and their cleanup finish.
+  for (let index = 0; index < scenarios.length; index++) {
+    const scenario = scenarios[index]!;
+    if (scenario.id === 'L5-21') results[index] = stop.requested ? skippedResult(scenario, 'the harness was stopped before the batch scan') : await runScenario(scenario, deps);
+  }
   return results;
 }

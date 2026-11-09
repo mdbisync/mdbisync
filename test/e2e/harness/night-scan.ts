@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 
 export interface CanaryEvidence {
   canaries: string[];
@@ -9,13 +9,16 @@ export interface CanaryEvidence {
 }
 
 /** Scan only collected output, never fixture bodies or the canary index itself. */
-export function scanNight(root: string) {
+export function scanNight(root: string, current?: { directory: string; evidence: CanaryEvidence }) {
   const snapshots: Array<{ path: string; evidence: CanaryEvidence }> = [];
   const logs: string[] = [];
   function visit(dir: string): void {
+    if (current && resolve(dir) === resolve(current.directory)) return;
+    if (basename(dirname(dir)) === 'runs' && !existsSync(join(dir, 'canary-evidence.json'))) throw new Error('run is missing canary evidence');
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
-      if (entry.isDirectory()) visit(path);
+      if (entry.isDirectory() && !['engine', 'person', 'scratch', 'hooks', 'node_modules', '.git'].includes(entry.name)) visit(path);
+      else if (entry.isFile() && entry.name === 'canary-pending') throw new Error('canary evidence still being produced');
       else if (entry.isFile() && /(?:\.log|\.stdout|\.stderr)$/.test(entry.name)) logs.push(path);
       else if (entry.isFile() && entry.name === 'canary-evidence.json') {
         const evidence = JSON.parse(readFileSync(path, 'utf8')) as CanaryEvidence;
@@ -26,8 +29,9 @@ export function scanNight(root: string) {
     }
   }
   visit(root);
+  if (current) snapshots.push({ path: join(current.directory, 'canary-evidence.json'), evidence: current.evidence });
   if (snapshots.length === 0) throw new Error('no canary evidence in the selected root');
-  const canaries = new Set(snapshots.flatMap(({ evidence }) => evidence.canaries));
+  const canaries = new Set(snapshots.flatMap(({ evidence }) => evidence.canaries.filter((canary) => canary.length >= 6)));
   if (canaries.size === 0) throw new Error('no content canaries in the selected evidence');
   const matches: Array<{ source: string; canary: string }> = [];
   let sources = 0;

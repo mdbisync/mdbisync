@@ -42,3 +42,25 @@ it('does not report an offline-only batch with no content canaries as clean', ()
     assert.throws(() => scanNight(dir), /no content canaries/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+it('uses the same canary union for current and persisted output and ignores fixture clones', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'canary-current-'));
+  try {
+    mkdirSync(join(dir, 'engine'));
+    writeFileSync(join(dir, 'engine', 'fixture.log'), 'kx-stored-canary');
+    writeFileSync(join(dir, 'canary-evidence.json'), JSON.stringify({ canaries: ['kx-stored-canary'], texts: { old: 'kx-current-canary' } }));
+    const result = scanNight(dir, { directory: join(dir, 'current'), evidence: { canaries: ['kx-current-canary'], texts: { log: 'kx-stored-canary' } } });
+    assert.equal(result.matches.length, 2);
+    assert.equal(result.sources, 2);
+    writeFileSync(join(dir, 'canary-pending'), '');
+    assert.throws(() => scanNight(dir), /still being produced/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('refuses historical run directories without collected evidence', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'canary-history-'));
+  try {
+    mkdirSync(join(dir, 'runs', 'old-run'), { recursive: true });
+    assert.throws(() => scanNight(dir), /missing canary evidence/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -157,7 +157,7 @@ describe('the action entry points', () => {
 
   it('cleans unknown stale tokens before staging and saves cleanup tokens for post', async () => {
     const world = fakeWorld();
-    const { printed } = await runStep(world, { operation: 'initial-sync', direction: 'git-to-linear', 'cleanup-tokens': 'true' });
+    const { printed } = await runStep(world, { operation: 'initial-sync', direction: 'git-to-linear', 'cleanup-tokens': 'True' });
     assert.match(printed, /token cleanup: replaced stale app tokens/);
     assert.equal(world.minted, 3);
     assert.equal(world.revoked, 3);

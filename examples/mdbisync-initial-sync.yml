@@ -73,8 +73,8 @@ jobs:
           operation: initial-sync
           security-step: stage
           # Requires a dedicated Linear app for these two serialized workflows.
-          # Leave false if any other repository or worker uses this app.
-          cleanup-tokens: true
+          # Enable only when no other repository or worker uses this app.
+          cleanup-tokens: false
           direction: ${{ inputs.direction }}
           confirm: ${{ inputs.confirm }}
           github-token: ${{ steps.app-token.outputs.token }}

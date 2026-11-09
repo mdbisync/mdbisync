@@ -83,8 +83,10 @@ export async function run(options: RunOptions = {}): Promise<void> {
     const get = (name: InputName) => core.getInput(name);
     const inputs = readInputs(get);
     const initialSync = operation === "initial-sync" ? readInitialSyncInputs(get) : undefined;
+    const cleanupValue = core.getInput("cleanup-tokens");
+    const cleanupTokens = cleanupValue === "" ? false : core.getBooleanInput("cleanup-tokens");
     const step = parseSecurityStep(core.getInput("security-step"));
-    if (core.getInput("cleanup-tokens") === "true" && step === "apply") throw new Error("cleanup-tokens belongs before the stage step, not apply");
+    if (cleanupTokens && step === "apply") throw new Error("cleanup-tokens belongs before the stage step, not apply");
     const security = step === undefined ? undefined : { step, folder: stageFolder() };
     const serverUrl = process.env["GITHUB_SERVER_URL"] || "https://github.com";
     const auth = gitAuthEnv(inputs.github.token, serverUrl);
@@ -97,12 +99,12 @@ export async function run(options: RunOptions = {}): Promise<void> {
       },
       revoked: () => core.saveState(LINEAR_TOKEN_STATE, ""),
     };
-    if (core.getInput("cleanup-tokens") === "true") {
+    if (cleanupTokens) {
       await cleanupAppTokens(inputs.linear, {
         exclusive: true,
         baseUrl: inputs.linear.apiUrl,
         lifecycle: tokenLifecycle,
-        onRevokeError: () => { throw new Error("token cleanup revocation failed; post will retry"); },
+        onRevokeError: () => { throw new Error("token cleanup revocation failed"); },
         ...(options.fetch ? { fetch: options.fetch } : {}),
       });
       core.info("token cleanup: replaced stale app tokens and restored read/write scopes");

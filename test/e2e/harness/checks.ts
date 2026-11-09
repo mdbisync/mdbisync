@@ -553,7 +553,10 @@ export async function collectCanaryEvidence(ctx: RunContext, options: { summarie
     texts.set(`run ${index} stdout`, result.stdout);
     texts.set(`run ${index} stderr`, result.stderr);
   });
-  if (world !== null && !options.summariesOnly) {
+  const cached = ctx.observations.get('canary.remoteTexts') as Record<string, string> | undefined;
+  if (!options.summariesOnly && cached !== undefined) {
+    for (const [source, text] of Object.entries(cached)) texts.set(source, text);
+  } else if (world !== null && !options.summariesOnly) {
     for (const pr of await world.rest.pullRequests(`t/${ctx.names.runId}/`)) texts.set(`pull request #${pr.number}`, `${pr.title}\n${pr.body ?? ''}`);
     // Linear comments on the run's documents: project documents, and team-zone documents with the run's prefix.
     for (const project of world.projects.values()) {
@@ -568,6 +571,9 @@ export async function collectCanaryEvidence(ctx: RunContext, options: { summarie
         if (!document.inProject) texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
       }
     }
+  }
+  if (!options.summariesOnly && cached === undefined && world !== null) {
+    ctx.observations.set('canary.remoteTexts', Object.fromEntries([...texts].filter(([source]) => source.startsWith('pull request #') || source.startsWith('comments on '))));
   }
   return { canaries: [...canaries], texts: Object.fromEntries(texts) };
 }
@@ -659,7 +665,8 @@ export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
   // A check the product cannot satisfy yet (a "not implemented" command in I6, a value the report lacks) fails
   // on its own; every other check is still evaluated, so one missing command hides no other result.
   const productFailure = (error: unknown) => error instanceof ProductError || error instanceof NotImplementedError;
-  for (const id of INVARIANTS) {
+  // I5 sees I6's extra engine run too; its remote output can then be reused at cleanup.
+  for (const id of [...INVARIANTS.filter((id) => id !== 'I5'), 'I5' as const]) {
     if (!ctx.scenario.checks.invariants[id].required) continue;
     try {
       outcomes.push(await INVARIANT_CHECKS[id](ctx, sides));

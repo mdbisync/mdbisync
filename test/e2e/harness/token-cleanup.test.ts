@@ -21,5 +21,7 @@ it('revokes multiple killed-run tokens through a proxy in the parent process', a
     });
     assert.deepEqual(revoked, ['orphan-one', 'orphan-two']);
     assert.match(output, /post: revoked/);
+    assert.ok(!output.includes('orphan-one') && !output.includes('orphan-two'));
+    assert.ok(!output.includes('::add-mask::'));
   } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
 });
