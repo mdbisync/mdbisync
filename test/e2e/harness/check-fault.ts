@@ -8,7 +8,7 @@ import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/chec
 import type { RunContext } from './context.ts';
 import type { SandboxRest } from './github.ts';
 import { nextToken } from './context.ts';
-import { EnvBlockedError, ProductError } from './results.ts';
+import { EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
 import { HARNESS } from './sandbox.ts';
 import { live } from './step-helpers.ts';
 
@@ -29,7 +29,10 @@ export async function waitForCheck(
     const actual = check === undefined ? 'absent' : check.status !== 'completed' ? 'pending'
       : check.conclusion === 'success' ? 'passed' : check.conclusion === 'failure' ? 'failed' : check.conclusion;
     if (actual === state) return;
-    if (Date.now() >= deadline) throw new EnvBlockedError(`the ${CHECK_NAME} check did not reach ${state} on the marker commit (last state: ${actual})`);
+    if (Date.now() >= deadline) {
+      if (check === undefined) throw new ProductError(`no ${CHECK_NAME} check appeared on the marker commit`);
+      throw new EnvBlockedError(`the ${CHECK_NAME} check did not reach ${state} on the marker commit (last state: ${actual})`);
+    }
     await sleep(options.pollMs ?? 2_000, undefined, { signal: options.signal });
   }
 }
@@ -43,7 +46,7 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
   const ref = `refs/heads/${ctx.names.syncBranch}`;
   const refs = await world.sandbox.runRefs();
   const exists = refs.some((entry) => entry.ref === ref);
-  if (!exists && state === 'passed') throw new ProductError('the run has no sync branch to release');
+  if (!exists && state === 'passed') throw new HarnessGapError('fault.checks release without a sync branch');
   await person.run(['fetch', '--quiet', 'origin', exists ? ref : `refs/heads/${ctx.names.trackedBranch}`]);
   const dir = join(ctx.runDir, `check-worktree-${nextToken(ctx)}`);
   await person.run(['worktree', 'add', '--quiet', '--detach', dir, 'FETCH_HEAD']);
@@ -60,11 +63,15 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
     await git.run(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', `Set check state to ${state}`]);
     sha = (await git.text(['rev-parse', 'HEAD'])).trim();
     await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:${ref}`]);
+    ctx.ownCommits.push(sha);
   } finally {
     await person.run(['worktree', 'remove', '--force', dir]);
   }
   const prs = await world.rest.pullRequests(ctx.names.syncBranch, 'open');
   if (!prs.some((pr) => pr.head.ref === ctx.names.syncBranch && pr.base.ref === ctx.names.trackedBranch)) {
+    // A check fault is a fixture of an already waiting PR. Seeding it lets
+    // the workflow run before the scenario's first sync; it does not test
+    // the product's ability to create a PR.
     await world.rest.openPullRequest(ctx.names.syncBranch, ctx.names.trackedBranch, 'Update documents', 'Review the latest document changes.');
   }
   ctx.log(`waiting up to 5 minutes for ${CHECK_NAME} to reach ${state}`);

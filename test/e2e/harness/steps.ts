@@ -204,7 +204,8 @@ async function installWorkflows(ctx: RunContext): Promise<void> {
 
 async function requireWorkflows(ctx: RunContext): Promise<void> {
   const world = live(ctx);
-  // A run's tree starts without `.github/`: the setup command writes the workflows, as a deployer runs it.
+  // The setup command writes the sync workflows, as a deployer runs it.
+  // Check-fault runs may already carry the harness's PR check workflow.
   await installWorkflows(ctx);
   if (!(await world.rest.workflowExists(SYNC_WORKFLOW, ctx.names.trackedBranch))) {
     throw new NotImplementedError('init', `the sync workflow ${SYNC_WORKFLOW} is not in the tracked branch`);

@@ -8,6 +8,7 @@ export const CHECK_WORKFLOW = `name: Harness check
 on:
   pull_request:
     branches: ['t/*/main']
+    types: [opened, synchronize, reopened, closed]
 permissions:
   contents: read
 concurrency:
@@ -16,7 +17,7 @@ concurrency:
 jobs:
   format:
     name: format
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted
     timeout-minutes: 20
     steps:

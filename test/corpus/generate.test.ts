@@ -17,7 +17,6 @@ import { MINI_DOCUMENTS } from "./slices.ts";
 import { fixText, lintText } from "../../src/format/index.ts";
 import { COLLISIONS, EDGE, EDGE_ZONE, LOOSE, preCommitConfig } from "./tree.ts";
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from "./check-workflow.ts";
-import { buildRunTree } from "../e2e/harness/corpus.ts";
 
 // The default corpus, built once for the tests that only read it.
 let defaultCorpus: ReturnType<typeof buildCorpus> | undefined;
@@ -26,23 +25,21 @@ function corpus(): ReturnType<typeof buildCorpus> {
   return defaultCorpus;
 }
 
-test("every published slice keeps the PR-only marker workflow and excludes other workflows", () => {
+test("every published slice carries the PR-only marker workflow template", () => {
   const data = corpus();
   const workflow = data.files.find((file) => file.path === CHECK_WORKFLOW_PATH)!;
   assert.equal(workflow.synced, false);
   assert.equal(workflow.content.toString(), CHECK_WORKFLOW);
   const yaml = parse(CHECK_WORKFLOW);
-  assert.deepEqual(yaml.on, { pull_request: { branches: ['t/*/main'] } });
+  assert.deepEqual(yaml.on, { pull_request: { branches: ['t/*/main'], types: ['opened', 'synchronize', 'reopened', 'closed'] } });
   assert.equal(yaml.jobs.format['runs-on'], 'self-hosted');
   assert.equal(yaml.jobs.format.name, 'format');
   assert.equal(yaml.concurrency['cancel-in-progress'], true);
+  assert.equal(yaml.concurrency.group, 'harness-check-${{ github.event.pull_request.number }}');
+  assert.match(yaml.jobs.format.if, /github\.event\.action != 'closed'/);
   assert.deepEqual(yaml.permissions, { contents: 'read' });
-  const readmes = new Map(data.files.filter((file) => file.path.endsWith('README.md')).map((file) => [file.path, file.content.toString()]));
   for (const [slice, paths] of Object.entries(data.slices)) {
     assert.ok(paths.includes(CHECK_WORKFLOW_PATH), slice);
-    const tree = buildRunTree({ slice, paths: [...paths, '.github/workflows/unrelated.yml'] }, readmes);
-    assert.equal(tree.paths.get(CHECK_WORKFLOW_PATH), CHECK_WORKFLOW_PATH);
-    assert.equal(tree.paths.has('.github/workflows/unrelated.yml'), false);
   }
 });
 

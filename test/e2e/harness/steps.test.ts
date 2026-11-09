@@ -667,6 +667,7 @@ describe('marker-driven checks', () => {
     assert.equal((await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim(), tracked);
     assert.equal(prs.length, 1);
     assert.equal(checked.length, 3);
+    assert.ok(checked.every((sha) => ctx.ownCommits.includes(sha)));
     assert.ok(methods.every((method) => method.startsWith('GET ') || method === 'POST /pulls'));
   });
 
@@ -693,7 +694,9 @@ describe('marker-driven checks', () => {
 
   it('bounds waits and obeys cancellation', async () => {
     const rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async () => Response.json({ check_runs: [] })) as typeof fetch);
-    await assert.rejects(waitForCheck(rest, 'abc', 'failed', { timeoutMs: 0 }), EnvBlockedError);
+    await assert.rejects(waitForCheck(rest, 'abc', 'failed', { timeoutMs: 0 }), ProductError);
+    const queued = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async () => Response.json({ check_runs: [{ id: 1, name: 'format', app: { slug: 'github-actions' }, status: 'queued', conclusion: null }] })) as typeof fetch);
+    await assert.rejects(waitForCheck(queued, 'abc', 'passed', { timeoutMs: 0 }), EnvBlockedError);
     await assert.rejects(waitForCheck(rest, 'abc', 'passed', { signal: AbortSignal.abort() }), { name: 'AbortError' });
   });
 
