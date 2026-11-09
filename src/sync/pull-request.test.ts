@@ -462,7 +462,7 @@ describe('sync: the sync pull request', () => {
     const record = await fixture.remote.text(['commit-tree', `${changed}^{tree}`, '-p', main, '-m', INITIAL_SYNC_FROM_LINEAR_RECORD], {
       env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' },
     });
-    const review = reviewed ? await fixture.remote.text(['commit-tree', `${record}^{tree}`, '-p', record, '-m', 'Review the snapshot']) : record;
+    const review = reviewed ? await commitFile(record, 'combined/guide.md', blob) : record;
     await fixture.remote.run(['update-ref', SYNC_BRANCH, review]);
     syncValues.push(review);
     world.github.pullRequests.push({ number: 1, title: 'Initial sync from Linear', body: '', head: 'mdbisync/linear', base: 'main', state: 'closed', merged: false });
@@ -775,7 +775,7 @@ describe('sync: the sync pull request', () => {
     const record = await fixture.remote.text(['commit-tree', `${changed}^{tree}`, '-p', main, '-m', INITIAL_SYNC_FROM_LINEAR_RECORD], {
       env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' },
     });
-    const head = reviewed ? await fixture.remote.text(['commit-tree', `${record}^{tree}`, '-p', record, '-m', 'Review the snapshot']) : record;
+    const head = reviewed ? await commitFile(record, 'combined/guide.md', blob) : record;
     await fixture.remote.run(['update-ref', SYNC_BRANCH, head]);
     world.github.pullRequests.push({ number: 1, title: 'Initial sync from Linear', body: '', head: 'mdbisync/linear', base: 'main', state: 'open', merged: false });
     await editInLinear('eng/notes/plan.md', `# Plan\n\nNot yet. ${CANARY}\n`);
