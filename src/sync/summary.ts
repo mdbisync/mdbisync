@@ -1,6 +1,8 @@
+import { cell } from '../run/summary.ts';
 // The sync run's job summary: paths, rule names and reasons only, never
 // document content.
 
+import { renderCapacity } from '../run/capacity.ts';
 import { describeStop } from '../linear/index.ts';
 import { type CycleResult } from './cycle.ts';
 import { type SkipReason } from './write.ts';
@@ -21,7 +23,9 @@ export function renderSync(result: CycleResult): string {
     lines.push('Linear already holds the tracked branch: nothing to write.', '');
   } else {
     const outcome =
-      write.code === 'state-moved'
+      write.code === 'container-cap'
+        ? 'Nothing was written. Reduce planned additions or increase document-cap after checking the container limit.'
+        : write.code === 'state-moved'
         ? 'A state ref moved while this run was writing, so it recorded nothing. Another run may be working on this repository; the next run writes again what is still missing.'
         : write.complete
           ? 'Linear now holds the tracked branch.'
@@ -53,14 +57,9 @@ export function renderSync(result: CycleResult): string {
   table('Renamed or moved', ['From', 'To'], write.relocated.map((entry) => [entry.from, entry.to]));
   table('Moved to trash', ['Path'], write.trashed.map((path) => [path]));
   table('Left out', ['Path', 'Rules'], [...write.leftOut.map((entry) => [entry.path, entry.rules.join(', ')]), ...write.leftOutAtWrite.map((entry) => [entry.path, entry.rule])]);
-  return lines.join('\n');
+  return lines.join('\n') + renderCapacity(write.capacity ?? []);
 }
 
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
-}
-
-/** A table cell: pipes, backslashes and line breaks would break the row. */
-function cell(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
 }

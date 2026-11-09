@@ -38,6 +38,10 @@ inputs:
     description: "Prefix of the sync's state refs."
     required: false
     default: refs/mdbisync
+  document-cap:
+    description: "Maximum documents per Linear container, including trash. Warn at 90%; stop before writing above the cap."
+    required: false
+    default: "1000"
   report-file:
     description: "Path to write the run's report as JSON (names and states only). Leave empty for none."
     required: false
