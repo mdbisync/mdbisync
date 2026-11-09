@@ -14,7 +14,7 @@ import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type 
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
-import { type CommitIdentity, type PushRefusal, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
+import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
@@ -48,8 +48,6 @@ export interface CaptureResult {
   changed: string[];
   removed: string[];
   leftOut: Array<{ id: string; rule: string }>;
-  /** A push of capture that the remote refused because a ref moved since the run read it (the lease). */
-  refusedPush?: PushRefusal;
   /** The `ids` ref was lost: how many of the recorded files got their document back by title, of how many. */
   rebuiltIds?: { matched: number; files: number };
   /** Captured content that exceeds Linear's write limit; paths and counts only. */
@@ -349,7 +347,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     if (prepared.oids.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...prepared.oids]);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
     const pushed = await pushAtomic(git, options.config, (['linear', 'ids', 'uploads'] as const).map((store) => ({ ref: stateRef(options.config, store), expected: state[store], next: next[store] })));
-    if (!pushed.ok) { result.ok = false; result.code = 'state-moved'; result.refusedPush = pushed; }
+    if (!pushed.ok) { result.ok = false; result.code = 'state-moved'; }
     else {
       result.state = next;
       published = true;
@@ -370,7 +368,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
               const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, message:'Capture document marks'});
               const updated = {...next, ids:tip};
               const saved = await pushAtomic(git, options.config, (['linear', 'ids', 'uploads'] as const).map((store) => ({ref:stateRef(options.config, store), expected:result.state[store], next:updated[store]})));
-              if (!saved.ok) { result.ok = false; result.code = 'state-moved'; result.refusedPush = saved; throw lostLease; }
+              if (!saved.ok) { result.ok = false; result.code = 'state-moved'; throw lostLease; }
               result.state = updated;
             },
           });

@@ -34,7 +34,6 @@ import {
   type Git,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
   type Oid,
-  type PushRefusal,
   type StateConfig,
   type StateSnapshot,
   branchRef,
@@ -80,8 +79,6 @@ export interface PullRequestResult {
    * - `github-failed`: GitHub refused or failed a request, or no answer came; `status` is its HTTP status, absent when no answer came.
    */
   code?: 'check-failed' | 'conflict' | 'merge-refused' | 'merge-blocked' | 'initial-pull-request-pending' | 'state-moved' | 'github-failed';
-  /** A push of this step that the remote refused because a ref moved since the run read it (the lease). */
-  refusedPush?: PushRefusal;
   /** GitHub's HTTP status for `merge-refused`, `merge-blocked` and `github-failed`. */
   status?: number;
   /** GitHub's reason for `merge-refused` and `merge-blocked`, on one line; empty when it gave none. */
@@ -144,7 +141,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: null, next: linear }]);
     if (pushed.ok) return { ...result, branchMoved: true };
     // A refusal that is not a lease (a rule on branch names, missing rights) leaves the branch to the run that needs it.
-    return pushed.reason === 'stale' ? { ...result, code: 'state-moved', refusedPush: pushed } : result;
+    return pushed.reason === 'stale' ? { ...result, code: 'state-moved' } : result;
   }
 
   try {
@@ -175,7 +172,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 
     if (head !== sync) {
       const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: sync, next: head }]);
-      if (!pushed.ok) return { ...result, code: 'state-moved', refusedPush: pushed };
+      if (!pushed.ok) return { ...result, code: 'state-moved' };
       result.branchMoved = true;
     }
     const headTree = await mergedTree(git, tracked, head);

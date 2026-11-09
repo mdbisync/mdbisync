@@ -19,6 +19,7 @@ import {
   readFiles,
   readIds,
   readUploads,
+  refusedPushes,
   resolveStateConfig,
   stateRef,
 } from './index.ts';
@@ -154,10 +155,12 @@ describe('state: stores and atomic lease pushes', () => {
     ]);
     assert.equal(result.ok, false);
     assert.ok(!result.ok && result.reason === 'stale' && result.refs.some((ref) => ref.ref === IDS));
-    assert.deepEqual(!result.ok && result.partial, [], 'no ref of the refused push moved');
     assert.equal(await remoteRef(fixture, LINEAR), seen.state.linear);
     assert.equal(await remoteRef(fixture, UPLOADS), seen.state.uploads);
     assert.equal(await remoteRef(fixture, IDS), otherIds);
+    // The refusal is logged for the run's report, with nothing moved.
+    assert.deepEqual(refusedPushes(writer), [{ refs: [LINEAR, IDS, UPLOADS], moved: [] }]);
+    assert.deepEqual(refusedPushes(other), []);
   });
 
   it('keeps the lease of a ref the run did not change', async () => {
@@ -254,6 +257,8 @@ describe('state: stores and atomic lease pushes', () => {
       ]);
       assert.equal(result.ok, false);
       assert.ok(!result.ok && result.reason === 'rejected', JSON.stringify(result));
+      // Not a lost lease: no other run moved anything.
+      assert.deepEqual(refusedPushes(writer), []);
       assert.equal(await remoteRef(fixture, stateRef(blocked, 'linear')), null);
       assert.equal(await remoteRef(fixture, stateRef(blocked, 'ids')), null);
     } finally {
