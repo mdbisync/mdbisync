@@ -269,6 +269,8 @@ describe('sync: the sync pull request', () => {
     assert.equal(failed.result.exitCode, SETUP_FAILED_EXIT_CODE, failed.result.stderr);
     assert.match(failed.result.stderr, /setup error \(check-failed\)/);
     assert.match(failed.summary, /Setup error: a check failed on the sync pull request \[#1\]\(.*\): `format`/);
+    assert.match(failed.summary, /writes no tracked-branch changes to Linear until the checks pass/);
+    assert.match(failed.summary, /rerun the failed check/);
     assert.equal(failed.report.pullRequest?.code, 'check-failed');
     assert.deepEqual(failed.writes, []);
     assert.equal(world.github.pullRequests[0]?.merged, false);

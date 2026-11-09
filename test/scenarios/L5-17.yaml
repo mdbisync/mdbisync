@@ -32,6 +32,13 @@
       }
     },
     {
+      "kind": "git",
+      "action": "edit",
+      "args": {
+        "target": "other-document"
+      }
+    },
+    {
       "kind": "run",
       "action": "sync",
       "args": {}

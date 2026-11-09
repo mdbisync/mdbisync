@@ -169,7 +169,10 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   merge to a later run, after the checks have started.
 - A check that fails is a setup error: the run summary names it, the run
   exits with code 3, and the pull request stays open until the repository's
-  checks pass Linear's form.
+  checks pass Linear's form. Tracked-branch changes are not written to Linear
+  until then. Fix the check configuration or rerun the failed check on the
+  sync pull request; changing a file on the tracked branch alone does not
+  rerun that check.
 - After the merge, the next run finds nothing to write and opens no pull
   request.
 - While the open pull request of an initial sync from Linear waits for a
