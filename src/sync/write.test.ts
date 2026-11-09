@@ -628,6 +628,22 @@ describe('sync: the tracked branch to Linear', () => {
     assert.match(document.content ?? '', /Typed in Linear meanwhile/);
   });
 
+  it('an edit of an excluded file made before capture is recorded and conflicts with a different git fix', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
+    assert.deepEqual((await sync()).writes, []);
+    document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}\n`;
+    touch(document);
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'conflict' }]);
+    assert.ok(report.capture?.changed.includes('eng/notes/review.md'));
+    assert.match(await show('refs/mdbisync/linear:eng/notes/review.md'), /Typed in Linear meanwhile/);
+    assert.match(document.content ?? '', /Typed in Linear meanwhile/);
+  });
+
   it('a left-out file is compared with what Linear was given, not with a git version it never received', async () => {
     const document = await documentOf('eng/notes/review.md');
     // Two git commits between runs: a clean version Linear never receives, then one the linter leaves out.
