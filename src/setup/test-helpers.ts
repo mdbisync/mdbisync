@@ -27,6 +27,10 @@ export interface FakeDocument {
   projectId?: string;
   teamId?: string;
   createdAt: string;
+  updatedAt?: string;
+  icon?: string | null;
+  color?: string | null;
+  comments?: string[];
   trashed?: boolean;
   archivedAt?: string;
   /** The stored content. */
@@ -175,6 +179,10 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
     return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
+  if (operationName === 'GetDocuments') {
+    const ids = variables.ids as string[];
+    return json(200, { data: { documents: { nodes: world.linear.documents.filter((d) => ids.includes(d.id)).map((d) => documentNode(d, variables.withContent === true)) } } });
+  }
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
   return json(400, { errors: [{ message: `unknown operation ${operationName}`, extensions: { code: 'INPUT_ERROR' } }] });
 }
@@ -197,9 +205,25 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
   if (operation === 'UpdateDocument') {
     const document = documents.find((d) => d.id === variables.id);
     if (document === undefined) return { documentUpdate: { success: false, document: null } };
-    const input = variables.input as { content?: string };
+    const input = variables.input as { content?: string; title?: string; icon?: string | null; color?: string | null; projectId?: string | null; teamId?: string | null };
     if (input.content !== undefined) document.content = world.linear.store(input.content);
+    for (const key of ['title', 'icon', 'color'] as const) if (input[key] !== undefined) Object.assign(document, { [key]: input[key] });
+    for (const key of ['projectId', 'teamId'] as const) {
+      if (input[key] === null) delete document[key];
+      else if (input[key] !== undefined) document[key] = input[key];
+    }
     return { documentUpdate: { success: true, document: documentNode(document, variables.withContent === true) } };
+  }
+  if (operation === 'CommentOnDocument') {
+    const input = variables.input as { documentContentId: string; body: string };
+    const document = documents.find((d) => `content-${d.id}` === input.documentContentId);
+    if (document !== undefined) (document.comments ??= []).push(input.body);
+    return { commentCreate: { success: document !== undefined, comment: { id: 'comment' } } };
+  }
+  if (operation === 'RestoreDocument') {
+    const document = documents.find((d) => d.id === variables.id);
+    if (document !== undefined) document.trashed = false;
+    return { documentUnarchive: { success: document !== undefined } };
   }
   if (operation === 'TrashDocument') {
     const document = documents.find((d) => d.id === variables.id);
@@ -214,13 +238,13 @@ function documentNode(d: FakeDocument, withContent: boolean) {
     id: d.id,
     title: d.title,
     slugId: d.id,
-    icon: null,
-    color: null,
+    icon: d.icon ?? null,
+    color: d.color ?? null,
     documentContentId: `content-${d.id}`,
     trashed: d.trashed ?? null,
     archivedAt: d.archivedAt ?? null,
     createdAt: d.createdAt,
-    updatedAt: d.createdAt,
+    updatedAt: d.updatedAt ?? d.createdAt,
     project: d.projectId !== undefined ? { id: d.projectId } : null,
     team: d.projectId === undefined && d.teamId !== undefined ? { id: d.teamId } : null,
     ...(withContent ? { content: d.content ?? '' } : {}),
