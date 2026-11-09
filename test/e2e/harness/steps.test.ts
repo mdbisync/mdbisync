@@ -17,7 +17,8 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { assertionHolds, compare, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { assertionHolds, bodyOf, compare, differingPaths, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { offlineInput } from './offline.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
@@ -389,6 +390,29 @@ describe('load', () => {
 });
 
 describe('oracles', () => {
+  it('give an unchanged file its body by the engine\'s rule as its form, in the bank and the corpus alike', () => {
+    for (const name of ['bank', 'full'] as const) {
+      const input = offlineInput(name);
+      const bom = [...input.files].find(([path]) => path.endsWith('typography-scripts/bom.md'));
+      assert.ok(bom !== undefined, `the ${name} input has the byte order mark fixture`);
+      assert.ok(bom[1].startsWith('﻿'), `the ${name} input keeps the mark in the file`);
+      assert.equal(input.golden.get(bom[0]), bodyOf(bom[1]), `the ${name} oracle is the file's body, as fix.output is`);
+      assert.ok(!input.golden.get(bom[0])?.startsWith('﻿'), `the ${name} oracle has no mark`);
+    }
+  });
+
+  it('name the paths a failed same-as differs at, a few at most and never their content', () => {
+    const actual = new Map([['a.md', 'secret one'], ['b.md', 'same'], ['c.md', 'x']]);
+    assert.equal(differingPaths(actual, new Map([['b.md', 'same'], ['c.md', 'y'], ['d.md', 'z']])), 'differs at a.md, c.md, d.md');
+    assert.equal(differingPaths(actual, new Map(actual)), undefined);
+    assert.equal(differingPaths(['a.md'], ['b.md']), undefined, 'only path maps name paths');
+    assert.ok(!differingPaths(actual, new Map())?.includes('secret'));
+    const many = new Map(Array.from({ length: 8 }, (_, i) => [`f${i}.md`, 'one']));
+    assert.equal(differingPaths(many, new Map([...many].map(([path]) => [path, 'two']))), 'differs at f0.md, f1.md, f2.md, f3.md, f4.md and 3 more');
+    // Values compare as compare() does: sets in sorted form.
+    assert.equal(differingPaths(new Map([['a.md', new Set(['x', 'y'])]]), new Map([['a.md', new Set(['y', 'x'])]])), undefined);
+  });
+
   it('map links to uploads link by link, so equal bytes at two paths keep their own links', () => {
     const hashes = new Map([['eng/media/a.png', 'h1'], ['eng/media/copy-of-a.png', 'h1'], ['eng/notes.pdf', 'h2']]);
     const uploads = new Map([['h1', 'https://uploads.linear.app/x/one'], ['h2', 'https://uploads.linear.app/x/two']]);
