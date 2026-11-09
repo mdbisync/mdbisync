@@ -37,11 +37,12 @@ test('action must run local bundled JavaScript with a post entry and no steps', 
 });
 
 test('hooks cannot add registry dependencies or shell installation steps', () => {
-  validateHooks([{ id: 'linear-format', language: 'node', entry: 'mdbisync lint' }]);
+  validateHooks([{ id: 'linear-format', language: 'node', language_version: 'system', entry: 'mdbisync lint' }]);
   for (const hook of [
     { language: 'system', entry: 'npm install' },
+    { language: 'node', language_version: '24.15.0', entry: 'mdbisync lint' },
     { language: 'node', entry: 'npx mdbisync lint' },
-    { language: 'node', entry: 'mdbisync lint', additional_dependencies: ['example'] },
+    { language: 'node', language_version: 'system', entry: 'mdbisync lint', additional_dependencies: ['example'] },
   ]) assert.throws(() => validateHooks([hook]));
 });
 
@@ -69,7 +70,7 @@ test('release tree is self-contained and its tagged commit does not change main'
     git('add', '.');
     git('commit', '-m', 'Create source fixture');
     const parent = git('rev-parse', 'HEAD');
-    const options = { source, output, version: 'v0.1.0-rc.1', sourceSha: parent, action, hooks: [{ language: 'node', entry: 'mdbisync lint' }] };
+    const options = { source, output, version: 'v0.1.0-rc.1', sourceSha: parent, action, hooks: [{ language: 'node', language_version: 'system', entry: 'mdbisync lint' }] };
     await stageRelease(options);
     const manifest = JSON.parse(await readFile(join(output, 'release.json'), 'utf8'));
     assert.equal(manifest.source, parent);
