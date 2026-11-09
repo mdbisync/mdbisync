@@ -325,6 +325,36 @@ describe('oracles', () => {
   });
 });
 
+describe('team-zone cleanup', () => {
+  it('archives a run\'s team-zone documents through a run project of their team, restoring trashed ones first', async () => {
+    const { LinearWorld } = await import('./linear-world.ts');
+    const calls: string[] = [];
+    const client = {
+      request: async (operation: string, _kind: string, _query: string, variables: { input?: { name: string; teamIds: string[] }; id?: string }) => {
+        calls.push(`${operation} ${variables.input?.name ?? variables.id ?? ''} ${variables.input?.teamIds?.join(',') ?? ''}`.trim());
+        if (operation === 'CreateProject') return { projectCreate: { success: true, project: { id: `project-${variables.input?.teamIds?.[0]}`, name: variables.input?.name, createdAt: '' } } };
+        return { projectDelete: { success: true } };
+      },
+      restoreDocument: async (id: string) => void calls.push(`restore ${id}`),
+      updateDocument: async (id: string, patch: { projectId?: string }) => void calls.push(`move ${id} ${patch.projectId}`),
+    };
+    const world = new LinearWorld(client as never);
+    const archived = await world.archiveRunTeamDocuments([
+      { id: 'd1', title: 'aaaaaa/guides/start', projectId: null, teamId: 'team-eng', trashed: false },
+      { id: 'd2', title: 'aaaaaa/guides/old', projectId: null, teamId: 'team-eng', trashed: true },
+      { id: 'd3', title: 'aaaaaa/notes', projectId: null, teamId: 'team-docs', trashed: false },
+      { id: 'd4', title: 'in a project already', projectId: 'p', teamId: 'team-eng', trashed: false },
+    ], 'aaaaaa', 'Workshop agenda aaaaaa');
+    assert.equal(archived, 3);
+    assert.deepEqual(calls, [
+      'CreateProject Workshop agenda aaaaaa team-eng', 'move d1 project-team-eng', 'restore d2', 'move d2 project-team-eng', 'DeleteProject project-team-eng',
+      'CreateProject Workshop agenda aaaaaa team-docs', 'move d3 project-team-docs', 'DeleteProject project-team-docs',
+    ]);
+    // Never another run's document.
+    await assert.rejects(world.archiveRunTeamDocuments([{ id: 'x', title: 'bbbbbb/notes', projectId: null, teamId: 'team-eng', trashed: false }], 'aaaaaa', 'Workshop agenda aaaaaa'), /not a team-zone document of run aaaaaa/);
+  });
+});
+
 describe('titles that are not paths', () => {
   it('follow the proposed percent-encoding rule', () => {
     assert.equal(encodeTitlePath('Notes: draft?*'), 'Notes%3A draft%3F%2A');
