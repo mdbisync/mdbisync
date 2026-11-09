@@ -673,6 +673,46 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/file-not-uploaded.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/image-not-uploaded-in-cell.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/release-notes.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/task-code-uploaded.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/task-code.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/tasks-then-bullets.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/video-mov.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/video-mp4.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/video-not-uploaded.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/video-webm.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "mermaid/mermaid-class.md": {
       "yjs": "recorded",
       "fixedPoint": true

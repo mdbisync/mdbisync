@@ -5,7 +5,7 @@
 //   node test/corpus/generate.ts --hook-rev <release-sha> [--out <dir>] [--seed <text>] [--bank <dir>] [--replace]
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { makeAssets } from "./assets.ts";
@@ -53,6 +53,17 @@ export type Corpus = {
   slices: Record<Slice, string[]>;
 };
 
+/** Whether a relative link in the file at `from` reaches a corpus file; an undecodable or rooted one is taken to. */
+function corpusHas(paths: ReadonlySet<string>, from: string, url: string): boolean {
+  const target = url.split(/[?#]/)[0]!;
+  if (target.startsWith("/")) return true;
+  try {
+    return paths.has(posix.normalize(posix.join(posix.dirname(from), decodeURIComponent(target))));
+  } catch {
+    return true;
+  }
+}
+
 /**
  * A synchronized repository's tracked branch is already in the form Linear
  * stores, so every synced Markdown file is written through `fix`; the
@@ -65,10 +76,12 @@ export type Corpus = {
  * only when the rewritten text is the form the probe recorded from Linear.
  */
 export function inLinearForm(files: CorpusFile[], bankDir: string): void {
+  const paths = new Set(files.map((file) => file.path));
   for (const file of files) {
     if (!file.synced || file.kind !== "markdown" || file.expected === "lint-error") continue;
     const text = file.content.toString("utf8");
-    const fixed = fixText(text);
+    // As the fix command does: a link to a file the corpus does not have is not uploaded.
+    const fixed = fixText(text, { linkedFileExists: (url) => corpusHas(paths, file.path, url) });
     if (fixed === text) continue;
     file.content = Buffer.from(fixed, "utf8");
     const rewritten = fixed === "" ? "written empty, as in Linear's form" : "written in Linear's form";

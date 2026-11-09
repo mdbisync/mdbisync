@@ -38,6 +38,7 @@ const cases: Array<[string, string, string]> = [
   ['reference images are written inline', '![a][i]\n\n[i]: x.png', '![a](x.png)'],
   ['an image leaves a paragraph with text', 'Before ![a](x.png) after.', 'Before\n\n![a](x.png)\n\nafter.'],
   ['a list item with only a file link becomes a file block', '* [Report](report.pdf)', '* \n  [Report](report.pdf)'],
+  ['a list item with only a video link becomes a video on its line', '* [Demo](media/demo.mp4)\n* [Clip](<clip one.MOV>)\n* [Loop](loop.webm)', '* [Demo](media/demo.mp4)\n* [Clip](clip%20one.MOV)\n* [Loop](loop.webm)'],
   ['tables get outer pipes and short separators', 'A | B\n--- | ---\n1 | 2', '| A | B |\n| -- | -- |\n| 1 | 2 |'],
   ['ragged rows fit the header', '| A | B |\n| -- | -- |\n| 1 |\n| 1 | 2 | 3 |', '| A | B |\n| -- | -- |\n| 1 |  |\n| 1 | 2 |'],
   ['character references become characters', 'Fish &amp; chips &mdash; &copy;', 'Fish & chips — ©'],
@@ -54,6 +55,19 @@ describe('fix rules', () => {
       assert.equal(fixText(expected), expected, 'the result is a fixed point');
     });
   }
+});
+
+describe('links to files that are not there', () => {
+  const missing = { linkedFileExists: (url: string) => !url.includes('missing') };
+  it('a list item with only a link to a missing file stays a link, as Linear keeps it', () => {
+    const text = '* [Report](missing/report.pdf)\n* [Demo](missing/demo.mp4)\n* [Here](report.pdf)';
+    const expected = '* [Report](<missing/report.pdf>)\n* [Demo](<missing/demo.mp4>)\n* \n  [Here](report.pdf)';
+    assert.equal(fixText(text, missing), expected);
+    assert.equal(fixText(expected, missing), expected, 'the result is a fixed point');
+  });
+  it('without the check every linked file is taken to exist', () => {
+    assert.equal(fixText('* [Report](<missing/report.pdf>)'), '* \n  [Report](missing/report.pdf)');
+  });
 });
 
 describe('what fix leaves alone', () => {

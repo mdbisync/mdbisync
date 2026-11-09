@@ -575,6 +575,26 @@ known_constructs:
     class: fixable
   - construct: markdown-extension-sibling
     class: unchanged
+  - construct: attachment-in-item-relative
+    class: fixable
+  - construct: image-in-cell-relative
+    class: unchanged
+  - construct: corpus-release-notes
+    class: fixable
+  - construct: corpus-task-code
+    class: unchanged
+  - construct: corpus-task-code-uploaded
+    class: unchanged
+  - construct: task-list-then-bullet-list
+    class: unchanged
+  - construct: video-in-item-mov
+    class: fixable
+  - construct: video-in-item
+    class: fixable
+  - construct: video-in-item-relative
+    class: fixable
+  - construct: video-in-item-webm
+    class: fixable
 assets:
   - file: "assets/pixel.png"
     kind: png
@@ -2324,32 +2344,32 @@ fixtures:
   - file: "list-items/video-mp4.md"
     group: list-items
     construct: video-in-item
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-444c259e
     corpus: false
     note: "a list item holding only an uploaded video link"
   - file: "list-items/video-mov.md"
     group: list-items
     construct: video-in-item-mov
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-51bc20a5
     corpus: false
     note: "a list item holding only an uploaded QuickTime link"
   - file: "list-items/video-webm.md"
     group: list-items
     construct: video-in-item-webm
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-bfe9777b
     corpus: false
     note: "a list item holding only an uploaded WebM link"
   - file: "list-items/video-not-uploaded.md"
     group: list-items
     construct: video-in-item-relative
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-38b45170
     corpus: false
     missing_target: true
@@ -2357,26 +2377,17 @@ fixtures:
   - file: "list-items/file-not-uploaded.md"
     group: list-items
     construct: attachment-in-item-relative
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-c4a90667
     corpus: false
     missing_target: true
     note: "sent with its relative link, as a sync without uploads sends it"
-  - file: "list-items/image-not-uploaded.md"
-    group: list-items
-    construct: image-after-text-in-item-relative
-    class: unchanged
-    basis: assumed
-    canary: kx-1b3d6545
-    corpus: false
-    missing_target: true
-    note: "sent with its relative image, as a sync without uploads sends it"
   - file: "list-items/image-not-uploaded-in-cell.md"
     group: list-items
     construct: image-in-cell-relative
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-7a154a39
     corpus: false
     missing_target: true
@@ -2385,15 +2396,15 @@ fixtures:
     group: list-items
     construct: task-list-then-bullet-list
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-b2c987d6
     corpus: false
     note: "fix form of one list mixing task and plain items"
   - file: "list-items/release-notes.md"
     group: list-items
     construct: corpus-release-notes
-    class: unchanged
-    basis: assumed
+    class: fixable
+    basis: known
     canary: kx-7b8ded8f
     corpus: false
     missing_target: true
@@ -2402,7 +2413,7 @@ fixtures:
     group: list-items
     construct: corpus-task-code
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-750b1a3b
     corpus: false
     missing_target: true
@@ -2411,7 +2422,7 @@ fixtures:
     group: list-items
     construct: corpus-task-code-uploaded
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-734631d7
     corpus: false
     note: "the corpus edge case with its images uploaded"

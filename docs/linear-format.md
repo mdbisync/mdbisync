@@ -97,8 +97,12 @@ Blocks:
 - An image does not share a paragraph with text: the text before and after
   it becomes its own paragraph.
 - A list item holding only a link to a relative file other than Markdown
-  becomes Linear's file block: the marker on its own line and the link
-  below it.
+  becomes the block Linear makes of the uploaded file. For a video
+  (`.mp4`, `.mov`, `.webm`) the link stays on the marker's line, with no
+  angle brackets; for any other file the marker stands on its own line and
+  the link goes below it. When the linked file does not exist, the sync
+  cannot upload it and Linear keeps a plain link, so `fix` writes
+  `* [Name](<path>)`.
 
 Inline text:
 
