@@ -29,6 +29,9 @@ describe('sameMarkdown', () => {
     assert.ok(!sameMarkdown('> \\+++ Details', '> +++ Details'));
     // `$$` lines are math in Linear; escaped, they are text.
     assert.ok(!sameMarkdown('\\$$\nx^2\n\\$$', '$$\nx^2\n$$'));
+    // A list item that opens with a line break is a file block in Linear.
+    assert.ok(!sameMarkdown('* \n  [Summary](a.pdf)', '* [Summary](a.pdf)'));
+    assert.ok(sameMarkdown('* \n  [Summary](a.pdf)', '* \n  [Summary](a.pdf)\n'));
   });
 
   it('compares a destination holding a lone surrogate without throwing', () => {
