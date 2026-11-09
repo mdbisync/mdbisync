@@ -126,6 +126,9 @@ to `.github/workflows/` and run it by hand from the Actions tab, with a
 direction: `git-to-linear` makes Linear equal to git, `linear-to-git` opens a
 pull request that makes git equal to Linear. The first run is a dry run that
 lists what would change; run it again with `confirm` to write.
+Before you take documents from Linear, read
+[initial sync from Linear to git](docs/initial-sync-linear-to-git.md): its
+pull request can remove files, and a person merges it.
 
 ### 4. Start ongoing sync
 
@@ -137,7 +140,9 @@ minutes, in both directions.
 ## Documentation
 
 How folders map to Linear, the checks every run makes, the sync pull request
-and how to pin a release: [docs/usage.md](docs/usage.md). How Markdown is kept
+and how to pin a release: [docs/usage.md](docs/usage.md). The initial sync
+from Linear to git, step by step:
+[docs/initial-sync-linear-to-git.md](docs/initial-sync-linear-to-git.md). How Markdown is kept
 in Linear's form: [docs/linear-format.md](docs/linear-format.md).
 
 ### Tokens left by interrupted jobs
