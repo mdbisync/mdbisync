@@ -526,6 +526,13 @@ describe('titles that are not paths', () => {
     assert.equal(encodeTitlePath('notes /trailing. '), 'notes%20/trailing%2E%20');
     assert.equal(encodeTitlePath('wait...'), 'wait%2E%2E%2E');
     assert.equal(encodeTitlePath('a. b'), 'a. b');
+    // A segment of spaces only has no leading part to keep: all of it is trailing.
+    assert.equal(encodeTitlePath('notes/   /x'), 'notes/%20%20%20/x');
+  });
+  it('apply the reserved-segment and trailing rules together', () => {
+    assert.equal(encodeTitlePath('..'), '%2E%2E');
+    assert.equal(encodeTitlePath('con.'), '%63on%2E');
+    assert.equal(encodeTitlePath('.git '), '.git%20');
   });
   it('encode reserved and empty segments so the path stays relative', () => {
     assert.equal(encodeTitlePath('../notes'), '%2E%2E/notes');

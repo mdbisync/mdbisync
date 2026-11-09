@@ -126,11 +126,14 @@ title-to-path map for the seeded unsafe titles, below the mapped project folder.
 Per segment, after Unicode NFC: percent-encode `%`, `\`, control characters
 and `:*?"<>|`; encode the leading character of `.`, `..`, `.git` and Windows
 device names; represent an empty path segment as `%00`; encode trailing periods
-and spaces. Leading spaces stay as they are. Append `.md`; for a collision the
-older document keeps the plain name and the other gets `~` and the first twelve
-hex digits of the SHA-256 of its document ID before the extension. Decoding
-must recover the original title; unique arbitrary filenames cannot satisfy the
-mapping and reverse-mapping assertions.
+and spaces. Leading spaces stay as they are. Append `.md`. For a collision
+(including a case-only match or a file where a folder is needed) the older
+document keeps the plain name; the other is written directly in the mapped
+folder with its separators flattened to `%2F`, then `~` and the first twelve
+hex digits of the SHA-256 of its document ID before the extension, as in
+`notes%2Fx~<hash>.md`. For the seeded titles, which are NFC and have no empty
+segment, decoding must recover the original title; unique arbitrary filenames
+cannot satisfy the mapping and reverse-mapping assertions.
 
 ## Catalog maintenance
 

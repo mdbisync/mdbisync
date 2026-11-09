@@ -378,6 +378,8 @@ export function linearForms(texts: ReadonlyMap<string, string>): Map<string, str
   }
 }
 
+const hex = (char: string) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
+
 /**
  * The expected file path of a title, written from the documented path rule and
  * kept independent of the engine's own implementation. Per slash-separated
@@ -388,7 +390,6 @@ export function linearForms(texts: ReadonlyMap<string, string>): Map<string, str
  * collision suffixes are outside this oracle.
  */
 export function encodeTitlePath(title: string): string {
-  const hex = (char: string) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
   return title
     .normalize('NFC')
     .split('/')
