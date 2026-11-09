@@ -8,12 +8,12 @@
 
 import assert from 'node:assert/strict';
 import { readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { detectConflicts, MARKERS, RETITLED_COMMENT } from '../merge/index.ts';
 import { type RunReport } from '../run/finish.ts';
-import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
+import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { CONFLICT_COMMENT, MARKS } from './marks.ts';
 
@@ -44,6 +44,7 @@ const TREE: Record<string, string> = {
   'eng/notes/bullets.md': `# Items\n\n- apples\n- pears\n- plums\n\nAfter. ${CANARY}\n`,
   'eng/notes/lookalike.md': `# Lookalike\n\nThe markers look like this:\n\n\`\`\`md\n${MARKERS.git}\n\nmine\n\n${MARKERS.linear}\n\ntheirs\n\n${MARKERS.end}\n\`\`\`\n\nAnd inline: \`${MARKERS.git}\`.\n\n> ${MARKERS.end}\n\nPlain text. ${CANARY}\n`,
   'eng/notes/front.md': `---\nowner: example\n---\n\n# Front\n\nOne paragraph. ${CANARY}\n`,
+  'eng/notes/gallery.md': `# Gallery\n\nIntro.\n\nOutro. ${CANARY}\n`,
 };
 
 const SYNC_BRANCH = 'refs/heads/mdbisync/linear';
@@ -616,6 +617,81 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.ok(result.startsWith('---\nowner: someone-else\n---\n'), result);
     assert.equal(detectConflicts(result).length, 1);
     assert.equal((await documentOf(path)).content, body(result));
+  });
+
+  it('L3-21: resolving that conflict in Linear keeps the front matter git changed', async () => {
+    const path = 'eng/notes/front.md';
+    const text = TREE[path] as string;
+    await editInLinear(path, `# Front\n\nOne paragraph, Linear. ${CANARY}\n`);
+    await commitGit({ [path]: text.replace('owner: example', 'owner: someone-else').replace('One paragraph.', 'One paragraph, git.') });
+    await settle();
+    await editInLinear(path, `# Front\n\nOne paragraph, agreed. ${CANARY}\n`);
+    await settle();
+    await assertBothSides(path, `---\nowner: someone-else\n---\n\n# Front\n\nOne paragraph, agreed. ${CANARY}\n`);
+    assert.equal((await documentOf(path)).icon ?? null, null);
+  });
+
+  it('L3-20: different images added at the same spot become a conflict whose versions keep both images working', async () => {
+    const path = `${NOTES}/gallery.md`;
+    const text = TREE[path] as string;
+    const gitBytes = Buffer.from('git chart bytes');
+    const linearBytes = Buffer.from('linear photo bytes');
+    // alice pastes a picture in Linear: Linear stores it and links its upload URL.
+    const url = `${UPLOADS_HOST}/pasted/photo.png`;
+    world.linear.uploads.push({ filename: 'photo.png', contentType: 'image/png', size: linearBytes.length, assetUrl: url, bytes: linearBytes });
+    await editInLinear(path, text.replace('Intro.\n\n', `Intro.\n\n![Photo](${url})\n\n`));
+    await commitGit({ [path]: text.replace('Intro.\n\n', 'Intro.\n\n![Chart](../media/chart.png)\n\n'), 'eng/media/chart.png': gitBytes.toString('latin1') });
+    await settle();
+
+    const result = await show(`refs/heads/main:${path}`);
+    assert.equal(detectConflicts(result).length, 1, result);
+    const [conflict] = detectConflicts(result);
+    assert.equal(conflict?.git, '![Chart](../media/chart.png)');
+    // Linear's picture is a file on the tracked branch, linked relative to the document.
+    const linearLink = /^!\[Photo\]\(<?([^)>]+)>?\)$/.exec(conflict?.linear ?? '')?.[1];
+    assert.ok(linearLink !== undefined && !linearLink.startsWith('http'), conflict?.linear);
+    const fileOf = async (link: string) => (await fixture.remote.run(['show', `refs/heads/main:${posix.join(NOTES, link)}`])).stdout;
+    assert.deepEqual(await fileOf('../media/chart.png'), gitBytes);
+    assert.deepEqual(await fileOf(decodeURI(linearLink)), linearBytes);
+
+    // In Linear both versions link uploads that serve each picture's bytes.
+    const document = await documentOf(path);
+    assert.equal(detectConflicts(document.content ?? '').length, 1, document.content);
+    const [inLinear] = detectConflicts(document.content ?? '');
+    const served = (version: string | undefined) => {
+      const link = /\((https:[^)]+)\)/.exec(version ?? '')?.[1];
+      assert.ok(link !== undefined, version);
+      return world.linear.uploads.find((upload) => upload.assetUrl === link)?.bytes;
+    };
+    assert.deepEqual(served(inLinear?.git), gitBytes);
+    assert.deepEqual(served(inLinear?.linear), linearBytes);
+    assert.deepEqual({ icon: document.icon, color: document.color }, MARKS.conflict);
+    // Outside the images the two sides hold the same text.
+    const unlinked = (whole: string) => whole.replace(/!\[(\w+)\]\([^)]+\)/g, '![$1]()');
+    assert.equal(unlinked(document.content ?? ''), unlinked(body(result)));
+  });
+
+  it('L3-23: alice and bob edit different paragraphs in Linear and git edits a third: all three on both sides, no conflict', async () => {
+    // alice and bob edit the one Linear document in turn before the run.
+    await editInLinear(DOC, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, alice.'));
+    await editInLinear(DOC, ((await documentOf(DOC)).content ?? '').replace('Beta paragraph.', 'Beta paragraph, bob.'));
+    await commitGit({ [DOC]: PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.') });
+    const runs = await settle();
+    for (const run of runs) assert.deepEqual(run.report.sync?.conflicts ?? [], []);
+    await assertBothSides(DOC, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, alice.').replace('Beta paragraph.', 'Beta paragraph, bob.').replace('Gamma paragraph.', 'Gamma paragraph, git.'));
+    const document = await documentOf(DOC);
+    assert.equal(document.icon ?? null, null);
+    assert.equal(comments(document).length, 0);
+  });
+
+  it('L3-23: bob edits after the run that merged alice and git, and his edit lands too', async () => {
+    await editInLinear(DOC, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, alice.'));
+    await commitGit({ [DOC]: PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.') });
+    await sync();
+    await editInLinear(DOC, ((await documentOf(DOC)).content ?? '').replace('Beta paragraph.', 'Beta paragraph, bob.'));
+    const runs = await settle();
+    for (const run of runs) assert.deepEqual(run.report.sync?.conflicts ?? [], []);
+    await assertBothSides(DOC, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, alice.').replace('Beta paragraph.', 'Beta paragraph, bob.').replace('Gamma paragraph.', 'Gamma paragraph, git.'));
   });
 
   it('L3-22: marker lookalikes in code, quotes and inline code get no mark and are not reported as conflicts', async () => {
