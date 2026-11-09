@@ -41,14 +41,15 @@ describe('results', () => {
     assert.equal(classify(undefined, true).unexpectedPass, true);
   });
 
-  it('starts with every scenario on the expected-red list', () => {
+  it('lists only known scenarios as expected-red, and none of the offline format scenarios that pass', () => {
     const list = loadExpectedRed();
-    for (const scenario of scenarios) assert.ok(list.has(scenario.id), scenario.id);
+    const known = new Set(scenarios.map((scenario) => scenario.id));
+    for (const id of list) assert.ok(known.has(id), id);
+    for (const id of ['L0-01', 'L0-02', 'L0-03', 'L0-04', 'L0-07', 'L0-08']) assert.ok(!list.has(id), id);
   });
 
-  it('knows which step actions it cannot run yet', () => {
-    assert.ok(HARNESS_GAPS.has('run.soak'));
-    assert.ok(!HARNESS_GAPS.has('git.edit'));
+  it('has an executor for every step action', () => {
+    assert.equal(HARNESS_GAPS.size, 0);
   });
 });
 
@@ -187,7 +188,8 @@ function deps(config: Partial<TestConfig> = {}) {
     appClients: new Map(),
     stateDir: fresh('runner-state-'),
     outDir: fresh('runner-out-'),
-    expectedRed: loadExpectedRed(),
+    // Every scenario on the list, so runner tests do not depend on which features have landed.
+    expectedRed: new Set(scenarios.map((scenario) => scenario.id)),
     log: () => {},
   };
 }
@@ -220,9 +222,26 @@ describe('runner', () => {
   });
 
   it('fails a scenario, as the harness\'s gap, when it cannot observe an assertion\'s subject', async () => {
-    const result = await withStubEngine('process.exitCode = 0;\n', () => runScenario(byId('L0-01'), deps()));
+    const base = byId('L0-04');
+    const scenario = { ...base, checks: { ...base.checks, assertions: [{ subject: 'nothing.known', operator: 'equal' as const, expected: 0 }] } };
+    const result = await withStubEngine('process.exitCode = 0;\n', () => runScenario(scenario, deps()));
     assert.equal(result.result, 'fail');
-    assert.match(result.reason ?? '', /harness: .*assertion subject fix\.second\.bytes/);
+    assert.match(result.reason ?? '', /harness: .*assertion subject nothing\.known/);
+  });
+
+  it('computes the offline format subjects and fails a fix that is not idempotent', async () => {
+    // A stub `fix` that changes every file again on each pass.
+    const growing = [
+      "const { readdirSync, readFileSync, writeFileSync, statSync } = await import('node:fs');",
+      "const walk = (dir) => readdirSync(dir).flatMap((name) => statSync(`${dir}/${name}`).isDirectory() ? walk(`${dir}/${name}`) : [`${dir}/${name}`]);",
+      "for (const file of walk('.').filter((path) => path.endsWith('.md'))) writeFileSync(file, readFileSync(file, 'utf8') + 'x');",
+      '',
+    ].join('\n');
+    const result = await withStubEngine(growing, () => runScenario(byId('L0-01'), deps()));
+    assert.equal(result.result, 'expected-red');
+    assert.match(result.reason ?? '', /checks failed: fix\.second\.bytes/);
+    const idempotent = await withStubEngine('process.exitCode = 0;\n', () => runScenario(byId('L0-04'), deps()));
+    assert.equal(idempotent.result, 'pass');
   });
 
   it('reports a live scenario env-blocked, with the reason, when the configuration is missing', async () => {

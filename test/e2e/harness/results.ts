@@ -79,6 +79,8 @@ export interface ScenarioResult {
   budgetWaitMs: number;
   checks: CheckOutcome[];
   cleanup: { ok: boolean; detail?: string };
+  /** Measurements the scenario records for the report (durations, budget, race windows); never content. */
+  metrics?: Record<string, unknown>;
 }
 
 export const EXPECTED_RED_FILE = fileURLToPath(new URL('../expected-red.json', import.meta.url));
