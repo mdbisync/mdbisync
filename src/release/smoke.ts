@@ -4,48 +4,53 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parse } from 'yaml';
+import { notImplementedMessage } from '../commands.ts';
 import { validateAction, validateHooks } from './package.ts';
 
-// Pages every release hook must handle: one Linear would keep after a fix and
-// one only its author can change, because Linear drops footnotes.
-const FIXABLE = '*one*\n';
+// Pages every release hook must handle: one that `fix` rewrites into the form
+// Linear keeps (a setext heading and a dash list item, not just whitespace),
+// and one only its author can change, because Linear drops footnotes.
+const FIXABLE = 'Notes\n=====\n\n- first item\n';
 const UNFIXABLE = 'A note[^1].\n\n[^1]: Linear drops footnotes.\n';
 
-type Run = (command: string, args: string[], cwd: string) => { status: number | null; stdout: string; stderr: string };
+type Run = (command: string, args: string[], extra?: Record<string, string>, cwd?: string) =>
+  { status: number | null; stdout: string; stderr: string };
 
 /**
  * Runs one hook's entry the way pre-commit does, from the installed package,
- * on a fixable and an unfixable page. A release whose hook ships a stub or
- * refuses ordinary Markdown fails here, before it is tagged.
+ * on a fixable and an unfixable page. A release whose hook is a stub, refuses
+ * Markdown in Linear's form or changes a page it cannot fix fails here, before
+ * it is tagged.
  */
 async function checkHookEntry(entry: string, bin: string, pages: string, run: Run): Promise<void> {
   const [name, command] = entry.split(' ') as [string, 'lint' | 'fix'];
   const page = join(pages, 'page.md');
-  const hook = async (text: string) => {
+  const hook = async (text: string, subcommand: 'lint' | 'fix' = command) => {
     await writeFile(page, text);
-    const result = run(join(bin, name), [command, 'page.md'], pages);
+    const result = run(join(bin, name), [subcommand, 'page.md'], {}, pages);
     const output = result.stdout + result.stderr;
-    assert.doesNotMatch(output, /not implemented/, `${entry} is a stub:\n${output}`);
+    assert.equal(output.includes(notImplementedMessage(subcommand)), false, `${name} ${subcommand} is a stub:\n${output}`);
     return { status: result.status, output, after: await readFile(page, 'utf8') };
   };
-  const fixable = await hook(FIXABLE);
-  assert.equal(fixable.status, 1, `${entry} on a fixable page:\n${fixable.output}`);
-  if (command === 'fix') {
-    assert.match(fixable.output, /page\.md: fixed/);
-    assert.notEqual(fixable.after, FIXABLE, `${entry} left a fixable page unchanged`);
-  } else {
-    assert.match(fixable.output, /not in Linear's form/);
-    assert.equal(fixable.after, FIXABLE, `${entry} changed a page`);
+  // The form Linear keeps comes from the release's own `fix`, so the lint hook
+  // is checked against what the fix hook writes.
+  const fixed = await hook(FIXABLE, 'fix');
+  assert.equal(fixed.status, 1, `${name} fix on a fixable page:\n${fixed.output}`);
+  assert.match(fixed.output, /^page\.md: fixed$/m);
+  assert.notEqual(fixed.after.trimEnd(), FIXABLE.trimEnd(), `${name} fix changed no more than whitespace`);
+  if (command === 'lint') {
+    const reported = await hook(FIXABLE);
+    assert.equal(reported.status, 1, `${entry} on a fixable page:\n${reported.output}`);
+    assert.match(reported.output, /^page\.md: not in Linear's form/m);
+    assert.equal(reported.after, FIXABLE, `${entry} changed a page`);
   }
-  // The fixed page passes both hooks unchanged.
-  const fixedText = command === 'fix' ? fixable.after : FIXABLE.trimEnd();
-  const fixed = await hook(fixedText);
-  assert.equal(fixed.status, 0, `${entry} on a page in Linear's form:\n${fixed.output}`);
-  assert.equal(fixed.after, fixedText);
-  const unfixable = await hook(UNFIXABLE);
-  assert.equal(unfixable.status, 1, `${entry} on an unfixable page:\n${unfixable.output}`);
-  assert.match(unfixable.output, /footnote/);
-  assert.equal(unfixable.after, UNFIXABLE, `${entry} changed a page it cannot fix`);
+  const kept = await hook(fixed.after);
+  assert.equal(kept.status, 0, `${entry} on a page in Linear's form:\n${kept.output}`);
+  assert.equal(kept.after, fixed.after, `${entry} changed a page in Linear's form`);
+  const refused = await hook(UNFIXABLE);
+  assert.equal(refused.status, 1, `${entry} on an unfixable page:\n${refused.output}`);
+  assert.match(refused.output, /^page\.md:1: footnote: /m);
+  assert.equal(refused.after, UNFIXABLE, `${entry} changed a page it cannot fix`);
 }
 
 export async function smokeRelease(directory: string): Promise<void> {
@@ -59,8 +64,8 @@ export async function smokeRelease(directory: string): Promise<void> {
   assert.equal(typeof bins.mdbisync, 'string');
   const temporary = await mkdtemp(join(tmpdir(), 'release-smoke-'));
   const env = { PATH: process.env.PATH, HOME: temporary, npm_config_offline: 'true', npm_config_ignore_scripts: 'true' };
-  const run = (command: string, args: string[], extra: Record<string, string> = {}) => {
-    const result = spawnSync(command, args, { cwd: root, encoding: 'utf8', env: { ...env, ...extra } });
+  const run: Run = (command, args, extra = {}, cwd = root) => {
+    const result = spawnSync(command, args, { cwd, encoding: 'utf8', env: { ...env, ...extra } });
     if (result.error) throw result.error;
     return result;
   };
@@ -92,13 +97,8 @@ export async function smokeRelease(directory: string): Promise<void> {
     assert.match(hookCli.stdout, /Usage:/);
     const pages = join(temporary, 'pages');
     await mkdir(pages);
-    const runIn: Run = (command, args, cwd) => {
-      const result = spawnSync(command, args, { cwd, encoding: 'utf8', env });
-      if (result.error) throw result.error;
-      return result;
-    };
     for (const hook of hooks as { entry: string }[]) {
-      await checkHookEntry(hook.entry, join(temporary, 'prefix/bin'), pages, runIn);
+      await checkHookEntry(hook.entry, join(temporary, 'prefix/bin'), pages, run);
     }
   } finally {
     await rm(temporary, { recursive: true, force: true });
