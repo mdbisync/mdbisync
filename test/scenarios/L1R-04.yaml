@@ -56,6 +56,11 @@
     },
     "assertions": [
       {
+        "subject": "pullRequests.existingAssetsUnchanged",
+        "operator": "equal",
+        "expected": true
+      },
+      {
         "subject": "pullRequests.assetBytes",
         "operator": "same-as",
         "expected": "linear.assetBytes"

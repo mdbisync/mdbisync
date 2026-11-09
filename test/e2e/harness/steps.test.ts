@@ -17,7 +17,7 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { compare, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { assertionHolds, compare, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
@@ -30,7 +30,7 @@ import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
 import { commitAsPerson, readRunIds } from './step-helpers.ts';
-import { documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
+import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
 import { prerequisiteErrors } from './workflow-files.ts';
@@ -522,6 +522,12 @@ describe('titles that are not paths', () => {
     assert.equal(encodeTitlePath('notes%3A'), 'notes%253A');
     assert.equal(encodeTitlePath('tab\there\u007f'), 'tab%09here%7F');
   });
+  it('cut a segment of more than 180 bytes to 40 characters and a hash of the segment', () => {
+    // Hashes written by hand: SHA-256 of 'x' x 200 and of 'é' x 100, first 16 hex digits.
+    assert.equal(encodeTitlePath(`a/${'x'.repeat(200)}`), `a/${'x'.repeat(40)}~aa20c23e32018340`);
+    assert.equal(encodeTitlePath('é'.repeat(100)), `${'é'.repeat(40)}~f42ec48e1e4b487e`, '200 bytes in 100 characters');
+    assert.equal(encodeTitlePath('x'.repeat(180)), 'x'.repeat(180), '180 bytes stay');
+  });
   it('keep leading spaces and encode trailing periods and spaces', () => {
     assert.equal(encodeTitlePath('  notes/leading spaces'), '  notes/leading spaces');
     assert.equal(encodeTitlePath(' leading'), ' leading');
@@ -669,6 +675,16 @@ function engineRun(command: EngineResult['command'], report: Record<string, unkn
  * documents, their ids ref, and Linear holding the same texts. With `hooks`,
  * the person's commits go through the corpus's hooks from a local hook repository.
  */
+/** Replaces the run's uploads state ref with one commit holding these hash → URL entries. */
+async function writeUploads(ctx: RunContext, entries: Record<string, string>): Promise<void> {
+  const git = await ctx.person();
+  const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(entries) })).trim();
+  const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
+  const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
+  await git.run(['push', '--quiet', 'origin', `+${commit}:${ctx.names.refPrefix}/uploads`]);
+  refreshView(ctx);
+}
+
 async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
@@ -1303,12 +1319,69 @@ describe('linear executors', () => {
     await runStep(ctx, { kind: 'linear', action: 'edit', args: { target: 'eng/platform/plan.md', fixture: 'fake-secret' } });
     const secret = ctx.observations.get('secret.value') as string;
     assert.match(secret, /^TESTKEY-[0-9a-f]{24}$/);
-    Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Cross', color: 'red' });
+    // Linear gives the color as a hex code; L2-35 names it by its palette name.
+    Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Cross', color: '#EB5757' });
     linear.comments.set(id, ['Blocked by hook `test-secret`, line 3.']);
     await runStep(ctx, { kind: 'linear', action: 'remove-secret', args: {} });
     assert.equal(ctx.observations.get('blocked.icon'), 'Cross');
     assert.ok(!(linear.documents.get(id)?.content ?? '').includes(secret));
     assert.deepEqual(await resolveSubject(ctx, 'blocked.commentFields'), { known: true, value: ['hook', 'line'] });
+    const mark = ['blocked.icon', 'blocked.color', 'blocked.commentFields'];
+    assert.deepEqual(await scenarioAssertions(ctx, 'L2-35', mark), new Map(mark.map((subject) => [subject, true])));
+    // A wrong color still fails L2-35.
+    ctx.observations.set('blocked.color', '#4cb782');
+    assert.deepEqual((await scenarioAssertions(ctx, 'L2-35', mark)).get('blocked.color'), false);
+  });
+
+  /** Whether each assertion of scenario `id` on `subjects` holds in `ctx`, compared as the runner compares them. */
+  async function scenarioAssertions(ctx: RunContext, id: string, subjects?: readonly string[]): Promise<Map<string, boolean>> {
+    const scenario = scenarios.find((candidate) => candidate.id === id)!;
+    const held = new Map<string, boolean>();
+    for (const assertion of scenario.checks.assertions) {
+      if (subjects !== undefined && !subjects.includes(assertion.subject)) continue;
+      held.set(assertion.subject, await assertionHolds(ctx, assertion));
+    }
+    return held;
+  }
+
+  it('compare a cross-project move (L2-25) with its recorded destination in the same form', async () => {
+    const { ctx, ids, remoteGit } = await fakeRun();
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    await runStep(ctx, { kind: 'linear', action: 'move-project', args: { target: 'eng/platform/plan.md' } });
+    // Where the sync left the document: the ids state ref names its path.
+    const landAt = async (path: string) => {
+      const moved = Object.fromEntries(Object.entries(ids).map(([key, entry]) => [entry.id === plan ? path : key, entry]));
+      const blob = (await remoteGit.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(moved) })).trim();
+      const tree = (await remoteGit.text(['mktree'], { input: `100644 blob ${blob}\tids.json\n` })).trim();
+      const commit = (await remoteGit.text(['commit-tree', tree, '-m', 'ids'])).trim();
+      await remoteGit.run(['update-ref', `${ctx.names.refPrefix}/ids`, commit]);
+      refreshView(ctx);
+    };
+    await landAt('docs/handbook/plan.md');
+    assert.deepEqual(await resolveSubject(ctx, 'tracked.movedPath'), { known: true, value: 'docs/handbook/plan.md' });
+    assert.deepEqual(await scenarioAssertions(ctx, 'L2-25'), new Map([['tracked.movedPath', true]]));
+    // Other path subjects keep naming every project folder by its role.
+    assert.deepEqual(await resolveSubject(ctx, 'tracked.documentPath'), { known: true, value: 'project/plan.md' });
+    // A document that stayed in its project reads `project/plan.md`, not the destination.
+    await landAt('eng/platform/plan.md');
+    assert.deepEqual(await resolveSubject(ctx, 'tracked.movedPath'), { known: true, value: 'project/plan.md' });
+    assert.deepEqual(await scenarioAssertions(ctx, 'L2-25'), new Map([['tracked.movedPath', false]]));
+    // So does one under another name in the destination's project.
+    await landAt('docs/handbook/other-plan.md');
+    assert.deepEqual(await scenarioAssertions(ctx, 'L2-25'), new Map([['tracked.movedPath', false]]));
+  });
+
+  it('read a recorded observation through the subject that normalizes it, and a direct one as recorded', async () => {
+    const { ctx } = await fakeRun();
+    ctx.observations.set('blocked.color', '#EB5757');
+    assert.deepEqual(await resolveSubject(ctx, 'blocked.color'), { known: true, value: 'red' });
+    ctx.observations.set('blocked.color', null);
+    assert.deepEqual(await resolveSubject(ctx, 'blocked.color'), { known: true, value: null });
+    // Direct observation subjects, and subjects a step overrides on purpose, return what was recorded.
+    ctx.observations.set('blocked.icon', 'Cross');
+    assert.deepEqual(await resolveSubject(ctx, 'blocked.icon'), { known: true, value: 'Cross' });
+    ctx.observations.set('golden.linearForm', 'recorded');
+    assert.deepEqual(await resolveSubject(ctx, 'golden.linearForm'), { known: true, value: 'recorded' });
   });
 
   it('reject a document by its recorded id and its name, without taking over the scenario\'s target', async () => {
@@ -1605,15 +1678,60 @@ describe('subjects', () => {
     // No uploads yet: the written document's image is missing from the cache.
     assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: false });
     // Once the written document's image is cached, the left-out document's image does not count.
-    const kept = createHash('sha256').update('kept bytes').digest('hex');
-    const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify({ [kept]: 'https://uploads.linear.app/x/kept' }) })).trim();
-    const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
-    const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
-    await git.run(['push', '--quiet', 'origin', `${commit}:${ctx.names.refPrefix}/uploads`]);
-    refreshView(ctx);
+    await writeUploads(ctx, { [fileHash(Buffer.from('kept bytes'))]: 'https://uploads.linear.app/x/kept' });
     assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: true });
     void linear;
     void ids;
+  });
+
+  it('expect no cache entry for an image link the input already held broken, and still one for every real image', async () => {
+    const { ctx } = await fakeRun();
+    const git = await ctx.person();
+    const notes = join(git.dir, 'eng/platform/notes.md');
+    const push = async (message: string) => {
+      await git.run(['add', '--all']);
+      await git.run(['commit', '--quiet', '-m', message]);
+      await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+      refreshView(ctx);
+    };
+    // The input: a written document with a deliberately broken image link beside two real images.
+    mkdirSync(join(git.dir, 'eng/platform/media'), { recursive: true });
+    const input = '# Notes\n\n![gone](../assets/does-not-exist.png) ![a](media/first.png) ![b](media/second.png)\n';
+    writeFileSync(notes, input);
+    writeFileSync(join(git.dir, 'eng/platform/media/first.png'), 'first bytes');
+    writeFileSync(join(git.dir, 'eng/platform/media/second.png'), 'second bytes');
+    await push('Images and a broken reference');
+    ctx.observations.set(BEFORE_VIEW, await takeStartView(ctx));
+    const [first, second, other] = ['first bytes', 'second bytes', 'other bytes'].map((text) => fileHash(Buffer.from(text))) as [string, string, string];
+    const cacheComplete = async () => (await resolveSubject(ctx, 'uploads.cacheComplete')).value;
+    // No uploads: the real images' missing entries fail.
+    assert.equal(await cacheComplete(), false);
+    // One real image cached, the other not: its missing entry still fails, whatever the broken link does.
+    await writeUploads(ctx, { [first]: 'https://uploads.linear.app/x/first' });
+    assert.equal(await cacheComplete(), false);
+    // An entry under another file's hash does not stand in for the real image's own.
+    await writeUploads(ctx, { [first]: 'https://uploads.linear.app/x/first', [other]: 'https://uploads.linear.app/x/other' });
+    assert.equal(await cacheComplete(), false);
+    // Both real images cached: the input's broken link has no file to upload, so it expects nothing and the check passes.
+    await writeUploads(ctx, { [first]: 'https://uploads.linear.app/x/first', [second]: 'https://uploads.linear.app/x/second' });
+    assert.equal(await cacheComplete(), true);
+    // The same broken target added to another written document is the run's link, not the input's: it fails.
+    const plan = join(git.dir, 'eng/platform/plan.md');
+    const planText = readFileSync(plan, 'utf8');
+    writeFileSync(plan, `${planText}\n![gone too](../assets/does-not-exist.png)\n`);
+    await push('The broken target in another document');
+    assert.equal(await cacheComplete(), false);
+    writeFileSync(plan, planText);
+    await push('Restore the plan');
+    assert.equal(await cacheComplete(), true);
+    // A link the run adds to a file the branch does not hold is not the input's broken reference: it still fails.
+    writeFileSync(notes, `${input}\n![new](media/new.png)\n`);
+    await push('A link to an image that was never committed');
+    assert.equal(await cacheComplete(), false);
+    // A document whose only image is the broken one checks nothing, so the check does not pass.
+    writeFileSync(notes, '# Notes\n\n![gone](../assets/does-not-exist.png)\n');
+    await push('Only the broken reference');
+    assert.equal(await cacheComplete(), false);
   });
 
   it('read conflict marks by the palette names specs use, from Linear\'s hex colors', async () => {
@@ -1765,6 +1883,49 @@ describe('subjects', () => {
     assert.deepEqual(reads.sort(), [plan, notes, start].sort());
   });
 
+  it('accept encoded and collision file names in I7 and still catch a wrong title, identity or place', async () => {
+    const { ctx, ids } = await fakeRun();
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const base = await readSides(ctx);
+    const start = ids['docs/handbook/start.md']?.id as string;
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    const suffix = (id: string) => createHash('sha256').update(id).digest('hex').slice(0, 12);
+    // The handbook document retitled `Notes: draft?*` (L2-22) and its file at `path`, mapped to `id`.
+    const i7 = async (path: string, title = 'Notes: draft?*', id = start, projectId = OTHER.id) => {
+      const files = new Map(base.files);
+      const text = files.get('docs/handbook/start.md') as string;
+      files.delete('docs/handbook/start.md');
+      files.set(path, text);
+      const mapped = new Map(base.ids);
+      mapped.delete('docs/handbook/start.md');
+      mapped.set(path, { id });
+      const documents = new Map(base.documents);
+      documents.set(start, { ...(base.documents.get(start) as LinearDocument), title, projectId });
+      return INVARIANT_CHECKS.I7(ctx, async () => ({ ...base, files, ids: mapped, documents }));
+    };
+    const pass = { name: 'I7', ok: true };
+    assert.deepEqual(await i7('docs/handbook/Notes%3A draft%3F%2A.md'), pass);
+    assert.deepEqual(await i7('docs/handbook/Notes: draft?*.md'), pass, 'a git spelling of the title is kept');
+    assert.deepEqual(await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(start)}.md`), pass);
+    assert.deepEqual(await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(start)}-1.md`), pass);
+    assert.deepEqual(await i7(`docs/handbook/a%2Fb %7C c~${suffix(start)}.md`, 'a/b | c'), pass, 'a flattened collision name');
+    assert.deepEqual(await i7('docs/handbook/a/b %7C c.md', 'a/b | c'), pass);
+    const wrong = (path: string) => new RegExp(`^1 problems: ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: title differs from its path$`);
+    // A wrong title, another document's suffix and a name outside the title's place all fail.
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F.md')).detail ?? '', wrong('docs/handbook/Notes%3A draft%3F.md'));
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F%2A.md', 'Notes: draft?')).detail ?? '', wrong('docs/handbook/Notes%3A draft%3F%2A.md'));
+    assert.match((await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(plan)}.md`)).detail ?? '', wrong(`docs/handbook/Notes%3A draft%3F%2A~${suffix(plan)}.md`));
+    assert.match((await i7(`docs/handbook/a/b %7C c~${suffix(start)}.md`, 'a/b | c')).detail ?? '', wrong(`docs/handbook/a/b %7C c~${suffix(start)}.md`));
+    assert.match((await i7('docs/handbook/drafts/Notes%3A draft%3F%2A.md')).detail ?? '', wrong('docs/handbook/drafts/Notes%3A draft%3F%2A.md'));
+    // A nested title's file directly in its folder, without the title's subfolder.
+    assert.match((await i7('docs/handbook/b %7C c.md', 'a/b | c')).detail ?? '', wrong('docs/handbook/b %7C c.md'));
+    // The right name for a document of another project: its folder is not the document's place.
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F%2A.md', 'Notes: draft?*', start, PROJECT.id)).detail ?? '', /^1 problems: docs\/handbook\/Notes%3A draft%3F%2A\.md: its document is in project:Field notes aaaaaa, not in its folder's project:Garden plans aaaaaa$/);
+    assert.match((await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(start)}.md`, 'Notes: draft?*', start, PROJECT.id)).detail ?? '', /its document is in project:Field notes aaaaaa/);
+    // Another document's identity on the right name: its own title differs.
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F%2A.md', 'Notes: draft?*', plan)).detail ?? '', /title differs from its path/);
+  });
+
   it('count the engine\'s commits as git writes and not the scenario\'s own', async () => {
     const { ctx, remoteGit } = await fakeRun();
     const { snapshotRefs } = await import('./checks.ts');
@@ -1778,6 +1939,140 @@ describe('subjects', () => {
     assert.deepEqual(await resolveSubject(ctx, 'writes.git'), { known: true, value: 1 });
     void readFileSync;
   });
+});
+
+describe('initial sync from Linear: kept annotation READMEs (L1R-01, L1R-02, L1R-06)', () => {
+  // Two folders whose README holds the folder's annotation (and a body) but no Linear document maps to it: the sync keeps them.
+  const KEPT = {
+    'eng/README.md': '---\nlinear-team: ENG\n---\n\nEngineering notes live in the folders below.\n',
+    'docs/README.md': '---\nlinear-team: DOCS\nowner: docs\n---\n\n# Docs\n\nThe handbook and its policies.\n',
+  };
+  // Files with a document (overwrite), a document without a file (create) and a file without a document (remove).
+  const OVERWRITTEN = ['docs/handbook/README.md', 'docs/handbook/faq.md', 'docs/handbook/policies/remote.md', 'docs/handbook/start.md', 'eng/platform/README.md', 'eng/platform/notes.md', 'eng/platform/plan.md', 'eng/platform/runbook.md'];
+  const CREATED = 'eng/platform/decisions/cache-warm-up.md';
+  const REMOVED = 'eng/platform/old.md';
+  const ACTIONS = [...OVERWRITTEN, CREATED, REMOVED].sort();
+
+  /** The mini case: ten actions (eight overwrites, one new file, one removal) and two kept READMEs. */
+  async function miniCase() {
+    const run = await fakeRun();
+    const { ctx, linear, ids } = run;
+    const git = await ctx.person();
+    const tracked: Record<string, string> = {
+      ...KEPT,
+      'eng/platform/runbook.md': '# Runbook\n\nRestart the worker.\n',
+      'docs/handbook/faq.md': '# FAQ\n\nAsk in the channel.\n',
+      'docs/handbook/policies/remote.md': '# Remote work\n\nTwo office days.\n',
+      [REMOVED]: '# Old\n\nNo longer used.\n',
+    };
+    for (const [path, text] of Object.entries(tracked)) {
+      mkdirSync(join(git.dir, path, '..'), { recursive: true });
+      writeFileSync(join(git.dir, path), text);
+    }
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '-m', 'Add the mini case files']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    // Linear is the model: its text differs from every tracked file's.
+    for (const [path, entry] of Object.entries(ids)) {
+      const document = linear.documents.get(entry.id) as LinearDocument;
+      document.content = `${[document.content?.trimEnd(), `Edited in Linear: ${path}.`].filter(Boolean).join('\n\n')}\n`;
+    }
+    linear.add({ projectId: PROJECT.id }, 'runbook', '# Runbook\n\nRestart the worker, then the queue.\n');
+    linear.add({ projectId: OTHER.id }, 'faq', '# FAQ\n\nAsk in the team channel.\n');
+    linear.add({ projectId: OTHER.id }, 'policies/remote', '# Remote work\n\nThree office days.\n');
+    linear.add({ projectId: PROJECT.id }, 'decisions/cache-warm-up', '# Cache warm-up\n\nWarm the route cache before traffic.\n');
+    refreshView(ctx);
+    return run;
+  }
+
+  /** Opens the pull request head the sync would: the tracked tree as Linear holds it, with `change` applied to the files. */
+  async function syncHead(ctx: RunContext, linear: FakeLinear, change: (files: Map<string, string>) => void = () => {}): Promise<void> {
+    const git = await ctx.person();
+    const files = new Map<string, string>(Object.entries(KEPT));
+    for (const document of linear.documents.values()) {
+      const folder = document.projectId === PROJECT.id ? 'eng/platform' : 'docs/handbook';
+      const path = `${folder}/${document.title}.md`;
+      // A file keeps its front matter (a project README's annotation) and takes Linear's body.
+      const original = existsSync(join(git.dir, path)) ? readFileSync(join(git.dir, path), 'utf8') : '';
+      const head = /^---\n[\s\S]*?\n---\n/.exec(original)?.[0] ?? '';
+      files.set(path, `${head}${document.content ?? ''}`);
+    }
+    change(files);
+    await git.run(['switch', '--quiet', '-c', 'sync-head']);
+    await git.run(['rm', '--quiet', '-r', 'eng', 'docs']);
+    for (const [path, text] of files) {
+      mkdirSync(join(git.dir, path, '..'), { recursive: true });
+      writeFileSync(join(git.dir, path), text);
+    }
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '-m', 'Initial sync from Linear']);
+    await git.run(['push', '--quiet', '--force', 'origin', `HEAD:refs/heads/${ctx.names.syncBranch}`]);
+    await git.run(['switch', '--quiet', '-']);
+    await git.run(['branch', '--quiet', '-D', 'sync-head']);
+  }
+
+  // The assertions of each scenario these tests check; pull request counts, ids and writes need the engine's own run.
+  const CHECKED: Record<string, string[]> = {
+    'L1R-01': ['summary.plan.paths'],
+    'L1R-02': ['pullRequests.tree', 'pullRequests.keptAnnotationReadmes', 'pullRequests.gitOnlyPaths'],
+    'L1R-06': ['files.duplicateCount', 'pullRequests.tree', 'pullRequests.keptAnnotationReadmes'],
+  };
+
+  /** The checked assertions of the scenario that fail, by its own subjects. */
+  async function failing(ctx: RunContext, id: string): Promise<string[]> {
+    const scenario = scenarios.find((candidate) => candidate.id === id)!;
+    const checked = scenario.checks.assertions.filter((assertion) => CHECKED[id]?.includes(assertion.subject));
+    // A renamed or dropped assertion must not leave these tests checking nothing.
+    assert.deepEqual(checked.map((assertion) => assertion.subject), CHECKED[id], `${id} assertions`);
+    const failed: string[] = [];
+    for (const assertion of checked) {
+      const { value } = await resolveSubject(ctx, assertion.subject);
+      const expected = assertion.operator === 'same-as' ? (await resolveSubject(ctx, String(assertion.expected))).value : assertion.expected;
+      if (!compare(assertion.operator, value, expected)) failed.push(assertion.subject);
+    }
+    return failed;
+  }
+
+  const dryRun = (paths: string[]) => engineRun('initial-sync', { summary: { direction: 'linear-to-git', confirm: false, plan: { paths } } });
+
+  it('expect the ten actions of the dry run, not the two kept READMEs (L1R-01)', async () => {
+    const { ctx } = await miniCase();
+    assert.deepEqual((await resolveSubject(ctx, 'expected.reversePlan.paths')).value, ACTIONS);
+    ctx.engine.results.push(dryRun(ACTIONS));
+    assert.deepEqual(await failing(ctx, 'L1R-01'), []);
+    // A plan that lists the kept READMEs as actions, or misses the removal or the new file, still fails.
+    for (const paths of [[...ACTIONS, ...Object.keys(KEPT)].sort(), ACTIONS.filter((path) => path !== REMOVED), ACTIONS.filter((path) => path !== CREATED)]) {
+      ctx.engine.results.push(dryRun(paths));
+      assert.deepEqual(await failing(ctx, 'L1R-01'), ['summary.plan.paths'], paths.join(', '));
+    }
+  });
+
+  it('expect the pull request to hold Linear\'s documents and the kept READMEs with their annotations and bodies (L1R-02, L1R-06)', async () => {
+    const { ctx, linear } = await miniCase();
+    await syncHead(ctx, linear);
+    const tree = (await resolveSubject(ctx, 'expected.linearTree')).value as Map<string, string>;
+    assert.deepEqual([...tree.keys()].sort(), [...OVERWRITTEN, CREATED, ...Object.keys(KEPT)].sort());
+    assert.equal(tree.get('docs/README.md'), '# Docs\n\nThe handbook and its policies.\n');
+    assert.deepEqual((await resolveSubject(ctx, 'expected.keptAnnotationReadmes')).value, new Map(Object.entries(KEPT)));
+    assert.deepEqual(await failing(ctx, 'L1R-02'), []);
+    assert.deepEqual(await failing(ctx, 'L1R-06'), []);
+  });
+
+  for (const [name, change, failed] of [
+    ['a kept README dropped', (files: Map<string, string>) => files.delete('eng/README.md'), ['pullRequests.tree', 'pullRequests.keptAnnotationReadmes']],
+    ['a kept README\'s body replaced', (files: Map<string, string>) => files.set('docs/README.md', '---\nlinear-team: DOCS\nowner: docs\n---\n\nSomething else.\n'), ['pullRequests.tree', 'pullRequests.keptAnnotationReadmes']],
+    ['a kept README\'s annotation changed', (files: Map<string, string>) => files.set('eng/README.md', KEPT['eng/README.md'].replace('ENG', 'OPS')), ['pullRequests.keptAnnotationReadmes']],
+    ['the file without a document kept', (files: Map<string, string>) => files.set(REMOVED, '# Old\n\nNo longer used.\n'), ['pullRequests.tree', 'pullRequests.gitOnlyPaths']],
+    ['the new document missing', (files: Map<string, string>) => files.delete(CREATED), ['pullRequests.tree']],
+    ['a document written twice', (files: Map<string, string>) => files.set('eng/platform/runbook-2.md', files.get('eng/platform/runbook.md') as string), ['pullRequests.tree', 'pullRequests.gitOnlyPaths', 'files.duplicateCount']],
+  ] as const) {
+    it(`fail when the pull request has ${name}`, async () => {
+      const { ctx, linear } = await miniCase();
+      await syncHead(ctx, linear, change);
+      const both = new Set([...(await failing(ctx, 'L1R-02')), ...(await failing(ctx, 'L1R-06'))]);
+      assert.deepEqual([...both].sort(), [...failed].sort());
+    });
+  }
 });
 
 describe('quiet runs through the harness', () => {

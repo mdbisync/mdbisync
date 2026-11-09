@@ -62,6 +62,9 @@ export function sibling(path: string, name: string): string {
   return folder === '' ? name : `${folder}/${name}`;
 }
 
+/** The observation naming the project folder a cross-project move took the document out of. */
+export const MOVE_SOURCE_FOLDER = 'move.sourceFolder';
+
 /** Project folders of the run's tree (folders whose README names a project), longest first. */
 export function projectFolders(ctx: RunContext): Array<{ folder: string; project: string }> {
   const world = live(ctx);

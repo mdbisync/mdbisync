@@ -26,7 +26,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
-import { listTree, readBlobs, readIds, readUploads, type Git } from '../../../src/state/index.ts';
+import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, type Git } from '../../../src/state/index.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readFixture, readOptional } from '../../probe/bank.ts';
@@ -38,7 +38,7 @@ import { REPO_ROOT, engineEntry } from './engine.ts';
 import { isAppBot } from './workflows.ts';
 import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
-import { documentPaths, projectFolders } from './step-helpers.ts';
+import { documentPaths, MOVE_SOURCE_FOLDER, projectFolders } from './step-helpers.ts';
 import { UNSAFE_TITLES } from './fixtures.ts';
 
 // --- views of the world ---------------------------------------------------------------
@@ -224,7 +224,7 @@ async function restorable(ctx: RunContext, id: string | undefined): Promise<bool
 }
 
 /** Where a document lives: `project:<name>` or `team:<key>`. */
-function placeOf(ctx: RunContext, document: LinearDocument | undefined): string | null {
+export function placeOf(ctx: RunContext, document: LinearDocument | undefined): string | null {
   const world = ctx.live;
   if (world === null || document === undefined) return null;
   if (document.projectId !== null) {
@@ -236,7 +236,7 @@ function placeOf(ctx: RunContext, document: LinearDocument | undefined): string 
 }
 
 /** Where a path's annotation says its document lives, and its title. */
-function expectedPlace(folders: readonly Folder[], path: string): { place: string; title: string } | null {
+export function expectedPlace(folders: readonly Folder[], path: string): { place: string; title: string } | null {
   const folder = owningFolder(path, folders);
   if (folder === null) return null;
   const place = folder.project !== null ? `project:${folder.project}` : `team:${folder.team}`;
@@ -273,6 +273,20 @@ async function parents(git: Git, commit: string): Promise<string[]> {
 export function symbolicPath(ctx: RunContext, path: string): string {
   const folder = projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`));
   return folder === undefined ? path : `project/${path.slice(folder.folder.length + 1)}`;
+}
+
+/**
+ * Where a document a step moved across projects is, in the form its moved
+ * path and its recorded destination share: only the project it left reads
+ * as `project/`; a path in any other project keeps its real folder, so a
+ * document that stayed, or went to the wrong project, does not read the same
+ * as its destination. Without a cross-project move, the symbolic path.
+ */
+function movedPath(ctx: RunContext, path: string): string {
+  const source = ctx.observations.get(MOVE_SOURCE_FOLDER) as string | undefined;
+  if (source === undefined) return symbolicPath(ctx, path);
+  const folder = projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`));
+  return folder?.folder === source ? symbolicPath(ctx, path) : path;
 }
 
 /** Brings commits into the person's clone; returns the ones it has afterwards. */
@@ -381,6 +395,11 @@ export function linearForms(texts: ReadonlyMap<string, string>): Map<string, str
   }
 }
 
+/** A path segment of more than 180 bytes: its first 40 characters, `~` and 16 hex digits of SHA-256 of `source`. */
+export function shortSegment(segment: string, source: string): string {
+  return Buffer.byteLength(segment) > 180 ? `${[...segment].slice(0, 40).join('')}~${createHash('sha256').update(source).digest('hex').slice(0, 16)}` : segment;
+}
+
 const hex = (char: string) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
 
 /**
@@ -389,8 +408,10 @@ const hex = (char: string) => `%${char.charCodeAt(0).toString(16).toUpperCase().
  * segment, after Unicode NFC: percent-encode `%`, `\`, control characters and
  * `:*?"<>|`; encode the leading character of `.`, `..`, `.git` (any case) and
  * Windows device names; write an empty segment as `%00`; encode trailing
- * periods and spaces. Leading spaces stay as they are. Long segments and
- * collision suffixes are outside this oracle.
+ * periods and spaces. Leading spaces stay as they are. A segment whose
+ * encoded form is longer than 180 bytes is cut to its first 40 characters,
+ * `~` and the first 16 hex digits of SHA-256 of the segment as titled.
+ * Collision names are `pathFitsTitle`'s, in `checks.ts`.
  */
 export function encodeTitlePath(title: string): string {
   return title
@@ -400,7 +421,8 @@ export function encodeTitlePath(title: string): string {
       if (segment === '') return '%00';
       let encoded = segment.replace(/[%\\\u0000-\u001f\u007f:*?"<>|]/g, hex);
       if (/^(\.|\.\.|\.git)$/i.test(encoded) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(encoded)) encoded = `${hex(encoded)}${encoded.slice(1)}`;
-      return encoded.replace(/[. ]+$/, (tail) => [...tail].map(hex).join(''));
+      encoded = encoded.replace(/[. ]+$/, (tail) => [...tail].map(hex).join(''));
+      return shortSegment(encoded, segment);
     })
     .join('/');
 }
@@ -502,6 +524,40 @@ function linearTree(ctx: RunContext, view: View): Map<string, string> {
   return result;
 }
 
+/**
+ * The annotation READMEs of the tracked tree that no Linear document maps
+ * to (`documents`: `linearTree`'s paths), with their whole text, body or
+ * none. The initial sync from Linear keeps them as they are: a folder's
+ * mapping depends on its annotation. They are not actions of its plan, and
+ * its pull request still holds them.
+ */
+function keptAnnotationReadmes(view: View, documents: ReadonlyMap<string, string> = new Map()): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const folder of view.folders) {
+    const path = folder.folder === '' ? 'README.md' : `${folder.folder}/README.md`;
+    const text = view.files.get(path);
+    if (text !== undefined && !documents.has(path)) result.set(path, text);
+  }
+  return result;
+}
+
+/** Linear's documents as files and the annotation READMEs the initial sync from Linear keeps beside them. */
+function reverseSides(ctx: RunContext, view: View): { documents: Map<string, string>; kept: Map<string, string> } {
+  const documents = linearTree(ctx, view);
+  return { documents, kept: keptAnnotationReadmes(view, documents) };
+}
+
+/**
+ * What the initial sync from Linear makes of the synchronized folders, by
+ * body: Linear's documents as files, and the annotation READMEs it keeps
+ * (the subject `expected.linearTree`).
+ */
+function reverseTree(ctx: RunContext, view: View): Map<string, string> {
+  const { documents, kept } = reverseSides(ctx, view);
+  for (const [path, text] of kept) documents.set(path, bodyOf(text));
+  return documents;
+}
+
 // --- the registry ----------------------------------------------------------------------------
 
 type Compute = (env: Env) => Promise<unknown>;
@@ -553,6 +609,18 @@ const linearRecords: Compute = async (env) => {
   const tip = await stateTip(env.ctx, 'linear');
   return (await newCommits(await person(env.ctx), tip, [(await env.view()).tip])).length;
 };
+
+/**
+ * Subjects whose recorded observation is raw: the subject's own computation
+ * turns it into the form specs compare (a role path, a palette label), so
+ * the raw observation of the same name must not answer for it.
+ */
+const NORMALIZED_OBSERVATIONS = new Set<string>();
+
+function normalizedObservation(name: string, normalize: (raw: unknown, env: Env) => unknown): Compute {
+  NORMALIZED_OBSERVATIONS.add(name);
+  return async (env) => normalize(observed(env.ctx, name), env);
+}
 
 export const SUBJECTS: Record<string, Compute> = {
   // --- documents in Linear --------------------------------------------------------------
@@ -832,7 +900,7 @@ export const SUBJECTS: Record<string, Compute> = {
     return new Map([...view.files.keys()].map((path) => [path, frontMatter(files.get(path)?.toString('utf8'))]));
   },
   'tracked.documentPath': async (env) => symbolicPath(env.ctx, (await target(env)).path),
-  'tracked.movedPath': async (env) => symbolicPath(env.ctx, (await target(env)).path),
+  'tracked.movedPath': async (env) => movedPath(env.ctx, (await target(env)).path),
   'tracked.createdPath': async (env) => {
     const view = await env.view();
     const id = observed(env.ctx, 'linear.created') as string;
@@ -985,10 +1053,26 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'uploads.cacheComplete': async (env) => {
     const view = await env.view();
+    // A deliberately broken reference has no file to upload, so it expects no cache entry. It is one the input
+    // already held: a link the same document had at the start whose resolved target the branch held no file at,
+    // and still holds none at. A link the run added (in any document), or one that does not resolve, still needs
+    // its file and entry.
+    const before = env.ctx.observations.get(BEFORE_VIEW) as View | undefined;
+    const brokenAtStart = new Set<string>();
+    for (const [path, text] of before?.files ?? []) for (const image of embeddedImages(path, text)) if (image !== '' && !before?.hashes.has(image)) brokenAtStart.add(`${path}\0${image}`);
     // Images of the documents the engine wrote; a document it left out on purpose uploads nothing.
-    const embedded = new Set<string>();
-    for (const [path, text] of view.files) if (view.ids.has(path)) for (const image of embeddedImages(path, text)) embedded.add(image);
-    return [...embedded].every((path) => {
+    let references = 0;
+    const expected = new Set<string>();
+    for (const [path, text] of view.files) {
+      if (!view.ids.has(path)) continue;
+      for (const image of embeddedImages(path, text)) {
+        references++;
+        if (!(brokenAtStart.has(`${path}\0${image}`) && !view.hashes.has(image))) expected.add(image);
+      }
+    }
+    // Images that are all exempt check nothing; report that rather than pass.
+    if (references > 0 && expected.size === 0) return false;
+    return [...expected].every((path) => {
       const hash = view.hashes.get(path);
       return hash !== undefined && view.uploadsByHash.has(hash);
     });
@@ -1077,15 +1161,25 @@ export const SUBJECTS: Record<string, Compute> = {
     const files = await treeFiles(head.git, head.commit, (path) => path.endsWith('.md') && owningFolder(path, view.folders) !== null);
     return new Map([...files].map(([path, bytes]) => [path, bodyOf(bytes.toString('utf8'))]));
   },
-  'expected.linearTree': async (env) => linearTree(env.ctx, await env.view()),
+  'expected.linearTree': async (env) => reverseTree(env.ctx, await env.view()),
   'pullRequests.gitOnlyPaths': async (env) => {
     const head = await syncPullRequestHead(env.ctx);
     if (head === null) return null;
     const view = await env.view();
-    const expected = linearTree(env.ctx, view);
+    const expected = reverseTree(env.ctx, view);
     const files = await treeFiles(head.git, head.commit, (path) => path.endsWith('.md') && owningFolder(path, view.folders) !== null);
     return sorted([...files.keys()].filter((path) => !expected.has(path)));
   },
+  // The kept annotation READMEs as the pull request holds them, whole: annotation, other front matter and body.
+  'pullRequests.keptAnnotationReadmes': async (env) => {
+    const head = await syncPullRequestHead(env.ctx);
+    if (head === null) return null;
+    const view = await env.view();
+    const kept = new Set(reverseSides(env.ctx, view).kept.keys());
+    const files = await treeFiles(head.git, head.commit, (path) => kept.has(path));
+    return new Map([...kept].map((path) => [path, files.get(path)?.toString('utf8') ?? null]));
+  },
+  'expected.keptAnnotationReadmes': async (env) => reverseSides(env.ctx, await env.view()).kept,
   'files.duplicateCount': async (env) => {
     const head = await syncPullRequestHead(env.ctx);
     if (head === null) return null;
@@ -1098,8 +1192,24 @@ export const SUBJECTS: Record<string, Compute> = {
     }
     return [...seen.values()].reduce((sum, count) => sum + count - 1, 0);
   },
-  'pullRequests.assetBytes': async (env) => sorted((await pullRequestAssets(env)).hashes.values()),
-  'linear.assetBytes': async (env) => sorted(((observed(env.ctx, 'linear.assets') as Array<{ sha256: string }>).map((asset) => asset.sha256))),
+  'pullRequests.assetBytes': async (env) => (await pullRequestAssets(env)).hashes,
+  'linear.assetBytes': async (env) => new Map(reverseAssets(env.ctx).map((asset) => [asset.path, asset.sha256])),
+  'pullRequests.existingAssetsUnchanged': async (env) => {
+    const head = await syncPullRequestHead(env.ctx);
+    if (head === null) return false;
+    const before = observed(env.ctx, BEFORE_VIEW) as View;
+    const documents = await treeFiles(head.git, before.tip, (path) => path.endsWith('.md'));
+    const paths = new Set([...documents].flatMap(([path, bytes]) => embeddedImages(path, bytes.toString('utf8'))));
+    const original = await treeFiles(head.git, before.tip, (path) => paths.has(path));
+    const files = await treeFiles(head.git, head.commit, (path) => paths.has(path));
+    for (const [path, bytes] of documents) {
+      for (const asset of embeddedImages(path, bytes.toString('utf8'))) {
+        const blob = original.get(asset);
+        if (blob !== undefined && !files.get(asset)?.equals(blob)) return false;
+      }
+    }
+    return true;
+  },
   'pullRequests.assetStorage': async (env) => (await pullRequestAssets(env)).storage.actual,
   'pullRequests.assetLinksRelative': async (env) => {
     const { links } = await pullRequestAssets(env);
@@ -1194,7 +1304,7 @@ export const SUBJECTS: Record<string, Compute> = {
 
   // --- blocked documents (L2-35) ----------------------------------------------------------------
   'blocked.icon': async (env) => observed(env.ctx, 'blocked.icon'),
-  'blocked.color': async (env) => colorLabel(observed(env.ctx, 'blocked.color') as string | null),
+  'blocked.color': normalizedObservation('blocked.color', (color) => colorLabel(color as string | null)),
   'blocked.commentFields': async (env) => {
     const comments = observed(env.ctx, 'blocked.comments') as string[];
     const fields: string[] = [];
@@ -1345,8 +1455,13 @@ export const SUBJECTS: Record<string, Compute> = {
   'corpus.lintErrors': async (env) => env.ctx.live === null ? observed(env.ctx, 'corpus.lintErrors') : sorted([...manifestOf(env.ctx)].filter(([, entry]) => entry.class === 'lint-error').map(([path]) => path)),
   'fixtures.bothCollisionPaths': async (env) => sorted([...manifestOf(env.ctx)].filter(([, entry]) => entry.rule === 'title-collision').map(([path]) => path)),
   'expected.initialPlan.paths': async (env) => sorted((await env.view()).files.keys()),
-  'expected.reversePlan.paths': async (env) => sorted(new Set([...(await env.view()).files.keys(), ...linearTree(env.ctx, await env.view()).keys()])),
-  'expected.destinationPath': async (env) => symbolicPath(env.ctx, observed(env.ctx, 'expected.destinationPath') as string),
+  // Every path the dry run acts on (overwrite, create, remove); the annotation READMEs it keeps are not actions.
+  'expected.reversePlan.paths': async (env) => {
+    const view = await env.view();
+    const { documents, kept } = reverseSides(env.ctx, view);
+    return sorted(new Set([...view.files.keys(), ...documents.keys()].filter((path) => !kept.has(path))));
+  },
+  'expected.destinationPath': normalizedObservation('expected.destinationPath', (path, env) => movedPath(env.ctx, path as string)),
   'setup.requiredChecks': async () => [...REQUIRED_SETUP_CHECKS],
   'fixture.rule': async (env) => observed(env.ctx, 'fixture.rule'),
   // Which Linear-format hook the scratch repository ran: `published` (the corpus's pinned release) or `source`.
@@ -1578,20 +1693,50 @@ async function trackedImages(env: Env): Promise<{ actual: Map<string, string>; e
   return storageOf(await person(env.ctx), images, bytes);
 }
 
+interface ReverseAsset {
+  documentPath: string;
+  path: string;
+  sha256: string;
+  bytes: Buffer;
+}
+
+function reverseAssets(ctx: RunContext): ReverseAsset[] {
+  const assets = observed(ctx, 'linear.assets') as ReverseAsset[];
+  if (assets.length === 0) throw new Error('the reverse asset fixture has no expected downloads');
+  const before = observed(ctx, BEFORE_VIEW) as View;
+  return assets.map((asset) => {
+    // A reverse sync reuses an identical file already present before the run.
+    const existing = [...before.hashes].filter(([path, hash]) => !path.toLowerCase().endsWith('.md') && hash === asset.sha256).at(-1)?.[0];
+    return existing === undefined ? asset : { ...asset, path: existing };
+  });
+}
+
 async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string>; storage: { actual: Map<string, string>; expected: Map<string, string> }; links: string[] }> {
   const head = await syncPullRequestHead(env.ctx);
   if (head === null) throw new ProductError('the reverse initial sync opened no pull request');
-  const files = await treeFiles(head.git, head.commit);
+  const assets = reverseAssets(env.ctx);
+  const paths = new Set(assets.flatMap((asset) => [asset.path, asset.documentPath]));
+  const files = await treeFiles(head.git, head.commit, (path) => paths.has(path));
+  const readLfs = await lfsReader(head.git, 'origin');
   const links: string[] = [];
-  const assets = new Set<string>();
-  for (const [path, bytes] of files) {
-    if (!path.endsWith('.md')) continue;
-    for (const link of imageLinks(bytes.toString('utf8'))) {
-      links.push(link);
-      if (!/^[a-z]+:/i.test(link)) assets.add(resolveLink(path, link));
+  const hashes = new Map<string, string>();
+  for (const asset of assets) {
+    const document = files.get(asset.documentPath);
+    if (document === undefined) throw new ProductError('the reverse asset fixture document is missing');
+    const embedded = imageLinks(document.toString('utf8'));
+    links.push(...embedded);
+    if (!embedded.some((link) => !/^[a-z]+:/i.test(link) && resolveLink(asset.documentPath, link) === asset.path)) {
+      throw new ProductError('the reverse asset fixture has no link to its expected download path');
     }
+    const blob = files.get(asset.path);
+    if (blob === undefined) throw new ProductError('the reverse asset fixture download is missing');
+    const pointer = parseLfsPointer(blob);
+    const read = pointer === null ? { ok: true as const, content: blob } : await readLfs(pointer, asset.path);
+    if (!read.ok) throw new ProductError('the reverse asset fixture LFS download is missing or corrupt');
+    const bytes = read.content;
+    if (!bytes.equals(asset.bytes)) throw new ProductError('the reverse asset fixture download has different bytes');
+    hashes.set(asset.path, sha256(bytes));
   }
-  const hashes = new Map([...assets].filter((path) => files.has(path)).map((path) => [path, fileHash(files.get(path) as Buffer)]));
   return { hashes, storage: await storageOf(head.git, [...hashes.keys()], files), links };
 }
 
@@ -1707,7 +1852,7 @@ function quietValue(ctx: RunContext, subject: string): string[] {
 }
 
 export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
-  if (ctx.observations.has(subject)) return { known: true, value: ctx.observations.get(subject) };
+  if (ctx.observations.has(subject) && !NORMALIZED_OBSERVATIONS.has(subject)) return { known: true, value: ctx.observations.get(subject) };
   if (QUIET_SUBJECT.test(subject)) return { known: true, value: quietValue(ctx, subject) };
   const before = subject.startsWith('before.');
   const name = before ? subject.slice('before.'.length) : subject;
