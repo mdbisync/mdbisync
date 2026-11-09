@@ -68,7 +68,7 @@ interface Running {
 describe('sync: races inside a run', { timeout: 240_000 }, () => {
   let fixture: Fixture;
   let world: FakeWorld;
-  let server: { url: string; close: () => Promise<void> };
+  let server: Served;
   let person: Git;
   let personDir: string;
   /** The tracked branch after initial sync: every later commit on it is the person's or a sync merge (I3). */
@@ -141,17 +141,23 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     let stderr = '';
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
     const timer = setTimeout(() => child.kill('SIGKILL'), RUN_TIMEOUT_MS);
-    const ended = new Promise<Ended>((resolve) => {
-      child.once('close', async (code, signal) => {
+    const ended = new Promise<Ended>((resolve, reject) => {
+      child.once('close', (code, signal) => {
         clearTimeout(timer);
-        const summary = await readFile(join(fixture.root, `${name}.md`), 'utf8').catch(() => '');
-        const text = await readFile(join(fixture.root, `${name}.json`), 'utf8').catch(() => null);
-        const report = text === null ? null : (JSON.parse(text) as RunReport);
-        for (const output of [stderr, summary, text ?? '']) assert.ok(!output.includes(CANARY), 'content reached the output (I5)');
-        await observeRefs();
-        resolve({ code, signal, stderr, summary, report });
+        // A failed check rejects `ended`, so the test that awaits the run fails with it.
+        const finish = async (): Promise<Ended> => {
+          const summary = await readFile(join(fixture.root, `${name}.md`), 'utf8').catch(() => '');
+          const text = await readFile(join(fixture.root, `${name}.json`), 'utf8').catch(() => null);
+          const report = text === null ? null : (JSON.parse(text) as RunReport);
+          for (const output of [stderr, summary, text ?? '']) assert.ok(!output.includes(CANARY), 'content reached the output (I5)');
+          await observeRefs();
+          return { code, signal, stderr, summary, report };
+        };
+        finish().then(resolve, reject);
       });
     });
+    // Waiting for a checkpoint watches `ended` without awaiting it; a rejection still fails the test that awaits it.
+    ended.catch(() => {});
     return { hooks, ended, kill: () => child.kill('SIGKILL') };
   }
 
@@ -361,12 +367,9 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     const running = await startRun('after-reread-before-write');
     await reached(running, 'after-reread-before-write');
     const heldFrom = performance.now();
-    const tokens = Array.from({ length: 20 }, (_, index) => `First paragraph, typed in the window (${index}).`);
-    let previous = 'First paragraph.';
-    for (const token of tokens) {
-      await editInLinear(NOTES, previous, token);
-      previous = token;
-    }
+    // Each edit adds its own paragraph and keeps the earlier ones: twenty edits that should all survive.
+    const tokens = Array.from({ length: 20 }, (_, index) => `Typed in the window (${index}).`);
+    for (const token of tokens) await editInLinear(NOTES, 'First paragraph.', `First paragraph.\n\n${token}`);
     await new Promise((resolve) => setTimeout(resolve, 200));
     running.hooks.resume('after-reread-before-write');
     const heldMs = performance.now() - heldFrom;
@@ -379,11 +382,34 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
 
     await assertSettled(['Second paragraph, edited in git.']);
     const tracked = await show(`refs/heads/main:${NOTES}`);
-    const lost = tokens.filter((token) => !tracked.includes(token) && !(world.linear.documents.find((d) => d.content?.includes(token)) !== undefined));
+    const linearText = (await documentOf(NOTES)).content ?? '';
+    const lost = tokens.filter((token) => !tracked.includes(token) && !linearText.includes(token));
     const metrics = { raceWindowMs: Math.round(heldMs), engineWindowMs: window, naturalWindowMs: naturalWindow, raceOutcome: lost.length === 0 ? 'no-loss' : 'edits-lost', lostEditCount: lost.length };
     t.diagnostic(`L4-03 metrics: ${JSON.stringify(metrics)}`);
-    // Linear takes the write without a version, and this fake replaces the whole text, so the typing is lost: ADR's accepted risk.
-    assert.equal(metrics.raceOutcome, 'edits-lost');
+    // Linear takes the write without a version and this fake replaces the whole text, so every edit typed in the window is
+    // lost: the accepted risk of the window. Live Linear merges a write into its stored text and may keep them.
+    assert.equal(metrics.lostEditCount, tokens.length);
+  });
+
+  it('L4-03: a write retried after a rate limit counts its wait in the reported window', async () => {
+    await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
+    // The first write is answered with a rate limit and a short Retry-After; the client waits and sends it again.
+    let limited = false;
+    server.fault = (body) => {
+      if (limited || !body.includes('UpdateDocument')) return undefined;
+      limited = true;
+      return new Response(JSON.stringify({ errors: [{ message: 'Rate limit exceeded', extensions: { code: 'RATELIMITED' } }] }), {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'retry-after': '1' },
+      });
+    };
+    const run = await sync();
+    delete server.fault;
+    assert.equal(run.code, 0, run.stderr);
+    assert.ok(limited, 'the write was not rate limited');
+    assert.deepEqual(run.report?.sync?.updated, [NOTES]);
+    const window = run.report?.rereadWindowMs ?? 0;
+    assert.ok(window >= 1000, `the reported window ${window} ms leaves out the one-second retry`);
   });
 
   it('L4-04: a run killed between write and record heals: the next capture takes the written documents equal to the tracked branch, and they add nothing to the pull request', async () => {
@@ -448,8 +474,16 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
 });
 
 /** Serves the fake world over HTTP for engine processes: `/github/...` and `/linear/...`. */
-async function serve(world: FakeWorld): Promise<{ url: string; close: () => Promise<void> }> {
+interface Served {
+  url: string;
+  /** Answers a request before the fake world does, for a fault; undefined lets the world answer. */
+  fault?: (body: string) => Response | undefined;
+  close: () => Promise<void>;
+}
+
+async function serve(world: FakeWorld): Promise<Served> {
   const answer = fakeFetch(world);
+  const served: Served = { url: '', close: async () => {} };
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -460,9 +494,10 @@ async function serve(world: FakeWorld): Promise<{ url: string; close: () => Prom
       for (const [name, value] of Object.entries(request.headers)) if (typeof value === 'string' && name !== 'host' && name !== 'content-length') headers.set(name, value);
       const method = request.method ?? 'GET';
       try {
-        const reply = await answer(target, { method, headers, ...(method === 'GET' || method === 'HEAD' ? {} : { body: Buffer.concat(chunks).toString('utf8') }) });
+        const body = Buffer.concat(chunks).toString('utf8');
+        const reply = served.fault?.(body) ?? (await answer(target, { method, headers, ...(method === 'GET' || method === 'HEAD' ? {} : { body }) }));
         const bytes = Buffer.from(await reply.arrayBuffer());
-        response.writeHead(reply.status, { 'content-type': reply.headers.get('content-type') ?? 'application/json', 'content-length': String(bytes.length) });
+        response.writeHead(reply.status, { ...Object.fromEntries(reply.headers), 'content-type': reply.headers.get('content-type') ?? 'application/json', 'content-length': String(bytes.length) });
         response.end(bytes);
       } catch (error) {
         response.writeHead(500, { 'content-type': 'text/plain' });
@@ -472,8 +507,7 @@ async function serve(world: FakeWorld): Promise<{ url: string; close: () => Prom
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
-  return {
-    url: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
-  };
+  served.url = `http://127.0.0.1:${port}`;
+  served.close = () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
+  return served;
 }

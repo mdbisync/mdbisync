@@ -110,9 +110,10 @@ export interface WriteResult {
   stopped?: WriteStop;
   /**
    * The longest time, in milliseconds, between a document's re-read and the
-   * moment its write was sent: an edit made in Linear inside it is
-   * overwritten (Linear takes writes without a version). Null when no
-   * document that was read again was written.
+   * answer to its write (an upper bound: the write lands inside it, after
+   * any retry); an edit made in Linear inside it can be overwritten (Linear
+   * takes writes without a version). Null when no document that was read
+   * again was written.
    */
   rereadWindowMs: number | null;
   record: SyncRecord | null;
@@ -284,10 +285,18 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   let written = 0;
   /** When the current batch's re-read answered. */
   let rereadAt = 0;
-  /** Just before a write to a document that was read again: how long Linear has been unwatched for it. */
-  const measureWindow = () => {
+  /**
+   * Sends a write to a document that was read again, and records how long
+   * Linear was unwatched for it: from the re-read to the write's answer, so
+   * a retry after a rate limit counts too. The write lands somewhere inside
+   * that time, so this is the window's upper bound. A write that fails
+   * records nothing.
+   */
+  const timed = async <T>(write: () => Promise<T>): Promise<T> => {
+    const done = await write();
     const window = Math.round((performance.now() - rereadAt) * 10) / 10;
     result.rereadWindowMs = Math.max(result.rereadWindowMs ?? 0, window);
+    return done;
   };
   try {
     const plan = transformPlan();
@@ -539,8 +548,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       return true;
     }
     if (!(await unchangedSinceCapture(document, change.path))) return skip(change.path, 'edited-in-linear');
-    measureWindow();
-    await linear.trashDocument(change.id);
+    await timed(() => linear.trashDocument(change.id));
     nextIds.delete(change.path);
     result.trashed.push(change.path);
     return true;
@@ -568,8 +576,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       }
     } else {
       if (!(await unchangedSinceCapture(document, change.from))) return skip(change.to, 'edited-in-linear');
-      measureWindow();
-      const updated = await linear.updateDocument(change.id, patch);
+      const updated = await timed(() => linear.updateDocument(change.id, patch));
       // Without a content write the merge result's file stands: Linear holds its body already.
       if (patch.content !== undefined) {
         stored.set(change.to, { content: updated.content ?? '', sent: patch.content });
@@ -593,8 +600,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     let document: LinearDocument;
     if (adopted !== undefined) {
       const live = current.get(adopted.id);
-      if (live === undefined || live.content !== body) measureWindow();
-      document = live !== undefined && live.content === body ? live : await linear.updateDocument(adopted.id, { content: body });
+      const write = () => linear.updateDocument(adopted.id, { content: body });
+      // Only a document the re-read returned has a window.
+      document = live === undefined ? await write() : live.content === body ? live : await timed(write);
       result.adopted.push(change.path);
     } else {
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });

@@ -86,7 +86,7 @@ export interface RunReport {
   skippedConcurrentDocument: boolean;
   /** The tracked branch's commit a sync run took in (fetched at its start); null for other runs. */
   capturedTrackedTip: string | null;
-  /** A sync run's longest time between a document's re-read and its write, in milliseconds; null when it wrote none. */
+  /** A sync run's longest time from a document's re-read to its write's answer, in milliseconds; null when it wrote none. */
   rereadWindowMs: number | null;
   /** A confirmed initial sync from Linear: what it took and the pull request it left for a person; null for other runs. */
   linearToGit: ReverseReport | null;

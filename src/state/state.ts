@@ -164,8 +164,9 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   // the later one ("atomic transaction failed"). Either way a ref has moved
   // away from its expected value; any other refusal (a hook, missing rights)
   // leaves them where they were.
-  const current = await lsRemote(git, config.remote, updates.map((update) => update.ref));
-  const stale = rejected.some((line) => line.summary.includes('stale info')) || updates.some((update) => (current.get(update.ref) ?? null) !== update.expected);
+  const stale =
+    rejected.some((line) => line.summary.includes('stale info')) ||
+    (await movedAway(git, config.remote, updates));
   // What git reports it updated in the refused push. A ref found at this push's value proves nothing: another run
   // that took in the same changes in the same second makes the same commits.
   if (stale) logRefusal(git, changing, lines.filter((line) => line.flag !== '!' && line.flag !== '=').map((line) => line.ref));
@@ -174,6 +175,11 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
     reason: stale ? 'stale' : 'rejected',
     refs: rejected.map((line) => ({ ref: line.ref, message: line.summary })),
   };
+}
+
+async function movedAway(git: Git, remote: string, updates: readonly RefUpdate[]): Promise<boolean> {
+  const current = await lsRemote(git, remote, updates.map((update) => update.ref));
+  return updates.some((update) => (current.get(update.ref) ?? null) !== update.expected);
 }
 
 function logRefusal(git: Git, changing: readonly RefUpdate[], moved: string[]): void {
