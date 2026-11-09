@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
-import { NO_STATE_EXIT_CODE } from '../commands.ts';
+import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git, UPLOADS_REBUILDING, UPLOADS_REBUILT } from '../state/index.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
@@ -507,6 +507,99 @@ describe('sync: lost state and deleted branches', () => {
 
     await settle();
     assert.equal((await fixture.remote.run(['cat-file', '-e', 'refs/heads/main:combined/topics/setup.md'], { okCodes: [0, 128] })).code, 128);
+    await assertConverged();
+    await assertQuiet();
+  });
+
+  /** Whether the tracked branch has the file. */
+  const tracks = async (path: string) => (await fixture.remote.run(['cat-file', '-e', `refs/heads/main:${path}`], { okCodes: [0, 128] })).code === 0;
+
+  it('MDS-009-21: a run whose every document read comes back blank removes no file, ends partial, and the next run finds them all', async () => {
+    const before = await ids();
+    const paths = Object.keys(before).sort();
+    const documents = world.linear.documents.length;
+    world.linear.blankAnswer = () => true;
+
+    const blank = await sync();
+    assert.equal(blank.result.exitCode, INCOMPLETE_EXIT_CODE, blank.result.stderr);
+    assert.equal(blank.report.exitStatus, 'warning');
+    assert.equal(blank.report.code, 'removal-held');
+    assert.match(blank.result.stderr, /partial, will continue \(removal-held\)/);
+    assert.deepEqual(blank.report.capture?.removed, []);
+    assert.deepEqual([...blank.report.capture!.heldRemovals].sort(), paths);
+    assert.match(blank.result.stdout, /Removal held for \d+ files/);
+    assert.deepEqual(await ids(), before, 'every id stays mapped');
+    for (const path of paths) assert.ok(await tracks(path), `${path} stays on the tracked branch`);
+    assert.deepEqual(blank.writes, [], 'nothing is written to Linear on a blank answer');
+
+    // A blank answer that lasts into the next run does not confirm the held removals: no place lists anything.
+    const still = await sync();
+    assert.equal(still.result.exitCode, INCOMPLETE_EXIT_CODE, still.result.stderr);
+    assert.deepEqual(still.report.capture?.removed, []);
+    assert.deepEqual([...still.report.capture!.heldRemovals].sort(), paths);
+    assert.deepEqual(await ids(), before, 'every id stays mapped');
+
+    delete world.linear.blankAnswer;
+    await settle();
+    assert.deepEqual(await ids(), before);
+    for (const path of paths) assert.ok(await tracks(path), `${path} stays on the tracked branch`);
+    assert.equal(world.linear.documents.length, documents, 'nothing is created');
+    await assertConverged();
+    await assertQuiet();
+  });
+
+  it('MDS-009-21: a place whose every document is removed for good loses its files on the next run, which confirms it', async () => {
+    const before = await ids();
+    const handbook = new Set(world.linear.documents.filter((d) => d.projectId === 'project-handbook').map((d) => d.id));
+    const paths = Object.entries(before).filter(([, entry]) => handbook.has(entry.id)).map(([path]) => path).sort();
+    assert.ok(paths.length >= 2, 'the project holds several files');
+    world.linear.documents = world.linear.documents.filter((d) => !handbook.has(d.id));
+
+    // Its place now lists nothing, as a blank answer would: the first run holds the removal.
+    const first = await sync();
+    assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
+    assert.deepEqual([...first.report.capture!.heldRemovals].sort(), paths);
+    assert.deepEqual(first.report.capture?.removed, []);
+    for (const path of paths) assert.ok(await tracks(path), `${path} stays while the removal is held`);
+
+    // The next run finds them gone again and removes them.
+    const second = await sync();
+    assert.deepEqual(second.report.capture?.heldRemovals, []);
+    assert.deepEqual([...second.report.capture!.removed].sort(), paths);
+    await settle();
+    for (const path of paths) {
+      // The folder's README keeps its annotation; its body goes with the document.
+      if (path.endsWith('README.md')) assert.doesNotMatch(await show(`refs/heads/main:${path}`), /# Handbook/, `${path} loses its body`);
+      else assert.equal(await tracks(path), false, `${path} is removed from the tracked branch`);
+    }
+    const after = await ids();
+    assert.ok(!Object.values(after).some((entry) => handbook.has(entry.id)), 'no removed id stays mapped');
+    await assertConverged();
+    await assertQuiet();
+  });
+
+  it('MDS-009-21: a blank answer that clears before the next run leaves no held removal behind', async () => {
+    const before = await ids();
+    const notes = new Set(world.linear.documents.filter((d) => d.projectId === 'project-api').map((d) => d.id));
+    world.linear.blankAnswer = (d) => notes.has(d.id);
+    const blank = await sync();
+    assert.equal(blank.result.exitCode, INCOMPLETE_EXIT_CODE, blank.result.stderr);
+    assert.ok(blank.report.capture!.heldRemovals.length > 0);
+    delete world.linear.blankAnswer;
+
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.deepEqual(next.report.capture?.heldRemovals, []);
+    assert.deepEqual(next.report.capture?.removed, []);
+    // A later blank answer is held again, not taken as a confirmation of the first.
+    world.linear.blankAnswer = (d) => notes.has(d.id);
+    const again = await sync();
+    assert.equal(again.result.exitCode, INCOMPLETE_EXIT_CODE, again.result.stderr);
+    assert.deepEqual(again.report.capture?.removed, []);
+    assert.deepEqual(again.report.capture?.heldRemovals, blank.report.capture?.heldRemovals);
+    delete world.linear.blankAnswer;
+    await settle();
+    assert.deepEqual(await ids(), before);
     await assertConverged();
     await assertQuiet();
   });
