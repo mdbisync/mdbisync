@@ -245,6 +245,58 @@ describe('confirmed initial sync from git to Linear', () => {
     await assertConverged(world);
   });
 
+  it('a resumed run skips what the stopped run wrote, whatever form Linear stored it in', async () => {
+    const world = fakeWorld();
+    // A form the format module does not predict, as for some links to attachments.
+    world.linear.store = (content) => `${content}\n\nStored.`;
+    world.linear.writes.rateLimitAt = 3;
+    assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+    const written = JSON.parse(await show('refs/mdbisync/ids:written.json')) as Record<string, string>;
+    assert.deepEqual(Object.keys(written).sort(), SYNCED_PATHS.slice(0, 2));
+
+    delete world.linear.writes.rateLimitAt;
+    const writes = world.linear.writes.count;
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(report.skippedCompletedCount, 2);
+    assert.equal(world.linear.writes.count - writes, SYNCED_PATHS.length - 2);
+    // The finished state keeps no progress files.
+    assert.equal((await fixture.remote.run(['cat-file', '-e', 'refs/mdbisync/ids:written.json'], { okCodes: [0, 128] })).code, 128);
+  });
+
+  it('a run that stops while only trashing still marks the initial sync unfinished, so the sync waits', async () => {
+    const world = fakeWorld();
+    assert.equal((await run(world)).result.exitCode, 0);
+    world.linear.documents.push({ id: 'doc-extra', title: 'extra', projectId: 'project-api', createdAt: '2026-01-03T00:00:00Z', content: 'Extra.' });
+    world.linear.writes.rateLimitAt = world.linear.writes.count + 1;
+
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE);
+    assert.equal(report.writtenCount, 0);
+    assert.equal(report.stoppedEarly, true);
+    assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', 'refs/mdbisync/ids']), PROGRESS_MESSAGE);
+    const sync = await runCli(['sync'], { env: { ...env(), MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }, cwd, fetch: fakeFetch(world) });
+    assert.equal(sync.exitCode, NO_STATE_EXIT_CODE, sync.stderr);
+  });
+
+  it('a resumed run does not reuse the id of a document trashed since the stop', async () => {
+    const world = fakeWorld();
+    world.linear.writes.rateLimitAt = 3;
+    assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+    const [first] = SYNCED_PATHS as [string];
+    const trashedId = (await readIds())[first]?.id as string;
+    const trashed = world.linear.documents.find((d) => d.id === trashedId);
+    assert.ok(trashed !== undefined);
+    trashed.trashed = true;
+
+    delete world.linear.writes.rateLimitAt;
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(report.initialSync?.created.includes(first), `${first} was not created again`);
+    assert.notEqual((await readIds())[first]?.id, trashedId);
+    await assertConverged(world);
+  });
+
   it('a resumed run writes again a document whose file changed after the stop', async () => {
     const world = fakeWorld();
     world.linear.writes.rateLimitAt = 3;

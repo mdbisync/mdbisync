@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkCorpus, checkLintExpectations } from "./check.ts";
+import { checkCorpus, checkLinearForm, checkLintExpectations } from "./check.ts";
 import { buildCorpus, writeCorpus, type Manifest } from "./generate.ts";
 
 const checker = fileURLToPath(new URL("./check.ts", import.meta.url));
@@ -16,7 +16,7 @@ let manifest: Manifest;
 
 before(() => {
   root = mkdtempSync(join(tmpdir(), "corpus-check-"));
-  writeCorpus(buildCorpus(), root, false);
+  writeCorpus(buildCorpus("a".repeat(40)), root, false);
   manifest = JSON.parse(readFileSync(join(root, "corpus-slices", "manifest.json"), "utf8")) as Manifest;
 });
 
@@ -189,5 +189,20 @@ test("a missing lint-error document is reported once under --lint", () => {
   const file = manifest.files.find((f) => f.synced && f.rule === "footnote")!;
   withChange(`corpus/${file.path}`, () => null, () => {
     assert.deepEqual(checkCorpus(root, { lint: true }).problems, [`missing from the tree: ${file.path}`]);
+  });
+});
+
+test("a synced document that is not in Linear's form is reported under --lint, a lint-error file is not", () => {
+  // The whole corpus is checked once by the --lint command test above; here only the files changed.
+  const entry = manifest.files.find((f) => f.synced && f.group === "tables" && f.class !== "lint-error")!;
+  const lintError = manifest.files.find((f) => f.synced && f.class === "lint-error" && f.rule === "table-alignment")!;
+  const only = (...files: Manifest["files"]): Manifest => ({ ...manifest, files });
+  assert.deepEqual(checkLinearForm(root, only(entry, lintError)), []);
+  // Linear writes table separators as "| -- |"; a longer one is a form Linear would change.
+  withChange(`corpus/${entry.path}`, (b) => Buffer.from(b.toString().replace("| -- |", "| --- |")), () => {
+    assert.deepEqual(checkLinearForm(root, only(entry)), [`not in Linear's form: ${entry.path}`]);
+  });
+  withChange(`corpus/${lintError.path}`, (b) => Buffer.concat([b, Buffer.from("\n\n\n")]), () => {
+    assert.deepEqual(checkLinearForm(root, only(lintError)), []);
   });
 });
