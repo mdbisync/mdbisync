@@ -31,7 +31,10 @@ import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { burst, realClock, soak, type LoadDriver } from './load.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
-import { commitStaged, HARNESS, personCommit } from './sandbox.ts';
+import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
+import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
+import { validateSha } from '../../../src/release/package.ts';
+import { parse } from 'yaml';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
 import {
@@ -380,7 +383,8 @@ const RUN: Record<string, Executor> = {
     const scratch = join(ctx.runDir, 'scratch');
     if (!existsSync(scratch)) throw new Error('run.pre-commit needs git.scratch-hook first');
     const before = spawnSync('git', ['diff', '--no-ext-diff', '--binary'], { cwd: scratch, encoding: 'utf8' }).stdout;
-    const result = spawnSync('pre-commit', ['run', '--all-files'], { cwd: scratch, encoding: 'utf8' });
+    // The hooks see the allowlisted environment only: a released hook is code from outside this checkout.
+    const result = spawnSync('pre-commit', ['run', '--all-files'], { cwd: scratch, encoding: 'utf8', env: hookEnv() });
     if (result.error !== undefined) throw new EnvBlockedError('pre-commit is not installed on this host');
     const output = `${result.stdout}${result.stderr}`;
     if (output.includes('not implemented')) throw new NotImplementedError('fix', 'through the Linear-format hook');
@@ -872,20 +876,63 @@ const GIT: Record<string, Executor> = {
     const text = await readWorking(git, file);
     await commitAsPerson(ctx, new Map([[file, text.replace(/^\s*alias:\s*security\s*$/gm, '')]]), 'Drop the hook alias', true);
   },
-  'git.scratch-hook': async (ctx) => {
-    // A scratch repository whose only hook is the published Linear-format hook, run from this checkout.
+  'git.scratch-hook': async (ctx, args) => {
+    // A scratch repository whose only Linear-format hook is the one the scenario names:
+    // `published`, the corpus's own configuration with the released hook it pins, installed
+    // by pre-commit; `source`, a local hook that runs this checkout's command line.
+    const source = args.source;
+    if (source !== 'published' && source !== 'source') throw new Error(`git.scratch-hook needs source "published" or "source", not ${JSON.stringify(source)}`);
     const scratch = join(ctx.runDir, 'scratch');
     mkdirSync(scratch, { recursive: true });
     spawnSync('git', ['init', '--quiet', scratch]);
-    writeFileSync(
-      join(scratch, '.pre-commit-config.yaml'),
-      `repos:\n  - repo: local\n    hooks:\n      - id: linear-format\n        name: Linear format\n        entry: node ${engineEntry()} fix\n        language: system\n        files: \\.md$\n`,
-    );
+    if (source === 'published') {
+      const text = await ctx.corpusFile(PRE_COMMIT_CONFIG);
+      if (text === null) throw new EnvBlockedError(`the corpus has no ${PRE_COMMIT_CONFIG}`);
+      ctx.observations.set('hook.pin', publishedHookPin(text));
+      // The corpus's file as it is, byte for byte: what a person who copies the corpus gets.
+      writeFileSync(join(scratch, PRE_COMMIT_CONFIG), text);
+    } else {
+      writeFileSync(
+        join(scratch, PRE_COMMIT_CONFIG),
+        `repos:\n  - repo: local\n    hooks:\n      - id: linear-format\n        name: Linear format\n        entry: node ${engineEntry()} fix\n        language: system\n        files: \\.md$\n`,
+      );
+    }
+    ctx.observations.set('hook.source', source);
     // A file the Linear-format hook fixes, from the fixture bank.
     writeFileSync(join(scratch, 'page.md'), fixableSample().text);
     spawnSync('git', ['add', '--all'], { cwd: scratch });
+    // pre-commit fetches the pinned hook and builds its environment now, with no harness secret in sight.
+    if (source === 'published') await installHooks(new Git(scratch), { signal: ctx.signal });
   },
 };
+
+/**
+ * The released Linear-format hook a corpus pre-commit configuration pins:
+ * exactly one remote repository defines it, at a full commit SHA. A local
+ * or pre-commit-defined hook, a tag, a branch or a placeholder is not the
+ * released hook, and the run cannot claim to test it.
+ */
+export function publishedHookPin(text: string): { repo: string; rev: string } {
+  let config: unknown;
+  try {
+    config = parse(text);
+  } catch {
+    throw new EnvBlockedError(`the corpus's ${PRE_COMMIT_CONFIG} is not valid YAML`);
+  }
+  const repos = (config as { repos?: unknown } | null)?.repos;
+  const entries = (Array.isArray(repos) ? repos : []) as Array<{ repo?: unknown; rev?: unknown; hooks?: unknown } | null>;
+  const owners = entries.filter((entry) => Array.isArray(entry?.hooks) && (entry.hooks as Array<{ id?: unknown } | null>).some((hook) => hook?.id === LINEAR_FORMAT_HOOK));
+  if (owners.length !== 1) throw new EnvBlockedError(`the corpus's ${PRE_COMMIT_CONFIG} defines ${LINEAR_FORMAT_HOOK} ${owners.length} times, not once`);
+  const owner = owners[0] as { repo?: unknown; rev?: unknown };
+  const repo = String(owner.repo);
+  if (LOCAL_REPOS.has(repo)) throw new EnvBlockedError(`the corpus's ${PRE_COMMIT_CONFIG} defines ${LINEAR_FORMAT_HOOK} as a ${repo} hook, not the released one`);
+  try {
+    validateSha(String(owner.rev));
+  } catch {
+    throw new EnvBlockedError(`the corpus's ${PRE_COMMIT_CONFIG} pins ${LINEAR_FORMAT_HOOK} to "${String(owner.rev)}", not a released commit SHA`);
+  }
+  return { repo, rev: owner.rev as string };
+}
 
 /**
  * An edit of the first line of one version inside the markers: `git` edits
