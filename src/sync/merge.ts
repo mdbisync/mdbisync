@@ -203,7 +203,7 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
   for (const file of mapping.leftOut) leave(file.path, [file.rule]);
   for (const file of mapping.unsynced) if (file.place !== undefined) leave(file.path, [file.reason]);
   leftOut.sort((a, b) => compare(a.path, b.path));
-  const mapped = new Map(mapping.documents.map((document) => [document.path, toSideFile(document)]));
+  const mapped = new Map([...mapping.documents, ...mapping.leftOut].map((document) => [document.path, toSideFile(document)]));
   return { mapping, files, leftOut, leftOutPaths: new Set(leftOut.map((entry) => entry.path)), mapped };
 }
 

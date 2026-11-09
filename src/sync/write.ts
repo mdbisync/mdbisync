@@ -294,7 +294,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     for (const path of new Set([...linearFiles.keys(), ...resultFiles.keys()])) {
       if (!path.endsWith('.md') && linearFiles.get(path) !== resultFiles.get(path)) changedNames.add(path.slice(path.lastIndexOf('/') + 1));
     }
-    if (changedNames.size === 0) return;
+    // A moved document is always compared: a relative link may now point at another file.
     // Documents with the same text: those needing nothing, and those only renamed or moved (their write must
     // carry the new link too).
     const sameText = [...merge.unchanged, ...merge.changes.filter((change): change is KeepChange => change.kind === 'keep' && !change.content)];
@@ -302,8 +302,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       const next = merge.result.get(change.to) as SideFile;
       const previous = merge.linear.get(change.from) as SideFile;
       const text = textOf(next);
-      // A cheap filter first: a link to a changed file names it.
-      if (![...changedNames].some((name) => text.includes(name) || text.includes(encodeURI(name)) || text.includes(encodeURIComponent(name)))) continue;
+      // A cheap filter first for documents that stay where they are: a link to a changed file names it.
+      const moved = change.from !== change.to;
+      if (!moved && ![...changedNames].some((name) => text.includes(name) || text.includes(encodeURI(name)) || text.includes(encodeURIComponent(name)))) continue;
       let differs: boolean;
       try {
         const written = await transformBody(transforms, change.to, splitFile(text).body);
@@ -363,39 +364,49 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    */
   async function unchangedSinceCapture(document: LinearDocument, path: string): Promise<boolean> {
     if (document.trashed || document.archivedAt !== null) return false;
-    let file = merge.linear.get(path);
-    let text: string | null = file === undefined ? null : textOf(file);
-    if (file === undefined) {
-      // The tip's file is left out (a lint finding): the tip records the git text, and Linear still holds the text
-      // last written. That is the newest version of the file on `linear` that was synchronized. Without one there
-      // is nothing to compare with, and the document is not written.
-      file = merge.linearMapped.get(path);
-      if (file === undefined) return false;
-      text = await lastSynchronizedText(path);
-      if (text === null) return false;
-    }
+    const synchronized = merge.linear.get(path);
+    // A file the tip leaves out (a lint finding, a title collision): the tip records the git text, and Linear holds
+    // the text it was last given, which is checked below against the `linear` chain.
+    const file = synchronized ?? merge.linearMapped.get(path);
+    if (file === undefined) return false;
     if (document.title.normalize('NFC') !== file.title.normalize('NFC')) return false;
     // Moved to another project or team in Linear: that move is the capture's to take in. A place the setup no longer
     // resolves (an annotation now names another project) cannot be checked.
     if (resolves(file.place) && !inPlace(document, file.place)) return false;
+    const text = synchronized !== undefined ? textOf(synchronized) : await lastSynchronizedText(path);
+    // No version Linear could have been given: nothing to compare with, so the document is not written.
+    if (text === null) return false;
     let expected: string;
     try {
-      expected = await transformBody(tipTransforms, path, splitFile(text as string).body);
+      expected = await transformBody(tipTransforms, path, splitFile(text).body);
     } catch (error) {
-      // The tip's file cannot be put in Linear's form (a file it links to is gone): nothing to compare with.
-      if (error instanceof LeaveOutError || error instanceof UploadRefusedError) return true;
-      throw error;
+      if (!(error instanceof LeaveOutError) && !(error instanceof UploadRefusedError)) throw error;
+      // The tip's own file cannot be put in Linear's form (a file it links to is gone): the write goes ahead. An
+      // older text that cannot be checked is not enough to overwrite what Linear holds.
+      return synchronized !== undefined;
     }
     return (document.content ?? '') === expected;
   }
 
-  /** The newest version of a file on the `linear` chain that the linter accepts, or null. Reads at most 50 versions. */
+  /**
+   * The newest version of a file that Linear was given: walking only the
+   * `linear` chain's own commits (records and captures, first parents, never
+   * the tracked branch's), the first version the linter accepts. Null when
+   * none of the last 200 versions on the chain does.
+   */
   async function lastSynchronizedText(path: string): Promise<string | null> {
-    const commits = (await git.text(['log', '--format=%H', '-n', '50', linearTip as Oid, '--', path])).split('\n').filter(Boolean);
-    for (const commit of commits) {
-      const read = await git.run(['cat-file', 'blob', `${commit}:${path}`], { okCodes: [0, 128] });
-      if (read.code !== 0) continue;
-      const text = read.stdout.toString('utf8');
+    const log = await git.text(['log', '--first-parent', '--format=%H', '-n', '200', linearTip as Oid, '--', path]);
+    const commits = log.split('\n').filter(Boolean);
+    if (commits.length === 0) return null;
+    // One process looks up every version's blob (a version without the file says "missing"); one more reads them.
+    const checked = await git.text(['cat-file', '--batch-check=%(objectname) %(objecttype)'], { input: commits.map((commit) => `${commit}:${path}\n`).join('') });
+    const oids = checked.split('\n').flatMap((line) => {
+      const [oid, type] = line.split(' ');
+      return type === 'blob' && oid !== undefined ? [oid] : [];
+    });
+    const blobs = await readBlobs(git, oids);
+    for (const oid of oids) {
+      const text = (blobs.get(oid) as Buffer).toString('utf8');
       if (lintText(path, text).length === 0) return text;
     }
     return null;

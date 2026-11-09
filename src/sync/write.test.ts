@@ -616,6 +616,35 @@ describe('sync: the tracked branch to Linear', () => {
     assert.match(document.content ?? '', /Typed in Linear meanwhile/);
   });
 
+  it('a left-out file is compared with what Linear was given, not with a git version it never received', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    // Two git commits between runs: a clean version Linear never receives, then one the linter leaves out.
+    await commit({ 'eng/notes/review.md': `# Review\n\nA version Linear never sees. ${CANARY}\n` });
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
+    assert.deepEqual((await sync()).writes, []);
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.match(document.content ?? '', /fixed in git/);
+  });
+
+  it('a move that makes a relative link point at another image writes the other image', async () => {
+    await commit({ 'eng/notes/media/diagram.png': Buffer.from('a different diagram').toString('latin1') });
+    assert.equal((await sync()).result.exitCode, 0);
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    // From eng/notes/sub/, `../media/diagram.png` is eng/notes/media/diagram.png.
+    await commit({}, [['eng/notes/figure.md', 'eng/notes/sub/figure.md']]);
+    const { result, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+    const [after] = uploadUrls(figure.content);
+    assert.ok(after !== undefined && after !== before, 'the moved document kept the old image');
+    assert.equal(figure.title, 'sub/figure');
+  });
+
   it('a file renamed in the same commit that changes its image is written with the new image', async () => {
     const figure = await documentOf('eng/notes/figure.md');
     const [before] = uploadUrls(figure.content);
