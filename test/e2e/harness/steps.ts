@@ -39,6 +39,7 @@ import { parse } from 'yaml';
 import { HOOK_REPOSITORY } from '../../corpus/tree.ts';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
+import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
 import {
   commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
@@ -78,6 +79,7 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
     names: ctx.names,
     ...(typeof args.direction === 'string' ? { direction: args.direction } : {}),
     ...(args.confirm === true ? { confirm: true } : {}),
+    ...(typeof args.mergeGraceSeconds === 'number' ? { mergeGraceSeconds: args.mergeGraceSeconds } : {}),
     cwd: await ctx.engineClone(),
     repository: world.repository,
     extraEnv: { ...ctx.engine.env },
@@ -182,7 +184,8 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
   }
   const trigger = ctx.engine.trigger;
   if (trigger !== undefined) {
-    // A fault that happens in the middle of this run: pause, act, go on.
+    // A fault that happens in the middle of this run: pause, act, go on. The fault's own
+    // writes fall inside the run, so this run gives no quiet verdict.
     delete ctx.engine.trigger;
     ctx.checkpoints.pause(trigger.checkpoint);
     const running = await startPaused(ctx, call, trigger.checkpoint);
@@ -192,7 +195,24 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
     settleResult(ctx, await running.done);
     return;
   }
-  settleResult(ctx, await runEngine(call));
+  await watchQuiet(ctx, { throughProxy: true }, async () => settleResult(ctx, await runEngine(call)));
+}
+
+/**
+ * Runs one engine invocation; in a scenario that asserts quiet, snapshots
+ * the world around it and records why the run was not quiet
+ * (`harness.quiet.<n>`, empty when it was), for the `quiet.<n|last>` subject.
+ */
+async function watchQuiet(ctx: RunContext, options: { throughProxy: boolean }, run: () => Promise<void>): Promise<void> {
+  if (!watchesQuiet(ctx)) return run();
+  const before = await snapshotWorld(ctx, options);
+  const count = ctx.engine.results.length;
+  await run();
+  const result = ctx.engine.results.at(-1);
+  if (ctx.engine.results.length !== count + 1 || result === undefined) throw new Error('a watched invocation recorded no single engine run');
+  const after = await snapshotWorld(ctx, options);
+  const n = ctx.engine.results.length - 1 - ctx.engine.setupRuns;
+  ctx.observations.set(`harness.quiet.${n}`, quietFailures({ exitCode: result.exitCode, report: result.report, before, after, documentWrites: writesBetween(ctx, before, after) }));
 }
 
 /** Runs the sync until a run changes nothing more (at most `limit` runs). */
@@ -278,11 +298,19 @@ async function trackedTipOnServer(ctx: RunContext): Promise<string> {
 
 /** Starts (dispatch) or finds (push, pull request) a workflow run, waits for it and records its result as an engine run. */
 async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Promise<void> {
-  const world = live(ctx);
+  live(ctx);
   const event = typeof args.event === 'string' ? args.event : 'workflow_dispatch';
   if (event === 'schedule') throw new EnvBlockedError(SCHEDULE_BLOCKED);
   const command = (typeof args.command === 'string' ? args.command : 'sync') as CommandName;
   await requireWorkflows(ctx, command);
+  // Only a dispatched run starts after the snapshot before it. A push or pull request run
+  // started on an earlier step and may already have written, so it gives no quiet verdict.
+  if (event === 'workflow_dispatch') await watchQuiet(ctx, { throughProxy: false }, () => startWorkflowRun(ctx, event, command, args));
+  else await startWorkflowRun(ctx, event, command, args);
+}
+
+async function startWorkflowRun(ctx: RunContext, event: string, command: CommandName, args: Record<string, unknown>): Promise<void> {
+  const world = live(ctx);
   let run;
   if (event === 'workflow_dispatch') {
     // The push that installed the workflow registers it (workflow-files.ts).
@@ -504,10 +532,11 @@ const RUN: Record<string, Executor> = {
       if (outcome === 'success') {
         await runCommand(ctx, 'sync', {});
       } else if (outcome === 'failure') {
-        // A run that fails after it has its token: every request after the third answers 500.
-        proxy.setFaults([{ kind: 'http', status: 500, requestNumber: 3, retryAfterSeconds: null, times: 10_000 }]);
+        // Fail document listing after token setup, leaving revocation available.
+        proxy.setFaults([{ kind: 'http', operation: 'ListDocuments', status: 500, requestNumber: 1, retryAfterSeconds: null, times: 10_000 }]);
         try {
           await runCommand(ctx, 'sync', {});
+          if (ctx.engine.results.at(-1)?.exitCode === 0) throw new Error('the token failure run unexpectedly succeeded');
         } finally {
           proxy.clearFaults();
         }
@@ -1295,8 +1324,12 @@ const FAULT: Record<string, Executor> = {
     for (const restore of ctx.engine.restores.splice(0).reverse()) await restore();
   },
   'fault.http': async (ctx, args) => {
+    if (args.target !== undefined && args.target !== 'graphql' && args.target !== 'oauth') throw new Error('unknown HTTP fault target');
+    if (args.target === 'oauth' && args.operation !== undefined) throw new Error('OAuth faults cannot select a GraphQL operation');
     http(ctx).setFaults([{
       kind: 'http',
+      target: args.target === 'oauth' ? 'oauth' : 'graphql',
+      ...(typeof args.operation === 'string' ? { operation: args.operation } : {}),
       status: Number(args.status),
       requestNumber: typeof args.requestNumber === 'number' ? args.requestNumber : 1,
       retryAfterSeconds: typeof args.retryAfterSeconds === 'number' ? args.retryAfterSeconds : null,

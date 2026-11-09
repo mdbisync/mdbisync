@@ -9,8 +9,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 
 export type Fault =
-  /** Answer the n-th request (counted from when the fault is set) with a status, `times` times. */
-  | { kind: 'http'; status: number; requestNumber: number; retryAfterSeconds: number | null; times: number }
+  /** Answer the n-th matching request after arming; GraphQL is the default target. */
+  | { kind: 'http'; target?: 'graphql' | 'oauth'; operation?: string; status: number; requestNumber: number; retryAfterSeconds: number | null; times: number }
   /**
    * Fail the next document write (create or update, or only the one named):
    * `server-error` answers 500 and `reset` drops the connection, both before
@@ -155,7 +155,7 @@ function names(body: string, target: string): boolean {
 export async function startFaultProxy(upstream: string, options: { fetch?: typeof fetch } = {}): Promise<FaultProxy> {
   const forward = options.fetch ?? ((input: string | URL | Request, init?: RequestInit) => globalThis.fetch(input, init));
   const base = upstream.replace(/\/+$/, '');
-  let faults: Array<Fault & { used?: number; armedAt?: number }> = [];
+  let faults: Array<Fault & { used?: number; matched?: number }> = [];
   let counter = 0;
   const requests: ProxyRequestRecord[] = [];
   const tokens = new Set<string>();
@@ -167,19 +167,29 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
     const text = body.toString('utf8');
     counter += 1;
     const n = counter;
-    const isGraphql = (request.url ?? '').startsWith('/graphql');
-    const { operation, kind } = isGraphql ? operationOf(text) : { operation: `http ${request.url?.split('?')[0] ?? ''}`, kind: 'other' as const };
+    const path = (request.url ?? '').split('?')[0];
+    const isGraphql = path === '/graphql';
+    const { operation, kind } = isGraphql ? operationOf(text) : { operation: `http ${path}`, kind: 'other' as const };
     const at = Date.now();
     const record = (status: number | 'reset', injected: boolean) => requests.push({ n, operation, kind, status, injected, at });
     const bearer = /^Bearer (\S+)$/.exec(String(request.headers.authorization ?? ''))?.[1];
     if (bearer !== undefined) tokens.add(bearer);
+
+    // Count for every HTTP fault before one can answer and hide the request from later faults.
+    for (const fault of faults) {
+      if (fault.kind !== 'http') continue;
+      const matchesTarget = fault.target === 'oauth' ? path === '/oauth/token' : isGraphql;
+      if (matchesTarget && (fault.operation === undefined || fault.operation === operation)) fault.matched = (fault.matched ?? 0) + 1;
+    }
 
     // A lost-answer fault for this write, used up only once the write has reached Linear.
     let dropAnswer: (Fault & { used?: number }) | undefined;
     for (const fault of faults) {
       const used = fault.used ?? 0;
       if (fault.kind === 'http') {
-        const position = n - (fault.armedAt ?? 0);
+        const matchesTarget = fault.target === 'oauth' ? path === '/oauth/token' : isGraphql;
+        if (!matchesTarget || (fault.operation !== undefined && fault.operation !== operation)) continue;
+        const position = fault.matched ?? 0;
         if (position >= fault.requestNumber && used < fault.times) {
           fault.used = used + 1;
           const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -288,7 +298,7 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
     requests,
     tokens: () => [...tokens],
     setFaults(next) {
-      faults = next.map((fault) => ({ ...fault, used: 0, armedAt: counter }));
+      faults = next.map((fault) => ({ ...fault, used: 0, matched: 0 }));
     },
     clearFaults() {
       faults = [];

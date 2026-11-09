@@ -116,17 +116,43 @@ collections such as `uploads.perHash` apply to every member, not an average.
 Checks such as `documents.allEditsPreserved` must compare unique seeded edit
 markers against both sides rather than assume success from a clean exit.
 
+`quiet.<n|last>` lists why that run was not quiet, and a scenario asserts it
+equal to `[]`. Quiet means the run finished a complete sync with zero document
+writes (seen by the Linear proxy and counted in its report), captured nothing
+into git, opened or updated no pull request, did not move the sync branch and
+left the tracked branch and its tree unchanged. A run's `changed` flag also
+covers its own state-ref writes, so right after a sync pull request merged, the
+next run records that merge (a metadata-only merge record in the state refs)
+and reports `changed: true` while staying quiet. That internal catch-up is the
+only write a quiet run may make: `changed: true` with no state ref moved is not
+quiet. The harness snapshots the world before and after every run of a scenario
+that asserts `quiet`; an unwatched run gives no verdict.
+
+Same-run merge scenarios set a positive merge grace with
+`run.sync.args.mergeGraceSeconds` (0 to 120; the harness otherwise passes 0,
+deferring every merge). A starting tree holds the pull request check workflow
+only for a scenario with a `fault.checks` step or the `check-workflow` fixture;
+without either it has no checks. The `pending-check` fixture publishes the
+workflow and holds its check pending with a marker committed before the
+initial sync.
+
 `proposedRule` records a testable proposed behavior. The concrete checks remain
 binding until the behavior and its specification are deliberately revised.
 The unsafe-title proposal preserves the original title. Its independent inputs
-and expected relative paths are in `unsafe-title-samples.json`; the fixture
-loader seeds these aliases and substitutes each returned document ID into its
-expected template before any engine invocation. `fixtures.unsafeTitlePaths`
-is the resulting alias-to-path map, including the mapped project folder.
-Percent-encode unsafe characters (including a literal percent sign), leading
-spaces and dot-only segments; represent an empty path segment as `%00`. Append
-`.md`, and append `--{documentId}` before the extension for every colliding
-title. Decoding must recover the original title; unique arbitrary filenames
+and expected relative paths are in `unsafe-title-samples.json`, written by hand
+from the path rule; the harness unit tests check the harness oracle
+`encodeTitlePath` against them. `fixtures.unsafeTitlePaths` is that oracle's
+title-to-path map for the seeded unsafe titles, below the mapped project folder.
+Per segment, after Unicode NFC: percent-encode `%`, `\`, control characters
+and `:*?"<>|`; encode the leading character of `.`, `..`, `.git` and Windows
+device names; represent an empty path segment as `%00`; encode trailing periods
+and spaces. Leading spaces stay as they are. Append `.md`. For a collision
+(including a case-only match or a file where a folder is needed) the older
+document keeps the plain name; the other is written directly in the mapped
+folder with its separators flattened to `%2F`, then `~` and the first twelve
+hex digits of the SHA-256 of its document ID before the extension, as in
+`notes%2Fx~<hash>.md`. For the seeded titles, which are NFC and have no empty
+segment, decoding must recover the original title; unique arbitrary filenames
 cannot satisfy the mapping and reverse-mapping assertions.
 
 ## Catalog maintenance
@@ -156,3 +182,5 @@ Commit only the IDs, never the source catalog itself. Schema validation rejects
 unknown fields, actions, kinds, modes, slices, missing invariants, empty steps
 or assertions, and the absence of any required proposed rule. Coverage validation
 rejects missing, extra, duplicate and misnamed specs and duplicate catalog IDs.
+
+HTTP faults default to GraphQL. `fault.http` accepts `operation` to select an exact operation name; `requestNumber` counts only matching requests after arming. Use `target: "oauth"` explicitly to fault the token exchange instead.

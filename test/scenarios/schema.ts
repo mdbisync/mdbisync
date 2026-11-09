@@ -12,7 +12,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "fault.credentials": ["service", "valid"],
   "fault.golden-drift": ["construct"],
   "fault.hooks": ["linearFormat"],
-  "fault.http": ["requestNumber", "retryAfter", "retryAfterSeconds", "status", "times"],
+  "fault.http": ["operation", "target", "requestNumber", "retryAfter", "retryAfterSeconds", "status", "times"],
   "fault.merge-policy": ["mergeCommits"],
   "fault.missing-lfs-object": [],
   "fault.pause": ["checkpoint"],
@@ -79,7 +79,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "run.scan-canaries": ["scope", "sources"],
   "run.settle": [],
   "run.soak": ["actors", "durationSeconds", "invariantIntervalSeconds", "randomSeed", "scheduleSeconds"],
-  "run.sync": ["wait"],
+  "run.sync": ["mergeGraceSeconds", "wait"],
   "run.token-lifecycle": ["outcomes"],
   "run.workflow": ["command", "confirm", "direction", "event"],
   "run.workflow-parallel": ["events", "replacePending"],
@@ -116,9 +116,9 @@ function list(value: unknown): asserts value is unknown[] {
   assert.ok(Array.isArray(value) && value.length > 0, 'expected nonempty array');
 }
 
-const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name path project ref scope service source storage target title'.split(' '));
+const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name operation path project ref scope service source storage target title'.split(' '));
 const booleanArguments = new Set('allFiles bypassHook compareGolden concurrencyGroup confirm coverAllConstructs includeEndpointLimits linearFormat mergeCommits replacePending samePath scheduled valid wait workflows'.split(' '));
-const numericArguments = new Set('characters cleanEdits conflictingDocuments count documents durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
+const numericArguments = new Set('characters cleanEdits conflictingDocuments count documents durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
 const arrayArguments = new Set('actors constructs events fixes measure names orderings outcomes sources variants'.split(' '));
 const requiredArguments: Record<string, string[]> = {
     'run.initial-sync': ['direction', 'confirm'],
@@ -139,6 +139,7 @@ function validateArguments(kind: string, action: string, args: ObjectValue): voi
     else if (numericArguments.has(key)) {
       assert.ok(typeof value === 'number' && Number.isFinite(value) && value >= 0, `${key} must be a nonnegative number`);
       if (key === 'rewriteFraction') assert.ok(value <= 1, 'rewriteFraction must be at most 1');
+      else if (key === 'mergeGraceSeconds') assert.ok(Number.isInteger(value) && value <= 120, 'mergeGraceSeconds must be an integer from 0 to 120');
       else assert.ok(Number.isInteger(value), `${key} must be an integer`);
     }
     else if (arrayArguments.has(key)) { list(value); value.forEach(text); }
@@ -149,7 +150,11 @@ function validateArguments(kind: string, action: string, args: ObjectValue): voi
   }
   for (const field of requiredArguments[`${kind}.${action}`] ?? []) assert.ok(Object.hasOwn(args, field), `missing argument ${field}`);
   if (kind === 'fault' && action === 'checks') oneOf(args.status, ['pending', 'passed', 'failed'], 'check status');
-  if (kind === 'fault' && action === 'http') assert.equal(typeof args.status, 'number', 'HTTP status must be numeric');
+  if (kind === 'fault' && action === 'http') {
+    assert.equal(typeof args.status, 'number', 'HTTP status must be numeric');
+    if (args.target !== undefined) oneOf(args.target, ['graphql', 'oauth'], 'HTTP fault target');
+    if (args.target === 'oauth') assert.equal(args.operation, undefined, 'OAuth faults cannot select a GraphQL operation');
+  }
   if (args.events !== undefined) { list(args.events); for (const event of args.events) oneOf(event, ['push', 'pull_request', 'workflow_dispatch', 'schedule'], 'event'); }
   if (args.actors !== undefined) { list(args.actors); for (const actor of args.actors) oneOf(actor, kind === 'ui' ? ['editor-a', 'editor-b'] : ['editor-a', 'editor-b', 'git'], 'editor role'); }
   if (args.command !== undefined) oneOf(args.command, ['sync', 'initial-sync', 'lint', 'fix', 'init', 'check'], 'command');

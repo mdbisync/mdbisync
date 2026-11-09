@@ -13,12 +13,14 @@ import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS
 import type { LiveWorld, RunContext } from './context.ts';
 import type { RunTree } from './corpus.ts';
 import { FIXTURE_PREPARATION } from './runner.ts';
-import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
+import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
-import { withoutDocuments } from './fault-proxy.ts';
+import { GraphQLTransport } from '../../../src/linear/transport.ts';
+import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
+import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
 import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, installHooks, PERSON, personCommit, Sandbox } from './sandbox.ts';
 import { engineEntry, type EngineResult } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
@@ -511,10 +513,48 @@ describe('team-zone cleanup', () => {
 });
 
 describe('titles that are not paths', () => {
-  it('follow the proposed percent-encoding rule', () => {
+  // Expected paths are written by hand from the documented path rule, not taken from the engine.
+  it('percent-encode unsafe characters within each segment', () => {
     assert.equal(encodeTitlePath('Notes: draft?*'), 'Notes%3A draft%3F%2A');
-    assert.equal(encodeTitlePath('  notes/leading spaces'), '%20%20notes/leading spaces');
     assert.equal(encodeTitlePath('notes/pipe | table'), 'notes/pipe %7C table');
+    assert.equal(encodeTitlePath('notes/back\\slash'), 'notes/back%5Cslash');
+    assert.equal(encodeTitlePath('say "hi" <now>'), 'say %22hi%22 %3Cnow%3E');
+    assert.equal(encodeTitlePath('notes%3A'), 'notes%253A');
+    assert.equal(encodeTitlePath('tab\there\u007f'), 'tab%09here%7F');
+  });
+  it('keep leading spaces and encode trailing periods and spaces', () => {
+    assert.equal(encodeTitlePath('  notes/leading spaces'), '  notes/leading spaces');
+    assert.equal(encodeTitlePath(' leading'), ' leading');
+    assert.equal(encodeTitlePath('notes /trailing. '), 'notes%20/trailing%2E%20');
+    assert.equal(encodeTitlePath('wait...'), 'wait%2E%2E%2E');
+    assert.equal(encodeTitlePath('a. b'), 'a. b');
+    // A segment of spaces only has no leading part to keep: all of it is trailing.
+    assert.equal(encodeTitlePath('notes/   /x'), 'notes/%20%20%20/x');
+  });
+  it('apply the reserved-segment and trailing rules together', () => {
+    assert.equal(encodeTitlePath('..'), '%2E%2E');
+    assert.equal(encodeTitlePath('con.'), '%63on%2E');
+    assert.equal(encodeTitlePath('.git '), '.git%20');
+  });
+  it('encode reserved and empty segments so the path stays relative', () => {
+    assert.equal(encodeTitlePath('../notes'), '%2E%2E/notes');
+    assert.equal(encodeTitlePath('./notes'), '%2E/notes');
+    assert.equal(encodeTitlePath('.GIT/config'), '%2EGIT/config');
+    assert.equal(encodeTitlePath('.github/notes'), '.github/notes');
+    assert.equal(encodeTitlePath('con'), '%63on');
+    assert.equal(encodeTitlePath('drafts/LPT1.notes'), 'drafts/%4CPT1.notes');
+    assert.equal(encodeTitlePath('console'), 'console');
+    assert.equal(encodeTitlePath('/part/notes'), '%00/part/notes');
+    assert.equal(encodeTitlePath('part//notes'), 'part/%00/notes');
+  });
+  it('normalize to NFC', () => {
+    assert.equal(encodeTitlePath('Café'), 'Café');
+  });
+  it('match the independent L1R-05 samples', () => {
+    const samples = JSON.parse(readFileSync(new URL('../../scenarios/unsafe-title-samples.json', import.meta.url), 'utf8')) as Array<{ alias: string; title: string; relativePathTemplate: string }>;
+    for (const sample of samples.filter((entry) => !entry.relativePathTemplate.includes('{'))) {
+      assert.equal(`${encodeTitlePath(sample.title)}.md`, sample.relativePathTemplate, sample.alias);
+    }
   });
 });
 
@@ -1314,6 +1354,64 @@ describe('I6 requires a completed no-change sync', () => {
   });
 });
 
+describe('GraphQL HTTP fault scenario', () => {
+  it('runs L5-07 OAuth setup and injects ListDocuments with exactly one real transport retry', async () => {
+    const { ctx } = await fakeRun();
+    const forwarded: string[] = [];
+    const proxy = await startFaultProxy('https://api.example.test', { fetch: async (input) => {
+      const path = new URL(String(input)).pathname;
+      forwarded.push(path);
+      return Response.json(path === '/oauth/token'
+        ? { access_token: 'test-access-token', expires_in: 3600, scope: 'read,write' }
+        : path === '/oauth/revoke' ? { success: true } : { data: { ok: true } });
+    } });
+    ctx.proxy = proxy;
+    const query = 'query ListDocuments { documents { nodes { id } } }';
+    try {
+      const scenario = scenarios.find((item) => item.id === 'L5-07')!;
+      const setup = new GraphQLTransport({ baseUrl: proxy.url, token: 'setup-token' });
+      await setup.request('ListDocuments', 'query', query);
+      ctx.observations.set('start.proxyIndex', proxy.requests.length);
+      await runStep(ctx, scenario.steps[0]!);
+      const token = await mintAppToken({ clientId: 'test-id', clientSecret: 'test-secret' }, { baseUrl: proxy.url });
+      const attempts: number[] = [];
+      const sleeps: number[] = [];
+      const transport = new GraphQLTransport({
+        baseUrl: proxy.url, token: token.accessToken,
+        hooks: { beforeRequest: (info) => { attempts.push(info.attempt); } },
+        sleep: async (ms) => { sleeps.push(ms); },
+      });
+      assert.deepEqual(await transport.request('ListDocuments', 'query', query), { ok: true });
+      await revokeToken(token.accessToken, { baseUrl: proxy.url });
+      ctx.observations.set('scenario.proxyEnd', proxy.requests.length);
+      assert.deepEqual(attempts, [1, 2]);
+      assert.deepEqual(sleeps, [1000]);
+      assert.deepEqual(proxy.requests.slice(1).map(({ operation, status, injected }) => ({ operation, status, injected })), [
+        { operation: 'http /oauth/token', status: 200, injected: false },
+        { operation: 'ListDocuments', status: 429, injected: true },
+        { operation: 'ListDocuments', status: 200, injected: false },
+        { operation: 'http /oauth/revoke', status: 200, injected: false },
+      ]);
+      assert.deepEqual(forwarded, ['/graphql', '/oauth/token', '/graphql', '/oauth/revoke']);
+      for (const assertion of scenario.checks.assertions.filter((item) => item.subject.startsWith('http.') || item.subject === 'proxy.injectedOperations')) {
+        assert.deepEqual(await resolveSubject(ctx, assertion.subject), { known: true, value: assertion.expected });
+      }
+      // An invariant's later normal run cannot turn a missing retry into a pass.
+      proxy.setFaults([{ kind: 'http', status: 429, requestNumber: 1, retryAfterSeconds: 1, times: 1 }]);
+      await transport.request('ListDocuments', 'query', query);
+      assert.deepEqual(await resolveSubject(ctx, 'http.retryCount'), { known: true, value: 1 });
+      ctx.observations.set('scenario.proxyEnd', 3);
+      assert.deepEqual(await resolveSubject(ctx, 'http.retryCount'), { known: true, value: 0 });
+      await assert.rejects(runStep(ctx, { kind: 'fault', action: 'http', args: { status: 429, target: 'unknown' } }), /unknown HTTP fault target/);
+      await assert.rejects(runStep(ctx, { kind: 'fault', action: 'http', args: { status: 500, target: 'oauth', operation: 'oauth.token' } }), /OAuth faults cannot select/);
+      await runStep(ctx, { kind: 'fault', action: 'http', args: { status: 500, target: 'oauth' } });
+      await assert.rejects(mintAppToken({ clientId: 'test-id', clientSecret: 'test-secret' }, { baseUrl: proxy.url }), /HTTP 500/);
+    } finally {
+      await proxy.close();
+    }
+  });
+});
+
 describe('subjects', () => {
   it('read the engine report by path and fail as a product error when it lacks a value', async () => {
     const { ctx } = await fakeRun();
@@ -1638,5 +1736,127 @@ describe('subjects', () => {
     await ctx.engine.trigger?.action();
     assert.deepEqual(await resolveSubject(ctx, 'writes.git'), { known: true, value: 1 });
     void readFileSync;
+  });
+});
+
+describe('quiet runs through the harness', () => {
+  const QUIET_REPORT = {
+    operation: 'sync', ok: true, complete: true, changed: true,
+    capture: { ok: true, changed: [], removed: [] },
+    pullRequest: { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [] },
+    sync: { complete: true, updated: [], relocated: [], created: [], adopted: [], restored: [], trashed: [], record: null },
+    writtenCount: 0, writtenDocuments: 0,
+  };
+  const MERGED = { number: 30, state: 'closed', title: 'Changes from Linear', body: 'One document.', head: { ref: 't/aaaaaa/sync', sha: 'a'.repeat(40) }, base: { ref: 't/aaaaaa/main' }, merged_at: '2026-01-01T00:00:00Z', created_at: '2026-01-01T00:00:00Z' };
+
+  /**
+   * One watched sync whose fake engine moves the named refs of the bare
+   * remote; `pullRequests` is what GitHub lists before and after it, and
+   * `writes` the document writes the proxy sees during it.
+   */
+  it('gives each same-run merge case its own check setup', () => {
+    const byId = new Map(scenarios.map((scenario) => [scenario.id, scenario]));
+    // Fast checks and slow checks publish the workflow; the no-check case starts without it.
+    assert.equal(publishesCheckWorkflow(byId.get('L2-38')!), true);
+    assert.equal(publishesCheckWorkflow(byId.get('L2-39')!), false);
+    assert.equal(publishesCheckWorkflow(byId.get('L2-40')!), true);
+    assert.ok(byId.get('L2-40')!.setup.fixtures.includes('pending-check'));
+    // Positive grace on every run, never the harness's deferring default.
+    for (const id of ['L2-38', 'L2-39', 'L2-40']) {
+      const runs = byId.get(id)!.steps.filter((step) => step.kind === 'run');
+      assert.ok(runs.length > 0 && runs.every((step) => typeof step.args.mergeGraceSeconds === 'number' && step.args.mergeGraceSeconds > 0), id);
+      assert.ok(byId.get(id)!.checks.assertions.some((assertion) => assertion.subject === 'quiet.last'), id);
+      assert.ok(!byId.get(id)!.checks.assertions.some((assertion) => assertion.subject.endsWith('.changed')), id);
+    }
+  });
+
+  async function watchedRun(options: { moves: Array<'state' | 'tracked-tree' | 'tracked-commit' | 'sync'>; report?: Record<string, unknown>; pullRequests?: [unknown[], unknown[]]; writes?: number; watch?: boolean }) {
+    const { ctx, remoteGit } = await fakeRun();
+    mkdirSync(await ctx.engineClone(), { recursive: true });
+    mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
+    if (options.watch !== false) ctx.scenario = { ...ctx.scenario, checks: { ...ctx.scenario.checks, assertions: [{ subject: 'quiet.last', operator: 'equal', expected: [] }] } };
+    const lists = options.pullRequests ?? [[MERGED], [MERGED]];
+    let listed = 0;
+    Object.assign(ctx.live!, { rest: { pullRequests: async () => lists[Math.min(listed++, 1)] } });
+    const records = join(ctx.runDir, 'proxy-records.json');
+    Object.defineProperty(ctx.proxy!, 'requests', { get: () => (existsSync(records) ? JSON.parse(readFileSync(records, 'utf8')) : []) });
+    const names = ctx.names;
+    const driver = join(ctx.runDir, 'quiet-sync.mjs');
+    writeFileSync(driver, `
+      import { execFileSync } from 'node:child_process';
+      import { writeFileSync } from 'node:fs';
+      const env = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' };
+      const git = (...args) => execFileSync('git', ['--git-dir', ${JSON.stringify(remoteGit.dir)}, ...args], { env, encoding: 'utf8' }).trim();
+      const empty = git('hash-object', '-t', 'tree', '-w', '--stdin');
+      const tip = git('rev-parse', ${JSON.stringify(names.trackedBranch)});
+      for (const move of ${JSON.stringify(options.moves)}) {
+        if (move === 'state') git('update-ref', ${JSON.stringify(`${names.refPrefix}/linear`)}, git('commit-tree', empty, '-m', 'Record the merge'));
+        if (move === 'tracked-tree') git('update-ref', ${JSON.stringify(`refs/heads/${names.trackedBranch}`)}, git('commit-tree', empty, '-p', tip, '-m', 'Change content'));
+        if (move === 'tracked-commit') git('update-ref', ${JSON.stringify(`refs/heads/${names.trackedBranch}`)}, git('commit-tree', tip + '^{tree}', '-p', tip, '-m', 'Same content'));
+        if (move === 'sync') git('update-ref', ${JSON.stringify(`refs/heads/${names.syncBranch}`)}, git('commit-tree', empty, '-m', 'Sync branch'));
+      }
+      const writes = Array.from({ length: ${options.writes ?? 0} }, (_, n) => ({ n, at: 0, operation: 'documentUpdate', kind: 'mutation', status: 200, injected: false }));
+      writeFileSync(${JSON.stringify(records)}, JSON.stringify(writes));
+      writeFileSync(process.env.MDBISYNC_REPORT_FILE, JSON.stringify(${JSON.stringify({ ...QUIET_REPORT, ...options.report })}));
+    `);
+    const previous = process.env['MDBISYNC_ENGINE'];
+    process.env['MDBISYNC_ENGINE'] = driver;
+    try {
+      await runStep(ctx, { kind: 'run', action: 'sync', args: {} });
+    } finally {
+      if (previous === undefined) delete process.env['MDBISYNC_ENGINE'];
+      else process.env['MDBISYNC_ENGINE'] = previous;
+    }
+    return ctx;
+  }
+
+  it('is a harness subject', () => {
+    assert.equal(subjectSource('quiet.last'), 'harness');
+    assert.equal(subjectSource('quiet.0'), 'harness');
+    assert.equal(subjectSource('before.quiet.last'), null);
+  });
+
+  it('accepts a metadata-only merge record although the run reports changed=true', async () => {
+    const ctx = await watchedRun({ moves: ['state'] });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.last.changed'), { known: true, value: true });
+    assert.deepEqual(await resolveSubject(ctx, 'quiet.last'), { known: true, value: [] });
+    assert.deepEqual(await resolveSubject(ctx, 'quiet.0'), { known: true, value: [] });
+  });
+
+  it('accepts a run that changed nothing', async () => {
+    const ctx = await watchedRun({ moves: [], report: { changed: false } });
+    assert.deepEqual(await resolveSubject(ctx, 'quiet.last'), { known: true, value: [] });
+  });
+
+  it('rejects document writes the proxy saw', async () => {
+    const ctx = await watchedRun({ moves: ['state'], writes: 2 });
+    assert.deepEqual(await resolveSubject(ctx, 'quiet.last'), { known: true, value: ['2 document writes reached Linear'] });
+  });
+
+  it('rejects a different tracked tree, and a moved tracked branch', async () => {
+    const tree = await watchedRun({ moves: ['state', 'tracked-tree'] });
+    assert.deepEqual(await resolveSubject(tree, 'quiet.last'), { known: true, value: ['the tracked content changed', 'the tracked branch moved'] });
+    const commit = await watchedRun({ moves: ['state', 'tracked-commit'] });
+    assert.deepEqual(await resolveSubject(commit, 'quiet.last'), { known: true, value: ['the tracked branch moved'] });
+  });
+
+  it('rejects repeated pull request activity: a new one, an update, a moved sync branch', async () => {
+    const opened = await watchedRun({ moves: ['state'], pullRequests: [[MERGED], [{ ...MERGED, number: 31, state: 'open', merged_at: null }, MERGED]] });
+    assert.deepEqual(await resolveSubject(opened, 'quiet.last'), { known: true, value: ['pull request #31 was opened'] });
+    const updated = await watchedRun({ moves: ['state'], pullRequests: [[MERGED], [{ ...MERGED, body: 'Two documents.' }]] });
+    assert.deepEqual(await resolveSubject(updated, 'quiet.last'), { known: true, value: ['pull request #30 was updated'] });
+    const moved = await watchedRun({ moves: ['state', 'sync'] });
+    assert.deepEqual(await resolveSubject(moved, 'quiet.last'), { known: true, value: ['the sync branch moved'] });
+  });
+
+  it('rejects changed=true that no state ref write explains', async () => {
+    const ctx = await watchedRun({ moves: [] });
+    assert.deepEqual(await resolveSubject(ctx, 'quiet.last'), { known: true, value: ['the run reports changed=true, but no state ref moved'] });
+  });
+
+  it('gives no verdict for a run it did not watch', async () => {
+    const ctx = await watchedRun({ moves: ['state'], watch: false });
+    await assert.rejects(resolveSubject(ctx, 'quiet.last'), /was not watched/);
+    await assert.rejects(resolveSubject(ctx, 'quiet.3'), ProductError);
   });
 });

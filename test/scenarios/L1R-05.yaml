@@ -83,5 +83,5 @@
       }
     ]
   },
-  "proposedRule": "Preserve slash-separated nonempty path segments, percent-encode unsafe characters and leading spaces, encode empty segments; append .md and disambiguate collisions by document ID."
+  "proposedRule": "Preserve slash-separated path segments and leading spaces, percent-encode unsafe characters and trailing periods and spaces, encode reserved and empty segments; append .md and disambiguate collisions by a document ID hash."
 }

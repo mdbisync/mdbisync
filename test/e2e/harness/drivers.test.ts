@@ -11,7 +11,7 @@ import { checkpoint, CHECKPOINTS, HOOKS_DIR_ENV, HOOKS_ENV, hooksDir, testStopAf
 import { CheckpointControl } from './checkpoints.ts';
 import { annotatedFolders, buildRunTree, readAnnotation } from './corpus.ts';
 import { CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
-import { engineInputs, inputEnv, runEngine, startEngine } from './engine.ts';
+import { engineEnv, engineInputs, inputEnv, runEngine, startEngine } from './engine.ts';
 import { operationOf, startFaultProxy, writeApplied, writeError, writeFields } from './fault-proxy.ts';
 import { runNames } from './isolation.ts';
 import { Sandbox } from './sandbox.ts';
@@ -101,6 +101,18 @@ describe('engine driver', () => {
     assert.equal(env['MDBISYNC_MERGE_GRACE_SECONDS'], '0');
   });
 
+  it('passes a run\'s positive merge grace, never a silent default', () => {
+    const call = {
+      command: 'sync' as const, names: runNames('4f1a9c'), cwd: '/', repository: 'o/r',
+      hooksDir: '/h', reportFile: '/r.json', summaryFile: '/s.md', linearUrl: 'http://127.0.0.1:1',
+      credentials: { linearClientId: 'id', linearClientSecret: 'secret', githubToken: 'token' }, extraEnv: { MDBISYNC_MERGE_GRACE_SECONDS: '0' }, timeoutMs: 1000,
+    };
+    assert.equal(engineInputs({ ...call, mergeGraceSeconds: 60 })['MDBISYNC_MERGE_GRACE_SECONDS'], '60');
+    assert.equal(engineInputs({ ...call, mergeGraceSeconds: 20 })['MDBISYNC_MERGE_GRACE_SECONDS'], '20');
+    // The call's grace wins over a test-hook environment that tries to set the input.
+    assert.equal(engineEnv({ ...call, mergeGraceSeconds: 60 })['MDBISYNC_MERGE_GRACE_SECONDS'], '60');
+  });
+
   it('recognizes a command that answers "not implemented", and only that', async () => {
     const dir = fresh('engine-');
     const call = {
@@ -184,6 +196,73 @@ describe('fault proxy', () => {
         statuses.push([response.status, response.headers.get('retry-after')]);
       }
       assert.deepEqual(statuses, [[200, null], [200, null], [429, '2'], [200, null]]);
+      assert.equal(up.calls(), 3);
+    } finally {
+      await proxy.close();
+      await up.close();
+    }
+  });
+
+  it('counts only matching GraphQL requests after arming, including repeated faults and rearming', async () => {
+    const up = await upstream();
+    const proxy = await startFaultProxy(up.url);
+    try {
+      await post(proxy.url, 'query Target { a }');
+      const fault = { kind: 'http' as const, operation: 'Target', status: 500, requestNumber: 2, retryAfterSeconds: null, times: 2 };
+      proxy.setFaults([fault]);
+      assert.equal((await fetch(`${proxy.url}/oauth/token`, { method: 'POST' })).status, 200);
+      assert.equal((await post(proxy.url, 'query Other { a }')).status, 200);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 200);
+      proxy.resetCounters();
+      assert.equal((await fetch(`${proxy.url}/graphql-other`)).status, 200);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 500);
+      assert.equal((await fetch(`${proxy.url}/oauth/token`, { method: 'POST' })).status, 200);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 500);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 200);
+      proxy.setFaults([fault]);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 200);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 500);
+      proxy.clearFaults();
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 200);
+    } finally {
+      await proxy.close();
+      await up.close();
+    }
+  });
+
+  it('counts a matching request for later faults even when an earlier fault answers it', async () => {
+    const up = await upstream();
+    const proxy = await startFaultProxy(up.url);
+    try {
+      proxy.setFaults([
+        { kind: 'http', status: 429, requestNumber: 1, retryAfterSeconds: 1, times: 1 },
+        { kind: 'http', status: 500, requestNumber: 2, retryAfterSeconds: null, times: 1 },
+      ]);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 429);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 500);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 200);
+      proxy.setFaults([
+        { kind: 'write-error', variant: 'server-error', times: 1 },
+        { kind: 'http', status: 429, requestNumber: 2, retryAfterSeconds: 1, times: 1 },
+      ]);
+      assert.equal((await post(proxy.url, 'mutation UpdateDocument { a }')).status, 500);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 429);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 200);
+    } finally {
+      await proxy.close();
+      await up.close();
+    }
+  });
+
+  it('faults OAuth only when explicitly targeted, without counting GraphQL or revocation', async () => {
+    const up = await upstream();
+    const proxy = await startFaultProxy(up.url);
+    try {
+      proxy.setFaults([{ kind: 'http', target: 'oauth', status: 429, requestNumber: 1, retryAfterSeconds: 1, times: 1 }]);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 200);
+      assert.equal((await fetch(`${proxy.url}/oauth/revoke`, { method: 'POST' })).status, 200);
+      assert.equal((await fetch(`${proxy.url}/oauth/token?test=1`, { method: 'POST' })).status, 429);
+      assert.equal((await fetch(`${proxy.url}/oauth/token`, { method: 'POST' })).status, 200);
       assert.equal(up.calls(), 3);
     } finally {
       await proxy.close();

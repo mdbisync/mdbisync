@@ -17,7 +17,8 @@
       "args": {
         "status": 429,
         "times": 1,
-        "retryAfterSeconds": 1
+        "retryAfterSeconds": 1,
+        "operation": "ListDocuments"
       }
     },
     {
@@ -57,6 +58,13 @@
       }
     },
     "assertions": [
+      {
+        "subject": "proxy.injectedOperations",
+        "operator": "equal",
+        "expected": [
+          "ListDocuments"
+        ]
+      },
       {
         "subject": "http.retryCount",
         "operator": "equal",
