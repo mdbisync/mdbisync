@@ -113,6 +113,12 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   if (unfinished !== undefined && !unfinished.complete) {
     return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${unfinished.code}); run it again with the same inputs\n` };
   }
+  if (outcome.captured?.stopped !== undefined) {
+    return {exitCode:0, stdout:outcome.summary, stderr:`${stderr}warning: ${command}: partial, will continue (${outcome.captured.code})\n`};
+  }
+  if (outcome.captured !== undefined && !outcome.captured.ok) {
+    return {exitCode:INCOMPLETE_EXIT_CODE, stdout:outcome.summary, stderr:`${stderr}${command}: capture did not finish (${outcome.captured.code})\n`};
+  }
   const write = outcome.sync?.write;
   // Skipped documents are normal (the next run takes them in); a stop, a refused push or a failed write is not.
   if (write?.code !== undefined) {

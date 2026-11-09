@@ -332,7 +332,7 @@ type Range = { from: number; to: number };
  * Every link, image and definition with the place of its destination's text,
  * without (`range`) and with (`outer`) its angle brackets, in document order.
  */
-function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range }> {
+export function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range }> {
   const result: Array<{ node: DestinationNode; range: Range; outer: Range }> = [];
   visit(parse(body), (node) => {
     if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;

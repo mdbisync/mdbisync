@@ -40,6 +40,8 @@ jobs:
         run: npm run typecheck
       - name: Bundle and check bundled licenses
         run: npm run build
+      - name: Install the security hook runner
+        run: pipx install pre-commit==4.6.2
       - name: Test
         run: npm test
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

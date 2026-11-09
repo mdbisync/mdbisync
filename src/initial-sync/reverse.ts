@@ -331,7 +331,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
    */
   async function record(): Promise<ReverseRecord | null | 'sync-branch-changed'> {
     const restored = (entry: ReverseEntry): string =>
-      restoreBody(transforms, entry.path, (documents.get(entry.documentId) as LinearDocument).content ?? '');
+      restoreBody(transforms, entry.path, (documents.get(entry.documentId) as LinearDocument).content ?? '', (documents.get(entry.documentId) as LinearDocument).content ?? '');
     const textOf = (entry: ReverseEntry): string => {
       const body = restored(entry);
       const tracked = input.texts.get(entry.path);

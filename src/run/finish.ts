@@ -2,6 +2,7 @@
 // for tests and tooling. Names, paths and states only, no content.
 
 import { writeFile } from 'node:fs/promises';
+import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type SyncRecord, type WriteResult } from '../sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
@@ -30,6 +31,7 @@ export interface RunReport {
   initialSync: ConfirmedReport | null;
   /** A sync run's writes to Linear, by path; null for other runs. */
   sync: SyncReport | null;
+  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'stopped'> | null;
   /** Documents created or overwritten in Linear by this run. */
   writtenCount: number;
   /** Documents an unfinished earlier run had written, skipped by this one. */
@@ -97,28 +99,30 @@ export interface ConfirmedReport {
 }
 
 export function toRunReport(outcome: OperationOutcome): RunReport {
-  if (outcome.sync !== undefined) return toSyncRunReport(outcome, outcome.sync.write);
+  if (outcome.sync?.write !== undefined) return toSyncRunReport(outcome, outcome.sync.write);
   const confirmed = outcome.confirmed;
   const reverse = outcome.reverse;
   return {
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? confirmed?.code ?? reverse?.code ?? null,
-    complete: confirmed?.complete ?? reverse?.complete ?? false,
+    code: outcome.code ?? outcome.captured?.code ?? confirmed?.code ?? reverse?.code ?? null,
+    complete: outcome.sync?.complete ?? confirmed?.complete ?? reverse?.complete ?? false,
     changed:
-      (confirmed !== undefined && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true)) ||
-      (reverse !== undefined && (reverse.record?.moved === true || reverse.pullRequest?.opened === true)),
+      outcome.sync?.changed ??
+      ((confirmed !== undefined && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true)) ||
+        (reverse !== undefined && (reverse.record?.moved === true || reverse.pullRequest?.opened === true))),
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
     securityHooks: outcome.setup?.securityHooks ?? null,
     notImplemented: outcome.notImplemented,
     summary: outcome.plan ?? null,
     initialSync: confirmed === undefined ? null : toConfirmedReport(confirmed),
+    capture: captureReport(outcome.captured),
     sync: null,
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? reverse?.skippedCompleted.length ?? 0,
     oversizeFiles: [...new Set((confirmed?.leftOutAtWrite ?? []).filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
     resumed: confirmed?.resumed ?? reverse?.resumed ?? false,
-    stoppedEarly: confirmed?.stopped !== undefined || reverse?.stopped !== undefined,
+    stoppedEarly: confirmed?.stopped !== undefined || reverse?.stopped !== undefined || outcome.captured?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
     progressRecorded: confirmed?.progressRecorded ?? (reverse !== undefined && reverse.code !== 'state-moved'),
     record:
@@ -159,13 +163,14 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     operation: outcome.operation,
     ok: outcome.ok,
     code: outcome.code ?? write.code ?? null,
-    complete: write.complete,
-    changed: write.changed,
+    complete: outcome.sync!.complete,
+    changed: outcome.sync!.changed,
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
     securityHooks: outcome.setup?.securityHooks ?? null,
     notImplemented: false,
     summary: null,
     initialSync: null,
+    capture: captureReport(outcome.captured),
     sync: {
       complete: write.complete,
       updated: write.updated,
@@ -211,4 +216,8 @@ function toConfirmedReport(result: ConfirmedResult): ConfirmedReport {
 
 export async function writeRunReport(path: string, outcome: OperationOutcome): Promise<void> {
   await writeFile(path, `${JSON.stringify(toRunReport(outcome), null, 2)}\n`);
+}
+
+function captureReport(captured: CaptureResult | undefined): RunReport['capture'] {
+  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, blocked:captured.blocked, leftOut:captured.leftOut, ...(captured.stopped ? {stopped:captured.stopped} : {})};
 }

@@ -14,7 +14,9 @@ const REASONS: Record<SkipReason, string> = {
 
 export function renderSync(result: CycleResult): string {
   const write = result.write;
-  const lines = ['## Sync', '', '### Tracked branch to Linear', ''];
+  const lines = ['## Sync', '', result.capture.summary, ''];
+  if (write === undefined) { lines.push('Capture did not finish; no tracked-branch changes were written.', ''); return lines.join('\n'); }
+  lines.push('### Tracked branch to Linear', '');
   if (write.complete && write.record === null && !write.changed) {
     lines.push('Linear already holds the tracked branch: nothing to write.', '');
   } else {

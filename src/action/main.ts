@@ -46,6 +46,15 @@ export async function run(): Promise<void> {
       core.setFailed(`${operation}: not finished (${unfinished.code}); run it again with the same inputs`);
       return;
     }
+    if (outcome.captured?.stopped !== undefined) {
+      core.setOutput('code', outcome.captured.code);
+      core.warning(`${operation}: partial, will continue (${outcome.captured.code})`);
+      return;
+    }
+    if (outcome.captured !== undefined && !outcome.captured.ok) {
+      core.setFailed(`${operation}: capture did not finish (${outcome.captured.code})`);
+      return;
+    }
     // A sync that skipped documents succeeded (the next run takes them in); a stop, a refused push or a failed write did not.
     const write = outcome.sync?.write;
     if (write?.code !== undefined) {
