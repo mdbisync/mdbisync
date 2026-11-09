@@ -8,12 +8,12 @@
 
 import assert from 'node:assert/strict';
 import { readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { detectConflicts, MARKERS, RETITLED_COMMENT } from '../merge/index.ts';
 import { type RunReport } from '../run/finish.ts';
-import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
+import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { CONFLICT_COMMENT, MARKS } from './marks.ts';
 
@@ -44,6 +44,7 @@ const TREE: Record<string, string> = {
   'eng/notes/bullets.md': `# Items\n\n- apples\n- pears\n- plums\n\nAfter. ${CANARY}\n`,
   'eng/notes/lookalike.md': `# Lookalike\n\nThe markers look like this:\n\n\`\`\`md\n${MARKERS.git}\n\nmine\n\n${MARKERS.linear}\n\ntheirs\n\n${MARKERS.end}\n\`\`\`\n\nAnd inline: \`${MARKERS.git}\`.\n\n> ${MARKERS.end}\n\nPlain text. ${CANARY}\n`,
   'eng/notes/front.md': `---\nowner: example\n---\n\n# Front\n\nOne paragraph. ${CANARY}\n`,
+  'eng/notes/gallery.md': `# Gallery\n\nIntro.\n\nOutro. ${CANARY}\n`,
 };
 
 const SYNC_BRANCH = 'refs/heads/mdbisync/linear';
@@ -155,7 +156,8 @@ describe('sync: conflicts through the cycle (L3)', () => {
   }
 
   const rev = (spec: string) => fixture.remote.text(['rev-parse', spec]);
-  const show = async (spec: string) => (await fixture.remote.run(['show', spec])).stdout.toString('utf8');
+  const showBytes = async (spec: string) => (await fixture.remote.run(['show', spec])).stdout;
+  const show = async (spec: string) => (await showBytes(spec)).toString('utf8');
   const exists = async (spec: string) => (await fixture.remote.run(['cat-file', '-e', spec], { okCodes: [0, 1, 128] })).code === 0;
   const ids = async () => JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, { id: string }>;
   const documentOf = async (path: string): Promise<FakeDocument> => {
@@ -187,7 +189,7 @@ describe('sync: conflicts through the cycle (L3)', () => {
   }
 
   /** A person's commit on the tracked branch: new text by path, null deletes, `rename` moves a file. */
-  async function commitGit(files: Record<string, string | null>, rename?: { from: string; to: string }) {
+  async function commitGit(files: Record<string, string | Buffer | null>, rename?: { from: string; to: string }) {
     const base = await rev('refs/heads/main');
     const index = join(fixture.root, 'scratch.index');
     const gitEnv = { GIT_INDEX_FILE: index, GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' };
@@ -606,7 +608,50 @@ describe('sync: conflicts through the cycle (L3)', () => {
     await assertBothSides(`${NOTES}/schedule.md`, PLAN);
   });
 
-  it('L3-21: a conflict in a document whose front matter changed in git keeps the new front matter', async () => {
+  it('L3-20: different images added at the same spot become a conflict whose versions keep both images working', async () => {
+    const path = `${NOTES}/gallery.md`;
+    const text = TREE[path] as string;
+    // Bytes above 0x7F, as in a real PNG signature, so an encoding slip shows.
+    const gitBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0x01, 0x80]);
+    const linearBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xfe, 0x02, 0x81]);
+    // alice pastes a picture in Linear: Linear stores it and links its upload URL.
+    const url = `${UPLOADS_HOST}/pasted/photo.png`;
+    world.linear.uploads.push({ filename: 'photo.png', contentType: 'image/png', size: linearBytes.length, assetUrl: url, bytes: linearBytes });
+    await editInLinear(path, text.replace('Intro.\n\n', `Intro.\n\n![Photo](${url})\n\n`));
+    await commitGit({ [path]: text.replace('Intro.\n\n', 'Intro.\n\n![Chart](media/chart.png)\n\n'), [`${NOTES}/media/chart.png`]: gitBytes });
+    await settle();
+
+    const linkOf = (version: string | undefined, alt: string) => {
+      const link = new RegExp(`^!\\[${alt}\\]\\(<?([^)>]+)>?\\)$`).exec(version ?? '')?.[1];
+      assert.ok(link !== undefined, version);
+      return link;
+    };
+    const result = await show(`refs/heads/main:${path}`);
+    assert.equal(detectConflicts(result).length, 1, result);
+    const [conflict] = detectConflicts(result);
+    assert.equal(conflict?.git, '![Chart](media/chart.png)');
+    // Linear's picture is a file on the tracked branch, linked relative to the document.
+    const linearLink = linkOf(conflict?.linear, 'Photo');
+    assert.ok(!linearLink.startsWith('http'), linearLink);
+    const fileOf = (link: string) => showBytes(`refs/heads/main:${posix.join(NOTES, decodeURI(link))}`);
+    assert.deepEqual(await fileOf('media/chart.png'), gitBytes);
+    assert.deepEqual(await fileOf(linearLink), linearBytes);
+
+    // In Linear both versions link uploads that serve each picture's bytes.
+    const document = await documentOf(path);
+    assert.equal(detectConflicts(document.content ?? '').length, 1, document.content);
+    const [inLinear] = detectConflicts(document.content ?? '');
+    const served = (link: string) => world.linear.uploads.find((upload) => upload.assetUrl === link)?.bytes;
+    assert.deepEqual(served(linkOf(inLinear?.git, 'Chart')), gitBytes);
+    assert.deepEqual(served(linkOf(inLinear?.linear, 'Photo')), linearBytes);
+    assert.deepEqual({ icon: document.icon, color: document.color }, MARKS.conflict);
+    // Outside the images the two sides hold the same text.
+    const unlinked = (whole: string) => whole.replace(/!\[(\w+)\]\([^)]+\)/g, '![$1]()');
+    assert.equal(unlinked(document.content ?? ''), unlinked(body(result)));
+  });
+
+  /** A same-paragraph conflict on the document whose front matter git changes in the same commit, settled. */
+  async function conflictOnFront() {
     const path = 'eng/notes/front.md';
     const text = TREE[path] as string;
     await editInLinear(path, `# Front\n\nOne paragraph, Linear. ${CANARY}\n`);
@@ -614,8 +659,23 @@ describe('sync: conflicts through the cycle (L3)', () => {
     await settle();
     const result = await show(`refs/heads/main:${path}`);
     assert.ok(result.startsWith('---\nowner: someone-else\n---\n'), result);
-    assert.equal(detectConflicts(result).length, 1);
-    assert.equal((await documentOf(path)).content, body(result));
+    assertOneConflict(result, `One paragraph, git. ${CANARY}`, `One paragraph, Linear. ${CANARY}`);
+    const document = await documentOf(path);
+    assert.equal(document.content, body(result));
+    assert.deepEqual({ icon: document.icon, color: document.color }, MARKS.conflict);
+    return path;
+  }
+
+  it('L3-21: a conflict in a document whose front matter changed in git keeps the new front matter', async () => {
+    await conflictOnFront();
+  });
+
+  it('L3-21: resolving that conflict in Linear keeps the front matter git changed', async () => {
+    const path = await conflictOnFront();
+    await editInLinear(path, `# Front\n\nOne paragraph, agreed. ${CANARY}\n`);
+    await settle();
+    await assertBothSides(path, `---\nowner: someone-else\n---\n\n# Front\n\nOne paragraph, agreed. ${CANARY}\n`);
+    assert.equal((await documentOf(path)).icon ?? null, null);
   });
 
   it('L3-22: marker lookalikes in code, quotes and inline code get no mark and are not reported as conflicts', async () => {
@@ -629,6 +689,42 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.equal(document.icon ?? null, null);
     assert.equal(comments(document).length, 0);
     await assertBothSides(path, text.replace('Plain text.', 'Plain text, Linear.').replace('The markers look like this:', 'The markers look like this, says git:'));
+  });
+
+  // The fake keeps one text per document and no editor identity, so alice and bob are told apart by
+  // when their edits arrive; edits through two real accounts are the live run of L3-23.
+  const allThree = PLAN.replace('Alpha paragraph.', 'Alpha paragraph, alice.').replace('Beta paragraph.', 'Beta paragraph, bob.').replace('Gamma paragraph.', 'Gamma paragraph, git.');
+  const bobEdits = async () => editInLinear(DOC, ((await documentOf(DOC)).content ?? '').replace('Beta paragraph.', 'Beta paragraph, bob.'));
+
+  it('L3-23: bob edits while the run merges alice and git: all three paragraphs on both sides, no conflict', async () => {
+    await editInLinear(DOC, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, alice.'));
+    await commitGit({ [DOC]: PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.') });
+    let edited = false;
+    afterCapture(() => {
+      edited = true;
+      const document = world.linear.documents.find((d) => d.content?.includes('Alpha paragraph, alice.'));
+      assert.ok(document !== undefined);
+      document.content = (document.content ?? '').replace('Beta paragraph.', 'Beta paragraph, bob.');
+      touch(document);
+    });
+    const runs = [await sync(), ...(await settle())];
+    assert.ok(edited, 'bob edited before the run captured Linear');
+    for (const run of runs) assert.deepEqual(run.report.sync?.conflicts ?? [], []);
+    await assertBothSides(DOC, allThree);
+    const document = await documentOf(DOC);
+    assert.equal(document.icon ?? null, null);
+    assert.equal(comments(document).length, 0);
+  });
+
+  it('L3-23: bob edits after the run that merged alice and git, and his edit lands too', async () => {
+    await editInLinear(DOC, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, alice.'));
+    await commitGit({ [DOC]: PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.') });
+    await sync();
+    assert.equal((await documentOf(DOC)).content, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, alice.').replace('Gamma paragraph.', 'Gamma paragraph, git.'));
+    await bobEdits();
+    const runs = await settle();
+    for (const run of runs) assert.deepEqual(run.report.sync?.conflicts ?? [], []);
+    await assertBothSides(DOC, allThree);
   });
 
   it('L3-24: many conflicts and many clean edits in one run: every clean edit syncs in that run, each conflict gets its mark', async () => {
