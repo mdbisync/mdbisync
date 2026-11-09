@@ -9,12 +9,13 @@ const REASONS: Record<SkipReason, string> = {
   'edited-in-linear': 'changed in Linear since it was read; the next run takes that change in and writes again',
   'missing-in-linear': 'not found in Linear, or in its trash; the next run takes that in',
   conflict: 'changed on both sides in a way git cannot merge; it is written when the conflict is resolved',
+  'renamed-to-unwritable': 'its file was renamed to one that is in conflict or left out; the document stays as it is until that is fixed',
 };
 
 export function renderSync(result: CycleResult): string {
   const write = result.write;
   const lines = ['## Sync', '', '### Tracked branch to Linear', ''];
-  if (write.record === null && !write.changed && write.code === undefined) {
+  if (write.complete && write.record === null && !write.changed) {
     lines.push('Linear already holds the tracked branch: nothing to write.', '');
   } else {
     const outcome =

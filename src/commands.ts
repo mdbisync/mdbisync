@@ -30,8 +30,8 @@ export const SETUP_FAILED_EXIT_CODE = 3;
 export const NO_STATE_EXIT_CODE = 4;
 /**
  * A confirmed initial sync wrote part of its work and stopped, or a sync run
- * stopped writing (rate limit, low budget) or found a state ref moved; run it
- * again with the same inputs.
+ * stopped writing (rate limit, low budget), had a write rejected, or found a
+ * state ref moved; run it again with the same inputs.
  */
 export const INCOMPLETE_EXIT_CODE = 5;
 

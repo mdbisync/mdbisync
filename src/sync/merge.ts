@@ -62,6 +62,20 @@ export interface LocalMerge {
   changes: DocumentChange[];
   /** Documents whose text, title and place stay; a file they link to may still have changed. */
   unchanged: KeepChange[];
+  /**
+   * Documents whose file was renamed to one that cannot be written yet (a
+   * conflict, or left out by a lint finding): neither renamed nor trashed.
+   * The record keeps the tip's file, and the run is not complete.
+   */
+  held: HeldRename[];
+  /** The blobs of every synchronized file of both sides, by id. */
+  texts: Map<Oid, Buffer>;
+}
+
+export interface HeldRename {
+  id: string;
+  from: string;
+  to: string;
 }
 
 /**
@@ -84,6 +98,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
 
   const changes: DocumentChange[] = [];
   const unchanged: KeepChange[] = [];
+  const held: HeldRename[] = [];
   const claimed = new Set<string>();
   const blobs = await readBlobs(git, [...linearSide.files.values(), ...resultSide.files.values()].map((file) => file.oid));
   const body = (oid: Oid) => splitFile((blobs.get(oid) as Buffer).toString('utf8')).body;
@@ -97,7 +112,15 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     if (resultSide.files.has(from)) to = from;
     else {
       const renamed = renames.get(from);
-      if (renamed !== undefined && resultSide.files.has(renamed) && !ids.has(renamed) && !claimed.has(renamed) && !conflicted.has(renamed)) to = renamed;
+      if (renamed !== undefined && !ids.has(renamed) && !claimed.has(renamed)) {
+        if (resultSide.files.has(renamed) && !conflicted.has(renamed)) to = renamed;
+        else if (conflicted.has(renamed) || resultSide.leftOutPaths.has(renamed)) {
+          // Renamed to a file that cannot be written yet: the document waits where it is.
+          claimed.add(renamed);
+          held.push({ id: entry.id, from, to: renamed });
+          continue;
+        }
+      }
     }
     if (to === undefined) {
       // A file the merge result keeps but the sync leaves out: its document stays as it was.
@@ -134,6 +157,8 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     leftOut: resultSide.leftOut,
     changes,
     unchanged: unchanged.sort((a, b) => compare(a.to, b.to)),
+    held,
+    texts: blobs,
   };
 }
 

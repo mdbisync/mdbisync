@@ -462,6 +462,120 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
+  it('a renamed project folder needs no write, and the id map follows the files', async () => {
+    const before = await documentOf('eng/notes/review.md');
+    await commit({}, [['eng/notes', 'eng/fieldnotes']]);
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.deepEqual(first.writes, []);
+    assert.equal((await ids())['eng/fieldnotes/review.md']?.id, before.id);
+    assert.equal((await ids())['eng/notes/review.md'], undefined);
+    // The next edit writes the same document; nothing is trashed or created.
+    await commit({ 'eng/fieldnotes/review.md': `# Review\n\nLater edit. ${CANARY}\n` });
+    const second = await sync();
+    assert.deepEqual(second.writes, ['UpdateDocument']);
+    assert.match(before.content ?? '', /Later edit/);
+    await assertConverged();
+  });
+
+  it('a file renamed to one that is left out keeps its document where it is; the run is not complete', async () => {
+    // Long enough that git still sees the rename after the footnote is added.
+    const long = `# Review\n\n${Array.from({ length: 12 }, (_, index) => `Finding number ${index} of the review, with its context.`).join('\n\n')}\n\n${CANARY}\n`;
+    await commit({ 'eng/notes/review.md': long });
+    assert.equal((await sync()).result.exitCode, 0);
+    const document = await documentOf('eng/notes/review.md');
+    const recorded = await show('refs/mdbisync/linear:eng/notes/review.md');
+    await commit({ 'eng/notes/review.md': null, 'eng/notes/review-notes.md': long.replace('Finding number 0', 'Finding number 0.[^1]') + '\n[^1]: A note.\n' });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.equal(document.trashed, undefined);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'renamed-to-unwritable' }]);
+    assert.equal(report.complete, false);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/review.md'), recorded);
+    assert.equal((await ids())['eng/notes/review.md']?.id, document.id);
+  });
+
+  it('a file with an image moved without a text change keeps its relative link on `linear`', async () => {
+    await commit({}, [['eng/notes/figure.md', 'eng/notes/old/figure.md']]);
+    const { result, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+  });
+
+  it('with the upload cache lost, an edited document with an image is written, not taken for a Linear edit', async () => {
+    const empty = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: '{}\n' });
+    const tree = await fixture.remote.text(['mktree'], { input: `100644 blob ${empty}\tuploads.json\n` });
+    const lost = await fixture.remote.text(['commit-tree', tree, '-p', 'refs/mdbisync/uploads', '-m', 'Cache lost'], {
+      env: { GIT_AUTHOR_NAME: 'x', GIT_AUTHOR_EMAIL: 'x@example.com', GIT_COMMITTER_NAME: 'x', GIT_COMMITTER_EMAIL: 'x@example.com' },
+    });
+    await fixture.remote.run(['update-ref', 'refs/mdbisync/uploads', lost]);
+    await commit({ 'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows, edited. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(writes, ['FileUpload', 'UpdateDocument']);
+  });
+
+  it('a write Linear rejects is listed, and the run exits to be run again', async () => {
+    world.linear.writes.reject = (operation) => operation === 'UpdateDocument';
+    await commit({ 'eng/notes/review.md': `# Review\n\nEdited. ${CANARY}\n` });
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE);
+    assert.equal(report.code, 'write-failed');
+    assert.deepEqual(report.sync?.failed.map((entry) => entry.path), ['eng/notes/review.md']);
+    // Nothing was written, so `linear` stays where it was.
+    assert.equal(report.sync?.record, null);
+  });
+
+  it('an image update Linear rejects is tried again by the next run', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    world.linear.writes.reject = (operation) => operation === 'UpdateDocument';
+    await commit({
+      'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1'),
+      'eng/notes/review.md': `# Review\n\nEdited too. ${CANARY}\n`,
+    });
+    const first = await sync();
+    assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE);
+    assert.deepEqual(uploadUrls(figure.content), [before]);
+    delete world.linear.writes.reject;
+    const second = await sync();
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.notDeepEqual(uploadUrls(figure.content), [before]);
+    assert.equal(second.report.complete, true);
+    await assertIdempotent();
+  });
+
+  it('a document moved to another project in Linear since the capture is not moved or trashed by git', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    document.projectId = 'project-archive';
+    touch(document);
+    await commit({ 'eng/notes/review.md': null });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.equal(document.trashed, undefined);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'edited-in-linear' }]);
+  });
+
+  it('an image whose name is percent-encoded in its link is found when its bytes change', async () => {
+    await commit({
+      'eng/media/part#1.png': Buffer.from('part bytes').toString('latin1'),
+      'eng/notes/part.md': `# Part\n\n![Part](../media/part%231.png)\n\n${CANARY}\n`,
+    });
+    assert.equal((await sync()).result.exitCode, 0);
+    const part = await documentOf('eng/notes/part.md');
+    const [before] = uploadUrls(part.content);
+    assert.ok(before !== undefined, 'the image was not uploaded');
+    await commit({ 'eng/media/part#1.png': Buffer.from('new part bytes').toString('latin1') });
+    const { result, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['FileUpload', 'UpdateDocument']);
+    assert.notDeepEqual(uploadUrls(part.content), [before]);
+  });
+
   /** What a capture does for an edit in Linear: the document's new text, committed onto `linear`. */
   async function captured(path: string, text: string) {
     const document = await documentOf(path);
@@ -513,6 +627,8 @@ describe('sync: the tracked branch to Linear', () => {
     assert.deepEqual(writes, []);
     assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'missing-in-linear' }]);
     assert.match(summary, /eng\/notes\/review\.md/);
+    assert.doesNotMatch(summary, /nothing to write/);
+    assert.equal(report.complete, false);
   });
 
   it('a state ref that moves under the run makes it record nothing and exit to be run again', async () => {
