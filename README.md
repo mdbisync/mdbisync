@@ -29,13 +29,14 @@ Edit in Linear or in git, and both stay in sync.
 - **Short-lived tokens.** Each run gets its own Linear token and revokes it at
   the end. No personal API key.
 - **Quality gates before any push.** Changes from Linear pass your
-  repository's security and privacy quality gates before anything is pushed.
-  A rejected change gets a red mark in Linear.
+  repository's security and privacy quality gates, the pre-commit hooks you
+  mark `alias: security`, before anything is pushed. A rejected change gets a
+  red mark in Linear.
 - **The same checks as everyone else.** Linear's changes reach `main` through
   a sync pull request, with the same checks as the pull requests of people and
   agents.
 - **No lost edits.** `main` flows back to Linear through a three-way merge in
-  the runner, and a document is written only if nobody touched it meanwhile.
+  the runner, so edits made on both sides are merged, not replaced.
 
 ## Setup
 
@@ -86,13 +87,16 @@ GitHub → Settings → Developer settings → GitHub Apps → New
 
 | Setting | Value |
 | --- | --- |
+| GitHub App name | any |
+| Homepage URL | any (required by the form) |
 | Webhook | Off |
 | Contents | Read and write |
 | Pull requests | Read and write |
 | Workflows | Read and write |
 | Checks | Read-only |
 | Commit statuses | Read-only |
-| Install on | Only select repositories → your docs repository |
+
+Then install the App: Only select repositories → your docs repository.
 
 In your docs repository: Settings → Secrets and variables → Actions
 
@@ -104,20 +108,29 @@ In your docs repository: Settings → Secrets and variables → Actions
 Then store the `.pem` file in your password manager or delete it. Don't leave
 a copy lying around.
 
-In the repository settings, turn on **Allow merge commits**.
-
 </details>
 
 ### 3. Run a one-time initial sync
 
-Copy [`examples/mdbisync-initial-sync.yml`](examples/mdbisync-initial-sync.yml)
-to `.github/workflows/` and run it by hand from the Actions tab. The first run
-is a dry run that lists what would change; run it again with `confirm` to
-write.
+First prepare the repository:
+
+- map a folder to Linear: `linear-team` and `linear-project` in the front
+  matter of its `README.md` ([folder mapping](docs/usage.md#folder-mapping));
+- add the `linear-format` hook to `.pre-commit-config.yaml`, pinned to a
+  release ([pins](docs/usage.md#pre-release-builds-and-pins)), and mark your
+  security hooks `alias: security`;
+- in the repository settings, turn on **Allow merge commits**.
+
+Then copy [`examples/mdbisync-initial-sync.yml`](examples/mdbisync-initial-sync.yml)
+to `.github/workflows/` and run it by hand from the Actions tab, with a
+direction: `git-to-linear` makes Linear equal to git, `linear-to-git` opens a
+pull request that makes git equal to Linear. The first run is a dry run that
+lists what would change; run it again with `confirm` to write.
 
 ### 4. Start ongoing sync
 
-Once the initial sync is done, copy [`examples/mdbisync.yml`](examples/mdbisync.yml)
+Once the initial sync is done (for `linear-to-git`, once its pull request is
+merged), copy [`examples/mdbisync.yml`](examples/mdbisync.yml)
 to `.github/workflows/`. It runs on every push to `main` and every five
 minutes, in both directions.
 
