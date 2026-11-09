@@ -453,8 +453,19 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     const pullRequestsBefore = world === null ? 0 : (await world.rest.pullRequests(`t/${ctx.names.runId}/`)).length;
     const proxy = ctx.proxy;
     const mutationsBefore = proxy?.counts().mutations ?? 0;
+    const runsBefore = ctx.engine.results.length;
     const { STEP_ACTIONS } = await import('./steps.ts');
     await (STEP_ACTIONS['run.sync'] as (c: RunContext, a: Record<string, unknown>) => Promise<void>)(ctx, {});
+    const run = ctx.engine.results.length === runsBefore + 1 ? ctx.engine.results.at(-1) : undefined;
+    if (run === undefined) return bad('I6', 'idempotence was not established: no result for the no-change sync run');
+    if (run.exitCode !== 0 || run.signal !== null || run.timedOut || run.notImplemented) {
+      return bad('I6', `idempotence was not established: the no-change sync run did not succeed (exit ${String(run.exitCode)}, signal ${String(run.signal)}, timed out ${run.timedOut}, not implemented ${run.notImplemented})`);
+    }
+    const report = run.report;
+    const capture = report?.['capture'] as Record<string, unknown> | null | undefined;
+    if (report?.['operation'] !== 'sync' || report['ok'] !== true || report['complete'] !== true || capture?.['ok'] !== true) {
+      return bad('I6', `idempotence was not established: the no-change sync run lacks a successful completed report (ok ${String(report?.['ok'])}, complete ${String(report?.['complete'])}, capture.ok ${String(capture?.['ok'])}, code ${String(report?.['code'])})`);
+    }
     const after = await snapshotRefs(ctx);
     const moved = Object.keys({ ...before, ...after }).filter((ref) => before[ref] !== after[ref]);
     const writes = (proxy?.counts().mutations ?? 0) - mutationsBefore;

@@ -1029,6 +1029,50 @@ describe('linear executors', () => {
   });
 });
 
+describe('I6 requires a completed no-change sync', () => {
+  const complete = { operation: 'sync', ok: true, complete: true, capture: { ok: true }, code: null, changed: false };
+  const cases = [
+    { name: 'a complete quiet run', report: complete, exitCode: 0, pass: true },
+    { name: 'a partial capture with a successful exit', report: { ...complete, complete: false, capture: { ok: false }, code: 'capture-failed' }, exitCode: 0, pass: false, reason: /capture.ok false.*capture-failed/ },
+    { name: 'a stopped run with a successful exit', report: { ...complete, complete: false, code: 'stopped' }, exitCode: 0, pass: false, reason: /complete false.*stopped/ },
+    { name: 'an unsuccessful run despite a complete report', report: complete, exitCode: 1, pass: false, reason: /exit 1/ },
+    { name: 'a failed report despite a successful exit', report: { ...complete, ok: false }, exitCode: 0, pass: false, reason: /ok false/ },
+    { name: 'a missing report', report: null, exitCode: 0, pass: false, reason: /lacks a successful completed report/ },
+    { name: 'a report without completion evidence', report: { operation: 'sync', ok: true }, exitCode: 0, pass: false, reason: /complete undefined/ },
+    { name: 'a signalled run', report: complete, signal: true, exitCode: 0, pass: false, reason: /signal SIGKILL/ },
+    { name: 'a complete run that writes', report: { ...complete, changed: true }, exitCode: 0, writes: 1, pass: false, reason: /wrote 1 mutations/ },
+  ];
+  for (const fixture of cases) it(fixture.name, async () => {
+    const { ctx } = await fakeRun();
+    const { INVARIANT_CHECKS, snapshotRefs } = await import('./checks.ts');
+    mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
+    ctx.observations.set('refHistory', [await snapshotRefs(ctx)]);
+    mkdirSync(await ctx.engineClone(), { recursive: true });
+    const driver = join(ctx.runDir, 'fixed-sync.mjs');
+    writeFileSync(driver, `
+      import { writeFileSync } from 'node:fs';
+      const report = ${JSON.stringify(fixture.report)};
+      if (report !== null) writeFileSync(process.env.MDBISYNC_REPORT_FILE, JSON.stringify(report));
+      ${fixture.signal === true ? "process.kill(process.pid, 'SIGKILL');" : `process.exitCode = ${fixture.exitCode};`}
+    `);
+    let counts = 0;
+    ctx.proxy!.counts = () => ({ total: 0, queries: 0, mutations: counts++ === 0 ? 0 : (fixture.writes ?? 0), injected: 0 });
+    // A prior successful run cannot stand in for the probe's own result.
+    ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: complete });
+    const previous = process.env['MDBISYNC_ENGINE'];
+    process.env['MDBISYNC_ENGINE'] = driver;
+    try {
+      const outcome = await INVARIANT_CHECKS.I6(ctx, () => assert.fail('I6 does not need document bodies'));
+      assert.equal(outcome.ok, fixture.pass, outcome.detail);
+      if (fixture.reason !== undefined) assert.match(outcome.detail ?? '', fixture.reason);
+      assert.equal(ctx.engine.results.length, 2);
+    } finally {
+      if (previous === undefined) delete process.env['MDBISYNC_ENGINE'];
+      else process.env['MDBISYNC_ENGINE'] = previous;
+    }
+  });
+});
+
 describe('subjects', () => {
   it('read the engine report by path and fail as a product error when it lacks a value', async () => {
     const { ctx } = await fakeRun();
