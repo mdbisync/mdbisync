@@ -2,6 +2,7 @@
 // and every annotated team and project exists. The resolved ids are what
 // the run then uses to list and place documents.
 
+import { setTimeout } from 'node:timers/promises';
 import { type LinearClient, LinearGraphQLError, LinearHttpError, LinearTokenError } from '../linear/index.ts';
 import { type Zone } from '../mapping/index.ts';
 import { type CheckResult, failed, notChecked, passed } from './report.ts';
@@ -29,6 +30,9 @@ export interface ResolvedTargets {
 
 /** Half of Linear's largest page; see `resolveTargets`. */
 const TEAM_REFS_PER_REQUEST = 125;
+
+/** The wait before asking again a token that saw no team at all. */
+export const TEAMS_RETRY_DELAY_MS = 3000;
 
 export function projectKey(team: string, project: string): string {
   return `${team}\0${project}`;
@@ -60,12 +64,16 @@ export function linearCredentialFailure(detail: string): CheckResult {
  * Looks up every annotated team (by key or name) and project (by name, in
  * its team): one request, plus one per further 125 team references. A
  * name that matches nothing, or more than one team or project, fails the
- * check and is named. A credential error is returned as a failed
- * `linear-credentials` item.
+ * check and is named. When the token sees no team at all, the lookup is
+ * asked once more after `retryDelayMs`; when it still sees none, the check
+ * fails with `linear-teams-not-visible` rather than naming every team as
+ * missing. A credential error is returned as a failed `linear-credentials`
+ * item.
  */
 export async function resolveTargets(
   client: LinearClient,
   zones: Iterable<Zone>,
+  retryDelayMs = TEAMS_RETRY_DELAY_MS,
 ): Promise<{ result: CheckResult; credentials?: CheckResult; targets?: ResolvedTargets }> {
   const zoneList = [...zones];
   const teamRefs = new Set<string>();
@@ -76,26 +84,33 @@ export async function resolveTargets(
   }
   if (teamRefs.size === 0) return { result: notChecked('annotation-targets', 'no annotated folders') };
 
-  let teamNodes: LinearTeam[];
-  let projectNodes: Array<LinearProject & { teams: { nodes: Array<{ id: string }> } }>;
-  try {
-    // A team matches a reference by key or by name, so a batch of references
-    // matches at most twice as many teams: within one page when batches are
-    // half a page. The first request also looks up the projects, so a usual
-    // run resolves its targets in one request.
-    const refs = [...teamRefs];
-    const names = [...new Set([...projectRefs.values()].map((ref) => ref.project))];
-    teamNodes = [];
-    projectNodes = [];
+  type ProjectNode = LinearProject & { teams: { nodes: Array<{ id: string }> } };
+  const refs = [...teamRefs];
+  const names = [...new Set([...projectRefs.values()].map((ref) => ref.project))];
+  // A team matches a reference by key or by name, so a batch of references
+  // matches at most twice as many teams: within one page when batches are
+  // half a page. The first request also looks up the projects, so a usual
+  // run resolves its targets in one request, and asks whether the token
+  // sees any team at all.
+  const lookUp = async () => {
+    const teamNodes: LinearTeam[] = [];
+    let projectNodes: ProjectNode[] = [];
+    let seesTeams: boolean | undefined;
     for (let start = 0; start < refs.length; start += TEAM_REFS_PER_REQUEST) {
       const batch = refs.slice(start, start + TEAM_REFS_PER_REQUEST);
-      const withProjects = start === 0 && names.length > 0;
-      const data = await client.request<{ teams: { nodes: LinearTeam[] }; projects?: { nodes: typeof projectNodes; pageInfo: { hasNextPage: boolean } } }>(
+      const first = start === 0;
+      const withProjects = first && names.length > 0;
+      const data = await client.request<{
+        teams: { nodes: LinearTeam[] };
+        projects?: { nodes: ProjectNode[]; pageInfo: { hasNextPage: boolean } };
+        visible?: { nodes: Array<{ id: string }> };
+      }>(
         'SetupTargets',
         'query',
         `query SetupTargets($refs: [String!]!, $first: Int!${withProjects ? ', $names: [String!]!' : ''}) {
           teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
           ${withProjects ? 'projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: 50) { nodes { id } } } pageInfo { hasNextPage } }' : ''}
+          ${first ? 'visible: teams(first: 1) { nodes { id } }' : ''}
         }`,
         withProjects ? { refs: batch, first: batch.length * 2, names } : { refs: batch, first: batch.length * 2 },
       );
@@ -104,7 +119,33 @@ export async function resolveTargets(
         if (data.projects.pageInfo.hasNextPage) throw new Error('more than 250 Linear projects share the annotated names');
         projectNodes = data.projects.nodes;
       }
+      if (data.visible !== undefined) seesTeams = data.visible.nodes.length > 0;
     }
+    return { teamNodes, projectNodes, seesTeams };
+  };
+
+  let teamNodes: LinearTeam[];
+  let projectNodes: ProjectNode[];
+  try {
+    let found = await lookUp();
+    // A token that sees no team at all: Linear has answered a run's token so
+    // once while the runs before and after it saw every team. Wait a moment
+    // and ask once more before stopping the run. A token that sees teams but
+    // not the annotated ones is a naming problem, asked only once.
+    if (found.seesTeams === false) {
+      await setTimeout(retryDelayMs);
+      found = await lookUp();
+      if (found.seesTeams === false) {
+        return {
+          result: failed(
+            'annotation-targets',
+            'linear-teams-not-visible',
+            `the Linear app saw no team in two lookups, so none of the annotated teams (${[...refs].sort().map((ref) => `"${ref}"`).join(', ')}) can be found: check the app's team access in Linear`,
+          ),
+        };
+      }
+    }
+    ({ teamNodes, projectNodes } = found);
   } catch (error) {
     if (!isCredentialError(error)) throw error;
     return {

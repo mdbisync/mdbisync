@@ -139,6 +139,12 @@ export interface FakeWorld {
     comments: Map<string, { documentContentId: string; body: string }>;
     /** Projects removed with `projectDelete`; their documents stay, archived. */
     deletedProjects?: string[];
+    /**
+     * How many of the next team lookups the token sees no team in, as one
+     * run against the live service did while every team existed; `Infinity`
+     * when the app has no team access at all.
+     */
+    teamsHidden?: number;
   };
   /** `METHOD url` of every request. */
   requests: string[];
@@ -367,14 +373,19 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
   world.linear.beforeQuery?.(operationName, variables);
   if (operationName === 'SetupTargets') {
     const refs = variables.refs as string[];
-    const teams = { nodes: world.linear.teams.filter((team) => refs.includes(team.key) || refs.includes(team.name)) };
+    const hidden = (world.linear.teamsHidden ?? 0) > 0;
+    if (hidden) world.linear.teamsHidden = (world.linear.teamsHidden as number) - 1;
+    const seen = hidden ? [] : world.linear.teams;
+    const teams = { nodes: seen.filter((team) => refs.includes(team.key) || refs.includes(team.name)) };
+    // `visible: teams(first: 1)` asks whether the token sees any team.
+    const visible = /\bvisible:\s*teams\(/.test(query) ? { visible: { nodes: seen.slice(0, 1).map((team) => ({ id: team.id })) } } : {};
     // The projects are asked for only when the query names them.
-    if (!Array.isArray(variables.names)) return json(200, { data: { teams } });
+    if (!Array.isArray(variables.names)) return json(200, { data: { teams, ...visible } });
     const names = variables.names as string[];
-    const nodes = world.linear.projects
+    const nodes = (hidden ? [] : world.linear.projects)
       .filter((project) => names.includes(project.name))
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
-    return json(200, { data: { teams, projects: { nodes, pageInfo: { hasNextPage: false } } } });
+    return json(200, { data: { teams, projects: { nodes, pageInfo: { hasNextPage: false } }, ...visible } });
   }
   if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });

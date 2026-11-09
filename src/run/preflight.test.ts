@@ -292,5 +292,47 @@ describe('preflight', () => {
       assert.equal(report.changed, false);
       assert.match(result.stdout, /nothing to write/);
     });
+
+    /** The fake world with every Linear query's operation name recorded. */
+    const counted = (change: (world: FakeWorld) => void) => {
+      const world = fakeWorld();
+      change(world);
+      const operations: string[] = [];
+      world.linear.beforeQuery = (operation) => operations.push(operation);
+      return { world, operations };
+    };
+
+    it('a token that once sees no team is asked again, and the sync goes on when it then sees them', async () => {
+      const { world, operations } = counted((world) => (world.linear.teamsHidden = 1));
+      const { result, report } = await run('sync', world);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(report.ok, true);
+      assert.match(result.stdout, /nothing to write/);
+      assert.equal(operations.filter((operation) => operation === 'SetupTargets').length, 2);
+    });
+
+    it('a token that sees no team in two lookups stops the sync and says the app sees no team, not that every team is missing', async () => {
+      const { world, operations } = counted((world) => (world.linear.teamsHidden = Infinity));
+      const { result, report } = await run('sync', world);
+      assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE);
+      assert.equal(report.code, 'linear-teams-not-visible');
+      assert.equal(operations.filter((operation) => operation === 'SetupTargets').length, 2);
+      const detail = report.setupChecks.find((check) => check.name === 'annotation-targets')?.detail ?? '';
+      assert.match(detail, /the Linear app saw no team in two lookups/);
+      assert.match(detail, /"Docs", "ENG"/);
+      assert.match(detail, /check the app's team access in Linear/);
+      assert.doesNotMatch(detail, /not found in Linear/);
+      assert.match(result.stderr, /sync: stopped before any write \(linear-teams-not-visible\): the Linear app saw no team/);
+      assert.equal(world.minted, world.revoked, 'a minted token was not revoked');
+    });
+
+    it('when the token sees teams but none of the annotated ones, the teams are named as not found', async () => {
+      const { world, operations } = counted((world) => (world.linear.teams = [{ id: 'team-other', key: 'OPS', name: 'Operations' }]));
+      const { result, report } = await run('sync', world);
+      assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE);
+      assert.equal(report.code, 'annotation-target-not-found');
+      assert.equal(operations.filter((operation) => operation === 'SetupTargets').length, 1, 'a token that sees teams is asked once');
+      assert.match(result.stderr, /not found in Linear: team "Docs", team "ENG"/);
+    });
   });
 });
