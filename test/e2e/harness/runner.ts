@@ -354,6 +354,38 @@ export async function retainPendingOutput(ctx: Pick<RunContext, 'engine' | 'obse
   }
 }
 
+/**
+ * Deletes a run's refs on the sandbox and closes its pull requests, and
+ * reports a problem unless both then read back gone: no run ref is left and
+ * no run pull request reads open. Deleting a head branch makes GitHub close
+ * its pull request itself; that close counts. Safe to repeat.
+ */
+export async function removeRunRefsAndPullRequests(
+  runId: string,
+  sandbox: Pick<Sandbox, 'runRefs' | 'deleteRunRefs'> | undefined,
+  rest: Pick<SandboxRest, 'closeOpenPullRequests'> | undefined,
+): Promise<string[]> {
+  const problems: string[] = [];
+  if (sandbox !== undefined) {
+    try {
+      const ofRun = async () => (await sandbox.runRefs()).filter((ref) => ref.runId === runId).map((ref) => ref.ref);
+      await sandbox.deleteRunRefs(runId, await ofRun());
+      const left = await ofRun();
+      if (left.length > 0) problems.push(`refs: still on the sandbox: ${left.join(', ')}`);
+    } catch (error) {
+      problems.push(`refs: ${(error as Error).message}`);
+    }
+  }
+  if (rest !== undefined) {
+    try {
+      await rest.closeOpenPullRequests(`t/${runId}/`);
+    } catch (error) {
+      problems.push(`pull requests: ${(error as Error).message}`);
+    }
+  }
+  return problems;
+}
+
 async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string }> {
   const problems: string[] = [];
   const attempt = async (what: string, action: () => Promise<unknown>) => {
@@ -377,18 +409,9 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
       for (const id of await recordedIds(ctx)) created.add(id);
     });
   }
-  const sandbox = ctx.sandbox;
-  if (sandbox !== undefined) {
-    await attempt('refs', async () => {
-      const refs = (await sandbox.runRefs()).filter((ref) => ref.runId === ctx.names.runId).map((ref) => ref.ref);
-      await sandbox.deleteRunRefs(ctx.names.runId, refs);
-    });
-  }
   const live = ctx.live;
+  problems.push(...(await removeRunRefsAndPullRequests(ctx.names.runId, ctx.sandbox, live?.rest)));
   if (live !== null) {
-    await attempt('pull requests', async () => {
-      for (const pr of await live.rest.pullRequests(`t/${ctx.names.runId}/`, 'open')) await live.rest.closePullRequest(pr.number);
-    });
     for (const project of live.projects.values()) {
       await attempt(`project ${project.name}`, () => live.world.deleteProject(project, ctx.names.runId));
     }
