@@ -50,7 +50,7 @@ export async function runOperation(
     options,
     operation === 'sync'
       ? async (context) => {
-          sync = await runSyncCycle(context, { config: inputs.state, transforms: () => [uploadsTransform({ config: inputs.state }), documentLinks()] });
+          sync = await runSyncCycle(context, { config: inputs.state, documentCap: inputs.documentCap, transforms: () => [uploadsTransform({ config: inputs.state }), documentLinks()] });
           workSummary = renderSync(sync);
         }
       : gitToLinear === undefined
@@ -59,12 +59,12 @@ export async function runOperation(
           if (gitToLinear.confirm) {
             // Uploads rewrite links to files that are not Markdown; document links, links to synchronized documents.
             const transforms = [uploadsTransform({ config: inputs.state }), documentLinks()];
-            const run = await confirmInitialSync(context, { config: inputs.state, transforms });
+            const run = await confirmInitialSync(context, { config: inputs.state, documentCap: inputs.documentCap, transforms });
             plan = toPlanReport(run.plan, gitToLinear.direction, true);
             confirmed = run.result;
             workSummary = renderConfirmed(run.plan, run.result);
           } else {
-            const planned = await planFromRepository(context);
+            const planned = await planFromRepository(context, inputs.documentCap);
             plan = toPlanReport(planned, gitToLinear.direction, false);
             workSummary = renderDryRun(planned);
           }

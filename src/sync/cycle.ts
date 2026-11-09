@@ -13,6 +13,7 @@ import { type StateConfig } from '../state/index.ts';
 import { type WriteResult, writeTrackedToLinear } from './write.ts';
 
 export interface CycleOptions {
+  documentCap?: number | undefined;
   config: StateConfig;
   /** Makes the body transforms (uploads, links); see `WriteOptions.transforms`. */
   transforms?: () => readonly BodyTransform[];
@@ -29,6 +30,6 @@ export interface CycleResult {
 export async function runSyncCycle(context: RunContext, options: CycleOptions): Promise<CycleResult> {
   const state = { ...context.fetched.state };
   // Steps 1 and 2 are not built yet: the state stays as fetched.
-  const write = await writeTrackedToLinear(context, { config: options.config, state, ...(options.transforms ? { transforms: options.transforms } : {}) });
+  const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, state, ...(options.transforms ? { transforms: options.transforms } : {}) });
   return { complete: write.complete, changed: write.changed, write };
 }

@@ -1,6 +1,7 @@
 // The sync run's job summary: paths, rule names and reasons only, never
 // document content.
 
+import { renderCapacity } from '../run/capacity.ts';
 import { describeStop } from '../linear/index.ts';
 import { type CycleResult } from './cycle.ts';
 import { type SkipReason } from './write.ts';
@@ -51,7 +52,7 @@ export function renderSync(result: CycleResult): string {
   table('Renamed or moved', ['From', 'To'], write.relocated.map((entry) => [entry.from, entry.to]));
   table('Moved to trash', ['Path'], write.trashed.map((path) => [path]));
   table('Left out', ['Path', 'Rules'], [...write.leftOut.map((entry) => [entry.path, entry.rules.join(', ')]), ...write.leftOutAtWrite.map((entry) => [entry.path, entry.rule])]);
-  return lines.join('\n');
+  return lines.join('\n') + renderCapacity(write.capacity ?? []);
 }
 
 function count(n: number, noun: string): string {
