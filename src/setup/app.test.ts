@@ -95,7 +95,7 @@ describe('fix links', () => {
   });
 
   it('resolve every quickstart link in the docs', () => {
-    for (const path of ['README.md', 'docs/usage.md', QUICKSTART_PATH]) {
+    for (const path of ['README.md', 'docs/usage.md', 'docs/troubleshooting.md', QUICKSTART_PATH]) {
       for (const match of read(path).matchAll(/\]\((?:docs\/)?quickstart\.md#([^)]+)\)/g)) {
         assert.ok(quickstart.has(match[1] as string), `${path} links #${match[1]}, which ${QUICKSTART_PATH} does not have`);
       }
