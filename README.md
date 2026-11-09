@@ -193,11 +193,16 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   merge commit; the branch is never force-pushed. The branch moves only when
   Linear brings something new, so the checks on its head are not restarted by
   every run.
-- A run reads the checks on the head itself (check runs and commit
-  statuses) and never waits for them. When every check has finished and
-  passed, it merges with a merge commit; while one still runs, a later run
-  merges. A run that moved the branch or opened the pull request leaves the
-  merge to a later run, after the checks have started.
+- After opening the pull request or moving its branch, a run waits up to
+  `merge-grace-seconds` (default `60`, range `0`–`120`) for the head's check
+  runs and commit statuses. When every check has finished and passed, it
+  merges with a merge commit in the same run. With no checks, it waits for
+  15 seconds of continuously absent checks to allow CI to register first.
+  Checks still running at the deadline leave the merge to a later run.
+  Set `merge-grace-seconds: 0` to always defer a new head's merge to a later
+  run. The CLI uses `MDBISYNC_MERGE_GRACE_SECONDS`. Later runs read an
+  unchanged head's checks once, without waiting. A moved head cannot merge
+  using the old head's checks.
 - A check that fails is a setup error: the run summary names it, the run
   exits with code 3, and the pull request stays open until the repository's
   checks pass Linear's form. Tracked-branch changes are not written to Linear

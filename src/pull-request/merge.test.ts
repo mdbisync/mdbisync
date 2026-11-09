@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type FakeCheck, GITHUB_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { PullRequestError } from './github.ts';
-import { mergePullRequest, readChecks } from './merge.ts';
+import { mergePullRequest, readChecks, waitForChecks } from './merge.ts';
 
 const SHA = 'a'.repeat(40);
 
@@ -14,21 +14,21 @@ function target(checks: FakeCheck[]) {
 
 describe('readChecks', () => {
   it('passes a commit without checks, and one whose checks succeeded, were neutral or skipped', async () => {
-    assert.deepEqual(await readChecks(target([]).repo, SHA), { state: 'passed', failed: [], pending: [] });
+    assert.deepEqual(await readChecks(target([]).repo, SHA), { state: 'passed', failed: [], pending: [], hasChecks: false });
     const checks: FakeCheck[] = [
       { name: 'a', status: 'completed', conclusion: 'success' },
       { name: 'b', status: 'completed', conclusion: 'neutral' },
       { name: 'c', status: 'completed', conclusion: 'skipped' },
       { name: 'd', status: 'completed', conclusion: 'success', commitStatus: true },
     ];
-    assert.deepEqual(await readChecks(target(checks).repo, SHA), { state: 'passed', failed: [], pending: [] });
+    assert.deepEqual(await readChecks(target(checks).repo, SHA), { state: 'passed', failed: [], pending: [], hasChecks: true });
   });
 
   it('reads every page of check runs, so a failure past the first hundred is seen', async () => {
     const checks: FakeCheck[] = Array.from({ length: 150 }, (_, i) => ({ name: `check-${i}`, status: 'completed', conclusion: 'success' }));
     checks.push({ name: 'late', status: 'completed', conclusion: 'timed_out' });
     const { world, repo } = target(checks);
-    assert.deepEqual(await readChecks(repo, SHA), { state: 'failed', failed: ['late'], pending: [] });
+    assert.deepEqual(await readChecks(repo, SHA), { hasChecks: true, state: 'failed', failed: ['late'], pending: [] });
     assert.equal(world.requests.filter((request) => request.includes('/check-runs')).length, 2);
   });
 
@@ -37,9 +37,9 @@ describe('readChecks', () => {
       { name: 'queued', status: 'queued' },
       { name: 'ext', status: 'pending', commitStatus: true },
     ];
-    assert.deepEqual(await readChecks(target(pending).repo, SHA), { state: 'pending', failed: [], pending: ['ext', 'queued'] });
+    assert.deepEqual(await readChecks(target(pending).repo, SHA), { hasChecks: true, state: 'pending', failed: [], pending: ['ext', 'queued'] });
     const failed: FakeCheck[] = [...pending, { name: 'cancelled', status: 'completed', conclusion: 'cancelled' }];
-    assert.deepEqual(await readChecks(target(failed).repo, SHA), { state: 'failed', failed: ['cancelled'], pending: ['ext', 'queued'] });
+    assert.deepEqual(await readChecks(target(failed).repo, SHA), { hasChecks: true, state: 'failed', failed: ['cancelled'], pending: ['ext', 'queued'] });
   });
 
   it('never reads unlisted commit statuses or check runs as passed', async () => {
@@ -55,13 +55,13 @@ describe('readChecks', () => {
       const body = (await response.json()) as { statuses: unknown[]; total_count: number };
       return new Response(JSON.stringify({ ...body, statuses: body.statuses.slice(0, 100) }), { status: 200 });
     };
-    assert.deepEqual(await readChecks({ ...repo, fetch: truncated }, SHA), { state: 'pending', failed: [], pending: ['1 more commit statuses'] });
+    assert.deepEqual(await readChecks({ ...repo, fetch: truncated }, SHA), { hasChecks: true, state: 'pending', failed: [], pending: ['1 more commit statuses'] });
 
     const empty: typeof fetch = async (input) =>
       String(input).includes('/check-runs')
         ? new Response(JSON.stringify({ total_count: 3, check_runs: [] }), { status: 200 })
         : new Response(JSON.stringify({ total_count: 0, statuses: [] }), { status: 200 });
-    assert.deepEqual(await readChecks({ ...repo, fetch: empty }, SHA), { state: 'pending', failed: [], pending: ['3 more check runs'] });
+    assert.deepEqual(await readChecks({ ...repo, fetch: empty }, SHA), { hasChecks: true, state: 'pending', failed: [], pending: ['3 more check runs'] });
   });
 
   it('throws a pull request error, without a body, when GitHub refuses', async () => {
@@ -111,5 +111,76 @@ describe('mergePullRequest', () => {
     world.github.pullRequests.push({ number: 1, title: 't', body: 'b', head: 'sync', base: 'main', state: 'open', merged: false });
     world.github.reset = () => 'before';
     await assert.rejects(mergePullRequest(repo, 1, SHA), (error: unknown) => error instanceof PullRequestError && error.status === undefined && /did not answer/.test(error.message));
+  });
+});
+
+describe('waitForChecks', () => {
+  const passing: FakeCheck = { name: 'ci', status: 'completed', conclusion: 'success' };
+  async function scenario(at: (ms: number) => FakeCheck[], seconds = 60) {
+    const { world, repo } = target([]);
+    let elapsed = 0;
+    const clock = {
+      now: () => elapsed,
+      sleep: async (ms: number) => { elapsed += ms; world.github.checks?.set(SHA, at(elapsed)); },
+    };
+    world.github.checks?.set(SHA, at(0));
+    const result = await waitForChecks(repo, SHA, seconds, clock);
+    return { result, elapsed, world };
+  }
+  it('merges eligibility as soon as a registered check passes within the grace', async () => {
+    const { result, elapsed } = await scenario(ms => ms < 10_000 ? [{ name: 'ci', status: 'in_progress' }] : [passing]);
+    assert.equal(result.state, 'passed');
+    assert.equal(elapsed, 10_000);
+  });
+  it('bounds a pending check and its request count, including when the grace is shorter than a poll', async () => {
+    for (const seconds of [1, 60, 120]) {
+      const { result, elapsed, world } = await scenario(() => [{ name: 'ci', status: 'queued' }], seconds);
+      assert.equal(result.state, 'pending');
+      assert.equal(elapsed, seconds * 1000);
+      assert.equal(world.requests.length, Math.ceil(seconds / 5) * 2);
+    }
+  });
+  it('reports a failure immediately even if another check runs', async () => {
+    const { result, elapsed } = await scenario(() => [{ name: 'ci', status: 'completed', conclusion: 'failure' }]);
+    assert.equal(result.state, 'failed');
+    assert.equal(elapsed, 0);
+  });
+  it('requires fifteen seconds of continuously absent checks', async () => {
+    const { result, elapsed } = await scenario(() => []);
+    assert.equal(result.state, 'passed');
+    assert.equal(elapsed, 15_000);
+    assert.equal((await scenario(() => [], 10)).result.state, 'pending');
+    const delayed = await scenario(ms => ms >= 10_000 ? [{ name: 'ci', status: 'queued' }] : []);
+    assert.equal(delayed.result.state, 'pending');
+    assert.equal(delayed.elapsed, 60_000);
+    const reset = await scenario(ms => ms === 5000 ? [{ name: 'ci', status: 'queued' }] : []);
+    assert.equal(reset.elapsed, 25_000);
+  });
+  it('aborts an unfinished HTTP observation at the grace deadline', async () => {
+    const { repo } = target([]);
+    let aborted = false;
+    const fetcher: typeof fetch = async (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => { aborted = true; reject(init.signal?.reason); }, { once: true });
+    });
+    // AbortSignal's own timer is unref'ed; keep this isolated test alive.
+    const keepAlive = setTimeout(() => {}, 1000);
+    try {
+      const result = await waitForChecks({ ...repo, fetch: fetcher }, SHA, 0.02);
+      assert.equal(aborted, true);
+      assert.equal(result.state, 'pending');
+    } finally {
+      clearTimeout(keepAlive);
+    }
+  });
+  it('does not accept a green response that arrives past the deadline', async () => {
+    const { repo } = target([passing]);
+    let elapsed = 0;
+    const fetcher: typeof fetch = async (input, init) => {
+      const response = await (repo.fetch as typeof fetch)(input, init);
+      elapsed += 40_000;
+      return response;
+    };
+    const result = await waitForChecks({ ...repo, fetch: fetcher }, SHA, 60, { now: () => elapsed, sleep: async () => {} });
+    assert.equal(result.state, 'pending');
   });
 });

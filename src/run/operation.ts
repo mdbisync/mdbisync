@@ -91,6 +91,7 @@ export async function runOperation(
     sync = await runSyncCycle(context, {
       config: inputs.state,
       documentCap: inputs.documentCap,
+      mergeGraceSeconds: inputs.mergeGraceSeconds,
       github: { ...inputs.github, ...(options.fetch ? { fetch: options.fetch } : {}) },
       transforms,
       ...(options.fetch ? { fetch: options.fetch } : {}),

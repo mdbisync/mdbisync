@@ -7,10 +7,9 @@
 // left on the branch is carried on. It moves only when `linear` brings the tracked branch
 // something the branch does not bring yet: `linear` gains a merge of the
 // tracked branch on every run that writes to Linear (step 5), and moving the
-// branch for those would restart the checks on every run. A run that moved
-// the branch or opened the pull request leaves the checks to start; a later
-// run reads them and merges with a merge commit when every one has finished
-// and passed. A run never waits for checks.
+// branch for those would restart the checks on every run. A new head or pull
+// request gets a bounded grace period for checks; if they pass, this run
+// merges with a merge commit. Otherwise a later run reads them again.
 //
 // A merge GitHub refuses is noted in the pull request's description, with
 // the head, the tracked branch and GitHub's reason. A later run that meets
@@ -26,6 +25,7 @@ import {
   findOpenPullRequest,
   mergePullRequest,
   readChecks,
+  waitForChecks,
   updatePullRequest,
 } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -52,6 +52,7 @@ export interface PullRequestOptions {
   state: StateSnapshot;
   github: GitHubRepository;
   identity?: CommitIdentity;
+  mergeGraceSeconds?: number | undefined;
 }
 
 export interface PullRequestResult {
@@ -59,9 +60,9 @@ export interface PullRequestResult {
   needed: boolean;
   /** The open sync pull request after this step; null when there is none. */
   pullRequest: { number: number; url: string; opened: boolean } | null;
-  /** This run moved the sync branch; its checks start now and a later run merges. */
+  /** This run moved the sync branch. */
   branchMoved: boolean;
-  /** The checks on an unchanged head; null when this run did not read them. */
+  /** The checks on the head; null when this run did not read them. */
   checks: CheckState | null;
   /** The merge commit on the tracked branch when this run merged the pull request. */
   merged: Oid | null;
@@ -180,10 +181,10 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       body: pullRequestBody(result.paths, earlier),
     });
     result.pullRequest = { number: pullRequest.number, url: pullRequest.url, opened };
-    // New checks start for a new head or a new pull request; a later run reads them.
-    if (result.branchMoved || opened) return result;
-
-    result.checks = await readChecks(github, head);
+    const fresh = result.branchMoved || opened;
+    const grace = options.mergeGraceSeconds ?? 60;
+    if (fresh && grace === 0) return result;
+    result.checks = fresh ? await waitForChecks(github, head, grace) : await readChecks(github, head);
     if (result.checks.state === 'failed') return { ...result, code: 'check-failed' };
     if (result.checks.state === 'pending') return result;
     const merge = await mergePullRequest(github, pullRequest.number, head);

@@ -118,7 +118,7 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
       MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
       MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
       MDBISYNC_LINEAR_API_URL: `${url}/linear`,
-      MDBISYNC_GITHUB_TOKEN: 'gh-token',
+      MDBISYNC_MERGE_GRACE_SECONDS: '0', MDBISYNC_GITHUB_TOKEN: 'gh-token',
       MDBISYNC_GITHUB_API_URL: `${url}/github`,
       MDBISYNC_REPOSITORY: 'owner/repo',
       MDBISYNC_REPORT_FILE: join(fixture.root, `${name}.json`),

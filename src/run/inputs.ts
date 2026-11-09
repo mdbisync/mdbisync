@@ -17,6 +17,7 @@ export const INPUT_NAMES = [
   'state-ref-prefix',
   'report-file',
   'document-cap',
+  'merge-grace-seconds',
   'direction',
   'confirm',
 ] as const;
@@ -29,6 +30,7 @@ export interface RunInputs {
   /** Where to write the run's report as JSON; for tests and tooling. */
   reportFile?: string;
   documentCap?: number;
+  mergeGraceSeconds?: number;
 }
 
 export class InputError extends Error {
@@ -75,6 +77,11 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   if (cap !== '') {
     if (!/^[1-9][0-9]*$/.test(cap) || !Number.isSafeInteger(Number(cap))) throw new InputError('the input document-cap must be a positive safe integer');
     inputs.documentCap = Number(cap);
+  }
+  const grace = value('merge-grace-seconds');
+  if (grace !== '') {
+    if (!/^(0|[1-9][0-9]*)$/.test(grace) || Number(grace) > 120) throw new InputError('the input merge-grace-seconds must be an integer from 0 to 120');
+    inputs.mergeGraceSeconds = Number(grace);
   }
   return inputs;
 }

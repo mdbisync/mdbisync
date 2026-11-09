@@ -18,6 +18,7 @@ import { type WriteResult, writeTrackedToLinear } from './write.ts';
 
 export interface CycleOptions {
   documentCap?: number | undefined;
+  mergeGraceSeconds?: number | undefined;
   config: StateConfig;
   /** The repository the sync pull request is in, with the token the run acts as. */
   github: GitHubRepository;
@@ -49,7 +50,7 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   await checkpoint('after-capture-push-before-pr');
   // Pending checks do not hold up steps 3 to 5. A failed check needs a
   // configuration fix first, so leave Linear untouched by the write step.
-  const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github });
+  const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds });
   // Writing Linear from the tracked branch while that pull request waits would leave it to be merged over the new state.
   if (pullRequest.code === 'initial-pull-request-pending' || pullRequest.code === 'check-failed') return { complete: false, changed, trackedTip, capture: captured, pullRequest };
   const moved = pullRequest.branchMoved || pullRequest.merged !== null || pullRequest.pullRequest?.opened === true;
