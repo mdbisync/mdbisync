@@ -3,6 +3,7 @@
 // title, and what a confirmed run would create, overwrite and move to trash.
 // Pure: the caller reads the files and lists the documents.
 
+import { type ContainerCapacity } from '../run/capacity.ts';
 import { lintText } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearDocument, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, type Zone } from '../mapping/index.ts';
@@ -49,13 +50,14 @@ export interface TrashEntry {
 }
 
 export interface InitialSyncPlan {
+  capacity?: ContainerCapacity[];
   create: CreateEntry[];
   overwrite: OverwriteEntry[];
   trash: TrashEntry[];
   leftOut: LeftOutEntry[];
 }
 
-/** One place's live documents (archived and trashed ones are not listed). */
+/** One place's documents; the planner ignores archived and trashed ones. */
 export interface PlaceDocuments {
   place: Place;
   documents: readonly LinearDocument[];
@@ -191,7 +193,8 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
  * The plan with documents that the write would leave out (a linked file over
  * the upload limit) moved from create and overwrite to the left-out files,
  * with their rule and the files that cause it. An overwritten document stays
- * as it is, as the confirmed run leaves it.
+ * as it is, as the confirmed run leaves it. The rest of the plan (the
+ * container counts) is kept as it is.
  */
 export function leaveOutAtWrite(plan: InitialSyncPlan, entries: ReadonlyArray<{ path: string; rule: string; files: readonly string[] }>): InitialSyncPlan {
   if (entries.length === 0) return plan;
@@ -205,9 +208,9 @@ export function leaveOutAtWrite(plan: InitialSyncPlan, entries: ReadonlyArray<{ 
   for (const entry of plan.create) add(entry.path);
   for (const entry of plan.overwrite) add(entry.path, entry.documentId);
   return {
+    ...plan,
     create: plan.create.filter((entry) => !byPath.has(entry.path)),
     overwrite: plan.overwrite.filter((entry) => !byPath.has(entry.path)),
-    trash: plan.trash,
     leftOut: leftOut.sort((a, b) => compare(a.path, b.path)),
   };
 }

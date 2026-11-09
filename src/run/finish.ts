@@ -1,6 +1,7 @@
 // The run's machine-readable report: what the job summary says, as JSON,
 // for tests and tooling. Names, paths and states only, no content.
 
+import { type ContainerCapacity } from './capacity.ts';
 import { writeFile } from 'node:fs/promises';
 import { type ConfirmedResult, type PlanReport, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type SyncRecord, type WriteResult } from '../sync/index.ts';
@@ -8,6 +9,7 @@ import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 
 export interface RunReport {
+  capacity: ContainerCapacity[];
   operation: PreflightOutcome['operation'];
   ok: boolean;
   /** Why the run stopped before writing, or why a confirmed initial sync or a sync run did not finish. */
@@ -83,6 +85,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
   if (outcome.sync !== undefined) return toSyncRunReport(outcome, outcome.sync.write);
   const confirmed = outcome.confirmed;
   return {
+    capacity: outcome.plan?.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
     code: outcome.code ?? confirmed?.code ?? null,
@@ -123,6 +126,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
 
 function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunReport {
   return {
+    capacity: write.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
     code: outcome.code ?? write.code ?? null,
