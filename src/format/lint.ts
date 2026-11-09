@@ -8,6 +8,7 @@ import { end, line, lineCount, parse, splitFile, start, visit } from './markdown
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
+const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
 const URL_OR_LINK_ATTRIBUTE = /[a-z][a-z0-9+.-]*:\/\/|\b(?:src|href)\s*=/i;
 
 /** Lint findings for one file's text, ordered by line. */
@@ -60,6 +61,20 @@ function lintTree(tree: Root, body: string, report: (rule: LintRule, line: numbe
       case 'table':
         if (node.align?.some((align) => align !== null)) report('table-alignment', line(node));
         break;
+      case 'tableCell': {
+        // Linear reads heading syntax that starts a body cell as a heading:
+        // a lone `#` becomes an empty one. The header row keeps it as text.
+        const [row, table] = ancestors.slice(-2).reverse();
+        // Test the whole cell text: a first text node of only `#` may be
+        // followed by markup (`#**tag**`), which is no heading.
+        const first = node.children[0];
+        const last = node.children.at(-1);
+        const heading = first?.type === 'text' && last !== undefined && ATX_HEADING.test(body.slice(start(first), end(last)));
+        if (heading && table?.type === 'table' && table.children[0] !== row) {
+          report('table-hash-cell', line(node));
+        }
+        break;
+      }
       case 'text':
         if (ancestors.some((a) => a.type === 'tableCell') && body.slice(start(node), end(node)).includes('\\|')) {
           report('table-escaped-pipe', line(node));

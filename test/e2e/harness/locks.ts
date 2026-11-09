@@ -10,6 +10,7 @@ import { hostname, tmpdir } from 'node:os';
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { forgetOwnership } from './ownership.ts';
 
 export const STATE_DIR_ENV = 'MDBISYNC_HARNESS_STATE_DIR';
 
@@ -167,7 +168,11 @@ export function registerRun(stateDir: string, runId: string): { heartbeat(): voi
       holdUntil = untilMs;
       write();
     },
-    done: () => rmSync(file, { force: true }),
+    // A run cleaned up needs its ownership record no more.
+    done: () => {
+      forgetOwnership(stateDir, runId);
+      rmSync(file, { force: true });
+    },
   };
 }
 
@@ -197,6 +202,7 @@ export function liveRuns(stateDir: string, now = Date.now()): Set<string> {
 
 /** Forgets a run once the sweeper has removed what it left. */
 export function forgetRun(stateDir: string, runId: string): void {
+  forgetOwnership(stateDir, runId);
   rmSync(join(stateDir, 'runs', `${runId}.json`), { force: true });
 }
 
