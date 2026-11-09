@@ -10,6 +10,7 @@ import { Git } from '../../../src/state/index.ts';
 import { checkpoint, CHECKPOINTS, HOOKS_DIR_ENV, HOOKS_ENV, hooksDir, testStopAfterDocuments } from '../../../src/test-hooks.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { annotatedFolders, buildRunTree, readAnnotation } from './corpus.ts';
+import { CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { engineInputs, inputEnv, runEngine, startEngine } from './engine.ts';
 import { operationOf, startFaultProxy, writeApplied, writeError, writeFields } from './fault-proxy.ts';
 import { runNames } from './isolation.ts';
@@ -344,6 +345,7 @@ const CORPUS: Record<string, string> = {
   'combined/note.md': '# Note\n\nkx-00000004\n',
   '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n',
   '.github/workflows/x.yml': 'on: push\n',
+  [CHECK_WORKFLOW_PATH]: CHECK_WORKFLOW,
 };
 
 describe('run tree from a slice', () => {
@@ -355,14 +357,14 @@ describe('run tree from a slice', () => {
     assert.equal(annotatedFolders(readmes).length, 5);
   });
 
-  it('puts team-zone files below the run id, renames projects and leaves out workflows', () => {
+  it('puts team-zone files below the run id, renames projects and excludes unrelated workflows', () => {
     const names = runNames('4f1a9c');
     const tree = buildRunTree({ slice: 'mini', paths: Object.keys(CORPUS) }, readmes, names);
     assert.equal(tree.paths.get('eng/4f1a9c/guides/start.md'), 'eng/guides/start.md');
     assert.equal(tree.paths.get('eng/README.md'), 'eng/README.md');
     assert.equal(tree.paths.get('eng/alpha/plan.md'), 'eng/alpha/plan.md');
     assert.equal(tree.paths.get('combined/note.md'), 'combined/note.md');
-    assert.equal([...tree.paths.keys()].some((path) => path.startsWith('.github/')), false);
+    assert.deepEqual([...tree.paths.keys()].filter((path) => path.startsWith('.github/')), [CHECK_WORKFLOW_PATH]);
     assert.equal(tree.projects.get('PROJECT_ENG_1'), 'Field notes 4f1a9c');
     assert.equal(tree.projects.get('PROJECT_DOCS_1'), 'Library index 4f1a9c');
     assert.match(tree.rewritten.get('eng/alpha/README.md') as string, /linear-project: Field notes 4f1a9c/);
@@ -379,7 +381,8 @@ describe('run tree from a slice', () => {
       const paths = corpus.slices[slice];
       const readmes = new Map(paths.filter((path) => /(^|\/)README\.md$/.test(path)).map((path) => [path, text.get(path) ?? '']));
       const tree = buildRunTree({ slice, paths }, readmes, names);
-      assert.equal(tree.paths.size, paths.filter((path) => !path.startsWith('.github/')).length, slice);
+      assert.equal(tree.paths.size, paths.filter((path) => !path.startsWith('.github/') || path === CHECK_WORKFLOW_PATH).length, slice);
+      assert.equal(tree.paths.get(CHECK_WORKFLOW_PATH), CHECK_WORKFLOW_PATH);
       // Every project of the slice gets a run project, and only ENG has a team zone.
       for (const [target, readme] of tree.rewritten) assert.doesNotMatch(readme, /PROJECT_[A-Z]+/, `${slice} ${target}`);
       assert.deepEqual([...tree.teamZones.keys()], tree.teamZones.size === 0 ? [] : ['ENG'], slice);
@@ -415,6 +418,12 @@ describe('run tree from a slice', () => {
     const files = (await new Git(remote).text(['ls-tree', '-r', '--name-only', names.trackedBranch])).split('\n');
     assert.ok(files.includes('eng/4f1a9c/guides/start.md'));
     assert.ok(!files.some((file) => file.startsWith('corpus')));
+    assert.ok(!files.some((file) => file.startsWith('.github/')));
+    const enabled = runNames('abcdef');
+    await sandbox.createTrackedBranch('mini', enabled, { checks: true });
+    const enabledFiles = (await new Git(remote).text(['ls-tree', '-r', '--name-only', enabled.trackedBranch])).split('\n');
+    assert.deepEqual(enabledFiles.filter((file) => file.startsWith('.github/')), [CHECK_WORKFLOW_PATH]);
+    await sandbox.deleteRunRefs(enabled.runId, [`refs/heads/${enabled.trackedBranch}`]);
     assert.equal((await new Git(remote).text(['rev-parse', `refs/heads/${names.trackedBranch}`])).trim(), commit);
     assert.match(await new Git(remote).text(['show', `${names.trackedBranch}:eng/alpha/README.md`]), /Field notes 4f1a9c/);
     await assert.rejects(sandbox.createTrackedBranch('full', names), /corpus-slices\/full\.json/);

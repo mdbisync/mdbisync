@@ -119,7 +119,9 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     ctx.phase('corpus manifest');
     manifest = await sandbox.manifest();
     ctx.phase('tracked branch');
-    created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names);
+    created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names, {
+      checks: ctx.scenario.steps.some((step) => step.kind === 'fault' && step.action === 'checks'),
+    });
   } catch (error) {
     if (error instanceof CorpusMissingError) throw new EnvBlockedError(`corpus: ${error.message}`);
     throw error;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { deflateRawSync } from 'node:zlib';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -22,6 +22,9 @@ import { withoutDocuments } from './fault-proxy.ts';
 import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, installHooks, PERSON, personCommit, Sandbox } from './sandbox.ts';
 import { engineEntry } from './engine.ts';
 import { preCommitConfig } from '../../corpus/tree.ts';
+import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { waitForCheck } from './check-fault.ts';
+import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
 import { commitAsPerson, readRunIds } from './step-helpers.ts';
@@ -518,6 +521,7 @@ async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
     'eng/platform/notes.md': '# Notes\n\nKept short.\n',
     'docs/handbook/start.md': '# Start\n\nWelcome.\n',
     '.pre-commit-config.yaml': hookConfig,
+    [CHECK_WORKFLOW_PATH]: CHECK_WORKFLOW,
     ...(options.review === undefined ? {} : { 'eng/platform/guides/weekly-plan.md': options.review }),
   };
   for (const [path, text] of Object.entries(files)) {
@@ -607,6 +611,108 @@ async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
   const rawFile = async (path: string) => (await remoteGit.run(['show', `${names.trackedBranch}:${path}`])).stdout.toString('utf8');
   return { ctx, linear, ids, remoteGit, remoteFile, rawFile, faults, created, docs };
 }
+
+describe('marker-driven checks', () => {
+  it('writes and releases the marker on the sync branch, retaining later edits without force pushes', async () => {
+    const { ctx, remoteGit, remoteFile, linear, ids } = await fakeRun();
+    mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
+    const prs: PullRequest[] = [];
+    const checked: string[] = [];
+    const methods: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const path = url.pathname.replace('/repos/example/sandbox', '');
+      methods.push(`${init?.method} ${path}`);
+      if (path === '/pulls' && init?.method === 'GET') return Response.json(prs);
+      if (path === '/pulls' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        assert.equal(body.head, ctx.names.syncBranch);
+        assert.equal(body.base, ctx.names.trackedBranch);
+        const sha = (await remoteGit.text(['rev-parse', ctx.names.syncBranch])).trim();
+        const pr = { number: 1, state: 'open', head: { ref: body.head, sha }, base: { ref: body.base }, merged_at: null } as PullRequest;
+        prs.push(pr);
+        return Response.json(pr);
+      }
+      const sha = /^\/commits\/([0-9a-f]+)\/check-runs$/.exec(path)?.[1];
+      assert.ok(sha, path);
+      assert.equal(sha, (await remoteGit.text(['rev-parse', ctx.names.syncBranch])).trim());
+      checked.push(sha);
+      const marker = await remoteGit.run(['show', `${sha}:${CHECK_MARKER}`], { okCodes: [0, 128] });
+      const state = marker.code === 0 ? marker.stdout.toString().trim() : 'passed';
+      return Response.json({ check_runs: [{ id: 1, name: 'format', app: { slug: 'github-actions' }, status: state === 'pending' ? 'in_progress' : 'completed', conclusion: state === 'pending' ? null : state === 'passed' ? 'success' : 'failure' }] });
+    }) as typeof fetch;
+    ctx.live!.rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', fetchImpl);
+    const tracked = (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
+    await runStep(ctx, { kind: 'fault', action: 'checks', args: { status: 'pending' } });
+    const pending = checked.at(-1)!;
+    assert.equal((await remoteFile(CHECK_MARKER, ctx.names.syncBranch)).trim(), 'pending');
+    assert.equal(prs.length, 1);
+    // A fake capture appends the editor's Linear changes while the check is pending.
+    const path = 'eng/platform/plan.md';
+    await runStep(ctx, { kind: 'linear', action: 'edit', args: { actor: 'editor-a', target: path } });
+    await runStep(ctx, { kind: 'linear', action: 'edit', args: { actor: 'editor-b', target: path } });
+    const edit = linear.documents.get(ids[path]!.id)!.content!;
+    const git = await ctx.person();
+    await git.run(['fetch', '--quiet', 'origin', `refs/heads/${ctx.names.syncBranch}`]);
+    await git.run(['checkout', '--quiet', '--detach', 'FETCH_HEAD']);
+    const editCommit = await personCommit(git, ctx.names, new Map([[path, edit]]), 'Update the plan', { verify: false, branch: ctx.names.syncBranch });
+    await runStep(ctx, { kind: 'fault', action: 'checks', args: { name: 'format', status: 'failed' } });
+    assert.equal((await remoteFile(CHECK_MARKER, ctx.names.syncBranch)).trim(), 'failed');
+    await runStep(ctx, { kind: 'fault', action: 'checks', args: { status: 'passed' } });
+    const passed = checked.at(-1)!;
+    assert.equal((await remoteGit.run(['cat-file', '-e', `${passed}:${CHECK_MARKER}`], { okCodes: [0, 128] })).code, 128);
+    assert.equal(await remoteFile(path, ctx.names.syncBranch), edit.trimEnd());
+    await remoteGit.run(['merge-base', '--is-ancestor', pending, editCommit]);
+    await remoteGit.run(['merge-base', '--is-ancestor', editCommit, passed]);
+    assert.equal((await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim(), tracked);
+    assert.equal(prs.length, 1);
+    assert.equal(checked.length, 3);
+    assert.ok(checked.every((sha) => ctx.ownCommits.includes(sha)));
+    assert.ok(methods.every((method) => method.startsWith('GET ') || method === 'POST /pulls'));
+  });
+
+  it('waits past absent, unrelated, skipped and stale checks until the requested state', async () => {
+    for (const wanted of ['pending', 'failed', 'passed'] as const) {
+      let polls = 0;
+      const rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async (_input, init) => {
+        assert.equal(init?.method, 'GET');
+        polls += 1;
+        const check = { id: polls, name: 'format', app: { slug: 'github-actions' }, status: 'completed', conclusion: 'success' };
+        if (polls === 1) return Response.json({ check_runs: [] });
+        if (polls === 2) return Response.json({ check_runs: [{ ...check, name: 'other' }] });
+        if (polls === 3) return Response.json({ check_runs: [{ ...check, conclusion: 'skipped' }] });
+        if (polls === 4) return Response.json({ check_runs: [{ ...check, app: { slug: 'another-app' } }] });
+        return Response.json({ check_runs: [
+          { ...check, id: 0, conclusion: 'failure' },
+          { ...check, status: wanted === 'pending' ? 'queued' : 'completed', conclusion: wanted === 'pending' ? null : wanted === 'failed' ? 'failure' : 'success' },
+        ] });
+      }) as typeof fetch);
+      await waitForCheck(rest, 'abc123', wanted, { pollMs: 0, timeoutMs: 1000 });
+      assert.equal(polls, 5);
+    }
+  });
+
+  it('bounds waits and obeys cancellation', async () => {
+    const rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async () => Response.json({ check_runs: [] })) as typeof fetch);
+    await assert.rejects(waitForCheck(rest, 'abc', 'failed', { timeoutMs: 0 }), ProductError);
+    const queued = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async () => Response.json({ check_runs: [{ id: 1, name: 'format', app: { slug: 'github-actions' }, status: 'queued', conclusion: null }] })) as typeof fetch);
+    await assert.rejects(waitForCheck(queued, 'abc', 'passed', { timeoutMs: 0 }), EnvBlockedError);
+    await assert.rejects(waitForCheck(rest, 'abc', 'passed', { signal: AbortSignal.abort() }), { name: 'AbortError' });
+  });
+
+  it('keeps the L5-17 setup error visible to scenario assertions', async () => {
+    const { ctx } = await fakeRun();
+    ctx.engine.results.push({ command: 'sync', exitCode: 1, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: {
+      summary: { code: 'setup-error', setupErrorCheck: 'format' }, pullRequests: { state: 'open', merged: 0 }, writes: { linear: 0 },
+    } });
+    const scenario = scenarios.find((item) => item.id === 'L5-17')!;
+    for (const assertion of scenario.checks.assertions.filter((item) => item.subject.startsWith('runs.0.'))) {
+      const subject = await resolveSubject(ctx, assertion.subject);
+      assert.equal(subject.known, true);
+      assert.equal(subject.value, assertion.expected, assertion.subject);
+    }
+  });
+});
 
 describe('person commits through the repository hooks', () => {
   // Hook environments of these tests stay in a folder of their own; later tests see the variable as it was.
