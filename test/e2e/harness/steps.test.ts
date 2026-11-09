@@ -1570,6 +1570,36 @@ describe('subjects', () => {
     void ids;
   });
 
+  it('expect no cache entry for an image link whose target the branch does not hold, and still one for every real image', async () => {
+    const { ctx } = await fakeRun();
+    const git = await ctx.person();
+    // A written document with a deliberately broken image link beside two real images.
+    spawnSync('mkdir', ['-p', join(git.dir, 'eng/platform/media')]);
+    writeFileSync(join(git.dir, 'eng/platform/notes.md'), '# Notes\n\n![gone](../assets/does-not-exist.png) ![a](media/first.png) ![b](media/second.png)\n');
+    writeFileSync(join(git.dir, 'eng/platform/media/first.png'), 'first bytes');
+    writeFileSync(join(git.dir, 'eng/platform/media/second.png'), 'second bytes');
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '-m', 'Images and a broken reference']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+    const cache = async (entries: Record<string, string>) => {
+      const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(entries) })).trim();
+      const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
+      const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
+      await git.run(['push', '--quiet', 'origin', `+${commit}:${ctx.names.refPrefix}/uploads`]);
+      refreshView(ctx);
+    };
+    // One real image cached, the other not: its missing entry still fails, whatever the broken link does.
+    await cache({ [sha('first bytes')]: 'https://uploads.linear.app/x/first' });
+    assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: false });
+    // An entry under another file's hash does not stand in for the real image's own.
+    await cache({ [sha('first bytes')]: 'https://uploads.linear.app/x/first', [sha('other bytes')]: 'https://uploads.linear.app/x/other' });
+    assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: false });
+    // Both real images cached: the broken link has no file to upload, so it expects nothing and the check passes.
+    await cache({ [sha('first bytes')]: 'https://uploads.linear.app/x/first', [sha('second bytes')]: 'https://uploads.linear.app/x/second' });
+    assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: true });
+  });
+
   it('read conflict marks by the palette names specs use, from Linear\'s hex colors', async () => {
     const { ctx, linear, ids } = await fakeRun();
     const id = ids['docs/handbook/start.md']?.id as string;

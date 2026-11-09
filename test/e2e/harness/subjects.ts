@@ -986,9 +986,11 @@ export const SUBJECTS: Record<string, Compute> = {
     // Images of the documents the engine wrote; a document it left out on purpose uploads nothing.
     const embedded = new Set<string>();
     for (const [path, text] of view.files) if (view.ids.has(path)) for (const image of embeddedImages(path, text)) embedded.add(image);
+    // Every tracked file has a hash. A link whose target the branch does not hold (a deliberately broken
+    // reference) has no file to upload, so it expects no cache entry; every tracked image needs its own.
     return [...embedded].every((path) => {
       const hash = view.hashes.get(path);
-      return hash !== undefined && view.uploadsByHash.has(hash);
+      return hash === undefined || view.uploadsByHash.has(hash);
     });
   },
   'uploads.downloadedBytes': async (env) => downloads(env, 'image'),
