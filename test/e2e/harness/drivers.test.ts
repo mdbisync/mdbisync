@@ -205,9 +205,12 @@ describe('fault proxy', () => {
       // A forwarded request with rewritten headers is still a real request (I9 counts it).
       assert.equal(proxy.requests.at(-1)?.injected, false);
 
-      proxy.setFaults([{ kind: 'reject-document', target: 'weekly-plan' }]);
+      proxy.setFaults([{ kind: 'reject-document', targets: ['weekly-plan', 'doc-7f3a'] }]);
       const rejected = await fetch(`${proxy.url}/graphql`, { method: 'POST', body: JSON.stringify({ query: 'mutation CreateDocument { a }', operationName: 'CreateDocument', variables: { input: { title: 'notes/weekly-plan' } } }) });
       assert.match(await rejected.text(), /INPUT_ERROR/);
+      // An update that carries only the document's id is refused too.
+      const update = await fetch(`${proxy.url}/graphql`, { method: 'POST', body: JSON.stringify({ query: 'mutation UpdateDocument { a }', operationName: 'UpdateDocument', variables: { id: 'doc-7f3a', input: { content: 'New text.' } } }) });
+      assert.match(await update.text(), /INPUT_ERROR/);
       assert.equal((await post(proxy.url, 'mutation CreateDocument { other }')).status, 200);
 
       proxy.setFaults([{ kind: 'upload-error', times: 1 }]);
@@ -217,6 +220,42 @@ describe('fault proxy', () => {
       await proxy.close();
       await up.close();
     }
+  });
+
+  it('drops the answer of a write Linear has applied, only for the write it names', async () => {
+    const up = await upstream();
+    const proxy = await startFaultProxy(up.url);
+    try {
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset-after-apply', operation: 'create', times: 1 }]);
+      // An update passes: the fault names creates.
+      assert.equal((await post(proxy.url, 'mutation UpdateDocument { a }')).status, 200);
+      const before = up.calls();
+      // The create reaches Linear, then the connection drops before its answer.
+      await assert.rejects(post(proxy.url, 'mutation CreateDocument { a }'));
+      assert.equal(up.calls(), before + 1);
+      assert.deepEqual(proxy.requests.at(-1)?.status, 'reset');
+      // It was a real request, counted for I9.
+      assert.equal(proxy.requests.at(-1)?.injected, false);
+      // Once only.
+      assert.equal((await post(proxy.url, 'mutation CreateDocument { a }')).status, 200);
+      // A plain reset drops the write before Linear sees it.
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset', times: 1 }]);
+      const calls = up.calls();
+      await assert.rejects(post(proxy.url, 'mutation UpdateDocument { a }'));
+      assert.equal(up.calls(), calls);
+    } finally {
+      await proxy.close();
+      await up.close();
+    }
+  });
+
+  it('names write-error variants the way specs write them', async () => {
+    const { writeError } = await import('./steps.ts');
+    assert.deepEqual(writeError('http-500'), { kind: 'write-error', variant: 'server-error', times: 1 });
+    assert.deepEqual(writeError('connection-reset'), { kind: 'write-error', variant: 'reset', times: 1 });
+    assert.deepEqual(writeError('reset-after-apply'), { kind: 'write-error', variant: 'reset-after-apply', times: 1 });
+    assert.deepEqual(writeError('reset-after-apply-on-update'), { kind: 'write-error', variant: 'reset-after-apply', operation: 'update', times: 1 });
+    assert.throws(() => writeError('surprise'), /unknown write-error variant/);
   });
 });
 

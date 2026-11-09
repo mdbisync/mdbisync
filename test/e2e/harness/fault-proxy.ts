@@ -11,12 +11,18 @@ import type { AddressInfo } from 'node:net';
 export type Fault =
   /** Answer the n-th request (counted from when the fault is set) with a status, `times` times. */
   | { kind: 'http'; status: number; requestNumber: number; retryAfterSeconds: number | null; times: number }
-  /** Fail the next document write (create or update) with a server error or a reset connection. */
-  | { kind: 'write-error'; variant: 'server-error' | 'reset'; times: number }
+  /**
+   * Fail the next document write (create or update, or only the one named):
+   * `server-error` answers 500 and `reset` drops the connection, both before
+   * Linear sees the write; `reset-after-apply` passes the write on, waits for
+   * Linear's answer and drops the connection instead of sending it, so Linear
+   * has applied a write the engine never hears about.
+   */
+  | { kind: 'write-error'; variant: 'server-error' | 'reset' | 'reset-after-apply'; operation?: 'create' | 'update'; times: number }
   /** Pass requests on, but report this little budget left. */
   | { kind: 'budget-headers'; remaining: number; includeEndpointLimits: boolean }
-  /** Refuse writes that name this document id or title. */
-  | { kind: 'reject-document'; target: string }
+  /** Refuse writes that name any of these: the document's title and, once it exists, its id. */
+  | { kind: 'reject-document'; targets: readonly string[] }
   /** Fail the upload request. */
   | { kind: 'upload-error'; times: number }
   /** Answer every request that names this document id as Linear answers for a document deleted for good. */
@@ -104,6 +110,7 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
     const bearer = /^Bearer (\S+)$/.exec(String(request.headers.authorization ?? ''))?.[1];
     if (bearer !== undefined) tokens.add(bearer);
 
+    let dropAnswer = false;
     for (const fault of faults) {
       const used = fault.used ?? 0;
       if (fault.kind === 'http') {
@@ -117,8 +124,12 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
           record(fault.status, true);
           return;
         }
-      } else if (fault.kind === 'write-error' && WRITE_OPERATIONS.test(operation) && used < fault.times) {
+      } else if (fault.kind === 'write-error' && WRITE_OPERATIONS.test(operation) && used < fault.times && (fault.operation === undefined || (fault.operation === 'create') === /create/i.test(operation))) {
         fault.used = used + 1;
+        if (fault.variant === 'reset-after-apply') {
+          dropAnswer = true;
+          break;
+        }
         if (fault.variant === 'reset') {
           record('reset', true);
           request.socket.destroy();
@@ -127,7 +138,7 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
         response.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ errors: [{ message: 'injected fault' }] }));
         record(500, true);
         return;
-      } else if (fault.kind === 'reject-document' && kind === 'mutation' && WRITE_OPERATIONS.test(operation) && names(text, fault.target)) {
+      } else if (fault.kind === 'reject-document' && kind === 'mutation' && WRITE_OPERATIONS.test(operation) && fault.targets.some((target) => names(text, target))) {
         response.writeHead(200, { 'content-type': 'application/json' }).end(
           JSON.stringify({ data: null, errors: [{ message: 'injected rejection', extensions: { code: 'INPUT_ERROR', userPresentableMessage: 'rejected' } }] }),
         );
@@ -181,6 +192,12 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
       }
     }
     let payload: Buffer = Buffer.from(await upstreamResponse.arrayBuffer());
+    if (dropAnswer) {
+      // Linear has the write; its answer never reaches the engine. The request did reach Linear, so it counts as the engine's.
+      record('reset', false);
+      request.socket.destroy();
+      return;
+    }
     const gone = faults.flatMap((fault) => (fault.kind === 'document-gone' ? [fault.id] : []));
     if (gone.length > 0 && isGraphql) payload = withoutDocuments(payload, new Set(gone));
     response.writeHead(upstreamResponse.status, out).end(payload);
