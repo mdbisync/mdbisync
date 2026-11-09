@@ -98,6 +98,12 @@ export interface RunContext {
   personHooks(): Promise<void>;
   /** The working clone the engine runs in; made on first use. */
   engineClone(): Promise<string>;
+  /**
+   * A file of the corpus on the sandbox's main branch (path relative to
+   * `corpus/`), null when the corpus has no such file. Offline scenarios read
+   * it too (the released hook's pin); without a sandbox it blocks the run.
+   */
+  corpusFile(path: string): Promise<string | null>;
 }
 
 export function nextToken(ctx: RunContext): string {

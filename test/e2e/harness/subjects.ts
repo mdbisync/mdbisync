@@ -1323,6 +1323,8 @@ export const SUBJECTS: Record<string, Compute> = {
   'expected.destinationPath': async (env) => symbolicPath(env.ctx, observed(env.ctx, 'expected.destinationPath') as string),
   'setup.requiredChecks': async () => [...REQUIRED_SETUP_CHECKS],
   'fixture.rule': async (env) => observed(env.ctx, 'fixture.rule'),
+  // Which Linear-format hook the scratch repository ran: `published` (the corpus's pinned release) or `source`.
+  'hook.source': async (env) => observed(env.ctx, 'hook.source'),
   'beforeConflict.icon': async (env) => observed(env.ctx, 'beforeConflict.icon'),
   'beforeConflict.color': async (env) => observed(env.ctx, 'beforeConflict.color'),
   // The start of L1-14 by its own names (`before.matchedIds` …).

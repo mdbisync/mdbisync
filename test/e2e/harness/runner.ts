@@ -12,7 +12,7 @@ import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
-import { annotatedFolders, owningFolder, readAnnotation } from './corpus.ts';
+import { annotatedFolders, CORPUS_DIR, owningFolder, readAnnotation } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
 import { BudgetBlockedError, estimate, type Governor } from './governor.ts';
 import { SandboxRest, githubToken } from './github.ts';
@@ -443,6 +443,28 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
   return { ...result, harnessAppRequests: requests };
 }
 
+/**
+ * The sandbox's corpus for an offline scenario: the shared cache of its main
+ * branch, brought up to date. Nothing is pushed and Linear is not involved.
+ */
+async function corpusReader(deps: RunnerDeps, runId: string): Promise<Sandbox> {
+  const { config } = deps;
+  if (config.gitUrl === '') throw new EnvBlockedError('the corpus is on the sandbox repository, and none is configured (MDBISYNC_TEST_SANDBOX_URL)');
+  let token;
+  try {
+    token = await githubToken(config, 'local');
+  } catch (error) {
+    throw new EnvBlockedError(`GitHub token: ${(error as Error).message}`);
+  }
+  const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, stateDir: deps.stateDir, runId });
+  try {
+    await sandbox.refreshCache();
+  } catch (error) {
+    throw new EnvBlockedError(`the sandbox's corpus could not be read: ${(error as Error).message}`);
+  }
+  return sandbox;
+}
+
 async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: string): Promise<Omit<ScenarioResult, 'harnessAppRequests'>> {
   const names: RunNames = runNames(runId);
   const started = Date.now();
@@ -459,6 +481,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   let person: Git | undefined;
   let hooksInstalled = false;
   let engineDir: string | undefined;
+  let corpus: Promise<Sandbox> | undefined;
   let phase = 'admission';
   // Set when setup missed its deadline: setup stops at its next phase or lock wait, and creates nothing more.
   const abort = new AbortController();
@@ -501,6 +524,11 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
         engineDir = join(runDir, 'engine');
       }
       return engineDir;
+    },
+    async corpusFile(path) {
+      // A live run's setup refreshed the cache; an offline run reads the sandbox's main once, read-only.
+      corpus ??= ctx.live === null ? corpusReader(deps, runId) : Promise.resolve(ctx.live.sandbox);
+      return (await corpus).readMain(`${CORPUS_DIR}/${path}`);
     },
   };
   const locks: Lock[] = [];
