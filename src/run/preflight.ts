@@ -2,7 +2,7 @@
 // its state, and every operation checks the setup. The run's Linear token
 // is minted here and revoked when the run's work is done, also on failure.
 
-import { LinearClient, LinearStoppedError, RequestStats, withRunToken, type LogEntry, type StopReason } from '../linear/index.ts';
+import { LinearClient, LinearStoppedError, RequestStats, withRunToken, type LogEntry, type StopReason, type TokenLifecycle } from '../linear/index.ts';
 import { type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import {
   type FailureCode,
@@ -63,6 +63,8 @@ export interface PreflightOptions {
   log: (entry: LogEntry) => void;
   /** Refuse, writing nothing, while the pull request of an initial sync from Linear waits for a person. */
   refusePendingInitialPullRequest?: boolean;
+  /** Told when the run's Linear token is minted and when this run revoked it. */
+  tokenLifecycle?: TokenLifecycle;
 }
 
 /**
@@ -101,7 +103,7 @@ export async function runPreflight(
     options.warn(`the run's Linear token could not be revoked: ${error instanceof Error ? error.message : String(error)}`);
   let minted = false;
   try {
-    return await withRunToken(credentials, { ...tokenOptions, onRevokeError }, async (token) => {
+    return await withRunToken(credentials, { ...tokenOptions, onRevokeError, ...(options.tokenLifecycle ? { lifecycle: options.tokenLifecycle } : {}) }, async (token) => {
       minted = true;
       const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, auth: token.context });
       let setup: SetupReport | undefined;

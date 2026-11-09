@@ -36,13 +36,17 @@ import {
   commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import { jobSpans, maxOverlap, runResult, SCHEDULE_BLOCKED, waitForRun } from './workflows.ts';
+import { runWorkflows, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
+import { LINEAR_TOKEN_STATE } from '../../../src/action/state.ts';
 
 export { documentId, documentPaths, resolveDestination, sibling, targetPath };
 
 export const ENGINE_TIMEOUT_MS = 30 * 60_000;
 export const CHECKPOINT_TIMEOUT_MS = 10 * 60_000;
-/** The workflow file the sync's setup writes into a repository (`init`). */
-export const SYNC_WORKFLOW = 'mdbisync.yml';
+/** The sync's workflow file in a repository. */
+export const SYNC_WORKFLOW = WORKFLOW_FILES.sync;
+/** The release commit actions mode runs, in place of the templates' pin. */
+export const ACTION_SHA_ENV = 'MDBISYNC_TEST_ACTION_SHA';
 
 type Executor = (ctx: RunContext, args: Record<string, unknown>) => Promise<void>;
 
@@ -185,16 +189,27 @@ async function settle(ctx: RunContext, limit = 4): Promise<void> {
 }
 
 /**
- * The repository files the setup command writes (workflows, pre-commit
- * configuration), committed as a person would after running `init`.
+ * The workflow templates of `examples/`, copied into the repository as a
+ * deployer copies them and rendered for this run (its branches, refs,
+ * concurrency group and the sandbox's runner and secret names), committed
+ * as a person would. `MDBISYNC_TEST_ACTION_SHA` names the release commit
+ * under test; without it the templates' own pin runs.
  */
 async function installWorkflows(ctx: RunContext): Promise<void> {
   if (ctx.observations.has('workflows.installed')) return;
   const git = await ctx.person();
   await pull(git, ctx);
-  const result = spawnSync(process.execPath, [engineEntry(), 'init'], { cwd: git.dir, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8' } });
-  if (result.status === COMMANDS.init.notImplementedExitCode && result.stderr.includes('not implemented')) throw new NotImplementedError('init', 'writing the workflows');
-  if (result.status !== 0) throw new ProductError(`init exited with ${String(result.status)}`);
+  const actionSha = process.env[ACTION_SHA_ENV]?.trim() ?? '';
+  if (actionSha !== '' && !/^[0-9a-f]{40}$/.test(actionSha)) throw new EnvBlockedError(`${ACTION_SHA_ENV} must be a full commit SHA`);
+  const files = runWorkflows({
+    trackedBranch: ctx.names.trackedBranch,
+    syncBranch: ctx.names.syncBranch,
+    refPrefix: ctx.names.refPrefix,
+    group: `mdbisync-${ctx.names.runId}`,
+    ...(actionSha === '' ? {} : { actionSha }),
+  });
+  mkdirSync(join(git.dir, '.github', 'workflows'), { recursive: true });
+  for (const [file, text] of files) writeFileSync(join(git.dir, '.github', 'workflows', file), text);
   await git.run(['add', '--all']);
   await git.run(['commit', '--quiet', '--no-verify', '-m', 'Add the sync workflows']);
   await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
@@ -202,25 +217,22 @@ async function installWorkflows(ctx: RunContext): Promise<void> {
   ctx.observations.set('workflows.installed', true);
 }
 
-async function requireWorkflows(ctx: RunContext): Promise<void> {
+async function requireWorkflows(ctx: RunContext, command: CommandName = 'sync'): Promise<void> {
   const world = live(ctx);
-  // The setup command writes the sync workflows, as a deployer runs it.
   // Check-fault runs may already carry the harness's PR check workflow.
   await installWorkflows(ctx);
-  if (!(await world.rest.workflowExists(SYNC_WORKFLOW, ctx.names.trackedBranch))) {
-    throw new NotImplementedError('init', `the sync workflow ${SYNC_WORKFLOW} is not in the tracked branch`);
+  const file = workflowFor(command);
+  if (!(await world.rest.workflowExists(file, ctx.names.trackedBranch))) {
+    throw new NotImplementedError(command, `the workflow template ${file} is not in examples/`);
   }
   if (world.githubTokenSource !== 'app') throw new EnvBlockedError('actions mode needs the GitHub App token');
 }
 
-function workflowInputs(ctx: RunContext, args: Record<string, unknown>): Record<string, string> {
+/** A dispatch's inputs: the run's branches and refs are in the rendered workflow already. */
+function workflowInputs(args: Record<string, unknown>): Record<string, string> {
   return {
-    operation: typeof args.command === 'string' ? args.command : 'sync',
-    'tracked-branch': ctx.names.trackedBranch,
-    'sync-branch': ctx.names.syncBranch,
-    'state-ref-prefix': ctx.names.refPrefix,
     ...(typeof args.direction === 'string' ? { direction: args.direction } : {}),
-    ...(args.confirm === true ? { confirm: 'true' } : {}),
+    ...(args.command === 'initial-sync' ? { confirm: args.confirm === true ? 'true' : 'false' } : {}),
   };
 }
 
@@ -244,12 +256,12 @@ async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Prom
   const world = live(ctx);
   const event = typeof args.event === 'string' ? args.event : 'workflow_dispatch';
   if (event === 'schedule') throw new EnvBlockedError(SCHEDULE_BLOCKED);
-  await requireWorkflows(ctx);
   const command = (typeof args.command === 'string' ? args.command : 'sync') as CommandName;
+  await requireWorkflows(ctx, command);
   let run;
   if (event === 'workflow_dispatch') {
     const after = Date.now();
-    await world.rest.dispatchWorkflow(SYNC_WORKFLOW, ctx.names.trackedBranch, workflowInputs(ctx, args));
+    await world.rest.dispatchWorkflow(workflowFor(command), ctx.names.trackedBranch, workflowInputs(args));
     run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: seenRuns(ctx) });
   } else if (event === 'push') {
     // The run the latest push to the tracked branch started.
@@ -384,7 +396,12 @@ const RUN: Record<string, Executor> = {
     // The action's post step, which runs after every job, killed ones too: it must revoke the run's Linear token (L5-20).
     if (ctx.live !== null) {
       const call = await engineCall(ctx, 'sync', {});
-      const result = spawnSync(process.execPath, [postEntry()], { cwd: call.cwd, env: engineEnv(call), encoding: 'utf8' });
+      // On a runner, `main` keeps its token in the step state and the runner hands it to `post`
+      // (checked offline in src/action/action.test.ts). The killed run here ran as the command
+      // line, which keeps no step state, so the harness hands over the token the proxy saw it mint.
+      const killed = (ctx.observations.get('tokens.byOutcome') as Record<string, string[]> | undefined)?.['killed'] ?? [];
+      const state = killed.length === 0 ? {} : { [`STATE_${LINEAR_TOKEN_STATE}`]: killed[killed.length - 1] as string, 'INPUT_LINEAR-API-URL': call.linearUrl };
+      const result = spawnSync(process.execPath, [postEntry()], { cwd: call.cwd, env: { ...engineEnv(call), ...state }, encoding: 'utf8' });
       if (result.error !== undefined) throw new Error(`could not run the post step: ${result.error.message}`);
       if (/not implemented/.test(`${result.stdout}${result.stderr}`)) throw new NotImplementedError('post', 'the cleanup step');
       ctx.observations.set('cleanup.exitCode', result.status);
@@ -402,7 +419,7 @@ const RUN: Record<string, Executor> = {
     const starts = [...events, ...(args.replacePending === true ? ['workflow_dispatch'] : [])];
     await Promise.all(starts.map(async (event) => {
       if (event === 'push') await loadDriver(ctx, async () => {}).gitEdit([targetPath(ctx)]);
-      else await world.rest.dispatchWorkflow(SYNC_WORKFLOW, ctx.names.trackedBranch, workflowInputs(ctx, {}));
+      else await world.rest.dispatchWorkflow(SYNC_WORKFLOW, ctx.names.trackedBranch, workflowInputs({}));
     }));
     const runs = [];
     for (const event of starts) {
