@@ -270,16 +270,52 @@ export class LinearClient {
   }
 
   /** Comments on a document; `documentContentId` comes from the document. */
-  async commentOnDocument(documentContentId: string, body: string): Promise<{ id: string }> {
+  async commentOnDocument(documentContentId: string, body: string, id?: string): Promise<{ id: string }> {
     const data = await this.request<{ commentCreate: { success: boolean; comment: { id: string } } }>(
       'CommentOnDocument',
       'mutation',
       `mutation CommentOnDocument($input: CommentCreateInput!) {
         commentCreate(input: $input) { success comment { id } }
       }`,
-      { input: { documentContentId, body } },
+      { input: { documentContentId, body, ...(id === undefined ? {} : { id }) } },
     );
     return succeeded('CommentOnDocument', data.commentCreate).comment;
+  }
+
+  /** Ensure one notice exists, including recovery after a lost create response. */
+  async ensureDocumentComment(documentContentId: string, body: string, id: string): Promise<{ id: string; created: boolean }> {
+    const find = async (): Promise<boolean> => {
+      const data = await this.request<{ comments: { nodes: Array<{ id: string; documentContentId: string | null }> } }>(
+        'FindDocumentComment', 'query',
+        `query FindDocumentComment($id: ID!) {
+          comments(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { id documentContentId } }
+        }`,
+        { id },
+      );
+      const comment = data.comments.nodes[0];
+      if (!comment) return false;
+      if (comment.id !== id || comment.documentContentId !== documentContentId) {
+        throw new LinearError('FindDocumentComment', 'Comment identity does not match its document');
+      }
+      return true;
+    };
+    if (await find()) return { id, created: false };
+    try {
+      const comment = await this.commentOnDocument(documentContentId, body, id);
+      if (comment.id !== id) throw new LinearError('CommentOnDocument', 'Created comment identity does not match');
+      return { id, created: true };
+    } catch (error) {
+      // A mutation may succeed before a network failure, or a concurrent
+      // caller may create the same id. Read it back before reporting failure.
+      if (error instanceof LinearError && this.stopped === undefined) {
+        try {
+          if (await find()) return { id, created: false };
+        } catch {
+          // Keep the original mutation failure when recovery cannot read.
+        }
+      }
+      throw error;
+    }
   }
 
   /**
