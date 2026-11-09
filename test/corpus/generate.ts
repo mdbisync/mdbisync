@@ -4,7 +4,7 @@
 //
 //   node test/corpus/generate.ts --hook-rev <release-sha> [--out <dir>] [--seed <text>] [--bank <dir>] [--replace]
 
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -15,7 +15,7 @@ import { fixText } from "../../src/format/index.ts";
 import { Canaries, isLfs, type CorpusFile } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { makeSlices, SLICES, type Slice } from "./slices.ts";
-import { treeFiles } from "./tree.ts";
+import { BANK_HOME, treeFiles } from "./tree.ts";
 
 export const DEFAULT_SEED = "corpus-v1";
 const here = dirname(fileURLToPath(import.meta.url));
@@ -56,18 +56,28 @@ export type Corpus = {
 /**
  * A synchronized repository's tracked branch is already in the form Linear
  * stores, so every synced Markdown file is written through `fix`; the
- * lint-error files stay as they are, since `fix` never touches them. A file
- * the bank classes as fixable is, once written this way, unchanged by `fix`.
+ * lint-error files stay as they are, since `fix` never touches them.
+ *
+ * Forms that only exist outside Linear's form (CRLF, a final newline,
+ * whitespace-only text, reference-style links) are rewritten here; the
+ * fixture bank keeps them for the format tests. A rewritten file's note says
+ * so. A bank copy classed fixable becomes unchanged; its basis stays known
+ * only when the rewritten text is the form the probe recorded from Linear.
  */
-export function inLinearForm(files: CorpusFile[]): void {
+export function inLinearForm(files: CorpusFile[], bankDir: string): void {
   for (const file of files) {
     if (!file.synced || file.kind !== "markdown" || file.expected === "lint-error") continue;
     const text = file.content.toString("utf8");
     const fixed = fixText(text);
-    if (fixed !== text) file.content = Buffer.from(fixed, "utf8");
+    if (fixed === text) continue;
+    file.content = Buffer.from(fixed, "utf8");
+    const rewritten = fixed === "" ? "written empty, as in Linear's form" : "written in Linear's form";
+    file.note = file.note === null ? rewritten : `${file.note}; ${rewritten}`;
     if (file.expected === "fixable") {
       file.expected = "unchanged";
-      file.note = [file.note, "written in Linear's form; the bank's source is fixable"].filter((n) => n !== null).join("; ");
+      // Known only when the probe recorded exactly this text as Linear's form; a generated file was never probed.
+      const golden = file.bankGroup === null ? null : join(bankDir, `${file.path.slice(BANK_HOME.length + 1).replace(/\.md$/, "")}.linear.md`);
+      if (!(golden !== null && existsSync(golden) && readFileSync(golden, "utf8") === fixed)) file.basis = "assumed";
     }
   }
 }
@@ -83,6 +93,9 @@ export function buildCorpus(hookRevision: string, seed: string = DEFAULT_SEED, b
   const docs = documents(rng.fork("documents"), canaries, assets, taken, bank.files);
   const files = [...bank.files, ...tree, ...assets.files, ...docs].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 
+  inLinearForm(files, bankDir);
+
+  // Paths and links are checked on the files as written, after the rewrite above.
   const seen = new Set<string>();
   for (const file of files) {
     if (seen.has(file.path)) throw new Error(`two corpus files share the path ${file.path}`);
@@ -91,8 +104,6 @@ export function buildCorpus(hookRevision: string, seed: string = DEFAULT_SEED, b
   for (const file of files) {
     for (const target of file.links) if (!seen.has(target)) throw new Error(`${file.path} links to ${target}, which is not in the corpus`);
   }
-
-  inLinearForm(files);
 
   const manifest: Manifest = {
     seed,

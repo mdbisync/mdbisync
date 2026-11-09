@@ -10,7 +10,8 @@ import { linkTargets, rewrite, targetPath } from "./bank.ts";
 import { checkCorpus } from "./check.ts";
 import { longTitle } from "./documents.ts";
 import { buildCorpus, writeCorpus } from "./generate.ts";
-import { gitattributes } from "./model.ts";
+import { parse } from "yaml";
+import { CONTENT_LIMIT, gitattributes } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
 import { fixText, lintText } from "../../src/format/index.ts";
@@ -152,6 +153,26 @@ test("every synced document outside the lint-error set is already in Linear's fo
   assert.ok(files.some((f) => f.expected === "lint-error"));
 });
 
+test("the size cases at Linear's limit keep their exact length in Linear's form", () => {
+  const files = corpus().files.filter((f) => f.group === "size-spectrum" && f.expected !== "lint-error");
+  for (const [name, length] of [["at-limit", CONTENT_LIMIT], ["at-limit-minus-one", CONTENT_LIMIT - 1], ["size-240kb-1", 240_000], ["size-1kb-1", 1_000]] as const) {
+    const file = files.find((f) => f.path.endsWith(`/${name}.md`));
+    assert.ok(file, name);
+    assert.equal([...file.content.toString("utf8")].length, length, name);
+  }
+});
+
+test("a file rewritten into Linear's form says so, and fix never changes a fixture Linear keeps as it is", () => {
+  const index = parse(readFileSync("test/fixtures/index.yaml", "utf8")) as { fixtures: { file: string; class?: string; basis?: string }[] };
+  const keptByLinear = new Set(index.fixtures.filter((f) => f.class === "unchanged" && f.basis === "known").map((f) => `docs/reference/${f.file}`));
+  for (const file of corpus().files) {
+    if (!file.note?.includes("Linear's form")) continue;
+    assert.ok(!keptByLinear.has(file.path), `${file.path}: Linear keeps the fixture as it is, but fix changes it`);
+  }
+  const rewritten = corpus().files.filter((f) => f.note?.includes("written in Linear's form"));
+  assert.ok(rewritten.length > 0);
+});
+
 test("a malformed percent escape is kept as written, and replacements are literal", () => {
   assert.equal(targetPath("100%.md"), "100%.md");
   assert.equal(targetPath("<a%20b.md#part>"), "a b.md");
@@ -235,8 +256,9 @@ test("generated alignment, image titles and marker contexts follow the fixture b
     assert.equal(generated.length, count, fixture);
     for (const file of generated) {
       assert.deepEqual(
-        [file.class, file.rule, file.basis],
-        [reference.class, reference.rule, reference.basis],
+        // The basis can differ: a bank copy may match the form the probe recorded, a generated file was never probed.
+        [file.class, file.rule],
+        [reference.class, reference.rule],
         file.path,
       );
     }
