@@ -16,6 +16,7 @@ import { startFaultProxy } from './fault-proxy.ts';
 import { BudgetBlockedError, estimate, type Governor } from './governor.ts';
 import { SandboxRest, githubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
+import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
@@ -395,7 +396,13 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
   return problems.length === 0 ? { ok: true } : { ok: false, detail: problems.join('; ') };
 }
 
+/** Runs one scenario and counts the harness's own requests through the app while it runs. */
 export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: string = newRunId()): Promise<ScenarioResult> {
+  const { result, requests } = await withAppRequests(() => runScenarioCounted(scenario, deps, runId));
+  return { ...result, harnessAppRequests: requests };
+}
+
+async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: string): Promise<Omit<ScenarioResult, 'harnessAppRequests'>> {
   const names: RunNames = runNames(runId);
   const started = Date.now();
   const runDir = join(deps.outDir, 'runs', `${scenario.id}-${runId}`);
@@ -560,7 +567,7 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
 export function skippedResult(scenario: Scenario, reason: string): ScenarioResult {
   return {
     id: scenario.id, level: levelOf(scenario.id), slice: scenario.slice, mode: scenario.mode, runId: '', result: 'skipped', reason,
-    startedAt: new Date().toISOString(), durationMs: 0, engineRequests: 0, harnessRequests: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true },
+    startedAt: new Date().toISOString(), durationMs: 0, engineRequests: 0, harnessRequests: 0, harnessAppRequests: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true },
   };
 }
 

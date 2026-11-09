@@ -31,8 +31,16 @@ export interface FakeDocument {
   updatedAt?: string;
   icon?: string | null;
   color?: string | null;
+  /** In the trash; Linear then sets `archivedAt` too. */
   trashed?: boolean;
   archivedAt?: string;
+  /**
+   * Left out of every `documents(...)` query, even with `includeArchived`,
+   * while `document(id:)` still answers for it. Not Linear's measured
+   * behaviour (lists return trashed and archived documents): an opt-in to
+   * reproduce a list that misses a document.
+   */
+  unlisted?: boolean;
   /** The stored content. */
   content?: string;
 }
@@ -284,8 +292,14 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
   if (operationName === 'GetDocuments') {
     // Read by id: trashed documents are included, unknown ids are absent.
     const ids = variables.ids as string[];
-    const nodes = world.linear.documents.filter((d) => ids.includes(d.id)).map((d) => documentNode(d, variables.withContent === true));
+    const nodes = world.linear.documents.filter((d) => ids.includes(d.id) && d.unlisted !== true).map((d) => documentNode(d, variables.withContent === true));
     return json(200, { data: { documents: { nodes } } });
+  }
+  if (operationName === 'GetDocument') {
+    // `document(id:)`: trashed and archived documents too; an unknown id is a GraphQL error, as in Linear.
+    const document = world.linear.documents.find((d) => d.id === variables.id);
+    if (document === undefined) return json(200, { errors: [{ message: 'Entity not found: Document', extensions: { code: 'INPUT_ERROR' } }], data: null });
+    return json(200, { data: { document: documentNode(document, variables.withContent === true) } });
   }
   return json(400, { errors: [{ message: `unknown operation ${operationName}`, extensions: { code: 'INPUT_ERROR' } }] });
 }
@@ -345,7 +359,9 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
   if (operation === 'TrashDocument') {
     const document = documents.find((d) => d.id === variables.id);
     if (document !== undefined) {
+      // `documentDelete` only moves the document to the trash, and sets `archivedAt` with it.
       document.trashed = true;
+      document.archivedAt = new Date().toISOString();
       touch(document);
     }
     return { documentDelete: { success: document !== undefined } };
@@ -365,6 +381,7 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     const document = documents.find((d) => d.id === variables.id);
     if (document !== undefined) {
       delete document.trashed;
+      delete document.archivedAt;
       touch(document);
     }
     return { documentUnarchive: { success: document !== undefined } };
@@ -413,6 +430,7 @@ function listDocuments(world: FakeWorld, variables: Record<string, unknown>) {
   const teamId = filter.team?.id.eq;
   const matching = world.linear.documents
     .filter((d) => (projectId !== undefined ? d.projectId === projectId : d.teamId === teamId && d.projectId === undefined))
+    .filter((d) => d.unlisted !== true)
     .filter((d) => variables.includeArchived === true || (d.trashed !== true && d.archivedAt === undefined))
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
   const start = variables.after === null ? 0 : Number(variables.after);
