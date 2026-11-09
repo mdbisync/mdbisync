@@ -253,6 +253,17 @@ describe('capture from Linear', () => {
     assert.equal((await fixture.remote.run(['cat-file','-e',`${stateRef(config,'linear')}:docs/blocked-new.md`],{okCodes:[0,128]})).code,128);
   });
 
+  it('scans original upload URLs before their query can enter the cache ref', async () => {
+    const secret = ['query','canary','731'].join('-');
+    const url = `https://uploads.linear.app/workspace/image.png?access=${secret}`;
+    world.linear.documents[0]!.content = `![Image](${url})\n`;
+    const result = await capture(context,{config,fetch:async()=>new Response('image'),security:{configured:true,check:async(files)=>[...files.values()].some((value)=>String(value).includes(secret))?[{hook:'secret-check',line:5}]:[]}});
+    assert.equal(result.blocked.length,1);
+    assert.equal(await text('docs/plan.md'),TREE['docs/plan.md']);
+    const remoteObjects = await fixture.remote.text(['cat-file','--batch-all-objects','--batch']);
+    assert.ok(!remoteObjects.includes(secret));
+  });
+
   it('reads only changed content after the cursor', async () => {
     world.linear.documents.push({id: 'later', title: 'later', projectId: 'project-api', content: 'Later.\n', createdAt: '2026-01-04T00:00:00Z'});
     await run();

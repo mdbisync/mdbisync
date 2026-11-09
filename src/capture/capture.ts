@@ -168,8 +168,15 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const text = head + body;
         candidate.files.set(path, text);
         if (candidate.checked === text) continue;
-        const unchanged = old?.path === path && previous.get(path)?.equals(Buffer.from(text)) === true && assets.files.size === 0;
-        const findings = unchanged && old?.entry.saved === undefined ? [] : await gate.check(candidate.files);
+        const unchanged = old?.path === path && previous.get(path)?.equals(Buffer.from(text)) === true && assets.files.size === 0 && assets.uploads.size === 0;
+        let findings: SecurityFinding[] = [];
+        if (!unchanged || old?.entry.saved !== undefined) {
+          // Upload URLs also enter the cache ref. Scan the original text so
+          // localization cannot hide a secret embedded in a URL or its query.
+          const original = head + (doc.content ?? '');
+          if (original !== text) findings = await gate.check(new Map<string, Buffer | string>([[path, original], ...assets.files]));
+          if (findings.length === 0) findings = await gate.check(candidate.files);
+        }
         if (findings.length > 0) {
           const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
           ids.set(old?.path ?? path, {id, saved});
