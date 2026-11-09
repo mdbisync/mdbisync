@@ -73,6 +73,15 @@ export interface CaptureResult {
 }
 
 const CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
+
+/**
+ * The trailer of an `ids` commit that sets the capture cursor: the next
+ * capture reads again only the documents Linear changed at or after `through`
+ * (and every document without an id).
+ */
+export function captureCursorTrailer(through: string): string {
+  return `Capture-through: ${through}`;
+}
 const HELD = /^Removal-held: (\S+)$/gm;
 
 /** The ids whose removal the last capture held, from its ids commit. */
@@ -408,7 +417,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // so documents sharing a timestamp or edited during pagination are not lost.
     // A place that listed nothing may have left out changes too: the cursor holds while a removal is held.
     const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
-    const trailers = [...(through === null ? [] : [`Capture-through: ${through}`]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
+    const trailers = [...(through === null ? [] : [captureCursorTrailer(through)]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
     const message = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
     // Record a held removal, and a cleared one, so the next capture reads what this one held.
     const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always: through !== cursor || held.size > 0 || heldBefore.size > 0, reserved });

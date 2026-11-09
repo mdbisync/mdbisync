@@ -60,7 +60,7 @@ import {
   stateRef,
 } from '../state/index.ts';
 import { createAssetCapture } from '../sync/assets.ts';
-import { prepareLfs } from '../sync/capture.ts';
+import { captureCursorTrailer, prepareLfs } from '../sync/capture.ts';
 import { type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titlePath } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
@@ -589,8 +589,9 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
 
     const synced = new Set([...entries.map((entry) => entry.path), ...keptTracked]);
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
+    const through = captureCursor(keptTracked);
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
-      message: FINAL_IDS_MESSAGE,
+      message: through === null ? FINAL_IDS_MESSAGE : `${FINAL_IDS_MESSAGE}\n\n${captureCursorTrailer(through)}`,
       always: (await readInitialSyncProgress(git, expected.ids)) !== null,
     });
     // The cache records each downloaded file, so the sync never uploads it again.
@@ -618,6 +619,27 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       needsPullRequest: changesTracked,
       closesPullRequest: !changesTracked && syncOpen,
     };
+  }
+
+  /**
+   * Where the first capture after this record starts reading Linear again.
+   * The record holds every listed document as it was listed, so the capture
+   * needs only what changed since: the latest update time listed, as the
+   * capture itself sets it. A file that kept the tracked branch's text while
+   * its document keeps its id (a download that failed, a hook's finding)
+   * does not hold Linear's text: the cursor stays at its document's update
+   * time so the capture reads it again. Null when nothing was listed.
+   */
+  function captureCursor(keptTracked: ReadonlySet<string>): string | null {
+    const time = (document: LinearDocument) => {
+      const parsed = new Date(document.updatedAt);
+      if (!Number.isFinite(parsed.getTime())) throw new Error('a document has an invalid update time');
+      return parsed.toISOString();
+    };
+    const idOf = new Map([...plan.overwrite, ...plan.create].map((entry) => [entry.path, entry.documentId]));
+    const pending = [...keptTracked].map((path) => documents.get(idOf.get(path) as string) as LinearDocument);
+    const times = (pending.length > 0 ? pending : [...documents.values()]).map(time).sort();
+    return (pending.length > 0 ? times[0] : times.at(-1)) ?? null;
   }
 
   /** Whether two commits have the same tree, parents and subject, so the newer one adds nothing. */

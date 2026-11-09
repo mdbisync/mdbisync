@@ -52,7 +52,7 @@ import {
   branchRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
-import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
+import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
@@ -213,7 +213,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // The upload cache was lost (or never recorded): each document that links a file is written again with fresh
   // uploads, run after run, until one run has done them all and marks the cache complete.
   const cacheLost = await uploadsRebuilding(git, expected.uploads);
-  const nothingNew = await alreadyMerged(git, linearTip, tracked);
+  // Nothing new either right after a person merged an initial sync from Linear unchanged: recording that merge
+  // would move `linear` with nothing written (I6). A deleted sync branch still takes the record that recreates it.
+  const nothingNew =
+    (await alreadyMerged(git, linearTip, tracked)) || (options.createSyncBranch !== true && (await mergedInitialRecord(git, linearTip, tracked)));
   if (nothingNew && !cacheLost) {
     // Nothing to write: the capacity report can use this run's earlier listing.
     const containers = options.containers ?? await readContainers();
