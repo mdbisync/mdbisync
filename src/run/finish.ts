@@ -2,7 +2,7 @@
 // for tests and tooling. Names, paths and states only, no content.
 
 import { writeFile } from 'node:fs/promises';
-import { type ConfirmedResult, type PlanReport, type WriteStop } from '../initial-sync/index.ts';
+import { type ConfirmedResult, type PlanReport, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type SyncRecord, type WriteResult } from '../sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
@@ -34,6 +34,8 @@ export interface RunReport {
   writtenCount: number;
   /** Documents an unfinished earlier run had written, skipped by this one. */
   skippedCompletedCount: number;
+  /** Files over the upload limit, by repository path; the documents that link them are left out. */
+  oversizeFiles: string[];
   /** The run continued an unfinished initial sync. */
   resumed: boolean;
   /** The run stopped writing before it finished (rate limit, low budget, test threshold). */
@@ -69,7 +71,7 @@ export interface ConfirmedReport {
   unchanged: string[];
   skippedCompleted: string[];
   trashed: string[];
-  leftOutAtWrite: Array<{ path: string; rule: string }>;
+  leftOutAtWrite: ConfirmedResult['leftOutAtWrite'];
   failed: ConfirmedResult['failed'];
   notAttempted: string[];
   stopped: WriteStop | null;
@@ -94,6 +96,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     sync: null,
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? 0,
+    oversizeFiles: [...new Set((confirmed?.leftOutAtWrite ?? []).filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
     resumed: confirmed?.resumed ?? false,
     stoppedEarly: confirmed?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
@@ -140,6 +143,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     },
     writtenCount: new Set([...write.updated, ...write.created, ...write.relocated.map((entry) => entry.to)]).size,
     skippedCompletedCount: 0,
+    oversizeFiles: [...new Set(write.leftOutAtWrite.filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
     resumed: false,
     stoppedEarly: write.stopped !== undefined,
     progressRecorded: write.code !== 'state-moved',

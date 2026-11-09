@@ -60,8 +60,8 @@ export interface LocalMerge {
   leftOut: Array<{ path: string; rules: string[] }>;
   /** What Linear must change, in path order; documents that need nothing are absent. */
   changes: DocumentChange[];
-  /** Documents that need nothing, by path in the merge result. */
-  unchanged: string[];
+  /** Documents whose text, title and place stay; a file they link to may still have changed. */
+  unchanged: KeepChange[];
 }
 
 /**
@@ -83,7 +83,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
   const conflicted = new Set(conflicts);
 
   const changes: DocumentChange[] = [];
-  const unchanged: string[] = [];
+  const unchanged: KeepChange[] = [];
   const claimed = new Set<string>();
   const blobs = await readBlobs(git, [...linearSide.files.values(), ...resultSide.files.values()].map((file) => file.oid));
   const body = (oid: Oid) => splitFile((blobs.get(oid) as Buffer).toString('utf8')).body;
@@ -118,7 +118,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
       place: previous === undefined || placeKey(previous.place) !== placeKey(next.place),
     };
     if (change.content || change.title || change.place) changes.push(change);
-    else unchanged.push(to);
+    else unchanged.push(change);
   }
   for (const path of resultSide.files.keys()) {
     if (!claimed.has(path) && !conflicted.has(path)) changes.push({ kind: 'create', path });
@@ -133,7 +133,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     result: resultSide.files,
     leftOut: resultSide.leftOut,
     changes,
-    unchanged: unchanged.sort(compare),
+    unchanged: unchanged.sort((a, b) => compare(a.to, b.to)),
   };
 }
 

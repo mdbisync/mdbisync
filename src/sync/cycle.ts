@@ -14,7 +14,8 @@ import { type WriteResult, writeTrackedToLinear } from './write.ts';
 
 export interface CycleOptions {
   config: StateConfig;
-  transforms?: readonly BodyTransform[];
+  /** Makes the body transforms (uploads, links); see `WriteOptions.transforms`. */
+  transforms?: () => readonly BodyTransform[];
 }
 
 export interface CycleResult {

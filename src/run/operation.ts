@@ -12,6 +12,7 @@ import {
   renderConfirmed,
   renderDryRun,
   toPlanReport,
+  uploadsTransform,
 } from '../initial-sync/index.ts';
 import { type CycleResult, renderSync, runSyncCycle } from '../sync/index.ts';
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
@@ -48,14 +49,14 @@ export async function runOperation(
     options,
     operation === 'sync'
       ? async (context) => {
-          sync = await runSyncCycle(context, { config: inputs.state });
+          sync = await runSyncCycle(context, { config: inputs.state, transforms: () => [uploadsTransform({ config: inputs.state })] });
           workSummary = renderSync(sync);
         }
       : gitToLinear === undefined
       ? undefined
       : async (context) => {
           if (gitToLinear.confirm) {
-            const run = await confirmInitialSync(context, { config: inputs.state });
+            const run = await confirmInitialSync(context, { config: inputs.state, transforms: [uploadsTransform({ config: inputs.state })] });
             plan = toPlanReport(run.plan, gitToLinear.direction, true);
             confirmed = run.result;
             workSummary = renderConfirmed(run.plan, run.result);

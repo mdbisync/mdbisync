@@ -82,6 +82,13 @@ export interface ConfirmOptions {
 /** Why the run stopped writing: the Linear client stopped, or a test threshold. */
 export type WriteStop = StopReason | { kind: 'test-threshold'; documents: number };
 
+/** A file a transform left out while writing: its rule, and the files that caused it when there are any. */
+export interface LeftOutAtWrite {
+  path: string;
+  rule: string;
+  files?: string[];
+}
+
 export interface FailedWrite {
   path: string;
   operation: string;
@@ -105,7 +112,7 @@ export interface ConfirmedResult {
   /** Paths where a document without a file would be; the documents are in Linear's trash. */
   trashed: string[];
   /** Files a transform left out while writing, with its rule. */
-  leftOutAtWrite: Array<{ path: string; rule: string }>;
+  leftOutAtWrite: LeftOutAtWrite[];
   failed: FailedWrite[];
   /** Paths not written because the run stopped first, the interrupted one included. */
   notAttempted: string[];
@@ -269,7 +276,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         unpushed += 1;
       } catch (error) {
         if (error instanceof LeaveOutError) {
-          result.leftOutAtWrite.push({ path, rule: error.rule });
+          result.leftOutAtWrite.push(error.files.length > 0 ? { path, rule: error.rule, files: [...error.files] } : { path, rule: error.rule });
           continue;
         }
         if (error instanceof DocumentTooLongError) {

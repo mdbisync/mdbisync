@@ -34,6 +34,8 @@ const TREE: Record<string, string> = {
   'eng/notes/draft.md': `# Draft\n\nA claim.[^1] ${CANARY}\n\n[^1]: A source.\n`,
   'combined/README.md': `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\n${CANARY}\n`,
   'combined/guide.md': `# Guide\n\nHow to start. ${CANARY}\n`,
+  'eng/media/diagram.png': Buffer.from('first diagram bytes').toString('latin1'),
+  'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows. ${CANARY}\n`,
   '.pre-commit-config.yaml': PRE_COMMIT,
 };
 
@@ -134,7 +136,8 @@ describe('sync: the tracked branch to Linear', () => {
       const document = world.linear.documents.find((d) => d.id === entry.id);
       assert.ok(document !== undefined && document.trashed !== true, `${path}: no live document`);
       const text = await show(`${tracked}:${path}`);
-      if (!text.includes('[^1]')) assert.equal(document.content, body(path, text), `${path}: content`);
+      // Left-out files keep an older text; images are compared in their own tests.
+      if (!text.includes('[^1]') && !text.includes('![')) assert.equal(document.content, body(path, text), `${path}: content`);
     }
     const keys = live().map((d) => `${d.projectId ?? d.teamId}/${d.title}`);
     assert.equal(new Set(keys).size, keys.length, 'duplicate documents');
@@ -273,11 +276,11 @@ describe('sync: the tracked branch to Linear', () => {
   });
 
   it('L2-08: a README that names another project moves all its documents there', async () => {
-    const before = await Promise.all(['eng/notes/README.md', 'eng/notes/plan.md', 'eng/notes/review.md'].map(documentOf));
+    const before = await Promise.all(['eng/notes/README.md', 'eng/notes/figure.md', 'eng/notes/plan.md', 'eng/notes/review.md'].map(documentOf));
     await commit({ 'eng/notes/README.md': `---\nlinear-project: Archive\n---\n\n# Field notes\n\n${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument', 'UpdateDocument']);
+    assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument', 'UpdateDocument', 'UpdateDocument']);
     assert.deepEqual(report.sync?.updated, []);
     for (const document of before) assert.equal(document.projectId, 'project-archive');
     await assertConverged();
@@ -403,6 +406,60 @@ describe('sync: the tracked branch to Linear', () => {
     assert.deepEqual(report.sync?.adopted, ['combined/faq.md']);
     assert.equal((await ids())['combined/faq.md']?.id, 'orphan');
     await assertConverged();
+  });
+
+  const uploadUrls = (text: string | null | undefined) => [...(text ?? '').matchAll(/https:\/\/uploads\.linear\.test\/[^)\s]+/g)].map((match) => match[0]);
+
+  it('a document with an image whose text changed is written; the image is not uploaded again', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const [url] = uploadUrls(figure.content);
+    assert.ok(url !== undefined, 'the initial sync did not upload the image');
+    const uploadsBefore = world.linear.uploads.length;
+    await commit({ 'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows, edited. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.equal(world.linear.uploads.length, uploadsBefore);
+    assert.deepEqual(uploadUrls(figure.content), [url]);
+    assert.match(figure.content ?? '', /edited/);
+    // `linear` keeps the relative link: its tree is the tracked tree.
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
+  });
+
+  it('L2-09: a new image is uploaded once; a second document embedding it reuses the upload', async () => {
+    const uploadsBefore = world.linear.uploads.length;
+    await commit({
+      'eng/media/chart.png': Buffer.from('chart bytes').toString('latin1'),
+      'eng/notes/report.md': `# Report\n\n![Chart](../media/chart.png)\n\n${CANARY}\n`,
+      'combined/summary.md': `# Summary\n\n![Chart](../eng/media/chart.png)\n\n${CANARY}\n`,
+    });
+    const { result, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes.filter((write) => write === 'FileUpload'), ['FileUpload']);
+    assert.equal(world.linear.uploads.length, uploadsBefore + 1);
+    const [report, summary] = await Promise.all([documentOf('eng/notes/report.md'), documentOf('combined/summary.md')]);
+    assert.deepEqual(uploadUrls(report.content), uploadUrls(summary.content));
+    assert.equal(uploadUrls(report.content).length, 1);
+    const cache = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
+    assert.ok(Object.values(cache).includes(uploadUrls(report.content)[0] as string));
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
+  });
+
+  it('L2-10: an image with new bytes at the same path is uploaded and its document gets the new URL', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    await commit({ 'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1') });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['FileUpload', 'UpdateDocument']);
+    assert.deepEqual(report.sync?.updated, ['eng/notes/figure.md']);
+    const [after] = uploadUrls(figure.content);
+    assert.ok(after !== undefined && after !== before, 'the document kept the old image');
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
   });
 
   /** What a capture does for an edit in Linear: the document's new text, committed onto `linear`. */
