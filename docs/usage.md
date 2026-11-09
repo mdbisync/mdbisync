@@ -253,11 +253,11 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   rerun that check.
 - After the merge, the next run finds nothing to write and opens no pull
   request.
-- While the open pull request of an initial sync from Linear waits for a
-  person, `sync` adds nothing to its branch and writes nothing to Linear. A
-  closed initial-sync pull request leaves its snapshot behind, including
-  review commits on top of it. The next sync pull request carries the tracked
-  branch with Linear's state merged in.
+- Until a person merges the pull request of an initial sync from Linear,
+  `sync` refuses with `initial-pull-request-pending` and writes nothing.
+  Closing that pull request or deleting its branch does not cancel the
+  unmerged snapshot. To start over, close the pull request, delete the sync
+  branch and run initial sync again to replace the snapshot.
 - Closing an ordinary sync pull request opens a replacement from the same
   branch on the next run. Pending person edits and CI fixes are kept and new
   captures are merged into them, without force pushes.

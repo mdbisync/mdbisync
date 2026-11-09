@@ -126,7 +126,7 @@ writes nothing and ends with exit code 4:
 | --- | --- | --- |
 | `initial-sync-required` | `refs/mdbisync/linear does not exist: run initial sync first. The sync wrote nothing.` | No initial sync has run, or its state is lost. Run an initial sync (see [Recovery with initial sync](#recovery-with-initial-sync)). |
 | `initial-sync-required` | `An initial sync stopped before it finished: run it again with the same inputs first. The sync wrote nothing.` | Run the initial sync again with the same direction and `confirm: true`. |
-| `initial-pull-request-pending` | `The pull request of the initial sync from Linear is not merged into <tracked branch> yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. To start over instead, close that pull request, delete the branch <sync branch> and run initial sync again. The sync wrote nothing.` | Review and merge that pull request with a merge commit. To start over, close it, delete the sync branch and run the initial sync again. |
+| `initial-pull-request-pending` | `The pull request of the initial sync from Linear is not merged into <tracked branch> yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. Closing the pull request or deleting its branch does not cancel this unmerged snapshot. To start over instead, close that pull request, delete the branch <sync branch> and run initial sync again to replace the snapshot. The sync wrote nothing.` | Review and merge that pull request with a merge commit. Closing it or deleting its branch alone leaves the snapshot pending. To start over, close it, delete the sync branch and run the initial sync again to replace the snapshot. |
 
 ## Partial sync runs
 
@@ -419,7 +419,9 @@ each linked file. Lost state is handled like this:
   comes back as a new file next to its old one.
 - **`uploads` lost:** the next sync uploads each linked file again and
   rewrites the documents that link one, once.
-- **The sync branch deleted:** the next sync creates it again.
+- **The sync branch deleted:** the next sync creates it again, except while
+  an initial snapshot from Linear remains unmerged; that run refuses and
+  writes nothing until a person merges or a new initial sync replaces it.
 - **`linear` lost, an initial sync that did not finish, or a state you do
   not trust:** the sync refuses with `initial-sync-required` and writes
   nothing. Recover with an initial sync.

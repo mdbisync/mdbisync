@@ -174,8 +174,10 @@ To abandon the pull request:
    pull request goes through step 3 again.
 4. Enable the sync workflow only when that initial sync is in place.
 
-Do not let the sync run between deleting the branch and the new initial
-sync.
+Closing the pull request or deleting its branch does not cancel the
+unmerged snapshot. Until a new initial sync replaces it, every `sync` run
+still refuses with `initial-pull-request-pending` and writes nothing. It
+never recreates and merges the abandoned snapshot.
 
 If a person pushed commits to the pull request's branch, a new confirmed run
 leaves them alone and stops: merge or close the pull request and delete the
