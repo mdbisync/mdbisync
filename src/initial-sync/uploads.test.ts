@@ -9,6 +9,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
+import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { fixText } from '../format/index.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
@@ -95,11 +96,13 @@ describe('uploads of linked files in an initial sync', () => {
       MDBISYNC_CONFIRM: 'true',
       GITHUB_STEP_SUMMARY: summaryFile(),
     };
+    const mark = await markWorld(world, fixture);
     const result = await runCli(['initial-sync'], { env, cwd, fetch: fetchOverride ?? fakeFetch(world) });
     assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     assert.ok(!summary.includes(CANARY), 'the job summary holds content');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
+    await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined });
     return { result, report, summary };
   };
 

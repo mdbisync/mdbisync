@@ -10,7 +10,7 @@ import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sy
 import { PATH_RULE } from '../sync/paths.ts';
 import { type ExitStatus, exitStatusOf, partialCode, pullRequestEnding } from './exit.ts';
 import { cell } from './summary.ts';
-import { type OperationOutcome } from './operation.ts';
+import { type OperationOutcome, type RunWrites } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 
 export interface RunReport {
@@ -107,6 +107,14 @@ export interface RunReport {
   rereadWindowMs: number | null;
   /** A confirmed initial sync from Linear: what it took and the pull request it left for a person; null for other runs. */
   linearToGit: ReverseReport | null;
+  /**
+   * What this run wrote, by kind, counted where each write succeeded:
+   * Linear mutations by operation and stored uploads, refs its accepted
+   * pushes moved by role, pull request calls GitHub accepted. A refused,
+   * failed or unanswered write is never counted; a run that wrote nothing
+   * has three empty objects.
+   */
+  writes: RunWrites;
 }
 
 export interface ReverseReport {
@@ -225,6 +233,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
           },
     linearToGit: reverse === undefined ? null : toReverseReport(reverse),
     ...raceFacts(outcome),
+    writes: outcome.writes,
   };
 }
 
@@ -298,6 +307,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     record: write.record === null ? null : { kind: write.record.kind, commit: write.record.commit, hasTrackedParent: write.record.parents.length > 1 },
     linearToGit: null,
     ...raceFacts(outcome),
+    writes: outcome.writes,
   };
 }
 

@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
+import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git, UPLOADS_REBUILDING, UPLOADS_REBUILT } from '../state/index.ts';
@@ -56,6 +57,8 @@ describe('sync: lost state and deleted branches', () => {
   let world: FakeWorld;
   /** Stands in front of the fake worlds when a test sets it. */
   let fetchOverride: typeof fetch | undefined;
+  /** State refs the test moves itself while a run works, which the run's report does not count. */
+  let movedByOthers: Array<'linear' | 'ids' | 'uploads' | 'syncBranch'> = [];
   const reportFile = () => join(fixture.root, 'report.json');
   const summaryFile = () => join(fixture.root, 'summary.md');
 
@@ -73,6 +76,7 @@ describe('sync: lost state and deleted branches', () => {
     });
     world = fakeWorld();
     fetchOverride = undefined;
+    movedByOthers = [];
     world.github.checks = new Map();
     world.github.merge = mergeOnRemote;
     const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
@@ -102,11 +106,13 @@ describe('sync: lost state and deleted branches', () => {
     await rm(summaryFile(), { force: true });
     const writesBefore = world.writes.length;
     const uploadsBefore = world.linear.uploads.length;
+    const mark = await markWorld(world, fixture);
     const result = await runCli([command], { env: env(extra), cwd, fetch: fetchOverride ?? fakeFetch(world) });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
     for (const text of texts) assert.ok(!text.includes(CANARY), 'content reached the output or a pull request (I5)');
+    await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined, movedByOthers });
     return { result, report, summary, writes: world.writes.slice(writesBefore), uploads: world.linear.uploads.length - uploadsBefore };
   }
 
@@ -260,6 +266,10 @@ describe('sync: lost state and deleted branches', () => {
     const linear = await rev(STATE('linear'));
     await fixture.remote.run(['update-ref', '-d', STATE('uploads')]);
 
+    // The rebuild's pushes of the uploads ref and the image stored again are counted.
+    const rebuilt = await sync();
+    assert.equal(rebuilt.report.writes.git.uploads, 2);
+    assert.equal(rebuilt.report.writes.linear['FileUpload'], 1);
     const run = await settle();
     assert.ok(world.linear.uploads.filter((upload) => upload.bytes?.equals(DIAGRAM)).length >= 2, 'the image is uploaded again');
     assert.notEqual(await remoteRef(fixture, STATE('uploads')), null, 'the cache is recorded again');
@@ -427,6 +437,7 @@ describe('sync: lost state and deleted branches', () => {
     Object.assign(process.env, hooked);
     let run;
     let moved = '';
+    movedByOthers = ['ids'];
     try {
       const running = sync();
       while (!existsSync(join(hooks, 'reached', 'after-write-before-record'))) await sleep(20);
@@ -439,9 +450,13 @@ describe('sync: lost state and deleted branches', () => {
       run = await running;
     } finally {
       for (const name of Object.keys(hooked)) delete process.env[name];
+      movedByOthers = [];
     }
     assert.match(run.report.sync?.updated.join() ?? '', /combined\/guide\.md/, 'the run wrote before it tried to record');
     assert.equal(run.report.atomicPushRefused, true);
+    // The refused push moved nothing, so the run reports no ref moved; the document it wrote first is counted.
+    assert.deepEqual(run.report.writes.git, {});
+    assert.equal(run.report.writes.linear['UpdateDocument'], 1);
     assert.equal(run.report.partialRefUpdates, 0);
     assert.equal(run.report.code, 'state-moved');
     assert.equal(run.report.exitStatus, 'warning');
@@ -548,6 +563,8 @@ describe('sync: lost state and deleted branches', () => {
     assert.deepEqual(await ids(), before, 'every id stays mapped');
     for (const path of paths) assert.ok(await tracks(path), `${path} stays on the tracked branch`);
     assert.deepEqual(blank.writes, [], 'nothing is written to Linear on a blank answer');
+    // The held removal is recorded on the ids ref: the one write of this run, which its report counts.
+    assert.deepEqual(blank.report.writes, { linear: {}, git: { ids: 1 }, pullRequests: {} });
 
     // A blank answer that lasts into the next run does not confirm the held removals: no place lists anything.
     const still = await sync();

@@ -9,6 +9,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
+import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { COMMANDS, INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
@@ -109,6 +110,7 @@ describe('initial sync from Linear to the tracked branch', () => {
   const run = async (world: FakeWorld, extra: Record<string, string> = {}, command = 'initial-sync') => {
     await rm(reportFile(), { force: true });
     await rm(summaryFile(), { force: true });
+    const mark = await markWorld(world, fixture);
     const result = await runCli([command], { env: env(extra), cwd, fetch: fakeFetch(world) });
     assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
@@ -116,6 +118,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     assert.ok(!JSON.stringify(report).includes(CANARY), 'the report holds content');
     for (const pr of world.github.pullRequests) assert.ok(!`${pr.title}\n${pr.body}`.includes(CANARY), 'a pull request holds content');
+    await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: false });
     return { result, report, summary };
   };
 
