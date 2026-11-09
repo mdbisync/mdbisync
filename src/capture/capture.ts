@@ -3,23 +3,21 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadMapping } from '../mapping/index.ts';
+import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { splitFile } from '../format/index.ts';
 import { type LinearDocument } from '../linear/index.ts';
-import { documentUrlBase, linksFromLinear, workspaceUrlKey } from '../initial-sync/links.ts';
-import { annotatedPlaces, placeId, type InitialSyncPlan } from '../initial-sync/plan.ts';
-import { type BodyTransform, restoreBody } from '../initial-sync/transform.ts';
+import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
+import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { type CommitIdentity, type StateConfig, type FetchedState, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readUploads } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { documentPath } from './paths.ts';
-import { captureAssets } from './assets.ts';
+import { createAssetCapture, type CapturedAssets } from './assets.ts';
 
 export interface CaptureOptions {
   config: StateConfig;
   identity?: CommitIdentity;
-  transforms?: readonly BodyTransform[];
   security?: SecurityGate;
   fetch?: typeof fetch;
 }
@@ -78,7 +76,26 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (!Number.isFinite(time.getTime())) throw new Error('a document has an invalid update time');
       return time.toISOString();
     };
-    const selected = [...listed.values()].filter((doc) => !byId.has(doc.id) || byId.get(doc.id)?.entry.saved !== undefined || cursor === null || normalizedTime(doc) >= cursor);
+    let selected = [...listed.values()].filter((doc) => !byId.has(doc.id) || byId.get(doc.id)?.entry.saved !== undefined || cursor === null || normalizedTime(doc) >= cursor);
+    const invalidZone = (doc: LinearDocument, path: string) => {
+      const zone = nearestZone(mapping.zones, folderOf(path));
+      if (zone === undefined) return true;
+      const place = zone.project === undefined ? {kind: 'team' as const, team: zone.team} : {kind: 'project' as const, team: zone.team, project: zone.project};
+      const target = placeId(targets, place);
+      return 'projectId' in target ? target.projectId !== doc.projectId : doc.projectId !== null || target.teamId !== doc.teamId;
+    };
+    const destination = (doc: LinearDocument, occupied: ReadonlySet<string>) => {
+      const old = byId.get(doc.id);
+      const available = new Set(occupied);
+      if (old !== undefined) available.delete(old.path);
+      return documentPath(folderFor(doc)!, doc.title, doc.id, available, old?.path, (path) => invalidZone(doc, path));
+    };
+    // An unchanged source may link a renamed, moved or removed target.
+    // Re-read bodies when a path changes so those inbound links are translated too.
+    if ([...listed.values()].some((doc) => {
+      const old = byId.get(doc.id);
+      return old !== undefined && (!live(doc) || destination(doc, new Set(entries.map((entry) => entry.path))) !== old.path);
+    })) selected = [...listed.values()];
     const documents = new Map<string, LinearDocument>(listed);
     const work = new Map<string, LinearDocument>();
     for (const doc of await linear.getDocuments(selected.filter(live).map((doc) => doc.id), { withContent: true })) { documents.set(doc.id, doc); work.set(doc.id, doc); }
@@ -87,76 +104,109 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const result: CaptureResult = { ok: true, fetched, documents, blocked: [], changed: [], removed: [], leftOut: [], summary: '' };
     const changes = new Map<string, Buffer | string | null>();
     const occupied = new Set(entries.map((entry) => entry.path));
-    const transforms = options.transforms ?? [];
-    const captureMapping = await loadMapping(git, base);
-    const plan: InitialSyncPlan = { create: [], overwrite: [], trash: [], leftOut: [] };
-    for (const file of captureMapping.documents) {
-      const entry = ids.get(file.path);
-      if (entry === undefined) plan.create.push({ path: file.path, title: file.title, place: file.place });
-      else plan.overwrite.push({ path: file.path, title: file.title, place: file.place, documentId: entry.id });
-    }
-    const documentIds = new Map([...ids].map(([path, entry]) => [path, entry.id]));
+    // Only files already present in the branch are link targets until their
+    // candidates pass. A blocked rename continues to point at its old file.
+    const documentIds = new Map([...ids].filter(([path]) => previous.has(path)).map(([path, entry]) => [path, entry.id]));
     const paths = new Map<string, string>();
     const reservations = new Set(occupied);
     for (const doc of [...work.values()].filter(live).sort((a, b) => a.id.localeCompare(b.id))) {
       const old = byId.get(doc.id);
-      const available = new Set(reservations);
-      if (old !== undefined) available.delete(old.path);
-      const path = documentPath(folderFor(doc)!, doc.title, doc.id, available);
+      const path = destination(doc, reservations);
       paths.set(doc.id, path);
       reservations.add(path);
-      if (old !== undefined) documentIds.delete(old.path);
-      documentIds.set(path, doc.id);
     }
-    for (const transform of transforms) await transform.prepare?.({ git, tracked: base, linear, plan, uploads, documentIds });
-
     const linkBase = [...work.values()].some((doc) => doc.content?.includes('https://linear.app/')) ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
-    for (const doc of [...work.values()].sort((a, b) => a.id.localeCompare(b.id))) {
+    const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)));
+    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, Buffer | string>; checked?: string };
+    const candidates = new Map<string, Candidate>();
+    const resetTarget = (id: string) => {
+      for (const [path, target] of documentIds) if (target === id) documentIds.delete(path);
+      const old = byId.get(id);
+      if (old !== undefined && previous.has(old.path)) documentIds.set(old.path, id);
+    };
+    for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
       const old = byId.get(doc.id);
       if (!live(doc)) {
         if (old !== undefined) {
+          if (old.entry.saved !== undefined) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
           changes.set(old.path, null);
           ids.delete(old.path);
-          occupied.delete(old.path);
+          documentIds.delete(old.path);
           result.removed.push(old.path);
         }
         continue;
       }
       const path = paths.get(doc.id)!;
-      const head = old === undefined ? '' : splitFile(previous.get(old.path)?.toString('utf8') ?? '').head;
+      const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       try {
-        const body = restoreBody(transforms, path, doc.content ?? '');
-        const restored = linkBase === undefined ? body : linksFromLinear(body, path, {base: linkBase, ids: documentIds});
-        const assets = await captureAssets(git, options.config, base, path, restored, uploads, options.fetch);
-        const files = new Map<string, Buffer | string>([[path, head + assets.body], ...assets.files]);
-        const findings = await gate.check(files);
-        if (findings.length > 0) {
-          // Save the original appearance durably before setting the mark. A failed
-          // mark or comment can then be retried without forgetting the original.
-          const saved = old?.entry.saved ?? { icon: doc.icon, color: doc.color };
-          const blockedPath = old?.path ?? path;
-          ids.set(blockedPath, { id: doc.id, saved });
-          result.blocked.push({ id: doc.id, path: blockedPath, findings });
-          continue;
-        }
-        if (old?.entry.saved !== undefined) await linear.updateDocument(doc.id, old.entry.saved);
-        if (old !== undefined && old.path !== path) {
-          changes.set(old.path, null);
-          ids.delete(old.path);
-          occupied.delete(old.path);
-          result.removed.push(old.path);
-        }
-        ids.set(path, { id: doc.id });
-        occupied.add(path);
-        for (const [file, content] of files) {
-          const existing = previous.get(file);
-          if (existing === undefined || !existing.equals(Buffer.from(content))) { changes.set(file, content); result.changed.push(file); }
-        }
-        for (const [hash, url] of assets.uploads) uploads.set(hash, url);
+        const assets = await downloadAssets(path, doc.content ?? '', uploads, old?.path === path ? prior.body : undefined);
+        const candidate: Candidate = {doc, path, head: prior.head, assets, files: new Map<string, Buffer | string>([[path, prior.head + assets.body], ...assets.files])};
+        if (old?.path === path) candidate.previousBody = prior.body;
+        candidates.set(doc.id, candidate);
+        resetTarget(doc.id);
+        if (old !== undefined) documentIds.delete(old.path);
+        documentIds.set(path, doc.id);
       } catch {
-        // Do not expose asset URLs, document content, or transform errors.
-        result.leftOut.push({ id: doc.id, rule: 'capture-translation' });
+        result.leftOut.push({id: doc.id, rule: 'capture-translation'});
       }
+    }
+    // A rejected target may change other documents' relative links. Recheck
+    // only bodies that change as targets fall back to their accepted paths.
+    let again = true;
+    while (again) {
+      again = false;
+      for (const [id, candidate] of candidates) {
+        const {doc, path, head, assets} = candidate;
+        const old = byId.get(id);
+        let body = assets.body;
+        if (linkBase !== undefined) {
+          const map = {base: linkBase, ids: new Map(documentIds)};
+          const seen: LinkSpellings = new Map();
+          if (candidate.previousBody !== undefined) linksToLinear(candidate.previousBody, path, map, seen);
+          body = linksFromLinear(body, path, map, seen);
+        }
+        const text = head + body;
+        candidate.files.set(path, text);
+        if (candidate.checked === text) continue;
+        const unchanged = old?.path === path && previous.get(path)?.equals(Buffer.from(text)) === true && assets.files.size === 0;
+        const findings = unchanged && old?.entry.saved === undefined ? [] : await gate.check(candidate.files);
+        if (findings.length > 0) {
+          const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
+          ids.set(old?.path ?? path, {id, saved});
+          result.blocked.push({id, path: old?.path ?? path, findings});
+          candidates.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
+        }
+        if (old?.entry.saved !== undefined) {
+          try { await linear.updateDocument(id, {icon: old.entry.saved.icon, color: old.entry.saved.color}); }
+          catch {
+            result.leftOut.push({id, rule: 'capture-appearance'});
+            candidates.delete(id);
+            resetTarget(id);
+            again = true;
+            break;
+          }
+        }
+        candidate.checked = text;
+      }
+    }
+    for (const [id, candidate] of candidates) {
+      const old = byId.get(id);
+      if (old !== undefined && old.path !== candidate.path) {
+        changes.set(old.path, null);
+        ids.delete(old.path);
+        result.removed.push(old.path);
+      }
+      ids.set(candidate.path, {id});
+      for (const [path, content] of candidate.files) {
+        if (previous.get(path)?.equals(Buffer.from(content)) !== true) {
+          changes.set(path, content);
+          result.changed.push(path);
+        }
+      }
+      for (const [hash,url] of candidate.assets.uploads) uploads.set(hash,url);
     }
     // Advance only to timestamps actually observed; equality is reread next run
     // so documents sharing a timestamp or edited during pagination are not lost.
@@ -176,7 +226,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       for (const blocked of result.blocked) {
         const doc = documents.get(blocked.id)!;
         if (doc.icon !== 'Cross' || doc.color !== '#EB5757') await linear.updateDocument(doc.id, { icon: 'Cross', color: '#EB5757' });
-        if (doc.documentContentId !== null && byId.get(doc.id)?.entry.saved === undefined) {
+        if (doc.documentContentId !== null) {
           const details = blocked.findings.map(({ hook, line }) => `hook \`${hook}\`, line ${line}`).join('; ');
           await linear.commentOnDocument(doc.documentContentId, `A security check blocked this change: ${details}. Edit the document to fix it; the next run will try again.`);
         }

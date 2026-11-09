@@ -34,6 +34,7 @@ export async function securityGate(git: Git, tracked: Oid): Promise<SecurityGate
   const config = readHookConfig(read.code === 0 ? read.stdout.toString('utf8') : null);
   if (config.invalid !== undefined) throw new Error('invalid security hook configuration');
   const hooks = config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+  if (hooks.length > 0 && (await runHooks(git.dir, ['--version'])).code !== 0) throw new Error('security hooks require pre-commit on PATH; install pre-commit before capture');
   let dir: string | undefined;
   let scratch: Git;
   let baseline: string;
@@ -75,16 +76,23 @@ export async function securityGate(git: Git, tracked: Oid): Promise<SecurityGate
           await writeFile(join(dir, path), content);
         }
         // Index-inspecting hooks see the candidate too. This repository has no remote.
-        await scratch.run(['add', '--all']);
+        await scratch.run(['add', '--force', '--', ...files.keys()]);
         const findings: SecurityFinding[] = [];
+        let ran = false;
         for (const stage of ['pre-commit', 'pre-push']) {
           const result = await runHooks(dir, ['run', SECURITY_ALIAS, '--hook-stage', stage, '--files', ...files.keys()]);
+          if (result.code !== 0 && result.output.trim() === `No hook with id \`security\` in stage \`${stage}\``) continue;
+          ran = true;
           if (result.code !== 0) {
             const failed = hooks.filter((id) => result.output.includes(`- hook id: ${id}\n`));
-            const lines = [...result.output.matchAll(/(?:\bline\s+|:)(\d+)(?::|\b)/g)].map((match) => Number(match[1])).filter((line) => Number.isSafeInteger(line) && line > 0);
+            const escaped = [...files.keys()].map((path) => path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+            const located = new RegExp(`(?:${escaped.join('|')}):(\\d+)(?::|\\b)`, 'g');
+            const matches = [...result.output.matchAll(located)];
+            const lines = matches.map((match) => Number(match[1])).filter((line) => Number.isSafeInteger(line) && line > 0);
             for (const hook of failed.length > 0 ? failed : [SECURITY_ALIAS]) findings.push({ hook, line: lines[0] ?? 1 });
           }
         }
+        if (!ran) findings.push({ hook: SECURITY_ALIAS, line: 1 });
         // Capture only Linear's text. A security hook that rewrites it is a rejection.
         for (const [path, content] of files) {
           const after = await readFile(join(dir, path)).catch(() => null);

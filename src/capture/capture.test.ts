@@ -185,6 +185,74 @@ describe('capture from Linear', () => {
     assert.ok(next.changed.includes('docs/plan.md'));
   });
 
+  it('refreshes unchanged inbound links and keeps the accepted target when a rename is blocked', async () => {
+    world.linear.documents[0]!.content = '[Target](https://linear.app/example-team/document/target)\n';
+    world.linear.documents.push({id: 'target', title: 'target', projectId: 'project-api', content: 'Target.\n', createdAt: '2026-01-04T00:00:00Z'});
+    await run();
+    await refresh();
+    Object.assign(world.linear.documents[1]!, {title: 'renamed', updatedAt: '2026-01-05T00:00:00Z'});
+    const blocked = await capture(context, {config, security: {configured: true, check: async (files) => files.has('docs/renamed.md') ? [{hook:'secret-check', line:1}] : []}});
+    assert.equal(blocked.blocked.length, 1);
+    assert.ok((await text('docs/plan.md')).includes('<target.md>'));
+    await refresh();
+    const accepted = await run();
+    assert.equal(accepted.blocked.length, 0);
+    assert.ok((await text('docs/plan.md')).includes('<renamed.md>'));
+    assert.equal(await text('docs/renamed.md'), 'Target.\n');
+  });
+
+  it('retries a security comment after its post-push delivery fails', async () => {
+    const gate = {configured: true, check: async () => [{hook:'secret-check', line:5}]};
+    world.linear.documents[0]!.content = 'Rejected.\n';
+    world.linear.writes.reject = (operation) => operation === 'CommentOnDocument';
+    await assert.rejects(capture(context, {config, security: gate}));
+    assert.equal(world.linear.documents[0]!.icon, 'Cross');
+    await refresh();
+    delete world.linear.writes.reject;
+    await capture(context, {config, security: gate});
+    assert.match(world.linear.documents[0]!.comments?.join('') ?? '', /hook `secret-check`, line 5/);
+  });
+
+  it('keeps team-zone documents outside nested project folders', async () => {
+    await fixture.seed({
+      'team/README.md': '---\nlinear-team: Docs\n---\n\nTeam.\n',
+      'team/sub/README.md': '---\nlinear-project: Research\n---\n\nResearch.\n',
+    });
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    context.targets.projects.set('Docs\0Research', {id:'project-research', name:'Research'});
+    world.linear.documents.push({id:'team-only', title:'sub/team-only', teamId:'team-docs', content:'Team document.\n', createdAt:'2026-01-06T00:00:00Z'});
+    const result = await run();
+    const ids = await readIds(context.git, result.fetched.state.ids);
+    const path = [...ids].find(([,entry]) => entry.id === 'team-only')?.[0];
+    assert.ok(path);
+    assert.ok(path.startsWith('team/'));
+    assert.ok(!path.startsWith('team/sub/'));
+    assert.equal(await text(path), 'Team document.\n');
+  });
+
+  it('preserves prior document-link spellings and leaves URLs to blocked new targets usable', async () => {
+    const target = {id:'target', title:'target', projectId:'project-api', content:'Target.\n', createdAt:'2026-01-04T00:00:00Z'};
+    world.linear.documents.push(target);
+    world.linear.documents[0]!.content = '[Target](https://linear.app/example-team/document/target)\n';
+    await run();
+    await refresh();
+    const raw = '---\ncategory: work\n---\n\n[Target](./target.md)\n';
+    const record = await commitTree(context.git, {parents:[context.fetched.state.linear!], base:context.fetched.state.linear, changes:new Map([['docs/plan.md',raw]]), message:'Keep link spelling', identity:IDENTITY});
+    assert.equal((await pushAtomic(context.git,config,[{ref:stateRef(config,'linear'),expected:context.fetched.state.linear,next:record}])).ok,true);
+    await refresh();
+    Object.assign(world.linear.documents[0]!, {content:'[Target](https://linear.app/example-team/document/target)\n\nEdited.\n', updatedAt:'2026-01-06T00:00:00Z'});
+    await run();
+    assert.ok((await text('docs/plan.md')).includes('[Target](./target.md)'));
+    await refresh();
+    world.linear.documents.push({id:'blocked-new',title:'blocked-new',projectId:'project-api',content:'Rejected.\n',createdAt:'2026-01-07T00:00:00Z'});
+    Object.assign(world.linear.documents[0]!, {content:'[New](https://linear.app/example-team/document/blocked-new)\n',updatedAt:'2026-01-07T00:00:00Z'});
+    const result = await capture(context,{config,security:{configured:true,check:async(files)=>files.has('docs/blocked-new.md')?[{hook:'secret-check',line:1}]:[]}});
+    assert.equal(result.blocked.length,1);
+    assert.ok((await text('docs/plan.md')).includes('https://linear.app/example-team/document/blocked-new'));
+    assert.equal((await fixture.remote.run(['cat-file','-e',`${stateRef(config,'linear')}:docs/blocked-new.md`],{okCodes:[0,128]})).code,128);
+  });
+
   it('reads only changed content after the cursor', async () => {
     world.linear.documents.push({id: 'later', title: 'later', projectId: 'project-api', content: 'Later.\n', createdAt: '2026-01-04T00:00:00Z'});
     await run();
@@ -216,7 +284,10 @@ it('makes safe title paths and deterministic collision names', () => {
     assert.ok(!path.split('/').some((segment) => segment === '..' || segment.toLowerCase() === '.git'));
     assert.ok(!/[\\:*?"<>|]/.test(path));
   }
+  assert.equal(documentPath('docs', '100% done', 'one', new Set(), 'docs/100% done.md'), 'docs/100% done.md');
   const occupied = new Set(['docs/plan.md']);
-  assert.notEqual(documentPath('docs', 'plan', 'two', occupied), 'docs/plan.md');
+  const collision = documentPath('docs', 'plan', 'two', occupied);
+  assert.notEqual(collision, 'docs/plan.md');
+  assert.equal(documentPath('docs', 'plan', 'two', new Set(), collision), collision);
   assert.equal(documentPath('docs', 'plan', 'two', occupied), documentPath('docs', 'plan', 'two', occupied));
 });

@@ -5,9 +5,9 @@ run as a GitHub Action.
 
 **Status:** early development. `lint` and `fix` work on Markdown files.
 `check` checks a repository's setup. `initial-sync` from git to Linear
-works, as a dry run and confirmed; `sync` and `initial-sync` from Linear to
-git run the same check (and `sync` refuses to run without its state) and
-then answer "not implemented".
+works, as a dry run and confirmed. `sync` currently captures Linear changes
+into its state ref; the remaining cycle steps are under development.
+`initial-sync` from Linear to git still answers "not implemented".
 
 ## Folder mapping
 
@@ -92,7 +92,11 @@ new confirmed run rebuilds them without duplicating documents.
 
 ## Development
 
-Requires Node 24.
+Requires Node 24 and pre-commit (install the hook runner before `npm test`).
+Capture with security hooks also requires pre-commit on the runner PATH;
+install it before invoking the action, for example with
+`pipx install pre-commit==4.6.2`. Missing tooling stops the run without
+marking documents as security failures.
 
 ```sh
 npm ci                  # exact versions from package-lock.json, install scripts off

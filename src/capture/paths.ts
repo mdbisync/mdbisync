@@ -18,16 +18,23 @@ export function titlePath(title: string): string {
 export function pathKey(path: string): string { return path.normalize('NFC').toLowerCase(); }
 
 /** Never overwrite an existing file, directory, or case-insensitive alias. */
-export function documentPath(folder: string, title: string, id: string, occupied: ReadonlySet<string>): string {
+export function documentPath(folder: string, title: string, id: string, occupied: ReadonlySet<string>, previous?: string, invalid: (path: string) => boolean = () => false): string {
   const stem = posix.join(folder, titlePath(title));
   const keys = [...occupied].map(pathKey);
-  const conflicts = (path: string) => keys.some((key) => key === pathKey(path) || key.startsWith(`${pathKey(path)}/`) || pathKey(path).startsWith(`${key}/`));
+  const conflicts = (path: string) => invalid(path) || keys.some((key) => key === pathKey(path) || key.startsWith(`${pathKey(path)}/`) || pathKey(path).startsWith(`${key}/`));
   let candidate = `${stem}.md`;
-  if (!conflicts(candidate)) return candidate;
+  // An existing git-originated spelling already represents this title.
+  const raw = `${folder === '' ? '' : `${folder}/`}${title}.md`;
+  if (previous === raw && !conflicts(previous)) return previous;
   const suffix = createHash('sha256').update(id).digest('hex').slice(0, 12);
   // A conflicting ancestor may be a file; flatten the title in that case.
   const flattened = titlePath(title).replaceAll('/', '%2F');
   const flat = Buffer.byteLength(flattened) > 180 ? `${[...flattened].slice(0, 40).join('')}~${createHash('sha256').update(title).digest('hex').slice(0, 16)}` : flattened;
+  if (previous !== undefined && !conflicts(previous)) {
+    const prefix = posix.join(folder, `${flat}~${suffix}`);
+    if (previous === `${prefix}.md` || (previous.startsWith(`${prefix}-`) && /^\d+\.md$/.test(previous.slice(prefix.length + 1)))) return previous;
+  }
+  if (!conflicts(candidate)) return candidate;
   for (let index = 0; ; index += 1) {
     candidate = posix.join(folder, `${flat}~${suffix}${index === 0 ? '' : `-${index}`}.md`);
     if (!conflicts(candidate)) return candidate;

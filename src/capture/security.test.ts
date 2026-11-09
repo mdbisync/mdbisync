@@ -43,3 +43,28 @@ it('runs security aliases at both stages and returns no hook output or matched v
     assert.ok(!all.includes('Safe.'));
   } finally { await fixture.cleanup(); }
 });
+
+it('allows single-stage aliases and scans ignored candidates through the index', async () => {
+  const fixture = await createFixture();
+  let gate: Awaited<ReturnType<typeof securityGate>> | undefined;
+  try {
+    await fixture.seed({
+      '.gitignore': 'private/\n',
+      '.pre-commit-config.yaml': `repos:
+  - repo: local
+    hooks:
+      - id: index-check
+        alias: security
+        name: Index check
+        entry: node index-check.mjs
+        language: system
+        stages: [pre-commit]
+`,
+      'index-check.mjs': `import {execFileSync} from 'node:child_process'; for(const file of process.argv.slice(2)) {const text=execFileSync('git',['show',':'+file],{encoding:'utf8'}); if(text.includes(['private','canary'].join('-'))) {console.log(file+':2: rejected'); process.exitCode=1;}}`,
+    });
+    const git = await fixture.clone('staged');
+    gate = await securityGate(git, await git.text(['rev-parse', 'origin/main']));
+    assert.deepEqual(await gate.check(new Map([['docs/safe.md', 'Safe.\n']])), []);
+    assert.deepEqual(await gate.check(new Map([['private/plan.md', 'private-canary\n']])), [{hook: 'index-check', line: 2}]);
+  } finally { await gate?.close?.(); await fixture.cleanup(); }
+});

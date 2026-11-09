@@ -41,3 +41,44 @@ it('rejects off-host redirects without sending a second request', async () => {
     assert.equal(gets, 1);
   } finally { await fixture.cleanup(); }
 });
+
+it('authenticates extensionless uploads, infers their image type and preserves fragments', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('authenticated');
+    const base = await git.text(['rev-parse','origin/main']);
+    const { GraphQLTransport } = await import('../linear/transport.ts');
+    let requests = 0;
+    const transport = new GraphQLTransport({token:'test-access-token', fetch: async (input, init) => {
+      requests++;
+      assert.equal(String(input),'https://uploads.linear.app/workspace/opaque');
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer test-access-token');
+      assert.equal(init?.redirect, 'manual');
+      return new Response('image-bytes',{headers:{'content-type':'image/png'}});
+    }});
+    const result = await captureAssets(git, resolveStateConfig({}), base, 'plan.md', '[Image](https://uploads.linear.app/workspace/opaque#page=3)', new Map(), (input,init) => transport.fetchUpload(String(input),init));
+    assert.match(result.body, /\.png#page=3\)$/);
+    assert.equal([...result.files.keys()].filter((path) => path.endsWith('.png')).length,1);
+    await assert.rejects(transport.fetchUpload('https://example.com/private'),/not allowed/);
+    assert.equal(requests,1);
+  } finally {await fixture.cleanup();}
+});
+
+it('returns replacement bytes when a cached LFS pointer has no readable object', async () => {
+  const fixture = await createFixture();
+  try {
+    const bytes = Buffer.from('replacement-image');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${hash}\nsize ${bytes.length}\n`;
+    await fixture.seed({'plan.md':'![Image](missing.png)\n','missing.png':pointer});
+    const git = await fixture.clone('missing-object');
+    const base = await git.text(['rev-parse','origin/main']);
+    const { createAssetCapture } = await import('./assets.ts');
+    const url = 'https://uploads.linear.app/workspace/image.png';
+    const read = createAssetCapture(git,resolveStateConfig({}),base,async()=>new Response(bytes));
+    const result = await read('plan.md',`![Image](${url})\n`,new Map([[hash,url]]),'![Image](missing.png)\n');
+    assert.deepEqual(result.files.get('missing.png'),bytes);
+    assert.equal(result.body,'![Image](missing.png)\n');
+  } finally {await fixture.cleanup();}
+});
