@@ -4,6 +4,7 @@
 // records the state; `sync` runs one sync cycle. An initial sync from Linear
 // to git is not built yet and says so after a passed preflight.
 
+import { type CaptureResult } from '../sync/capture.ts';
 import {
   type ConfirmedResult,
   type PlanReport,
@@ -28,6 +29,7 @@ export interface OperationOutcome extends PreflightOutcome {
   confirmed?: ConfirmedResult;
   /** What a sync run wrote and recorded. */
   sync?: CycleResult;
+  captured?: CaptureResult;
 }
 
 export async function runOperation(
@@ -50,7 +52,7 @@ export async function runOperation(
     options,
     operation === 'sync'
       ? async (context) => {
-          sync = await runSyncCycle(context, { config: inputs.state, documentCap: inputs.documentCap, transforms: () => [uploadsTransform({ config: inputs.state }), documentLinks()] });
+          sync = await runSyncCycle(context, { config: inputs.state, documentCap: inputs.documentCap, transforms: () => [uploadsTransform({ config: inputs.state }), documentLinks()], ...(options.fetch ? {fetch:options.fetch} : {}) });
           workSummary = renderSync(sync);
         }
       : gitToLinear === undefined
@@ -75,6 +77,6 @@ export async function runOperation(
   if (plan !== undefined) outcome.plan = plan;
   if (workSummary !== '') outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;
   if (confirmed !== undefined) outcome.confirmed = confirmed;
-  if (sync !== undefined) outcome.sync = sync;
+  if (sync !== undefined) { outcome.sync = sync; outcome.captured = sync.capture; }
   return outcome;
 }

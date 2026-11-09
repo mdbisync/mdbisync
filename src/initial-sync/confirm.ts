@@ -293,8 +293,9 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         // document's history. Linear's form can depend on what a transform
         // wrote (a link to an uploaded file is stored as a file), so the
         // content is also compared after the transforms' inverses, with the
-        // file's own body.
-        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(restoreBody(transforms, path, document.content ?? '', body), source))) {
+        // file's own body. Normalize the restored text too: restoring document
+        // links can put back their original spelling in otherwise formatted text.
+        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body)), source))) {
           result.unchanged.push(path);
           remember(path, document);
           continue;

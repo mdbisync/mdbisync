@@ -40,7 +40,7 @@ export async function run(): Promise<void> {
       core.setFailed(`${operation}: stopped before any write (${outcome.code})`);
       return;
     }
-    if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write.code === 'container-cap') {
+    if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write?.code === 'container-cap') {
       core.setOutput("code", "container-cap");
       core.setFailed(`${operation}: stopped before any write (container-cap); reduce additions or check document-cap`);
       return;
@@ -48,6 +48,15 @@ export async function run(): Promise<void> {
     if (outcome.confirmed !== undefined && !outcome.confirmed.complete) {
       core.setOutput("code", outcome.confirmed.code ?? "");
       core.setFailed(`${operation}: not finished (${outcome.confirmed.code}); run it again with the same inputs`);
+      return;
+    }
+    if (outcome.captured?.stopped !== undefined) {
+      core.setOutput('code', outcome.captured.code);
+      core.warning(`${operation}: partial, will continue (${outcome.captured.code})`);
+      return;
+    }
+    if (outcome.captured !== undefined && !outcome.captured.ok) {
+      core.setFailed(`${operation}: capture did not finish (${outcome.captured.code})`);
       return;
     }
     // A sync that skipped documents succeeded (the next run takes them in); a stop, a refused push or a failed write did not.

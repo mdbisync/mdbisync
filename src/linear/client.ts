@@ -182,6 +182,14 @@ export class LinearClient {
     return documents.filter((d) => d.projectId === null);
   }
 
+  /** Lists mapped places together, using the same pagination and document parser. */
+  async listDocumentsInPlaces(places: readonly DocumentPlace[], options: ListOptions = {}): Promise<LinearDocument[]> {
+    if (places.length === 0) return [];
+    const filters = places.map((place) => place.projectId !== undefined ? {project:{id:{eq:place.projectId}}} : {team:{id:{eq:place.teamId}}});
+    const documents = await this.#pagedDocuments('ListDocuments', {or:filters}, options);
+    return documents.filter((doc) => places.some((place) => place.projectId !== undefined ? doc.projectId === place.projectId : doc.projectId === null && doc.teamId === place.teamId));
+  }
+
   /**
    * Reads documents by id, one request per page of ids (one request for up
    * to `pageSize` ids). Trashed documents are included; ids that no longer

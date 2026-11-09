@@ -22,6 +22,7 @@
 
 import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
 import { randomUUID } from 'node:crypto';
+import { documentPath } from './paths.ts';
 import { splitFile } from '../format/index.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
@@ -425,7 +426,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    * version that cannot be checked does not.
    */
   async function holdsVersion(document: LinearDocument, file: SideFile, text: string, through: readonly BodyTransform[], uncheckable: boolean): Promise<boolean> {
-    if (document.title.normalize('NFC') !== file.title.normalize('NFC')) return false;
+    // Capture can encode a title or assign a stable collision suffix.
+    const folder = file.path.slice(0, -(file.title.length + '.md'.length)).replace(/\/$/, '');
+    const occupied = new Set([...linearFiles.keys()].filter((path) => path !== file.path));
+    if (document.title.normalize('NFC') !== file.title.normalize('NFC')
+      && documentPath(folder, document.title, document.id, occupied, file.path) !== file.path) return false;
     // Moved to another project or team in Linear: that move is the capture's to take in. A place the setup no longer
     // resolves (an annotation now names another project) cannot be checked.
     if (resolves(file.place) && !inPlace(document, file.place)) return false;
