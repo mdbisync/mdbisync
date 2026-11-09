@@ -67,7 +67,7 @@ import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, SYNC_IDENTITY, type WriteStop } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
-import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey } from './links.ts';
+import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
 
 /**
@@ -463,7 +463,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     const uploads = await readUploads(git, expected.uploads);
     const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads);
     const failed: string[] = [];
-    if (entries.some((entry) => ((documents.get(entry.documentId) as LinearDocument).content ?? '').includes('https://linear.app/'))) {
+    if (entries.some((entry) => linksLinearDocuments((documents.get(entry.documentId) as LinearDocument).content ?? ''))) {
       linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
     }
     for (const entry of entries) {

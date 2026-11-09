@@ -15,6 +15,8 @@ import {
 import { GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from './test-helpers.ts';
 import { resolveTargets } from './linear.ts';
 import { DEFAULT_STATE_CONFIG } from '../state/index.ts';
+import type { Nodes } from 'mdast';
+import { parse, visit } from '../format/markdown.ts';
 
 const PRE_COMMIT = `repos:
   - repo: https://github.com/example/linear-format
@@ -267,6 +269,23 @@ describe('setup check', () => {
     assert.match(summary, /^## Setup check\n\nStopped before any write: `missing-permission`\./);
     assert.match(summary, /\| github-access \| FAILED \| the GitHub token lacks workflows:write \|/);
     assert.match(summary, /\| linear-format-hook \| passed \|/);
+  });
+
+  it('keeps a detail with backslashes and pipes inside its table cell', () => {
+    const summary = renderSetupSummary({
+      ok: true,
+      securityHooks: [],
+      checks: [{ name: 'github-access', state: 'passed', detail: 'C:\\dir\\|a|b\nnext\rlast' }],
+    });
+    const table = parse(summary).children.find((node) => node.type === 'table');
+    assert.ok(table?.type === 'table');
+    const text = (cell: Nodes) => {
+      let out = '';
+      visit(cell, (node) => { if (node.type === 'text') out += node.value; });
+      return out;
+    };
+    const cells = table.children[1]!.children.map(text);
+    assert.deepEqual(cells, ['github-access', 'passed', 'C:\\dir\\|a|b next last']);
   });
 });
 

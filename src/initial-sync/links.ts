@@ -248,6 +248,26 @@ function destinationSpan(body: string, node: Link | Definition): { from: number;
 }
 
 
+/**
+ * Whether Linear content links a Linear document: one of the destinations
+ * `linksFromLinear` can rewrite is an https URL on the host `linear.app` with
+ * a `/<workspace>/document/` path. Without one, nothing maps back to a
+ * relative link, so a run skips the request for the URL key.
+ */
+export function linksLinearDocuments(content: string): boolean {
+  return linkDestinations(content).some((destination) => isLinearDocumentUrl(destination.url));
+}
+
+function isLinearDocumentUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === 'https:' && parsed.hostname === 'linear.app' && /^\/[^/]+\/document\//.test(parsed.pathname);
+}
+
 /** Reads the workspace's URL key; one request. */
 export async function workspaceUrlKey(linear: LinearClient): Promise<string> {
   const data = await linear.request<{ organization: { urlKey: string } }>('WorkspaceUrlKey', 'query', 'query WorkspaceUrlKey { organization { urlKey } }');
