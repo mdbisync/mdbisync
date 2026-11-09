@@ -65,6 +65,6 @@ test('operation arguments and step ordering reject invalid contracts', () => {
   rejects('L2-01', s => { s.steps[0].args.direction = 'git-to-linear'; }, /unknown argument direction/);
   rejects('L4-07', s => { s.steps[1].args.status = 429; }, /invalid check status/);
   rejects('L5-07', s => { s.steps[0].args.status = 'passed'; }, /HTTP status must be numeric/);
-  rejects('L4-02', s => { s.steps.splice(4, 1); }, /unjoined async run/);
-  rejects('L4-02', s => { s.steps[4] = { kind: 'kill', action: 'engine', args: { checkpoint: 'wrong' } }; }, /kill checkpoint does not match/);
+  rejects('L4-02', s => { s.steps.splice(5, 1); }, /unjoined async run/);
+  rejects('L4-02', s => { s.steps[5] = { kind: 'kill', action: 'engine', args: { checkpoint: 'wrong' } }; }, /kill checkpoint does not match/);
 });

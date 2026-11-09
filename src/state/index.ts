@@ -35,6 +35,8 @@ export {
   NotFastForwardError,
   type PushResult,
   type RefUpdate,
+  type RefusedPush,
+  refusedPushes,
   type StateSnapshot,
   UPLOADS_FILE,
   type UploadMap,
