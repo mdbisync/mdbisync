@@ -119,15 +119,18 @@ markers against both sides rather than assume success from a clean exit.
 `proposedRule` records a testable proposed behavior. The concrete checks remain
 binding until the behavior and its specification are deliberately revised.
 The unsafe-title proposal preserves the original title. Its independent inputs
-and expected relative paths are in `unsafe-title-samples.json`; the fixture
-loader seeds these aliases and substitutes each returned document ID into its
-expected template before any engine invocation. `fixtures.unsafeTitlePaths`
-is the resulting alias-to-path map, including the mapped project folder.
-Percent-encode unsafe characters (including a literal percent sign), leading
-spaces and dot-only segments; represent an empty path segment as `%00`. Append
-`.md`, and append `--{documentId}` before the extension for every colliding
-title. Decoding must recover the original title; unique arbitrary filenames
-cannot satisfy the mapping and reverse-mapping assertions.
+and expected relative paths are in `unsafe-title-samples.json`, written by hand
+from the path rule; the harness unit tests check the harness oracle
+`encodeTitlePath` against them. `fixtures.unsafeTitlePaths` is that oracle's
+title-to-path map for the seeded unsafe titles, below the mapped project folder.
+Per segment, after Unicode NFC: percent-encode `%`, `\`, control characters
+and `:*?"<>|`; encode the leading character of `.`, `..`, `.git` and Windows
+device names; represent an empty path segment as `%00`; encode trailing periods
+and spaces. Leading spaces stay as they are. Append `.md`; for a collision the
+older document keeps the plain name and the other gets `~` and the first twelve
+hex digits of the SHA-256 of its document ID before the extension. Decoding
+must recover the original title; unique arbitrary filenames cannot satisfy the
+mapping and reverse-mapping assertions.
 
 ## Catalog maintenance
 

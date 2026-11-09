@@ -511,10 +511,41 @@ describe('team-zone cleanup', () => {
 });
 
 describe('titles that are not paths', () => {
-  it('follow the proposed percent-encoding rule', () => {
+  // Expected paths are written by hand from the documented path rule, not taken from the engine.
+  it('percent-encode unsafe characters within each segment', () => {
     assert.equal(encodeTitlePath('Notes: draft?*'), 'Notes%3A draft%3F%2A');
-    assert.equal(encodeTitlePath('  notes/leading spaces'), '%20%20notes/leading spaces');
     assert.equal(encodeTitlePath('notes/pipe | table'), 'notes/pipe %7C table');
+    assert.equal(encodeTitlePath('notes/back\\slash'), 'notes/back%5Cslash');
+    assert.equal(encodeTitlePath('say "hi" <now>'), 'say %22hi%22 %3Cnow%3E');
+    assert.equal(encodeTitlePath('notes%3A'), 'notes%253A');
+    assert.equal(encodeTitlePath('tab\there\u007f'), 'tab%09here%7F');
+  });
+  it('keep leading spaces and encode trailing periods and spaces', () => {
+    assert.equal(encodeTitlePath('  notes/leading spaces'), '  notes/leading spaces');
+    assert.equal(encodeTitlePath(' leading'), ' leading');
+    assert.equal(encodeTitlePath('notes /trailing. '), 'notes%20/trailing%2E%20');
+    assert.equal(encodeTitlePath('wait...'), 'wait%2E%2E%2E');
+    assert.equal(encodeTitlePath('a. b'), 'a. b');
+  });
+  it('encode reserved and empty segments so the path stays relative', () => {
+    assert.equal(encodeTitlePath('../notes'), '%2E%2E/notes');
+    assert.equal(encodeTitlePath('./notes'), '%2E/notes');
+    assert.equal(encodeTitlePath('.GIT/config'), '%2EGIT/config');
+    assert.equal(encodeTitlePath('.github/notes'), '.github/notes');
+    assert.equal(encodeTitlePath('con'), '%63on');
+    assert.equal(encodeTitlePath('drafts/LPT1.notes'), 'drafts/%4CPT1.notes');
+    assert.equal(encodeTitlePath('console'), 'console');
+    assert.equal(encodeTitlePath('/part/notes'), '%00/part/notes');
+    assert.equal(encodeTitlePath('part//notes'), 'part/%00/notes');
+  });
+  it('normalize to NFC', () => {
+    assert.equal(encodeTitlePath('Café'), 'Café');
+  });
+  it('match the independent L1R-05 samples', () => {
+    const samples = JSON.parse(readFileSync(new URL('../../scenarios/unsafe-title-samples.json', import.meta.url), 'utf8')) as Array<{ alias: string; title: string; relativePathTemplate: string }>;
+    for (const sample of samples.filter((entry) => !entry.relativePathTemplate.includes('{'))) {
+      assert.equal(`${encodeTitlePath(sample.title)}.md`, sample.relativePathTemplate, sample.alias);
+    }
   });
 });
 

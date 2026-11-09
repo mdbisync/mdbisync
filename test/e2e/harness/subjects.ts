@@ -378,11 +378,26 @@ export function linearForms(texts: ReadonlyMap<string, string>): Map<string, str
   }
 }
 
-/** The proposed rule for titles that are not paths: percent-encode characters a file name cannot hold, per segment. */
+/**
+ * The expected file path of a title, written from the documented path rule and
+ * kept independent of the engine's own implementation. Per slash-separated
+ * segment, after Unicode NFC: percent-encode `%`, `\`, control characters and
+ * `:*?"<>|`; encode the leading character of `.`, `..`, `.git` (any case) and
+ * Windows device names; write an empty segment as `%00`; encode trailing
+ * periods and spaces. Leading spaces stay as they are. Long segments and
+ * collision suffixes are outside this oracle.
+ */
 export function encodeTitlePath(title: string): string {
+  const hex = (char: string) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
   return title
+    .normalize('NFC')
     .split('/')
-    .map((segment) => segment.replace(/[%:?*\\|"<>]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`).replace(/^ +| +$/g, (spaces) => '%20'.repeat(spaces.length)))
+    .map((segment) => {
+      if (segment === '') return '%00';
+      let encoded = segment.replace(/[%\\\u0000-\u001f\u007f:*?"<>|]/g, hex);
+      if (/^(\.|\.\.|\.git)$/i.test(encoded) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(encoded)) encoded = `${hex(encoded)}${encoded.slice(1)}`;
+      return encoded.replace(/[. ]+$/, (tail) => [...tail].map(hex).join(''));
+    })
     .join('/');
 }
 
