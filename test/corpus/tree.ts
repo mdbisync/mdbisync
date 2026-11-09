@@ -171,7 +171,7 @@ export function preCommitConfig(hookRevision: string): string {
   validateSha(hookRevision);
   return [
     "repos:",
-    "  - repo: https://github.com/mikhail-yaskou/mdbisync",
+    "  - repo: https://github.com/mdbisync/mdbisync",
     `    rev: ${hookRevision}`,
     "    hooks:",
     "      - id: linear-format",

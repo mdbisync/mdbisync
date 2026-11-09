@@ -498,7 +498,7 @@ async function localHookConfig(root: string): Promise<string> {
   await git.run(['add', '--all']);
   await git.run(['commit', '--quiet', '-m', 'Hook']);
   const revision = (await git.text(['rev-parse', 'HEAD'])).trim();
-  return preCommitConfig(revision).replace('https://github.com/mikhail-yaskou/mdbisync', repo);
+  return preCommitConfig(revision).replace('https://github.com/mdbisync/mdbisync', repo);
 }
 
 /**

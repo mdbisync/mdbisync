@@ -1198,10 +1198,10 @@ const FAULT: Record<string, Executor> = {
     else ctx.engine.badCredential = args.service === 'github' ? 'github' : 'linear';
   },
   'fault.permissions': async () => {
-    throw new EnvBlockedError('needs a second GitHub App without a permission; agents do not create GitHub Apps');
+    throw new EnvBlockedError('needs a second GitHub App without a permission; the harness does not create GitHub Apps');
   },
   'fault.merge-policy': async () => {
-    throw new EnvBlockedError('needs the sandbox to refuse merge commits; agents do not change repository settings');
+    throw new EnvBlockedError('needs the sandbox to refuse merge commits; the harness does not change repository settings');
   },
   'fault.checks': faultChecks,
   'fault.stale-lease': async (ctx, args) => {
