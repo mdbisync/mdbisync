@@ -19,6 +19,7 @@ import { writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
 import { Git } from "./state/index.ts";
+import { pullRequestFailure } from "./sync/index.ts";
 import { VERSION } from "./version.ts";
 
 export interface CliResult {
@@ -120,15 +121,10 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
     return {exitCode:INCOMPLETE_EXIT_CODE, stdout:outcome.summary, stderr:`${stderr}${command}: capture did not finish (${outcome.captured.code})\n`};
   }
   // A failed check on the sync pull request is a setup error: the repository's checks must pass Linear's form.
-  const pullRequest = outcome.sync?.pullRequest;
-  if (pullRequest?.code === "check-failed") {
-    return { exitCode: SETUP_FAILED_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: setup error (${pullRequest.code}): a check failed on the sync pull request\n` };
-  }
-  if (pullRequest?.code === "initial-pull-request-pending") {
-    return { exitCode: NO_STATE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: stopped short (${pullRequest.code})\n` };
-  }
-  if (pullRequest?.code === "state-moved" || pullRequest?.code === "github-failed") {
-    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${pullRequest.code}); run it again\n` };
+  const failure = pullRequestFailure(outcome.sync?.pullRequest);
+  if (failure !== null) {
+    const exitCode = failure.kind === "setup" ? SETUP_FAILED_EXIT_CODE : failure.kind === "no-state" ? NO_STATE_EXIT_CODE : INCOMPLETE_EXIT_CODE;
+    return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: ${failure.message}\n` };
   }
   const write = outcome.sync?.write;
   // Skipped documents are normal (the next run takes them in); a stop, a refused push or a failed write is not.

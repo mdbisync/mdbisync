@@ -42,6 +42,28 @@ describe('readChecks', () => {
     assert.deepEqual(await readChecks(target(failed).repo, SHA), { state: 'failed', failed: ['cancelled'], pending: ['ext', 'queued'] });
   });
 
+  it('never reads unlisted commit statuses or check runs as passed', async () => {
+    const statuses: FakeCheck[] = Array.from({ length: 101 }, (_, i) => ({ name: `ctx-${i}`, status: 'completed', conclusion: 'success', commitStatus: true }));
+    const { world, repo } = target(statuses);
+    const answer = (await readChecks(repo, SHA));
+    // The fake lists every status in one answer; GitHub lists at most one page of contexts.
+    assert.equal(answer.state, 'passed');
+    const paged = fakeFetch(world);
+    const truncated: typeof fetch = async (input, init) => {
+      const response = await paged(input, init);
+      if (!String(input).includes('/status?')) return response;
+      const body = (await response.json()) as { statuses: unknown[]; total_count: number };
+      return new Response(JSON.stringify({ ...body, statuses: body.statuses.slice(0, 100) }), { status: 200 });
+    };
+    assert.deepEqual(await readChecks({ ...repo, fetch: truncated }, SHA), { state: 'pending', failed: [], pending: ['1 more commit statuses'] });
+
+    const empty: typeof fetch = async (input) =>
+      String(input).includes('/check-runs')
+        ? new Response(JSON.stringify({ total_count: 3, check_runs: [] }), { status: 200 })
+        : new Response(JSON.stringify({ total_count: 0, statuses: [] }), { status: 200 });
+    assert.deepEqual(await readChecks({ ...repo, fetch: empty }, SHA), { state: 'pending', failed: [], pending: ['3 more check runs'] });
+  });
+
   it('throws a pull request error, without a body, when GitHub refuses', async () => {
     const { world, repo } = target([]);
     world.github.missing.add('checks:read');

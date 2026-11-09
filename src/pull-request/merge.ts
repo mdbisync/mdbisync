@@ -43,18 +43,21 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
       else if (typeof run.conclusion !== 'string' || !PASSING_CONCLUSIONS.has(run.conclusion)) failed.add(name);
     }
     seen += body.check_runs.length;
-    if (seen >= body.total_count || body.check_runs.length === 0) break;
-    if (page === MAX_PAGES) {
+    if (seen >= body.total_count) break;
+    // Check runs GitHub counts but did not list are never read as passed.
+    if (body.check_runs.length === 0 || page === MAX_PAGES) {
       pending.add(`${body.total_count - seen} more check runs`);
       break;
     }
   }
 
   const answer = await request(target, 'GET', `/commits/${sha}/status?per_page=${PAGE_SIZE}`);
-  const combined = answer.json as { statuses?: unknown } | null;
-  if (answer.status !== 200 || combined === null || !Array.isArray(combined.statuses)) {
+  const combined = answer.json as { total_count?: unknown; statuses?: unknown } | null;
+  if (answer.status !== 200 || combined === null || typeof combined.total_count !== 'number' || !Array.isArray(combined.statuses)) {
     throw new PullRequestError('reading the commit statuses of the sync pull request', answer.status);
   }
+  // The combined status lists at most one page of contexts; ones it does not show are never read as passed.
+  if (combined.total_count > combined.statuses.length) pending.add(`${combined.total_count - combined.statuses.length} more commit statuses`);
   for (const status of combined.statuses as Array<{ context?: unknown; state?: unknown }>) {
     const name = typeof status.context === 'string' ? status.context : 'unnamed status';
     if (status.state === 'pending') pending.add(name);

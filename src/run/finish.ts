@@ -4,7 +4,7 @@
 import { writeFile } from 'node:fs/promises';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
-import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
+import { type PullRequestResult, type SyncRecord, type WriteResult, pullRequestFailure } from '../sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 
@@ -107,7 +107,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
   return {
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? outcome.captured?.code ?? confirmed?.code ?? reverse?.code ?? null,
+    code: outcome.code ?? outcome.captured?.code ?? pullRequestFailure(outcome.sync?.pullRequest)?.code ?? confirmed?.code ?? reverse?.code ?? null,
     complete: outcome.sync?.complete ?? confirmed?.complete ?? reverse?.complete ?? false,
     changed:
       outcome.sync?.changed ??
@@ -165,7 +165,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
   return {
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? write.code ?? null,
+    code: outcome.code ?? pullRequestFailure(outcome.sync?.pullRequest)?.code ?? write.code ?? null,
     complete: outcome.sync!.complete,
     changed: outcome.sync!.changed,
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),

@@ -74,6 +74,28 @@ export interface PullRequestResult {
   status?: number;
 }
 
+/** How a run ends because of step 2; null when step 2 leaves the run successful (waiting for checks, a conflict, a refused merge). */
+export interface PullRequestFailure {
+  /** `setup`: a failed check, the deployer fixes the configuration; `no-state`: an initial sync from Linear waits for a person; `incomplete`: run again. */
+  kind: 'setup' | 'no-state' | 'incomplete';
+  code: NonNullable<PullRequestResult['code']>;
+  message: string;
+}
+
+export function pullRequestFailure(result: PullRequestResult | undefined): PullRequestFailure | null {
+  switch (result?.code) {
+    case 'check-failed':
+      return { kind: 'setup', code: result.code, message: `setup error (${result.code}): a check failed on the sync pull request` };
+    case 'initial-pull-request-pending':
+      return { kind: 'no-state', code: result.code, message: `stopped short (${result.code}): an initial sync from Linear waits for a person to merge it` };
+    case 'state-moved':
+    case 'github-failed':
+      return { kind: 'incomplete', code: result.code, message: `not finished (${result.code}); run it again` };
+    default:
+      return null;
+  }
+}
+
 export async function syncPullRequest(context: RunContext, options: PullRequestOptions): Promise<PullRequestResult> {
   const { git, fetched } = context;
   const { config, github } = options;
@@ -145,10 +167,23 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   }
 }
 
-/** Whether the sync branch holds an initial sync's record from Linear that the tracked branch has not merged. */
+/**
+ * Whether the sync branch holds an initial sync's record from Linear that
+ * changes the tracked branch and that the tracked branch has not merged: the
+ * head of the pull request a person merges. A record that changed nothing
+ * needed no pull request and is never merged, so it does not count.
+ */
 async function holdsInitialRecord(git: Git, sync: Oid, tracked: Oid): Promise<boolean> {
-  const subjects = await git.text(['log', '--format=%s', `${tracked}..${sync}`]);
-  return subjects.split('\n').includes(INITIAL_SYNC_FROM_LINEAR_RECORD);
+  const records = await git.text(['log', '--format=%H', '--fixed-strings', `--grep=${INITIAL_SYNC_FROM_LINEAR_RECORD}`, `${tracked}..${sync}`]);
+  for (const record of records.split('\n').filter(Boolean)) {
+    const [subject] = (await git.text(['show', '-s', '--format=%s', record])).split('\n');
+    if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) continue;
+    const parent = await git.run(['rev-parse', '--verify', '--quiet', `${record}^1`], { okCodes: [0, 1] });
+    if (parent.code !== 0) return true;
+    const changed = await git.run(['diff', '--quiet', parent.stdout.toString('utf8').trim(), record], { okCodes: [0, 1] });
+    if (changed.code === 1) return true;
+  }
+  return false;
 }
 
 /** The tree of `into` with `from` merged in; null on a conflict. */
@@ -201,7 +236,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       );
       break;
     case 'conflict':
-      lines.push('Linear and the tracked branch changed the same lines. This run merges them for Linear; a later run takes the result to the sync pull request.');
+      lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is; this run merges the tracked branch into Linear's state, and a later run takes the result to the sync pull request.");
       break;
     case 'merge-refused':
       lines.push(`GitHub did not merge the sync pull request ${link} (HTTP ${result.status ?? 0}); a later run tries again.`);

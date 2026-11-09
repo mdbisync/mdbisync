@@ -5,6 +5,7 @@
 
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
+import { pullRequestFailure } from "../sync/index.ts";
 import { writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { runOperation } from "../run/operation.ts";
@@ -53,6 +54,12 @@ export async function run(): Promise<void> {
     }
     if (outcome.captured !== undefined && !outcome.captured.ok) {
       core.setFailed(`${operation}: capture did not finish (${outcome.captured.code})`);
+      return;
+    }
+    const failure = pullRequestFailure(outcome.sync?.pullRequest);
+    if (failure !== null) {
+      core.setOutput("code", failure.code);
+      core.setFailed(`${operation}: ${failure.message}`);
       return;
     }
     // A sync that skipped documents succeeded (the next run takes them in); a stop, a refused push or a failed write did not.

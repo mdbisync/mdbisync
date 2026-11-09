@@ -265,6 +265,55 @@ describe('sync: the sync pull request', () => {
     assert.equal(await rev('refs/heads/main'), start);
   });
 
+  it('the GitHub Action fails on a failed check too, with the code as its output', async () => {
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nA step for the action. ${CANARY}\n`);
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'secrets', status: 'completed', conclusion: 'failure' }]);
+
+    const saved = { env: { ...process.env }, fetch: globalThis.fetch, write: process.stdout.write, exitCode: process.exitCode };
+    let output = '';
+    try {
+      for (const [name, value] of Object.entries(env({}))) {
+        if (name.startsWith('MDBISYNC_')) process.env[`INPUT_${name.slice('MDBISYNC_'.length).replaceAll('_', '-')}`] = value;
+      }
+      Object.assign(process.env, { INPUT_OPERATION: 'sync', GITHUB_WORKSPACE: cwd, GITHUB_STEP_SUMMARY: '', GITHUB_OUTPUT: '' });
+      globalThis.fetch = fakeFetch(world);
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        output += String(chunk);
+        return true;
+      }) as typeof process.stdout.write;
+      const { run } = await import('../action/main.ts');
+      await run();
+      assert.equal(process.exitCode, 1);
+    } finally {
+      process.stdout.write = saved.write;
+      globalThis.fetch = saved.fetch;
+      process.exitCode = saved.exitCode;
+      for (const name of Object.keys(process.env)) if (!(name in saved.env)) delete process.env[name];
+      Object.assign(process.env, saved.env);
+    }
+    assert.match(output, /::error::sync: setup error \(check-failed\)/);
+    assert.match(output, /::set-output name=code::check-failed/);
+    assert.equal(world.github.pullRequests[0]?.merged, false);
+  });
+
+  it('a sync branch holding an initial sync from Linear that changed nothing is reused', async () => {
+    // Such a record needed no pull request, so the tracked branch never merges it.
+    const main = await rev('refs/heads/main');
+    const record = await fixture.remote.text(['commit-tree', `${main}^{tree}`, '-p', main, '-m', INITIAL_SYNC_FROM_LINEAR_RECORD], {
+      env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' },
+    });
+    await fixture.remote.run(['update-ref', SYNC_BRANCH, record]);
+    syncValues.push(record);
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nReused. ${CANARY}\n`);
+    const opened = await sync();
+    assert.equal(opened.result.exitCode, 0, opened.result.stderr);
+    assert.deepEqual(opened.writes, ['POST /pulls']);
+    const merged = await sync();
+    assert.deepEqual(merged.writes, ['PUT /pulls/1/merge']);
+    assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Reused\./);
+  });
+
   it('a commit status that fails counts as a failed check', async () => {
     await editInLinear('eng/notes/plan.md', `# Plan\n\nAnother step. ${CANARY}\n`);
     await sync();
@@ -305,9 +354,12 @@ describe('sync: the sync pull request', () => {
   });
 
   it('never reuses a sync branch that holds an unmerged initial sync from Linear', async () => {
-    // The sync branch holds such a record that the tracked branch has not merged, while `linear` has moved on.
+    // The sync branch holds such a record, which changes the tracked branch and
+    // which a person has not merged, while `linear` has moved on.
     const main = await rev('refs/heads/main');
-    const record = await fixture.remote.text(['commit-tree', `${main}^{tree}`, '-p', main, '-m', INITIAL_SYNC_FROM_LINEAR_RECORD], {
+    const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: `# Guide\n\nAs Linear holds it. ${CANARY}\n` });
+    const changed = await commitFile(main, 'combined/guide.md', blob);
+    const record = await fixture.remote.text(['commit-tree', `${changed}^{tree}`, '-p', main, '-m', INITIAL_SYNC_FROM_LINEAR_RECORD], {
       env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' },
     });
     await fixture.remote.run(['update-ref', SYNC_BRANCH, record]);
