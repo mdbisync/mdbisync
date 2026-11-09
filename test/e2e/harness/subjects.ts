@@ -35,6 +35,7 @@ import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMar
 import type { RunContext } from './context.ts';
 import { owningFolder, type Folder } from './corpus.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
+import { canaryIsolated, type CanaryFacts } from './security-canary.ts';
 import { isAppBot } from './workflows.ts';
 import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
@@ -1303,6 +1304,10 @@ export const SUBJECTS: Record<string, Compute> = {
   },
 
   // --- blocked documents (L2-35) ----------------------------------------------------------------
+  'securityCanary.isolated': async (env) => {
+    const facts = (env.ctx.observations.get('securityCanary.facts') as CanaryFacts[] | undefined) ?? [];
+    return env.ctx.observations.get('securityCanary.missing') !== true && facts.length > 0 && facts.every(canaryIsolated);
+  },
   'blocked.icon': async (env) => observed(env.ctx, 'blocked.icon'),
   'blocked.color': normalizedObservation('blocked.color', (color) => colorLabel(color as string | null)),
   'blocked.commentFields': async (env) => {

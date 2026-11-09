@@ -9,6 +9,8 @@
 //   document with its own icon and color, a trashed document, a blocked one.
 // - Slice fixtures only name content the slice already has; they need no setup.
 
+import { CANARY_FILE, CANARY_TOKEN_OBSERVER_FILE, CANARY_TOKEN_OBSERVER, CANARY_FIXTURE, CANARY_KEY_ENV, canaryScript } from './security-canary.ts';
+import { parse, stringify } from 'yaml';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -144,6 +146,21 @@ export function publishesCheckWorkflow(scenario: { steps: readonly Step[]; setup
 }
 
 export const SETUP_FIXTURES: Record<string, SetupFixture> = {
+  [CANARY_FIXTURE]: {
+    async beforeSync(ctx) {
+      if (ctx.scenario.mode !== 'actions') throw new EnvBlockedError('The security canary needs Actions mode');
+      const key = process.env[CANARY_KEY_ENV];
+      if (!key) throw new EnvBlockedError(`${CANARY_KEY_ENV} must hold the known workflow hook key`);
+      const git = await ctx.person();
+      const config = parse(await git.text(['show', 'HEAD:.pre-commit-config.yaml'])) as { repos: unknown[] };
+      config.repos.push({ repo: 'local', hooks: [{ id: 'security-canary', alias: 'security', name: 'Security canary', entry: `node ${CANARY_FILE}`, language: 'system', stages: ['pre-commit'], always_run: true, pass_filenames: false, verbose: true }] });
+      await commitAsPerson(ctx, new Map([
+        [CANARY_FILE, canaryScript(sha256(key))],
+        [CANARY_TOKEN_OBSERVER_FILE, CANARY_TOKEN_OBSERVER],
+        ['.pre-commit-config.yaml', stringify(config)],
+      ]), 'Add the security canary', true);
+    },
+  },
   ...Object.fromEntries([...DOCUMENT_FIXTURES].map((name) => [name, { beforeSync: addReviewDocument }])),
   // Same-run merge scenarios. A starting tree has no pull request check
   // workflow unless the scenario has a `fault.checks` step or one of these

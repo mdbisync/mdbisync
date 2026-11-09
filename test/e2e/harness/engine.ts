@@ -59,6 +59,7 @@ export interface EngineResult {
   stdout: string;
   stderr: string;
   summary: string;
+  securityCanary?: string;
   report: Record<string, unknown> | null;
 }
 
