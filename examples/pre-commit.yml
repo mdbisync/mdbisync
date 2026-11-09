@@ -34,7 +34,7 @@ jobs:
       - name: Install pre-commit
         shell: bash
         run: |
-          if ! command -v pre-commit >/dev/null 2>&1; then
+          if [[ "$(pre-commit --version 2>/dev/null || true)" != "pre-commit 4.6.2" ]]; then
             if ! command -v python3 >/dev/null 2>&1; then
               echo '::error::Install Python 3 with venv support, or provide pre-commit on PATH.'
               exit 1
@@ -44,8 +44,13 @@ jobs:
               echo '::error::Python 3 venv support is required; install it, or provide pre-commit on PATH.'
               exit 1
             fi
-            "$environment/bin/python" -m pip install pre-commit==4.6.2
-            echo "$environment/bin" >> "$GITHUB_PATH"
+            if ! "$environment/bin/python" -m pip install pre-commit==4.6.2; then
+              echo '::error::Could not install pre-commit 4.6.2; use Python 3.10+ and allow access to PyPI.'
+              exit 1
+            fi
+            mkdir "$environment/commands"
+            ln -s "$environment/bin/pre-commit" "$environment/commands/pre-commit"
+            echo "$environment/commands" >> "$GITHUB_PATH"
           fi
       - name: Run all hooks and collect fixes
         id: hooks
