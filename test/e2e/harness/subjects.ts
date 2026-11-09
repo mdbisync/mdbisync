@@ -986,11 +986,18 @@ export const SUBJECTS: Record<string, Compute> = {
     // Images of the documents the engine wrote; a document it left out on purpose uploads nothing.
     const embedded = new Set<string>();
     for (const [path, text] of view.files) if (view.ids.has(path)) for (const image of embeddedImages(path, text)) embedded.add(image);
-    // Every tracked file has a hash. A link whose target the branch does not hold (a deliberately broken
-    // reference) has no file to upload, so it expects no cache entry; every tracked image needs its own.
-    return [...embedded].every((path) => {
+    // A deliberately broken reference has no file to upload, so it expects no cache entry. It is one the input
+    // already held: a link in the tracked branch at the start whose resolved target the branch held no file at,
+    // and still holds none at. A link the run added, or one that does not resolve, still needs its file and entry.
+    const before = env.ctx.observations.get(BEFORE_VIEW) as View | undefined;
+    const brokenAtStart = new Set<string>();
+    for (const [path, text] of before?.files ?? []) for (const image of embeddedImages(path, text)) if (image !== '' && !before?.hashes.has(image)) brokenAtStart.add(image);
+    const expected = [...embedded].filter((path) => !(brokenAtStart.has(path) && !view.hashes.has(path)));
+    // Images that are all exempt check nothing; report that rather than pass.
+    if (embedded.size > 0 && expected.length === 0) return false;
+    return expected.every((path) => {
       const hash = view.hashes.get(path);
-      return hash === undefined || view.uploadsByHash.has(hash);
+      return hash !== undefined && view.uploadsByHash.has(hash);
     });
   },
   'uploads.downloadedBytes': async (env) => downloads(env, 'image'),
