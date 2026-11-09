@@ -28,6 +28,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { LINT_RULES } from '../../src/format/rules.ts';
 import { CHECK_NAMES } from '../../src/setup/report.ts';
+import { RECORD_LEFT_OUT_RULES } from '../../src/initial-sync/reverse.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const PAGE = readFileSync(join(ROOT, 'docs/troubleshooting.md'), 'utf8');
@@ -81,6 +82,7 @@ function collectCodes(files: Source[]): Map<string, string> {
   }
   for (const name of CHECK_NAMES) add(name, 'src/setup/report.ts');
   for (const rule of Object.keys(LINT_RULES)) add(rule, 'src/format/rules.ts');
+  for (const rule of RECORD_LEFT_OUT_RULES) add(rule, 'src/initial-sync/reverse.ts');
   return codes;
 }
 

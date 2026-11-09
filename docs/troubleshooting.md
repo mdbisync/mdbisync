@@ -430,7 +430,8 @@ To recover with an initial sync:
    tracked branch: documents keep their ids and comments and get the file's
    text, and documents that match no file go to Linear's trash.
    `linear-to-git` makes the tracked branch equal to Linear through one pull
-   request and writes nothing to Linear.
+   request and writes nothing to Linear; its steps are in
+   [initial-sync-linear-to-git.md](initial-sync-linear-to-git.md).
 3. Run the initial sync workflow with that direction and `confirm`
    unchecked. This dry run lists what would be created, overwritten,
    removed and left out, and writes nothing. Read it.
