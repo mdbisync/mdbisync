@@ -1,0 +1,420 @@
+// The sync's git → Linear direction through the command line, against a
+// local git remote and a fake GitHub and Linear: after a confirmed initial
+// sync, a person commits to the tracked branch and the sync takes the change
+// to Linear and records it on `linear`.
+
+import assert from 'node:assert/strict';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import { runCli } from '../cli.ts';
+import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
+import { type RunReport } from '../run/finish.ts';
+import { Git } from '../state/index.ts';
+import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
+import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
+import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
+
+const CANARY = 'kx-5b1e0a94';
+const PRE_COMMIT = `repos:
+  - repo: https://github.com/example/mdbisync
+    rev: 0123456789abcdef0123456789abcdef01234567
+    hooks:
+      - id: linear-format
+`;
+
+const TREE: Record<string, string> = {
+  'README.md': `# Repository\n\n${CANARY}\n`,
+  'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
+  'eng/backend/notes.md': `# Notes\n\nFirst paragraph.\n\nSecond paragraph. ${CANARY}\n`,
+  'eng/notes/README.md': `---\nlinear-project: Field notes\n---\n\n# Field notes\n\n${CANARY}\n`,
+  'eng/notes/plan.md': `---\nowner: example\n---\n\n# Plan\n\nSteps one and two. ${CANARY}\n`,
+  'eng/notes/review.md': `# Review\n\nFindings of the review. ${CANARY}\n`,
+  'eng/notes/draft.md': `# Draft\n\nA claim.[^1] ${CANARY}\n\n[^1]: A source.\n`,
+  'combined/README.md': `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\n${CANARY}\n`,
+  'combined/guide.md': `# Guide\n\nHow to start. ${CANARY}\n`,
+  '.pre-commit-config.yaml': PRE_COMMIT,
+};
+
+describe('sync: the tracked branch to Linear', () => {
+  let fixture: Fixture;
+  let cwd: string;
+  let person: Git;
+  let personDir: string;
+  let world: FakeWorld;
+  const reportFile = () => join(fixture.root, 'report.json');
+  const summaryFile = () => join(fixture.root, 'summary.md');
+
+  beforeEach(async () => {
+    fixture = await createFixture();
+    await fixture.seed(TREE);
+    cwd = (await fixture.clone('engine')).dir;
+    personDir = join(fixture.root, 'person');
+    await new Git(fixture.root).run(['clone', '--quiet', fixture.url, personDir]);
+    person = new Git(personDir, {
+      GIT_AUTHOR_NAME: IDENTITY.name,
+      GIT_AUTHOR_EMAIL: IDENTITY.email,
+      GIT_COMMITTER_NAME: IDENTITY.name,
+      GIT_COMMITTER_EMAIL: IDENTITY.email,
+    });
+    world = fakeWorld();
+    world.linear.projects.push({ id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
+    const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
+    assert.equal(initial.result.exitCode, 0, initial.result.stderr);
+  });
+  afterEach(() => fixture.cleanup());
+
+  const env = (extra: Record<string, string>) => ({
+    PATH: process.env.PATH ?? '',
+    HOME: process.env.HOME ?? '',
+    MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
+    MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
+    MDBISYNC_LINEAR_API_URL: LINEAR_API,
+    MDBISYNC_GITHUB_TOKEN: 'gh-token',
+    MDBISYNC_GITHUB_API_URL: GITHUB_API,
+    MDBISYNC_REPOSITORY: 'owner/repo',
+    MDBISYNC_REPORT_FILE: reportFile(),
+    GITHUB_STEP_SUMMARY: summaryFile(),
+    ...extra,
+  });
+
+  async function cli(command: string, extra: Record<string, string> = {}) {
+    await rm(reportFile(), { force: true });
+    await rm(summaryFile(), { force: true });
+    const before = world.requests.length;
+    const writesBefore = world.writes.length;
+    const result = await runCli([command], { env: env(extra), cwd, fetch: fakeFetch(world) });
+    const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
+    const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
+    for (const text of [result.stdout, result.stderr, summary, JSON.stringify(report)]) assert.ok(!text.includes(CANARY), 'content reached the output');
+    const graphql = world.requests.slice(before).filter((request) => request === `POST ${LINEAR_API}/graphql`).length;
+    return { result, report, summary, graphql, writes: world.writes.slice(writesBefore) };
+  }
+
+  const sync = (extra: Record<string, string> = {}) => cli('sync', extra);
+
+  /** Commits as a person: files to write (null removes) and moves, then pushes to the tracked branch. */
+  async function commit(changes: Record<string, string | null>, moves: Array<[string, string]> = []) {
+    await person.run(['pull', '--quiet', '--ff-only']);
+    for (const [from, to] of moves) {
+      await mkdir(dirname(join(personDir, to)), { recursive: true });
+      await rename(join(personDir, from), join(personDir, to));
+    }
+    for (const [path, content] of Object.entries(changes)) {
+      if (content === null) await rm(join(personDir, path));
+      else {
+        await mkdir(dirname(join(personDir, path)), { recursive: true });
+        await writeFile(join(personDir, path), content);
+      }
+    }
+    await person.run(['add', '--all']);
+    await person.run(['commit', '--quiet', '-m', 'Edit']);
+    await person.run(['push', '--quiet', 'origin', 'HEAD:main']);
+  }
+
+  const show = (spec: string) => fixture.remote.text(['show', spec]);
+  const rev = (spec: string) => fixture.remote.text(['rev-parse', spec]);
+  const ids = async () => JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, { id: string }>;
+  const live = () => world.linear.documents.filter((d) => d.trashed !== true);
+  const documentOf = async (path: string): Promise<FakeDocument> => {
+    const id = (await ids())[path]?.id;
+    const document = world.linear.documents.find((d) => d.id === id);
+    assert.ok(document !== undefined, `${path} has no document`);
+    return document;
+  };
+  const body = (path: string, text: string) => text.slice(text.indexOf(`# `));
+
+  /** Every live document holds its file's body; no title twice in a place. */
+  async function assertConverged() {
+    const map = await ids();
+    const tracked = await rev('refs/heads/main');
+    for (const [path, entry] of Object.entries(map)) {
+      const document = world.linear.documents.find((d) => d.id === entry.id);
+      assert.ok(document !== undefined && document.trashed !== true, `${path}: no live document`);
+      const text = await show(`${tracked}:${path}`);
+      if (!text.includes('[^1]')) assert.equal(document.content, body(path, text), `${path}: content`);
+    }
+    const keys = live().map((d) => `${d.projectId ?? d.teamId}/${d.title}`);
+    assert.equal(new Set(keys).size, keys.length, 'duplicate documents');
+  }
+
+  /** One more run changes nothing (I6). */
+  async function assertIdempotent() {
+    const before = await rev('refs/mdbisync/linear');
+    const again = await sync();
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    assert.deepEqual(again.writes, []);
+    assert.equal(again.report.changed, false);
+    assert.equal(again.report.complete, true);
+    assert.equal(await rev('refs/mdbisync/linear'), before);
+  }
+
+  /** The `linear` tip merges the tracked branch: parents (previous tip, tracked). */
+  async function assertMergeRecord(previous: string) {
+    const parents = (await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^@'])).split('\n');
+    assert.deepEqual(parents, [previous, await rev('refs/heads/main')]);
+    assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', 'refs/mdbisync/linear']), MERGE_RECORD_MESSAGE);
+  }
+
+  it('with nothing new on the tracked branch the run writes nothing and records nothing', async () => {
+    await assertIdempotent();
+  });
+
+  it('L2-01: an edited paragraph reaches its document in one request; the record is a merge commit', async () => {
+    const previous = await rev('refs/mdbisync/linear');
+    const before = await documentOf('eng/backend/notes.md');
+    await commit({ 'eng/backend/notes.md': `# Notes\n\nFirst paragraph, edited.\n\nSecond paragraph. ${CANARY}\n` });
+    const { result, report, writes, graphql } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.deepEqual(report.sync?.updated, ['eng/backend/notes.md']);
+    assert.equal(report.complete, true);
+    assert.equal(report.sync?.record?.kind, 'merge');
+    assert.equal((await documentOf('eng/backend/notes.md')).id, before.id);
+    assert.match((await documentOf('eng/backend/notes.md')).content ?? '', /edited/);
+    await assertMergeRecord(previous);
+    // The record holds the tracked tree: Linear kept the text.
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    // I9: one read again of the document and one write, plus the run's own few requests.
+    assert.ok(graphql <= 1 * 1.5 + 5, `requests: ${graphql}`);
+    await assertConverged();
+    await assertIdempotent();
+  });
+
+  it('L2-02: a new file becomes a document in its project and its id is recorded', async () => {
+    await commit({ 'eng/notes/guides/setup.md': `# Setup\n\nInstall it. ${CANARY}\n`, 'eng/ops.md': `# Ops\n\nRun it. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['CreateDocument', 'CreateDocument']);
+    assert.deepEqual(report.sync?.created, ['eng/notes/guides/setup.md', 'eng/ops.md']);
+    const setup = await documentOf('eng/notes/guides/setup.md');
+    assert.equal(setup.title, 'guides/setup');
+    assert.equal(setup.projectId, 'project-api');
+    const ops = await documentOf('eng/ops.md');
+    assert.equal(ops.title, 'ops');
+    assert.equal(ops.teamId, 'team-eng');
+    assert.equal(ops.projectId, undefined);
+    await assertConverged();
+    await assertIdempotent();
+  });
+
+  it('L2-03: a removed file sends its document to the trash, from which it can be restored', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    await commit({ 'eng/notes/review.md': null });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['TrashDocument']);
+    assert.deepEqual(report.sync?.trashed, ['eng/notes/review.md']);
+    assert.equal(document.trashed, true);
+    assert.equal((await ids())['eng/notes/review.md'], undefined);
+    assert.equal(report.sync?.record?.kind, 'merge');
+    await assertConverged();
+    await assertIdempotent();
+  });
+
+  it('L2-04: a file moved inside its project renames its document; the id stays', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    await commit({}, [['eng/notes/review.md', 'eng/notes/archive/review.md']]);
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.deepEqual(report.sync?.relocated, [{ from: 'eng/notes/review.md', to: 'eng/notes/archive/review.md' }]);
+    assert.deepEqual(report.sync?.created, []);
+    assert.equal(document.title, 'archive/review');
+    assert.equal(document.trashed, undefined);
+    assert.equal((await ids())['eng/notes/archive/review.md']?.id, document.id);
+    assert.equal((await ids())['eng/notes/review.md'], undefined);
+    await assertConverged();
+    await assertIdempotent();
+  });
+
+  it('L2-05: a file moved to another team and project moves its document; the id stays', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    const team = await documentOf('eng/backend/notes.md');
+    await commit({}, [
+      ['eng/notes/review.md', 'combined/review.md'],
+      ['eng/backend/notes.md', 'eng/notes/backend-notes.md'],
+    ]);
+    const { result, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument']);
+    assert.equal(document.projectId, 'project-handbook');
+    assert.equal(document.title, 'review');
+    assert.equal(team.projectId, 'project-api');
+    assert.equal(team.teamId, undefined);
+    assert.equal(team.title, 'backend-notes');
+    await assertConverged();
+    await assertIdempotent();
+  });
+
+  it('L2-06: a move with a heavy rewrite creates a new document and trashes the old one', async () => {
+    const old = await documentOf('eng/notes/review.md');
+    await commit({ 'eng/notes/review.md': null, 'eng/notes/retro.md': `# Retro\n\nWhat went well, what did not, and what we change next time. ${CANARY}\n` });
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.created, ['eng/notes/retro.md']);
+    assert.deepEqual(report.sync?.trashed, ['eng/notes/review.md']);
+    assert.equal(old.trashed, true);
+    assert.notEqual((await documentOf('eng/notes/retro.md')).id, old.id);
+    await assertConverged();
+  });
+
+  it('L2-07: a copied file is a new document; the original keeps its own', async () => {
+    const original = await documentOf('eng/notes/review.md');
+    await commit({ 'eng/notes/review-copy.md': TREE['eng/notes/review.md'] as string });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['CreateDocument']);
+    assert.deepEqual(report.sync?.created, ['eng/notes/review-copy.md']);
+    assert.equal((await documentOf('eng/notes/review.md')).id, original.id);
+    await assertConverged();
+  });
+
+  it('L2-08: a README that names another project moves all its documents there', async () => {
+    const before = await Promise.all(['eng/notes/README.md', 'eng/notes/plan.md', 'eng/notes/review.md'].map(documentOf));
+    await commit({ 'eng/notes/README.md': `---\nlinear-project: Archive\n---\n\n# Field notes\n\n${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument', 'UpdateDocument']);
+    assert.deepEqual(report.sync?.updated, []);
+    for (const document of before) assert.equal(document.projectId, 'project-archive');
+    await assertConverged();
+    await assertIdempotent();
+  });
+
+  it('L2-11: a change of front matter only writes nothing to Linear and is recorded', async () => {
+    const previous = await rev('refs/mdbisync/linear');
+    await commit({ 'eng/notes/plan.md': `---\nowner: someone-else\n---\n\n# Plan\n\nSteps one and two. ${CANARY}\n` });
+    const { result, writes, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.equal(report.complete, true);
+    await assertMergeRecord(previous);
+    assert.match(await show('refs/mdbisync/linear:eng/notes/plan.md'), /someone-else/);
+    await assertIdempotent();
+  });
+
+  it('L2-12: a left-out file that is fixed joins: a document is created', async () => {
+    assert.equal(live().some((d) => d.title === 'draft'), false);
+    await commit({ 'eng/notes/draft.md': `# Draft\n\nA claim. ${CANARY}\n` });
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.created, ['eng/notes/draft.md']);
+    await assertConverged();
+  });
+
+  it('L2-13: a synchronized file that gains a footnote is left out and its document stays as it was', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    const content = document.content;
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.ok(report.sync?.leftOut.some((entry) => entry.path === 'eng/notes/review.md' && entry.rules.includes('footnote')));
+    assert.equal(document.content, content);
+    assert.equal(document.trashed, undefined);
+    assert.equal((await ids())['eng/notes/review.md']?.id, document.id);
+    assert.equal(report.complete, true);
+    await assertIdempotent();
+
+    // Fixed again: the same document gets the text.
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed. ${CANARY}\n` });
+    const fixed = await sync();
+    assert.deepEqual(fixed.writes, ['UpdateDocument']);
+    assert.match(document.content ?? '', /fixed/);
+  });
+
+  it('L2-14: a renamed folder renames every document in it; ids stay', async () => {
+    const files = Array.from({ length: 12 }, (_, index) => `eng/notes/topics/topic-${String(index).padStart(2, '0')}.md`);
+    await commit(Object.fromEntries(files.map((path, index) => [path, `# Topic ${index}\n\nThe text of topic number ${index}, long enough to be found again. ${CANARY}\n`])));
+    assert.equal((await sync()).result.exitCode, 0);
+    const before = Object.fromEntries(await Promise.all(files.map(async (path) => [path, (await documentOf(path)).id] as const)));
+    await commit({}, [['eng/notes/topics', 'eng/notes/subjects']]);
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(writes.length, files.length);
+    assert.ok(writes.every((write) => write === 'UpdateDocument'));
+    assert.equal(report.sync?.relocated.length, files.length);
+    for (const path of files) assert.equal((await documentOf(path.replace('/topics/', '/subjects/'))).id, before[path]);
+    await assertConverged();
+  });
+
+  it('a document edited in Linear since the capture is not overwritten; the record is an ordinary commit', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}`;
+    touch(document);
+    const previous = await rev('refs/mdbisync/linear');
+    await commit({
+      'eng/notes/review.md': `# Review\n\nEdited in git. ${CANARY}\n`,
+      'eng/backend/notes.md': `# Notes\n\nOther edit. ${CANARY}\n`,
+    });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'edited-in-linear' }]);
+    assert.equal(report.complete, false);
+    assert.match(document.content ?? '', /Typed in Linear/);
+    assert.equal(report.sync?.record?.kind, 'ordinary');
+    assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^@']), previous);
+    assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', 'refs/mdbisync/linear']), PARTIAL_RECORD_MESSAGE);
+    // The skipped document keeps what `linear` said before; the written one has its new text.
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/review.md'), TREE['eng/notes/review.md']);
+    assert.match(await show('refs/mdbisync/linear:eng/backend/notes.md'), /Other edit/);
+  });
+
+  it('L2-15: a run that stops partway records what it wrote; the next run writes the rest and merges', async () => {
+    const files = Array.from({ length: 6 }, (_, index) => `combined/part-${index}.md`);
+    await commit(Object.fromEntries(files.map((path, index) => [path, `# Part ${index}\n\nPart ${index}. ${CANARY}\n`])));
+    const previous = await rev('refs/mdbisync/linear');
+    const first = await sync({ MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '4' });
+    assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE);
+    assert.equal(first.report.complete, false);
+    assert.equal(first.report.sync?.created.length, 4);
+    assert.equal(first.report.sync?.record?.kind, 'ordinary');
+    assert.equal(Object.keys(await ids()).filter((path) => path.startsWith('combined/part-')).length, 4);
+
+    const second = await sync();
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.deepEqual(second.writes, ['CreateDocument', 'CreateDocument']);
+    assert.equal(second.report.complete, true);
+    const parents = (await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^@'])).split('\n');
+    assert.equal(parents.length, 2);
+    assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^^']), previous);
+    await assertConverged();
+    await assertIdempotent();
+  });
+
+  it('a document created by a run that died before recording its id is adopted by its title, not created twice', async () => {
+    await commit({ 'combined/faq.md': `# FAQ\n\nAnswers. ${CANARY}\n` });
+    world.linear.documents.push({ id: 'orphan', title: 'faq', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# FAQ\n\nAnswers. ${CANARY}` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(report.sync?.adopted, ['combined/faq.md']);
+    assert.equal((await ids())['combined/faq.md']?.id, 'orphan');
+    await assertConverged();
+  });
+
+  it('a document trashed in Linear since the capture is not written; the run says so', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    document.trashed = true;
+    await commit({ 'eng/notes/review.md': `# Review\n\nEdited in git. ${CANARY}\n` });
+    const { result, report, writes, summary } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'missing-in-linear' }]);
+    assert.match(summary, /eng\/notes\/review\.md/);
+  });
+
+  it('a state ref that moves under the run makes it record nothing and exit to be run again', async () => {
+    await commit({ 'eng/backend/notes.md': `# Notes\n\nEdited. ${CANARY}\n` });
+    world.linear.writes.reject = () => {
+      // Another run records first, between this run's write and its record.
+      void fixture.remote.run(['update-ref', 'refs/mdbisync/ids', 'refs/mdbisync/linear']);
+      return false;
+    };
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE);
+    assert.equal(report.code, 'state-moved');
+  });
+});

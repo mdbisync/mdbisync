@@ -104,6 +104,10 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   if (outcome.confirmed !== undefined && !outcome.confirmed.complete) {
     return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${outcome.confirmed.code}); run it again with the same inputs\n` };
   }
+  const write = outcome.sync?.write;
+  if (write?.code === "stopped" || write?.code === "state-moved") {
+    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${write.code}); run it again\n` };
+  }
   if (!outcome.notImplemented) return { exitCode: 0, stdout: outcome.summary, stderr };
   const stub = notImplemented(command);
   return { ...stub, stdout: outcome.summary, stderr: `${stderr}${stub.stderr}` };

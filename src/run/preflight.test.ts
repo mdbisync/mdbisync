@@ -150,10 +150,16 @@ describe('preflight', () => {
       }
     });
 
-    it('a correct setup lets the sync past the preflight', async () => {
+    it('a correct setup lets the sync past the preflight; with the state at the tracked branch it has nothing to do', async () => {
+      // Earlier cases commit to the tracked branch; the state takes it in again.
+      await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', 'refs/heads/main']);
       const { result, report } = await run('sync', fakeWorld());
       assert.equal(report.ok, true);
-      assert.equal(result.stderr, 'sync: not implemented\n');
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(result.stderr, '');
+      assert.equal(report.complete, true);
+      assert.equal(report.changed, false);
+      assert.match(result.stdout, /nothing to write/);
     });
   });
 });
