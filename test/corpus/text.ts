@@ -63,13 +63,6 @@ export function title(rng: Rng): string {
   return rng.pick(TITLES);
 }
 
-export function slug(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
 export function isoDate(rng: Rng): string {
   return `2026-${String(rng.int(1, 12)).padStart(2, "0")}-${String(rng.int(1, 28)).padStart(2, "0")}`;
 }

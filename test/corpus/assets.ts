@@ -179,7 +179,7 @@ const PLAN: { format: ImageFormat; count: number; scenes: Scene[]; sizes: [numbe
 ];
 
 /** Two levels per channel for the eight-color WebP writer, near the accent colors. */
-const WEBP_LEVELS = { red: [30, 236] as [number, number], green: [64, 205] as [number, number], blue: [70, 240] as [number, number] };
+const WEBP_LEVELS = { red: [30, 252] as [number, number], green: [64, 252] as [number, number], blue: [70, 252] as [number, number] };
 
 function encodeImage(rng: Rng, format: ImageFormat, width: number, height: number, pic: Picture, animated: boolean): Buffer {
   switch (format) {
@@ -280,7 +280,8 @@ export function makeAssets(rng: Rng): Assets {
   for (let i = 0; i < 40; i++) {
     const home = homeFor();
     const format = tinyFormats[i % tinyFormats.length] as ImageFormat;
-    const side = [1, 2, 4, 8, 16][i % 5] as number;
+    // Mostly dots big enough to see; one in five is a single pixel, the smallest image there is.
+    const side = [1, 16, 12, 16, 8][i % 5] as number;
     const color = statusNames[i % statusNames.length] as string;
     // Each icon gets its own shade so no two files are equal.
     const accent = mix(ACCENTS[i % ACCENTS.length] as Rgb, [255, 255, 255], (i % 7) / 20);
@@ -292,9 +293,11 @@ export function makeAssets(rng: Rng): Assets {
   for (const { format, count, scenes, sizes } of PLAN) {
     for (let i = 0; i < count; i++) {
       const home = homeFor();
-      const [w, h] = sizes[i % sizes.length] as [number, number];
+      // The round over the homes shifts the cycles, so each home gets every size and scene.
+      const round = Math.floor(i / HOMES.length);
+      const [w, h] = sizes[(i + round) % sizes.length] as [number, number];
       // Phones are drawn upright and app windows wide, whatever the plan pairs them with.
-      const planned = scenes[(i * 3 + 1) % scenes.length] as Scene;
+      const planned = scenes[(i + 2 * round + 1) % scenes.length] as Scene;
       const scene: Scene = planned === "phone" && w > h ? "screenshot" : planned === "screenshot" && h > w ? "phone" : planned;
       const pic = picture(rng, profileOf(home), scene);
       const animated = format === "gif" && i % 2 === 0;

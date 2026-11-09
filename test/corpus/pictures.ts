@@ -422,7 +422,7 @@ export function drawIcon(c: Canvas, rng: Rng, spec: PictureSpec): void {
 }
 
 export function drawScene(c: Canvas, rng: Rng, spec: PictureSpec): void {
-  if (Math.min(c.width, c.height) < 64 && spec.scene !== "photo") return drawIcon(c, rng, spec);
+  if (Math.min(c.width, c.height) < 100 && spec.scene !== "photo") return drawIcon(c, rng, spec);
   switch (spec.scene) {
     case "screenshot": return drawScreenshot(c, rng, spec);
     case "phone": return drawPhone(c, rng, spec);
