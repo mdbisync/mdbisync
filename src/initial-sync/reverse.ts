@@ -461,7 +461,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
 
     let entries = [...plan.overwrite, ...plan.create];
     const uploads = await readUploads(git, expected.uploads);
-    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)));
+    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads);
     const failed: string[] = [];
     if (entries.some((entry) => ((documents.get(entry.documentId) as LinearDocument).content ?? '').includes('https://linear.app/'))) {
       linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
@@ -509,7 +509,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
           const text = textOf(entry);
           if (files.size === 0 && text === input.texts.get(entry.path)) continue;
           const findings = await gate.check(new Map<string, Buffer | string>([[entry.path, text], ...files]));
-          // No answer: the hooks have not seen this text (it changed in Linear after they ran).
+          // No answer: the hooks have not seen this text (the hooks step did not run, or the tracked branch moved).
           if (findings === null) unchecked.push(entry.path);
           else if (findings.length > 0) blocked.push(entry.path);
         }
@@ -519,6 +519,8 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     } finally {
       await gate.close?.();
     }
+    // The stage step stops here: the reads it kept end, and the rest of the run reads Linear itself.
+    context.linear.transport.reads?.end();
     if (options.stageOnly === true) return 'staged';
     let lfsObjects: string[] = [];
     // What `.gitattributes` makes of each changed path, by the content it was given: a later build

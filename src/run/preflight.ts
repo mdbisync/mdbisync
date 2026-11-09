@@ -2,7 +2,7 @@
 // its state, and every operation checks the setup. The run's Linear token
 // is minted here and revoked when the run's work is done, also on failure.
 
-import { LinearClient, LinearStoppedError, RequestStats, withRunToken, type LogEntry, type StopReason, type TokenLifecycle } from '../linear/index.ts';
+import { type AuthContext, LinearClient, type LinearReads, LinearStoppedError, RequestStats, withDeferredRunToken, withRunToken, type LogEntry, type StopReason, type TokenLifecycle } from '../linear/index.ts';
 import { type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import {
   type FailureCode,
@@ -65,6 +65,12 @@ export interface PreflightOptions {
   refusePendingInitialPullRequest?: boolean;
   /** Told when the run's Linear token is minted and when this run revoked it. */
   tokenLifecycle?: TokenLifecycle;
+  /**
+   * The staged security steps: the stage step keeps Linear's answers to its
+   * reads here; the apply step's reads take them, and its token is minted
+   * only when a request still has to reach Linear.
+   */
+  reads?: LinearReads;
 }
 
 /**
@@ -102,10 +108,20 @@ export async function runPreflight(
   const onRevokeError = (error: unknown) =>
     options.warn(`the run's Linear token could not be revoked: ${error instanceof Error ? error.message : String(error)}`);
   let minted = false;
+  const reads = options.reads;
+  const runOptions = { ...tokenOptions, onRevokeError, ...(options.tokenLifecycle ? { lifecycle: options.tokenLifecycle } : {}) };
+  const withToken = <T>(work: (token: { accessToken: string | (() => Promise<string>); scope: string[]; context: AuthContext }) => Promise<T>) => {
+    const known = reads?.token;
+    if (known != null) return withDeferredRunToken(credentials, known, runOptions, (token) => work({ ...token, accessToken: () => token.accessToken() }));
+    return withRunToken(credentials, runOptions, (token) => {
+      reads?.tokenMinted(token.scope, token.context);
+      return work(token);
+    });
+  };
   try {
-    return await withRunToken(credentials, { ...tokenOptions, onRevokeError, ...(options.tokenLifecycle ? { lifecycle: options.tokenLifecycle } : {}) }, async (token) => {
+    return await withToken(async (token) => {
       minted = true;
-      const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, auth: token.context });
+      const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, auth: token.context, ...(reads ? { reads } : {}) });
       let setup: SetupReport | undefined;
       try {
         const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
