@@ -88,6 +88,9 @@ Each scenario declares all nine invariants. `required: false` needs a concrete
 applicability reason, for example an offline lint check with no synchronized
 state. Evaluate the required invariants after the final step, before cleanup;
 I6 uses an extra read-only-observation probe of an ordinary no-change run.
+It requires that run to exit successfully and report a successful, complete
+sync and capture before checking that it wrote nothing. A partial capture,
+stopped run or missing completion report cannot establish idempotence.
 Transient assertions such as `runs.0.writes.total` inspect that invocation,
 including failed runs; later recovery must not erase that evidence.
 
