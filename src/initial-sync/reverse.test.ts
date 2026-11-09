@@ -230,8 +230,11 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(after.result.exitCode, 0, after.result.stderr);
     assert.equal(after.report.code, null);
     assert.equal(world.writes.length, writesBeforeSync);
-    // Merged, the tracked branch holds Linear's state: the synchronized folders equal `linear`.
-    assert.equal(await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']), await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']));
+    const diff = await fixture.remote.text(['diff', '--name-status', 'refs/heads/main', 'refs/mdbisync/linear']);
+    // Merged, the tracked branch holds Linear's state. The one document the
+    // initial sync left out for its title is captured under the file name
+    // rule, and only it differs from the tracked branch.
+    assert.equal(diff, 'A\teng/notes/Q3%3A plans%3F.md');
   });
 
   it('runs again with nothing changed: refs stay, no second pull request', async () => {

@@ -4,12 +4,14 @@
 // the state; from Linear it records the state and opens the pull request a
 // person merges. `sync` runs one sync cycle.
 
+import { type CaptureResult } from '../sync/capture.ts';
 import {
   type ConfirmedResult,
   type PlanReport,
   type ReverseResult,
   confirmInitialSync,
   confirmLinearToGit,
+  documentLinks,
   planFromRepository,
   planLinearToGitFromRepository,
   renderConfirmed,
@@ -35,6 +37,7 @@ export interface OperationOutcome extends PreflightOutcome {
   reverse?: ReverseResult;
   /** What a sync run wrote and recorded. */
   sync?: CycleResult;
+  captured?: CaptureResult;
 }
 
 export async function runOperation(
@@ -55,7 +58,7 @@ export async function runOperation(
 
   const gitToLinear = async (context: RunContext, confirm: boolean) => {
     if (confirm) {
-      const run = await confirmInitialSync(context, { config: inputs.state, transforms: [uploadsTransform({ config: inputs.state })] });
+      const run = await confirmInitialSync(context, { config: inputs.state, transforms: [uploadsTransform({ config: inputs.state }), documentLinks()] });
       plan = toPlanReport(run.plan, 'git-to-linear', true);
       confirmed = run.result;
       workSummary = renderConfirmed(run.plan, run.result);
@@ -78,7 +81,11 @@ export async function runOperation(
     }
   };
   const cycle = async (context: RunContext) => {
-    sync = await runSyncCycle(context, { config: inputs.state, transforms: () => [uploadsTransform({ config: inputs.state })] });
+    sync = await runSyncCycle(context, {
+      config: inputs.state,
+      transforms: () => [uploadsTransform({ config: inputs.state }), documentLinks()],
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    });
     workSummary = renderSync(sync);
   };
 
@@ -99,6 +106,9 @@ export async function runOperation(
   if (workSummary !== '') outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;
   if (confirmed !== undefined) outcome.confirmed = confirmed;
   if (reverse !== undefined) outcome.reverse = reverse;
-  if (sync !== undefined) outcome.sync = sync;
+  if (sync !== undefined) {
+    outcome.sync = sync;
+    outcome.captured = sync.capture;
+  }
   return outcome;
 }

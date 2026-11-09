@@ -21,6 +21,7 @@
 // adopted by its title.
 
 import { randomUUID } from 'node:crypto';
+import { documentPath } from './paths.ts';
 import { splitFile } from '../format/index.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
@@ -360,7 +361,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     if (document.trashed || document.archivedAt !== null) return false;
     // The tip's file was left out (a lint finding): Linear keeps an older text the tip does not show.
     if (file === undefined) return true;
-    if (document.title.normalize('NFC') !== file.title.normalize('NFC')) return false;
+    // Capture can encode a title or assign a stable collision suffix.
+    const folder = file.path.slice(0, -(file.title.length + '.md'.length)).replace(/\/$/, '');
+    const occupied = new Set([...linearFiles.keys()].filter((path) => path !== file.path));
+    if (documentPath(folder, document.title, document.id, occupied, file.path) !== file.path) return false;
     // Moved to another project or team in Linear: that move is the capture's to take in. A place the setup no longer
     // resolves (an annotation now names another project) cannot be checked.
     if (resolves(file.place) && !inPlace(document, file.place)) return false;

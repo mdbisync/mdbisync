@@ -132,8 +132,8 @@ describe('uploads of linked files in an initial sync', () => {
 
     assert.equal(
       document(world, 'a')?.content,
-      A_BODY.replace('../media/diagram.png', diagram.assetUrl).replace('<files/report 2026.pdf>', `<${report2026.assetUrl}>`).replace('(files/report%202026.pdf)', `(${report2026.assetUrl})`).replace('(files/report%202026.pdf#page=2)', `(${report2026.assetUrl}#page=2)`),
-      'links to other documents, other sites, missing files and anchors stay as they are',
+      A_BODY.replace('../media/diagram.png', diagram.assetUrl).replace('<files/report 2026.pdf>', `<${report2026.assetUrl}>`).replace('(files/report%202026.pdf)', `(${report2026.assetUrl})`).replace('(files/report%202026.pdf#page=2)', `(${report2026.assetUrl}#page=2)`).replace('(b.md)', `(<https://linear.app/${world.linear.urlKey}/document/${document(world, 'b')!.id}>)`),
+      'document and upload links use their URLs; sites, missing files and anchors stay as they are',
     );
     assert.equal(document(world, 'b')?.content, B_BODY.replace('../media/diagram.png', diagram.assetUrl).replace('./pixel.png', pixel.assetUrl));
     for (const name of SHARED) assert.ok(document(world, name)?.content?.includes(`![Diagram](${diagram.assetUrl})`));

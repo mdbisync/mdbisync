@@ -5,8 +5,9 @@ run as a GitHub Action.
 
 **Status:** early development. `lint` and `fix` work on Markdown files.
 `check` checks a repository's setup. `initial-sync` works in both
-directions, as a dry run and confirmed; `sync` runs the same check, refuses
-to run without its state, and then answers "not implemented".
+directions, as a dry run and confirmed. `sync` captures Linear changes into
+its state ref, then writes tracked-branch changes to Linear. Publishing
+captured changes through a sync pull request is under development.
 
 ## Folder mapping
 
@@ -58,6 +59,12 @@ leaves out, and writes nothing. With `confirm: true`:
   written;
 - the documents of the annotated projects and team zones that match no file
   are moved to Linear's trash, from which they can be restored;
+- a relative link to another synchronized document, such as
+  `[setup](../guide.md#setup)`, becomes a link to that document in Linear
+  (`https://linear.app/<workspace>/document/<id>#setup`), also when the
+  document is created in the same run; the recorded file keeps the link as
+  it was written. Links to files that are not synchronized documents stay as
+  they are;
 - document ids go to `refs/mdbisync/ids` as the run goes, and at the end
   one push records `refs/mdbisync/linear` (the tracked branch with each
   synchronized file as Linear stores it), `ids` and `uploads`.
@@ -112,7 +119,11 @@ again with the same inputs to go on without duplicate files.
 
 ## Development
 
-Requires Node 24.
+Requires Node 24 and pre-commit (install the hook runner before `npm test`).
+Capture with security hooks also requires pre-commit on the runner PATH;
+install it before invoking the action, for example with
+`pipx install pre-commit==4.6.2`. Missing tooling stops the run without
+marking documents as security failures.
 
 ```sh
 npm ci                  # exact versions from package-lock.json, install scripts off
