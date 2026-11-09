@@ -17,7 +17,7 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { compare, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { compare, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
@@ -30,7 +30,7 @@ import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
 import { commitAsPerson, readRunIds } from './step-helpers.ts';
-import { documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
+import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
 import { prerequisiteErrors } from './workflow-files.ts';
@@ -669,6 +669,16 @@ function engineRun(command: EngineResult['command'], report: Record<string, unkn
  * documents, their ids ref, and Linear holding the same texts. With `hooks`,
  * the person's commits go through the corpus's hooks from a local hook repository.
  */
+/** Replaces the run's uploads state ref with one commit holding these hash → URL entries. */
+async function writeUploads(ctx: RunContext, entries: Record<string, string>): Promise<void> {
+  const git = await ctx.person();
+  const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(entries) })).trim();
+  const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
+  const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
+  await git.run(['push', '--quiet', 'origin', `+${commit}:${ctx.names.refPrefix}/uploads`]);
+  refreshView(ctx);
+}
+
 async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
@@ -1605,15 +1615,60 @@ describe('subjects', () => {
     // No uploads yet: the written document's image is missing from the cache.
     assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: false });
     // Once the written document's image is cached, the left-out document's image does not count.
-    const kept = createHash('sha256').update('kept bytes').digest('hex');
-    const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify({ [kept]: 'https://uploads.linear.app/x/kept' }) })).trim();
-    const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
-    const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
-    await git.run(['push', '--quiet', 'origin', `${commit}:${ctx.names.refPrefix}/uploads`]);
-    refreshView(ctx);
+    await writeUploads(ctx, { [fileHash(Buffer.from('kept bytes'))]: 'https://uploads.linear.app/x/kept' });
     assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: true });
     void linear;
     void ids;
+  });
+
+  it('expect no cache entry for an image link the input already held broken, and still one for every real image', async () => {
+    const { ctx } = await fakeRun();
+    const git = await ctx.person();
+    const notes = join(git.dir, 'eng/platform/notes.md');
+    const push = async (message: string) => {
+      await git.run(['add', '--all']);
+      await git.run(['commit', '--quiet', '-m', message]);
+      await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+      refreshView(ctx);
+    };
+    // The input: a written document with a deliberately broken image link beside two real images.
+    mkdirSync(join(git.dir, 'eng/platform/media'), { recursive: true });
+    const input = '# Notes\n\n![gone](../assets/does-not-exist.png) ![a](media/first.png) ![b](media/second.png)\n';
+    writeFileSync(notes, input);
+    writeFileSync(join(git.dir, 'eng/platform/media/first.png'), 'first bytes');
+    writeFileSync(join(git.dir, 'eng/platform/media/second.png'), 'second bytes');
+    await push('Images and a broken reference');
+    ctx.observations.set(BEFORE_VIEW, await takeStartView(ctx));
+    const [first, second, other] = ['first bytes', 'second bytes', 'other bytes'].map((text) => fileHash(Buffer.from(text))) as [string, string, string];
+    const cacheComplete = async () => (await resolveSubject(ctx, 'uploads.cacheComplete')).value;
+    // No uploads: the real images' missing entries fail.
+    assert.equal(await cacheComplete(), false);
+    // One real image cached, the other not: its missing entry still fails, whatever the broken link does.
+    await writeUploads(ctx, { [first]: 'https://uploads.linear.app/x/first' });
+    assert.equal(await cacheComplete(), false);
+    // An entry under another file's hash does not stand in for the real image's own.
+    await writeUploads(ctx, { [first]: 'https://uploads.linear.app/x/first', [other]: 'https://uploads.linear.app/x/other' });
+    assert.equal(await cacheComplete(), false);
+    // Both real images cached: the input's broken link has no file to upload, so it expects nothing and the check passes.
+    await writeUploads(ctx, { [first]: 'https://uploads.linear.app/x/first', [second]: 'https://uploads.linear.app/x/second' });
+    assert.equal(await cacheComplete(), true);
+    // The same broken target added to another written document is the run's link, not the input's: it fails.
+    const plan = join(git.dir, 'eng/platform/plan.md');
+    const planText = readFileSync(plan, 'utf8');
+    writeFileSync(plan, `${planText}\n![gone too](../assets/does-not-exist.png)\n`);
+    await push('The broken target in another document');
+    assert.equal(await cacheComplete(), false);
+    writeFileSync(plan, planText);
+    await push('Restore the plan');
+    assert.equal(await cacheComplete(), true);
+    // A link the run adds to a file the branch does not hold is not the input's broken reference: it still fails.
+    writeFileSync(notes, `${input}\n![new](media/new.png)\n`);
+    await push('A link to an image that was never committed');
+    assert.equal(await cacheComplete(), false);
+    // A document whose only image is the broken one checks nothing, so the check does not pass.
+    writeFileSync(notes, '# Notes\n\n![gone](../assets/does-not-exist.png)\n');
+    await push('Only the broken reference');
+    assert.equal(await cacheComplete(), false);
   });
 
   it('read conflict marks by the palette names specs use, from Linear\'s hex colors', async () => {
