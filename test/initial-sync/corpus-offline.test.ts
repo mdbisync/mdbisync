@@ -49,7 +49,8 @@ function worldFor(files: ReadonlyMap<string, Buffer>): FakeWorld {
 describe('confirmed initial sync over the generated corpus (offline)', () => {
   let corpus: Corpus;
   before(() => {
-    corpus = buildCorpus();
+    // The hook revision only fills the corpus's .pre-commit-config.yaml, which this test replaces.
+    corpus = buildCorpus("a".repeat(40));
   });
 
   for (const slice of ['mini', 'bank', 'mid'] as const) {
