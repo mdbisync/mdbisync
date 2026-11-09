@@ -5,8 +5,7 @@
 
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
-import { PARTIAL, partialCode, stoppedMessage } from "../run/exit.ts";
-import { pullRequestFailure } from "../sync/index.ts";
+import { PARTIAL, partialCode, pullRequestEnding, stoppedMessage } from "../run/exit.ts";
 import { unfinishedMessage, writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { runOperation } from "../run/operation.ts";
@@ -37,7 +36,7 @@ export async function run(): Promise<void> {
     if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(outcome.summary).write();
     else core.info(outcome.summary);
     if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
-    const failure = pullRequestFailure(outcome.sync?.pullRequest);
+    const failure = pullRequestEnding(outcome);
     if (failure !== null) {
       core.setOutput("code", failure.code);
       core.setFailed(`${operation}: ${failure.message}`);

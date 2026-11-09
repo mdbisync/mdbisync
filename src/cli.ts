@@ -15,12 +15,11 @@ import {
 } from "./commands.ts";
 import { type LogEntry } from "./linear/index.ts";
 import { runFix, runLint } from "./format/command.ts";
-import { PARTIAL, partialCode, stoppedMessage } from "./run/exit.ts";
+import { PARTIAL, partialCode, pullRequestEnding, stoppedMessage } from "./run/exit.ts";
 import { unfinishedMessage, writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
 import { Git } from "./state/index.ts";
-import { pullRequestFailure } from "./sync/index.ts";
 import { VERSION } from "./version.ts";
 
 export interface CliResult {
@@ -108,7 +107,7 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   if (summaryFile) await appendFile(summaryFile, outcome.summary);
   const stderr = warnings.join("");
   // A failed check on the sync pull request is a setup error: a person fixes it, so it comes before a partial ending.
-  const failure = pullRequestFailure(outcome.sync?.pullRequest);
+  const failure = pullRequestEnding(outcome);
   if (failure !== null) {
     const exitCode = failure.kind === "setup" ? SETUP_FAILED_EXIT_CODE : failure.kind === "no-state" ? NO_STATE_EXIT_CODE : INCOMPLETE_EXIT_CODE;
     return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: ${failure.message}\n` };

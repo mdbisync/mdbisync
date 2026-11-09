@@ -5,8 +5,8 @@ import { type ContainerCapacity } from './capacity.ts';
 import { writeFile } from 'node:fs/promises';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
-import { type PullRequestResult, type SyncRecord, type WriteResult, pullRequestFailure } from '../sync/index.ts';
-import { type ExitStatus, exitStatusOf } from './exit.ts';
+import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
+import { type ExitStatus, exitStatusOf, pullRequestEnding } from './exit.ts';
 import { cell } from './summary.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
@@ -128,7 +128,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     capacity: outcome.plan?.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? outcome.captured?.code ?? pullRequestFailure(outcome.sync?.pullRequest)?.code ?? confirmed?.code ?? reverse?.code ?? (outcome.stopped === undefined ? null : 'stopped'),
+    code: outcome.code ?? outcome.captured?.code ?? pullRequestEnding(outcome)?.code ?? confirmed?.code ?? reverse?.code ?? (outcome.stopped === undefined ? null : 'stopped'),
     exitStatus: exitStatusOf(outcome),
     stop: outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped ?? reverse?.stopped ?? null,
     complete: outcome.sync?.complete ?? confirmed?.complete ?? reverse?.complete ?? false,
@@ -202,7 +202,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     capacity: write.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? pullRequestFailure(outcome.sync?.pullRequest)?.code ?? write.code ?? null,
+    code: outcome.code ?? pullRequestEnding(outcome)?.code ?? write.code ?? null,
     exitStatus: exitStatusOf(outcome),
     stop: write.stopped ?? null,
     complete: outcome.sync!.complete,
