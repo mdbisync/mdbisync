@@ -48,6 +48,7 @@ import {
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { type CreateChange, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, mergeLocally } from './merge.ts';
+import { reconcileDocumentMark } from './marks.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
 export const PARTIAL_RECORD_MESSAGE = "Sync: Linear's state, part of the tracked branch taken in";
@@ -114,6 +115,9 @@ export interface SyncRecord {
 }
 
 class StopWriting extends Error {}
+
+/** A state ref moved while the run was writing: another run records first, this one records nothing. */
+class StateMovedError extends Error {}
 
 export async function writeTrackedToLinear(context: RunContext, options: WriteOptions): Promise<WriteResult> {
   const { git, fetched, targets, linear } = context;
@@ -255,6 +259,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       }
     }
   } catch (error) {
+    if (error instanceof StateMovedError) {
+      result.code = 'state-moved';
+      return result;
+    }
     if (!(error instanceof StopWriting)) throw error;
   }
   if (written > 0) result.changed = true;
@@ -404,6 +412,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     if (document === undefined || document.trashed || document.archivedAt !== null) return skip(change.to, 'missing-in-linear');
     const file = merge.result.get(change.to) as SideFile;
     const patch: DocumentPatch = {};
+    /** The document as Linear stores it after the content change, for its status mark. */
+    let readBack: LinearDocument | undefined;
     if (change.content) patch.content = await transformBody(transforms, change.to, splitFile(textOf(file)).body);
     if (change.title) patch.title = file.title.normalize('NFC');
     if (change.place) Object.assign(patch, placePatch(file.place));
@@ -413,17 +423,24 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       (!change.place || inPlace(document, file.place));
     if (holds) {
       // Linear already holds the change: written by a run that stopped before recording it, or kept back by a partial record.
-      if (patch.content !== undefined) stored.set(change.to, document.content ?? '');
+      if (patch.content !== undefined) {
+        stored.set(change.to, document.content ?? '');
+        readBack = document;
+      }
     } else {
       if (!(await unchangedSinceCapture(document, merge.linear.get(change.from)))) return skip(change.to, 'edited-in-linear');
       if (written === 0) await checkpoint('before-write');
       const updated = await linear.updateDocument(change.id, patch);
       // Without a content write the merge result's file stands: Linear holds its body already.
-      if (patch.content !== undefined) stored.set(change.to, updated.content ?? '');
+      if (patch.content !== undefined) {
+        stored.set(change.to, updated.content ?? '');
+        readBack = updated;
+      }
     }
     const entry = nextIds.get(change.from);
     nextIds.delete(change.from);
     nextIds.set(change.to, entry !== undefined && entry.id === change.id ? entry : { id: change.id });
+    if (readBack !== undefined) await reconcileMark(change.to, readBack);
     if (change.content) result.updated.push(change.to);
     if (change.from !== change.to || change.title || change.place) result.relocated.push({ from: change.from, to: change.to });
     return true;
@@ -447,7 +464,36 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     stored.set(change.path, document.content ?? '');
     nextIds.set(change.path, { id: document.id });
     result.created.push(change.path);
+    await reconcileMark(change.path, document);
     return true;
+  }
+
+  /**
+   * Sets or clears the document's status mark from the text Linear now
+   * stores (conflict markers show the conflict mark), and records the
+   * document's own icon and color in `ids` before the mark replaces them.
+   */
+  async function reconcileMark(path: string, document: LinearDocument): Promise<void> {
+    const entry = nextIds.get(path);
+    if (entry === undefined || entry.id !== document.id || document.content === undefined) return;
+    await reconcileDocumentMark({
+      document,
+      entry,
+      linear,
+      persistEntry: async (next) => {
+        nextIds.set(path, next);
+        await pushIds();
+      },
+    });
+  }
+
+  /** Pushes the id map on its own, with its lease, so a saved icon is durable before the mark replaces it. */
+  async function pushIds(): Promise<void> {
+    for (const path of nextIds.keys()) nextReserved.delete(path);
+    const next = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved });
+    const pushed = await pushAtomic(git, options.config, [{ ref: stateRef(options.config, 'ids'), expected: expected.ids, next }]);
+    if (!pushed.ok) throw new StateMovedError();
+    expected.ids = next;
   }
 
   /** A document's place as a patch: a project, or a team without a project. */

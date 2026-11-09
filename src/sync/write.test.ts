@@ -579,6 +579,29 @@ describe('sync: the tracked branch to Linear', () => {
     assert.notDeepEqual(uploadUrls(part.content), [before]);
   });
 
+  it('a written text with conflict markers gets the conflict mark; removing them restores the icon', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    document.icon = 'Fire';
+    document.color = '#123456';
+    const conflicted = `# Review\n\n**Sync conflict: git version**\n\nOne way.\n\n**Sync conflict: Linear version**\n\nThe other way.\n\n**Sync conflict: end**\n\n${CANARY}\n`;
+    await commit({ 'eng/notes/review.md': conflicted });
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.equal(document.icon, 'Alert');
+    assert.equal(world.linear.comments.size, 1);
+    assert.ok(![...world.linear.comments.values()].some((comment) => comment.body.includes(CANARY)), 'a comment holds content');
+    const saved = (await ids())['eng/notes/review.md'] as { id: string; saved?: { icon: string | null; color: string | null } };
+    assert.deepEqual({ icon: saved.saved?.icon, color: saved.saved?.color }, { icon: 'Fire', color: '#123456' });
+
+    await commit({ 'eng/notes/review.md': `# Review\n\nOne way. ${CANARY}\n` });
+    const second = await sync();
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.equal(document.icon, 'Fire');
+    assert.equal(document.color, '#123456');
+    assert.equal(((await ids())['eng/notes/review.md'] as { saved?: unknown }).saved, undefined);
+    await assertIdempotent();
+  });
+
   /** What a capture does for an edit in Linear: the document's new text, committed onto `linear`. */
   async function captured(path: string, text: string) {
     const document = await documentOf(path);

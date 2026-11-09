@@ -75,6 +75,8 @@ export interface FakeWorld {
     writes: FakeWrites;
     store: (content: string) => string;
     uploads: FakeUpload[];
+    /** Comments on documents, by comment id. */
+    comments: Map<string, { documentContentId: string; body: string }>;
   };
   /** `METHOD url` of every request. */
   requests: string[];
@@ -104,6 +106,7 @@ export function fakeWorld(): FakeWorld {
       writes: { count: 0 },
       store: (content) => content,
       uploads: [],
+      comments: new Map(),
     },
     requests: [],
     writes: [],
@@ -200,6 +203,11 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
+  if (operationName === 'FindDocumentComment') {
+    const id = variables.id as string;
+    const comment = world.linear.comments.get(id);
+    return json(200, { data: { comments: { nodes: comment === undefined ? [] : [{ id, documentContentId: comment.documentContentId }] } } });
+  }
   if (operationName === 'GetDocuments') {
     // Read by id: trashed documents are included, unknown ids are absent.
     const ids = variables.ids as string[];
@@ -268,6 +276,17 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
       touch(document);
     }
     return { documentDelete: { success: document !== undefined } };
+  }
+  if (operation === 'CommentOnDocument') {
+    const input = variables.input as { id?: string; documentContentId: string; body: string };
+    const id = input.id ?? `comment-${world.linear.comments.size + 1}`;
+    world.linear.comments.set(id, { documentContentId: input.documentContentId, body: input.body });
+    return { commentCreate: { success: true, comment: { id } } };
+  }
+  if (operation === 'UpdateDocumentComment') {
+    const comment = world.linear.comments.get(variables.id as string);
+    if (comment !== undefined) comment.body = (variables.input as { body: string }).body;
+    return { commentUpdate: { success: comment !== undefined, comment: comment === undefined ? null : { id: variables.id } } };
   }
   if (operation === 'RestoreDocument') {
     const document = documents.find((d) => d.id === variables.id);
