@@ -125,7 +125,7 @@ describe('preflight', () => {
     };
     const result = await runCli(['check'], { env: env(), cwd, fetch, log });
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(entries.map(e => e.operation), ['oauth.token', 'SetupTeams', 'SetupProjects', 'oauth.revoke']);
+    assert.deepEqual(entries.map(e => e.operation), ['oauth.token', 'SetupTargets', 'oauth.revoke']);
     for (const [index, entry] of entries.entries()) {
       assert.equal(entry.status, 200);
       assert.equal(entry.requestId, `setup-request-${index + 1}`);
@@ -174,7 +174,7 @@ describe('preflight', () => {
     await assert.rejects(runCli(['check'], { env: env(), cwd, fetch, log, warn: message => { warnings.push(message); } }), /Entity not found: User/);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0]!, /token could not be revoked/);
-    assert.deepEqual(entries.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTeams', 400], ['oauth.revoke', 401]]);
+    assert.deepEqual(entries.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTargets', 400], ['oauth.revoke', 401]]);
     assert.equal(entries[1]?.requestId, 'setup-query-failed');
     assert.deepEqual(entries[1]?.errorCodes, ['INPUT_ERROR']);
     assert.equal(entries[2]?.requestId, 'setup-revoke-failed');
@@ -206,7 +206,7 @@ describe('preflight', () => {
       const stream = action ? child.stdout : child.stderr;
       const lines = stream.trim().split('\n');
       const events = lines.filter(line => line.startsWith('{')).map(line => JSON.parse(line) as LogEntry);
-      assert.deepEqual(events.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTeams', 400], ['oauth.revoke', 401]]);
+      assert.deepEqual(events.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTargets', 400], ['oauth.revoke', 401]]);
       const warning = lines.findIndex(line => line.startsWith(action ? '::warning' : 'warning:'));
       const primary = lines.findIndex(line => line.startsWith(action ? '::error' : 'error:'));
       assert.ok(warning >= 0 && primary > warning, child.stderr);

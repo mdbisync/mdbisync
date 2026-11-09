@@ -19,14 +19,31 @@ export interface ContainerCapacity {
 }
 
 export function containerKey(context: RunContext, place: Place): string {
-  return JSON.stringify(placeId(context.targets, place));
+  return documentPlaceKey(placeId(context.targets, place));
 }
 
+/** The key of a container by its Linear ids; `containerKey` of the place it resolves from. */
+function documentPlaceKey(place: { projectId: string } | { teamId: string }): string {
+  return JSON.stringify('projectId' in place ? { projectId: place.projectId } : { teamId: place.teamId });
+}
+
+/** Every annotated container's documents, trash included, listed together (one request per page). */
 export async function readContainerDocuments(context: RunContext): Promise<Map<string, LinearDocument[]>> {
+  const places = [...new Map(annotatedPlaces(context.mapping.zones).map(({ place }) => [containerKey(context, place), placeId(context.targets, place)])).values()];
+  return containersOf(context, await context.linear.listDocumentsInPlaces(places, { includeArchived: true }));
+}
+
+/**
+ * Groups a listing of the annotated containers by container. Every
+ * container gets an entry, empty when it listed nothing; a document of no
+ * annotated container is left out.
+ */
+export function containersOf(context: RunContext, listed: readonly LinearDocument[]): Map<string, LinearDocument[]> {
   const documents = new Map<string, LinearDocument[]>();
-  for (const { place } of annotatedPlaces(context.mapping.zones)) {
-    const key = containerKey(context, place);
-    if (!documents.has(key)) documents.set(key, await context.linear.listDocuments(placeId(context.targets, place), { includeArchived: true }));
+  for (const { place } of annotatedPlaces(context.mapping.zones)) documents.set(containerKey(context, place), []);
+  for (const document of listed) {
+    const place = document.projectId !== null ? { projectId: document.projectId } : document.teamId !== null ? { teamId: document.teamId } : undefined;
+    if (place !== undefined) documents.get(documentPlaceKey(place))?.push(document);
   }
   return documents;
 }

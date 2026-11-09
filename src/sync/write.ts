@@ -64,6 +64,13 @@ export const ID_HISTORY_DEPTH = 100;
 
 export interface WriteOptions {
   documentCap?: number | undefined;
+  /**
+   * The containers' documents as this run's capture listed them, by
+   * `containerKey`. Used only for the capacity report of a run whose
+   * tracked branch already holds `linear` (it returns before any write);
+   * every other run lists the containers again.
+   */
+  containers?: Map<string, LinearDocument[]> | undefined;
   config: StateConfig;
   /** The state refs after capture: the expected old values of this step's push. */
   state: StateSnapshot;
@@ -169,22 +176,27 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     record: null,
     state: { ...expected },
   };
-  let containers: Map<string, LinearDocument[]>;
-  try {
-    containers = await readContainerDocuments(context);
-  } catch (error) {
-    if (!(error instanceof LinearError)) throw error;
-    result.notAttempted = context.mapping.documents.map((document) => document.path).sort();
-    if (error instanceof LinearStoppedError) {
-      result.code = 'stopped';
-      result.stopped = error.reason;
-    } else {
-      result.code = 'write-failed';
-      result.failed = result.notAttempted.map((path) => ({ path, operation: error.operation, error: describeLinearError(error) }));
+  /** The containers' documents as Linear lists them now; undefined, with the result set, when the listing failed. */
+  const readContainers = async (): Promise<Map<string, LinearDocument[]> | undefined> => {
+    try {
+      return await readContainerDocuments(context);
+    } catch (error) {
+      if (!(error instanceof LinearError)) throw error;
+      result.notAttempted = context.mapping.documents.map((document) => document.path).sort();
+      if (error instanceof LinearStoppedError) {
+        result.code = 'stopped';
+        result.stopped = error.reason;
+      } else {
+        result.code = 'write-failed';
+        result.failed = result.notAttempted.map((path) => ({ path, operation: error.operation, error: describeLinearError(error) }));
+      }
+      return undefined;
     }
-    return result;
-  }
+  };
   if (await alreadyMerged(git, linearTip, tracked)) {
+    // Nothing to write: the capacity report can use this run's earlier listing.
+    const containers = options.containers ?? await readContainers();
+    if (containers === undefined) return result;
     result.capacity = assessCapacity(context, containers, [], options.documentCap);
     if (capacityBlocked(result.capacity)) {
       result.code = 'container-cap';
@@ -217,6 +229,12 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     return undefined;
   };
   const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId });
+  // Anything from here may write (linked-file changes are found later too): capacity, adoption and
+  // reserved ids are decided on the containers as Linear lists them now, not as capture saw them.
+  const containerListing = await readContainers();
+  if (containerListing === undefined) return result;
+  // A separate const: the hoisted `adoptableDocuments` below does not see the narrowing above.
+  const containers: Map<string, LinearDocument[]> = containerListing;
   result.leftOut = merge.leftOut;
   await findGoneRestores();
   for (const path of merge.conflicts) if (merge.result.has(path) || merge.linear.has(path) || ids.has(path)) result.skipped.push({ path, reason: 'conflict' });
