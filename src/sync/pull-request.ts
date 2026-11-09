@@ -37,6 +37,7 @@ import {
   type Git,
   type IdMap,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
+  initialRecordChangesParent,
   type Oid,
   type StateConfig,
   type StateSnapshot,
@@ -179,9 +180,9 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const resolved: Resolution = { marked: [], decided: [] };
     let head: Oid | null = sync;
     if (open === null && (!pending || (await holdsInitialRecord(git, sync as Oid, tracked)))) {
-      // A merged branch can start again from Linear. An abandoned initial
-      // sync record is also left out: its destructive snapshot needs a
-      // person's approval. Ordinary unmerged changes stay on the branch,
+      // A merged branch can start again from Linear. An older initial
+      // sync record left on this branch is also left out: its destructive
+      // snapshot needs a person's approval. Ordinary unmerged changes stay on the branch,
       // including a person's edits and CI fixes after a pull request closes.
       if (!result.needed) return result;
       head = await restart(git, sync, linear, wanted, identity);
@@ -286,9 +287,7 @@ async function holdsInitialRecord(git: Git, sync: Oid, tracked: Oid): Promise<bo
     }
   }
   if (record === undefined) return false;
-  const parent = await git.run(['rev-parse', '--verify', '--quiet', `${record}^1`], { okCodes: [0, 1] });
-  if (parent.code !== 0) return true;
-  return (await git.run(['diff', '--quiet', parent.stdout.toString('utf8').trim(), record], { okCodes: [0, 1] })).code === 1;
+  return initialRecordChangesParent(git, record);
 }
 
 /** The tree of `into` with `from` merged in; null on a conflict. */
