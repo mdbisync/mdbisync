@@ -21,7 +21,7 @@
 // rebuilt, without duplicates.
 
 import { randomUUID } from 'node:crypto';
-import { splitFile } from '../format/index.ts';
+import { fixText, splitFile } from '../format/index.ts';
 import {
   DocumentTooLongError,
   type LinearDocument,
@@ -239,10 +239,13 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
 
       try {
         const body = await transformBody(transforms, path, splitFile(texts.get(path) as string).body);
-        // A document already holding the body is not written again. On a
-        // resumed run, that is how the documents the stopped run wrote are
-        // skipped; one whose file or Linear text changed since is written.
-        if (document !== undefined && document.content === body) {
+        // A document already holding the body, as sent or in the form Linear
+        // stores it, is not written again: files are often not in Linear's
+        // form, and writing them again would change nothing but the
+        // document's history. On a resumed run, that is how the documents the
+        // stopped run wrote are skipped; one whose file or Linear text
+        // changed since is written.
+        if (document !== undefined && holdsBody(document.content ?? '', body)) {
           const completed = resumed && previous.get(path)?.id === document.id;
           (completed ? result.skippedCompleted : result.unchanged).push(path);
           remember(path, document);
@@ -399,6 +402,11 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P', oid]);
     return (await describe(a)) === (await describe(b));
   }
+}
+
+/** Whether Linear's content is the body, or the body in the form Linear stores (as the format module writes it). */
+export function holdsBody(content: string, body: string): boolean {
+  return content === body || content === fixText(body);
 }
 
 function describeError(error: LinearError): string {
