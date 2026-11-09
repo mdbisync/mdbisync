@@ -13,7 +13,7 @@ import { buildCorpus, writeCorpus } from "./generate.ts";
 import { gitattributes } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
-import { lintText } from "../../src/format/index.ts";
+import { fixText, lintText } from "../../src/format/index.ts";
 import { COLLISIONS, EDGE, LOOSE, preCommitConfig } from "./tree.ts";
 
 // The default corpus, built once for the tests that only read it.
@@ -132,12 +132,24 @@ test("HTML src and href count as links, and the HTML image fixture records its i
   assert.ok(html?.links.includes("docs/reference/assets/banner.png"));
 });
 
-test("bank fixtures whose links still reach their files are copied byte for byte", () => {
+test("bank fixtures whose links still reach their files are copied unchanged, then in Linear's form", () => {
   for (const name of ["links/spaces-angle.md", "links/spaces-encoded.md", "links/relative.md", "images/reference.md"]) {
     const copied = corpus().files.find((f) => f.path === `docs/reference/${name}`);
     assert.ok(copied, name);
-    assert.deepEqual(copied.content, readFileSync(join("test/fixtures", name)), name);
+    assert.equal(copied.content.toString("utf8"), fixText(readFileSync(join("test/fixtures", name), "utf8")), name);
   }
+});
+
+test("every synced document outside the lint-error set is already in Linear's form", () => {
+  const files = corpus().files.filter((f) => f.synced && f.kind === "markdown");
+  for (const file of files) {
+    const text = file.content.toString("utf8");
+    if (file.expected === "lint-error") continue;
+    assert.equal(fixText(text), text, `${file.path} is not in Linear's form`);
+    assert.notEqual(file.expected, "fixable", `${file.path} is still classed fixable`);
+  }
+  // The lint-error files are written as generated: fix never touches them.
+  assert.ok(files.some((f) => f.expected === "lint-error"));
 });
 
 test("a malformed percent escape is kept as written, and replacements are literal", () => {

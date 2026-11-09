@@ -11,6 +11,7 @@ import { parseArgs } from "node:util";
 import { makeAssets } from "./assets.ts";
 import { copyBank } from "./bank.ts";
 import { documents } from "./documents.ts";
+import { fixText } from "../../src/format/index.ts";
 import { Canaries, isLfs, type CorpusFile } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { makeSlices, SLICES, type Slice } from "./slices.ts";
@@ -52,6 +53,25 @@ export type Corpus = {
   slices: Record<Slice, string[]>;
 };
 
+/**
+ * A synchronized repository's tracked branch is already in the form Linear
+ * stores, so every synced Markdown file is written through `fix`; the
+ * lint-error files stay as they are, since `fix` never touches them. A file
+ * the bank classes as fixable is, once written this way, unchanged by `fix`.
+ */
+export function inLinearForm(files: CorpusFile[]): void {
+  for (const file of files) {
+    if (!file.synced || file.kind !== "markdown" || file.expected === "lint-error") continue;
+    const text = file.content.toString("utf8");
+    const fixed = fixText(text);
+    if (fixed !== text) file.content = Buffer.from(fixed, "utf8");
+    if (file.expected === "fixable") {
+      file.expected = "unchanged";
+      file.note = [file.note, "written in Linear's form; the bank's source is fixable"].filter((n) => n !== null).join("; ");
+    }
+  }
+}
+
 export function buildCorpus(hookRevision: string, seed: string = DEFAULT_SEED, bankDir: string = DEFAULT_BANK): Corpus {
   const rng = new Rng(seed);
   const canaryRng = rng.fork("canaries");
@@ -71,6 +91,8 @@ export function buildCorpus(hookRevision: string, seed: string = DEFAULT_SEED, b
   for (const file of files) {
     for (const target of file.links) if (!seen.has(target)) throw new Error(`${file.path} links to ${target}, which is not in the corpus`);
   }
+
+  inLinearForm(files);
 
   const manifest: Manifest = {
     seed,
