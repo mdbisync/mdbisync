@@ -195,12 +195,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
 
   let written = 0;
   try {
+    // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
+    // before any upload of this run (preparing may upload ahead of the writes), so this run's uploads never count as
+    // what Linear held.
+    const tipUploads = new Map(uploads);
     const plan = transformPlan();
     for (const transform of transforms) await transform.prepare?.({ git, tracked: candidate, linear, plan, uploads, documentIds });
-    // The tip's side only computes what Linear should hold: it never uploads.
-    // It reads the cache as the run found it, so this run's own uploads never count as what Linear held.
-    const tipUploads = new Map(uploads);
-    for (const transform of tipTransforms) await transform.prepare?.({ git, tracked: linearTip, linear: withoutUploads(linear), plan, uploads: tipUploads, documentIds });
+    for (const transform of tipTransforms) await transform.prepare?.({ git, tracked: linearTip, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads: tipUploads, documentIds });
     await findLinkedFileChanges();
 
     const changes = merge.changes;
@@ -298,7 +299,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         differs = written !== (await transformBody(tipTransforms, change.from, splitFile(textOf(previous)).body));
       } catch (error) {
         // Left out or stopped: the write reports it, or stops before it.
-        if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError)) throw error;
+        if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError)) throw error;
         differs = true;
       }
       if (differs) merge.changes.push({ ...change, content: true });
@@ -360,7 +361,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       expected = await transformBody(tipTransforms, file.path, splitFile(textOf(file)).body);
     } catch (error) {
       // The tip's file cannot be put in Linear's form (a file it links to is gone): nothing to compare with.
-      if (error instanceof LeaveOutError) return true;
+      if (error instanceof LeaveOutError || error instanceof UploadRefusedError) return true;
       throw error;
     }
     return (document.content ?? '') === expected;
@@ -528,19 +529,28 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   }
 }
 
-/** Rule of a tip file whose linked file is not in the upload cache: it cannot be put in Linear's form without an upload. */
-const NOT_IN_UPLOAD_CACHE = 'not-in-upload-cache';
+/**
+ * A tip file links to a file that is not in the upload cache, so it cannot
+ * be put in Linear's form without an upload. A `LinearError`, so a
+ * transform that uploads ahead of time (and gives up quietly on a Linear
+ * error) treats it as a failed upload.
+ */
+export class UploadRefusedError extends LinearError {
+  constructor() {
+    super('FileUpload', 'a linked file is not in the upload cache');
+  }
+}
 
 /**
  * The client with uploads refused: a transform that would upload throws
- * `LeaveOutError` instead. Other calls go to the client itself.
+ * `UploadRefusedError` instead. Other calls go to the client itself.
  */
 function withoutUploads(client: LinearClient): LinearClient {
   return new Proxy(client, {
     get(target, property) {
-      if (property === 'uploadFile') {
+      if (property === 'uploadFile' || property === 'uploadFiles') {
         return async () => {
-          throw new LeaveOutError(NOT_IN_UPLOAD_CACHE, 'a linked file is not in the upload cache');
+          throw new UploadRefusedError();
         };
       }
       const value: unknown = Reflect.get(target, property, target);

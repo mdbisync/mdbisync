@@ -16,7 +16,8 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Nodes } from 'mdast';
-import { end, parse, start, visit } from '../format/markdown.ts';
+import { end, parse, splitFile, start, visit } from '../format/markdown.ts';
+import { LinearError } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
 import {
   type Git,
@@ -43,6 +44,9 @@ export const UPLOAD_UNREADABLE = 'upload-unreadable';
 const HASH_BATCH_BYTES = 64 * 1024 * 1024;
 /** An LFS pointer file is smaller than this (Git LFS spec v1). */
 const MAX_POINTER_SIZE = 1024;
+/** Files uploaded with one API request before the first write, and their largest total size. */
+const UPLOAD_BATCH_FILES = 20;
+const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
 
 export interface UploadsOptions {
   config: StateConfig;
@@ -123,17 +127,22 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
     }
   };
 
-  /** Uploads the files not in the cache, read together; an unreadable one leaves the document out before any upload. */
-  const uploadMissing = async (targets: readonly string[]) => {
-    const { git, linear, uploads } = context as TransformContext;
+  /** The files of `targets` not in the cache, one path per content hash. */
+  const missing = (targets: Iterable<string>): Map<string, string> => {
+    const { uploads } = context as TransformContext;
     const byHash = new Map<string, string>();
     for (const target of targets) {
       const { hash } = linked.get(target) as LinkedFile;
       if (!uploads.has(hash) && !byHash.has(hash)) byHash.set(hash, target);
     }
-    if (byHash.size === 0) return;
+    return byHash;
+  };
+
+  /** Reads files by hash, from LFS when they are stored there; an unreadable one gets its reason. */
+  const readContents = async (byHash: ReadonlyMap<string, string>): Promise<Map<string, Buffer | { unreadable: string }>> => {
+    const { git } = context as TransformContext;
     const blobs = await readBlobs(git, [...byHash.values()].map((target) => (files.get(target) as TreeEntry).oid));
-    const contents = new Map<string, Buffer>();
+    const contents = new Map<string, Buffer | { unreadable: string }>();
     for (const [hash, target] of byHash) {
       const blob = blobs.get((files.get(target) as TreeEntry).oid) as Buffer;
       const pointer = parseLfsPointer(blob);
@@ -143,14 +152,81 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       }
       lfs ??= await lfsReader(git, options.config.remote);
       const read = await lfs(pointer, target);
-      if (!read.ok) throw new LeaveOutError(UPLOAD_UNREADABLE, `${target} cannot be read: ${read.reason}`, [target]);
-      contents.set(hash, read.content);
+      contents.set(hash, read.ok ? read.content : { unreadable: read.reason });
     }
-    for (const [hash, target] of byHash) {
+    return contents;
+  };
+
+  /** Uploads files with one API request and caches their URLs. */
+  const uploadAll = async (items: ReadonlyArray<{ hash: string; target: string; content: Buffer }>) => {
+    const { linear, uploads } = context as TransformContext;
+    const inputs = items.map(({ target, content }) => ({
+      filename: posix.basename(target),
+      contentType: contentTypeOf(target),
       // A copy, so the bytes sent are a whole ArrayBuffer of their own, as the client's type requires.
-      const bytes = new Uint8Array(contents.get(hash) as Buffer);
-      const { assetUrl } = await linear.uploadFile({ filename: posix.basename(target), contentType: contentTypeOf(target), bytes });
-      uploads.set(hash, assetUrl);
+      bytes: new Uint8Array(content),
+    }));
+    const results = await linear.uploadFiles(inputs);
+    items.forEach(({ hash }, index) => uploads.set(hash, (results[index] as { assetUrl: string }).assetUrl));
+  };
+
+  /** Uploads a document's files not in the cache; an unreadable one leaves the document out before any upload. */
+  const uploadMissing = async (targets: readonly string[]) => {
+    const byHash = missing(targets);
+    if (byHash.size === 0) return;
+    const contents = await readContents(byHash);
+    const batch: Array<{ hash: string; target: string; content: Buffer }> = [];
+    for (const [hash, target] of byHash) {
+      const content = contents.get(hash) as Buffer | { unreadable: string };
+      if (!Buffer.isBuffer(content)) throw new LeaveOutError(UPLOAD_UNREADABLE, `${target} cannot be read: ${content.unreadable}`, [target]);
+      batch.push({ hash, target, content });
+    }
+    await uploadAll(batch);
+  };
+
+  /**
+   * Uploads, before the first write, the files of every document the run
+   * will write, in batches of one request each. Each upload costs a request
+   * otherwise, more than the run's budget of 1.5 requests per document allows
+   * where documents link many files. Best effort: a file that cannot be read,
+   * a document that will be left out and any Linear error leave the work to
+   * `apply`, which uploads per document and reports per document.
+   */
+  const preUpload = async (ctx: TransformContext, markdown: ReadonlyMap<string, TreeEntry>) => {
+    const paths = [...ctx.plan.create, ...ctx.plan.overwrite].map((entry) => entry.path).filter((path) => markdown.has(path));
+    const texts = await readBlobs(ctx.git, paths.map((path) => (markdown.get(path) as TreeEntry).oid));
+    const wanted: string[] = [];
+    for (const path of paths) {
+      const blob = texts.get((markdown.get(path) as TreeEntry).oid) as Buffer;
+      if (parseLfsPointer(blob) !== null) continue;
+      const targets = [...new Set(findFileLinks(path, splitFile(blob.toString('utf8')).body, isFile).map((link) => link.target))];
+      if (targets.length === 0) continue;
+      await hashFiles(ctx.git, targets);
+      if (targets.some((target) => (linked.get(target) as LinkedFile).size > limit)) continue;
+      wanted.push(...targets);
+    }
+    const byHash = [...missing(wanted)];
+    let index = 0;
+    while (index < byHash.length) {
+      const chunk: Array<[string, string]> = [];
+      let bytes = 0;
+      while (index < byHash.length && chunk.length < UPLOAD_BATCH_FILES && (chunk.length === 0 || bytes + (linked.get((byHash[index] as [string, string])[1]) as LinkedFile).size <= UPLOAD_BATCH_BYTES)) {
+        const item = byHash[index] as [string, string];
+        chunk.push(item);
+        bytes += (linked.get(item[1]) as LinkedFile).size;
+        index += 1;
+      }
+      const contents = await readContents(new Map(chunk));
+      const batch = chunk.flatMap(([hash, target]) => {
+        const content = contents.get(hash);
+        return Buffer.isBuffer(content) ? [{ hash, target, content }] : [];
+      });
+      try {
+        if (batch.length > 0) await uploadAll(batch);
+      } catch (error) {
+        if (error instanceof LinearError) return;
+        throw error;
+      }
     }
   };
 
@@ -159,9 +235,13 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
 
     async prepare(ctx) {
       context = ctx;
+      const markdown = new Map<string, TreeEntry>();
       for (const entry of await listTree(ctx.git, ctx.tracked)) {
-        if (entry.type === 'blob' && entry.mode !== '120000' && !entry.path.endsWith(MARKDOWN_EXTENSION)) files.set(entry.path, entry);
+        if (entry.type !== 'blob' || entry.mode === '120000') continue;
+        if (entry.path.endsWith(MARKDOWN_EXTENSION)) markdown.set(entry.path, entry);
+        else files.set(entry.path, entry);
       }
+      await preUpload(ctx, markdown);
     },
 
     async apply({ path, body }) {

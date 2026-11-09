@@ -409,6 +409,9 @@ describe('sync: the tracked branch to Linear', () => {
   });
 
   const uploadUrls = (text: string | null | undefined) => [...(text ?? '').matchAll(/https:\/\/uploads\.linear\.test\/[^)\s]+/g)].map((match) => match[0]);
+  /** Upload requests, single or batched, whatever the operation is called. */
+  const isUpload = (write: string) => /^FileUpload/.test(write);
+  const kinds = (writes: string[]) => writes.map((write) => (isUpload(write) ? 'upload' : write));
 
   it('a document with an image whose text changed is written; the image is not uploaded again', async () => {
     const figure = await documentOf('eng/notes/figure.md');
@@ -437,7 +440,7 @@ describe('sync: the tracked branch to Linear', () => {
     });
     const { result, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes.filter((write) => write === 'FileUpload'), ['FileUpload']);
+    assert.equal(writes.filter(isUpload).length, 1, 'more than one upload request');
     assert.equal(world.linear.uploads.length, uploadsBefore + 1);
     const [report, summary] = await Promise.all([documentOf('eng/notes/report.md'), documentOf('combined/summary.md')]);
     assert.deepEqual(uploadUrls(report.content), uploadUrls(summary.content));
@@ -454,7 +457,7 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1') });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, ['FileUpload', 'UpdateDocument']);
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
     assert.deepEqual(report.sync?.updated, ['eng/notes/figure.md']);
     const [after] = uploadUrls(figure.content);
     assert.ok(after !== undefined && after !== before, 'the document kept the old image');
@@ -515,7 +518,7 @@ describe('sync: the tracked branch to Linear', () => {
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.sync?.skipped, []);
-    assert.deepEqual(writes, ['FileUpload', 'UpdateDocument']);
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
   });
 
   it('a write Linear rejects is listed, and the run exits to be run again', async () => {
@@ -572,7 +575,7 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/media/part#1.png': Buffer.from('new part bytes').toString('latin1') });
     const { result, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, ['FileUpload', 'UpdateDocument']);
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
     assert.notDeepEqual(uploadUrls(part.content), [before]);
   });
 

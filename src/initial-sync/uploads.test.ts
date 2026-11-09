@@ -117,6 +117,9 @@ describe('uploads of linked files in an initial sync', () => {
     // One upload per distinct file: the diagram linked from eight documents, the pixel, and the report linked twice.
     assert.equal(world.linear.uploads.length, 3);
     for (const content of [DIAGRAM, PIXEL, REPORT]) assert.equal(uploadOf(world, content).length, 1, 'uploaded once, bytes equal');
+    // I9: the three files take one API request, before the first write; the over-limit and unreadable files are not sent.
+    assert.deepEqual(world.writes.filter((operation) => operation.startsWith('FileUpload')), ['FileUploads']);
+    assert.ok(world.writes.indexOf('FileUploads') < world.writes.indexOf('CreateDocument'));
     const [diagram, pixel, report2026] = [DIAGRAM, PIXEL, REPORT].map((content) => uploadOf(world, content)[0]) as [FakeUpload, FakeUpload, FakeUpload];
     assert.equal(report2026.filename, 'report 2026.pdf');
     assert.equal(report2026.contentType, 'application/pdf');
@@ -168,7 +171,8 @@ describe('uploads of linked files in an initial sync', () => {
 
   it('L5-11: a failed upload writes no document with a broken link; the next run uploads and writes it', async () => {
     const world = fakeWorld();
-    world.linear.writes.reject = (operation, variables) => operation === 'FileUpload' && variables.filename === 'pixel.png';
+    // Linear refuses the pixel, alone or in a batch: the batch before the first write fails, and each document then uploads its own.
+    world.linear.writes.reject = (operation, variables) => operation.startsWith('FileUpload') && Object.values(variables).includes('pixel.png');
     const first = await run(world);
     assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
     assert.deepEqual(first.report.initialSync?.failed.map((failure) => failure.path), ['eng/notes/b.md']);
