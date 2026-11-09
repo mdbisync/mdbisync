@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { createSign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
-import { LinearClient, withRunToken } from '../../src/linear/index.ts';
+import { LinearClient, withRunToken, type LogEntry } from '../../src/linear/index.ts';
 import { PERMISSION_PROBES, checkGitHub, resolveTargets } from '../../src/setup/index.ts';
 
 const env = process.env;
@@ -86,8 +86,9 @@ describe('setup check against GitHub', { skip: appId && keyFile && repository ? 
 
 describe('setup check against Linear', { skip: linearId && linearSecret && linearTeams.length > 0 ? false : 'the Linear test variables are not set' }, () => {
   it('resolves existing teams and names a missing one, in two requests or fewer', async () => {
-    await withRunToken({ clientId: linearId, clientSecret: linearSecret }, { onRevokeError: (error) => assert.fail(String(error)) }, async ({ accessToken }) => {
-      const client = new LinearClient({ token: accessToken });
+    const hooks = { log: (entry: LogEntry) => console.error(JSON.stringify(entry)) };
+    await withRunToken({ clientId: linearId, clientSecret: linearSecret }, { hooks, onRevokeError: (error) => assert.fail(String(error)) }, async ({ accessToken, context }) => {
+      const client = new LinearClient({ token: accessToken, auth: context, hooks });
       const found = await resolveTargets(client, linearTeams.map((team, index) => ({ team, teamFolder: `t${index}` })));
       assert.equal(found.result.state, 'passed', found.result.detail);
       assert.equal(found.targets?.teams.size, linearTeams.length);

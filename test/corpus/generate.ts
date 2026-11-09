@@ -2,19 +2,20 @@
 // `corpus/` (the tree) and `corpus-slices/` (the slice lists and the
 // manifest) under an output folder.
 //
-//   node test/corpus/generate.ts [--out <dir>] [--seed <text>] [--bank <dir>] [--replace]
+//   node test/corpus/generate.ts --hook-rev <release-sha> [--out <dir>] [--seed <text>] [--bank <dir>] [--replace]
 
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { makeAssets } from "./assets.ts";
 import { copyBank } from "./bank.ts";
 import { documents } from "./documents.ts";
+import { fixText } from "../../src/format/index.ts";
 import { Canaries, isLfs, type CorpusFile } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { makeSlices, SLICES, type Slice } from "./slices.ts";
-import { treeFiles } from "./tree.ts";
+import { BANK_HOME, treeFiles } from "./tree.ts";
 
 export const DEFAULT_SEED = "corpus-v1";
 const here = dirname(fileURLToPath(import.meta.url));
@@ -37,6 +38,7 @@ export type ManifestEntry = {
   bank_group: string | null;
   links: string[];
   note: string | null;
+  role: string | null;
 };
 
 export type Manifest = {
@@ -51,17 +53,49 @@ export type Corpus = {
   slices: Record<Slice, string[]>;
 };
 
-export function buildCorpus(seed: string = DEFAULT_SEED, bankDir: string = DEFAULT_BANK): Corpus {
+/**
+ * A synchronized repository's tracked branch is already in the form Linear
+ * stores, so every synced Markdown file is written through `fix`; the
+ * lint-error files stay as they are, since `fix` never touches them.
+ *
+ * Forms that only exist outside Linear's form (CRLF, a final newline,
+ * whitespace-only text, reference-style links) are rewritten here; the
+ * fixture bank keeps them for the format tests. A rewritten file's note says
+ * so. A bank copy classed fixable becomes unchanged; its basis stays known
+ * only when the rewritten text is the form the probe recorded from Linear.
+ */
+export function inLinearForm(files: CorpusFile[], bankDir: string): void {
+  for (const file of files) {
+    if (!file.synced || file.kind !== "markdown" || file.expected === "lint-error") continue;
+    const text = file.content.toString("utf8");
+    const fixed = fixText(text);
+    if (fixed === text) continue;
+    file.content = Buffer.from(fixed, "utf8");
+    const rewritten = fixed === "" ? "written empty, as in Linear's form" : "written in Linear's form";
+    file.note = file.note === null ? rewritten : `${file.note}; ${rewritten}`;
+    if (file.expected === "fixable") {
+      file.expected = "unchanged";
+      // Known only when the probe recorded exactly this text as Linear's form; a generated file was never probed.
+      const golden = file.bankGroup === null ? null : join(bankDir, `${file.path.slice(BANK_HOME.length + 1).replace(/\.md$/, "")}.linear.md`);
+      if (!(golden !== null && existsSync(golden) && readFileSync(golden, "utf8") === fixed)) file.basis = "assumed";
+    }
+  }
+}
+
+export function buildCorpus(hookRevision: string, seed: string = DEFAULT_SEED, bankDir: string = DEFAULT_BANK): Corpus {
   const rng = new Rng(seed);
   const canaryRng = rng.fork("canaries");
   const canaries = new Canaries(() => canaryRng.hex(8));
   const bank = copyBank(bankDir, canaries);
-  const tree = treeFiles(rng.fork("tree"), canaries);
+  const tree = treeFiles(rng.fork("tree"), canaries, hookRevision);
   const assets = makeAssets(rng.fork("assets"));
   const taken = new Set<string>([...bank.files, ...tree, ...assets.files].map((f) => f.path));
   const docs = documents(rng.fork("documents"), canaries, assets, taken, bank.files);
   const files = [...bank.files, ...tree, ...assets.files, ...docs].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 
+  inLinearForm(files, bankDir);
+
+  // Paths and links are checked on the files as written, after the rewrite above.
   const seen = new Set<string>();
   for (const file of files) {
     if (seen.has(file.path)) throw new Error(`two corpus files share the path ${file.path}`);
@@ -89,6 +123,7 @@ export function buildCorpus(seed: string = DEFAULT_SEED, bankDir: string = DEFAU
       bank_group: f.bankGroup,
       links: [...f.links].sort(),
       note: f.note,
+      role: f.role ?? null,
     })),
     excluded: bank.excluded,
   };
@@ -120,13 +155,15 @@ export function writeCorpus(corpus: Corpus, outDir: string, replace: boolean): v
 function main(): void {
   const { values } = parseArgs({
     options: {
+      "hook-rev": { type: "string" },
       out: { type: "string", default: DEFAULT_OUT },
       seed: { type: "string", default: DEFAULT_SEED },
       bank: { type: "string", default: DEFAULT_BANK },
       replace: { type: "boolean", default: false },
     },
   });
-  const corpus = buildCorpus(values.seed, values.bank);
+  if (values["hook-rev"] === undefined) throw new Error("--hook-rev is required: pin a bundled release commit, not a source commit");
+  const corpus = buildCorpus(values["hook-rev"], values.seed, values.bank);
   writeCorpus(corpus, resolve(values.out), values.replace);
   const lfsBytes = corpus.manifest.files.filter((f) => f.lfs).reduce((sum, f) => sum + f.bytes, 0);
   console.log(`corpus: ${corpus.files.length} files, ${(lfsBytes / 1024 / 1024).toFixed(1)} MiB in LFS, written to ${resolve(values.out)}`);

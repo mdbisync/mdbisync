@@ -187,6 +187,15 @@ function parsePorcelain(output: string): PorcelainLine[] {
 export const IDS_FILE = 'ids.json';
 export const UPLOADS_FILE = 'uploads.json';
 
+export interface MarkNotice {
+  /** The id of the single comment for this marked episode. */
+  id: string;
+  kind: 'conflict' | 'blocked';
+  /** Hash of the neutral notice text, not document content. */
+  bodyHash: string;
+  posted: boolean;
+}
+
 export interface IdEntry {
   /** The Linear document id. */
   id: string;
@@ -194,7 +203,7 @@ export interface IdEntry {
    * The document's own icon and color while the sync shows a mark in their
    * place; absent when no mark is shown.
    */
-  saved?: { icon: string | null; color: string | null };
+  saved?: { icon: string | null; color: string | null; notice?: MarkNotice };
 }
 
 /** Path → Linear document. */
@@ -273,22 +282,44 @@ export async function readReservedIds(git: Git, commit: Oid | null): Promise<Res
 }
 
 /**
- * Commits the id map (and the reserved ids, when there are any) on top of
- * `parent`. Returns `parent` when nothing changed, unless `always`.
+ * In a progress commit only: for each document the unfinished initial sync
+ * wrote, the SHA-256 (lowercase hex) of the text it sent. A resumed run
+ * skips a document whose text has the same hash, whatever form Linear
+ * stored it in.
+ */
+export const WRITTEN_FILE = 'written.json';
+
+export async function readWrittenHashes(git: Git, commit: Oid | null): Promise<Map<string, string>> {
+  if (commit === null) return new Map();
+  const read = await git.run(['cat-file', 'blob', `${commit}:${WRITTEN_FILE}`], { okCodes: [0, 128] });
+  if (read.code !== 0) return new Map();
+  const data = await readJsonFile(git, commit, WRITTEN_FILE);
+  const map = new Map<string, string>();
+  for (const [path, hash] of Object.entries(data)) {
+    if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) throw new Error(`${WRITTEN_FILE} has an invalid entry`);
+    map.set(path, hash);
+  }
+  return map;
+}
+
+/**
+ * Commits the id map (and, when there are any, the reserved ids and the
+ * written hashes) on top of `parent`. Returns `parent` when nothing
+ * changed, unless `always`.
  */
 export function commitIds(
   git: Git,
   parent: Oid | null,
   ids: IdMap,
   identity: CommitIdentity,
-  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string> } = {},
+  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string> } = {},
 ): Promise<Oid> {
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
   const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry.saved === undefined ? { id: entry.id } : { id: entry.id, saved: entry.saved }]));
   const files = new Map<string, unknown>([[IDS_FILE, data]]);
-  if (options.reserved !== undefined && options.reserved.size > 0) {
-    files.set(RESERVED_IDS_FILE, Object.fromEntries([...options.reserved.entries()].sort(([a], [b]) => compareStrings(a, b))));
-  }
+  const sorted = (map: ReadonlyMap<string, string>) => Object.fromEntries([...map.entries()].sort(([a], [b]) => compareStrings(a, b)));
+  if (options.reserved !== undefined && options.reserved.size > 0) files.set(RESERVED_IDS_FILE, sorted(options.reserved));
+  if (options.written !== undefined && options.written.size > 0) files.set(WRITTEN_FILE, sorted(options.written));
   return commitJsonFiles(git, parent, files, options.message ?? 'Update document ids', identity, options.always === true);
 }
 
@@ -312,8 +343,18 @@ function isIdEntry(value: unknown): value is IdEntry {
     typeof saved === 'object' &&
     saved !== null &&
     (saved.icon === null || typeof saved.icon === 'string') &&
-    (saved.color === null || typeof saved.color === 'string')
+    (saved.color === null || typeof saved.color === 'string') &&
+    (saved.notice === undefined || isMarkNotice(saved.notice))
   );
+}
+
+function isMarkNotice(value: unknown): value is MarkNotice {
+  if (typeof value !== 'object' || value === null) return false;
+  const notice = value as Record<string, unknown>;
+  return typeof notice.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(notice.id)
+    && (notice.kind === 'conflict' || notice.kind === 'blocked')
+    && typeof notice.bodyHash === 'string' && /^[0-9a-f]{64}$/.test(notice.bodyHash)
+    && typeof notice.posted === 'boolean';
 }
 
 async function readJsonFile(git: Git, commit: Oid | null, file: string): Promise<Record<string, unknown>> {

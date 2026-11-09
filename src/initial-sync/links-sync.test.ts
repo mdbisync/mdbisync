@@ -170,7 +170,7 @@ describe('links between synchronized documents in a confirmed initial sync', () 
     };
     const confirm = async () => {
       let result: ConfirmedResult | undefined;
-      const outcome = await runPreflight('initial-sync', inputs, { git: new Git(cwd), warn: () => undefined, fetch: fakeFetch(world) }, async (context) => {
+      const outcome = await runPreflight('initial-sync', inputs, { git: new Git(cwd), warn: () => undefined, log: () => undefined, fetch: fakeFetch(world) }, async (context) => {
         result = (await confirmInitialSync(context, { config: inputs.state, transforms: [leaveOutPlan, documentLinks()], stopAfterDocuments: undefined })).result;
       });
       assert.equal(outcome.ok, true);

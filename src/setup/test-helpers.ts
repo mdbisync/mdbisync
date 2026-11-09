@@ -180,6 +180,12 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
   }
   if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
+  if (operationName === 'GetDocuments') {
+    // Reads by id include archived and trashed documents, as Linear's do.
+    const wanted = new Set(variables.ids as string[]);
+    const nodes = world.linear.documents.filter((d) => wanted.has(d.id)).map((d) => documentNode(d, variables.withContent === true));
+    return json(200, { data: { documents: { nodes } } });
+  }
   return json(400, { errors: [{ message: `unknown operation ${operationName}`, extensions: { code: 'INPUT_ERROR' } }] });
 }
 
