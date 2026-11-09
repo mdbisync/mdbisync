@@ -123,6 +123,7 @@ export function linearPart(text: string): string {
 /** Runs the command line's `lint` or `fix` on a folder. */
 export function runFormatCommand(command: 'lint' | 'fix', dir: string): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(process.execPath, [engineEntry(), command, '.'], { cwd: dir, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  if (result.error !== undefined) throw new Error(`could not run ${command}: ${result.error.message}`);
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 

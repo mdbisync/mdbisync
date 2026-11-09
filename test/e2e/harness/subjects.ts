@@ -24,15 +24,16 @@ import { dirname, join, posix } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { listTree, readBlobs, readIds, readUploads, type Git } from '../../../src/state/index.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
-import { BANK_DIR, goldenMarkdownPath, readOptional } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, lfsSize, lostEdits, mapImageLinks, readSides, snapshotRefs, stripFrontMatter, titleOf, type Sides } from './checks.ts';
+import { BANK_DIR, goldenMarkdownPath, loadBank, readFixture, readOptional } from '../../probe/bank.ts';
+import { canaryScan, fetchRef, fileHash, lfsSize, lostEdits, mapImageLinks, readSides, sameAsFile, snapshotRefs, stripFrontMatter, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { owningFolder, type Folder } from './corpus.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
 import { isAppBot } from './workflows.ts';
-import { NotImplementedError, ProductError } from './results.ts';
-import { documentPaths } from './step-helpers.ts';
+import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
+import { documentPaths, projectFolders } from './step-helpers.ts';
+import { linearPart } from './offline.ts';
 import { UNSAFE_TITLES } from './fixtures.ts';
 
 // --- views of the world ---------------------------------------------------------------
@@ -146,8 +147,17 @@ async function target(env: Env): Promise<{ path: string; id: string | undefined;
   return { path, id, document };
 }
 
+/**
+ * A document's text in git's terms, to compare with a file body: when the
+ * document holds exactly the file's text (links mapped link by link, as I1
+ * compares), the file's body; otherwise its content with upload URLs mapped
+ * back to file paths.
+ */
 function documentBody(view: View, path: string, document: LinearDocument | undefined): string | null {
-  return document === undefined ? null : mapImageLinks(document.content ?? '', view.uploads, path);
+  if (document === undefined) return null;
+  const file = view.files.get(path);
+  if (file !== undefined && sameAsFile(file, document.content ?? '', path, view)) return stripFrontMatter(file);
+  return mapImageLinks(document.content ?? '', view.uploads, path);
 }
 
 function fileBody(view: View, path: string): string | null {
@@ -250,6 +260,15 @@ async function parents(git: Git, commit: string): Promise<string[]> {
   return (await git.text(['rev-list', '--parents', '-n', '1', commit])).trim().split(' ').slice(1);
 }
 
+/**
+ * A path as specs write it: a run's project folder becomes `project/`
+ * (specs name destinations by role, since each run has its own folders).
+ */
+export function symbolicPath(ctx: RunContext, path: string): string {
+  const folder = projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`));
+  return folder === undefined ? path : `project/${path.slice(folder.folder.length + 1)}`;
+}
+
 /** Brings commits into the person's clone; returns the ones it has afterwards. */
 async function present(git: Git, commits: readonly string[]): Promise<string[]> {
   const result: string[] = [];
@@ -265,6 +284,7 @@ async function present(git: Git, commits: readonly string[]): Promise<string[]> 
 /** Whether `ancestor` is an ancestor of `descendant`; a commit the server no longer has cannot be shown to be. */
 async function isAncestor(git: Git, ancestor: string, descendant: string | null): Promise<boolean> {
   if (descendant === null) return false;
+  if (ancestor === descendant) return (await present(git, [ancestor])).length === 1;
   if ((await present(git, [ancestor, descendant])).length < 2) return false;
   return (await git.run(['merge-base', '--is-ancestor', ancestor, descendant], { okCodes: [0, 1] })).code === 0;
 }
@@ -319,8 +339,11 @@ function manifestOf(ctx: RunContext) {
   return byTarget;
 }
 
+/** The slice's documents of a corpus group; an empty group would make its subject vacuous, so it is an error. */
 function groupPaths(ctx: RunContext, group: string): string[] {
-  return sorted([...manifestOf(ctx)].filter(([, entry]) => entry.group === group && entry.kind === 'markdown').map(([path]) => path));
+  const paths = sorted([...manifestOf(ctx)].filter(([, entry]) => entry.group === group && entry.kind === 'markdown').map(([path]) => path));
+  if (paths.length === 0) throw new Error(`the slice has no document of the corpus group ${group}`);
+  return paths;
 }
 
 /** Runs the normalizer (`fix`) on texts in a scratch folder: path → fixed text. */
@@ -392,7 +415,8 @@ const viewCache: WeakMap<RunContext, Promise<View>> = new WeakMap();
 async function currentView(ctx: RunContext): Promise<View> {
   let view = viewCache.get(ctx);
   if (view === undefined) {
-    view = takeView(ctx, false);
+    // Previews (L1-03, L1R-01) leave no ids ref: the view then has an empty ids map, and subjects that need ids fail on their own values.
+    view = takeView(ctx, false, { allowNoIds: true });
     viewCache.set(ctx, view);
   }
   return view;
@@ -582,19 +606,24 @@ export const SUBJECTS: Record<string, Compute> = {
   'fixtures.tableCells': async (env) => cellMap(await tableRows(env, 'git')),
   'documents.typographyBytes': async (env) => {
     const view = await env.view();
-    return new Map(groupPaths(env.ctx, 'typography').map((path) => [path, documentBody(view, path, view.documents.get(view.ids.get(path)?.id ?? ''))]));
+    return new Map(groupPaths(env.ctx, 'typography-scripts').map((path) => [path, documentBody(view, path, view.documents.get(view.ids.get(path)?.id ?? ''))]));
   },
   'golden.typographyBytes': async (env) => {
     const view = await env.view();
-    return linearForms(new Map(groupPaths(env.ctx, 'typography').map((path) => [path, fileBody(view, path) ?? ''])));
+    return linearForms(new Map(groupPaths(env.ctx, 'typography-scripts').map((path) => [path, fileBody(view, path) ?? ''])));
   },
   'golden.linearForm': async (env) => {
-    // The bank's recorded Linear form for each bank file of the slice.
+    // The form Linear keeps of every synchronized file: a bank fixture's recorded form while the
+    // file is the fixture's own text, else what the normalizer makes of it, without front matter.
     const view = await env.view();
-    const result = new Map<string, string | null>();
-    for (const path of view.files.keys()) {
-      if (!path.startsWith(`${BANK_HOME}/`) || /(^|\/)README\.md$/.test(path)) continue;
-      result.set(path, readOptional(join(REPO_ROOT, BANK_DIR, goldenMarkdownPath(path.slice(BANK_HOME.length + 1)))) ?? null);
+    const bank = loadBank(join(REPO_ROOT, BANK_DIR));
+    const fixtures = new Map(bank.fixtures.map((fixture) => [fixture.file, fixture]));
+    const fixed = linearForms(view.files);
+    const result = new Map<string, string>();
+    for (const [path, text] of view.files) {
+      const fixture = path.startsWith(`${BANK_HOME}/`) ? fixtures.get(path.slice(BANK_HOME.length + 1)) : undefined;
+      const recorded = fixture !== undefined && readFixture(bank, fixture) === text ? readOptional(join(bank.dir, goldenMarkdownPath(fixture.file))) : undefined;
+      result.set(path, recorded ?? linearPart(fixed.get(path) ?? text));
     }
     return result;
   },
@@ -763,12 +792,13 @@ export const SUBJECTS: Record<string, Compute> = {
     const files = await treeFiles(await person(env.ctx), tip, (path) => view.files.has(path));
     return new Map([...view.files.keys()].map((path) => [path, frontMatter(files.get(path)?.toString('utf8'))]));
   },
-  'tracked.documentPath': async (env) => (await target(env)).path,
-  'tracked.movedPath': async (env) => (await target(env)).path,
+  'tracked.documentPath': async (env) => symbolicPath(env.ctx, (await target(env)).path),
+  'tracked.movedPath': async (env) => symbolicPath(env.ctx, (await target(env)).path),
   'tracked.createdPath': async (env) => {
     const view = await env.view();
     const id = observed(env.ctx, 'linear.created') as string;
-    return [...view.ids].find(([, entry]) => entry.id === id)?.[0] ?? null;
+    const path = [...view.ids].find(([, entry]) => entry.id === id)?.[0];
+    return path === undefined ? null : symbolicPath(env.ctx, path);
   },
   'tracked.documentPathExists': async (env) => {
     const view = await env.view();
@@ -1221,7 +1251,8 @@ export const SUBJECTS: Record<string, Compute> = {
   'report.budgetWindows': async (env) => (await metrics(env)).budgetWindows,
   'report.generatedLinearEdits': async (env) => observed(env.ctx, 'report.generatedLinearEdits'),
   'report.generatedGitPushes': async (env) => observed(env.ctx, 'report.generatedGitPushes'),
-  'report.lostEditCount': async (env) => lostEdits(env.ctx, await env.view()).length,
+  // The most edits lost at any moment the harness looked: the end, or an hourly soak check.
+  'report.lostEditCount': async (env) => Math.max(lostEdits(env.ctx, await env.view()).length, Number(env.ctx.observations.get('soak.maxLostEdits') ?? 0)),
   'report.hourlyInvariantChecks': async (env) => observed(env.ctx, 'report.hourlyInvariantChecks'),
   'report.interleavingsCovered': async (env) => sorted(new Set((env.ctx.observations.get('report.interleavingsCovered') as string[] | undefined) ?? [])),
   'report.activeLinearTokens': async (env) => {
@@ -1239,7 +1270,7 @@ export const SUBJECTS: Record<string, Compute> = {
   'fixtures.bothCollisionPaths': async (env) => sorted([...manifestOf(env.ctx)].filter(([, entry]) => entry.rule === 'title-collision').map(([path]) => path)),
   'expected.initialPlan.paths': async (env) => sorted((await env.view()).files.keys()),
   'expected.reversePlan.paths': async (env) => sorted(new Set([...(await env.view()).files.keys(), ...linearTree(env.ctx, await env.view()).keys()])),
-  'expected.destinationPath': async (env) => observed(env.ctx, 'expected.destinationPath'),
+  'expected.destinationPath': async (env) => symbolicPath(env.ctx, observed(env.ctx, 'expected.destinationPath') as string),
   'setup.requiredChecks': async () => [...REQUIRED_SETUP_CHECKS],
   'fixture.rule': async (env) => observed(env.ctx, 'fixture.rule'),
   'beforeConflict.icon': async (env) => observed(env.ctx, 'beforeConflict.icon'),
@@ -1325,15 +1356,28 @@ async function checksOf(ctx: RunContext, sha: string): Promise<'passed' | 'faile
 }
 
 /** Whether a Linear access token still works. */
-export async function tokenActive(token: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
-  const response = await fetchImpl('https://api.linear.app/graphql', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({ query: '{ viewer { id } }' }),
-  });
-  if (response.status === 401 || response.status === 403) return false;
-  const body = (await response.json().catch(() => ({}))) as { data?: { viewer?: { id?: string } }; errors?: unknown[] };
-  return typeof body.data?.viewer?.id === 'string';
+/**
+ * Whether a Linear access token still works: true when Linear answers as
+ * the token's user, false only for an authentication refusal. Anything else
+ * (a rate limit, an outage, an unexpected answer) proves neither, and after
+ * three tries it is an environment problem, never a revoked token.
+ */
+export async function tokenActive(token: string, fetchImpl: typeof fetch = fetch, pauseMs = 2_000): Promise<boolean> {
+  let last = '';
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, pauseMs));
+    const response = await fetchImpl('https://api.linear.app/graphql', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ query: '{ viewer { id } }' }),
+    });
+    if (response.status === 401 || response.status === 403) return false;
+    const body = (await response.json().catch(() => ({}))) as { data?: { viewer?: { id?: string } }; errors?: Array<{ extensions?: { code?: string; type?: string } }> };
+    if (typeof body.data?.viewer?.id === 'string') return true;
+    if (body.errors?.some((error) => /AUTHENTICATION|authentication/.test(`${error.extensions?.code ?? ''} ${error.extensions?.type ?? ''}`))) return false;
+    last = `HTTP ${response.status}`;
+  }
+  throw new EnvBlockedError(`could not tell whether a Linear token is active (${last})`);
 }
 
 async function tokenRevoked(env: Env, outcome: string): Promise<boolean> {

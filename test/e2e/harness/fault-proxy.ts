@@ -61,6 +61,22 @@ export function operationOf(body: string): { operation: string; kind: ProxyReque
   }
 }
 
+/** A GraphQL answer with the given documents left out of every list, as Linear lists no document deleted for good. */
+export function withoutDocuments(payload: Buffer, ids: ReadonlySet<string>): Buffer {
+  let value: unknown;
+  try {
+    value = JSON.parse(payload.toString('utf8'));
+  } catch {
+    return payload;
+  }
+  const prune = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.filter((item) => !(item !== null && typeof item === 'object' && ids.has(String((item as { id?: unknown }).id)))).map(prune);
+    if (node !== null && typeof node === 'object') return Object.fromEntries(Object.entries(node).map(([key, item]) => [key, prune(item)]));
+    return node;
+  };
+  return Buffer.from(JSON.stringify(prune(value)));
+}
+
 /** Whether the request's text names a target id or title; the body itself is not kept. */
 function names(body: string, target: string): boolean {
   return body.includes(JSON.stringify(target).slice(1, -1));
@@ -117,7 +133,8 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
         );
         record(200, true);
         return;
-      } else if (fault.kind === 'document-gone' && names(text, fault.id)) {
+      } else if (fault.kind === 'document-gone' && names(text, fault.id) && (kind === 'mutation' || /\bdocument\s*\(\s*id\s*:/.test(text))) {
+        // A lookup or a write of that one document: Linear's "not found". Collections leave it out (below).
         response.writeHead(200, { 'content-type': 'application/json' }).end(
           JSON.stringify({ data: null, errors: [{ message: 'Entity not found: Document', extensions: { code: 'INVALID_INPUT', type: 'invalid input', userPresentableMessage: 'Could not find referenced Document.' } }] }),
         );
@@ -163,7 +180,9 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
         out['x-ratelimit-endpoint-requests-reset'] = String(Date.now() + 3_600_000);
       }
     }
-    const payload = Buffer.from(await upstreamResponse.arrayBuffer());
+    let payload: Buffer = Buffer.from(await upstreamResponse.arrayBuffer());
+    const gone = faults.flatMap((fault) => (fault.kind === 'document-gone' ? [fault.id] : []));
+    if (gone.length > 0 && isGraphql) payload = withoutDocuments(payload, new Set(gone));
     response.writeHead(upstreamResponse.status, out).end(payload);
     record(upstreamResponse.status, false);
   }

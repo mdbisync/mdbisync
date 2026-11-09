@@ -22,7 +22,7 @@ import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, stripFrontMatter 
 import { isCheckpoint } from './checkpoints.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
-import { REPO_ROOT, engineEntry, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
+import { REPO_ROOT, engineEntry, engineEnv, postEntry, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, linearPart, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -115,6 +115,8 @@ async function offlineFormat(ctx: RunContext, command: 'lint' | 'fix', args: Rec
   for (let pass = 0; pass < passes; pass += 1) {
     const result = runFormatCommand(command, dir);
     if (result.status === COMMANDS[command].notImplementedExitCode && result.stderr.includes('not implemented')) throw new NotImplementedError(command);
+    // 0: nothing to report; 1: findings or fixed files. Anything else (a crash, a signal, a usage error) is no result to compare.
+    if (result.status !== 0 && result.status !== 1) throw new ProductError(`${command} exited with ${String(result.status)} on the ${String(args.input)} input`);
     ctx.observations.set(`${command}.exitCode`, result.status);
     if (command === 'lint') {
       const findings = parseFindings(result.stdout);
@@ -200,6 +202,8 @@ async function installWorkflows(ctx: RunContext): Promise<void> {
 
 async function requireWorkflows(ctx: RunContext): Promise<void> {
   const world = live(ctx);
+  // A run's tree starts without `.github/`: the setup command writes the workflows, as a deployer runs it.
+  await installWorkflows(ctx);
   if (!(await world.rest.workflowExists(SYNC_WORKFLOW, ctx.names.trackedBranch))) {
     throw new NotImplementedError('init', `the sync workflow ${SYNC_WORKFLOW} is not in the tracked branch`);
   }
@@ -374,7 +378,14 @@ const RUN: Record<string, Executor> = {
     // The scan itself is a check (I5) and the subject scan.canaryMatches; this step marks where the scenario asks for it.
   },
   'run.cleanup': async (ctx) => {
-    // Cleanup runs after every scenario; here L5-20 reads which Linear tokens are still active.
+    // The action's post step, which runs after every job, killed ones too: it must revoke the run's Linear token (L5-20).
+    if (ctx.live !== null) {
+      const call = await engineCall(ctx, 'sync', {});
+      const result = spawnSync(process.execPath, [postEntry()], { cwd: call.cwd, env: engineEnv(call), encoding: 'utf8' });
+      if (result.error !== undefined) throw new Error(`could not run the post step: ${result.error.message}`);
+      if (/not implemented/.test(`${result.stdout}${result.stderr}`)) throw new NotImplementedError('post', 'the cleanup step');
+      ctx.observations.set('cleanup.exitCode', result.status);
+    }
     ctx.observations.set('tokens.seen', [...(ctx.proxy?.tokens() ?? [])]);
   },
   'run.workflow': (ctx, args) => workflowRun(ctx, args),
@@ -446,6 +457,7 @@ const RUN: Record<string, Executor> = {
     // each run by dispatch, as an external trigger would (a schedule never runs
     // on a run's branch); the report says so.
     const actions = ctx.scenario.mode === 'actions';
+    if (actions) await installWorkflows(ctx);
     const sync = actions ? () => workflowRun(ctx, { event: 'workflow_dispatch' }) : () => runCommand(ctx, 'sync', {});
     const driver = {
       ...loadDriver(ctx, sync),
@@ -474,7 +486,13 @@ const RUN: Record<string, Executor> = {
     // Tokens are visible to the harness only through its proxy (local runs).
     metrics.activeLinearTokens = actions ? null : ctx.proxy?.tokens().length ?? 0;
     metrics.trigger = actions ? 'dispatch' : 'local';
+    metrics.hourlyLostEditsMax = result.lostEdits;
     ctx.observations.set('metrics', metrics);
+    ctx.observations.set('soak.maxLostEdits', result.lostEdits);
+    // An hourly check that failed fails the soak, even when later runs repaired the state.
+    const failed = ((ctx.observations.get('soak.checks') as Array<{ I1: boolean; lost: number }> | undefined) ?? [])
+      .flatMap((check, hour) => (check.I1 && check.lost === 0 ? [] : [`hour ${hour + 1}: ${check.I1 ? '' : 'I1 failed, '}${check.lost} edits lost`]));
+    if (failed.length > 0) throw new ProductError(`hourly checks failed: ${failed.join('; ')}`);
   },
 };
 

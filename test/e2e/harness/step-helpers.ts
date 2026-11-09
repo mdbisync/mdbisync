@@ -142,7 +142,8 @@ export async function editorEdit(ctx: RunContext, editor: Editor, path: string, 
   const token = nextToken(ctx);
   const content = await change(document.content ?? '', token);
   await client.updateDocument(id, { content });
-  ctx.edits.push({ side: 'linear', path, token, ...(removal ? { removal } : {}) });
+  // Only an edit that wrote its token counts for I2 (a resolution or a removal writes none).
+  if (removal || content.includes(token)) ctx.edits.push({ side: 'linear', path, token, ...(removal ? { removal } : {}) });
   ctx.observations.set('edited.linearBody', content);
   return token;
 }

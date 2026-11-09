@@ -2,6 +2,7 @@
 // starting state, the steps, the checks, and cleanup in a `finally` step.
 // Workers run scenarios in parallel; the governor admits each one.
 
+import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LinearClient } from '../../../src/linear/index.ts';
@@ -243,6 +244,8 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
     const upload = await editor.uploadFile({ filename: 'diagram.png', contentType: 'image/png', bytes: new Uint8Array(TINY_PNG) });
     const document = await editor.createDocument({ projectId: project.id }, { title: `guides/diagram-${ctx.names.runId}`, content: `The flow at a glance.\n\n![diagram](${upload.assetUrl})\n` });
     live.seededDocuments.push(document.id);
+    // The bytes the pull request must hold, hashed here from what was uploaded.
+    ctx.observations.set('linear.assets', [{ name: 'diagram.png', sha256: createHash('sha256').update(TINY_PNG).digest('hex') }]);
   },
   // L1R-05: titles with characters a file name cannot hold as they are.
   async 'unsafe-titles'(_ctx, live) {

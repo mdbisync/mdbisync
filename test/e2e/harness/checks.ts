@@ -34,6 +34,33 @@ export function mapImageLinks(content: string, urlToPath: ReadonlyMap<string, st
   return result;
 }
 
+/**
+ * A file's text as Linear should hold it: each relative link to a file whose
+ * bytes were uploaded becomes that upload's URL, link by link, so two links
+ * to equal bytes at different paths each keep their own place.
+ */
+export function linkUploads(text: string, documentPath: string, hashes: ReadonlyMap<string, string>, uploadsByHash: ReadonlyMap<string, string>): string {
+  const base = posix.dirname(documentPath);
+  return text.replace(/(\]\(\s*)(<[^>]*>|[^)\s]+)/g, (whole, open: string, target: string) => {
+    const written = target.startsWith('<') ? target.slice(1, -1) : target;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(written) || written.startsWith('#')) return whole;
+    let path: string;
+    try {
+      path = posix.normalize(posix.join(base, decodeURI(written.split('#')[0] as string)));
+    } catch {
+      return whole;
+    }
+    const hash = hashes.get(path);
+    const url = hash === undefined ? undefined : uploadsByHash.get(hash);
+    return url === undefined ? whole : `${open}${url}`;
+  });
+}
+
+/** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
+export function sameAsFile(text: string, content: string, path: string, sides: Pick<Sides, 'hashes' | 'uploadsByHash'>): boolean {
+  return linkUploads(stripFrontMatter(text), path, sides.hashes, sides.uploadsByHash) === content;
+}
+
 export interface CanaryHit {
   source: string;
   canary: string;
@@ -189,7 +216,7 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
         differing.push(`${path} (no document)`);
         continue;
       }
-      if (stripFrontMatter(text) !== mapImageLinks(document.content ?? '', s.uploads, path)) differing.push(path);
+      if (!sameAsFile(text, document.content ?? '', path, s)) differing.push(path);
     }
     return differing.length === 0 ? ok('I1') : bad('I1', `${differing.length} files differ from their documents: ${differing.slice(0, 10).join(', ')}`);
   },

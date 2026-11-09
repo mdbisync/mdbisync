@@ -15,11 +15,13 @@ import { FIXTURE_PREPARATION } from './runner.ts';
 import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
-import { ProductError } from './results.ts';
+import { EnvBlockedError, ProductError } from './results.ts';
+import { linkUploads, sameAsFile } from './checks.ts';
+import { withoutDocuments } from './fault-proxy.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, runStep, STEP_ACTIONS } from './steps.ts';
-import { encodeTitlePath, refreshView, resolveSubject, subjectSource } from './subjects.ts';
+import { encodeTitlePath, refreshView, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
 import { maxOverlap, unzip, waitForRun } from './workflows.ts';
 
 const roots: string[] = [];
@@ -256,6 +258,30 @@ describe('load', () => {
     assert.equal(first.result.syncRuns, 288);
     assert.ok(first.result.edits.git > 100 && first.result.edits['editor-a'] > 100);
     assert.deepEqual((await run()).edited, first.edited);
+  });
+});
+
+describe('oracles', () => {
+  it('map links to uploads link by link, so equal bytes at two paths keep their own links', () => {
+    const hashes = new Map([['eng/media/a.png', 'h1'], ['eng/media/copy-of-a.png', 'h1'], ['eng/notes.pdf', 'h2']]);
+    const uploads = new Map([['h1', 'https://uploads.linear.app/x/one'], ['h2', 'https://uploads.linear.app/x/two']]);
+    const text = '![a](media/a.png) and ![b](<media/copy-of-a.png>) and [pdf](notes.pdf) and [web](https://example.com/a.png) and [anchor](#top)';
+    assert.equal(linkUploads(text, 'eng/plan.md', hashes, uploads), '![a](https://uploads.linear.app/x/one) and ![b](https://uploads.linear.app/x/one) and [pdf](https://uploads.linear.app/x/two) and [web](https://example.com/a.png) and [anchor](#top)');
+    assert.ok(sameAsFile('---\na: 1\n---\n![a](media/a.png)\n', '![a](https://uploads.linear.app/x/one)\n', 'eng/plan.md', { hashes, uploadsByHash: uploads }));
+  });
+
+  it('leave a document deleted for good out of every list the proxy passes on', () => {
+    const answer = Buffer.from(JSON.stringify({ data: { documents: { nodes: [{ id: 'gone', title: 'x' }, { id: 'kept', title: 'y' }], pageInfo: { hasNextPage: false } } } }));
+    assert.deepEqual(JSON.parse(withoutDocuments(answer, new Set(['gone'])).toString()), { data: { documents: { nodes: [{ id: 'kept', title: 'y' }], pageInfo: { hasNextPage: false } } } });
+    assert.equal(withoutDocuments(Buffer.from('not json'), new Set(['gone'])).toString(), 'not json');
+  });
+
+  it('tell a revoked token from a probe that proves nothing', async () => {
+    const answer = (status: number, body: unknown) => (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+    assert.equal(await tokenActive('t', answer(200, { data: { viewer: { id: 'u' } } }), 0), true);
+    assert.equal(await tokenActive('t', answer(401, {}), 0), false);
+    assert.equal(await tokenActive('t', answer(400, { errors: [{ extensions: { code: 'AUTHENTICATION_ERROR' } }] }), 0), false);
+    await assert.rejects(tokenActive('t', answer(503, {}), 0), EnvBlockedError);
   });
 });
 
