@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, afterEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY } from '../state/test-helpers.ts';
-import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, pushAtomic, stateRef, readIds, readReservedIds } from '../state/index.ts';
+import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { LinearClient, LinearStoppedError } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
@@ -491,6 +491,38 @@ describe('capture from Linear', () => {
     assert.equal(posted.posted, true);
     assert.deepEqual(await readReservedIds(context.git, resumed.state.ids), reserved);
     assert.equal(commentsOf('plan')![0], 'Existing note.');
+  });
+
+  it('counts the refs a capture published also when Linear stopped it while it marked the document', async () => {
+    const doc = world.linear.documents[0]!;
+    doc.content = `${MARKERS.git}\n\nFirst.\n\n${MARKERS.linear}\n\nSecond.\n\n${MARKERS.end}\n`;
+    const moved = movedRefs(context.git);
+    const wrote = new Map(context.linear.stats.writes);
+    // The mark is the first Linear write, after the push: Linear stops the client there.
+    world.linear.writes.rateLimitAt = world.linear.writes.count + 1;
+    const stopped = await run();
+    assert.equal(stopped.ok, false);
+    assert.equal(stopped.code, 'stopped');
+    assert.deepEqual(stopped.changed, ['docs/plan.md']);
+    assert.notEqual(doc.icon, 'Alert', 'the mark was refused');
+    assert.equal((movedRefs(context.git).get('linear') ?? 0) - (moved.get('linear') ?? 0), 1, 'the published capture is counted');
+    assert.deepEqual(context.linear.stats.writes, wrote, 'the refused mark is not counted');
+  });
+
+  it('counts the first marking of a blocked document and no write while it stays blocked', async () => {
+    const gate = {configured: true, check: async () => [{hook:'secret-check', line:5}]};
+    world.linear.documents[0]!.content = 'Rejected.\n';
+    const first = await capture(context, {config, state: context.fetched.state, security: gate});
+    assert.deepEqual(first.blocked.map(({id}) => id), ['plan']);
+    assert.equal(world.linear.documents[0]!.icon, 'Cross');
+    assert.deepEqual(Object.fromEntries(context.linear.stats.writes), {CommentOnDocument: 1, UpdateDocument: 1});
+    await refresh();
+    const moved = movedRefs(context.git);
+    const wrote = new Map(context.linear.stats.writes);
+    const again = await capture(context, {config, state: context.fetched.state, security: gate});
+    assert.deepEqual(again.blocked.map(({id}) => id), ['plan']);
+    assert.deepEqual(movedRefs(context.git), moved, 'no ref moves');
+    assert.deepEqual(context.linear.stats.writes, wrote, 'no Linear write');
   });
 
   it('retries a security comment after its post-push delivery fails', async () => {

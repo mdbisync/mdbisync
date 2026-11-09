@@ -12,6 +12,14 @@ export interface GitHubRepository {
   fetch?: typeof fetch;
   /** Bounds a sequence of requests, including reading their bodies. */
   signal?: AbortSignal;
+  /** Counts the pull request calls GitHub accepted, by kind (`opened`, `updated`, `merged`, `closed`); a refused or unanswered call is not counted. */
+  writes?: Map<string, number>;
+}
+
+/** A pull request call that writes, and the status with which GitHub accepts it. */
+export interface WriteCall {
+  kind: 'opened' | 'updated' | 'merged' | 'closed';
+  accepted: number;
 }
 
 export interface PullRequest {
@@ -59,7 +67,7 @@ export async function findOpenPullRequest(target: GitHubRepository, head: string
 
 /** Opens a pull request; the caller checks first that none is open. */
 export async function openPullRequest(target: GitHubRepository, spec: NewPullRequest): Promise<PullRequest> {
-  const answer = await request(target, 'POST', '/pulls', { title: spec.title, head: spec.head, base: spec.base, body: spec.body, maintainer_can_modify: false });
+  const answer = await request(target, 'POST', '/pulls', { title: spec.title, head: spec.head, base: spec.base, body: spec.body, maintainer_can_modify: false }, { kind: 'opened', accepted: 201 });
   const opened = answer.status === 201 ? toPullRequest(answer.json) : null;
   if (opened === null) throw new PullRequestError('opening a pull request', answer.status);
   return opened;
@@ -67,7 +75,7 @@ export async function openPullRequest(target: GitHubRepository, spec: NewPullReq
 
 /** Replaces a pull request's title and description. */
 export async function updatePullRequest(target: GitHubRepository, number: number, text: { title: string; body: string }): Promise<PullRequest> {
-  const answer = await request(target, 'PATCH', `/pulls/${number}`, { title: text.title, body: text.body });
+  const answer = await request(target, 'PATCH', `/pulls/${number}`, { title: text.title, body: text.body }, { kind: 'updated', accepted: 200 });
   const updated = answer.status === 200 ? toPullRequest(answer.json) : null;
   if (updated === null) throw new PullRequestError('updating a pull request', answer.status);
   return updated;
@@ -75,7 +83,7 @@ export async function updatePullRequest(target: GitHubRepository, number: number
 
 /** Closes a pull request without merging it. */
 export async function closePullRequest(target: GitHubRepository, number: number): Promise<void> {
-  const answer = await request(target, 'PATCH', `/pulls/${number}`, { state: 'closed' });
+  const answer = await request(target, 'PATCH', `/pulls/${number}`, { state: 'closed' }, { kind: 'closed', accepted: 200 });
   if (answer.status !== 200) throw new PullRequestError('closing a pull request', answer.status);
 }
 
@@ -110,7 +118,12 @@ function toPullRequest(value: unknown): PullRequest | null {
   };
 }
 
-export async function request(target: GitHubRepository, method: string, path: string, body?: Record<string, unknown>): Promise<{ status: number; json: unknown }> {
+/**
+ * Sends one request to the repository's API. For a call that writes, GitHub's
+ * accepting status is counted in `target.writes` as soon as it arrives, also
+ * when the answer's body then cannot be read.
+ */
+export async function request(target: GitHubRepository, method: string, path: string, body?: Record<string, unknown>, write?: WriteCall): Promise<{ status: number; json: unknown }> {
   const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}/repos/${target.repository}`;
   let status: number;
   let text: string;
@@ -127,6 +140,7 @@ export async function request(target: GitHubRepository, method: string, path: st
       signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(target.signal ? [target.signal] : [])]),
     });
     status = response.status;
+    if (write !== undefined && status === write.accepted) target.writes?.set(write.kind, (target.writes.get(write.kind) ?? 0) + 1);
     text = await response.text();
   } catch (error) {
     // No whole answer came (a reset connection, a timeout, also while the

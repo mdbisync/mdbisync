@@ -9,10 +9,21 @@ export class RequestStats {
   storagePuts = 0;
   /** Writes the run tried after the client stopped; each was refused without a request. */
   writesAfterStop = 0;
+  /**
+   * Writes Linear accepted, by operation: a mutation once its answer reports
+   * success, a file upload (`FileUpload`) once storage took its bytes. A
+   * refused, failed or unanswered write is not counted.
+   */
+  readonly writes = new Map<string, number>();
 
   count(operation: string): void {
     this.total += 1;
     this.byOperation.set(operation, (this.byOperation.get(operation) ?? 0) + 1);
+  }
+
+  /** Counts a write Linear accepted. */
+  wrote(operation: string): void {
+    this.writes.set(operation, (this.writes.get(operation) ?? 0) + 1);
   }
 
   toJSON(): { total: number; storagePuts: number; writesAfterStop: number; byOperation: Record<string, number> } {
