@@ -68,7 +68,7 @@ jobs:
       # it ends, and again in its post step after a failed or cancelled run.
       - name: Stage Linear's documents
         id: stage
-        uses: mikhail-yaskou/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2
+        uses: mdbisync/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2
         with:
           operation: initial-sync
           security-step: stage
@@ -90,7 +90,7 @@ jobs:
       # A document the hooks have not seen (it changed after they ran) keeps
       # the tracked branch's version and is listed as left out.
       - name: Initial sync
-        uses: mikhail-yaskou/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2
+        uses: mdbisync/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2
         with:
           operation: initial-sync
           security-step: apply

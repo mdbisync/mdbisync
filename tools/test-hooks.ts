@@ -49,7 +49,7 @@ try {
   const scratch = join(temporary, 'scratch');
   await init(scratch);
   const config = (id: string) => preCommitConfig(revision)
-    .replace('https://github.com/mikhail-yaskou/mdbisync', release)
+    .replace('https://github.com/mdbisync/mdbisync', release)
     .replace('id: linear-format', `id: ${id}`);
   const page = join(scratch, 'page with spaces.md');
   const fixable = '*one*\n';
