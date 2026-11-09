@@ -39,6 +39,8 @@ const cases: Array<[string, string, string]> = [
   ['an image leaves a paragraph with text', 'Before ![a](x.png) after.', 'Before\n\n![a](x.png)\n\nafter.'],
   ['a list item with only a file link becomes a file block', '* [Report](report.pdf)', '* \n  [Report](report.pdf)'],
   ['a task or numbered item with only a video link keeps the file block (the video form is recorded for bullets)', '- [ ] [Demo](demo.mp4)\n\n1. [Demo](demo.mp4)', '- [ ] \n  [Demo](demo.mp4)\n\n1. \n   [Demo](demo.mp4)'],
+  ['a bullet item with only an MP3 link keeps the link on its line, in angle brackets', '* \n  [Voice note](media/note.mp3)\n* [Call](<call one.MP3>)\n* [Memo](memo.mp3?v=2)', '* [Voice note](<media/note.mp3>)\n* [Call](<call%20one.MP3>)\n* [Memo](<memo.mp3?v=2>)'],
+  ['a task or numbered item with only an MP3 link keeps the file block (the MP3 form is recorded for bullets)', '- [ ] [Note](note.mp3)\n\n1. [Note](note.mp3)', '- [ ] \n  [Note](note.mp3)\n\n1. \n   [Note](note.mp3)'],
   ['a list item with only a video link becomes a video on its line', '* [Demo](media/demo.mp4)\n* [Clip](<clip one.MOV>)\n* [Loop](loop.webm)', '* [Demo](media/demo.mp4)\n* [Clip](clip%20one.MOV)\n* [Loop](loop.webm)'],
   ['tables get outer pipes and short separators', 'A | B\n--- | ---\n1 | 2', '| A | B |\n| -- | -- |\n| 1 | 2 |'],
   ['a hash header cell is escaped', '| # | Customer |\n| --- | --- |\n| 1 | Example |', '| \\# | Customer |\n| -- | -- |\n| 1 | Example |'],
@@ -68,8 +70,8 @@ describe('fix rules', () => {
 describe('links to files that are not there', () => {
   const missing = { linkedFileExists: (url: string) => !url.includes('missing') };
   it('a list item with only a link to a missing file stays a link, as Linear keeps it', () => {
-    const text = '* [Report](missing/report.pdf)\n* [Demo](missing/demo.mp4)\n* [Here](report.pdf)';
-    const expected = '* [Report](<missing/report.pdf>)\n* [Demo](<missing/demo.mp4>)\n* \n  [Here](report.pdf)';
+    const text = '* [Report](missing/report.pdf)\n* [Demo](missing/demo.mp4)\n* \n  [Note](missing/note.mp3)\n* [Here](report.pdf)';
+    const expected = '* [Report](<missing/report.pdf>)\n* [Demo](<missing/demo.mp4>)\n* [Note](<missing/note.mp3>)\n* \n  [Here](report.pdf)';
     assert.equal(fixText(text, missing), expected);
     assert.equal(fixText(expected, missing), expected, 'the result is a fixed point');
   });

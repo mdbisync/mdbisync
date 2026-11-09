@@ -45,6 +45,7 @@ import {
 } from './step-helpers.ts';
 import type { WorkflowRun } from './github.ts';
 import { environmentBlocker, jobSpans, maxOverlap, runLogs, runResult, SCHEDULE_BLOCKED, waitForRegistration, waitForRun } from './workflows.ts';
+import { CANARY_FIXTURE, canaryFacts } from './security-canary.ts';
 import { prerequisiteErrors, runWorkflows, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 
 export { documentId, documentPaths, resolveDestination, sibling, targetPath };
@@ -218,7 +219,8 @@ async function watchQuiet(ctx: RunContext, options: { throughProxy: boolean }, r
 /** Runs the sync until a run changes nothing more (at most `limit` runs). */
 async function settle(ctx: RunContext, limit = 4): Promise<void> {
   for (let attempt = 0; attempt < limit; attempt += 1) {
-    await runCommand(ctx, 'sync', {});
+    if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) await workflowRun(ctx, { event: 'workflow_dispatch' });
+    else await runCommand(ctx, 'sync', {});
     const last = ctx.engine.results.at(-1);
     if (last?.report?.['changed'] === false) return;
   }
@@ -250,6 +252,7 @@ async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'):
     syncBranch: ctx.names.syncBranch,
     refPrefix: ctx.names.refPrefix,
     group: `mdbisync-${ctx.names.runId}`,
+    securityCanary: ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE),
     ...(actionSha === '' ? {} : { actionSha }),
   }, wanted);
   if (files.size === 0) return;
@@ -344,6 +347,15 @@ async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: Com
   const world = live(ctx);
   const logs = await runLogs(world.rest, run);
   const result = await runResult(world.rest, run, command, logs);
+  if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) {
+    const facts = canaryFacts(result.securityCanary ?? '');
+    if (/Security hooks: staged sets checked [1-9][0-9]*,/.test(result.stdout) && facts.length === 0) ctx.observations.set('securityCanary.missing', true);
+    const previous = (ctx.observations.get('securityCanary.facts') as unknown[] | undefined) ?? [];
+    ctx.observations.set('securityCanary.facts', [...previous, ...facts]);
+    const dir = join(ctx.runDir, 'workflows', String(run.id));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'security-canary.json'), `${JSON.stringify(facts, null, 2)}\n`);
+  }
   const blocker = run.conclusion === 'failure' ? environmentBlocker(run, await world.rest.runJobs(run.id), logs, prerequisiteErrors()) : undefined;
   if (blocker === undefined) {
     settleResult(ctx, result);

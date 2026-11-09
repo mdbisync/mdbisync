@@ -109,11 +109,13 @@ Blocks:
 - A list item holding only a link to a relative file other than Markdown
   becomes the block Linear makes of the uploaded file. For a video
   (`.mp4`, `.mov`, `.webm`) the link stays on the marker's line, with no
-  angle brackets; for any other file the marker stands on its own line and
-  the link goes below it; a video in a task or numbered item keeps the
-  file block form. When the link does not name a file in the repository
-  (the file is missing, the path is a folder, starts with `/` or leads
-  outside the repository), the sync cannot upload it and Linear keeps a
+  angle brackets. An MP3 file (`.mp3`) Linear keeps as a plain link, so
+  the link stays on the marker's line in angle brackets:
+  `* [Name](<path>)`. For any other file the marker stands on its own
+  line and the link goes below it. A video or MP3 file in a task or
+  numbered item keeps the file block form. When the link does not name a
+  file in the repository (the file is missing, the path is a folder,
+  starts with `/` or leads outside the repository), the sync cannot upload it and Linear keeps a
   plain link, so `fix` writes `* [Name](<path>)`. `fix` resolves links from
   the folder it runs in, which for the hook is the repository's top
   folder.
