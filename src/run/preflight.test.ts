@@ -3,15 +3,19 @@
 // the writes counted on every side.
 
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { type LogEntry } from '../linear/index.ts';
 import { runCli } from '../cli.ts';
 import { NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { CHECK_NAMES } from '../setup/index.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { type RunReport } from './finish.ts';
+import { INPUT_NAMES, environmentName } from './inputs.ts';
 
 const CANARY = 'kx-5e7c0a11';
 const PRE_COMMIT = `repos:
@@ -101,6 +105,121 @@ describe('preflight', () => {
     world.linear.unavailable = true;
     await assert.rejects(runCli(['check'], { env: env(), cwd, fetch: fakeFetch(world) }), /oauth\.token: Linear refused the token request/);
     assert.deepEqual(world.writes, []);
+  });
+
+  it('emits safe complete lifecycle diagnostics from the setup caller', async () => {
+    const entries: LogEntry[] = [];
+    const log = (entry: LogEntry) => { entries.push(entry); };
+    const world = fakeWorld();
+    const request = fakeFetch(world);
+    let next = 0;
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const response = await request(input, init);
+      if (String(input).startsWith(LINEAR_API)) {
+        response.headers.set('x-request-id', `setup-request-${++next}`);
+        response.headers.set('x-ratelimit-requests-limit', '5000');
+        response.headers.set('x-ratelimit-requests-remaining', '4500');
+        response.headers.set('set-cookie', 'private-cookie-canary');
+      }
+      return response;
+    };
+    const result = await runCli(['check'], { env: env(), cwd, fetch, log });
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(entries.map(e => e.operation), ['oauth.token', 'SetupTeams', 'SetupProjects', 'oauth.revoke']);
+    for (const [index, entry] of entries.entries()) {
+      assert.equal(entry.status, 200);
+      assert.equal(entry.requestId, `setup-request-${index + 1}`);
+      assert.equal(entry.grantType, 'client_credentials');
+      assert.deepEqual(entry.requestedScopes, ['read', 'write']);
+      assert.deepEqual(entry.returnedScopes, ['read', 'write']);
+      assert.equal(new Date(entry.startedAt).toISOString(), entry.startedAt);
+      assert.equal(new Date(entry.finishedAt).toISOString(), entry.finishedAt);
+      assert.equal(entry.rateLimitHeaders['x-ratelimit-requests-remaining'], '4500');
+    }
+    assert.equal(entries.at(-1)?.revocationConfirmed, true);
+    for (const secret of ['client-id', 'client-secret', 'fake-token', 'gh-token', 'private-cookie-canary', CANARY, 'Field notes', 'Handbook', 'team-eng', 'project-api']) {
+      assert.ok(!JSON.stringify(entries).includes(secret), secret);
+    }
+    assert.deepEqual(world.writes, []);
+    assert.equal(world.revoked, 1);
+  });
+
+  it('emits the rejected mint even when setup returns a credential failure', async () => {
+    const entries: LogEntry[] = [];
+    const log = (entry: LogEntry) => { entries.push(entry); };
+    const world = fakeWorld();
+    world.linear.credentialsValid = false;
+    const result = await runCli(['check'], { env: env(), cwd, fetch: fakeFetch(world), log });
+    assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0]?.operation, 'oauth.token');
+    assert.equal(entries[0]?.status, 401);
+    assert.deepEqual(entries[0]?.errorCodes, ['invalid_client']);
+    assert.equal(world.minted, 0);
+    assert.equal(world.revoked, 0);
+  });
+
+  it('retains query and failed-revocation diagnostics when setup throws', async () => {
+    const entries: LogEntry[] = [];
+    const log = (entry: LogEntry) => { entries.push(entry); };
+    const world = fakeWorld();
+    const request = fakeFetch(world);
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url === `${LINEAR_API}/graphql`) return new Response(JSON.stringify({ errors: [{ message: 'Entity not found: User', extensions: { code: 'INPUT_ERROR' } }] }), { status: 400, headers: { 'x-request-id': 'setup-query-failed' } });
+      if (url === `${LINEAR_API}/oauth/revoke`) return new Response('{}', { status: 401, headers: { 'x-request-id': 'setup-revoke-failed' } });
+      return request(input, init);
+    };
+    const warnings: string[] = [];
+    await assert.rejects(runCli(['check'], { env: env(), cwd, fetch, log, warn: message => { warnings.push(message); } }), /Entity not found: User/);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0]!, /token could not be revoked/);
+    assert.deepEqual(entries.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTeams', 400], ['oauth.revoke', 401]]);
+    assert.equal(entries[1]?.requestId, 'setup-query-failed');
+    assert.deepEqual(entries[1]?.errorCodes, ['INPUT_ERROR']);
+    assert.equal(entries[2]?.requestId, 'setup-revoke-failed');
+    assert.equal(entries[2]?.revocationConfirmed, false);
+    assert.deepEqual(world.writes, []);
+  });
+
+  for (const [entry, action] of [['../cli.ts', false], ['../../dist/cli.js', false], ['../action/main.ts', true], ['../../dist/action-main.js', true]] as const) {
+    it(`the entry process retains diagnostics and cleanup warnings on failure (${entry})`, async () => {
+      const injection = join(fixture.root, 'setup-fake-fetch.mjs');
+      const helpers = new URL('../setup/test-helpers.ts', import.meta.url).href;
+      await writeFile(injection, `
+        import { fakeFetch, fakeWorld } from ${JSON.stringify(helpers)};
+        const original = fakeFetch(fakeWorld());
+        globalThis.fetch = async (input, init) => {
+          if (String(input).endsWith('/graphql')) return new Response(JSON.stringify({ errors: [{ message: 'Entity not found: User', extensions: { code: 'INPUT_ERROR' } }] }), { status: 400 });
+          if (String(input).endsWith('/oauth/revoke')) return new Response('{}', { status: 401 });
+          return original(input, init);
+        };
+      `);
+      const fakeEnv: Record<string, string> = env();
+      const actionEnv = Object.fromEntries(INPUT_NAMES.map(name => [`INPUT_${name.toUpperCase()}`, fakeEnv[environmentName(name)] ?? '']));
+      const child = spawnSync(process.execPath, ['--import', injection, fileURLToPath(new URL(entry, import.meta.url)), 'check'], {
+        cwd, env: action ? { ...fakeEnv, ...actionEnv, INPUT_OPERATION: 'initial-sync', INPUT_DIRECTION: 'git-to-linear', GITHUB_WORKSPACE: cwd, GITHUB_OUTPUT: '', GITHUB_STATE: '', GITHUB_STEP_SUMMARY: '' } : fakeEnv,
+        encoding: 'utf8', timeout: 15_000,
+      });
+      assert.equal(child.status, 1, child.stderr);
+      const stream = action ? child.stdout : child.stderr;
+      const lines = stream.trim().split('\n');
+      const events = lines.filter(line => line.startsWith('{')).map(line => JSON.parse(line) as LogEntry);
+      assert.deepEqual(events.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTeams', 400], ['oauth.revoke', 401]]);
+      const warning = lines.findIndex(line => line.startsWith(action ? '::warning' : 'warning:'));
+      const primary = lines.findIndex(line => line.startsWith(action ? '::error' : 'error:'));
+      assert.ok(warning >= 0 && primary > warning, child.stderr);
+      assert.match(lines[warning]!, /token could not be revoked/);
+      assert.match(lines[primary]!, /Entity not found: User/);
+      for (const secret of ['client-id', 'client-secret', 'fake-token', 'gh-token', CANARY]) assert.ok(!`${child.stdout}${child.stderr}`.includes(secret), secret);
+    });
+  }
+
+  it('the programmatic CLI does not write diagnostic events to the global console', async (t) => {
+    const consoleError = t.mock.method(console, 'error', () => {});
+    const { result } = await run('check', fakeWorld());
+    assert.equal(result.exitCode, 0);
+    assert.equal(consoleError.mock.callCount(), 0);
   });
 
   it('check passes with exit code 0', async () => {

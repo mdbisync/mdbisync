@@ -13,6 +13,7 @@ import {
   isCommandName,
   notImplementedMessage,
 } from "./commands.ts";
+import { type LogEntry } from "./linear/index.ts";
 import { runFix, runLint } from "./format/command.ts";
 import { writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
@@ -31,6 +32,9 @@ export interface CliOptions {
   /** The repository the command works in. */
   cwd?: string;
   fetch?: typeof fetch;
+  /** Optional immediate sinks for callers that need diagnostics even on rejection. */
+  log?: (entry: LogEntry) => void;
+  warn?: (message: string) => void;
 }
 
 export function usage(): string {
@@ -89,7 +93,11 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   const warnings: string[] = [];
   const outcome = await runOperation(command, inputs, initialSync, {
     git: new Git(options.cwd ?? process.cwd()),
-    warn: (message) => warnings.push(`warning: ${message}\n`),
+    warn: (message) => {
+      if (options.warn) options.warn(message);
+      else warnings.push(`warning: ${message}\n`);
+    },
+    log: options.log ?? (() => {}),
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
   if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
@@ -120,7 +128,10 @@ function notImplemented(command: CommandName): CliResult {
 
 async function main(): Promise<void> {
   try {
-    const result = await runCli(process.argv.slice(2));
+    const result = await runCli(process.argv.slice(2), {
+      log: (entry) => { process.stderr.write(`${JSON.stringify(entry)}\n`); },
+      warn: (message) => { process.stderr.write(`warning: ${message}\n`); },
+    });
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);
     process.exitCode = result.exitCode;

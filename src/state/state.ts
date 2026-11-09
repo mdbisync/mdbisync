@@ -187,6 +187,15 @@ function parsePorcelain(output: string): PorcelainLine[] {
 export const IDS_FILE = 'ids.json';
 export const UPLOADS_FILE = 'uploads.json';
 
+export interface MarkNotice {
+  /** The id of the single comment for this marked episode. */
+  id: string;
+  kind: 'conflict' | 'blocked';
+  /** Hash of the neutral notice text, not document content. */
+  bodyHash: string;
+  posted: boolean;
+}
+
 export interface IdEntry {
   /** The Linear document id. */
   id: string;
@@ -194,7 +203,7 @@ export interface IdEntry {
    * The document's own icon and color while the sync shows a mark in their
    * place; absent when no mark is shown.
    */
-  saved?: { icon: string | null; color: string | null };
+  saved?: { icon: string | null; color: string | null; notice?: MarkNotice };
 }
 
 /** Path → Linear document. */
@@ -312,8 +321,18 @@ function isIdEntry(value: unknown): value is IdEntry {
     typeof saved === 'object' &&
     saved !== null &&
     (saved.icon === null || typeof saved.icon === 'string') &&
-    (saved.color === null || typeof saved.color === 'string')
+    (saved.color === null || typeof saved.color === 'string') &&
+    (saved.notice === undefined || isMarkNotice(saved.notice))
   );
+}
+
+function isMarkNotice(value: unknown): value is MarkNotice {
+  if (typeof value !== 'object' || value === null) return false;
+  const notice = value as Record<string, unknown>;
+  return typeof notice.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(notice.id)
+    && (notice.kind === 'conflict' || notice.kind === 'blocked')
+    && typeof notice.bodyHash === 'string' && /^[0-9a-f]{64}$/.test(notice.bodyHash)
+    && typeof notice.posted === 'boolean';
 }
 
 async function readJsonFile(git: Git, commit: Oid | null, file: string): Promise<Record<string, unknown>> {
