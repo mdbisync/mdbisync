@@ -97,6 +97,24 @@ describe('lint and fix commands', () => {
     assert.deepEqual(runFix(['nowhere'], dir), { exitCode: 2, stdout: '', stderr: 'no such file or folder: nowhere\n' });
   });
 
+  it('lint and fix agree on a hash header without losing cell text', () => {
+    const path = join(dir, 'table.md');
+    const source = '| # | Customer |\n| -- | -- |\n| 1 | Example |';
+    const fixed = '| \\# | Customer |\n| -- | -- |\n| 1 | Example |';
+    try {
+      writeFileSync(path, source);
+      assert.deepEqual(runLint(['table.md'], dir), { exitCode: 1, stdout: "table.md: not in Linear's form; run fix\n", stderr: '' });
+      assert.equal(readFileSync(path, 'utf8'), source);
+      assert.deepEqual(runFix(['table.md'], dir), { exitCode: 1, stdout: 'table.md: fixed\n', stderr: '' });
+      assert.equal(readFileSync(path, 'utf8'), fixed);
+      assert.deepEqual(runLint(['table.md'], dir), { exitCode: 0, stdout: '', stderr: '' });
+      assert.deepEqual(runFix(['table.md'], dir), { exitCode: 0, stdout: '', stderr: '' });
+      assert.equal(readFileSync(path, 'utf8'), fixed);
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
   it('fix leaves files whose titles collide', () => {
     const folder = join(dir, 'titles');
     mkdirSync(folder);
