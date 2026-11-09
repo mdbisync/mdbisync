@@ -20,7 +20,7 @@ export interface RunReport {
   summary: PlanReport | null;
   /** A confirmed initial sync's writes, by path; null for other runs. */
   initialSync: ConfirmedReport | null;
-  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut'> | null;
+  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'stopped'> | null;
   /** Documents created or overwritten in Linear by this run. */
   writtenCount: number;
   /** Documents an unfinished earlier run had written, skipped by this one. */
@@ -61,11 +61,11 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     notImplemented: outcome.notImplemented,
     summary: outcome.plan ?? null,
     initialSync: confirmed === undefined ? null : toConfirmedReport(confirmed),
-    capture: outcome.captured === undefined ? null : {ok: outcome.captured.ok, changed: outcome.captured.changed, removed: outcome.captured.removed, blocked: outcome.captured.blocked, leftOut: outcome.captured.leftOut},
+    capture: outcome.captured === undefined ? null : {ok: outcome.captured.ok, changed: outcome.captured.changed, removed: outcome.captured.removed, blocked: outcome.captured.blocked, leftOut: outcome.captured.leftOut, ...(outcome.captured.stopped ? {stopped:outcome.captured.stopped} : {})},
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? 0,
     resumed: confirmed?.resumed ?? false,
-    stoppedEarly: confirmed?.stopped !== undefined,
+    stoppedEarly: confirmed?.stopped !== undefined || outcome.captured?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
     progressRecorded: confirmed?.progressRecorded ?? false,
     record:

@@ -45,6 +45,11 @@ export async function run(): Promise<void> {
       core.setFailed(`${operation}: not finished (${outcome.confirmed.code}); run it again with the same inputs`);
       return;
     }
+    if (outcome.captured?.stopped !== undefined) {
+      core.setOutput('code', outcome.captured.code);
+      core.warning(`${operation}: partial, will continue (${outcome.captured.code})`);
+      return;
+    }
     if (outcome.captured !== undefined && !outcome.captured.ok) {
       core.setFailed(`${operation}: capture did not finish (${outcome.captured.code})`);
       return;

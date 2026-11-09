@@ -3,7 +3,7 @@ import { beforeEach, afterEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY } from '../state/test-helpers.ts';
 import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, pushAtomic, stateRef, readIds, readReservedIds } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
-import { LinearClient } from '../linear/index.ts';
+import { LinearClient, LinearStoppedError } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { runCli } from '../cli.ts';
@@ -88,6 +88,71 @@ describe('capture from Linear', () => {
     assert.notEqual(second.state.linear, first.state.linear);
     assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nNext edit.\n');
     assert.deepEqual(context.fetched.state, initial);
+  });
+
+  it('reports a rate-limited CLI capture as a partial warning with its stop reason', async () => {
+    await fixture.seed({'.pre-commit-config.yaml':'repos:\n  - repo: https://github.com/example/mdbisync\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n'});
+    const reportFile = join(fixture.root, 'partial-report.json');
+    const request = fakeFetch(world);
+    const fetcher: typeof fetch = async (input, init) => {
+      if (String(input) === `${LINEAR_API}/graphql` && JSON.parse(String(init?.body)).operationName === 'ListDocuments') {
+        return new Response(JSON.stringify({errors:[{message:'Limited', extensions:{code:'RATELIMITED'}}]}), {status:429, headers:{'retry-after':'12'}});
+      }
+      return request(input, init);
+    };
+    const result = await runCli(['sync'], {cwd:context.git.dir, fetch:fetcher, env:{
+      MDBISYNC_LINEAR_CLIENT_ID:'client', MDBISYNC_LINEAR_CLIENT_SECRET:'secret', MDBISYNC_LINEAR_API_URL:LINEAR_API,
+      MDBISYNC_GITHUB_TOKEN:'token', MDBISYNC_GITHUB_API_URL:GITHUB_API, MDBISYNC_REPOSITORY:'example/repository', MDBISYNC_REPORT_FILE:reportFile,
+    }});
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.match(result.stderr, /warning: sync: partial, will continue/);
+    const report = JSON.parse(await readFile(reportFile, 'utf8'));
+    assert.equal(report.code, 'stopped');
+    assert.equal(report.stoppedEarly, true);
+    assert.equal(report.capture.stopped.kind, 'rate-limited');
+    assert.equal(report.capture.stopped.operation, 'ListDocuments');
+    assert.equal(report.capture.stopped.retryAfterSeconds, 12);
+    assert.deepEqual(world.writes, []);
+  });
+
+  it('returns a partial capture when document listing exhausts the budget', async () => {
+    const before = {...context.fetched.state};
+    const reason = {kind:'budget-low' as const, operation:'ListDocuments', header:'x-ratelimit-requests-remaining', remaining:10, threshold:100};
+    context.linear.listDocuments = async () => { throw new LinearStoppedError('ListDocuments', reason); };
+    const partial = await run();
+    assert.equal(partial.ok, false);
+    assert.equal(partial.code, 'stopped');
+    assert.deepEqual(partial.stopped, reason);
+    assert.deepEqual(partial.state, before);
+    assert.deepEqual(partial.changed, []);
+    assert.deepEqual(partial.removed, []);
+    assert.match(partial.summary, /partial.*will continue/i);
+    assert.deepEqual(world.writes, []);
+  });
+
+  it('returns durable progress when rate-limited after capture pushes a pending notice', async () => {
+    const before = {...context.fetched.state};
+    world.linear.documents[0]!.content = 'Rejected.\n';
+    world.linear.documents.push({id:'safe', title:'safe', projectId:'project-api', content:'Safe.\n', createdAt:'2026-01-02T00:00:00Z'});
+    world.linear.writes.rateLimitAt = 1;
+    const gate = {configured:true, check:async(files:ReadonlyMap<string, Buffer|string>)=>files.has('docs/plan.md')?[{hook:'secret-check', line:1}]:[]};
+    const partial = await capture(context, {config, state:context.fetched.state, security:gate});
+    assert.equal(partial.code, 'stopped');
+    assert.equal(partial.stopped?.kind, 'rate-limited');
+    assert.notEqual(partial.state.ids, before.ids);
+    assert.notEqual(partial.state.linear, before.linear);
+    assert.equal(await text('docs/safe.md'), 'Safe.\n');
+    const pending = (await readIds(context.git, partial.state.ids)).get('docs/plan.md')!.saved!.notice!;
+    assert.equal(pending.posted, false);
+    delete world.linear.writes.rateLimitAt;
+    context.linear = new LinearClient({token:'test', baseUrl:LINEAR_API, fetch:fakeFetch(world)});
+    await refresh();
+    const resumed = await capture(context, {config, state:context.fetched.state, security:gate});
+    assert.equal(resumed.ok, true);
+    const posted = (await readIds(context.git, resumed.state.ids)).get('docs/plan.md')!.saved!.notice!;
+    assert.equal(posted.id, pending.id);
+    assert.equal(posted.posted, true);
+    assert.equal(world.linear.documents[0]!.comments?.length, 1);
   });
 
   it('preserves reserved document ids through capture and subsequent runs', async () => {

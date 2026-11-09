@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { splitFile } from '../format/index.ts';
-import { type LinearDocument } from '../linear/index.ts';
+import { type LinearDocument, type StopReason, LinearStoppedError, describeStop } from '../linear/index.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -27,7 +27,9 @@ export interface CaptureOptions {
 
 export interface CaptureResult {
   ok: boolean;
-  code?: 'state-moved';
+  code?: 'state-moved' | 'stopped';
+  /** A resumable client budget stop; state is the last successful push. */
+  stopped?: StopReason;
   /** The state refs after capture, or the input snapshot if its push lost the lease. */
   state: StateSnapshot;
   /** Metadata for every observed document; selected changes also have content. Never serialize these. */
@@ -58,6 +60,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   const uploads = await readUploads(git, state.uploads);
   const reserved = await readReservedIds(git, state.ids);
   const gate = options.security ?? await securityGate(git, fetched.tracked);
+  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], leftOut:[], summary:''};
+  let published = false;
   try {
     const cursor = await readCursor(context, state);
     const entries = await listTree(git, base);
@@ -107,7 +111,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     for (const doc of await linear.getDocuments(selected.filter(live).map((doc) => doc.id), { withContent: true })) { documents.set(doc.id, doc); work.set(doc.id, doc); }
     // Keep metadata for out-of-scope documents; never infer deletion from a missing page.
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
-    const result: CaptureResult = { ok: true, state, documents, blocked: [], changed: [], removed: [], leftOut: [], summary: '' };
+    result.documents = documents;
     const changes = new Map<string, Buffer | string | null>();
     const occupied = new Set(entries.map((entry) => entry.path));
     // Only files already present in the branch are link targets until their
@@ -152,7 +156,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         resetTarget(doc.id);
         if (old !== undefined) documentIds.delete(old.path);
         documentIds.set(path, doc.id);
-      } catch {
+      } catch (error) {
+        if (error instanceof LinearStoppedError) throw error;
         result.leftOut.push({id: doc.id, rule: 'capture-translation'});
       }
     }
@@ -226,6 +231,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     if (!pushed.ok) { result.ok = false; result.code = 'state-moved'; }
     else {
       result.state = next;
+      published = true;
       const lostLease = new Error('state moved while recording document marks');
       const marked = [
         ...[...candidates.values()].map(({doc, path}) => ({doc, path, blocked: [] as SecurityFinding[]})),
@@ -249,10 +255,24 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
 
     }
-    result.summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
-    if (!gate.configured) result.summary += '\nContent is pushed unchecked: no security hooks are configured.';
+    result.summary = renderCapture(result, gate.configured);
+    return result;
+  } catch (error) {
+    if (!(error instanceof LinearStoppedError)) throw error;
+    result.ok = false;
+    result.code = 'stopped';
+    result.stopped = error.reason;
+    if (!published) { result.changed = []; result.removed = []; }
+    result.summary = renderCapture(result, gate.configured);
     return result;
   } finally { await gate.close?.(); }
+}
+
+function renderCapture(result: CaptureResult, configured: boolean): string {
+  let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
+  if (result.stopped !== undefined) summary += `\nCapture partial, will continue: ${describeStop(result.stopped)}.`;
+  if (!configured) summary += '\nContent is pushed unchecked: no security hooks are configured.';
+  return summary;
 }
 
 /** Apply only LFS, after the security gate. Other clean filters cannot change captured text. */
