@@ -29,7 +29,8 @@ export type FailureCode =
   | 'annotation-target-not-found'
   | 'annotation-target-ambiguous'
   | 'annotation-target-shared'
-  | 'initial-sync-required';
+  | 'initial-sync-required'
+  | 'initial-pull-request-pending';
 
 export interface CheckResult {
   name: CheckName;

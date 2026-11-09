@@ -14,7 +14,7 @@ import { fixText, splitFile } from '../../src/format/index.ts';
 import { documentUrlBase, findFileLinks, linksToLinear } from '../../src/initial-sync/index.ts';
 import { collectAnnotations } from '../../src/mapping/index.ts';
 import { type RunReport } from '../../src/run/finish.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../../src/setup/test-helpers.ts';
+import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../../src/setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../../src/state/test-helpers.ts';
 import { type Corpus, buildCorpus } from '../corpus/generate.ts';
 
@@ -166,6 +166,121 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
         assert.equal(second.result.exitCode, 0, second.result.stderr);
         assert.equal(world.linear.writes.count, writes, 'the second run wrote to Linear (I6)');
         assert.equal(await refs(), before, 'the second run moved a ref (I6)');
+      });
+    });
+  }
+});
+
+// The initial sync from Linear over the same slices: Linear first gets one
+// document per synchronized file (as the live scenarios seed it), then one
+// document is edited, one trashed and one added only in Linear, and the state
+// refs are dropped. The run must leave Linear as it is, record every id, and
+// open one pull request whose synchronized folders equal Linear.
+describe('confirmed initial sync from Linear over the generated corpus (offline)', () => {
+  let corpus: Corpus;
+  before(() => {
+    corpus = buildCorpus("a".repeat(40));
+  });
+
+  for (const slice of ['mini', 'mid'] as const) {
+    describe(slice, () => {
+      let fixture: Fixture;
+      let cwd: string;
+      let files: Map<string, Buffer>;
+      let world: FakeWorld;
+
+      before(async () => {
+        const byPath = new Map(corpus.files.map((file) => [file.path, file.content]));
+        files = new Map(corpus.slices[slice].map((path) => [path, byPath.get(path) as Buffer]));
+        files.set('.pre-commit-config.yaml', Buffer.from(LINEAR_FORMAT_HOOK));
+        fixture = await createFixture();
+        const attributes = files.get('.gitattributes')?.toString('utf8') ?? '';
+        const lfs = [...attributes.matchAll(/^(\S+)\s.*filter=lfs/gm)].map((match) => match[1] as string);
+        await fixture.seed(Object.fromEntries(files), lfs.length > 0 ? { lfs } : {});
+        cwd = (await fixture.clone('work')).dir;
+        world = worldFor(files);
+      });
+      after(() => fixture.cleanup());
+
+      const run = async (direction: string, confirm = 'true') => {
+        const reportFile = join(fixture.root, 'report.json');
+        await rm(reportFile, { force: true });
+        const requestsBefore = world.requests.length;
+        const result = await runCli(['initial-sync'], {
+          cwd,
+          fetch: fakeFetch(world),
+          env: {
+            PATH: process.env.PATH ?? '',
+            HOME: process.env.HOME ?? '',
+            MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
+            MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
+            MDBISYNC_LINEAR_API_URL: LINEAR_API,
+            MDBISYNC_GITHUB_TOKEN: 'gh-token',
+            MDBISYNC_GITHUB_API_URL: GITHUB_API,
+            MDBISYNC_REPOSITORY: 'owner/repo',
+            MDBISYNC_REPORT_FILE: reportFile,
+            MDBISYNC_DIRECTION: direction,
+            MDBISYNC_CONFIRM: confirm,
+          },
+        });
+        const report = JSON.parse(await readFile(reportFile, 'utf8')) as RunReport;
+        const graphql = world.requests.slice(requestsBefore).filter((request) => request === `POST ${LINEAR_API}/graphql`).length;
+        return { result, report, graphql };
+      };
+      const refs = () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
+      const show = async (spec: string) => (await fixture.remote.run(['show', spec])).stdout.toString('utf8');
+
+      it('opens one pull request that makes the synchronized folders equal to Linear', async () => {
+        // Seed Linear through the other direction, then change it as people would.
+        assert.equal((await run('git-to-linear')).result.exitCode, 0);
+        const seeded = JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, { id: string }>;
+        const pages = Object.keys(seeded).filter((path) => !path.endsWith('README.md')).sort();
+        const byPath = (path: string) => world.linear.documents.find((d) => d.id === seeded[path]?.id) as FakeDocument;
+        const edited = pages[0] as string;
+        const trashed = pages.at(-1) as string;
+        byPath(edited).content = 'Rewritten in Linear.\n';
+        byPath(trashed).trashed = true;
+        const home = byPath(edited);
+        const place = home.projectId !== undefined ? { projectId: home.projectId } : { teamId: home.teamId as string };
+        world.linear.documents.push({ id: 'doc-linear-only', title: 'from-linear/new-page', ...place, createdAt: '2026-03-01T00:00:00Z', content: 'Only in Linear.\n' });
+        for (const store of ['linear', 'ids', 'uploads']) await fixture.remote.run(['update-ref', '-d', `refs/mdbisync/${store}`]);
+        const documents = structuredClone(world.linear.documents);
+        const writes = world.linear.writes.count;
+
+        const dry = await run('linear-to-git', '');
+        assert.equal(dry.result.exitCode, 0, dry.result.stderr);
+        assert.deepEqual(dry.report.summary?.plan.remove, [trashed]);
+        assert.equal(dry.report.summary?.plan.create.length, 1);
+        assert.equal(world.linear.writes.count, writes, 'the dry run wrote to Linear');
+
+        const confirmed = await run('linear-to-git');
+        assert.equal(confirmed.result.exitCode, 0, `${confirmed.result.stderr}\n${confirmed.result.stdout.slice(0, 2000)}`);
+        assert.deepEqual(world.linear.documents, documents, 'Linear changed');
+        assert.equal(world.linear.writes.count, writes, 'the run wrote to Linear');
+        assert.equal(world.github.pullRequests.length, 1);
+        assert.equal(confirmed.report.linearToGit?.created.length, 1);
+        const canaries = corpus.manifest.files.filter((entry) => files.has(entry.path) && entry.canary !== null).map((entry) => entry.canary as string);
+        const output = `${confirmed.result.stdout}${confirmed.result.stderr}${world.github.pullRequests[0]?.body ?? ''}`;
+        assert.deepEqual(canaries.filter((canary) => output.includes(canary)), [], 'a canary left the run (I5)');
+
+        // The pull request's head: every live document is a file holding its text (I1, I7).
+        const ids = JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, { id: string }>;
+        const live = world.linear.documents.filter((d) => d.trashed !== true);
+        assert.equal(Object.keys(ids).length, live.length, `a live document has no id (I7): ${JSON.stringify(confirmed.report.linearToGit?.leftOutAtRecord)}`);
+        for (const [path, entry] of Object.entries(ids)) {
+          const document = live.find((d) => d.id === entry.id);
+          assert.ok(document !== undefined, `${path} has no live document`);
+          assert.equal(splitFile(await show(`refs/heads/mdbisync/linear:${path}`)).body, document.content, `${path} differs from Linear (I1)`);
+        }
+        const tree = (await fixture.remote.text(['ls-tree', '-r', '--name-only', 'refs/heads/mdbisync/linear'])).split('\n');
+        assert.ok(!tree.includes(trashed), 'a file without a document stayed');
+        process.stdout.write(`# ${slice} from Linear: ${Object.keys(ids).length} documents, ${confirmed.graphql} GraphQL requests\n`);
+
+        const before = await refs();
+        const again = await run('linear-to-git');
+        assert.equal(again.result.exitCode, 0, again.result.stderr);
+        assert.equal(await refs(), before, 'a second run moved a ref (I6)');
+        assert.equal(world.github.pullRequests.length, 1, 'a second pull request was opened (I6)');
       });
     });
   }
