@@ -8,9 +8,11 @@ import { join, posix } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import type { Definition, Image, Link, Nodes } from 'mdast';
 import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
+import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../../../src/initial-sync/uploads.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
+import type { EngineResult } from './engine.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
 import { refreshView, resolveSubject } from './subjects.ts';
@@ -291,6 +293,68 @@ export interface Sides {
   folders: Folder[];
   /** The URL prefix of the workspace's documents, for links between synchronized documents. */
   documentUrlBase: string;
+  /**
+   * Synchronized files the scenario's own runs left out on purpose, with the
+   * rule their reports gave: path → `lint: <rules>` or `write: <rule>`.
+   */
+  omitted: Map<string, string>;
+}
+
+/** Rules of files left out because of files they link; such an entry names those files. */
+const RULES_WITH_FILES = new Set([UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE]);
+
+/** Report lists of paths a run wrote, tried to write or held back: any of them ends a write-time omission. */
+const DECIDED_PATHS = ['created', 'overwritten', 'unchanged', 'updated', 'adopted', 'restored', 'notAttempted'];
+/** Report lists of entries with a path that do the same: failed and skipped writes. */
+const DECIDED_ENTRIES = ['failed', 'skipped'];
+
+/**
+ * The files the runs left out on purpose, from their own reports, in run
+ * order: the latest decision about a path wins. A run that wrote a path, or
+ * tried to (created, overwrote, updated, relocated, adopted, restored, found
+ * it unchanged, failed, skipped or did not reach it), takes it back in. A
+ * run that lists every left-out file of its tree (a sync's `sync.leftOut`, a
+ * confirmed initial sync's plan) replaces the lint-time omissions; a
+ * write-time omission (`leftOutAtWrite`) stays until a run decides
+ * otherwise about the path. An entry counts only with its rule and, for a
+ * rule found from linked files, those files: anything else is unexplained.
+ */
+export function deliberateOmissions(results: readonly Pick<EngineResult, 'report'>[]): Map<string, string> {
+  const lint = new Map<string, string>();
+  const write = new Map<string, string>();
+  const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+  const record = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : null);
+  /** An entry's rules, or none when a rule found from linked files does not name them. */
+  const explained = (entry: Record<string, unknown> | null, rules: unknown[]): string[] => {
+    const named = rules.filter((rule): rule is string => typeof rule === 'string' && rule !== '');
+    return named.some((rule) => RULES_WITH_FILES.has(rule)) && list(entry?.['files']).length === 0 ? [] : named;
+  };
+  for (const { report } of results) {
+    const initial = record(report?.['initialSync']);
+    const sync = record(report?.['sync']);
+    if (initial === null && sync === null) continue;
+    const full = sync !== null ? list(sync['leftOut']) : list(record(report?.['summary'])?.['leftOutFiles']);
+    lint.clear();
+    for (const entry of full.map(record)) {
+      const rules = explained(entry, list(entry?.['rules']));
+      if (typeof entry?.['path'] === 'string' && rules.length > 0) lint.set(entry['path'], `lint: ${rules.join(', ')}`);
+    }
+    for (const side of [initial, sync]) {
+      if (side === null) continue;
+      const decided = [
+        ...DECIDED_PATHS.flatMap((key) => list(side[key])),
+        ...DECIDED_ENTRIES.flatMap((key) => list(side[key]).map((entry) => record(entry)?.['path'])),
+        ...list(side['relocated']).map((entry) => record(entry)?.['to']),
+      ];
+      for (const path of decided) if (typeof path === 'string') write.delete(path);
+      for (const entry of list(side['leftOutAtWrite']).map(record)) {
+        const path = entry?.['path'];
+        const rules = explained(entry, [entry?.['rule']]);
+        if (typeof path === 'string' && rules.length > 0) write.set(path, `write: ${rules.join(', ')}`);
+      }
+    }
+  }
+  return new Map([...lint, ...write]);
 }
 
 /** A file's SHA-256: an LFS pointer's object id, else the hash of the bytes. */
@@ -378,7 +442,8 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
     for (const document of read) if (document !== null) documents.set(document.id, document);
   }
   const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
-  return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders, documentUrlBase: world.documentUrlBase };
+  const omitted = deliberateOmissions(ctx.engine.results);
+  return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders, documentUrlBase: world.documentUrlBase, omitted };
 }
 
 // --- invariants ---------------------------------------------------------------
@@ -393,6 +458,8 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     const s = await sides();
     const differing: string[] = [];
     for (const [path, text] of s.files) {
+      // A file its run left out on purpose has no document to match; its earlier document, if any, stays as it was.
+      if (s.omitted.has(path)) continue;
       const entry = s.ids.get(path);
       const document = entry === undefined ? undefined : s.documents.get(entry.id);
       if (document === undefined || document.trashed) {
@@ -486,7 +553,8 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     for (const path of s.files.keys()) {
       const entry = s.ids.get(path);
       if (entry === undefined) {
-        problems.push(`${path} has no id`);
+        // Left out on purpose, it needs no id; a mapped one is still checked below.
+        if (!s.omitted.has(path)) problems.push(`${path} has no id`);
         continue;
       }
       const document = s.documents.get(entry.id);
