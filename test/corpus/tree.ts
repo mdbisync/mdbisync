@@ -6,6 +6,7 @@
 // lookalikes, unusual typography) lives under eng/edge-cases/, so a reader
 // can open the tidy part first.
 
+import { validateSha } from "../../src/release/package.ts";
 import { COMPANY, PROFILE_PATHS, PROFILES } from "./company.ts";
 import { gitattributes, idLine, markdownFile, relativeLink, type Canaries, type CorpusFile } from "./model.ts";
 import type { Rng } from "./rng.ts";
@@ -127,7 +128,7 @@ function rootReadme(links: string[]): string {
 }
 
 /** The annotated README.md files and the corpus root files. */
-export function treeFiles(_rng: Rng, canaries: Canaries): CorpusFile[] {
+export function treeFiles(_rng: Rng, canaries: Canaries, hookRevision: string): CorpusFile[] {
   const rootLinks: string[] = [];
   const root = annotated("README.md", [], rootReadme(rootLinks), canaries.take());
   const files: CorpusFile[] = [
@@ -141,21 +142,22 @@ export function treeFiles(_rng: Rng, canaries: Canaries): CorpusFile[] {
   }
   files.push(
     markdownFile({ path: ".gitattributes", content: Buffer.from(gitattributes()), group: "support", kind: "other", synced: false }),
-    markdownFile({ path: ".pre-commit-config.yaml", content: Buffer.from(preCommitConfig()), group: "support", kind: "other", synced: false }),
+    markdownFile({ path: ".pre-commit-config.yaml", content: Buffer.from(preCommitConfig(hookRevision)), group: "support", kind: "other", synced: false }),
   );
   return files;
 }
 
 /**
  * The corpus's pre-commit configuration: the Linear-format hook, whose
- * release the harness fills in, and a test security hook that rejects a
+ * release commit the caller supplies, and a test security hook that rejects a
  * fake secret pattern and needs no toolchain.
  */
-export function preCommitConfig(): string {
+export function preCommitConfig(hookRevision: string): string {
+  validateSha(hookRevision);
   return [
     "repos:",
     "  - repo: https://github.com/mikhail-yaskou/mdbisync",
-    "    rev: HOOK_REV_PLACEHOLDER",
+    `    rev: ${hookRevision}`,
     "    hooks:",
     "      - id: linear-format",
     "  - repo: local",

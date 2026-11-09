@@ -2,5 +2,13 @@
   name: Format Markdown for Linear
   entry: mdbisync fix
   language: node
-  language_version: 24.15.0
+  language_version: system
   types: [markdown]
+  require_serial: true
+- id: linear-format-check
+  name: Check Markdown for Linear
+  entry: mdbisync lint
+  language: node
+  language_version: system
+  types: [markdown]
+  require_serial: true
