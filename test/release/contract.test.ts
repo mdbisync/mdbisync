@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -57,5 +57,33 @@ test('real bundles run from the isolated release tree and install as an offline 
     await assert.rejects(readFile(join(output, 'node_modules/package.json')), /ENOENT/);
   } finally {
     await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+// The command-line bundle of a release cut before `fix` and `lint` were built:
+// help and version work, the hook commands only report that they are stubs.
+const STUB_CLI = `#!/usr/bin/env node
+const [command] = process.argv.slice(2);
+if (command === '--help') { console.log('Usage: mdbisync <command> [paths...]'); }
+else if (command === '--version') { console.log('0.1.0-rc.1'); }
+else { console.error(command + ': not implemented'); process.exitCode = command === 'fix' ? 13 : 12; }
+`;
+
+test('the release smoke refuses a release whose hook commands are stubs', { timeout: 30_000 }, async () => {
+  const release = await mkdtemp(join(tmpdir(), 'release-stub-'));
+  try {
+    await mkdir(join(release, 'dist'));
+    await copyFile(join(root, '.pre-commit-hooks.yaml'), join(release, '.pre-commit-hooks.yaml'));
+    await writeFile(join(release, 'action.yml'), 'runs:\n  using: node24\n  main: dist/action-main.js\n  post: dist/action-post.js\n  post-if: always()\n');
+    await writeFile(join(release, 'dist/action-main.js'), 'console.error("unknown operation: smoke"); process.exitCode = 1;\n');
+    await writeFile(join(release, 'dist/action-post.js'), '');
+    await writeFile(join(release, 'dist/cli.js'), STUB_CLI, { mode: 0o755 });
+    await writeFile(join(release, 'package.json'), JSON.stringify({
+      name: 'mdbisync', version: '0.1.0-rc.1', private: true, type: 'module', engines: { node: '>=24.2' }, bin: { mdbisync: 'dist/cli.js' },
+    }));
+    await writeFile(join(release, 'release.json'), JSON.stringify({ version: 'v0.1.0-rc.1' }));
+    await assert.rejects(smokeRelease(release), /mdbisync (?:fix|lint) is a stub/);
+  } finally {
+    await rm(release, { recursive: true, force: true });
   }
 });
