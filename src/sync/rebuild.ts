@@ -4,7 +4,9 @@
 // as in initial sync; a trashed or archived document is matched only when
 // no live one has the title, so capture records its removal instead of the
 // write step creating it again. Files the sync leaves out (lint findings, a
-// title Linear refuses) stay git-only and are not matched. A file with no
+// title Linear refuses) stay git-only and are not matched. A file capture
+// named (an encoded title, a collision suffix) is matched by the path capture
+// gives that document, as the write step checks it. A file with no
 // such document stays unmapped; a document with no file is captured as new.
 // What the map alone held is lost: renames made in Linear since the last
 // run (the document comes back under its new title as a new file), the ids
@@ -17,6 +19,7 @@ import { type MappedDocument } from '../mapping/index.ts';
 import { placeId } from '../initial-sync/plan.ts';
 import { type ResolvedTargets } from '../setup/index.ts';
 import { type IdMap } from '../state/index.ts';
+import { documentPath } from './paths.ts';
 
 export interface RebuildInput {
   linear: LinearClient;
@@ -31,6 +34,8 @@ export async function rebuildIds({ linear, facts, targets, documents }: RebuildI
     `${'projectId' in place ? `project:${place.projectId}` : `team:${place.teamId}`}\0${title.normalize('NFC')}`;
   const files = new Map<string, string>();
   const places = new Map<string, DocumentPlace>();
+  /** Files by place, for the paths capture gives: folder and path. */
+  const byPlace = new Map<string, Array<{ folder: string; path: string }>>();
   for (const document of documents) {
     if (lintText(document.path, document.text).length > 0 || lengthRefusal({ title: document.title }, facts) !== undefined) continue;
     let place: DocumentPlace;
@@ -41,17 +46,34 @@ export async function rebuildIds({ linear, facts, targets, documents }: RebuildI
     }
     places.set(JSON.stringify(place), place);
     files.set(keyOf(place, document.title), document.path);
+    const folder = document.path.slice(0, -(document.title.length + '.md'.length)).replace(/\/$/, '');
+    byPlace.set(JSON.stringify(place), [...(byPlace.get(JSON.stringify(place)) ?? []), { folder, path: document.path }]);
   }
+  const allPaths = new Set(documents.map((document) => document.path));
 
   const ids: IdMap = new Map();
   const listed = await linear.listDocumentsInPlaces([...places.values()], { includeArchived: true });
   const gone = (document: (typeof listed)[number]) => document.trashed || document.archivedAt !== null;
   const order = listed.sort((a, b) => Number(gone(a)) - Number(gone(b)) || compare(a.createdAt, b.createdAt) || compare(a.id, b.id));
+  const unmatched: Array<{ document: (typeof listed)[number]; place: DocumentPlace }> = [];
   for (const document of order) {
     if (document.projectId === null && document.teamId === null) continue;
     const place: DocumentPlace = document.projectId !== null ? { projectId: document.projectId } : { teamId: document.teamId as string };
     const path = files.get(keyOf(place, document.title));
     if (path !== undefined && !ids.has(path)) ids.set(path, { id: document.id });
+    else unmatched.push({ document, place });
+  }
+  // Only what plain titles left over: a document and a file of its place whose path is the one capture gives it.
+  const leftFiles = new Map([...byPlace].map(([place, list]) => [place, list.filter(({ path }) => !ids.has(path))]));
+  const taken = new Set([...ids.values()].map((entry) => entry.id));
+  for (const { document, place } of unmatched) {
+    const candidates = leftFiles.get(JSON.stringify(place)) ?? [];
+    if (taken.has(document.id) || candidates.length === 0) continue;
+    const index = candidates.findIndex(({ folder, path }) => documentPath(folder, document.title, document.id, new Set([...allPaths].filter((other) => other !== path)), path) === path);
+    if (index < 0) continue;
+    ids.set((candidates[index] as { path: string }).path, { id: document.id });
+    taken.add(document.id);
+    candidates.splice(index, 1);
   }
   return ids;
 }

@@ -285,6 +285,24 @@ describe('sync: lost state and deleted branches', () => {
     await assertQuiet();
   });
 
+  it('L5-13: a file capture named from an encoded title gets its document back, with no second file', async () => {
+    world.linear.documents.push({ id: 'doc-why', title: 'Why now?', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# Why\n\nBecause. ${CANARY}\n` });
+    await settle();
+    const before = await ids();
+    const path = Object.keys(before).find((key) => before[key]?.id === 'doc-why');
+    assert.ok(path !== undefined && path !== 'combined/Why now?.md', `captured under an encoded name: ${path}`);
+    const tracked = await rev('refs/heads/main');
+    await fixture.remote.run(['update-ref', '-d', STATE('ids')]);
+
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(await ids(), before);
+    assert.deepEqual(run.writes, []);
+    await settle();
+    assert.equal(await rev('refs/heads/main'), tracked, 'no second file');
+    await assertConverged();
+  });
+
   it('L5-13: a document trashed in Linear while the ids ref was lost is removed, not created again', async () => {
     const before = await ids();
     const documents = world.linear.documents.length;
