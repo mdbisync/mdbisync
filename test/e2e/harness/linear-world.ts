@@ -100,7 +100,7 @@ export class LinearWorld {
    * Team-zone documents (no project) of a team whose title starts with a run
    * id. With `trashed`, trashed ones are listed too. Cleanup asks for them for
    * its own run only; the sweeper does not, so it never touches trash that runs
-   * left before the archive cleanup (freeing that is the owner's decision).
+   * left before the archive cleanup (freeing that is left to a workspace admin).
    */
   async runTeamDocuments(teamId: string, options: { trashed?: boolean } = {}): Promise<Array<LinearDocument & { runId: string }>> {
     const documents = await this.client.listDocuments({ teamId }, { includeArchived: options.trashed === true });

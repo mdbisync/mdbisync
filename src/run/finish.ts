@@ -7,7 +7,7 @@ import { dirname } from 'node:path';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
-import { type ExitStatus, exitStatusOf, pullRequestEnding } from './exit.ts';
+import { type ExitStatus, exitStatusOf, partialCode, pullRequestEnding } from './exit.ts';
 import { cell } from './summary.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
@@ -42,7 +42,7 @@ export interface RunReport {
   sync: SyncReport | null;
   /** A sync run's step 2, the sync pull request; null for other runs and when capture stopped before it. */
   pullRequest: PullRequestResult | null;
-  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'writeBackWarnings' | 'stopped' | 'rebuiltIds'> | null;
+  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'heldRemovals' | 'blocked' | 'leftOut' | 'writeBackWarnings' | 'stopped' | 'rebuiltIds'> | null;
   /** Documents created or overwritten in Linear by this run. */
   writtenCount: number;
   /** Documents an unfinished earlier run had written, skipped by this one. */
@@ -231,7 +231,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     capacity: write.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? pullRequestEnding(outcome)?.code ?? write.code ?? null,
+    code: outcome.code ?? pullRequestEnding(outcome)?.code ?? write.code ?? partialCode(outcome) ?? null,
     exitStatus: exitStatusOf(outcome),
     stop: write.stopped ?? null,
     complete: outcome.sync!.complete,
@@ -340,5 +340,5 @@ export async function writeRunReport(path: string, outcome: OperationOutcome): P
 }
 
 function captureReport(captured: CaptureResult | undefined): RunReport['capture'] {
-  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, blocked:captured.blocked, leftOut:captured.leftOut, writeBackWarnings:captured.writeBackWarnings, ...(captured.stopped ? {stopped:captured.stopped} : {}), ...(captured.rebuiltIds ? {rebuiltIds:captured.rebuiltIds} : {})};
+  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, heldRemovals:captured.heldRemovals, blocked:captured.blocked, leftOut:captured.leftOut, writeBackWarnings:captured.writeBackWarnings, ...(captured.stopped ? {stopped:captured.stopped} : {}), ...(captured.rebuiltIds ? {rebuiltIds:captured.rebuiltIds} : {})};
 }

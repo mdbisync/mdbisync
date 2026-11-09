@@ -27,7 +27,7 @@ export function workflowFor(command: CommandName): string {
 }
 
 /** The action's repository in the templates' `uses:`. */
-export const ACTION_REPOSITORY = 'mikhail-yaskou/mdbisync';
+export const ACTION_REPOSITORY = 'mdbisync/mdbisync';
 
 /** The templates' secret and variable names, and the sandbox's. */
 export const SANDBOX_NAMES: Readonly<Record<string, string>> = {
