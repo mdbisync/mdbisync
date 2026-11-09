@@ -510,6 +510,40 @@ function linearTree(ctx: RunContext, view: View): Map<string, string> {
   return result;
 }
 
+/**
+ * The annotation READMEs of the tracked tree that no Linear document maps
+ * to (`documents`: `linearTree`'s paths), with their whole text, body or
+ * none. The initial sync from Linear keeps them as they are: a folder's
+ * mapping depends on its annotation. They are not actions of its plan, and
+ * its pull request still holds them.
+ */
+function keptAnnotationReadmes(view: View, documents: ReadonlyMap<string, string> = new Map()): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const folder of view.folders) {
+    const path = folder.folder === '' ? 'README.md' : `${folder.folder}/README.md`;
+    const text = view.files.get(path);
+    if (text !== undefined && !documents.has(path)) result.set(path, text);
+  }
+  return result;
+}
+
+/** Linear's documents as files and the annotation READMEs the initial sync from Linear keeps beside them. */
+function reverseSides(ctx: RunContext, view: View): { documents: Map<string, string>; kept: Map<string, string> } {
+  const documents = linearTree(ctx, view);
+  return { documents, kept: keptAnnotationReadmes(view, documents) };
+}
+
+/**
+ * What the initial sync from Linear makes of the synchronized folders, by
+ * body: Linear's documents as files, and the annotation READMEs it keeps
+ * (the subject `expected.linearTree`).
+ */
+function reverseTree(ctx: RunContext, view: View): Map<string, string> {
+  const { documents, kept } = reverseSides(ctx, view);
+  for (const [path, text] of kept) documents.set(path, bodyOf(text));
+  return documents;
+}
+
 // --- the registry ----------------------------------------------------------------------------
 
 type Compute = (env: Env) => Promise<unknown>;
@@ -1101,15 +1135,25 @@ export const SUBJECTS: Record<string, Compute> = {
     const files = await treeFiles(head.git, head.commit, (path) => path.endsWith('.md') && owningFolder(path, view.folders) !== null);
     return new Map([...files].map(([path, bytes]) => [path, bodyOf(bytes.toString('utf8'))]));
   },
-  'expected.linearTree': async (env) => linearTree(env.ctx, await env.view()),
+  'expected.linearTree': async (env) => reverseTree(env.ctx, await env.view()),
   'pullRequests.gitOnlyPaths': async (env) => {
     const head = await syncPullRequestHead(env.ctx);
     if (head === null) return null;
     const view = await env.view();
-    const expected = linearTree(env.ctx, view);
+    const expected = reverseTree(env.ctx, view);
     const files = await treeFiles(head.git, head.commit, (path) => path.endsWith('.md') && owningFolder(path, view.folders) !== null);
     return sorted([...files.keys()].filter((path) => !expected.has(path)));
   },
+  // The kept annotation READMEs as the pull request holds them, whole: annotation, other front matter and body.
+  'pullRequests.keptAnnotationReadmes': async (env) => {
+    const head = await syncPullRequestHead(env.ctx);
+    if (head === null) return null;
+    const view = await env.view();
+    const kept = new Set(reverseSides(env.ctx, view).kept.keys());
+    const files = await treeFiles(head.git, head.commit, (path) => kept.has(path));
+    return new Map([...kept].map((path) => [path, files.get(path)?.toString('utf8') ?? null]));
+  },
+  'expected.keptAnnotationReadmes': async (env) => reverseSides(env.ctx, await env.view()).kept,
   'files.duplicateCount': async (env) => {
     const head = await syncPullRequestHead(env.ctx);
     if (head === null) return null;
@@ -1369,7 +1413,12 @@ export const SUBJECTS: Record<string, Compute> = {
   'corpus.lintErrors': async (env) => env.ctx.live === null ? observed(env.ctx, 'corpus.lintErrors') : sorted([...manifestOf(env.ctx)].filter(([, entry]) => entry.class === 'lint-error').map(([path]) => path)),
   'fixtures.bothCollisionPaths': async (env) => sorted([...manifestOf(env.ctx)].filter(([, entry]) => entry.rule === 'title-collision').map(([path]) => path)),
   'expected.initialPlan.paths': async (env) => sorted((await env.view()).files.keys()),
-  'expected.reversePlan.paths': async (env) => sorted(new Set([...(await env.view()).files.keys(), ...linearTree(env.ctx, await env.view()).keys()])),
+  // Every path the dry run acts on (overwrite, create, remove); the annotation READMEs it keeps are not actions.
+  'expected.reversePlan.paths': async (env) => {
+    const view = await env.view();
+    const { documents, kept } = reverseSides(env.ctx, view);
+    return sorted(new Set([...view.files.keys(), ...documents.keys()].filter((path) => !kept.has(path))));
+  },
   'expected.destinationPath': async (env) => symbolicPath(env.ctx, observed(env.ctx, 'expected.destinationPath') as string),
   'setup.requiredChecks': async () => [...REQUIRED_SETUP_CHECKS],
   'fixture.rule': async (env) => observed(env.ctx, 'fixture.rule'),
