@@ -48,7 +48,8 @@
     "checks": null,
     "merged": null,
     "paths": [],
-    "marked": []
+    "marked": [],
+    "decided": []
   },
   "capture": {
     "ok": true,

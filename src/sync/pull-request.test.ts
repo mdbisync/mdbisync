@@ -630,6 +630,54 @@ describe('sync: the sync pull request', () => {
     for (const text of [BRANCH_EDIT, LATER_EDIT.tracked, LATER_EDIT.linear]) assert.ok(tracked.includes(text), `the edit "${text}" was lost (I2)`);
     assert.equal((await documentOf(PLAN)).content, tracked.slice(tracked.indexOf('# ')));
     assert.ok(await isAncestorOn(commit, 'refs/heads/main'));
+    assert.ok(tracked.split(MARKERS.git).length <= 2, 'markers are nested or repeated');
+  });
+
+  it('MDS-011-2C: a front matter edit pending on the sync branch survives a merge with a conflicting tracked edit', async () => {
+    await pendingBranchEdit('open');
+    await editRef(SYNC_BRANCH, PLAN, planText(BRANCH_EDIT).replace('owner: example', 'owner: reviewer'));
+    await editRef('refs/heads/main', PLAN, planText(LATER_EDIT.tracked));
+    const run = await sync();
+    assert.deepEqual(run.report.pullRequest?.marked, [PLAN]);
+    await settle();
+    const tracked = await show(`refs/heads/main:${PLAN}`);
+    assert.match(tracked, /^---\nowner: reviewer\n---\n/, 'the pending front matter edit was lost');
+    assertOneConflict(tracked, LATER_EDIT.tracked, BRANCH_EDIT);
+  });
+
+  it('MDS-011-2C: a Linear title change and rewrite against a pending sync-branch edit stays one document', async () => {
+    await pendingBranchEdit('open');
+    const document = await documentOf(PLAN);
+    const live = () => world.linear.documents.filter((candidate) => candidate.trashed !== true).length;
+    const before = live();
+    document.title = 'Roadmap';
+    document.content = `# Roadmap\n\nEverything here was rewritten in Linear, line by line, so git sees no rename at all. ${CANARY}\n`;
+    touch(document);
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    await settle();
+    assert.equal(live(), before, 'a document was duplicated');
+    const mapped = Object.entries(await ids()).filter(([, entry]) => entry.id === document.id).map(([path]) => path);
+    assert.equal(mapped.length, 1, `the document is mapped at ${mapped.join(', ')}`);
+    const tracked = await show(`refs/heads/main:${mapped[0]}`);
+    for (const text of [BRANCH_EDIT, 'Everything here was rewritten in Linear']) assert.ok(tracked.includes(text), `the edit "${text}" was lost (I2)`);
+    assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/heads/main:${PLAN}`], { okCodes: [0, 128] })).code === 0 && mapped[0] !== PLAN, false, 'the old path stayed as a second file');
+  });
+
+  it('MDS-011-2C: a pending delete on the sync branch against a later Linear edit is decided and reported, the edit kept', async () => {
+    await pendingBranchEdit('open');
+    const base = await rev(SYNC_BRANCH);
+    const deleted = await commitFile(base, PLAN, null);
+    await fixture.remote.run(['update-ref', SYNC_BRANCH, deleted, base]);
+    syncValues.push(deleted);
+    await editInLinear(PLAN, `# Plan\n\n${LATER_EDIT.linear} ${CANARY}\n`);
+    const run = await sync();
+    assert.equal(run.report.pullRequest?.code, undefined, JSON.stringify(run.report.pullRequest));
+    assert.deepEqual(run.report.pullRequest?.decided, [PLAN]);
+    assert.match(run.summary, /decided them by its structural conflict rules/);
+    await settle();
+    assert.match(await show(`refs/heads/main:${PLAN}`), /Edited again in Linear\./);
+    assert.ok(await isAncestorOn(deleted, 'refs/heads/main'), 'the pending delete commit was lost from history');
   });
 
   it('MDS-011-2C: a person resolves the markers on the sync branch; the resolution is kept and reaches Linear', async () => {
@@ -923,11 +971,13 @@ describe('sync: the sync pull request', () => {
   });
 
   /** A commit on `base` with one file replaced, made on the bare remote; a merge when `other` is a second parent. */
-  async function commitFile(base: string, path: string, blob: string, other?: string): Promise<string> {
+  async function commitFile(base: string, path: string, blob: string | null, other?: string): Promise<string> {
     const index = join(fixture.root, 'scratch.index');
     const env = { GIT_INDEX_FILE: index, GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' };
     await fixture.remote.run(['read-tree', base], { env });
-    await fixture.remote.run(['update-index', '--add', '--cacheinfo', `100644,${blob},${path}`], { env });
+    // The bare remote has no work tree: a zero mode removes the entry.
+    if (blob === null) await fixture.remote.run(['update-index', '--index-info'], { env, input: `0 ${'0'.repeat(40)}\t${path}\n` });
+    else await fixture.remote.run(['update-index', '--add', '--cacheinfo', `100644,${blob},${path}`], { env });
     const tree = await fixture.remote.text(['write-tree'], { env });
     return fixture.remote.text(['commit-tree', tree, '-p', base, ...(other === undefined ? [] : ['-p', other]), '-m', 'Edit'], { env });
   }

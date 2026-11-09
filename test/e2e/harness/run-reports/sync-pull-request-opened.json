@@ -54,7 +54,8 @@
     "paths": [
       "docs/handbook/faq/equipment.md"
     ],
-    "marked": []
+    "marked": [],
+    "decided": []
   },
   "capture": {
     "ok": true,

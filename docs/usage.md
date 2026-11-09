@@ -286,7 +286,11 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   (the sync branch's edit is the git version against Linear, the Linear
   version against the tracked branch). The pull request carries the markers
   to the tracked branch and from there to Linear, like any other conflict,
-  and the run summary names the documents. Resolve it by editing the text on
+  and the run summary names the documents. Front matter changes from both
+  sides are kept unless they change the same lines, where the git version's
+  wins. A pending delete or rename that meets an edit follows the usual
+  structural conflict rules (an edited document is kept), and the summary
+  names it too. Resolve a conflict by editing the text on
   either side, or on the sync branch before the merge; a merge of your own
   on the sync branch is kept as it is. Only a conflicting file that is not a
   synchronized document, which cannot hold markers, still waits for you to

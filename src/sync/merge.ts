@@ -8,7 +8,7 @@ import { lintText, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
-import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, isAncestor, listTree, readBlobs } from '../state/index.ts';
+import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
 
 /** A synchronized file of one side: its path, blob, Linear title and place. */
 export interface SideFile {
@@ -208,6 +208,35 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     unchanged: unchanged.sort((a, b) => compare(a.to, b.to)),
     held,
     texts: blobs,
+  };
+}
+
+/** Versions of the id map searched for the id of a document Linear removed or renamed. */
+export const ID_HISTORY_DEPTH = 100;
+
+/**
+ * The id a path's document last had: in `ids`, the map at `idsCommit`, or
+ * in an earlier version of that map (a document Linear removed, or renamed
+ * since). Earlier versions are read once each, newest first, when needed.
+ */
+export function knownIdLookup(git: Git, idsCommit: Oid | null, ids: IdMap): (path: string) => Promise<string | undefined> {
+  let history: Oid[] | undefined;
+  const versions = new Map<Oid, IdMap>();
+  return async (path) => {
+    const current = ids.get(path);
+    if (current !== undefined) return current.id;
+    history ??= idsCommit === null ? [] : (await git.text(['rev-list', '--first-parent', '-n', String(ID_HISTORY_DEPTH), idsCommit])).split('\n').filter(Boolean);
+    // Newest first, one version at a time: the first match is the answer.
+    for (const commit of history) {
+      let map = versions.get(commit);
+      if (map === undefined) {
+        map = await readIds(git, commit);
+        versions.set(commit, map);
+      }
+      const entry = map.get(path);
+      if (entry !== undefined) return entry.id;
+    }
+    return undefined;
   };
 }
 
