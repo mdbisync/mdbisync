@@ -2,7 +2,7 @@
 // `corpus/` (the tree) and `corpus-slices/` (the slice lists and the
 // manifest) under an output folder.
 //
-//   node test/corpus/generate.ts [--out <dir>] [--seed <text>] [--bank <dir>] [--replace]
+//   node test/corpus/generate.ts --hook-rev <release-sha> [--out <dir>] [--seed <text>] [--bank <dir>] [--replace]
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -37,6 +37,7 @@ export type ManifestEntry = {
   bank_group: string | null;
   links: string[];
   note: string | null;
+  role: string | null;
 };
 
 export type Manifest = {
@@ -51,12 +52,12 @@ export type Corpus = {
   slices: Record<Slice, string[]>;
 };
 
-export function buildCorpus(seed: string = DEFAULT_SEED, bankDir: string = DEFAULT_BANK): Corpus {
+export function buildCorpus(hookRevision: string, seed: string = DEFAULT_SEED, bankDir: string = DEFAULT_BANK): Corpus {
   const rng = new Rng(seed);
   const canaryRng = rng.fork("canaries");
   const canaries = new Canaries(() => canaryRng.hex(8));
   const bank = copyBank(bankDir, canaries);
-  const tree = treeFiles(rng.fork("tree"), canaries);
+  const tree = treeFiles(rng.fork("tree"), canaries, hookRevision);
   const assets = makeAssets(rng.fork("assets"));
   const taken = new Set<string>([...bank.files, ...tree, ...assets.files].map((f) => f.path));
   const docs = documents(rng.fork("documents"), canaries, assets, taken, bank.files);
@@ -89,6 +90,7 @@ export function buildCorpus(seed: string = DEFAULT_SEED, bankDir: string = DEFAU
       bank_group: f.bankGroup,
       links: [...f.links].sort(),
       note: f.note,
+      role: f.role ?? null,
     })),
     excluded: bank.excluded,
   };
@@ -120,13 +122,15 @@ export function writeCorpus(corpus: Corpus, outDir: string, replace: boolean): v
 function main(): void {
   const { values } = parseArgs({
     options: {
+      "hook-rev": { type: "string" },
       out: { type: "string", default: DEFAULT_OUT },
       seed: { type: "string", default: DEFAULT_SEED },
       bank: { type: "string", default: DEFAULT_BANK },
       replace: { type: "boolean", default: false },
     },
   });
-  const corpus = buildCorpus(values.seed, values.bank);
+  if (values["hook-rev"] === undefined) throw new Error("--hook-rev is required: pin a bundled release commit, not a source commit");
+  const corpus = buildCorpus(values["hook-rev"], values.seed, values.bank);
   writeCorpus(corpus, resolve(values.out), values.replace);
   const lfsBytes = corpus.manifest.files.filter((f) => f.lfs).reduce((sum, f) => sum + f.bytes, 0);
   console.log(`corpus: ${corpus.files.length} files, ${(lfsBytes / 1024 / 1024).toFixed(1)} MiB in LFS, written to ${resolve(values.out)}`);

@@ -23,6 +23,8 @@ export interface ManifestFile {
   synced: boolean;
   lfs: boolean;
   canary: string | null;
+  /** Where the canary is: in the content, or in the file name (files that hold no text). */
+  canary_in?: "content" | "name" | null;
   class: 'fixable' | 'lint-error' | 'unchanged' | null;
   rule: string | null;
   basis?: 'known' | 'assumed' | null;

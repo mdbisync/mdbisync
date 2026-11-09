@@ -85,7 +85,20 @@ export class LinearNetworkError extends LinearError {
 }
 
 /** Minting or revoking an OAuth token failed. */
-export class LinearTokenError extends LinearError {}
+export class LinearTokenError extends LinearError {
+  /** Linear's HTTP status; undefined when the request did not complete. */
+  readonly httpStatus: number | undefined;
+
+  constructor(operation: string, message: string, options?: ErrorOptions & { httpStatus?: number }) {
+    super(operation, message, options);
+    this.httpStatus = options?.httpStatus;
+  }
+
+  /** Linear answered and refused the client credentials, as opposed to an outage or a lost request. */
+  get credentialsRefused(): boolean {
+    return this.operation === 'oauth.token' && (this.httpStatus === 400 || this.httpStatus === 401);
+  }
+}
 
 /**
  * A title or content is longer than Linear accepts. Raised before any request

@@ -485,6 +485,8 @@ async function fakeRun(options: { review?: string } = {}) {
     uiSteps: 0,
     sequence: 0,
     log: () => {},
+    phase: () => {},
+    signal: new AbortController().signal,
     async person() {
       person ??= await sandbox.clone(names, join(root, 'run', 'person'));
       return person;

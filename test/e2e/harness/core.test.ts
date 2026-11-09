@@ -207,6 +207,28 @@ describe('budget governor', () => {
     (await other.admit(byId('L2-01'), 'ddddd2', { requests: 1_500, complexity: 1 })).release();
   });
 
+  it('admits a scenario held back only by reservations as soon as they end, not at the window\'s reset', async () => {
+    let now = 0;
+    const slept: number[] = [];
+    const stateDir = freshStateDir();
+    const app = fakeApp('one', [full({ requestsRemaining: 2_200, resetAt: 3_600_000 })]);
+    let first: Awaited<ReturnType<Governor['admit']>> | undefined;
+    const governor = new Governor({
+      apps: [app],
+      stateDir,
+      now: () => now,
+      sleep: async (ms) => {
+        slept.push(ms);
+        now += ms;
+        first?.release();
+        await new Promise((resolve) => setTimeout(resolve, 30)); // the ledger entry goes a moment after release
+      },
+    });
+    first = await governor.admit(byId('L2-01'), 'eeeee1', { requests: 1_500, complexity: 1 });
+    (await governor.admit(byId('L2-01'), 'eeeee2', { requests: 1_500, complexity: 1 })).release();
+    assert.ok(slept.length > 0 && slept.every((ms) => ms < 60_000), `slept ${slept.join(', ')} ms`);
+  });
+
   it('caps workers per app and spreads them over every app', async () => {
     const stateDir = freshStateDir();
     const apps = [fakeApp('one', [full()]), fakeApp('two', [full()])];

@@ -39,7 +39,8 @@ function bankInput(filter: (fixture: { class: string; construct: string }, text:
 }
 
 function corpusInput(): OfflineInput {
-  const corpus = buildCorpus();
+  // The hook revision only fills the corpus's .pre-commit-config.yaml, which the format scenarios do not read.
+  const corpus = buildCorpus('0'.repeat(40));
   const bank = loadBank(join(REPO_ROOT, BANK_DIR));
   // A bank fixture's recorded form holds for its corpus copy only while the copy is the same text
   // (copying rewrites links that lead out of the bank, and the form recorded for the old link no longer applies).
