@@ -5,7 +5,7 @@
 
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
-import { pullRequestFailure } from "../sync/index.ts";
+import { PARTIAL, partialCode, pullRequestEnding, stoppedMessage } from "../run/exit.ts";
 import { unfinishedMessage, writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { runOperation } from "../run/operation.ts";
@@ -36,7 +36,24 @@ export async function run(): Promise<void> {
     if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(outcome.summary).write();
     else core.info(outcome.summary);
     if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
-    core.setOutput("code", outcome.code ?? "");
+    const failure = pullRequestEnding(outcome);
+    if (failure !== null) {
+      core.setOutput("code", failure.code);
+      core.setFailed(`${operation}: ${failure.message}`);
+      return;
+    }
+    const partial = partialCode(outcome);
+    core.setOutput("code", partial ?? outcome.code ?? (outcome.stopped === undefined ? "" : "stopped"));
+    // A partial sync kept what it could record; the next run goes on, so the job ends with a warning, not a failure.
+    if (partial !== undefined) {
+      core.warning(`${operation}: ${PARTIAL} (${partial})`);
+      return;
+    }
+    const stopped = stoppedMessage(outcome);
+    if (stopped !== undefined) {
+      core.setFailed(stopped);
+      return;
+    }
     if (!outcome.ok) {
       core.setFailed(`${operation}: stopped before any write (${outcome.code})`);
       return;
@@ -50,28 +67,6 @@ export async function run(): Promise<void> {
     if (unfinished !== undefined && !unfinished.complete) {
       core.setOutput("code", unfinished.code ?? "");
       core.setFailed(unfinishedMessage(operation, unfinished.code));
-      return;
-    }
-    if (outcome.captured?.stopped !== undefined) {
-      core.setOutput('code', outcome.captured.code);
-      core.warning(`${operation}: partial, will continue (${outcome.captured.code})`);
-      return;
-    }
-    if (outcome.captured !== undefined && !outcome.captured.ok) {
-      core.setFailed(`${operation}: capture did not finish (${outcome.captured.code})`);
-      return;
-    }
-    const failure = pullRequestFailure(outcome.sync?.pullRequest);
-    if (failure !== null) {
-      core.setOutput("code", failure.code);
-      core.setFailed(`${operation}: ${failure.message}`);
-      return;
-    }
-    // A sync that skipped documents succeeded (the next run takes them in); a stop, a refused push or a failed write did not.
-    const write = outcome.sync?.write;
-    if (write?.code !== undefined) {
-      core.setOutput("code", write.code);
-      core.setFailed(`${operation}: not finished (${write.code}); the next run goes on`);
       return;
     }
     if (outcome.notImplemented) core.setFailed(notImplementedMessage(operation));

@@ -13,6 +13,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
+import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { editBlock, editParagraph, noteSentence, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { EnvBlockedError } from './results.ts';
@@ -249,7 +250,7 @@ function changeFrontMatter(text: string, token: string): string {
 }
 
 function frontMatterOf(text: string): string | null {
-  return /^---\n[\s\S]*?\n---\n/.exec(text)?.[0] ?? null;
+  return findFrontMatter(text)?.yaml ?? null;
 }
 
 function insertAfterFirstParagraph(text: string, line: string): string {
