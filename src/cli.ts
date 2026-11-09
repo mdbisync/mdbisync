@@ -141,6 +141,9 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.main) {
+if (Number(process.versions.node.split(".")[0]) < 24) {
+  process.stderr.write("mdbisync requires Node 24 or newer; install it before running the hook.\n");
+  process.exitCode = USAGE_EXIT_CODE;
+} else if (import.meta.main) {
   await main();
 }
