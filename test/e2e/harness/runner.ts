@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { LinearClient } from '../../../src/linear/index.ts';
+import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts';
 import { Git, readIds } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs, stripFrontMatter, titleOf } from './checks.ts';
@@ -131,16 +131,6 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   const world = new LinearWorld(editors['editor-a']);
   ctx.phase('linear teams');
   const teams = new Map((await world.teams()).map((team) => [team.key, team]));
-  // Trashed documents per team zone the run uses: they count against the zone's cap and cannot be purged.
-  const trash: Record<string, { before: number; after?: number }> = {};
-  for (const key of tree.teamZones.keys()) {
-    const team = teams.get(key);
-    if (team === undefined) continue;
-    const before = await world.trashedInZone(team.id);
-    trash[key] = { before };
-    if (before >= ZONE_TRASH_WARNING) ctx.log(`warning: team ${key}'s zone holds ${before} trashed documents, near the cap of about ${ZONE_CAP}; creates there fail with QUOTA_EXCEEDED at the cap`);
-  }
-  ctx.observations.set('zone.trash', trash);
   // Links between synchronized documents are written as document URLs of this workspace.
   const organization = await appClient.request<{ organization: { urlKey: string } }>('Organization', 'query', 'query Organization { organization { urlKey } }');
   const live: LiveWorld = {
@@ -186,6 +176,23 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
       }
     }
   }
+
+  // Trashed documents per team zone the run uses, counted once the team lock is held so another run's work
+  // is not counted as this run's. They count against the zone's cap and cannot be purged. Only a measure:
+  // a count that cannot be read is logged and leaves the run alone.
+  const trash: Record<string, { before: number; after?: number }> = {};
+  for (const key of tree.teamZones.keys()) {
+    const team = teams.get(key);
+    if (team === undefined) continue;
+    try {
+      const before = await world.trashedInZone(team.id);
+      trash[key] = { before };
+      if (before >= ZONE_TRASH_WARNING) ctx.log(`warning: team ${key}'s zone holds ${before} trashed documents, near the cap of about ${ZONE_CAP}; creates there fail with QUOTA_EXCEEDED at the cap`);
+    } catch (error) {
+      ctx.log(`could not count team ${key}'s trashed documents: ${(error as Error).message}`);
+    }
+  }
+  ctx.observations.set('zone.trash', trash);
 
   const readmes = new Map<string, string>();
   for (const [target, source] of tree.paths) {
@@ -288,7 +295,7 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
     // a document with a matched title and is deleted, which archives it.
     const team = [...live.teams.values()][0];
     if (team !== undefined) {
-      const helper = await live.world.createProject(ctx.names.helperProject(), [team.id]);
+      const helper = await live.world.createProject(ctx.names.helperProject('archived-copy'), [team.id]);
       const archived = await editor.createDocument({ projectId: helper.id }, { title: first.title, content: 'An older copy.\n' });
       await live.world.deleteProject(helper, ctx.names.runId);
       ctx.observations.set('setup.archivedDocument', archived.id);
@@ -370,16 +377,20 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
     // Project documents went with their projects. Team-zone documents the run made (by id: seeded or recorded;
     // by title: the run's prefix) are archived through a run project of their team, never trashed: trashed
     // documents count against a team zone's cap and cannot be purged.
-    await attempt('team-zone documents', async () => {
-      const zone = new Map<string, Awaited<ReturnType<LinearClient['getDocuments']>>[number]>();
-      for (const document of await live.app.getDocuments([...created])) if (document.projectId === null) zone.set(document.id, document);
-      for (const team of live.tree.teamZones.keys()) {
-        const teamId = live.teams.get(team)?.id;
-        if (teamId === undefined) continue;
-        for (const document of await live.world.runTeamDocuments(teamId)) if (document.runId === ctx.names.runId) zone.set(document.id, document);
-      }
-      await live.world.archiveRunTeamDocuments([...zone.values()], ctx.names.runId, ctx.names.helperProject(), (document) => created.has(document.id) || runOfTeamTitle(document.title) === ctx.names.runId);
+    // Reads go through the harness's own editor client, not the app whose budget the scenarios share.
+    const zone = new Map<string, LinearDocument>();
+    await attempt('team-zone documents by id', async () => {
+      for (const document of await live.world.client.getDocuments([...created])) if (document.projectId === null) zone.set(document.id, document);
     });
+    for (const team of live.tree.teamZones.keys()) {
+      const teamId = live.teams.get(team)?.id;
+      if (teamId === undefined) continue;
+      // This run's own documents, trashed ones included: archiving them takes them out of the zone's trash.
+      await attempt(`team ${team} documents`, async () => {
+        for (const document of await live.world.runTeamDocuments(teamId, { trashed: true })) if (document.runId === ctx.names.runId) zone.set(document.id, document);
+      });
+    }
+    await attempt('archiving team-zone documents', () => live.world.archiveRunTeamDocuments([...zone.values()], ctx.names.runId, ctx.names.helperProject('archive'), (document) => created.has(document.id) || runOfTeamTitle(document.title) === ctx.names.runId));
   }
   return problems.length === 0 ? { ok: true } : { ok: false, detail: problems.join('; ') };
 }

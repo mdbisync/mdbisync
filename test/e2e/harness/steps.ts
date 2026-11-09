@@ -1001,7 +1001,7 @@ const LINEAR: Record<string, Executor> = {
         // A run project that no folder names; cleanup deletes it with the run's projects.
         const team = [...world.teams.values()][0];
         if (team === undefined) throw new EnvBlockedError('the test workspace has no team');
-        const unmapped = await world.world.createProject(ctx.names.helperProject(), [team.id]);
+        const unmapped = await world.world.createProject(ctx.names.helperProject('unmapped'), [team.id]);
         world.projects.set('UNMAPPED', unmapped);
         await editor.updateDocument(id, { projectId: unmapped.id });
       } else if (variant === 'trash') {

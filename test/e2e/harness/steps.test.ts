@@ -330,10 +330,15 @@ describe('team-zone cleanup', () => {
     const { RUN_PROJECT_PATTERN, runOfProject } = await import('./isolation.ts');
     const { PROJECT_PLACEHOLDERS } = await import('./corpus.ts');
     const names = runNames('aaaaaa');
-    assert.match(names.helperProject(), RUN_PROJECT_PATTERN);
-    assert.equal(runOfProject(names.helperProject()), 'aaaaaa');
     const placeholderProjects = PROJECT_PLACEHOLDERS.map((_, index) => names.project(index));
-    assert.ok(!placeholderProjects.includes(names.helperProject()));
+    const helpers = (['archive', 'unmapped', 'archived-copy'] as const).map((purpose) => names.helperProject(purpose));
+    // One name per purpose, so a run never holds two live projects with one name.
+    assert.equal(new Set(helpers).size, helpers.length);
+    for (const helper of helpers) {
+      assert.match(helper, RUN_PROJECT_PATTERN);
+      assert.equal(runOfProject(helper), 'aaaaaa');
+      assert.ok(!placeholderProjects.includes(helper));
+    }
   });
 
   it('archives a run\'s team-zone documents through a run project of their team, restoring trashed ones first', async () => {
@@ -360,6 +365,23 @@ describe('team-zone cleanup', () => {
       'CreateProject Spare shelf aaaaaa team-eng', 'move d1 project-team-eng', 'restore d2', 'move d2 project-team-eng', 'DeleteProject project-team-eng',
       'CreateProject Spare shelf aaaaaa team-docs', 'move d3 project-team-docs', 'DeleteProject project-team-docs',
     ]);
+    // A move that fails puts a restored document back in the trash, the other team is still archived, and the
+    // failures come back together.
+    calls.length = 0;
+    const failing = new LinearWorld({
+      ...client,
+      updateDocument: async (id: string, patch: { projectId?: string }) => {
+        if (id === 'd2') throw new Error('quota');
+        calls.push(`move ${id} ${patch.projectId}`);
+      },
+      trashDocument: async (id: string) => void calls.push(`trash ${id}`),
+    } as never);
+    await assert.rejects(failing.archiveRunTeamDocuments([
+      { id: 'd2', title: 'aaaaaa/guides/old', projectId: null, teamId: 'team-eng', trashed: true },
+      { id: 'd3', title: 'aaaaaa/notes', projectId: null, teamId: 'team-docs', trashed: false },
+      { id: 'd5', title: 'aaaaaa/loose', projectId: null, teamId: null, trashed: false },
+    ], 'aaaaaa', 'Spare shelf aaaaaa'), /archived 1; not archived: document d5 has neither a project nor a team; document d2: quota/);
+    assert.deepEqual(calls.filter((call) => /^(restore|trash|move)/.test(call)), ['restore d2', 'trash d2', 'move d3 project-team-docs']);
     // Never another run's document.
     await assert.rejects(world.archiveRunTeamDocuments([{ id: 'x', title: 'bbbbbb/notes', projectId: null, teamId: 'team-eng', trashed: false }], 'aaaaaa', 'Spare shelf aaaaaa'), /not a team-zone document of run aaaaaa/);
   });
@@ -666,7 +688,7 @@ describe('linear executors', () => {
     assert.equal(ctx.observations.get('expected.destinationPath'), 'docs/handbook/plan.md');
     ctx.observations.delete('target.paths');
     await runStep(ctx, { kind: 'linear', action: 'out-of-scope', args: { variants: ['unmapped-project', 'trash'] } });
-    assert.deepEqual(created, ['Spare shelf aaaaaa']);
+    assert.deepEqual(created, ['Spare drawer aaaaaa']);
     assert.equal((ctx.observations.get('target.paths') as string[]).length, 2);
     assert.ok([...linear.documents.values()].some((document) => document.trashed));
   });

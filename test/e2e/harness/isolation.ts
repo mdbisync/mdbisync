@@ -29,8 +29,13 @@ const PROJECT_WORDS = [
   'Workshop agenda',
 ] as const;
 
-/** The name of the run's helper projects; not one of PROJECT_WORDS, so it never names a placeholder's project. Matches the run-project pattern, so cleanup and the sweeper find it. */
-const HELPER_PROJECT_WORDS = 'Spare shelf';
+/**
+ * Names of the run's helper projects, one per purpose so a run never holds two live projects with one name.
+ * None is one of PROJECT_WORDS, so no annotation names a helper; each matches the run-project pattern, so
+ * cleanup and the sweeper find it.
+ */
+const HELPER_PROJECT_WORDS = { archive: 'Spare shelf', unmapped: 'Spare drawer', 'archived-copy': 'Spare binder' } as const;
+export type HelperPurpose = keyof typeof HELPER_PROJECT_WORDS;
 
 export function newRunId(): string {
   return randomBytes(3).toString('hex');
@@ -51,7 +56,7 @@ export interface RunNames {
    * a placeholder's, so the engine never maps it, however many placeholders
    * the corpus has.
    */
-  helperProject(): string;
+  helperProject(purpose: HelperPurpose): string;
 }
 
 export function runNames(runId: string): RunNames {
@@ -67,8 +72,8 @@ export function runNames(runId: string): RunNames {
       if (words === undefined) throw new Error(`a run has at most ${PROJECT_WORDS.length} projects`);
       return `${words} ${runId}`;
     },
-    helperProject(): string {
-      return `${HELPER_PROJECT_WORDS} ${runId}`;
+    helperProject(purpose: HelperPurpose): string {
+      return `${HELPER_PROJECT_WORDS[purpose]} ${runId}`;
     },
   };
 }
@@ -82,7 +87,7 @@ export function runOfRef(ref: string): string | null {
 export function runOfProject(name: string): string | null {
   const match = RUN_PROJECT_PATTERN.exec(name);
   if (match === null) return null;
-  return [...PROJECT_WORDS, HELPER_PROJECT_WORDS].some((words) => name === `${words} ${match[1]}`) ? (match[1] as string) : null;
+  return [...PROJECT_WORDS, ...Object.values(HELPER_PROJECT_WORDS)].some((words) => name === `${words} ${match[1]}`) ? (match[1] as string) : null;
 }
 
 /** The run id of a team-zone document title, or null. */

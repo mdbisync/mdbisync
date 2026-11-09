@@ -96,11 +96,18 @@ export class LinearWorld {
     await this.client.request('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id: project.id });
   }
 
-  /** Team-zone documents (no project) of a team whose title starts with a run id. */
-  async runTeamDocuments(teamId: string): Promise<Array<LinearDocument & { runId: string }>> {
-    const documents = await this.client.listDocuments({ teamId }, { includeArchived: false });
+  /**
+   * Team-zone documents (no project) of a team whose title starts with a run
+   * id. With `trashed`, trashed ones are listed too. Cleanup asks for them for
+   * its own run only; the sweeper does not, so it never touches trash that runs
+   * left before the archive cleanup (freeing that is the owner's decision).
+   */
+  async runTeamDocuments(teamId: string, options: { trashed?: boolean } = {}): Promise<Array<LinearDocument & { runId: string }>> {
+    const documents = await this.client.listDocuments({ teamId }, { includeArchived: options.trashed === true });
     return documents.flatMap((document) => {
-      const runId = document.projectId === null ? runOfTeamTitle(document.title) : null;
+      if (document.projectId !== null || (document.archivedAt !== null && !document.trashed)) return [];
+      if (document.trashed && options.trashed !== true) return [];
+      const runId = runOfTeamTitle(document.title);
       return runId === null ? [] : [{ ...document, runId }];
     });
   }
@@ -109,9 +116,12 @@ export class LinearWorld {
    * Archives a run's team-zone documents instead of trashing them: per team, it
    * moves them into a run project of that team and deletes the project, which
    * archives them, as Linear does for project documents. A trashed one is
-   * restored first. Trashed documents count against a team zone's cap of about
-   * 1,000 documents and the API cannot purge them; archived ones do not count.
-   * Refuses any document that is not one of the run's.
+   * restored first, and put back in the trash if it cannot be moved, so a
+   * failure never leaves a live document in the zone. Trashed documents count
+   * against a team zone's cap of about 1,000 documents and the API cannot
+   * purge them; archived ones do not count. Refuses any document that is not
+   * one of the run's. Every team and document is tried; the failures are
+   * thrown together at the end.
    */
   async archiveRunTeamDocuments(
     documents: ReadonlyArray<Pick<LinearDocument, 'id' | 'title' | 'projectId' | 'teamId' | 'trashed'>>,
@@ -119,25 +129,49 @@ export class LinearWorld {
     projectName: string,
     isRuns: (document: Pick<LinearDocument, 'id' | 'title'>) => boolean = (document) => runOfTeamTitle(document.title) === runId,
   ): Promise<number> {
-    const byTeam = new Map<string, typeof documents[number][]>();
+    const byTeam = new Map<string, Array<(typeof documents)[number]>>();
+    const problems: string[] = [];
     for (const document of documents) {
-      if (document.projectId !== null || document.teamId === null) continue;
+      if (document.projectId !== null) continue;
       if (!isRuns(document)) throw new RunWorldError(`refusing to archive a document that is not a team-zone document of run ${runId}`);
-      byTeam.set(document.teamId, [...(byTeam.get(document.teamId) ?? []), document]);
+      if (document.teamId === null) {
+        problems.push(`document ${document.id} has neither a project nor a team`);
+        continue;
+      }
+      const list = byTeam.get(document.teamId) ?? [];
+      list.push(document);
+      byTeam.set(document.teamId, list);
     }
     let archived = 0;
     for (const [teamId, teamDocuments] of byTeam) {
-      const project = await this.createProject(projectName, [teamId]);
+      let project: Project;
       try {
-        for (const document of teamDocuments) {
+        project = await this.createProject(projectName, [teamId]);
+      } catch (error) {
+        problems.push(`team ${teamId}: ${(error as Error).message}`);
+        continue;
+      }
+      for (const document of teamDocuments) {
+        try {
           if (document.trashed) await this.client.restoreDocument(document.id);
-          await this.client.updateDocument(document.id, { projectId: project.id });
+          try {
+            await this.client.updateDocument(document.id, { projectId: project.id });
+          } catch (error) {
+            if (document.trashed) await this.client.trashDocument(document.id).catch(() => {});
+            throw error;
+          }
           archived += 1;
+        } catch (error) {
+          problems.push(`document ${document.id}: ${(error as Error).message}`);
         }
-      } finally {
+      }
+      try {
         await this.deleteProject(project, runId);
+      } catch (error) {
+        problems.push(`project of team ${teamId}: ${(error as Error).message}`);
       }
     }
+    if (problems.length > 0) throw new RunWorldError(`archived ${archived}; not archived: ${problems.join('; ')}`);
     return archived;
   }
 
