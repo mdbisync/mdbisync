@@ -359,7 +359,52 @@ export class LinearClient {
     );
     const target = succeeded('FileUpload', data.fileUpload).uploadFile;
     if (!target) throw new LinearUploadError('FileUpload', 'FileUpload: Linear returned no upload target');
+    await this.#putUpload('FileUpload.put', target, input);
+    return { assetUrl: target.assetUrl };
+  }
 
+  /**
+   * Uploads several files with one API request: one `fileUpload` per file,
+   * aliased in a single mutation, then one storage PUT per file. Linear's
+   * request budget is the scarce one (5,000 an hour); each `fileUpload`
+   * still counts against the complexity budget. Returns the asset URLs in
+   * the order of `inputs`; throws when any file fails, after uploading the
+   * ones before it (their URLs are lost to the caller, which uploads them
+   * again one by one).
+   */
+  async uploadFiles(inputs: readonly UploadInput[]): Promise<Array<{ assetUrl: string }>> {
+    if (inputs.length === 0) return [];
+    const declarations = inputs.map((_, index) => `$contentType${index}: String!, $filename${index}: String!, $size${index}: Int!`).join(', ');
+    const fields = inputs
+      .map((_, index) => `f${index}: fileUpload(contentType: $contentType${index}, filename: $filename${index}, size: $size${index}) {
+          success uploadFile { uploadUrl assetUrl headers { key value } }
+        }`)
+      .join('\n        ');
+    const variables: Record<string, unknown> = {};
+    inputs.forEach((input, index) => {
+      variables[`contentType${index}`] = input.contentType;
+      variables[`filename${index}`] = input.filename;
+      variables[`size${index}`] = input.bytes.byteLength;
+    });
+    type Payload = { success: boolean; uploadFile: { uploadUrl: string; assetUrl: string; headers: Array<{ key: string; value: string }> } | null };
+    const data = await this.request<Record<string, Payload>>('FileUploads', 'mutation', `mutation FileUploads(${declarations}) {\n        ${fields}\n      }`, variables);
+    const targets = inputs.map((_, index) => {
+      const payload = data[`f${index}`];
+      const target = payload === undefined ? null : succeeded('FileUploads', payload).uploadFile;
+      if (!target) throw new LinearUploadError('FileUploads', 'FileUploads: Linear returned no upload target');
+      return target;
+    });
+    const result: Array<{ assetUrl: string }> = [];
+    for (const [index, input] of inputs.entries()) {
+      const target = targets[index] as (typeof targets)[number];
+      await this.#putUpload('FileUploads.put', target, input);
+      result.push({ assetUrl: target.assetUrl });
+    }
+    return result;
+  }
+
+  /** Sends a file's bytes to the storage URL Linear issued for it. */
+  async #putUpload(operation: string, target: { uploadUrl: string; headers: Array<{ key: string; value: string }> }, input: UploadInput): Promise<void> {
     const headers = new Headers({ 'content-type': input.contentType, 'cache-control': 'public, max-age=31536000' });
     for (const { key, value } of target.headers) headers.set(key, value);
     this.stats.storagePuts += 1;
@@ -372,12 +417,11 @@ export class LinearClient {
         signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
       });
     } catch (error) {
-      throw new LinearUploadError('FileUpload.put', 'FileUpload.put: storage request failed', { cause: error });
+      throw new LinearUploadError(operation, `${operation}: storage request failed`, { cause: error });
     }
     if (!response.ok) {
-      throw new LinearUploadError('FileUpload.put', `FileUpload.put: storage answered HTTP ${response.status}`);
+      throw new LinearUploadError(operation, `${operation}: storage answered HTTP ${response.status}`);
     }
-    return { assetUrl: target.assetUrl };
   }
 
   #refuseTooLong(operation: string, document: { title?: string | undefined; content?: string | undefined }): void {

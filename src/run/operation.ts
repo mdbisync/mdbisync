@@ -18,6 +18,7 @@ import {
   renderReverseDryRun,
   toPlanReport,
   toReversePlanReport,
+  uploadsTransform,
 } from '../initial-sync/index.ts';
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
 import { type Operation, type PreflightOptions, type PreflightOutcome, type RunContext, runPreflight } from './preflight.ts';
@@ -49,7 +50,7 @@ export async function runOperation(
 
   const gitToLinear = async (context: RunContext, confirm: boolean) => {
     if (confirm) {
-      const run = await confirmInitialSync(context, { config: inputs.state });
+      const run = await confirmInitialSync(context, { config: inputs.state, transforms: [uploadsTransform({ config: inputs.state })] });
       plan = toPlanReport(run.plan, 'git-to-linear', true);
       confirmed = run.result;
       workSummary = renderConfirmed(run.plan, run.result);

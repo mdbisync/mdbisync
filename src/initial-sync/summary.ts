@@ -94,7 +94,13 @@ export function renderConfirmed(plan: InitialSyncPlan, result: ConfirmedResult):
   }
   pushTable(lines, 'Failed', ['Path', 'Operation', 'Error'], result.failed.map((entry) => [entry.path, entry.operation, entry.error]), false);
   pushTable(lines, 'Moved to trash', ['Path'], result.trashed.map((path) => [path]), false);
-  pushTable(lines, 'Left out', LEFT_OUT_HEAD, [...leftOutRows(plan.leftOut), ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, '', ''])], false);
+  pushTable(
+    lines,
+    'Left out',
+    ['Path', 'Rules', 'Lines', 'Collides with, or the files'],
+    [...leftOutRows(plan.leftOut), ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, '', (entry.files ?? []).join(', ')])],
+    false,
+  );
   if (result.record !== null && result.record.reformatted.length > 0) {
     lines.push(
       `Linear stores ${count(result.record.reformatted.length, 'file')} in a different form than the tracked branch; the next sync proposes that form in its pull request.`,

@@ -25,7 +25,7 @@ import type { LinearDocument } from '../../../src/linear/index.ts';
 import { listTree, readBlobs, readIds, readUploads, type Git } from '../../../src/state/index.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readFixture, readOptional } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, lfsSize, lostEdits, mapImageLinks, readSides, sameAsFile, snapshotRefs, stripFrontMatter, titleOf, type Sides } from './checks.ts';
+import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, snapshotRefs, stripFrontMatter, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { owningFolder, type Folder } from './corpus.ts';
@@ -157,7 +157,7 @@ function documentBody(view: View, path: string, document: LinearDocument | undef
   if (document === undefined) return null;
   const file = view.files.get(path);
   if (file !== undefined && sameAsFile(file, document.content ?? '', path, view)) return stripFrontMatter(file);
-  return mapImageLinks(document.content ?? '', view.uploads, path);
+  return gitLinks(document.content ?? '', path, view);
 }
 
 function fileBody(view: View, path: string): string | null {
@@ -308,23 +308,26 @@ function ownResults(ctx: RunContext) {
   return ctx.engine.results.slice(ctx.engine.setupRuns, end);
 }
 
-/** Relative link targets in Markdown (outside code), without anchors' titles. */
+/** Relative link and image destinations of a Markdown body (as the parser reads them; nothing in code). */
 export function relativeLinks(text: string): string[] {
-  const withoutCode = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
-  return [...withoutCode.matchAll(/\]\(\s*<?([^)\s>]+)>?/g)].map((match) => match[1] as string).filter((link) => !/^[a-z][a-z0-9+.-]*:/i.test(link) && !link.startsWith('#'));
+  // Relative by form: no scheme, not protocol-relative, not an anchor in the same document. Whether it stays
+  // inside the repository depends on the linking document, which `resolveLink` checks with that path.
+  return linkDestinations(text).map((destination) => destination.url).filter((url) => url !== '' && !url.startsWith('#') && !url.startsWith('//') && !/^[a-z][a-z0-9+.-]*:/i.test(url));
 }
 
 function imageLinks(text: string): string[] {
-  return [...text.matchAll(/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?/g)].map((match) => match[1] as string);
+  return linkDestinations(text).filter((destination) => destination.image).map((destination) => destination.url);
 }
 
+/** The repository file a link points to, by the same rule as the convergence check (empty when none). */
 function resolveLink(fromPath: string, link: string): string {
-  return posix.normalize(posix.join(posix.dirname(fromPath), decodeURI(link.split('#')[0] as string)));
+  return linkedFile(fromPath, link)?.path ?? '';
 }
 
-/** Slug ids of Linear document URLs a text links to. */
-function linkedSlugs(text: string): string[] {
-  return [...text.matchAll(/linear\.app\/[^/\s)]+\/document\/[^\s)#]*?-?([0-9a-f]{12})(?=[\s)#]|$)/g)].map((match) => match[1] as string);
+/** Links (not images) to documents of the workspace in a body, as `<id>` or `<id>#<fragment>`, in text order. */
+export function documentLinks(text: string, base: string): string[] {
+  const prefix = `${base}/`;
+  return linkDestinations(text).filter((destination) => !destination.image && destination.url.startsWith(prefix)).map((destination) => destination.url.slice(prefix.length));
 }
 
 function manifestOf(ctx: RunContext) {
@@ -643,15 +646,19 @@ export const SUBJECTS: Record<string, Compute> = {
   'input.unsyncedLinks': async (env) => linkMap(env, 'unsynced-git'),
   'input.relativeLinks': async (env) => linkMap(env, 'relative-git'),
   'capture.relativeLinks': async (env) => linkMap(env, 'relative-capture'),
+  // Every link with a fragment to another synchronized document keeps its fragment on the document URL.
   'documents.supportedAnchorsPreserved': async (env) => {
     const view = await env.view();
-    for (const [path, text] of view.files) {
+    let anchored = 0;
+    for (const path of groupPaths(env.ctx, 'links')) {
       const id = view.ids.get(path)?.id;
-      const content = id === undefined ? '' : (view.documents.get(id)?.content ?? '');
-      for (const link of relativeLinks(text).filter((candidate) => candidate.includes('#'))) {
-        if (view.ids.has(resolveLink(path, link)) && !content.includes(`#${link.split('#')[1]}`)) return false;
-      }
+      // Every occurrence counts: a fragment kept on one of two equal links does not cover the other.
+      const actual = documentLinks(id === undefined ? '' : (view.documents.get(id)?.content ?? ''), view.documentUrlBase).filter((link) => link.includes('#'));
+      const expected = documentLinks(linearLinks(stripFrontMatter(view.files.get(path) ?? ''), path, view), view.documentUrlBase).filter((link) => link.includes('#'));
+      anchored += expected.length;
+      if (JSON.stringify(sorted(actual)) !== JSON.stringify(sorted(expected))) return false;
     }
+    if (anchored === 0) throw new Error('the slice has no link with a fragment to another synchronized document');
     return true;
   },
   'documents.oversizeAssetReferences': async (env) => {
@@ -737,7 +744,7 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'documents.imageUrl': async (env) => {
     const { document } = await target(env);
-    const urls = [...(document?.content ?? '').matchAll(/!\[[^\]]*\]\((https?:[^)\s]+)\)/g)].map((match) => match[1] as string);
+    const urls = linkDestinations(document?.content ?? '').filter((destination) => destination.image && /^https?:/.test(destination.url)).map((destination) => destination.url);
     const fresh = (await env.view()).uploadsByHash.get(observed(env.ctx, 'git.imageHash') as string);
     return urls.find((url) => url === fresh) ?? urls[0] ?? null;
   },
@@ -956,8 +963,9 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'uploads.cacheComplete': async (env) => {
     const view = await env.view();
+    // Images of the documents the engine wrote; a document it left out on purpose uploads nothing.
     const embedded = new Set<string>();
-    for (const [path, text] of view.files) for (const image of embeddedImages(path, text)) embedded.add(image);
+    for (const [path, text] of view.files) if (view.ids.has(path)) for (const image of embeddedImages(path, text)) embedded.add(image);
     return [...embedded].every((path) => {
       const hash = view.hashes.get(path);
       return hash !== undefined && view.uploadsByHash.has(hash);
@@ -1462,28 +1470,25 @@ async function linkMap(env: Env, kind: LinkKind): Promise<Map<string, string[]>>
     if (tip === null) throw new ProductError('the run has no linear state ref');
     capture = await treeFiles(await person(env.ctx), tip, (path) => paths.includes(path));
   }
-  const slugOf = (path: string) => {
-    const id = view.ids.get(path)?.id;
-    return id === undefined ? undefined : view.documents.get(id)?.slugId;
-  };
   for (const path of paths) {
-    const text = view.files.get(path) ?? '';
+    const text = stripFrontMatter(view.files.get(path) ?? '');
     const id = view.ids.get(path)?.id;
     const content = id === undefined ? '' : (view.documents.get(id)?.content ?? '');
     const links = relativeLinks(text);
-    const isSynced = (link: string) => view.ids.has(resolveLink(path, link));
     switch (kind) {
       case 'synced-linear':
-        result.set(path, sorted(linkedSlugs(content)));
+        // The documents this one links to, by id and fragment.
+        result.set(path, sorted(documentLinks(content, view.documentUrlBase)));
         break;
       case 'synced-expected':
-        result.set(path, sorted(links.filter(isSynced).map((link) => slugOf(resolveLink(path, link)) ?? 'unknown')));
+        result.set(path, sorted(documentLinks(linearLinks(text, path, view), view.documentUrlBase)));
         break;
       case 'unsynced-linear':
         result.set(path, sorted(relativeLinks(content)));
         break;
       case 'unsynced-git':
-        result.set(path, sorted(links.filter((link) => !isSynced(link))));
+        // Links that stay as written: to files that are neither synchronized documents nor uploads.
+        result.set(path, sorted(relativeLinks(linearLinks(text, path, view))));
         break;
       case 'relative-git':
         result.set(path, sorted(links));
@@ -1503,7 +1508,8 @@ async function downloads(env: Env, kind: 'image' | 'attachment'): Promise<Map<st
   const view = await env.view();
   const manifest = manifestOf(env.ctx);
   const result = new Map<string, string>();
-  const used = new Set([...view.documents.values()].flatMap((document) => [...(document.content ?? '').matchAll(/\]\((https?:[^)\s]+)\)/g)].map((match) => match[1] as string)));
+  // Destinations as the parser reads them (`<…>` included), without a fragment such as `#page=2`.
+  const used = new Set([...view.documents.values()].flatMap((document) => linkDestinations(document.content ?? '').map((destination) => destination.url.split('#')[0] as string)));
   for (const [url, path] of view.uploads) {
     if (!used.has(url) || manifest.get(path)?.kind !== kind) continue;
     result.set(path, sha256(await world.download(url)));
@@ -1582,7 +1588,10 @@ function engineValue(ctx: RunContext, subject: string): unknown {
   if (result === undefined) throw new ProductError(`the scenario has no engine run ${runMatch?.[1] ?? 'last'} for ${subject}`);
   if (result.report === null) throw new ProductError(`engine run ${index} wrote no report, so it gives no ${subject}`);
   // The report is the job summary in structured form: `summary.code` is the report's `code`.
-  if (path[0] === 'summary' && !Object.hasOwn(result.report, 'summary')) path.shift();
+  // A sync's report has `summary: null` (that field holds an initial sync's plan), so a `summary` that does not
+  // hold the next key sends the path to the top level.
+  const nested = result.report['summary'];
+  if (path[0] === 'summary' && (nested === null || typeof nested !== 'object' || !Object.hasOwn(nested, path[1] as string))) path.shift();
   const found = pathValue(result.report, path);
   if (!found.found) throw new ProductError(`the engine's report gives no ${path.join('.')}`);
   return found.value;

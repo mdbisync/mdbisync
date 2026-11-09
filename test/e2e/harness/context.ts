@@ -48,6 +48,8 @@ export interface LiveWorld {
   engineApp: { clientId: string; clientSecret: string };
   /** Team-zone documents seeded by the harness, for cleanup. */
   seededDocuments: string[];
+  /** The URL prefix of the test workspace's documents (`https://linear.app/<url key>/document`). */
+  documentUrlBase: string;
   /** Downloads an upload URL as editor-a (uploads need an authenticated request). */
   download(url: string): Promise<Buffer>;
 }

@@ -33,6 +33,18 @@ export interface FakeDocument {
   content?: string;
 }
 
+/** A file uploaded with `fileUpload`; `bytes` is set once the storage PUT arrived. */
+export interface FakeUpload {
+  filename: string;
+  contentType: string;
+  size: number;
+  assetUrl: string;
+  bytes?: Buffer;
+}
+
+/** Where the fake's asset URLs point. */
+export const UPLOADS_HOST = 'https://uploads.linear.test';
+
 /** How the fake answers document writes. */
 export interface FakeWrites {
   /** Mutations received so far. */
@@ -78,6 +90,7 @@ export interface FakeWorld {
     documents: FakeDocument[];
     writes: FakeWrites;
     store: (content: string) => string;
+    uploads: FakeUpload[];
   };
   /** `METHOD url` of every request. */
   requests: string[];
@@ -106,6 +119,7 @@ export function fakeWorld(): FakeWorld {
       documents: [],
       writes: { count: 0 },
       store: (content) => content,
+      uploads: [],
     },
     requests: [],
     writes: [],
@@ -214,6 +228,12 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     world.revoked += 1;
     return json(200, { success: true });
   }
+  if (path.startsWith('/storage/') && init?.method === 'PUT') {
+    const upload = world.linear.uploads[Number(path.slice('/storage/'.length))];
+    if (upload === undefined) return json(404, {});
+    upload.bytes = Buffer.from(init.body as Uint8Array);
+    return new Response(null, { status: 200 });
+  }
   if (path !== '/graphql') return json(404, {});
   const { query, variables, operationName } = JSON.parse(String(init?.body)) as {
     query: string;
@@ -275,12 +295,31 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     if (input.content !== undefined) document.content = world.linear.store(input.content);
     return { documentUpdate: { success: true, document: documentNode(document, variables.withContent === true) } };
   }
+  if (operation === 'FileUpload') {
+    return { fileUpload: fileUpload(world, String(variables.filename), String(variables.contentType), Number(variables.size)) };
+  }
+  if (operation === 'FileUploads') {
+    // One aliased `fileUpload` per file: f0, f1, … with variables filename0, filename1, …
+    const payload: Record<string, unknown> = {};
+    for (let index = 0; variables[`filename${index}`] !== undefined; index += 1) {
+      payload[`f${index}`] = fileUpload(world, String(variables[`filename${index}`]), String(variables[`contentType${index}`]), Number(variables[`size${index}`]));
+    }
+    return payload;
+  }
   if (operation === 'TrashDocument') {
     const document = documents.find((d) => d.id === variables.id);
     if (document !== undefined) document.trashed = true;
     return { documentDelete: { success: document !== undefined } };
   }
   return undefined;
+}
+
+/** Issues an upload target; the storage PUT to it fills in the bytes. */
+function fileUpload(world: FakeWorld, filename: string, contentType: string, size: number) {
+  const index = world.linear.uploads.length;
+  const upload: FakeUpload = { filename, contentType, size, assetUrl: `${UPLOADS_HOST}/${index}/${encodeURIComponent(filename)}` };
+  world.linear.uploads.push(upload);
+  return { success: true, uploadFile: { uploadUrl: `${LINEAR_API}/storage/${index}`, assetUrl: upload.assetUrl, headers: [] } };
 }
 
 function documentNode(d: FakeDocument, withContent: boolean) {
