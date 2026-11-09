@@ -73,7 +73,7 @@ A scenario uses one slice of the corpus:
 | --- | --- |
 | `mini` | a few documents in two teams and three projects, a team zone, two images (one in LFS), a PDF, front matter |
 | `bank` | every fixture of the bank |
-| `mid` | about 300 files across every group of the corpus |
+| `mid` | about 300 files across every group of the corpus, always with the documents `MID_REGRESSIONS` in `test/corpus/slices.ts` pins for the seed |
 | `full` | the whole corpus |
 
 ## Run scenarios

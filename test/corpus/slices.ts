@@ -15,6 +15,33 @@ export type Slice = (typeof SLICES)[number];
 export const MINI_DOCUMENTS = 12;
 export const MID_DOCUMENTS = 200;
 
+/**
+ * Documents the mid slice always keeps, by seed, because live checks over mid
+ * name them (a second initial sync must leave each of them alone) and a
+ * random pick could drop them at the next generation:
+ * - task-code-3: a task list with `- [X]`, and an image that ended a list
+ *   item's paragraph, which the corpus (written in Linear's form) holds as
+ *   its own paragraph in the item;
+ * - kitewing-4-28-2: a link to a video alone in a bullet item;
+ * - kitewing-4-22-0: no list construct of its own any more; kept because
+ *   those checks name it.
+ * Each replaces the last random pick of its group; its linked files come
+ * with it through the slice's closure. Another seed writes other paths, so
+ * it pins nothing.
+ */
+export const MID_REGRESSIONS: Readonly<Record<string, readonly string[]>> = {
+  "corpus-v1": [
+    "eng/edge-cases/formatting/task-code-3.md",
+    "docs/release notes/releases/2025/kitewing-4-28-2.md",
+    "docs/release notes/releases/2025/kitewing-4-22-0.md",
+  ],
+};
+
+/** The documents mid pins for a seed; none for a seed the list does not name. */
+export function midRegressions(seed: string): readonly string[] {
+  return Object.hasOwn(MID_REGRESSIONS, seed) ? (MID_REGRESSIONS[seed] as readonly string[]) : [];
+}
+
 const SUPPORT = [".gitattributes", ".pre-commit-config.yaml", CHECK_WORKFLOW_PATH];
 
 function isDocument(file: CorpusFile): boolean {
@@ -65,7 +92,8 @@ function pickMini(files: CorpusFile[]): string[] {
   return documents;
 }
 
-function pickMid(files: CorpusFile[], rng: Rng): string[] {
+/** The mid slice's documents before the closure; exported for its tests. */
+export function pickMid(files: CorpusFile[], rng: Rng, pinned: readonly string[]): string[] {
   // Colliding names only make sense as a pair and cannot be checked out on
   // macOS, so they stay in the bank and full slices.
   const documents = files
@@ -92,6 +120,11 @@ function pickMid(files: CorpusFile[], rng: Rng): string[] {
   const image = files.find((f) => f.role === "shared-image");
   const shared = image === undefined ? [] : documents.filter((f) => f.links.includes(image.path));
   if (shared.length !== SHARED_IMAGE_USERS) throw new Error(`the mid slice can take ${shared.length} users of the shared image, not ${SHARED_IMAGE_USERS}`);
+  const eligible = new Set(documents.map((f) => f.path));
+  for (const path of pinned) {
+    if (!eligible.has(path)) throw new Error(`the mid slice must keep ${path}, but it is not a mid document of this corpus`);
+  }
+  const pins = new Set(pinned);
   const picked = new Set(shared.map((f) => f.path));
   const sharedPerGroup = new Map<string, number>();
   for (const f of shared) sharedPerGroup.set(f.group, (sharedPerGroup.get(f.group) ?? 0) + 1);
@@ -99,13 +132,18 @@ function pickMid(files: CorpusFile[], rng: Rng): string[] {
     const already = sharedPerGroup.get(g) ?? 0;
     if (already > (share.get(g) as number)) throw new Error(`group ${g} has ${already} users of the shared image, more than its mid share`);
     const pool = rng.shuffle(documents.filter((f) => f.group === g && !picked.has(f.path)));
-    for (const f of pool.slice(0, (share.get(g) as number) - already)) picked.add(f.path);
+    // A pinned document takes the place of the group's last random pick, so
+    // the rest of the slice stays what the seed alone would give.
+    const pinnedHere = pool.filter((f) => pins.has(f.path));
+    const room = (share.get(g) as number) - already - pinnedHere.length;
+    if (room < 0) throw new Error(`group ${g} has more pinned documents than its mid share leaves room for`);
+    for (const f of [...pinnedHere, ...pool.filter((f) => !pins.has(f.path)).slice(0, room)]) picked.add(f.path);
   }
   if (picked.size !== MID_DOCUMENTS) throw new Error(`the mid slice has ${picked.size} documents, not ${MID_DOCUMENTS}`);
   return [...picked];
 }
 
-export function makeSlices(files: CorpusFile[], rng: Rng): Record<Slice, string[]> {
+export function makeSlices(files: CorpusFile[], rng: Rng, midPinned: readonly string[] = []): Record<Slice, string[]> {
   const bank = files
     .filter((f) => f.path.startsWith(`${BANK_HOME}/`) || f.path.startsWith(`${COLLISIONS}/`) || f.path.startsWith(`${BANK_UNSYNCED}/`))
     .filter((f) => f.path !== `${BANK_HOME}/README.md`)
@@ -113,7 +151,7 @@ export function makeSlices(files: CorpusFile[], rng: Rng): Record<Slice, string[
   return {
     mini: closure(files, pickMini(files)),
     bank: closure(files, bank),
-    mid: closure(files, pickMid(files, rng)),
+    mid: closure(files, pickMid(files, rng, midPinned)),
     full: files.map((f) => f.path).sort(),
   };
 }

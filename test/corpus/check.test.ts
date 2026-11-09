@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { checkCorpus, checkLinearForm, checkLintExpectations } from "./check.ts";
 import { SHARED_IMAGE_USERS } from "./model.ts";
 import { buildCorpus, writeCorpus, type Manifest } from "./generate.ts";
+import { midRegressions } from "./slices.ts";
 
 const checker = fileURLToPath(new URL("./check.ts", import.meta.url));
 
@@ -206,6 +207,19 @@ test("a synced document that is not in Linear's form is reported under --lint, a
   withChange(`corpus/${lintError.path}`, (b) => Buffer.concat([b, Buffer.from("\n\n\n")]), () => {
     assert.deepEqual(checkLinearForm(root, only(lintError)), []);
   });
+});
+
+test("a mid slice that loses a pinned document or its linked file is reported", () => {
+  const pinned = midRegressions(manifest.seed);
+  const linking = manifest.files.find((f) => pinned.includes(f.path) && f.links.length > 0)!;
+  for (const gone of [pinned[0]!, linking.links[0]!]) {
+    withChange("corpus-slices/mid.json", (b) => {
+      const mid = JSON.parse(b.toString()) as { slice: string; paths: string[] };
+      return Buffer.from(JSON.stringify({ ...mid, paths: mid.paths.filter((p) => p !== gone) }));
+    }, () => {
+      assert.ok(problems().some((p) => p.startsWith("slice mid leaves out") && p.includes(gone)), gone);
+    });
+  }
 });
 
 test("a mid slice that loses a user of the shared image is reported", () => {

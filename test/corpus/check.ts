@@ -18,7 +18,7 @@ import { duplicateTitles, fixText, linkedFileCheck, lintText, type Finding } fro
 import { findCyrillicLines } from "../../tools/check-no-cyrillic.ts";
 import type { Manifest, ManifestEntry } from "./generate.ts";
 import { gitattributes, GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, ROLES, SHARED_IMAGE_SLICES, SHARED_IMAGE_USERS, type Group } from "./model.ts";
-import { SLICES } from "./slices.ts";
+import { midRegressions, SLICES } from "./slices.ts";
 
 export type CheckResult = {
   problems: string[];
@@ -197,6 +197,14 @@ export function checkCorpus(root: string, options: { git?: boolean; lint?: boole
         return entry?.synced === true && entry.kind === "markdown" && entry.links.includes(image.path);
       }).length;
       if (!inSlice.has(image.path) || users !== SHARED_IMAGE_USERS) problems.push(`slice ${slice}: the shared image is embedded by ${users} documents, not ${SHARED_IMAGE_USERS}`);
+    }
+    // The mid slice keeps the documents its seed pins, and their linked files.
+    if (slice === "mid") {
+      const inSlice = new Set(paths);
+      for (const path of midRegressions(manifest.seed)) {
+        if (!inSlice.has(path)) problems.push(`slice mid leaves out the pinned document ${path}`);
+        for (const target of entries.get(path)?.links ?? []) if (!inSlice.has(target)) problems.push(`slice mid leaves out ${target}, linked from the pinned document ${path}`);
+      }
     }
   }
 
