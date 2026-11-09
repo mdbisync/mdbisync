@@ -315,7 +315,7 @@ describe('ui-result', () => {
     assert.equal(existsSync(join(runDir, HELD_RUN_FILE)), false);
     assert.equal(existsSync(join(runDir, 'canary-pending')), false);
     const swept = await sweep(sweepTargets(remote), stateDir);
-    assert.deepEqual(swept, { removedRefs: [], closedPullRequests: [], deletedProjects: [], archivedDocuments: 0, keptLive: [], errors: [] });
+    assert.deepEqual(swept, { removedRefs: [], closedPullRequests: [], deletedProjects: [], archivedDocuments: 0, recovered: [], keptLive: [], errors: [] });
     assert.match(readFileSync(join(runDir, 'harness.log'), 'utf8'), /ui item 3 \(assert-dom\): pass/);
     await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 3, { values: true })), scenarios, deps), /no run waiting for its UI steps/);
 

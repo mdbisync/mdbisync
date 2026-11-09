@@ -8,6 +8,7 @@
 // steps are left to the UI session's checklist. Every text a step writes is
 // neutral work text with a run token, so I2 can find it on both sides.
 
+import { randomUUID } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { cleanupKilledTokens } from './token-cleanup.ts';
@@ -1161,7 +1162,7 @@ const LINEAR: Record<string, Executor> = {
     const title = typeof args.title === 'string' ? args.title : `guides/page-${token}`;
     const characters = typeof args.characters === 'number' ? args.characters : 0;
     const body = characters > 0 ? `${noteSentence(token)}\n\n${'Plain text line. '.repeat(Math.ceil(characters / 17)).slice(0, characters)}\n` : `${noteSentence(token)}\n`;
-    const document = await world.editors[editorOf(args)].createDocument({ projectId: project.id }, { title, content: body });
+    const document = await world.editors[editorOf(args)].createDocument({ projectId: project.id }, { id: randomUUID(), title, content: body });
     const folder = projectFolders(ctx).find((candidate) => candidate.project === project.name)?.folder;
     setTarget(ctx, folder === undefined ? `${title}.md` : `${folder}/${title}.md`, document.id);
     ctx.observations.set('linear.created', document.id);

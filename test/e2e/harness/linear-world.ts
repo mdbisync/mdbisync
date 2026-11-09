@@ -3,8 +3,10 @@
 // for scripted human edits, and cleanup that touches only what a run made.
 // Fixture projects and anything else that is no run's are never written.
 
+import { randomUUID } from 'node:crypto';
 import { LinearClient, GraphQLTransport, type LinearDocument } from '../../../src/linear/index.ts';
 import { runOfProject, runOfTeamTitle } from './isolation.ts';
+import { observingFetch, type OwnershipLedger, type WriteObserver } from './ownership.ts';
 
 /** Personal API keys go in the Authorization header as they are, without "Bearer". */
 export function apiKeyFetch(base: typeof fetch = fetch): typeof fetch {
@@ -16,8 +18,9 @@ export function apiKeyFetch(base: typeof fetch = fetch): typeof fetch {
   };
 }
 
-export function editorClient(apiKey: string, baseUrl?: string): LinearClient {
-  return new LinearClient(new GraphQLTransport({ token: apiKey, baseUrl, fetch: apiKeyFetch() }));
+/** An editor's client; with an `observer`, every write it sends and Linear's answer are shown to it (a run's ownership record). */
+export function editorClient(apiKey: string, baseUrl?: string, observer?: WriteObserver): LinearClient {
+  return new LinearClient(new GraphQLTransport({ token: apiKey, baseUrl, fetch: apiKeyFetch(observingFetch(fetch, observer)) }));
 }
 
 export interface Team {
@@ -57,14 +60,21 @@ export class LinearWorld {
     return team;
   }
 
-  /** Creates a run project. Its name must be a run project's name. */
-  async createProject(name: string, teamIds: readonly string[]): Promise<Project> {
+  /**
+   * Creates a run project. Its name must be a run project's name. The id is
+   * chosen here, so a run's record holds the project before Linear sees the
+   * request, even when its answer is lost.
+   */
+  async createProject(name: string, teamIds: readonly string[], record?: Pick<OwnershipLedger, 'project'>): Promise<Project> {
     if (runOfProject(name) === null) throw new RunWorldError(`refusing to create a project that is no run's: ${name}`);
+    const id = randomUUID();
+    // On record before Linear sees the request, for a client that does not record its writes itself.
+    record?.project({ id, name });
     const data = await this.client.request<{ projectCreate: { success: boolean; project: Project } }>(
       'CreateProject',
       'mutation',
       'mutation CreateProject($input: ProjectCreateInput!) { projectCreate(input: $input) { success project { id name createdAt } } }',
-      { input: { name, teamIds } },
+      { input: { id, name, teamIds } },
     );
     if (!data.projectCreate.success) throw new RunWorldError(`Linear did not create project ${name}`);
     return data.projectCreate.project;
@@ -72,7 +82,15 @@ export class LinearWorld {
 
   /** Every project whose name is a run project's, with the run id. */
   async runProjects(): Promise<Array<Project & { runId: string }>> {
-    const result: Array<Project & { runId: string }> = [];
+    return (await this.projects()).flatMap((project) => {
+      const runId = runOfProject(project.name);
+      return runId === null ? [] : [{ ...project, runId }];
+    });
+  }
+
+  /** Every project of the workspace, whatever its name. */
+  async projects(): Promise<Project[]> {
+    const result: Project[] = [];
     let after: string | null = null;
     for (;;) {
       const data: { projects: { nodes: Project[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await this.client.request(
@@ -81,10 +99,7 @@ export class LinearWorld {
         'query RunProjects($after: String) { projects(first: 100, after: $after) { nodes { id name createdAt } pageInfo { hasNextPage endCursor } } }',
         { after },
       );
-      for (const project of data.projects.nodes) {
-        const runId = runOfProject(project.name);
-        if (runId !== null) result.push({ ...project, runId });
-      }
+      result.push(...data.projects.nodes);
       if (!data.projects.pageInfo.hasNextPage) return result;
       after = data.projects.pageInfo.endCursor;
     }
@@ -93,7 +108,8 @@ export class LinearWorld {
   /** Deletes a run project (its documents go with it). Refuses any other project. */
   async deleteProject(project: Pick<Project, 'id' | 'name'>, runId: string): Promise<void> {
     if (runOfProject(project.name) !== runId) throw new RunWorldError(`refusing to delete project ${project.name}: not a project of run ${runId}`);
-    await this.client.request('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id: project.id });
+    const data = await this.client.request<{ projectDelete: { success: boolean } }>('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id: project.id });
+    if (data.projectDelete?.success !== true) throw new RunWorldError(`Linear did not delete project ${project.name}`);
   }
 
   /**
@@ -128,6 +144,8 @@ export class LinearWorld {
     runId: string,
     projectName: string,
     isRuns: (document: Pick<LinearDocument, 'id' | 'title'>) => boolean = (document) => runOfTeamTitle(document.title) === runId,
+    /** The run's ownership record, for a client that does not record its writes itself. */
+    record?: Pick<OwnershipLedger, 'project' | 'projectDeleted'>,
   ): Promise<number> {
     const byTeam = new Map<string, Array<(typeof documents)[number]>>();
     const problems: string[] = [];
@@ -146,7 +164,7 @@ export class LinearWorld {
     for (const [teamId, teamDocuments] of byTeam) {
       let project: Project;
       try {
-        project = await this.createProject(projectName, [teamId]);
+        project = await this.createProject(projectName, [teamId], record);
       } catch (error) {
         problems.push(`team ${teamId}: ${(error as Error).message}`);
         continue;
@@ -167,6 +185,7 @@ export class LinearWorld {
       }
       try {
         await this.deleteProject(project, runId);
+        record?.projectDeleted(project.id);
       } catch (error) {
         problems.push(`project of team ${teamId}: ${(error as Error).message}`);
       }

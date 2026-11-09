@@ -10,6 +10,7 @@ import type { FaultProxy } from './fault-proxy.ts';
 import type { SandboxRest } from './github.ts';
 import type { RunNames } from './isolation.ts';
 import type { LinearWorld, Project, Team } from './linear-world.ts';
+import type { OwnershipLedger } from './ownership.ts';
 import type { Sandbox } from './sandbox.ts';
 import type { Scenario } from './spec.ts';
 
@@ -62,6 +63,8 @@ export interface RunContext {
   /** The sandbox, known before the live world is complete, so cleanup can remove an early branch. */
   sandbox?: Sandbox;
   proxy: FaultProxy | null;
+  /** What the run created in Linear, on disk as it is created, for cleanup and for a recovery after a failed one. */
+  owned: OwnershipLedger;
   checkpoints: CheckpointControl;
   engine: {
     results: EngineResult[];

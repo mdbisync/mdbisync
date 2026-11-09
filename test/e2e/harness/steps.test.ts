@@ -15,6 +15,7 @@ import type { RunTree } from './corpus.ts';
 import { FIXTURE_PREPARATION } from './runner.ts';
 import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
 import { runNames } from './isolation.ts';
+import { OwnershipLedger } from './ownership.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { bodyOf, compare, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
@@ -812,6 +813,7 @@ async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
     live: liveWorld,
     sandbox,
     proxy: { url: 'http://127.0.0.1:1', requests: [], tokens: () => [], setFaults: (next: readonly unknown[]) => void faults.push(...next), clearFaults: () => {}, armedFaults: () => faults.length, counts: () => ({ total: 0, queries: 0, mutations: 0, injected: 0 }), resetCounters: () => {}, close: async () => {} },
+    owned: new OwnershipLedger(stateDir, names.runId),
     checkpoints: new CheckpointControl(join(root, 'run', 'hooks')),
     engine: { results: [], setupRuns: 0, env: {}, restores: [] },
     edits: [],
