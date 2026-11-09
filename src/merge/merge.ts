@@ -141,7 +141,7 @@ function completeBlocks(text: string): string {
       const terminator = raw.startsWith('<!--') ? '-->' : raw.startsWith('<?') ? '?>'
         : raw.startsWith('<![CDATA[') ? ']]>' : /^<![A-Z]/.test(raw) ? '>'
         : tag ? `</${tag}>` : undefined;
-      if (!terminator || closedHtmlBlock(raw)) return;
+      if (!terminator || closedHtmlBlock(node.value)) return;
       close = terminator;
     }
     const lineStart = text.lastIndexOf('\n', start.offset! - 1) + 1;
@@ -159,10 +159,12 @@ function completeBlocks(text: string): string {
  * is new content; an open block takes it in. Asking the parser, not searching
  * for an end string, keeps the rule CommonMark's: a comment ends only at
  * `-->` (not at the `--!>` browsers also accept), a `<script>` only at its
- * end tag, whatever the case.
+ * end tag, whatever the case. The block's value, not its source, is asked:
+ * a container's `>` prefixes stay out of it, so they cannot end a
+ * `<!DOCTYPE` block that ends at any `>`.
  */
-function closedHtmlBlock(raw: string): boolean {
-  return parse(`${raw}${raw.endsWith('\n') ? '' : '\n'}x`).children.length > 1;
+function closedHtmlBlock(value: string): boolean {
+  return parse(`${value}\nx`).children.length > 1;
 }
 
 function render(tokens: Token[], ranges: Range[]): string {

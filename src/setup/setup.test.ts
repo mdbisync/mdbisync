@@ -275,7 +275,7 @@ describe('setup check', () => {
     const summary = renderSetupSummary({
       ok: true,
       securityHooks: [],
-      checks: [{ name: 'github-access', state: 'passed', detail: 'C:\\dir\\|a|b\nnext' }],
+      checks: [{ name: 'github-access', state: 'passed', detail: 'C:\\dir\\|a|b\nnext\rlast' }],
     });
     const table = parse(summary).children.find((node) => node.type === 'table');
     assert.ok(table?.type === 'table');
@@ -285,7 +285,7 @@ describe('setup check', () => {
       return out;
     };
     const cells = table.children[1]!.children.map(text);
-    assert.deepEqual(cells, ['github-access', 'passed', 'C:\\dir\\|a|b next']);
+    assert.deepEqual(cells, ['github-access', 'passed', 'C:\\dir\\|a|b next last']);
   });
 });
 

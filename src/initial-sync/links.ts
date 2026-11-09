@@ -249,17 +249,13 @@ function destinationSpan(body: string, node: Link | Definition): { from: number;
 
 
 /**
- * Whether Linear content links a Linear document: a link or definition whose
- * destination, as the parser reads it, is an https URL on the host
- * `linear.app` with a `/<workspace>/document/` path. Without one, nothing maps
- * back to a relative link, so a run skips the request for the URL key.
+ * Whether Linear content links a Linear document: one of the destinations
+ * `linksFromLinear` can rewrite is an https URL on the host `linear.app` with
+ * a `/<workspace>/document/` path. Without one, nothing maps back to a
+ * relative link, so a run skips the request for the URL key.
  */
 export function linksLinearDocuments(content: string): boolean {
-  let found = false;
-  visit(parse(content), (node: Nodes) => {
-    if (!found && (node.type === 'link' || node.type === 'definition')) found = isLinearDocumentUrl(node.url);
-  });
-  return found;
+  return linkDestinations(content).some((destination) => isLinearDocumentUrl(destination.url));
 }
 
 function isLinearDocumentUrl(url: string): boolean {

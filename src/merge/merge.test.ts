@@ -233,6 +233,11 @@ test('a <pre> block the parser already ended gets no second end tag', async () =
   assert.equal(result.text, conflict('<pre>\ndraft </script>', 'Linear'));
 });
 
+test('a quote prefix does not close a quoted <!DOCTYPE block', async () => {
+  const result = await mergeMarkdown('old\n', '> <!DOCTYPE html\n> draft\n', 'Linear\n');
+  assert.equal(result.text, conflict('> <!DOCTYPE html\n> draft\n> >', 'Linear'));
+});
+
 test('a closed comment gets no extra end', async () => {
   const result = await mergeMarkdown('old\n', '<!-- a -->\n', 'Linear\n');
   assert.equal(result.text, conflict('<!-- a -->', 'Linear'));

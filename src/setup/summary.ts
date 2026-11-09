@@ -1,6 +1,7 @@
 // The job summary of the setup check: a table of names and states. It never
 // holds document content.
 
+import { cell } from '../run/summary.ts';
 import { type SetupReport } from './report.ts';
 import { type StateRefusal } from './state.ts';
 
@@ -14,7 +15,7 @@ export function renderSetupSummary(report: SetupReport): string {
     '',
     '| Item | State | Detail |',
     '| --- | --- | --- |',
-    ...report.checks.map((check) => `| ${check.name} | ${MARK[check.state]} | ${escapeCell(check.detail)} |`),
+    ...report.checks.map((check) => `| ${check.name} | ${MARK[check.state]} | ${cell(check.detail)} |`),
     '',
   ];
   return lines.join('\n');
@@ -22,9 +23,4 @@ export function renderSetupSummary(report: SetupReport): string {
 
 export function renderStateRefusal(refusal: StateRefusal): string {
   return ['## Sync', '', `Stopped before any write: \`${refusal.code}\`.`, '', refusal.message, ''].join('\n');
-}
-
-/** A table cell: backslashes first, so a `\` before a `|` cannot undo the pipe's escape. */
-function escapeCell(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }

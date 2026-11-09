@@ -197,6 +197,9 @@ describe('finding Linear document links', () => {
     assert.equal(linksLinearDocuments(`Inline \`[x](${BASE}/abc)\` code.`), false);
     assert.equal(linksLinearDocuments(`\`\`\`\n[x](${BASE}/abc)\n\`\`\``), false);
     assert.equal(linksLinearDocuments('[issue](https://linear.app/example-team/issue/ABC-1)'), false);
+    // Autolinks and image definitions are never rewritten, so they need no URL key.
+    assert.equal(linksLinearDocuments(`<${BASE}/abc>`), false);
+    assert.equal(linksLinearDocuments(`![x][a]\n\n[a]: ${BASE}/abc`), false);
   });
 
   it('skips only content the mapping back would leave unchanged', () => {
