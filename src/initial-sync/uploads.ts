@@ -235,7 +235,7 @@ export function findFileLinks(documentPath: string, body: string, isFile: (path:
 type DestinationNode = Extract<Nodes, { type: 'link' | 'image' | 'definition' }>;
 
 /** Every link, image and definition with the place of its destination's text, in document order. */
-function destinations(body: string): Array<{ node: DestinationNode; range: { from: number; to: number } }> {
+export function destinations(body: string): Array<{ node: DestinationNode; range: { from: number; to: number } }> {
   const result: Array<{ node: DestinationNode; range: { from: number; to: number } }> = [];
   visit(parse(body), (node) => {
     if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;

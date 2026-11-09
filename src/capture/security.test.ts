@@ -38,6 +38,7 @@ it('runs security aliases at both stages and returns no hook output or matched v
     assert.deepEqual(findings, [{hook: 'content-secret', line: 3}, {hook: 'push-secret', line: 3}]);
     assert.ok(!JSON.stringify(findings).includes('private-canary'));
     // No candidate was added to the real repository, including unreachable objects.
+    await gate.close?.();
     const all = await git.text(['cat-file', '--batch-all-objects', '--batch']);
     assert.ok(!all.includes('Safe.'));
   } finally { await fixture.cleanup(); }

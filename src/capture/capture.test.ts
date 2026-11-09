@@ -6,6 +6,10 @@ import { loadMapping } from '../mapping/index.ts';
 import { LinearClient } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
 import { resolveTargets } from '../setup/linear.ts';
+import { runCli } from '../cli.ts';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { GITHUB_API } from '../setup/test-helpers.ts';
 import { capture } from './capture.ts';
 import { documentPath } from './paths.ts';
 
@@ -43,6 +47,22 @@ describe('capture from Linear', () => {
   const run = () => capture(context, { config, identity: IDENTITY });
   const refresh = async () => { context.fetched = await fetchState(context.git, config); };
   const text = async (path: string) => (await fixture.remote.run(['show', `${stateRef(config, 'linear')}:${path}`])).stdout.toString('utf8');
+
+  it('captures through the CLI and omits document bodies from its report and summary', async () => {
+    await fixture.seed({'.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/mdbisync\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n'});
+    world.linear.documents[0]!.content = 'Private body canary.\n';
+    const reportFile = join(fixture.root, 'capture-report.json');
+    const result = await runCli(['sync'], {cwd: context.git.dir, fetch: fakeFetch(world), env: {
+      MDBISYNC_LINEAR_CLIENT_ID: 'client', MDBISYNC_LINEAR_CLIENT_SECRET: 'secret', MDBISYNC_LINEAR_API_URL: LINEAR_API,
+      MDBISYNC_GITHUB_TOKEN: 'token', MDBISYNC_GITHUB_API_URL: GITHUB_API, MDBISYNC_REPOSITORY: 'example/repository', MDBISYNC_REPORT_FILE: reportFile,
+    }});
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(!result.stdout.includes('Private body canary'));
+    const reportText = await readFile(reportFile, 'utf8');
+    assert.ok(!reportText.includes('Private body canary'));
+    assert.equal(JSON.parse(reportText).capture.ok, true);
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nPrivate body canary.\n');
+  });
 
   it('captures edits with previous front matter; repeated capture makes no content commit', async () => {
     world.linear.documents[0]!.content = 'Updated.\n';
@@ -143,6 +163,26 @@ describe('capture from Linear', () => {
     const read = (await (await import('../state/index.ts')).readFiles(context.git, config, result.fetched.state.linear!, [image])).get(image)!;
     assert.equal(read.ok, true);
     if(read.ok) assert.equal(read.content.toString(), 'image-bytes');
+  });
+
+  it('restores links between documents using the shared inverse', async () => {
+    world.linear.documents.push({id: 'target', title: 'guides/target', projectId: 'project-api', content: 'Target.\n', createdAt: '2026-01-04T00:00:00Z'});
+    world.linear.documents[0]!.content = '[Target](https://linear.app/example-team/document/target#intro)\n';
+    const result = await run();
+    assert.equal(result.ok, true);
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<guides/target.md#intro>)\n');
+  });
+
+  it('retries an asset failure on an older document after accepting a newer document', async () => {
+    world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/retry.png)\n';
+    world.linear.documents.push({id: 'later', title: 'later', projectId: 'project-api', content: 'Later.\n', createdAt: '2026-01-04T00:00:00Z'});
+    const first = await capture(context, { config, fetch: async () => { throw new Error('Unavailable'); } });
+    assert.equal(first.leftOut.length, 1);
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+    await refresh();
+    const next = await capture(context, { config, fetch: async () => new Response('image') });
+    assert.equal(next.leftOut.length, 0);
+    assert.ok(next.changed.includes('docs/plan.md'));
   });
 
   it('reads only changed content after the cursor', async () => {

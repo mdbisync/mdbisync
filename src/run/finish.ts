@@ -2,6 +2,7 @@
 // for tests and tooling. Names, paths and states only, no content.
 
 import { writeFile } from 'node:fs/promises';
+import { type CaptureResult } from '../capture/index.ts';
 import { type ConfirmedResult, type PlanReport, type WriteStop } from '../initial-sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
@@ -19,6 +20,7 @@ export interface RunReport {
   summary: PlanReport | null;
   /** A confirmed initial sync's writes, by path; null for other runs. */
   initialSync: ConfirmedReport | null;
+  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut'> | null;
   /** Documents created or overwritten in Linear by this run. */
   writtenCount: number;
   /** Documents an unfinished earlier run had written, skipped by this one. */
@@ -53,12 +55,13 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
   return {
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? confirmed?.code ?? null,
+    code: outcome.code ?? outcome.captured?.code ?? confirmed?.code ?? null,
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
     securityHooks: outcome.setup?.securityHooks ?? null,
     notImplemented: outcome.notImplemented,
     summary: outcome.plan ?? null,
     initialSync: confirmed === undefined ? null : toConfirmedReport(confirmed),
+    capture: outcome.captured === undefined ? null : {ok: outcome.captured.ok, changed: outcome.captured.changed, removed: outcome.captured.removed, blocked: outcome.captured.blocked, leftOut: outcome.captured.leftOut},
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? 0,
     resumed: confirmed?.resumed ?? false,

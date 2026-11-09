@@ -153,7 +153,9 @@ describe('preflight', () => {
     it('a correct setup lets the sync past the preflight', async () => {
       const { result, report } = await run('sync', fakeWorld());
       assert.equal(report.ok, true);
-      assert.equal(result.stderr, 'sync: not implemented\n');
+      assert.equal(result.stderr, '');
+      assert.equal(result.exitCode, 0);
+      assert.equal(report.capture?.ok, true);
     });
   });
 });

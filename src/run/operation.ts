@@ -1,9 +1,10 @@
 // Runs one operation after its preflight: `check` stops there; an initial
 // sync from git to Linear without `confirm` plans and reports what it would
 // do, and with `confirm` makes Linear equal to the tracked branch and
-// records the state. The other operations are not built yet and say so after
-// a passed preflight.
+// records the state. A sync captures Linear changes after its preflight.
 
+import { capture, type CaptureResult } from '../capture/index.ts';
+import { checkpoint } from '../test-hooks.ts';
 import {
   type ConfirmedResult,
   type PlanReport,
@@ -25,6 +26,7 @@ export interface OperationOutcome extends PreflightOutcome {
   plan?: PlanReport;
   /** What a confirmed initial sync wrote and recorded. */
   confirmed?: ConfirmedResult;
+  captured?: CaptureResult;
 }
 
 export async function runOperation(
@@ -39,12 +41,19 @@ export async function runOperation(
   const gitToLinear = initialSync?.direction === 'git-to-linear' ? initialSync : undefined;
   let plan: PlanReport | undefined;
   let confirmed: ConfirmedResult | undefined;
+  let captured: CaptureResult | undefined;
   let workSummary = '';
   const preflight = await runPreflight(
     operation,
     inputs,
     options,
-    gitToLinear === undefined
+    operation === 'sync'
+      ? async (context) => {
+          captured = await capture(context, { config: inputs.state, ...(options.fetch ? {fetch: options.fetch} : {}) });
+          workSummary = captured.summary;
+          if (captured.ok) await checkpoint('after-capture-push-before-pr');
+        }
+      : gitToLinear === undefined
       ? undefined
       : async (context) => {
           if (gitToLinear.confirm) {
@@ -60,11 +69,12 @@ export async function runOperation(
         },
   );
   if (!preflight.ok) return { ...preflight, notImplemented: false };
-  const outcome: OperationOutcome = { ...preflight, notImplemented: operation !== 'check' && gitToLinear === undefined };
-  if (plan !== undefined) {
-    outcome.plan = plan;
+  const outcome: OperationOutcome = { ...preflight, notImplemented: operation !== 'check' && operation !== 'sync' && gitToLinear === undefined };
+  if (plan !== undefined) outcome.plan = plan;
+  if (workSummary !== '') {
     outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;
   }
   if (confirmed !== undefined) outcome.confirmed = confirmed;
+  if (captured !== undefined) outcome.captured = captured;
   return outcome;
 }

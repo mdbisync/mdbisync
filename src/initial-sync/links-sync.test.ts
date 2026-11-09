@@ -76,7 +76,10 @@ describe('links between synchronized documents in a confirmed initial sync', () 
     const ids = await readIds();
     assert.deepEqual(Object.keys(ids).sort(), SYNCED_PATHS);
     const id = (path: string) => ids[path]?.id as string;
-    assert.equal(content(world, id('eng/notes/plan.md')), `# Plan\n\nRead [the guide](<${BASE}/${id('eng/notes/guide.md')}#setup>), [the raw data](<data.csv>) and [the site](<https://example.com>). ${CANARY}`);
+    const data = world.linear.uploads.find((upload) => upload.filename === 'data.csv');
+    assert.ok(data);
+    assert.ok(data.bytes?.equals(Buffer.from(TREE['eng/notes/data.csv']!)));
+    assert.equal(content(world, id('eng/notes/plan.md')), `# Plan\n\nRead [the guide](<${BASE}/${id('eng/notes/guide.md')}#setup>), [the raw data](<${data.assetUrl}>) and [the site](<https://example.com>). ${CANARY}`);
     assert.equal(content(world, id('eng/notes/guide.md')), `# Guide\n\n## Setup\n\nBack to [the plan](<${BASE}/${id('eng/notes/plan.md')}>). ${CANARY}`);
     assert.equal(content(world, id('eng/backend/notes.md')), `# Notes\n\nFollow [the plan](<${BASE}/${id('eng/notes/plan.md')}>). ${CANARY}`);
     const tracked = await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']);

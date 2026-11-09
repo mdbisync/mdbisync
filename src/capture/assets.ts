@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
-import { parse, visit, start, end } from '../format/markdown.ts';
+import { destinations } from '../initial-sync/uploads.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, type StateConfig } from '../state/index.ts';
 
 export interface CapturedAssets {
@@ -44,12 +44,9 @@ export async function captureAssets(
   fetcher: typeof fetch = fetch,
 ): Promise<CapturedAssets> {
   const references: Array<{ url: string; from: number; to: number }> = [];
-  visit(parse(body), (node) => {
-    if ((node.type !== 'image' && node.type !== 'link' && node.type !== 'definition') || !isUpload(node.url)) return;
-    const source = body.slice(start(node), end(node));
-    const offset = source.indexOf(node.url);
-    if (offset !== -1) references.push({ url: node.url, from: start(node) + offset, to: start(node) + offset + node.url.length });
-  });
+  for (const { node, range } of destinations(body)) {
+    if (isUpload(node.url)) references.push({ url: node.url, from: range.from, to: range.to });
+  }
   const files = new Map<string, Buffer>();
   const additions: UploadMap = new Map();
   if (references.length === 0) return { body, files, uploads: additions };
