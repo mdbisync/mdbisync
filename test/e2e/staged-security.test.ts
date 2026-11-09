@@ -187,6 +187,7 @@ for (const file of process.argv.slice(2)) {
       'linear-api-url': `${bridge}/linear`,
       'github-token': appToken,
       'github-api-url': `${bridge}/github`,
+      'merge-grace-seconds': '0',
       repository: 'example/repository',
       'report-file': join(fixture.root, `${name}-report`, 'report.json'),
       ...inputs,
