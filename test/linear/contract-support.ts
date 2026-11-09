@@ -119,29 +119,29 @@ export function stateOf(document: LinearDocument): DocumentState {
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** A read of a trashed document that did not say trashed, and one read after a pause. */
+/** An unconfirmed read after trash, and the one permitted delayed read. */
 export interface TrashReadDiagnosis {
   trashRequestId: string | undefined;
   trashFinishedAt: string | undefined;
-  immediate: DocumentState & { requestId: string | undefined };
+  immediate: (DocumentState | { absent: true }) & { requestId: string | undefined };
   delayed:
-    | (DocumentState & { requestId: string | undefined; afterMs: number })
-    | { requestId: string | undefined; afterMs: number; absent: true }
-    | { afterMs: number; error: string };
+    | (DocumentState & { requestId: string | undefined; afterMs: number; elapsedMs: number })
+    | { requestId: string | undefined; afterMs: number; elapsedMs: number; absent: true }
+    | { requestId: string | undefined; afterMs: number; elapsedMs: number; error: string };
 }
 
 /**
- * Records why a read right after a successful trash did not say trashed: its
- * request id and state (a stale record keeps the old `updatedAt` and no
- * `archivedAt`; a record that has `archivedAt` without `trashed` points at
- * the field instead), then reads the document once more after `pauseMs`. A
- * read only: it changes nothing, never throws, and the caller's assertion
- * still fails.
+ * Allows at most one delayed read after an absent or stale immediate read.
+ * The default pause is two seconds, matching observed backend consistency
+ * lag. This is a read budget (two requests, one pause), not a transport
+ * deadline. The caller must assert that the final read confirms trash.
+ * Records only request ids, timing and state; never retries a write.
  */
 export async function diagnoseTrashRead(
   linear: LinearClient,
   requests: readonly LogEntry[],
-  immediate: LinearDocument,
+  documentId: string,
+  immediate: LinearDocument | undefined,
   pauseMs = 2_000,
 ): Promise<TrashReadDiagnosis> {
   const last = (operation: string) => requests.findLast((entry) => entry.operation === operation);
@@ -149,17 +149,19 @@ export async function diagnoseTrashRead(
   const diagnosis: Omit<TrashReadDiagnosis, 'delayed'> = {
     trashRequestId: trash?.requestId,
     trashFinishedAt: trash?.finishedAt,
-    immediate: { ...stateOf(immediate), requestId: last('GetDocuments')?.requestId },
+    immediate: { ...(immediate ? stateOf(immediate) : { absent: true as const }), requestId: last('GetDocuments')?.requestId },
   };
+  const started = performance.now();
   await pause(pauseMs);
   try {
-    const [later] = await linear.getDocuments([immediate.id]);
+    const [later] = await linear.getDocuments([documentId]);
     const requestId = last('GetDocuments')?.requestId;
+    const elapsedMs = performance.now() - started;
     return {
       ...diagnosis,
-      delayed: later === undefined ? { requestId, afterMs: pauseMs, absent: true } : { ...stateOf(later), requestId, afterMs: pauseMs },
+      delayed: later === undefined ? { requestId, afterMs: pauseMs, elapsedMs, absent: true } : { ...stateOf(later), requestId, afterMs: pauseMs, elapsedMs },
     };
   } catch (error) {
-    return { ...diagnosis, delayed: { afterMs: pauseMs, error: error instanceof Error ? error.name : 'Unknown error' } };
+    return { ...diagnosis, delayed: { requestId: last('GetDocuments')?.requestId, afterMs: pauseMs, elapsedMs: performance.now() - started, error: error instanceof Error ? error.name : 'Unknown error' } };
   }
 }

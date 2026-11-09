@@ -14,6 +14,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
+import type { TrashReadDiagnosis } from './contract-support.ts';
+
 import { LINEAR_API, fakeFetch, fakeWorld, type FakeWorld } from '../../src/setup/test-helpers.ts';
 
 const BUDGET = {
@@ -26,7 +28,7 @@ const BUDGET = {
   'x-complexity': '3',
 };
 
-/** The contract run's pause before a diagnostic or verifying read again. */
+/** The contract run's pause before the one delayed trash read or a verifying cleanup read. */
 const PAUSE_MS = 50;
 
 interface Faults {
@@ -34,6 +36,8 @@ interface Faults {
   staleTrashReads?: number;
   /** TrashDocument is applied, but answered with a 503. */
   loseTrashAnswer?: boolean;
+  /** Replace reads after trash with an empty result or a transport error. */
+  trashReadFault?: 'absent-once' | 'absent-always' | 'delayed-error';
   /** After the last DeleteProject, this many GetDocuments answers show no `archivedAt`. */
   staleArchiveReads?: number;
 }
@@ -60,6 +64,7 @@ async function serve(world: FakeWorld, faults: Faults): Promise<Served> {
   let deletes = 0;
   let trashedId: string | undefined;
   let requestNumber = 0;
+  let trashReads = 0;
   const served: Served = { url: '', operations, server: createServer() };
 
   async function answer(req: IncomingMessage, raw: Buffer): Promise<Reply> {
@@ -79,6 +84,14 @@ async function serve(world: FakeWorld, faults: Faults): Promise<Served> {
     if (operationName === 'TrashDocument') {
       [trashedId, staleTrash] = [variables.id as string, faults.staleTrashReads ?? 0];
       if (faults.loseTrashAnswer) return { status: 503, headers, text: '{}' };
+    }
+    if (operationName === 'RestoreDocument') trashedId = undefined;
+    if (operationName === 'GetDocuments' && trashedId !== undefined) {
+      trashReads += 1;
+      if (faults.trashReadFault === 'absent-always' || (faults.trashReadFault === 'absent-once' && trashReads === 1)) {
+        return { status: 200, headers, text: JSON.stringify({ data: { documents: { nodes: [] } } }) };
+      }
+      if (faults.trashReadFault === 'delayed-error' && trashReads === 2) return { status: 503, headers, text: '{}' };
     }
     if (operationName === 'DeleteProject' && (deletes += 1) === 2) staleArchive = faults.staleArchiveReads ?? 0;
     if (operationName === 'GetDocuments' && (staleTrash > 0 || staleArchive > 0)) {
@@ -134,11 +147,7 @@ interface Run {
     restoredInCleanup: string[];
     unconfirmedRestoreFailures: Array<{ operation: string; documentId?: string; error: string }>;
     finalDocuments: Array<{ id: string; trashed: boolean; archived: boolean }>;
-    trashRead?: {
-      trashRequestId: string;
-      immediate: { trashed: boolean; archived: boolean; requestId: string };
-      delayed: { trashed: boolean; archived: boolean; requestId: string; afterMs: number };
-    };
+    trashRead?: TrashReadDiagnosis;
   };
   operations: string[];
 }
@@ -208,13 +217,57 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
     assertArchivedNotTrashed(world);
   });
 
+  for (const fault of ['stale', 'absent-once'] as const) {
+    it(`confirms trash on the delayed read after an immediate ${fault} response`, async () => {
+      const world = fakeWorld();
+      const run = await runContract(world, fault === 'stale' ? { staleTrashReads: 1 } : { trashReadFault: fault });
+      assert.equal(run.code, 0, run.output);
+      assert.equal(run.report.cleanupFailed, false);
+      const diagnosis = run.report.trashRead!;
+      assert.ok('trashed' in diagnosis.delayed);
+      assert.equal(diagnosis.delayed.trashed, true);
+      assert.equal(diagnosis.delayed.afterMs, PAUSE_MS);
+      assert.ok(diagnosis.delayed.elapsedMs >= PAUSE_MS);
+      const trash = run.operations.indexOf('TrashDocument');
+      assert.deepEqual(run.operations.slice(trash, trash + 4), ['TrashDocument', 'GetDocuments', 'GetDocuments', 'RestoreDocument']);
+      assert.equal(run.operations.filter((op) => op === 'TrashDocument').length, 1);
+      assertArchivedNotTrashed(world);
+    });
+  }
+
+  for (const fault of ['absent-always', 'delayed-error'] as const) {
+    it(`fails with diagnostics and restores before deleting after ${fault}`, async () => {
+      const world = fakeWorld();
+      const run = await runContract(world, { trashReadFault: fault, staleTrashReads: 1 });
+      assert.equal(run.code, 1, run.output);
+      assert.match(run.output, TRASH_TEST_FAILED);
+      assert.match(run.output, /trash must be confirmed within two reads/);
+      const diagnosis = run.report.trashRead!;
+      if (fault === 'absent-always') {
+        assert.ok('absent' in diagnosis.immediate && diagnosis.immediate.absent);
+        assert.ok('absent' in diagnosis.delayed && diagnosis.delayed.absent);
+      } else {
+        assert.ok('error' in diagnosis.delayed);
+        assert.equal(diagnosis.delayed.error, 'LinearHttpError');
+      }
+      assert.equal(run.report.cleanupFailed, false, run.output);
+      const trash = run.operations.indexOf('TrashDocument');
+      const restore = run.operations.indexOf('RestoreDocument');
+      // Two contract reads, then cleanup's own read before its restore.
+      assert.deepEqual(run.operations.slice(trash, restore).filter((op) => op !== 'UpdateDocument'), ['TrashDocument', 'GetDocuments', 'GetDocuments', 'GetDocuments']);
+      assert.ok(restore < run.operations.indexOf('DeleteProject'));
+      assert.equal(run.operations.filter((op) => op === 'TrashDocument').length, 1);
+      assertArchivedNotTrashed(world);
+    });
+  }
+
   it('restores the trashed document before deleting its project when the trash assertion fails', async () => {
     const world = fakeWorld();
     // The read right after the trash, the diagnostic read and cleanup's own read are all stale.
     const run = await runContract(world, { staleTrashReads: 3 });
     assert.equal(run.code, 1, run.output);
     assert.match(run.output, TRASH_TEST_FAILED);
-    assert.match(run.output, /Expected values to be strictly equal:[\s\S]*false !== true/);
+    assert.match(run.output, /trash must be confirmed within two reads and one 50ms pause/);
     assert.match(run.output, LATER_TEST_PASSED, 'the later tests still ran');
     assert.equal(run.report.cleanupFailed, false, run.output);
     assert.deepEqual(run.report.restoredInCleanup, [readingList(world).id]);
@@ -225,7 +278,9 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
     assertArchivedNotTrashed(world);
     // The safe diagnosis: request ids and states only.
     const diagnosis = run.report.trashRead!;
-    assert.match(diagnosis.trashRequestId, /^fake-\d+$/);
+    assert.match(diagnosis.trashRequestId!, /^fake-\d+$/);
+    assert.ok('trashed' in diagnosis.immediate);
+    assert.ok('trashed' in diagnosis.delayed);
     assert.deepEqual([diagnosis.immediate.trashed, diagnosis.immediate.archived], [false, false]);
     assert.deepEqual([diagnosis.delayed.trashed, diagnosis.delayed.archived, diagnosis.delayed.afterMs], [false, false, PAUSE_MS]);
     assert.notEqual(diagnosis.delayed.requestId, diagnosis.immediate.requestId);
@@ -239,6 +294,9 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
     assert.match(run.output, TRASH_TEST_FAILED);
     assert.equal(run.report.cleanupFailed, false, run.output);
     assert.deepEqual(run.report.restoredInCleanup, [readingList(world).id]);
+    assert.equal(run.report.trashRead, undefined, 'a lost mutation response cannot become success through a read');
+    assert.equal(run.operations.filter((op) => op === 'TrashDocument').length, 1);
+    assert.ok(run.operations.indexOf('RestoreDocument') < run.operations.indexOf('DeleteProject'));
     assertArchivedNotTrashed(world);
   });
 
