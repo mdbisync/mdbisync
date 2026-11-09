@@ -31,6 +31,8 @@ export interface CycleResult {
   complete: boolean;
   /** Something was written to Linear or to a ref. */
   changed: boolean;
+  /** The tracked branch's commit this run took in: fetched at its start, so a later push waits for the next run. */
+  trackedTip: string;
   capture: CaptureResult;
   /** Absent when capture stops before step 2. */
   pullRequest?: PullRequestResult;
@@ -40,15 +42,17 @@ export interface CycleResult {
 
 export async function runSyncCycle(context: RunContext, options: CycleOptions): Promise<CycleResult> {
   const state = { ...context.fetched.state };
+  const trackedTip = context.fetched.tracked;
   const captured = await capture(context, {config:options.config, state, ...(options.fetch ? {fetch:options.fetch} : {})});
   const changed = captured.changed.length > 0 || captured.removed.length > 0 || captured.blocked.length > 0;
-  if (!captured.ok) return {complete:false, changed, capture:captured};
+  if (!captured.ok) return {complete:false, changed, trackedTip, capture:captured};
   await checkpoint('after-capture-push-before-pr');
-  // Nothing waits on the pull request: steps 3 to 5 run whatever step 2 found.
+  // Pending checks do not hold up steps 3 to 5. A failed check needs a
+  // configuration fix first, so leave Linear untouched by the write step.
   const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github });
   // Writing Linear from the tracked branch while that pull request waits would leave it to be merged over the new state.
-  if (pullRequest.code === 'initial-pull-request-pending') return { complete: false, changed, capture: captured, pullRequest };
+  if (pullRequest.code === 'initial-pull-request-pending' || pullRequest.code === 'check-failed') return { complete: false, changed, trackedTip, capture: captured, pullRequest };
   const moved = pullRequest.branchMoved || pullRequest.merged !== null || pullRequest.pullRequest?.opened === true;
-  const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, state:captured.state, ...(options.transforms ? { transforms: options.transforms } : {}) });
-  return {complete:write.complete && pullRequest.code === undefined, changed:changed || moved || write.changed, capture:captured, pullRequest, write};
+  const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, containers: captured.containers, state:captured.state, captured:captured.documents, ...(options.transforms ? { transforms: options.transforms } : {}) });
+  return {complete:write.complete && pullRequest.code === undefined, changed:changed || moved || write.changed, trackedTip, capture:captured, pullRequest, write};
 }

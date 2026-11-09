@@ -104,9 +104,18 @@ export interface FakeWorld {
     /**
      * Merges a pull request as GitHub would, while its head is `sha`: the
      * test moves the base branch and answers the merge commit, or answers
-     * GitHub's refusal status. Without it, GitHub answers 405.
+     * GitHub's refusal status, with its message when given. Without it,
+     * GitHub answers 405.
      */
-    merge?: (pr: FakePullRequest, sha: string) => Promise<{ sha: string } | { status: number }>;
+    merge?: (pr: FakePullRequest, sha: string) => Promise<{ sha: string } | { status: number; message?: string }>;
+    /**
+     * Breaks the connection of a request (`METHOD path`, the path after the
+     * repository): `before` GitHub handles it, or `after`, so its answer is
+     * lost. Undefined lets the request through. `body` is the request's JSON
+     * body, empty for none; the setup check's probes send bodies that lack
+     * required fields.
+     */
+    reset?: (request: string, body: Record<string, unknown>) => 'before' | 'after' | undefined;
   };
   /**
    * `unavailable`: the token endpoint answers 503, as in an outage.
@@ -128,6 +137,8 @@ export interface FakeWorld {
     uploads: FakeUpload[];
     /** Comments on documents, by comment id. */
     comments: Map<string, { documentContentId: string; body: string }>;
+    /** Projects removed with `projectDelete`; their documents stay, archived. */
+    deletedProjects?: string[];
   };
   /** `METHOD url` of every request. */
   requests: string[];
@@ -176,7 +187,15 @@ export function fakeFetch(world: FakeWorld): typeof fetch {
       const upload = world.linear.uploads.find((entry) => entry.assetUrl === url);
       return upload?.bytes === undefined ? new Response(null, {status:404}) : new Response(upload.bytes, {headers:{'content-type':upload.contentType}});
     }
-    if (url.startsWith(GITHUB_API)) return github(world, method, url.slice(GITHUB_API.length), init);
+    if (url.startsWith(GITHUB_API)) {
+      const path = url.slice(GITHUB_API.length);
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const reset = world.github.reset?.(`${method} ${path.replace(/^\/repos\/[^/]+\/[^/]+/, '')}`, body);
+      if (reset === 'before') throw new TypeError('fetch failed', { cause: new Error('read ECONNRESET') });
+      const answer = await github(world, method, path, init);
+      if (reset === 'after') throw new TypeError('fetch failed', { cause: new Error('read ECONNRESET') });
+      return answer;
+    }
     if (url.startsWith(LINEAR_API)) return linear(world, url.slice(LINEAR_API.length), init);
     throw new Error(`unexpected request to ${url}`);
   };
@@ -271,7 +290,7 @@ async function mergeRequest(world: FakeWorld, method: string, rest: string, init
   const body = JSON.parse(String(init?.body ?? '{}')) as { merge_method?: string; sha?: string };
   if (body.merge_method !== 'merge' || body.sha === undefined) return json(422, { message: 'Validation Failed' });
   const answer = world.github.merge === undefined ? { status: 405 } : await world.github.merge(pr, body.sha);
-  if ('status' in answer) return json(answer.status, { message: 'Pull Request is not mergeable' });
+  if ('status' in answer) return json(answer.status, { message: answer.message ?? 'Pull Request is not mergeable' });
   world.writes.push(`${method} ${rest}`);
   Object.assign(pr, { state: 'closed', merged: true });
   return json(200, { sha: answer.sha, merged: true, message: 'Pull Request successfully merged' });
@@ -336,19 +355,26 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     if (write.reject?.(operationName, variables) === true) {
       return json(200, { errors: [{ message: 'Rejected by the fake', extensions: { code: 'INVALID_INPUT' } }], data: null });
     }
+    if (operationName === 'UpdateDocument' && !world.linear.documents.some((d) => d.id === variables.id)) {
+      return json(200, { errors: [{ message: 'Entity not found: Document', extensions: { code: 'INPUT_ERROR' } }], data: null });
+    }
+    if (operationName === 'RestoreDocument' && inDeletedProject(world, variables.id as string)) {
+      // As measured: Linear refuses to restore a trashed document whose project was deleted.
+      return json(200, { errors: [{ message: 'Project not found', extensions: { code: 'INPUT_ERROR' } }], data: null });
+    }
     return json(200, { data: documentMutation(world, operationName, variables) ?? {} });
   }
   world.linear.beforeQuery?.(operationName, variables);
-  if (operationName === 'SetupTeams') {
+  if (operationName === 'SetupTargets') {
     const refs = variables.refs as string[];
-    return json(200, { data: { teams: { nodes: world.linear.teams.filter((team) => refs.includes(team.key) || refs.includes(team.name)) } } });
-  }
-  if (operationName === 'SetupProjects') {
+    const teams = { nodes: world.linear.teams.filter((team) => refs.includes(team.key) || refs.includes(team.name)) };
+    // The projects are asked for only when the query names them.
+    if (!Array.isArray(variables.names)) return json(200, { data: { teams } });
     const names = variables.names as string[];
     const nodes = world.linear.projects
       .filter((project) => names.includes(project.name))
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
-    return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
+    return json(200, { data: { teams, projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
   if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
@@ -388,8 +414,8 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     return { documentCreate: { success: true, document: documentNode(document, true) } };
   }
   if (operation === 'UpdateDocument') {
-    const document = documents.find((d) => d.id === variables.id);
-    if (document === undefined) return { documentUpdate: { success: false, document: null } };
+    // An unknown id was already answered with Linear's not-found error.
+    const document = documents.find((d) => d.id === variables.id)!;
     const input = variables.input as {
       content?: string;
       title?: string;
@@ -445,6 +471,23 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     if (comment !== undefined) comment.body = (variables.input as { body: string }).body;
     return { commentUpdate: { success: comment !== undefined, comment: comment === undefined ? null : { id: variables.id } } };
   }
+  if (operation === 'CreateProject') {
+    const input = variables.input as { name: string; teamIds: string[] };
+    const project: FakeProject = { id: `project-${world.linear.projects.length + (world.linear.deletedProjects?.length ?? 0) + 1}`, name: input.name, teamIds: input.teamIds };
+    world.linear.projects.push(project);
+    return { projectCreate: { project: { id: project.id } } };
+  }
+  if (operation === 'DeleteProject') {
+    const index = world.linear.projects.findIndex((p) => p.id === variables.id);
+    if (index === -1) return { projectDelete: { success: false } };
+    const [project] = world.linear.projects.splice(index, 1);
+    (world.linear.deletedProjects ??= []).push(project!.id);
+    // Deleting a project archives its live documents; trashed ones stay trashed.
+    for (const document of documents) {
+      if (document.projectId === project!.id && document.archivedAt === undefined) document.archivedAt = new Date().toISOString();
+    }
+    return { projectDelete: { success: true } };
+  }
   if (operation === 'RestoreDocument') {
     const document = documents.find((d) => d.id === variables.id);
     if (document !== undefined) {
@@ -455,6 +498,11 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     return { documentUnarchive: { success: document !== undefined } };
   }
   return undefined;
+}
+
+function inDeletedProject(world: FakeWorld, id: string): boolean {
+  const projectId = world.linear.documents.find((d) => d.id === id)?.projectId;
+  return projectId !== undefined && world.linear.deletedProjects?.includes(projectId) === true;
 }
 
 let clock = 0;

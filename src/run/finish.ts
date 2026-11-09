@@ -2,7 +2,8 @@
 // for tests and tooling. Names, paths and states only, no content.
 
 import { type ContainerCapacity } from './capacity.ts';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
@@ -41,7 +42,7 @@ export interface RunReport {
   sync: SyncReport | null;
   /** A sync run's step 2, the sync pull request; null for other runs and when capture stopped before it. */
   pullRequest: PullRequestResult | null;
-  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'stopped'> | null;
+  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'writeBackWarnings' | 'stopped'> | null;
   /** Documents created or overwritten in Linear by this run. */
   writtenCount: number;
   /** Documents an unfinished earlier run had written, skipped by this one. */
@@ -64,8 +65,30 @@ export interface RunReport {
   stoppedEarly: boolean;
   /** Every document this run wrote has its id in the `ids` state ref. */
   progressRecorded: boolean;
-  /** The `linear` record an initial sync from git to Linear made or confirmed; null otherwise (a run from Linear reports its record under `linearToGit`). */
-  record: { kind: 'initial'; commit: string; moved: boolean; hasTrackedParent: boolean; reformattedCount: number } | null;
+  /**
+   * The `linear` record this run made: an initial sync from git to Linear's,
+   * or a sync run's step 5 (a merge of the tracked branch, or an ordinary
+   * commit when documents were skipped or left); null when it made none (a
+   * run from Linear reports its record under `linearToGit`).
+   */
+  record: {
+    kind: 'initial' | 'merge' | 'ordinary';
+    commit: string;
+    hasTrackedParent: boolean;
+    /** An initial sync's: whether the record moved `linear`, and how many files it took in Linear's form. */
+    moved?: boolean;
+    reformattedCount?: number;
+  } | null;
+  /** A push of this run was refused because a ref had moved under it: another run recorded first. */
+  atomicPushRefused: boolean;
+  /** Refs that a refused push moved anyway; always 0, since every push is atomic. */
+  partialRefUpdates: number;
+  /** A sync run skipped a document because it changed in Linear after the capture. */
+  skippedConcurrentDocument: boolean;
+  /** The tracked branch's commit a sync run took in (fetched at its start); null for other runs. */
+  capturedTrackedTip: string | null;
+  /** A sync run's longest time from a document's re-read to its write's answer, in milliseconds; null when it wrote none. */
+  rereadWindowMs: number | null;
   /** A confirmed initial sync from Linear: what it took and the pull request it left for a person; null for other runs. */
   linearToGit: ReverseReport | null;
 }
@@ -94,7 +117,12 @@ export interface SyncReport {
   relocated: WriteResult['relocated'];
   created: string[];
   adopted: string[];
+  restored: string[];
   trashed: string[];
+  /** Documents whose merged text holds conflict marker paragraphs. */
+  conflicts: string[];
+  /** Cases the structural conflict rules decided: paths, rule codes and summary lines, never content. */
+  decided: WriteResult['decided'];
   skipped: WriteResult['skipped'];
   leftOut: WriteResult['leftOut'];
   leftOutAtWrite: WriteResult['leftOutAtWrite'];
@@ -171,6 +199,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
             reformattedCount: confirmed.record.reformatted.length,
           },
     linearToGit: reverse === undefined ? null : toReverseReport(reverse),
+    ...raceFacts(outcome),
   };
 }
 
@@ -220,7 +249,10 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
       relocated: write.relocated,
       created: write.created,
       adopted: write.adopted,
+      restored: write.restored,
       trashed: write.trashed,
+      conflicts: write.conflicts,
+      decided: write.decided,
       skipped: write.skipped,
       leftOut: write.leftOut,
       leftOutAtWrite: write.leftOutAtWrite,
@@ -229,15 +261,28 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
       stopped: write.stopped ?? null,
       record: write.record,
     },
-    writtenCount: new Set([...write.updated, ...write.created, ...write.relocated.map((entry) => entry.to)]).size,
+    writtenCount: new Set([...write.updated, ...write.created, ...write.restored, ...write.relocated.map((entry) => entry.to)]).size,
     skippedCompletedCount: 0,
     oversizeFiles: [...new Set(write.leftOutAtWrite.filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
     resumed: write.resumed,
     ...faultFacts(outcome, write.stopped, write.failed, [...write.updated, ...write.created, ...write.relocated.map((entry) => entry.to)]),
     stoppedEarly: write.stopped !== undefined,
     progressRecorded: write.code !== 'state-moved',
-    record: null,
+    record: write.record === null ? null : { kind: write.record.kind, commit: write.record.commit, hasTrackedParent: write.record.parents.length > 1 },
     linearToGit: null,
+    ...raceFacts(outcome),
+  };
+}
+
+/** What a run met from other runs and from people while it worked. */
+function raceFacts(outcome: OperationOutcome) {
+  const write = outcome.sync?.write;
+  return {
+    atomicPushRefused: outcome.refusedPushes.length > 0,
+    partialRefUpdates: outcome.refusedPushes.reduce((sum, push) => sum + push.moved.length, 0),
+    skippedConcurrentDocument: write?.skipped.some((entry) => entry.reason === 'edited-in-linear' || entry.reason === 'missing-in-linear') ?? false,
+    capturedTrackedTip: outcome.sync?.trackedTip ?? null,
+    rereadWindowMs: write?.rereadWindowMs ?? null,
   };
 }
 
@@ -290,9 +335,10 @@ export function unfinishedMessage(command: string, code: string | undefined): st
 }
 
 export async function writeRunReport(path: string, outcome: OperationOutcome): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(toRunReport(outcome), null, 2)}\n`);
 }
 
 function captureReport(captured: CaptureResult | undefined): RunReport['capture'] {
-  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, blocked:captured.blocked, leftOut:captured.leftOut, ...(captured.stopped ? {stopped:captured.stopped} : {})};
+  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, blocked:captured.blocked, leftOut:captured.leftOut, writeBackWarnings:captured.writeBackWarnings, ...(captured.stopped ? {stopped:captured.stopped} : {})};
 }

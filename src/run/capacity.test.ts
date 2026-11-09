@@ -35,12 +35,14 @@ describe('container document capacity', () => {
   async function run(command = 'initial-sync', confirm = false, cap = '10', fetchOverride?: typeof fetch, beforeCapacity?: () => void) {
     const reportFile = join(fixture.root, 'report.json');
     let refsBeforeWrite: string | undefined;
+    let listings = 0;
     const normal = fetchOverride ?? fakeFetch(world);
     const request: typeof fetch = async (url, init) => {
       if (command === 'sync' && refsBeforeWrite === undefined && String(url).endsWith('/graphql')) {
-        const query = JSON.parse(String(init?.body)) as {operationName?:string; variables?:{filter?:{or?:unknown}}};
-        // Capture lists all places together; the writer then reads each container.
-        if (query.operationName === 'ListDocuments' && query.variables?.filter?.or === undefined) {
+        const query = JSON.parse(String(init?.body)) as {operationName?:string};
+        // Capture lists the containers first (one page here: fewer than 250 documents); a run with
+        // something to write lists them again before writing.
+        if (query.operationName === 'ListDocuments' && ++listings === 2) {
           refsBeforeWrite = await refs();
           beforeCapacity?.();
         }
@@ -152,7 +154,8 @@ describe('container document capacity', () => {
     const blocked = await run('sync');
     assert.equal(blocked.exitCode, INCOMPLETE_EXIT_CODE, blocked.stderr);
     assert.equal(blocked.report.code, 'container-cap');
-    assert.equal(world.writes.length, writesBefore);
+    // Nothing reaches Linear; the sync pull request step may note GitHub's refused merge on its pull request.
+    assert.deepEqual(world.writes.slice(writesBefore).filter((write) => !write.includes('/pulls')), []);
   });
   it('a previously left-out document already at the destination is not counted as an addition', async () => {
     assert.equal((await run('initial-sync', true)).exitCode, 0);
@@ -171,9 +174,11 @@ describe('container document capacity', () => {
       await fixture.seed({ 'eng/new.md': '# New\n' });
       const writesBefore = world.writes.length;
       const normal = fakeFetch(world);
+      let listings = 0;
+      // The writer's listing: the run's second, after capture's.
       const failedRead: typeof fetch = async (url, init) => {
         const query = String(url).endsWith('/graphql') ? JSON.parse(String(init?.body)) : undefined;
-        if (query?.operationName === 'ListDocuments' && query.variables?.filter?.or === undefined) {
+        if (query?.operationName === 'ListDocuments' && ++listings === 2) {
           return new Response(JSON.stringify({ errors: [{ message: 'Request refused', extensions: { code: rateLimited ? 'RATELIMITED' : 'FORBIDDEN' } }] }), {
             status: rateLimited ? 429 : 400, headers: { 'content-type': 'application/json', 'retry-after': '60' },
           });
@@ -190,6 +195,17 @@ describe('container document capacity', () => {
       assert.equal(world.revoked, 2);
     });
   }
+  it('an image-only change lists the containers again and stops above the cap before writing', async () => {
+    await fixture.seed({ 'eng/media/diagram.png': 'first diagram bytes', 'eng/figure.md': '# Figure\n\n![Diagram](media/diagram.png)\n' });
+    assert.equal((await run('initial-sync', true)).exitCode, 0);
+    // Only the image changes: no Markdown file differs, yet the document linking it is updated.
+    await fixture.seed({ 'eng/media/diagram.png': 'second diagram bytes' });
+    const writesBefore = world.writes.length;
+    const result = await run('sync', false, '4', undefined, () => populate(3));
+    assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE, result.stderr);
+    assert.equal(result.report.code, 'container-cap');
+    assert.deepEqual(world.writes.slice(writesBefore).filter((write) => !write.endsWith(' /pulls')), []);
+  });
   it('does not count an adopted document as an additional create', async () => {
     assert.equal((await run('initial-sync', true)).exitCode, 0);
     populate(8);

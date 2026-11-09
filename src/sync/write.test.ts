@@ -46,6 +46,7 @@ describe('sync: the tracked branch to Linear', () => {
   let person: Git;
   let personDir: string;
   let world: FakeWorld;
+  let fetchOverride: typeof fetch | undefined;
   const reportFile = () => join(fixture.root, 'report.json');
   const summaryFile = () => join(fixture.root, 'summary.md');
 
@@ -62,6 +63,7 @@ describe('sync: the tracked branch to Linear', () => {
       GIT_COMMITTER_EMAIL: IDENTITY.email,
     });
     world = fakeWorld();
+    fetchOverride = undefined;
     world.linear.projects.push({ id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
     const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
     assert.equal(initial.result.exitCode, 0, initial.result.stderr);
@@ -87,7 +89,7 @@ describe('sync: the tracked branch to Linear', () => {
     await rm(summaryFile(), { force: true });
     const before = world.requests.length;
     const writesBefore = world.writes.length;
-    const result = await runCli([command], { env: env(extra), cwd, fetch: fakeFetch(world) });
+    const result = await runCli([command], { env: env(extra), cwd, fetch: fetchOverride ?? fakeFetch(world) });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     for (const text of [result.stdout, result.stderr, summary, JSON.stringify(report)]) assert.ok(!text.includes(CANARY), 'content reached the output');
@@ -509,6 +511,120 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
+  for (const failure of ['rejection', 'storage-http', 'storage-reset'] as const) {
+    it(`L5-11: an image-only update with ${failure} keeps the old document, syncs other edits and retries`, async () => {
+      const figure = await documentOf('eng/notes/figure.md');
+      const before = figure.content;
+      const recorded = await show('refs/mdbisync/linear:eng/media/diagram.png');
+      const cacheBefore = await show('refs/mdbisync/uploads:uploads.json');
+      await commit({
+        'eng/media/diagram.png': 'replacement diagram bytes',
+        'eng/notes/review.md': `# Review\n\nIndependent edit. ${CANARY}\n`,
+      });
+      if (failure === 'rejection') world.linear.writes.reject = (operation) => isUpload(operation);
+      else {
+        const base = fakeFetch(world);
+        fetchOverride = async (input, init) => {
+          if (init?.method === 'PUT' && String(input).startsWith(`${LINEAR_API}/storage/`)) {
+            if (failure === 'storage-reset') throw new TypeError('connection reset');
+            return new Response('', { status: 503 });
+          }
+          return base(input, init);
+        };
+      }
+      const first = await sync();
+      assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
+      assert.equal(first.report.exitStatus, 'warning');
+      assert.equal(first.writes.filter(isUpload).length, 1, 'only the write loop attempts the upload');
+      assert.deepEqual(first.report.sync?.failed.map((entry) => entry.path), ['eng/notes/figure.md']);
+      assert.deepEqual(first.report.sync?.updated, ['eng/notes/review.md']);
+      assert.match(first.summary, /eng\/notes\/figure\.md/);
+      assert.equal(figure.content, before, 'the complete previous document stays');
+      assert.equal(await show('refs/mdbisync/linear:eng/media/diagram.png'), recorded);
+      assert.equal(await show('refs/mdbisync/uploads:uploads.json'), cacheBefore, 'no failed upload URL cached');
+
+      delete world.linear.writes.reject;
+      fetchOverride = undefined;
+      const second = await sync();
+      assert.equal(second.result.exitCode, 0, second.result.stderr);
+      assert.deepEqual(second.report.sync?.updated, ['eng/notes/figure.md']);
+      assert.notEqual(figure.content, before);
+      for (const url of uploadUrls(figure.content)) {
+        assert.ok(world.linear.uploads.some((upload) => upload.assetUrl === url && upload.bytes?.equals(Buffer.from('replacement diagram bytes'))));
+      }
+      assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+      await assertIdempotent();
+    });
+  }
+
+  it('L5-11: a failing shared image is attempted only in the write loop for each document', async () => {
+    await commit({ 'eng/notes/shared.md': `# Shared\n\n![Diagram](../media/diagram.png)\n\n${CANARY}\n` });
+    assert.equal((await sync()).result.exitCode, 0);
+    const paths = ['eng/notes/figure.md', 'eng/notes/shared.md'];
+    const before = await Promise.all(paths.map(async (path) => (await documentOf(path)).content));
+    await commit({ 'eng/media/diagram.png': 'replacement shared diagram' });
+    world.linear.writes.reject = (operation) => isUpload(operation);
+    const failed = await sync();
+    assert.equal(failed.result.exitCode, INCOMPLETE_EXIT_CODE, failed.result.stderr);
+    assert.deepEqual(failed.report.sync?.failed.map((entry) => entry.path), paths);
+    assert.equal(failed.writes.filter(isUpload).length, paths.length, 'no comparison uploads or automatic per-document retry');
+    assert.deepEqual(await Promise.all(paths.map(async (path) => (await documentOf(path)).content)), before);
+    delete world.linear.writes.reject;
+    const recovered = await sync();
+    assert.equal(recovered.result.exitCode, 0, recovered.result.stderr);
+    assert.equal(recovered.writes.filter(isUpload).length, 1, 'the recovered shared image uploads once');
+    assert.deepEqual(recovered.report.sync?.updated, paths);
+    await assertIdempotent();
+  });
+
+  for (const create of [false, true]) {
+    it(`L5-11: upload rejection leaves a ${create ? 'new' : 'changed'} document unwritten until the next run`, async () => {
+      const path = create ? 'eng/notes/new-figure.md' : 'eng/notes/figure.md';
+      const before = create ? undefined : (await documentOf(path)).content;
+      const text = `# Figure\n\n![New](../media/new.png)\n\n${CANARY}\n`;
+      await commit({ [path]: text, 'eng/media/new.png': 'new image bytes' });
+      world.linear.writes.reject = (operation) => isUpload(operation);
+      const first = await sync();
+      assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
+      assert.deepEqual(first.report.sync?.failed.map((entry) => entry.path), [path]);
+      if (create) assert.equal((await ids())[path], undefined);
+      else assert.equal((await documentOf(path)).content, before);
+      delete world.linear.writes.reject;
+      const second = await sync();
+      assert.equal(second.result.exitCode, 0, second.result.stderr);
+      assert.deepEqual(create ? second.report.sync?.created : second.report.sync?.updated, [path]);
+      const url = uploadUrls((await documentOf(path)).content)[0];
+      assert.ok(world.linear.uploads.some((upload) => upload.assetUrl === url && upload.bytes?.equals(Buffer.from('new image bytes'))));
+      assert.equal(await show(`refs/mdbisync/linear:${path}`), text);
+      await assertIdempotent();
+    });
+  }
+
+  for (const imageOnly of [false, true]) {
+    it(`L5-12: a missing LFS object leaves out its ${imageOnly ? 'unchanged' : 'new'} document while other edits sync`, async () => {
+      const path = imageOnly ? 'eng/notes/figure.md' : 'eng/notes/new-figure.md';
+      const before = imageOnly ? (await documentOf(path)).content : undefined;
+      const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${'ab'.repeat(32)}\nsize 42\n`;
+      await commit({
+        [imageOnly ? 'eng/media/diagram.png' : 'eng/media/missing.png']: pointer,
+        ...(!imageOnly ? { [path]: `# New figure\n\n![Missing](../media/missing.png)\n\n${CANARY}\n` } : {}),
+        'eng/notes/review.md': `# Review\n\nIndependent edit. ${CANARY}\n`,
+      });
+      const first = await sync();
+      assert.equal(first.result.exitCode, 0, first.result.stderr);
+      assert.equal(first.report.complete, false);
+      assert.deepEqual(first.report.sync?.leftOutAtWrite, [{ path, rule: 'upload-unreadable', files: [imageOnly ? 'eng/media/diagram.png' : 'eng/media/missing.png'] }]);
+      assert.deepEqual(first.report.sync?.updated, ['eng/notes/review.md']);
+      assert.match(first.summary, /upload-unreadable/);
+      if (imageOnly) assert.equal((await documentOf(path)).content, before);
+      else assert.equal(live().some((document) => document.title === 'new-figure'), false);
+      const again = await sync();
+      assert.equal(again.result.exitCode, 0, again.result.stderr);
+      assert.deepEqual(again.report.sync?.leftOutAtWrite, first.report.sync?.leftOutAtWrite);
+      assert.deepEqual(again.report.sync?.updated, []);
+    });
+  }
+
   it('a renamed project folder needs no write, and the id map follows the files', async () => {
     const before = await documentOf('eng/notes/review.md');
     await commit({}, [['eng/notes', 'eng/fieldnotes']]);
@@ -673,11 +789,14 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, []);
-    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'conflict' }]);
+    // Both versions are written between the conflict markers, and the document gets the conflict mark and its notice.
+    assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument', 'CommentOnDocument']);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(report.sync?.conflicts, ['eng/notes/review.md']);
     assert.ok(report.capture?.changed.includes('eng/notes/review.md'));
-    assert.match(await show('refs/mdbisync/linear:eng/notes/review.md'), /Typed in Linear meanwhile/);
-    assert.match(document.content ?? '', /Typed in Linear meanwhile/);
+    for (const text of [document.content ?? '', await show('refs/mdbisync/linear:eng/notes/review.md')]) {
+      assert.match(text, /\*\*Sync conflict: git version\*\*\n\nFindings, fixed in git\. [^\n]+\n\n\*\*Sync conflict: Linear version\*\*\n\nTyped in Linear meanwhile\. [^\n]+\n\n\*\*Sync conflict: end\*\*/);
+    }
   });
 
   it('a left-out file is compared with what Linear was given, not with a git version it never received', async () => {
@@ -822,7 +941,7 @@ describe('sync: the tracked branch to Linear', () => {
     await assertMergeRecord(previous);
   });
 
-  it('edits of the same paragraph on both sides are not written; the record is an ordinary commit', async () => {
+  it('edits of the same paragraph on both sides are written with conflict markers; the record is a merge commit', async () => {
     const linearText = `# Notes\n\nFirst paragraph, Linear's way.\n\nSecond paragraph. ${CANARY}\n`;
     await captured('eng/backend/notes.md', linearText);
     await commit({
@@ -831,11 +950,14 @@ describe('sync: the tracked branch to Linear', () => {
     });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, ['UpdateDocument']);
-    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/backend/notes.md', reason: 'conflict' }]);
-    assert.equal((await documentOf('eng/backend/notes.md')).content, body('', linearText));
-    assert.equal(report.sync?.record?.kind, 'ordinary');
-    assert.equal(await show('refs/mdbisync/linear:eng/backend/notes.md'), linearText);
+    // The marked text, the conflict mark and its notice, then the other document.
+    assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument', 'CommentOnDocument', 'UpdateDocument']);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(report.sync?.conflicts, ['eng/backend/notes.md']);
+    const marked = `# Notes\n\n**Sync conflict: git version**\n\nFirst paragraph, git's way.\n\n**Sync conflict: Linear version**\n\nFirst paragraph, Linear's way.\n\n**Sync conflict: end**\n\nSecond paragraph. ${CANARY}\n`;
+    assert.equal((await documentOf('eng/backend/notes.md')).content, marked);
+    assert.equal(report.sync?.record?.kind, 'merge');
+    assert.equal(await show('refs/mdbisync/linear:eng/backend/notes.md'), marked);
     assert.match(await show('refs/mdbisync/linear:eng/notes/review.md'), /Another edit/);
   });
 

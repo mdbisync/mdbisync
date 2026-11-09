@@ -125,7 +125,7 @@ describe('preflight', () => {
     };
     const result = await runCli(['check'], { env: env(), cwd, fetch, log });
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(entries.map(e => e.operation), ['oauth.token', 'SetupTeams', 'SetupProjects', 'oauth.revoke']);
+    assert.deepEqual(entries.map(e => e.operation), ['oauth.token', 'SetupTargets', 'oauth.revoke']);
     for (const [index, entry] of entries.entries()) {
       assert.equal(entry.status, 200);
       assert.equal(entry.requestId, `setup-request-${index + 1}`);
@@ -174,7 +174,7 @@ describe('preflight', () => {
     await assert.rejects(runCli(['check'], { env: env(), cwd, fetch, log, warn: message => { warnings.push(message); } }), /Entity not found: User/);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0]!, /token could not be revoked/);
-    assert.deepEqual(entries.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTeams', 400], ['oauth.revoke', 401]]);
+    assert.deepEqual(entries.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTargets', 400], ['oauth.revoke', 401]]);
     assert.equal(entries[1]?.requestId, 'setup-query-failed');
     assert.deepEqual(entries[1]?.errorCodes, ['INPUT_ERROR']);
     assert.equal(entries[2]?.requestId, 'setup-revoke-failed');
@@ -195,23 +195,26 @@ describe('preflight', () => {
           return original(input, init);
         };
       `);
+      await writeFile(join(fixture.root, 'action-state'), '');
       const fakeEnv: Record<string, string> = env();
       const actionEnv = Object.fromEntries(INPUT_NAMES.map(name => [`INPUT_${name.toUpperCase()}`, fakeEnv[environmentName(name)] ?? '']));
       const child = spawnSync(process.execPath, ['--import', injection, fileURLToPath(new URL(entry, import.meta.url)), 'check'], {
-        cwd, env: action ? { ...fakeEnv, ...actionEnv, INPUT_OPERATION: 'initial-sync', INPUT_DIRECTION: 'git-to-linear', GITHUB_WORKSPACE: cwd, GITHUB_OUTPUT: '', GITHUB_STATE: '', GITHUB_STEP_SUMMARY: '' } : fakeEnv,
+        cwd, env: action ? { ...fakeEnv, ...actionEnv, INPUT_OPERATION: 'initial-sync', INPUT_DIRECTION: 'git-to-linear', GITHUB_WORKSPACE: cwd, GITHUB_OUTPUT: '', GITHUB_STATE: join(fixture.root, 'action-state'), GITHUB_STEP_SUMMARY: '' } : fakeEnv,
         encoding: 'utf8', timeout: 15_000,
       });
       assert.equal(child.status, 1, child.stderr);
       const stream = action ? child.stdout : child.stderr;
       const lines = stream.trim().split('\n');
       const events = lines.filter(line => line.startsWith('{')).map(line => JSON.parse(line) as LogEntry);
-      assert.deepEqual(events.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTeams', 400], ['oauth.revoke', 401]]);
+      assert.deepEqual(events.map(e => [e.operation, e.status]), [['oauth.token', 200], ['SetupTargets', 400], ['oauth.revoke', 401]]);
       const warning = lines.findIndex(line => line.startsWith(action ? '::warning' : 'warning:'));
       const primary = lines.findIndex(line => line.startsWith(action ? '::error' : 'error:'));
       assert.ok(warning >= 0 && primary > warning, child.stderr);
       assert.match(lines[warning]!, /token could not be revoked/);
       assert.match(lines[primary]!, /Entity not found: User/);
-      for (const secret of ['client-id', 'client-secret', 'fake-token', 'gh-token', CANARY]) assert.ok(!`${child.stdout}${child.stderr}`.includes(secret), secret);
+      // The runner consumes mask commands; it never logs them.
+      const logged = `${child.stdout.replace(/^::add-mask::.*$/gm, '')}${child.stderr}`;
+      for (const secret of ['client-id', 'client-secret', 'fake-token', 'gh-token', CANARY]) assert.ok(!logged.includes(secret), secret);
     });
   }
 

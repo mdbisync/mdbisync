@@ -13,6 +13,7 @@ import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
+import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
@@ -46,7 +47,15 @@ export interface CaptureResult {
   changed: string[];
   removed: string[];
   leftOut: Array<{ id: string; rule: string }>;
+  /** Captured content that exceeds Linear's write limit; paths and counts only. */
+  writeBackWarnings: Array<{ path: string; code: 'linear-content-too-large-to-write-back'; length: number; limit: number }>;
   summary: string;
+  /**
+   * The run's annotated containers as this capture listed them (trash
+   * included), by `containerKey`; absent when capture listed the places of
+   * a changed annotation, or listed nothing. Never serialize these.
+   */
+  containers?: Map<string, LinearDocument[]>;
 }
 
 const CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
@@ -70,7 +79,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   const uploads = await readUploads(git, state.uploads);
   const reserved = await readReservedIds(git, state.ids);
   const gate = options.security ?? await securityGate(git, fetched.tracked);
-  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], leftOut:[], summary:''};
+  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], leftOut:[], writeBackWarnings:[], summary:''};
   let published = false;
   try {
     // Capture the old place before a git annotation change moves its documents.
@@ -114,7 +123,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       folders.set('projectId' in resolved ? `project:${resolved.projectId}` : `team:${resolved.teamId}`, folder);
       return resolved;
     });
-    for (const document of await linear.listDocumentsInPlaces(places, {includeArchived:true})) listed.set(document.id, document);
+    const inPlaces = await linear.listDocumentsInPlaces(places, {includeArchived:true});
+    for (const document of inPlaces) listed.set(document.id, document);
+    // The write step counts its containers from this listing when it has nothing to write.
+    if (!changedPlace) result.containers = containersOf(context, inPlaces);
     // Looking up known ids also finds trash, project moves and moves out of scope.
     const missing = [...byId.keys()].filter((id) => !listed.has(id));
     for (const document of await linear.getDocuments(missing)) listed.set(document.id, document);
@@ -313,6 +325,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     else {
       result.state = next;
       published = true;
+      for (const candidate of candidates.values()) {
+        const refusal = lengthRefusal({content: candidate.doc.content ?? ''}, linear.facts);
+        if (refusal !== undefined) result.writeBackWarnings.push({path: candidate.path, code: 'linear-content-too-large-to-write-back', length: refusal.length, limit: refusal.limit});
+      }
       const lostLease = new Error('state moved while recording document marks');
       const marked = [
         ...[...candidates.values()].map(({doc, path}) => ({doc, path, blocked: [] as SecurityFinding[]})),
@@ -381,11 +397,14 @@ function renderCapture(result: CaptureResult, configured: boolean): string {
   if (result.stopped !== undefined) summary += `\nCapture partial, will continue.\n\n${renderStop(result.stopped).join('\n')}`;
   if (result.failure !== undefined) summary += `\nCapture partial, will continue: Linear failed ${result.failure.operation} (${result.failure.error}).`;
   if (!configured) summary += '\nContent is pushed unchecked: no security hooks are configured.';
+  for (const warning of result.writeBackWarnings) {
+    summary += `\n${warning.code}: ${JSON.stringify(warning.path)} (${warning.length} characters; limit ${warning.limit}). Preserved in git; Linear will not accept it back if it is changed in git while still over the limit.`;
+  }
   return summary;
 }
 
 /** Apply only LFS, after the security gate. Other clean filters cannot change captured text. */
-async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: Map<string, Buffer | string | null>) {
+export async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: Map<string, Buffer | string | null>) {
   const dir = await mkdtemp(join(tmpdir(), 'capture-attributes-'));
   const env = { GIT_INDEX_FILE: join(dir, 'index') };
   const result = new Map(changes);

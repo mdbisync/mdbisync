@@ -80,7 +80,7 @@ describe('engine checkpoints (MDBISYNC_TEST_HOOKS)', () => {
     assert.equal(await control.waitReached('document-created-before-ids-push', { timeoutMs: 10_000, exited }), true);
     child.kill('SIGKILL');
     await exited;
-    assert.equal(control.reached('after-reread-before-write'), 0);
+    assert.equal(control.reached('after-write-before-record'), 0);
   });
 });
 
