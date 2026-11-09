@@ -7,7 +7,7 @@ import { dirname } from 'node:path';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
-import { type ExitStatus, exitStatusOf, pullRequestEnding } from './exit.ts';
+import { type ExitStatus, exitStatusOf, partialCode, pullRequestEnding } from './exit.ts';
 import { cell } from './summary.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
@@ -231,7 +231,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     capacity: write.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? pullRequestEnding(outcome)?.code ?? write.code ?? null,
+    code: outcome.code ?? pullRequestEnding(outcome)?.code ?? write.code ?? partialCode(outcome) ?? null,
     exitStatus: exitStatusOf(outcome),
     stop: write.stopped ?? null,
     complete: outcome.sync!.complete,

@@ -523,6 +523,7 @@ describe('sync: lost state and deleted branches', () => {
     const blank = await sync();
     assert.equal(blank.result.exitCode, INCOMPLETE_EXIT_CODE, blank.result.stderr);
     assert.equal(blank.report.exitStatus, 'warning');
+    assert.equal(blank.report.code, 'removal-held');
     assert.match(blank.result.stderr, /partial, will continue \(removal-held\)/);
     assert.deepEqual(blank.report.capture?.removed, []);
     assert.deepEqual([...blank.report.capture!.heldRemovals].sort(), paths);
@@ -530,6 +531,13 @@ describe('sync: lost state and deleted branches', () => {
     assert.deepEqual(await ids(), before, 'every id stays mapped');
     for (const path of paths) assert.ok(await tracks(path), `${path} stays on the tracked branch`);
     assert.deepEqual(blank.writes, [], 'nothing is written to Linear on a blank answer');
+
+    // A blank answer that lasts into the next run does not confirm the held removals: no place lists anything.
+    const still = await sync();
+    assert.equal(still.result.exitCode, INCOMPLETE_EXIT_CODE, still.result.stderr);
+    assert.deepEqual(still.report.capture?.removed, []);
+    assert.deepEqual([...still.report.capture!.heldRemovals].sort(), paths);
+    assert.deepEqual(await ids(), before, 'every id stays mapped');
 
     delete world.linear.blankAnswer;
     await settle();
@@ -586,7 +594,9 @@ describe('sync: lost state and deleted branches', () => {
     // A later blank answer is held again, not taken as a confirmation of the first.
     world.linear.blankAnswer = (d) => notes.has(d.id);
     const again = await sync();
+    assert.equal(again.result.exitCode, INCOMPLETE_EXIT_CODE, again.result.stderr);
     assert.deepEqual(again.report.capture?.removed, []);
+    assert.deepEqual(again.report.capture?.heldRemovals, blank.report.capture?.heldRemovals);
     delete world.linear.blankAnswer;
     await settle();
     assert.deepEqual(await ids(), before);

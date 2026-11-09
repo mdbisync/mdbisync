@@ -54,8 +54,8 @@ export interface CaptureResult {
   removed: string[];
   /**
    * Files whose documents Linear did not return while their place listed no
-   * document at all: a blank answer reads the same, so they stay until the
-   * next capture finds them gone again.
+   * document at all: a blank answer reads the same, so they stay until a
+   * later capture finds them gone again while some place lists documents.
    */
   heldRemovals: string[];
   leftOut: Array<{ id: string; rule: string }>;
@@ -149,7 +149,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const folders = new Map<string, string>();
     const places = annotatedPlaces(mapping.zones).map(({place, folder}) => {
       const resolved = placeId(targets, place);
-      folders.set('projectId' in resolved ? `project:${resolved.projectId}` : `team:${resolved.teamId}`, folder);
+      folders.set(placeKeyOf(resolved), folder);
       return resolved;
     });
     // The place a known file's document belongs in: its zone's project, or its team zone.
@@ -157,7 +157,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const zone = nearestZone(mapping.zones, folderOf(path));
       if (zone === undefined) return undefined;
       const resolved = placeId(targets, zone.project === undefined ? {kind:'team', team:zone.team} : {kind:'project', team:zone.team, project:zone.project});
-      return 'projectId' in resolved ? `project:${resolved.projectId}` : `team:${resolved.teamId}`;
+      return placeKeyOf(resolved);
     };
     const inPlaces = await linear.listDocumentsInPlaces(places, {includeArchived:true});
     for (const document of inPlaces) listed.set(document.id, document);
@@ -167,23 +167,24 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const missing = [...byId.keys()].filter((id) => !listed.has(id));
     for (const document of await linear.getDocuments(missing)) listed.set(document.id, document);
     // A known id that neither answer has: `document(id:)` tells a document Linear no longer has (removed from the
-    // trash for good) from one a list left out. A document gone for good is a deletion.
-    // Linear has answered a lookup with nothing while everything existed. A blank answer for documents reads the same
-    // as every document removed for good, so a removal counts only when the document's place listed documents (trash
-    // included) in this run, or when the previous capture held it already: two captures found it gone.
+    // trash for good) from one a list left out. A document gone for good is a deletion. But Linear has answered a
+    // lookup with nothing while everything existed, and a blank answer reads the same as every document removed for
+    // good. So a removal counts at once only when the document's place listed documents (trash included) in this run.
+    // Otherwise it is held; the next capture confirms it when it finds the id gone again while some place lists
+    // documents, so a blank answer for every place holds it again however long it lasts.
     const notFound: string[] = [];
     for (const id of missing.filter((id) => !listed.has(id))) {
       const document = await linear.getDocument(id);
       if (document === null) notFound.push(id);
       else listed.set(id, document);
     }
-    const answered = new Set(inPlaces.map(placeKey));
+    const answered = new Set(inPlaces.map(placeKeyOf));
     const heldBefore = await readHeld(context, state);
     const gone = new Set<string>();
     const held = new Set<string>();
     for (const id of notFound) {
       const place = recordedPlace(byId.get(id)!.path);
-      if ((place !== undefined && answered.has(place)) || heldBefore.has(id)) gone.add(id);
+      if ((place !== undefined && answered.has(place)) || (heldBefore.has(id) && answered.size > 0)) gone.add(id);
       else held.add(id);
     }
     // Git-only exclusions keep their last accepted identity and place. A
@@ -212,7 +213,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       if ('projectId' in resolved ? resolved.projectId === doc.projectId : doc.projectId === null && resolved.teamId === doc.teamId) retained.set(id, old.path);
     }
-    const folderFor = (doc: LinearDocument) => folders.get(doc.projectId !== null ? `project:${doc.projectId}` : `team:${doc.teamId}`);
+    const folderFor = (doc: LinearDocument) => folders.get(placeKeyOf(doc));
     const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && (folderFor(doc) !== undefined || retained.has(doc.id));
     const normalizedTime = (doc: LinearDocument) => {
       const time = new Date(doc.updatedAt);
@@ -516,9 +517,9 @@ function relocatedHead(head: string): string {
   return `---\n${yaml}---\n\n`;
 }
 
-/** A listed document's place, named as `recordedPlace` names it. */
-function placeKey(doc: LinearDocument): string {
-  return doc.projectId !== null ? `project:${doc.projectId}` : `team:${doc.teamId}`;
+/** The key of a document's place, or of a resolved place: its project, or its team zone. */
+function placeKeyOf(place: {projectId?: string | null; teamId?: string | null}): string {
+  return place.projectId != null ? `project:${place.projectId}` : `team:${place.teamId}`;
 }
 
 function renderCapture(result: CaptureResult, configured: boolean): string {
