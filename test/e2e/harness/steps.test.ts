@@ -662,6 +662,24 @@ describe('subjects', () => {
     assert.deepEqual(await resolveSubject(ctx, 'summary.oversizeFiles'), { known: true, value: ['eng/platform/unknown.png', 'pdf-11mb'] });
   });
 
+  it('compare only the valid files: a lint-error file stays in git with no document and no difference', async () => {
+    const { ctx } = await fakeRun();
+    // A file the corpus marks as a lint error, in git as it is, with no document in Linear.
+    const git = await ctx.person();
+    writeFileSync(join(git.dir, 'eng/platform/footnotes.md'), '# Notes\n\nSee this.[^1]\n\n[^1]: A footnote Linear would drop.\n');
+    await git.run(['add', '--', 'eng/platform/footnotes.md']);
+    await git.run(['commit', '--quiet', '-m', 'Add footnotes']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    ctx.live?.tree.paths.set('eng/platform/footnotes.md', 'eng/platform/footnotes.md');
+    ctx.live?.manifest.files.push({ path: 'eng/platform/footnotes.md', group: 'lint-errors', kind: 'markdown', synced: true, lfs: false, canary: null, class: 'lint-error', rule: 'footnote' });
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const sides = await readSides(ctx);
+    assert.equal(sides.files.has('eng/platform/footnotes.md'), false);
+    assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
+    refreshView(ctx);
+    assert.equal(((await resolveSubject(ctx, 'corpus.validPaths')).value as string[]).includes('eng/platform/footnotes.md'), false);
+  });
+
   it('count the engine\'s commits as git writes and not the scenario\'s own', async () => {
     const { ctx, remoteGit } = await fakeRun();
     const { snapshotRefs } = await import('./checks.ts');
