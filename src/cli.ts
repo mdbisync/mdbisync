@@ -98,11 +98,12 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   if (summaryFile) await appendFile(summaryFile, outcome.summary);
   const stderr = warnings.join("");
   if (!outcome.ok) {
-    const exitCode = outcome.code === "initial-sync-required" ? NO_STATE_EXIT_CODE : SETUP_FAILED_EXIT_CODE;
+    const exitCode = outcome.code === "initial-sync-required" || outcome.code === "initial-pull-request-pending" ? NO_STATE_EXIT_CODE : SETUP_FAILED_EXIT_CODE;
     return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (${outcome.code})\n` };
   }
-  if (outcome.confirmed !== undefined && !outcome.confirmed.complete) {
-    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${outcome.confirmed.code}); run it again with the same inputs\n` };
+  const unfinished = outcome.confirmed ?? outcome.reverse;
+  if (unfinished !== undefined && !unfinished.complete) {
+    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${unfinished.code}); run it again with the same inputs\n` };
   }
   if (!outcome.notImplemented) return { exitCode: 0, stdout: outcome.summary, stderr };
   const stub = notImplemented(command);

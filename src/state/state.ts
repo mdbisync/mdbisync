@@ -243,6 +243,28 @@ export async function readInitialSyncProgress(git: Git, commit: Oid | null): Pro
   return { tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message)?.[1] ?? null };
 }
 
+/**
+ * The subject of a `linear` record made by an initial sync from Linear. That
+ * record is the head of a pull request a person merges, since it can remove
+ * files; the sync does not run until it is merged.
+ */
+export const INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear's state";
+
+/**
+ * Whether `linear` is an initial sync's record from Linear that the tracked
+ * branch has not taken yet: not merged, and with a tree that differs from
+ * the tracked branch's.
+ */
+export async function initialPullRequestPending(git: Git, linear: Oid | null, tracked: Oid): Promise<boolean> {
+  if (linear === null) return false;
+  const [subject] = (await git.text(['show', '-s', '--format=%s', linear])).split('\n');
+  if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
+  const merged = await git.run(['merge-base', '--is-ancestor', linear, tracked], { okCodes: [0, 1] });
+  if (merged.code === 0) return false;
+  const trees = (await git.text(['show', '-s', '--format=%T', linear, tracked])).split('\n');
+  return trees[0] !== trees[1];
+}
+
 export interface CommitStateOptions {
   /** The commit message; a reader can tell a run's progress commits from its final one by it. */
   message?: string;

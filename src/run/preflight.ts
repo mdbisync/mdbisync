@@ -18,7 +18,7 @@ import {
   renderStateRefusal,
   runSetupCheck,
 } from '../setup/index.ts';
-import { type FetchedState, type Git, fetchState, readInitialSyncProgress } from '../state/index.ts';
+import { type FetchedState, type Git, fetchState, initialPullRequestPending, readInitialSyncProgress } from '../state/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
 
@@ -66,7 +66,8 @@ export async function runPreflight(
   const fetched = await fetchState(git, inputs.state);
   if (operation === 'sync') {
     const unfinished = (await readInitialSyncProgress(git, fetched.state.ids)) !== null;
-    const refusal = checkSyncState(fetched.state, inputs.state, unfinished);
+    const pending = await initialPullRequestPending(git, fetched.state.linear, fetched.tracked);
+    const refusal = checkSyncState(fetched.state, inputs.state, unfinished, pending);
     if (refusal !== null) return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   }
 
