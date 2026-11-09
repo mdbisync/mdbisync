@@ -216,13 +216,13 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     return { plan, result };
   }
 
-  /** Each remembered document's id and update time, as Linear returned it or listed it. */
-  const updatedAt = new Map<string, { id: string; time: string }>();
+  /** Each remembered document, as Linear returned it or listed it. */
+  const rememberedDocuments = new Map<string, LinearDocument>();
   const remember = (path: string, document: LinearDocument) => {
     const before = previous.get(path);
     ids.set(path, before !== undefined && before.id === document.id && before.saved !== undefined ? { id: document.id, saved: before.saved } : { id: document.id });
     stored.set(path, document.content ?? '');
-    updatedAt.set(path, { id: document.id, time: document.updatedAt });
+    rememberedDocuments.set(path, document);
   };
 
   let unpushed = 0;
@@ -455,11 +455,17 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       result.leftOutAtWrite.filter(({ path }) => created.has(path)).map(({ path }) => [path, documentIds.get(path) as string]),
     );
     // The record holds what Linear returned for each document written or found holding its body: the first
-    // capture need not read those again. One a resumed run skipped was not read, so it is read again.
+    // capture need not read those again when the title and place are the file's too. One a resumed run skipped
+    // was not read, so it is read again.
+    const entries = new Map<string, CreateEntry | OverwriteEntry>([...plan.create, ...plan.overwrite].map((entry) => [entry.path, entry]));
     const recorded = new Map(
       [...result.created, ...result.overwritten, ...result.unchanged].flatMap((path) => {
-        const seen = updatedAt.get(path);
-        return seen === undefined ? [] : [[seen.id, seen.time] as const];
+        const document = rememberedDocuments.get(path);
+        const entry = entries.get(path);
+        if (document === undefined || entry === undefined) return [];
+        const where = placeId(targets, entry.place);
+        const placed = 'projectId' in where ? document.projectId === where.projectId : document.projectId === null && document.teamId === where.teamId;
+        return placed && document.title.normalize('NFC') === entry.title.normalize('NFC') ? [[document.id, document.updatedAt] as const] : [];
       }),
     );
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {

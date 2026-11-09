@@ -383,6 +383,20 @@ describe('sync: the tracked branch to Linear', () => {
     assert.match(await show('refs/mdbisync/linear:eng/backend/notes.md'), /Other edit/);
   });
 
+  it('a rename in Linear after the capture, of a document that already holds the git text, reaches git', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    const text = `# Review\n\nThe same words on both sides. ${CANARY}`;
+    afterCapture(() => { Object.assign(document, { content: text, title: 'retro' }); touch(document); });
+    await commit({ 'eng/notes/review.md': `${text}\n` });
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    // The record keeps the old title: the document is not named as recorded at its new time.
+    assert.doesNotMatch(await fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/ids']), new RegExp(`Document-recorded: ${document.id} ${document.updatedAt}`));
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.match(await show('refs/mdbisync/linear:eng/notes/retro.md'), /The same words on both sides/);
+  });
+
   it('L2-15: a run that stops partway records what it wrote; the next run writes the rest and merges', async () => {
     const files = Array.from({ length: 6 }, (_, index) => `combined/part-${index}.md`);
     await commit(Object.fromEntries(files.map((path, index) => [path, `# Part ${index}\n\nPart ${index}. ${CANARY}\n`])));
@@ -714,6 +728,25 @@ describe('sync: the tracked branch to Linear', () => {
     assert.deepEqual(report.sync?.failed.map((entry) => entry.path), ['eng/notes/review.md']);
     // Nothing was written, so `linear` stays where it was.
     assert.equal(report.sync?.record, null);
+  });
+
+  it('a caption edited in git after a partial run that changed its image reaches Linear', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const review = await documentOf('eng/notes/review.md');
+    // The figure takes the new image; the review, edited in Linear meanwhile, is skipped: the record is partial and
+    // keeps the old bytes.
+    afterCapture(() => { review.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}`; touch(review); });
+    await commit({
+      'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1'),
+      'eng/notes/review.md': `# Review\n\nEdited too. ${CANARY}\n`,
+    });
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.deepEqual(first.report.sync?.updated, ['eng/notes/figure.md']);
+    assert.deepEqual(first.report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'edited-in-linear' }]);
+    await commit({ 'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nA new caption. ${CANARY}\n` });
+    for (let run = 0; run < 3 && !/A new caption/.test(figure.content ?? ''); run += 1) assert.equal((await sync()).result.exitCode, 0);
+    assert.match(figure.content ?? '', /A new caption/);
   });
 
   it('an image update Linear rejects is tried again by the next run', async () => {

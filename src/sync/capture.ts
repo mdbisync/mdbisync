@@ -18,7 +18,7 @@ import { type CommitIdentity, type Git, type StateConfig, type StateSnapshot, ty
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
-import { readRecorded } from './recorded.ts';
+import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { lastSynchronized } from './merge.ts';
@@ -87,9 +87,8 @@ export function captureCursorTrailer(through: string): string {
 
 /** A document's update time in the cursor's form, so cursor times compare as text. */
 export function cursorTime(document: LinearDocument): string {
-  const time = new Date(document.updatedAt);
-  if (!Number.isFinite(time.getTime())) throw new Error('a document has an invalid update time');
-  return time.toISOString();
+  // The same form as a recorded document's time: the capture compares the two as text.
+  return recordedTime(document.updatedAt);
 }
 const HELD = /^Removal-held: (\S+)$/gm;
 
