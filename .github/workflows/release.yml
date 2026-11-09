@@ -63,6 +63,7 @@ jobs:
           MDBISYNC_RELEASE_VERSION="${RELEASE_VERSION#v}" npm run build
           node src/release/prepare.ts "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/release"
           node src/release/smoke.ts "$RUNNER_TEMP/release"
+          node test/release/staged-flow.ts "$RUNNER_TEMP/release"
           tar -C "$RUNNER_TEMP/release" -cf "$RUNNER_TEMP/release.tar" .
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
