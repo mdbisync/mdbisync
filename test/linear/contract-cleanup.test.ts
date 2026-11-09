@@ -168,7 +168,7 @@ interface Run {
   operations: string[];
 }
 
-async function runContract(world: FakeWorld, faults: Faults = {}): Promise<Run> {
+async function runContract(world: FakeWorld, faults: Faults = {}, pauseSetting = String(PAUSE_MS)): Promise<Run> {
   const served = await serve(world, faults);
   const directory = await mkdtemp(join(tmpdir(), 'contract-cleanup-'));
   const reportPath = join(directory, 'report.json');
@@ -183,7 +183,7 @@ async function runContract(world: FakeWorld, faults: Faults = {}): Promise<Run> 
         LINEAR_TEST_TEAM_KEY: 'ENG',
         LINEAR_BASE_URL: served.url,
         LINEAR_CONTRACT_REPORT: reportPath,
-        LINEAR_CONTRACT_PAUSE_MS: String(PAUSE_MS),
+        LINEAR_CONTRACT_PAUSE_MS: pauseSetting,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 20_000,
@@ -233,6 +233,16 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
     assertArchivedNotTrashed(world);
   });
 
+  it('completes cleanup, revocation and reporting with a malformed pause setting', async () => {
+    const world = fakeWorld();
+    const run = await runContract(world, {}, 'invalid');
+    assert.equal(run.code, 0, run.output);
+    assert.equal(run.report.cleanupFailed, false);
+    assert.equal(run.report.archivalVerification.pauseMs, 2_000);
+    assert.equal(run.report.requests.at(-1)?.operation, 'oauth.revoke');
+    assertArchivedNotTrashed(world);
+  });
+
   for (const fault of ['stale', 'absent-once'] as const) {
     it(`confirms trash on the delayed read after an immediate ${fault} response`, async () => {
       const world = fakeWorld();
@@ -277,9 +287,10 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
     });
   }
 
-  it('restores the trashed document before deleting its project when the trash assertion fails', async () => {
+  it('restores before project deletion after a failed trash assertion even with delayed archival', async () => {
     const world = fakeWorld();
-    // The read right after the trash, the diagnostic read and cleanup's own read are all stale.
+    // The trash read, diagnostic read and cleanup read are stale. Archival
+    // also stays stale until the final allowed sample after the restore.
     const run = await runContract(world, { staleTrashReads: 3, staleArchiveReads: 15 });
     assert.equal(run.code, 1, run.output);
     assert.match(run.output, TRASH_TEST_FAILED);
@@ -287,6 +298,7 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
     assert.match(run.output, LATER_TEST_PASSED, 'the later tests still ran');
     assert.equal(run.report.cleanupFailed, false, run.output);
     assert.deepEqual(run.report.restoredInCleanup, [readingList(world).id]);
+    assert.equal(run.report.archivalVerification.samples.length, 16);
     const restore = run.operations.lastIndexOf('RestoreDocument');
     assert.ok(restore > 0 && restore < run.operations.indexOf('DeleteProject'), run.operations.join(' '));
     assert.equal(run.operations.at(-1), 'GetDocuments', 'the final read follows the project deletions');

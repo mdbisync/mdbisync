@@ -36,7 +36,7 @@ export interface CleanupResult {
    * may not have applied): not errors, since the final read decides.
    */
   unconfirmedRestoreFailures: CleanupError[];
-  /** The owned documents as the last read after the project deletions returned them. */
+  /** Last post-deletion read; empty on a failed read. Earlier states remain in samples. */
   final: DocumentState[];
   /** Every post-deletion read, including absent documents and failed reads. */
   archivalVerification: {
@@ -68,7 +68,7 @@ export interface CleanupOptions {
  * document whose project is gone, so the restore comes first. A document
  * may be in the trash when the read says so or when a trash was sent and no
  * restore confirmed, since a read right after a trash was once seen stale.
- * Archival has a read budget of 16 reads and at most 15 two-second pauses
+ * By default archival has 16 reads and at most 15 two-second pauses
  * (30 seconds of waiting, plus client request time). Stop early only
  * when every owned document is present, archived and not trashed. This is an
  * operational budget, not a guarantee of backend consistency. Keep all read
@@ -77,10 +77,11 @@ export interface CleanupOptions {
  * failure stays first.
  */
 export async function cleanUpOwned(linear: LinearClient, owned: OwnedRecords, options: CleanupOptions = {}): Promise<CleanupResult> {
-  const { pauseMs = 2_000, verifyReads = 16, requests = [] } = options;
-  if (!Number.isFinite(pauseMs) || pauseMs < 0 || !Number.isSafeInteger(verifyReads) || verifyReads < 1) {
-    throw new Error('Archival verification requires a finite nonnegative pause and a positive integer read budget');
-  }
+  // Teardown must still restore, delete, revoke and report with malformed
+  // configuration. Use the default budget rather than throwing after setup.
+  const pauseMs = Number.isFinite(options.pauseMs) && options.pauseMs! >= 0 ? options.pauseMs! : 2_000;
+  const verifyReads = Number.isSafeInteger(options.verifyReads) && options.verifyReads! >= 1 ? options.verifyReads! : 16;
+  const requests = options.requests ?? [];
   const result: CleanupResult = {
     errors: [], restored: [], unconfirmedRestoreFailures: [], final: [],
     archivalVerification: { maxReads: verifyReads, pauseMs, samples: [] },
