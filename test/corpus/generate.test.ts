@@ -5,13 +5,16 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
+import { fitScene, gifFrames, PLAN } from "./assets.ts";
 import { linkTargets, rewrite, targetPath } from "./bank.ts";
 import { checkCorpus } from "./check.ts";
 import { longTitle } from "./documents.ts";
 import { buildCorpus, writeCorpus } from "./generate.ts";
 import { gitattributes } from "./model.ts";
+import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
-import { COLLISIONS } from "./tree.ts";
+import { lintText } from "../../src/format/index.ts";
+import { COLLISIONS, EDGE, LOOSE } from "./tree.ts";
 
 // The default corpus, built once for the tests that only read it.
 let defaultCorpus: ReturnType<typeof buildCorpus> | undefined;
@@ -147,7 +150,7 @@ test("a malformed percent escape is kept as written, and replacements are litera
 
 test("bank files above every annotation are unsynced, and every bank fixture keeps its bank group", () => {
   const built = corpus();
-  for (const file of built.files.filter((f) => f.path.startsWith("loose/"))) {
+  for (const file of built.files.filter((f) => f.path.startsWith(`${LOOSE}/`))) {
     assert.equal(file.synced, false, file.path);
     assert.equal(file.group, "unsynced", file.path);
   }
@@ -176,7 +179,7 @@ test("every generated image and attachment has its own content", () => {
   // Uploads are deduplicated by content hash, so two equal files would test one upload.
   const seen = new Map<string, string>();
   for (const file of corpus().files) {
-    if ((file.kind !== "image" && file.kind !== "attachment") || file.bankGroup !== null || file.path.startsWith("loose/")) continue;
+    if ((file.kind !== "image" && file.kind !== "attachment") || file.bankGroup !== null || file.path.startsWith(`${LOOSE}/`)) continue;
     const digest = createHash("sha256").update(file.content).digest("hex");
     assert.equal(seen.get(digest), undefined, `${file.path} has the same content as ${seen.get(digest)}`);
     seen.set(digest, file.path);
@@ -204,7 +207,7 @@ test("generated alignment, image titles and marker contexts follow the fixture b
   const built = corpus();
   const cases = [
     { matches: /\/tables\/aligned-/, fixture: "tables/table-alignment.md", count: 14 },
-    { matches: /handbook\/images\/titled-image\.md$/, fixture: "images/title.md", count: 1 },
+    { matches: /edge-cases\/images\/titled-image\.md$/, fixture: "images/title.md", count: 1 },
     ...[
       "conflict-markers/in-code-fence.md",
       "conflict-markers/in-quote.md",
@@ -239,5 +242,38 @@ test("generated quoted markers stay separate paragraphs and diff3 examples inclu
     const diff3 = built.files.find((f) => f.path.endsWith(`/marker-lookalike-${n}.md`));
     assert.ok(diff3);
     assert.match(diff3.content.toString(), /```text\n<<<<<<< ours\nthe old line\n\|{7} base\nthe base line\n=======\nthe new line\n>>>>>>> theirs\n```/);
+  }
+});
+
+test("every animated GIF scene and size moves from frame to frame", () => {
+  const gif = PLAN.find((p) => p.format === "gif");
+  assert.ok(gif);
+  for (const scene of [...gif.scenes, "screenshot" as const]) {
+    for (const [width, height] of gif.sizes) {
+      const frames = gifFrames(new Rng(`${scene}-${width}`), width, height, { scene: fitScene(scene, width, height), title: "TITLE", labels: ["ONE", "TWO", "THREE", "FOUR"], accent: [37, 99, 235] }, true);
+      assert.ok(frames.length > 1);
+      for (let f = 1; f < frames.length; f++) {
+        assert.notDeepEqual(frames[f]?.indices, frames[f - 1]?.indices, `${scene} ${width}x${height}: frame ${f + 1} repeats frame ${f}`);
+      }
+    }
+  }
+});
+
+test("the linter flags exactly the documents the manifest classes as lint errors", () => {
+  // Duplicate titles are a property of a pair of paths, not of one file's text.
+  for (const file of corpus().files) {
+    if (file.kind !== "markdown" || !file.synced || file.rule === "duplicate-title") continue;
+    const rules: string[] = [...new Set(lintText(file.path, new TextDecoder().decode(file.content)).map((f) => f.rule))];
+    if (file.expected === "lint-error") assert.ok(rules.includes(file.rule as string), `${file.path}: expected ${file.rule}, the linter found [${rules.join(", ")}]`);
+    else assert.deepEqual(rules, [], `${file.path} is not classed as a lint error`);
+  }
+});
+
+test("edge cases stay in the edge-case area and the Markdown reference, away from the everyday documents", () => {
+  const edgeGroups = new Set(["pairwise", "size-spectrum", "conflict-markers", "lint-errors"]);
+  for (const file of corpus().files) {
+    if (file.kind !== "markdown" || [`${EDGE}/`, "docs/reference/", `${LOOSE}/`].some((p) => file.path.startsWith(p))) continue;
+    assert.ok(!edgeGroups.has(file.group), `${file.path} (${file.group}) belongs in ${EDGE}`);
+    assert.notEqual(file.expected, "lint-error", `${file.path} is a lint error outside ${EDGE}`);
   }
 });

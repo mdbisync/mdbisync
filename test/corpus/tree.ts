@@ -1,9 +1,14 @@
 // The corpus tree: team and project folders with their annotations, the
 // folders where generated files live, and the files at the corpus root.
+//
+// The tidy part reads like one company's documentation. Everything that
+// exists to exercise an edge case (sizes, odd names, lint errors, marker
+// lookalikes, unusual typography) lives under eng/edge-cases/, so a reader
+// can open the tidy part first.
 
-import { gitattributes, markdownFile, type Canaries, type CorpusFile } from "./model.ts";
+import { COMPANY, PROFILE_PATHS, PROFILES } from "./company.ts";
+import { gitattributes, idLine, markdownFile, relativeLink, type Canaries, type CorpusFile } from "./model.ts";
 import type { Rng } from "./rng.ts";
-import { paragraph } from "./text.ts";
 
 /** A folder that holds synchronized documents. */
 export type Home = {
@@ -25,42 +30,114 @@ export const DOCS_PROJECTS = [
   { folder: "docs/release notes", placeholder: "PROJECT_DOCS_2" },
   { folder: "docs/reference", placeholder: "PROJECT_DOCS_3" },
 ];
-export const COMBINED = { folder: "combined", placeholder: "PROJECT_COMBINED", team: "DOCS" as const };
+/** A folder with a team and a project annotation together, and no team zone. */
+export const COMBINED = { folder: "support", placeholder: "PROJECT_COMBINED", team: "DOCS" as const };
 
 /** The fixture bank is copied here, keeping its own folder layout. */
 export const BANK_HOME = "docs/reference";
 /** Files above every annotation. */
-export const LOOSE = "loose";
+export const LOOSE = "workspace";
+/** The team-zone area for edge cases. */
+export const EDGE = "eng/edge-cases";
 /** Team-zone folder for the duplicate-title pairs. */
-export const COLLISIONS = "eng/collisions";
+export const COLLISIONS = `${EDGE}/collisions`;
+/** Team-zone area with documents in other languages and scripts. */
+export const LOCALIZATION = "eng/localization";
 
-/** Team-zone areas of ENG; their names exercise spaces, dots, parentheses and other scripts. */
-const ENG_AREAS = ["eng/backend", "eng/frontend", "eng/infra", "eng/on-call (rotation)", "eng/notes.v2", "eng/Ελληνικά", "eng/設計", "eng/🚀 launches"];
+const PROJECT_FOLDERS = new Set([...ENG_PROJECTS, ...DOCS_PROJECTS].map((p) => p.folder));
 
-/** Where generated documents may be placed; the bank's project is kept for the bank. */
-export const HOMES: Home[] = [
-  ...ENG_AREAS.map((path): Home => ({ path, scope: "team", team: "ENG" })),
-  ...ENG_PROJECTS.map(({ folder }): Home => ({ path: folder, scope: "project", team: "ENG" })),
-  ...DOCS_PROJECTS.filter((p) => p.folder !== BANK_HOME).map(({ folder }): Home => ({ path: folder, scope: "project", team: "DOCS" })),
-  { path: COMBINED.folder, scope: "project", team: "DOCS" },
-];
+/** Where generated work documents live: one home per company area or project. */
+export const HOMES: Home[] = PROFILE_PATHS.map((path): Home => ({
+  path,
+  scope: PROJECT_FOLDERS.has(path) || path === COMBINED.folder ? "project" : "team",
+  team: path.startsWith("eng/") ? "ENG" : "DOCS",
+}));
 
-function readme(path: string, frontMatter: string[], heading: string, rng: Rng, canary: string): CorpusFile {
+function annotated(path: string, frontMatter: string[], body: string, canary: string): CorpusFile {
   const front = frontMatter.length > 0 ? `---\n${frontMatter.join("\n")}\n---\n\n` : "";
-  const body = `${front}# ${heading}\n\n${paragraph(rng)}\n\nReference: ${canary}\n`;
-  return markdownFile({ path, content: Buffer.from(body), group: "annotations", canary, canaryIn: "content" });
+  return markdownFile({ path, content: Buffer.from(`${front}${body}\n${idLine(canary)}\n`), group: "annotations", canary, canaryIn: "content" });
+}
+
+function areaTable(prefix: string): string {
+  const rows = PROFILE_PATHS.filter((p) => p.startsWith(prefix)).map((p) => `| ${p.slice(prefix.length)} | ${PROFILES[p]?.about} |`);
+  return ["| Folder | What is in it |", "| --- | --- |", ...rows].join("\n");
+}
+
+function teamReadme(team: "eng" | "docs"): string {
+  if (team === "eng") {
+    return [
+      "# Engineering",
+      "",
+      `This is where ${COMPANY} engineering writes things down: design docs and RFCs before we build, runbooks and postmortems for when things break, and notes from our meetings.`,
+      "",
+      "## Areas and projects",
+      "",
+      areaTable("eng/"),
+      `| localization | Translations, glossaries and style notes for every language the driver app speaks. |`,
+      "| edge-cases | Formatting samples and unusual files: very long titles, large documents, odd file names and constructs that do not render everywhere. |",
+      "",
+      "## How we write",
+      "",
+      "* Write the RFC before the code, and keep it short enough to read over a coffee.",
+      "* Every runbook names an owner and the date it was last checked.",
+      "* Postmortems are blameless and end with action items that have owners.",
+      "",
+    ].join("\n");
+  }
+  return [
+    "# Documentation",
+    "",
+    `The documentation team keeps the company handbook, the release notes and the reference pages, and runs the help center for ${COMPANY} customers.`,
+    "",
+    areaTable("docs/"),
+    "| reference | A reference of every Markdown construct we use, one small page each. |",
+    "",
+  ].join("\n");
+}
+
+function projectReadme(folder: string): string {
+  const profile = PROFILES[folder];
+  if (folder === BANK_HOME) {
+    return "# Markdown reference\n\nOne small page per Markdown construct: headings, lists, tables, code, links, images and more. Use it to check how a construct looks before you use it in a real document.\n";
+  }
+  if (!profile) throw new Error(`no profile for ${folder}`);
+  return [`# ${profile.name}`, "", profile.about, "", ...(profile.topics.length > 0 ? ["## Current work", "", ...profile.topics.map((tp) => `* **${tp.title}.** ${tp.summary}`), ""] : [])].join("\n");
+}
+
+function rootReadme(links: string[]): string {
+  const link = (text: string, target: string) => {
+    links.push(target);
+    return `[${text}](${relativeLink("README.md", target)})`;
+  };
+  return [
+    `# ${COMPANY} documentation`,
+    "",
+    `${COMPANY} plans delivery routes for local couriers: a web console for planners, an app for drivers and an API for the shops that send orders. This repository holds the documentation of its teams.`,
+    "",
+    "| Folder | Team | What is in it |",
+    "| --- | --- | --- |",
+    `| ${link("eng", "eng/README.md")} | Engineering | Design docs, RFCs, runbooks, postmortems, meeting notes and project pages |`,
+    `| ${link("docs", "docs/README.md")} | Documentation | The company handbook, release notes and the Markdown reference |`,
+    `| ${link("support", `${COMBINED.folder}/README.md`)} | Documentation | The help center for customers and partners |`,
+    `| ${LOOSE} | Everyone | Scripts, data exports and personal notes that are not published |`,
+    "",
+    "Unusual files used to check formatting live in `eng/edge-cases`, away from the everyday documents.",
+    "",
+  ].join("\n");
 }
 
 /** The annotated README.md files and the corpus root files. */
-export function treeFiles(rng: Rng, canaries: Canaries): CorpusFile[] {
+export function treeFiles(_rng: Rng, canaries: Canaries): CorpusFile[] {
+  const rootLinks: string[] = [];
+  const root = annotated("README.md", [], rootReadme(rootLinks), canaries.take());
   const files: CorpusFile[] = [
-    { ...readme("README.md", [], "Test corpus", rng, canaries.take()), group: "unsynced", synced: false, note: "no annotation: nothing above it is synced" },
-    readme("eng/README.md", ["linear-team: ENG"], "Engineering", rng, canaries.take()),
-    readme("docs/README.md", ["linear-team: DOCS"], "Documentation", rng, canaries.take()),
-    readme(`${COMBINED.folder}/README.md`, [`linear-team: ${COMBINED.team}`, `linear-project: ${COMBINED.placeholder}`], "Combined space", rng, canaries.take()),
+    { ...root, group: "unsynced", synced: false, links: rootLinks, note: "no annotation: nothing above it is synced" },
+    annotated("eng/README.md", ["linear-team: ENG"], teamReadme("eng"), canaries.take()),
+    annotated("docs/README.md", ["linear-team: DOCS"], teamReadme("docs"), canaries.take()),
+    annotated(`${COMBINED.folder}/README.md`, [`linear-team: ${COMBINED.team}`, `linear-project: ${COMBINED.placeholder}`], projectReadme(COMBINED.folder), canaries.take()),
   ];
   for (const { folder, placeholder } of [...ENG_PROJECTS, ...DOCS_PROJECTS]) {
-    files.push(readme(`${folder}/README.md`, [`linear-project: ${placeholder}`], folder.split("/").pop() as string, rng, canaries.take()));
+    files.push(annotated(`${folder}/README.md`, [`linear-project: ${placeholder}`], projectReadme(folder), canaries.take()));
   }
   files.push(
     markdownFile({ path: ".gitattributes", content: Buffer.from(gitattributes()), group: "support", kind: "other", synced: false }),
