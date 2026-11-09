@@ -20,7 +20,7 @@ import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
-import { CorpusMissingError, Sandbox } from './sandbox.ts';
+import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
 import { prepareFixtures, UNSAFE_TITLES } from './fixtures.ts';
@@ -411,6 +411,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   const heartbeat = setInterval(() => registration.heartbeat(), 60_000);
   const log = (line: string) => deps.log(`${scenario.id} ${runId}: ${line}`);
   let person: Git | undefined;
+  let hooksInstalled = false;
   let engineDir: string | undefined;
   let phase = 'admission';
   // Set when setup missed its deadline: setup stops at its next phase or lock wait, and creates nothing more.
@@ -439,6 +440,13 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       if (ctx.live === null) throw new Error('offline scenarios have no repository');
       person ??= await ctx.live.sandbox.clone(names, join(runDir, 'person'));
       return person;
+    },
+    async personHooks() {
+      if (ctx.live === null) throw new Error('offline scenarios have no repository');
+      if (hooksInstalled) return;
+      // No sandbox credentials: npm runs while the public hooks install.
+      await installHooks(await ctx.person(), { signal: ctx.signal });
+      hooksInstalled = true;
     },
     async engineClone() {
       if (ctx.live === null) throw new Error('offline scenarios have no repository');

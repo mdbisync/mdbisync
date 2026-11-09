@@ -11,6 +11,12 @@ export interface RunOptions {
   input?: Buffer | string;
   /** Extra environment; a value of `undefined` removes the variable. */
   env?: Record<string, string | undefined>;
+  /**
+   * The whole environment of this call, with only the runner's base settings
+   * under it: neither the process's environment nor the runner's own is
+   * inherited. For commands that run code which must not see them (hooks).
+   */
+  onlyEnv?: Record<string, string>;
   /** Exit codes that are not an error (default: only 0). */
   okCodes?: readonly number[];
 }
@@ -56,7 +62,8 @@ export class Git {
   }
 
   run(args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
-    const env: Record<string, string | undefined> = { ...process.env, ...BASE_ENV, ...this.env, ...options.env };
+    const env: Record<string, string | undefined> =
+      options.onlyEnv !== undefined ? { ...BASE_ENV, ...options.onlyEnv } : { ...process.env, ...BASE_ENV, ...this.env, ...options.env };
     for (const key of Object.keys(env)) {
       if (env[key] === undefined) delete env[key];
     }
