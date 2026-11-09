@@ -180,37 +180,49 @@ export class SandboxRest {
    * Closes a pull request and returns once it reads back closed. Deleting a
    * pull request's head branch makes GitHub close it itself, a little later,
    * and answer 422 to the close meanwhile: a 422 counts as closed only when
-   * the pull request reads back closed within `settleMs`.
+   * the pull request reads back closed within `settleMs`. A read that fails
+   * meanwhile is retried; the last failure is reported at the deadline.
    */
   async closePullRequest(number: number, settleMs = 15_000, pollMs = 1_000): Promise<void> {
-    let refused: GitHubError | undefined;
+    let reason = 'after the close';
     try {
       const closed = await this.request<PullRequest>('PATCH', `/pulls/${number}`, { state: 'closed' });
       if (closed?.state === 'closed') return;
     } catch (error) {
       if (!(error instanceof GitHubError) || error.status !== 422) throw error;
-      refused = error;
+      reason = `(${error.message})`;
     }
     const deadline = Date.now() + settleMs;
     for (;;) {
-      if ((await this.pullRequest(number)).state === 'closed') return;
+      try {
+        if ((await this.pullRequest(number)).state === 'closed') return;
+      } catch (error) {
+        reason = `(${(error as Error).message})`;
+      }
       if (Date.now() >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
-    throw new GitHubError(`pull request ${number} is still open${refused === undefined ? ' after the close' : ` (${refused.message})`}`, refused?.status ?? 0);
+    throw new Error(`pull request ${number} is still open ${reason}`);
   }
 
   /**
    * Closes every open pull request whose head branch starts with `prefix`,
-   * and returns their numbers once none reads open. The open listing can lag
+   * and returns their numbers once none reads open. A close that fails does
+   * not stop the others; every failure is reported. The open listing can lag
    * behind a close, so a pull request it still lists is read on its own.
    */
   async closeOpenPullRequests(prefix: string, settleMs?: number, pollMs?: number): Promise<number[]> {
     const closed: number[] = [];
+    const problems: string[] = [];
     for (const pr of await this.pullRequests(prefix, 'open')) {
-      await this.closePullRequest(pr.number, settleMs, pollMs);
-      closed.push(pr.number);
+      try {
+        await this.closePullRequest(pr.number, settleMs, pollMs);
+        closed.push(pr.number);
+      } catch (error) {
+        problems.push((error as Error).message);
+      }
     }
+    if (problems.length > 0) throw new Error(problems.join('; '));
     const open: number[] = [];
     for (const pr of await this.pullRequests(prefix, 'open')) if ((await this.pullRequest(pr.number)).state !== 'closed') open.push(pr.number);
     if (open.length > 0) throw new Error(`pull requests still open: ${open.join(', ')}`);

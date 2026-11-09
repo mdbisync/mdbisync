@@ -355,10 +355,11 @@ export async function retainPendingOutput(ctx: Pick<RunContext, 'engine' | 'obse
 }
 
 /**
- * Deletes a run's refs on the sandbox and closes its pull requests, and
- * reports a problem unless both then read back gone: no run ref is left and
- * no run pull request reads open. Deleting a head branch makes GitHub close
- * its pull request itself; that close counts. Safe to repeat.
+ * Closes a run's pull requests and deletes its refs on the sandbox, and
+ * reports a problem unless both then read back gone: no run pull request
+ * reads open and no run ref is left. Pull requests go first, while their head
+ * branches exist; a head branch a step already deleted makes GitHub close its
+ * pull request itself, and that close counts. Safe to repeat.
  */
 export async function removeRunRefsAndPullRequests(
   runId: string,
@@ -366,6 +367,13 @@ export async function removeRunRefsAndPullRequests(
   rest: Pick<SandboxRest, 'closeOpenPullRequests'> | undefined,
 ): Promise<string[]> {
   const problems: string[] = [];
+  if (rest !== undefined) {
+    try {
+      await rest.closeOpenPullRequests(`t/${runId}/`);
+    } catch (error) {
+      problems.push(`pull requests: ${(error as Error).message}`);
+    }
+  }
   if (sandbox !== undefined) {
     try {
       const ofRun = async () => (await sandbox.runRefs()).filter((ref) => ref.runId === runId).map((ref) => ref.ref);
@@ -374,13 +382,6 @@ export async function removeRunRefsAndPullRequests(
       if (left.length > 0) problems.push(`refs: still on the sandbox: ${left.join(', ')}`);
     } catch (error) {
       problems.push(`refs: ${(error as Error).message}`);
-    }
-  }
-  if (rest !== undefined) {
-    try {
-      await rest.closeOpenPullRequests(`t/${runId}/`);
-    } catch (error) {
-      problems.push(`pull requests: ${(error as Error).message}`);
     }
   }
   return problems;

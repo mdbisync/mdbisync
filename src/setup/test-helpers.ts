@@ -290,9 +290,10 @@ function pullRequests(world: FakeWorld, method: string, rest: string, init: Requ
     const state = query.get('state') ?? 'open';
     const head = query.get('head');
     const base = query.get('base');
-    const found = store.map(read).filter(
-      (pr) => (state === 'all' || pr.state === state) && (head === null || `owner:${pr.head}` === head) && (base === null || pr.base === base),
-    );
+    const found = store
+      .filter((pr) => (head === null || `owner:${pr.head}` === head) && (base === null || pr.base === base))
+      .map(read)
+      .filter((pr) => state === 'all' || pr.state === state);
     return json(200, found.map(pullRequestNode));
   }
   if (method !== 'POST') return undefined;

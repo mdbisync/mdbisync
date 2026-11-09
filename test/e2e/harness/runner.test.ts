@@ -402,9 +402,17 @@ describe('run cleanup on GitHub', () => {
     return { world, sandbox, rest, refs };
   };
 
-  it('counts GitHub\'s own close after the head branch went, and stays clean when repeated', async () => {
+  it('closes the run\'s pull requests while their head branches exist, then deletes its refs', async () => {
+    const { world, sandbox, rest, refs } = await setup(1);
+    assert.deepEqual(await removeRunRefsAndPullRequests('444444', sandbox, rest), []);
+    assert.deepEqual(world.github.pullRequests.map((pr) => [pr.number, pr.state, pr.headDeleted]), [[1, 'closed', undefined], [2, 'open', undefined]]);
+    assert.deepEqual(await refs(), ['refs/heads/main', 'refs/heads/t/555555/sync']);
+  });
+
+  it('counts GitHub\'s own close after a step deleted the head branch, and stays clean when repeated', async () => {
     // The open listing still shows the pull request, the close answers 422, and it then reads back closed.
     const { world, sandbox, rest, refs } = await setup(1);
+    await sandbox.deleteRunRefs('444444', ['refs/heads/t/444444/sync']);
     assert.deepEqual(await removeRunRefsAndPullRequests('444444', sandbox, rest), []);
     assert.ok(world.requests.some((request) => request.startsWith('PATCH ') && request.endsWith('/pulls/1')));
     assert.deepEqual(await refs(), ['refs/heads/main', 'refs/heads/t/555555/sync']);
@@ -428,13 +436,30 @@ describe('run cleanup on GitHub', () => {
     assert.equal(world.github.pullRequests[0]?.state, 'open');
   });
 
+  it('closes the other pull requests when one close fails', async () => {
+    const { world, sandbox, rest } = await setup(Infinity);
+    await sandbox.deleteRunRefs('444444', ['refs/heads/t/444444/sync']);
+    await assert.rejects(rest.closeOpenPullRequests('t/', 0), /^Error: pull request 1 is still open \(PATCH [^)]*: HTTP 422\)$/);
+    assert.equal(world.github.pullRequests[1]?.state, 'closed');
+  });
+
+  it('reads a pull request again when a read fails while GitHub closes it', async () => {
+    const { world, sandbox, rest } = await setup(0);
+    await sandbox.deleteRunRefs('444444', ['refs/heads/t/444444/sync']);
+    let broken = 0;
+    world.github.reset = (request) => (request === 'GET /pulls/1' && broken++ === 0 ? 'before' : undefined);
+    await rest.closePullRequest(1, 5_000, 10);
+    assert.equal(broken, 2);
+    assert.equal(world.github.pullRequests[0]?.state, 'closed');
+  });
+
   it('reports a cleanup that fails, and run refs that stay', async () => {
     const { world, sandbox, rest } = await setup(0);
     world.github.reset = (request) => (request.startsWith('PATCH ') ? 'before' : undefined);
     const problems = await removeRunRefsAndPullRequests('444444', { runRefs: () => sandbox.runRefs(), deleteRunRefs: async () => {} }, rest);
     assert.equal(problems.length, 2);
-    assert.match(problems[0] ?? '', /^refs: still on the sandbox: refs\/heads\/t\/444444\/sync, refs\/mdbisync-t\/444444\/ids$/);
-    assert.match(problems[1] ?? '', /^pull requests: fetch failed$/);
+    assert.match(problems[0] ?? '', /^pull requests: fetch failed$/);
+    assert.match(problems[1] ?? '', /^refs: still on the sandbox: refs\/heads\/t\/444444\/sync, refs\/mdbisync-t\/444444\/ids$/);
   });
 });
 
