@@ -62,10 +62,25 @@ describe('workflow templates rendered for a run', () => {
     assert.throws(() => renderForRun('x: ${{ secrets.MDBISYNC_OTHER }}\n', RUN), /no sandbox name for secrets\.MDBISYNC_OTHER/);
   });
 
+  it('the sync: push on the run\'s branch, the schedule and dispatch kept, the run\'s group', () => {
+    const text = renderForRun(readTemplate(WORKFLOW_FILES.sync), { ...RUN, actionSha: SHA });
+    const parsed = parse(text) as { on: Record<string, { branches?: string[] } | null>; concurrency: { group: string } };
+    assert.deepEqual(parsed.on['push'], { branches: [RUN.trackedBranch] });
+    assert.ok(Array.isArray(parsed.on['schedule']));
+    assert.ok('workflow_dispatch' in parsed.on);
+    assert.equal(parsed.concurrency.group, RUN.group);
+    const [job] = jobsOf(text);
+    const action = job!.steps.find((step) => step.uses?.startsWith(`${ACTION_REPOSITORY}@`));
+    assert.equal(action?.with?.['operation'], 'sync');
+    assert.equal(action?.with?.['tracked-branch'], RUN.trackedBranch);
+  });
+
   it('renders every template that exists, and finds the workflow of each command', () => {
     const files = runWorkflows(RUN);
+    assert.ok(files.has(WORKFLOW_FILES.sync));
     assert.ok(files.has(WORKFLOW_FILES['initial-sync']));
     assert.ok(files.has(WORKFLOW_FILES['pre-commit']));
+    assert.deepEqual([...runWorkflows(RUN, [WORKFLOW_FILES['initial-sync'], WORKFLOW_FILES['pre-commit']]).keys()], [WORKFLOW_FILES['initial-sync'], WORKFLOW_FILES['pre-commit']]);
     assert.equal(workflowFor('initial-sync'), 'mdbisync-initial-sync.yml');
     assert.equal(workflowFor('sync'), 'mdbisync.yml');
   });

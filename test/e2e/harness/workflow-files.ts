@@ -114,10 +114,10 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
   }
 }
 
-/** Every template that exists, rendered for one run, by its `.github/workflows/` file name. */
-export function runWorkflows(options: RunWorkflowOptions): Map<string, string> {
+/** The templates that exist (of `only`, when given), rendered for one run, by their `.github/workflows/` file name. */
+export function runWorkflows(options: RunWorkflowOptions, only?: readonly string[]): Map<string, string> {
   const files = new Map<string, string>();
-  for (const file of Object.values(WORKFLOW_FILES)) {
+  for (const file of only ?? Object.values(WORKFLOW_FILES)) {
     if (existsSync(join(EXAMPLES, file))) files.set(file, renderForRun(readTemplate(file), options));
   }
   return files;

@@ -103,16 +103,22 @@ describe('the action entry points', () => {
     return printed;
   };
 
-  const runInitialSync = async (world: FakeWorld, confirm: string) => {
-    step({ operation: 'initial-sync', direction: 'git-to-linear', confirm });
+  /** Runs `main` with these inputs; what it logs and writes holds no content and no secret. */
+  const runStep = async (world: FakeWorld, inputs: Record<string, string>) => {
+    step(inputs);
     const printed = await quietly(() => runMain({ fetch: fakeFetch(world) }));
     assert.ok(!printed.includes(CANARY), 'the step printed content');
     // The runner consumes mask commands; it never logs them.
     const logged = printed.replace(/^::add-mask::.*$/gm, '');
     for (const secret of ['client-secret', 'gh-token', 'fake-token']) assert.ok(!logged.includes(secret), secret);
     const report = JSON.parse(await readFile(file('report.json'), 'utf8')) as RunReport;
-    return { printed, report };
+    const summary = await readFile(file('summary.md'), 'utf8');
+    for (const secret of [CANARY, 'client-secret', 'gh-token', 'fake-token']) assert.ok(!summary.includes(secret), `summary: ${secret}`);
+    // Every token a run mints is masked before anything else is printed.
+    assert.match(printed, /::add-mask::fake-token/);
+    return { printed, report, summary };
   };
+  const runInitialSync = (world: FakeWorld, confirm: string) => runStep(world, { operation: 'initial-sync', direction: 'git-to-linear', confirm });
 
   it('L1-20 (offline): a dry run writes nothing, the confirmed run converges, and each revokes its token', async () => {
     const world = fakeWorld();
@@ -121,9 +127,7 @@ describe('the action entry points', () => {
     assert.deepEqual(world.writes, [], 'the dry run wrote');
     assert.deepEqual(dry.report.summary?.plan?.create, ['eng/README.md', 'eng/backend/notes.md']);
     // The job summary goes beside the report, for tooling that collects both.
-    const summary = await readFile(file('summary.md'), 'utf8');
-    assert.match(summary, /eng\/backend\/notes\.md/);
-    assert.ok(!summary.includes(CANARY));
+    assert.match(dry.summary, /eng\/backend\/notes\.md/);
     assert.equal(world.minted, 1);
     assert.equal(world.revoked, 1);
     // The token went to the step's state for `post`, and was taken back once revoked.
@@ -138,6 +142,16 @@ describe('the action entry points', () => {
     assert.notEqual(await fixture.remote.text(['rev-parse', '--verify', '--quiet', 'refs/mdbisync/linear']).catch(() => ''), '');
     assert.equal(world.minted, 2);
     assert.equal(world.revoked, 2);
+    assert.deepEqual(await tokenStates(), ['fake-token', '']);
+
+    // L2-37 (offline): the sync entry point on the converged repository writes nothing and revokes its token.
+    await writeFile(file('state'), '');
+    const writes = world.writes.length;
+    const synced = await runStep(world, { operation: 'sync' });
+    assert.equal(process.exitCode ?? 0, 0, synced.printed);
+    assert.equal(world.writes.length, writes, 'a converged sync wrote');
+    assert.equal(world.minted, 3);
+    assert.equal(world.revoked, 3);
     assert.deepEqual(await tokenStates(), ['fake-token', '']);
   });
 
