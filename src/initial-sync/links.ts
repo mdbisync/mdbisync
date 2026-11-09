@@ -19,6 +19,7 @@
 
 import { posix } from 'node:path';
 import type { Definition, Link, Nodes } from 'mdast';
+import { fixText } from '../format/index.ts';
 import { parse, visit } from '../format/markdown.ts';
 import { type LinearClient } from '../linear/index.ts';
 import { type BodyTransform, type TransformContext } from './transform.ts';
@@ -246,6 +247,13 @@ function destinationSpan(body: string, node: Link | Definition): { from: number;
   return to > at ? { from: at, to } : undefined;
 }
 
+/** A raw destination as Linear's form writes it (`b.md` becomes `<b.md>`); unchanged when that cannot be read back. */
+function linearFormOf(raw: string): string {
+  const fixed = fixText(`[x](${raw})`);
+  const [destination] = linkDestinations(fixed);
+  return destination === undefined || destination.url !== destinationUrl(raw) ? raw : fixed.slice(destination.from, destination.to);
+}
+
 /** Reads the workspace's URL key; one request. */
 export async function workspaceUrlKey(linear: LinearClient): Promise<string> {
   const data = await linear.request<{ organization: { urlKey: string } }>('WorkspaceUrlKey', 'query', 'query WorkspaceUrlKey { organization { urlKey } }');
@@ -261,8 +269,12 @@ export async function workspaceUrlKey(linear: LinearClient): Promise<string> {
 export function documentLinks(): BodyTransform {
   let context: TransformContext | undefined;
   let map: LinkMap | undefined;
-  /** By document path, for the documents rewritten: the destinations the file had for each document URL. */
-  const seen = new Map<string, LinkSpellings>();
+  /**
+   * By document path, for the documents rewritten: what the transform wrote,
+   * and for each document URL the destinations the file had, as written and
+   * in Linear's form.
+   */
+  const rewritten = new Map<string, { written: string; asWritten: LinkSpellings; inLinearForm: LinkSpellings }>();
   return {
     name: 'document-links',
     async prepare(run: TransformContext) {
@@ -274,16 +286,23 @@ export function documentLinks(): BodyTransform {
         if (!hasDocumentLinks(body, path, context.documentIds)) return body;
         map = { base: documentUrlBase(await workspaceUrlKey(context.linear)), ids: context.documentIds };
       }
-      const urls: LinkSpellings = new Map();
-      const written = linksToLinear(body, path, map, urls);
-      if (written !== body) seen.set(path, urls);
-      else seen.delete(path);
+      const asWritten: LinkSpellings = new Map();
+      const written = linksToLinear(body, path, map, asWritten);
+      if (written === body) {
+        rewritten.delete(path);
+        return body;
+      }
+      const inLinearForm: LinkSpellings = new Map([...asWritten].map(([url, raws]) => [url, raws.map(linearFormOf)]));
+      rewritten.set(path, { written, asWritten, inLinearForm });
       return written;
     },
     restore({ path, body }) {
       // In an initial sync only what this transform wrote comes back; a document it did not rewrite stays as it is.
-      const urls = seen.get(path);
-      return map === undefined || urls === undefined ? body : linksFromLinear(body, path, map, urls);
+      const entry = rewritten.get(path);
+      if (map === undefined || entry === undefined) return body;
+      // Linear kept the text: each link comes back exactly as the file had it. Linear reformatted it: the links
+      // come back in Linear's form too, so the restored text is Linear's form of the file, not a mix of both.
+      return linksFromLinear(body, path, map, body === entry.written ? entry.asWritten : entry.inLinearForm);
     },
   };
 }

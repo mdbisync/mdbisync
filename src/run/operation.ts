@@ -13,6 +13,7 @@ import {
   renderConfirmed,
   renderDryRun,
   toPlanReport,
+  uploadsTransform,
 } from '../initial-sync/index.ts';
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
 import { type Operation, type PreflightOptions, type PreflightOutcome, runPreflight } from './preflight.ts';
@@ -47,7 +48,9 @@ export async function runOperation(
       ? undefined
       : async (context) => {
           if (gitToLinear.confirm) {
-            const run = await confirmInitialSync(context, { config: inputs.state, transforms: [documentLinks()] });
+            // Uploads rewrite links to files that are not Markdown; document links, links to synchronized documents.
+            const transforms = [uploadsTransform({ config: inputs.state }), documentLinks()];
+            const run = await confirmInitialSync(context, { config: inputs.state, transforms });
             plan = toPlanReport(run.plan, gitToLinear.direction, true);
             confirmed = run.result;
             workSummary = renderConfirmed(run.plan, run.result);

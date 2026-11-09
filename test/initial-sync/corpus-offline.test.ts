@@ -11,12 +11,15 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { runCli } from '../../src/cli.ts';
 import { fixText, splitFile } from '../../src/format/index.ts';
-import { documentUrlBase, linksToLinear } from '../../src/initial-sync/index.ts';
+import { documentUrlBase, findFileLinks, linksToLinear } from '../../src/initial-sync/index.ts';
 import { collectAnnotations } from '../../src/mapping/index.ts';
 import { type RunReport } from '../../src/run/finish.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../../src/setup/test-helpers.ts';
+import { type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../../src/setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../../src/state/test-helpers.ts';
 import { type Corpus, buildCorpus } from '../corpus/generate.ts';
+
+/** A relative folder standing in for the fake's upload host while the fake formats content. */
+const UPLOAD_PLACEHOLDER = 'uploaded-file-placeholder/';
 
 const LINEAR_FORMAT_HOOK = `repos:
   - repo: https://github.com/example/mdbisync
@@ -72,7 +75,12 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
         cwd = (await fixture.clone('work')).dir;
         world = worldFor(files);
         // Like Linear, the fake stores Markdown in its own form; the corpus is not written in that form.
-        world.linear.store = (content) => fixText(content);
+        // Linear stores a link to an uploaded file as a file, the form `fix` gives a relative link to a
+        // file (format probe, attachments/several.md); so upload URLs are formatted as such links.
+        world.linear.store = (content) => {
+          const asFiles = content.replaceAll(`${UPLOADS_HOST}/`, UPLOAD_PLACEHOLDER);
+          return fixText(asFiles).replaceAll(UPLOAD_PLACEHOLDER, `${UPLOADS_HOST}/`);
+        };
       });
       after(() => fixture.cleanup());
 
@@ -103,6 +111,23 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
       };
       const refs = () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
 
+      /**
+       * The text Linear should hold for a file: each link to a file of the
+       * slice points to the upload with that file's bytes (I1 maps links
+       * this way), keeping the link's query and fragment.
+       */
+      const withUploadUrls = (path: string, text: string): string => {
+        const isFile = (target: string) => files.has(target) && !target.endsWith('.md');
+        let result = text;
+        for (const link of findFileLinks(path, text, isFile).reverse()) {
+          const bytes = files.get(link.target) as Buffer;
+          const upload = world.linear.uploads.find((candidate) => candidate.bytes?.equals(bytes));
+          assert.ok(upload !== undefined, `${link.target}, linked from ${path}, was not uploaded`);
+          result = result.slice(0, link.from) + upload.assetUrl + link.suffix + result.slice(link.to);
+        }
+        return result;
+      };
+
       it('writes every synchronized file once, records the state, and a second run changes nothing', async () => {
         const first = await run();
         assert.equal(first.result.exitCode, 0, `${first.result.stderr}\n${first.result.stdout.slice(0, 2000)}`);
@@ -121,7 +146,7 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
           const document = live.find((d) => d.id === entry.id);
           assert.ok(document !== undefined, `${path} has no document (I7)`);
           const body = splitFile((files.get(path) as Buffer).toString('utf8')).body;
-          assert.equal(document.content, fixText(linksToLinear(body, path, links)), `${path} differs (I1, in Linear's form)`);
+          assert.equal(document.content, withUploadUrls(path, fixText(linksToLinear(body, path, links))), `${path} differs (I1, in Linear's form)`);
         }
         assert.equal(live.length, Object.keys(ids).length, 'documents without a path, or duplicates (I8)');
         const keys = live.map((d) => `${d.projectId ?? d.teamId}\0${d.title}`);

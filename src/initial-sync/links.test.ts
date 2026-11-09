@@ -121,6 +121,18 @@ describe('document links', () => {
     assert.equal(transform.restore({ path: 'eng/plan.md', body: `[g](<${BASE}/id-guide>)` }), '[g](guide.md)');
   });
 
+  it("restores links in Linear's form when Linear reformatted the document, exactly as written when it kept the text", async () => {
+    const linear = { request: async () => ({ organization: { urlKey: 'example-team' } }) } as unknown as LinearClient;
+    const context = { linear, documentIds: new Map([['eng/guide.md', 'id-guide']]) } as unknown as TransformContext;
+    const transform = documentLinks();
+    await transform.prepare?.(context);
+    const written = await transform.apply({ path: 'eng/plan.md', body: '* [g](guide.md)\n* [h](./guide.md#a)' });
+    assert.equal(transform.restore({ path: 'eng/plan.md', body: written }), '* [g](guide.md)\n* [h](./guide.md#a)');
+    // Linear changed something else in the document: the restored text is Linear's form of the file throughout.
+    const reformatted = written.replace('* ', '- ');
+    assert.equal(transform.restore({ path: 'eng/plan.md', body: reformatted }), '- [g](<guide.md>)\n* [h](<./guide.md#a>)');
+  });
+
   it('round-trips every bank fixture exactly, with every bank document synchronized', () => {
     const root = join(import.meta.dirname, '../../test/fixtures');
     const files = (readdirSync(root, { recursive: true }) as string[])
