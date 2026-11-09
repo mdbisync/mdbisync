@@ -140,3 +140,72 @@ test('the bundled CLI initializes a repository with no dependency installation',
   assert.match(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), new RegExp(sha));
   assert.match(result.stdout, /Remaining admin steps/);
 });
+
+test('complete flags do not prompt even when a terminal prompt is available', async (t) => {
+  const cwd = await fixture(t);
+  const { runInit } = await import('./command.ts');
+  const result = await runInit(flags.slice(1), { cwd, prompt: async () => assert.fail('flags must run non-interactively') });
+  assert.equal(result.exitCode, 0, result.stderr);
+});
+
+test('existing descendant mappings are checked before adding a parent annotation', async (t) => {
+  const cwd = await fixture(t);
+  await mkdir(join(cwd, 'guides/sub'), { recursive: true });
+  await writeFile(join(cwd, 'guides/sub/README.md'), '---\nlinear-team: Other\n---\n# Notes\n');
+  assert.equal((await runCli(flags, { cwd })).exitCode, 2);
+  await assert.rejects(readFile(join(cwd, '.pre-commit-config.yaml')), { code: 'ENOENT' });
+});
+
+test('guided setup permits an inherited or existing team without writing an empty annotation', async (t) => {
+  const { runInit } = await import('./command.ts');
+  for (const inherited of [false, true]) {
+    const cwd = await fixture(t);
+    await mkdir(join(cwd, 'guides/sub'), { recursive: true });
+    await writeFile(join(cwd, 'guides/README.md'), '---\nlinear-team: Planning\n---\n# Notes\n');
+    const answers = [sha, '', 'no'];
+    const result = await runInit(['--folder', inherited ? 'guides/sub' : 'guides', '--project', 'Roadmap'], {
+      cwd, prompt: async () => answers.shift() ?? assert.fail('unexpected question'),
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const text = await readFile(join(cwd, inherited ? 'guides/sub/README.md' : 'guides/README.md'), 'utf8');
+    assert.ok(!text.includes('linear-team: ""'));
+    assert.equal((await runCli(['init', '--release-sha', sha, '--folder', inherited ? 'guides/sub' : 'guides', '--project', 'Roadmap'], { cwd })).exitCode, 0);
+  }
+});
+
+test('security opt-in refuses incompatible existing IDs and malformed hooks', async (t) => {
+  for (const hook of ['null', '{ id: gitleaks, name: custom, language: system, entry: gitleaks }']) {
+    const cwd = await fixture(t);
+    const before = `repos:\n  - repo: local\n    hooks: [${hook}]\n`;
+    await writeFile(join(cwd, '.pre-commit-config.yaml'), before);
+    assert.equal((await runCli([...flags, '--security-hooks'], { cwd })).exitCode, 2);
+    assert.equal(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), before);
+    await assert.rejects(readFile(join(cwd, 'guides/README.md')), { code: 'ENOENT' });
+  }
+});
+
+test('init reports regular-file folder paths as usage errors', async (t) => {
+  const cwd = await fixture(t);
+  await writeFile(join(cwd, 'guides'), 'Keep me.');
+  assert.equal((await runCli(flags, { cwd })).exitCode, 2);
+  assert.equal(await readFile(join(cwd, 'guides'), 'utf8'), 'Keep me.');
+});
+
+test('annotations retain a leading BOM, CRLF body and long unrelated scalars; new hooks use block YAML', async (t) => {
+  for (const frontMatter of [false, true]) {
+    const cwd = await fixture(t);
+    await mkdir(join(cwd, 'guides'));
+    const scalar = 'A long description '.repeat(10);
+    const body = '# Notes\r\n\r\nKeep these words.\r\n';
+    const text = '\uFEFF' + (frontMatter ? `---\r\ndescription: ${scalar.trim()}\r\n---\r\n` : '') + body;
+    await writeFile(join(cwd, 'guides/README.md'), text);
+    const result = await runCli(flags, { cwd });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const after = await readFile(join(cwd, 'guides/README.md'), 'utf8');
+    assert.ok(after.startsWith('\uFEFF---'));
+    assert.ok(after.endsWith(body));
+    assert.equal(after.lastIndexOf('\uFEFF'), 0);
+    if (frontMatter) assert.ok(after.includes(`description: ${scalar.trim()}\r\n`));
+    assert.match(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8'), /repos:\n\s+- repo:/);
+  }
+});

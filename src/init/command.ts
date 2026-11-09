@@ -1,11 +1,12 @@
 // Repository setup is local: validate the entire change before writing files.
-import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { createInterface } from 'node:readline/promises';
 import { parseDocument, isMap, isSeq } from 'yaml';
 import templates from './workflows.json' with { type: 'json' };
 import type { CliResult } from '../cli.ts';
-import { readAnnotation, resolveZones, type Annotation } from '../mapping/annotations.ts';
+import { ANNOTATION_FILE, TEAM_KEY, PROJECT_KEY, resolveZones } from '../mapping/annotations.ts';
+import { collectAnnotations } from '../mapping/mapping.ts';
+import { LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
 import { findFrontMatter } from '../mapping/front-matter.ts';
 
 export const INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA> [--release-version vX.Y.Z]
@@ -61,7 +62,10 @@ async function safePath(root: string, path: string): Promise<string> {
   for (const component of relative(root, target).split(sep).filter(Boolean)) {
     part = join(part, component);
     try { if ((await lstat(part)).isSymbolicLink()) throw new InitError('setup destinations must not contain symlinks'); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') throw new InitError('a setup folder path names a regular file');
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
   }
   return target;
 }
@@ -76,18 +80,22 @@ function annotate(text: string, folder: Folder): string {
   const fm = findFrontMatter(text);
   const doc = document(fm?.yaml ?? '');
   let changed = false;
-  for (const [key, value] of [['linear-team', folder.team], ['linear-project', folder.project]] as const) {
+  for (const [key, value] of [[TEAM_KEY, folder.team], [PROJECT_KEY, folder.project]] as const) {
     if (value === undefined) continue;
     if (doc.has(key)) {
       if (doc.get(key) !== value) throw new InitError(`${folder.path}/README.md already has a different ${key}`);
     } else { doc.set(key, value); changed = true; }
   }
   if (!changed) return text;
-  if (fm === null) return `---\n${doc.toString()}---\n${text}`;
+  if (fm === null) {
+    const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
+    const body = bom ? text.slice(1) : text;
+    return `${bom}---\n${doc.toString({ lineWidth: 0 })}---\n${body}`;
+  }
   // Replace only the YAML, leaving the fences, README body and line endings intact.
   const opening = /^﻿?---[^\S\r\n]*\r?\n/.exec(text)![0];
   const eol = opening.endsWith('\r\n') ? '\r\n' : '\n';
-  return opening + doc.toString().replace(/\n/g, eol) + text.slice(opening.length + fm.yaml.length);
+  return opening + doc.toString({ lineWidth: 0 }).replace(/\n/g, eol) + text.slice(opening.length + fm.yaml.length);
 }
 
 // The image digest pins the scanner's bytes as well as its version.
@@ -95,26 +103,36 @@ export const SCANNER_IMAGE = 'ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0a
 function hookConfig(text: string | undefined, settings: Settings): string {
   const doc = document(text ?? 'default_install_hook_types: [pre-commit, pre-push]\nrepos: []\n');
   const repos = doc.get('repos');
-  if (!isSeq(repos)) throw new InitError('.pre-commit-config.yaml needs a repos list');
-  const data = doc.toJS() as { repos: Array<{ repo?: string; rev?: string; hooks?: Array<{ id?: string }> }> };
-  if (data.repos.some((repo) => repo === null || typeof repo !== 'object' || !Array.isArray(repo.hooks))) throw new InitError('invalid pre-commit repository entry');
-  const existing = data.repos.filter((repo) => repo.hooks?.some((hook) => hook?.id === 'linear-format'));
+  if (!isSeq(repos)) throw new InitError(`${PRE_COMMIT_CONFIG} needs a repos list`);
+  if (text === undefined) repos.flow = false;
+  const data = doc.toJS() as { repos: Array<{ repo?: string; rev?: string; hooks?: Array<{ id?: string; [key: string]: unknown }> }> };
+  if (data.repos.some((repo) => repo === null || typeof repo !== 'object' || !Array.isArray(repo.hooks) || repo.hooks.some((hook) => hook === null || typeof hook !== 'object' || typeof hook.id !== 'string'))) throw new InitError('invalid pre-commit repository entry');
+  const existing = data.repos.filter((repo) => repo.hooks?.some((hook) => hook.id === LINEAR_FORMAT_HOOK));
   if (existing.some((repo) => repo.repo !== 'https://github.com/mdbisync/mdbisync' || repo.rev !== settings.sha)) throw new InitError('existing linear-format hook uses a different repository or release');
   let changed = text === undefined;
   if (!existing.length) {
-    repos.add(doc.createNode({ repo: 'https://github.com/mdbisync/mdbisync', rev: settings.sha, hooks: [{ id: 'linear-format' }] }));
+    repos.add(doc.createNode({ repo: 'https://github.com/mdbisync/mdbisync', rev: settings.sha, hooks: [{ id: LINEAR_FORMAT_HOOK }] }));
     changed = true;
   }
   if (settings.security) {
     const examples = [
-      { id: 'gitleaks', name: 'Scan for secrets (Docker required)', alias: 'security', language: 'docker_image', entry: `${SCANNER_IMAGE} dir --redact --no-banner .`, pass_filenames: false, stages: ['pre-commit', 'pre-push'] },
-      { id: 'private-key-pattern', name: 'Private key pattern', alias: 'security', language: 'pygrep', entry: '-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----', args: ['--multiline'], stages: ['pre-commit', 'pre-push'] },
+      { id: 'gitleaks', name: 'Scan for secrets (Docker required)', alias: SECURITY_ALIAS, language: 'docker_image', entry: `${SCANNER_IMAGE} dir --redact --no-banner .`, pass_filenames: false, stages: ['pre-commit', 'pre-push'] },
+      { id: 'private-key-pattern', name: 'Private key pattern', alias: SECURITY_ALIAS, language: 'pygrep', entry: '-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----', args: ['--multiline'], stages: ['pre-commit', 'pre-push'] },
     ];
-    const ids = data.repos.flatMap((repo) => repo.hooks ?? []).map((hook) => hook.id);
-    const missing = examples.filter((hook) => !ids.includes(hook.id));
+    const hooks = data.repos.flatMap((repo) => repo.hooks ?? []);
+    for (const example of examples) {
+      const matches = hooks.filter((hook) => hook.id === example.id);
+      for (const hook of matches) {
+        const local = data.repos.some((repo) => repo.repo === 'local' && repo.hooks?.includes(hook));
+        if (!local || Object.entries(example).some(([key, value]) => JSON.stringify(hook[key]) !== JSON.stringify(value))) {
+          throw new InitError(`existing ${example.id} hook differs from the security example; reconcile it first`);
+        }
+      }
+    }
+    const missing = examples.filter((hook) => !hooks.some((existing) => existing.id === hook.id));
     if (missing.length) { repos.add(doc.createNode({ repo: 'local', hooks: missing })); changed = true; }
   }
-  return changed ? doc.toString() : text!;
+  return changed ? doc.toString({ lineWidth: 0 }) : text!;
 }
 
 export async function runInit(args: readonly string[], options: InitOptions = {}): Promise<CliResult> {
@@ -122,11 +140,15 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
   try {
     const settings = parseArgs(args);
     const ask = options.prompt;
-    if (ask) {
+    const needsGuidance = !settings.sha || !settings.folders.length || settings.folders.some((folder) => !folder.team && !folder.project);
+    if (ask && needsGuidance) {
       settings.sha ??= (await ask('Release commit SHA: ')).trim();
       if (!settings.folders.length) settings.folders.push({ path: (await ask('Folder to synchronize: ')).trim() });
       for (const folder of settings.folders) {
-        folder.team ??= (await ask(`Linear team for ${folder.path}: `)).trim();
+        if (folder.team === undefined) {
+          const team = (await ask(`Linear team for ${folder.path} (blank to keep or inherit): `)).trim();
+          if (team) folder.team = team;
+        }
         if (folder.project === undefined) {
           const project = (await ask(`Linear project for ${folder.path} (blank for team documents): `)).trim();
           if (project) folder.project = project;
@@ -154,27 +176,41 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
         return content;
       });
     }
-    await queue('.pre-commit-config.yaml', (before) => hookConfig(before, settings));
-    for (const folder of settings.folders) await queue(join(folder.path, 'README.md'), (before) => annotate(before ?? '', folder));
+    await queue(PRE_COMMIT_CONFIG, (before) => hookConfig(before, settings));
+    for (const folder of settings.folders) await queue(join(folder.path, ANNOTATION_FILE), (before) => annotate(before ?? '', folder));
     // Include existing parent annotations when a project inherits its team.
-    const annotations: Annotation[] = [];
+    const contents = new Map<string, string>();
     const readmes = new Set<string>();
     for (const folder of settings.folders) {
       let path = resolve(root, folder.path);
       for (;;) {
-        readmes.add(join(path, 'README.md'));
+        readmes.add(join(path, ANNOTATION_FILE));
         if (path === root) break;
         path = dirname(path);
       }
     }
+    // A new parent annotation can invalidate an existing descendant mapping.
+    const visited = new Set<string>();
+    const descendants = async (folder: string): Promise<void> => {
+      if (visited.has(folder)) return;
+      visited.add(folder);
+      readmes.add(join(folder, ANNOTATION_FILE));
+      let entries;
+      try { entries = await readdir(folder, { withFileTypes: true }); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+      for (const entry of entries) {
+        if (entry.isDirectory() && !['.git', 'node_modules'].includes(entry.name)) await descendants(join(folder, entry.name));
+      }
+    };
+    for (const folder of settings.folders) await descendants(resolve(root, folder.path));
     for (const path of readmes) {
       await safePath(root, relative(root, path));
       const text = changes.get(path) ?? await optionalRead(path);
       if (text === undefined) continue;
-      const result = readAnnotation(relative(root, path), text);
-      if ('problem' in result) throw new InitError(result.problem.message);
-      if (result.annotation) annotations.push(result.annotation);
+      contents.set(relative(root, path), text);
     }
+    const { annotations, problems } = collectAnnotations(contents);
+    if (problems.length) throw new InitError(problems[0]!.message);
     const mapping = resolveZones(annotations);
     if (mapping.problems.length) throw new InitError(mapping.problems[0]!.message);
     for (const [path, text] of changes) {
@@ -186,12 +222,4 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
     if (!(error instanceof InitError)) throw error;
     return { exitCode: 2, stdout: '', stderr: `init: ${error.message}\n\n${INIT_USAGE}` };
   }
-}
-
-/** Only the executable opens a terminal; library callers never prompt implicitly. */
-export async function runTerminalInit(args: readonly string[]): Promise<CliResult> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return runInit(args);
-  const terminal = createInterface({ input: process.stdin, output: process.stdout });
-  try { return await runInit(args, { prompt: (question) => terminal.question(question) }); }
-  finally { terminal.close(); }
 }

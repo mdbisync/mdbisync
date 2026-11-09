@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Command-line entry: `mdbisync <command>` and `mdbisync --version`.
 
+import { createInterface } from "node:readline/promises";
 import { appendFile } from "node:fs/promises";
 import {
   COMMANDS,
@@ -20,7 +21,7 @@ import { unfinishedMessage, writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
 import { Git } from "./state/index.ts";
-import { runInit, runTerminalInit } from "./init/command.ts";
+import { runInit } from "./init/command.ts";
 import { VERSION } from "./version.ts";
 
 export interface CliResult {
@@ -34,6 +35,8 @@ export interface CliOptions {
   /** The repository the command works in. */
   cwd?: string;
   fetch?: typeof fetch;
+  /** Explicit terminal prompt for repository setup; never opened by library calls. */
+  prompt?: (question: string) => Promise<string>;
   /** Optional immediate sinks for callers that need diagnostics even on rejection. */
   log?: (entry: LogEntry) => void;
   warn?: (message: string) => void;
@@ -144,8 +147,11 @@ function notImplemented(command: CommandName): CliResult {
 }
 
 async function main(): Promise<void> {
+  const terminal = process.argv[2] === "init" && process.stdin.isTTY && process.stdout.isTTY
+    ? createInterface({ input: process.stdin, output: process.stdout }) : undefined;
   try {
-    const result = process.argv[2] === "init" ? await runTerminalInit(process.argv.slice(3)) : await runCli(process.argv.slice(2), {
+    const result = await runCli(process.argv.slice(2), {
+      ...(terminal ? { prompt: (question: string) => terminal.question(question) } : {}),
       log: (entry) => { process.stderr.write(`${JSON.stringify(entry)}\n`); },
       warn: (message) => { process.stderr.write(`warning: ${message}\n`); },
     });
@@ -155,6 +161,8 @@ async function main(): Promise<void> {
   } catch (error) {
     process.stderr.write(`error: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
+  } finally {
+    terminal?.close();
   }
 }
 
