@@ -40,7 +40,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   let indexed = false;
   const index = async () => {
     if (indexed) return;
-    const entries = (await listTree(git, base)).filter((entry) => entry.type === 'blob' && ['100644', '100755'].includes(entry.mode));
+    // Markdown files are documents the same run may rewrite or remove, never a downloaded file's home.
+    const entries = (await listTree(git, base)).filter((entry) => entry.type === 'blob' && ['100644', '100755'].includes(entry.mode) && !entry.path.toLowerCase().endsWith('.md'));
     for (let at = 0; at < entries.length;) {
       const batch = [];
       let bytes = 0;

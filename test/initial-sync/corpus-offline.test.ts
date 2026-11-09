@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { documentUrlBase, linksFromLinear, linksToLinear, type LinkSpellings } from '../../src/initial-sync/links.ts';
 import { findFileLinks, restoreFileLinks } from '../../src/initial-sync/uploads.ts';
-import { readReservedIds, readUploads } from '../../src/state/index.ts';
+import { parseLfsPointer, readReservedIds, readUploads } from '../../src/state/index.ts';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -279,12 +279,27 @@ describe('confirmed initial sync from Linear over the generated corpus (offline)
         const ids = JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, { id: string }>;
         const live = world.linear.documents.filter((d) => d.trashed !== true);
         assert.equal(Object.keys(ids).length, live.length, `a live document has no id (I7): ${JSON.stringify(confirmed.report.linearToGit?.leftOutAtRecord)}`);
+        const tree = (await fixture.remote.text(['ls-tree', '-r', '--name-only', 'refs/heads/mdbisync/linear'])).split('\n');
+        // Files a document embeds are downloaded and linked relatively (L1R-04): put back their Linear URLs, by content hash, to compare.
+        const cached = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
+        const inTree = new Set(tree);
+        const withLinearUrls = async (path: string, body: string): Promise<string> => {
+          let result = body;
+          for (const link of findFileLinks(path, body, (target) => inTree.has(target) && !target.endsWith('.md')).reverse()) {
+            const blob = (await fixture.remote.run(['show', `refs/heads/mdbisync/linear:${link.target}`])).stdout;
+            const url = cached[parseLfsPointer(blob)?.oid ?? createHash('sha256').update(blob).digest('hex')];
+            assert.ok(url !== undefined, `${link.target}, linked from ${path}, has no cached upload URL`);
+            result = result.slice(0, link.from) + url + link.suffix + result.slice(link.to);
+          }
+          // And links to other synchronized documents back to their Linear URLs (by the recorded ids).
+          return linksToLinear(result, path, { base: documentUrlBase(world.linear.urlKey), ids: new Map(Object.entries(ids).map(([file, { id }]) => [file, id])) });
+        };
         for (const [path, entry] of Object.entries(ids)) {
           const document = live.find((d) => d.id === entry.id);
           assert.ok(document !== undefined, `${path} has no live document`);
-          assert.equal(splitFile(await show(`refs/heads/mdbisync/linear:${path}`)).body, document.content, `${path} differs from Linear (I1)`);
+          const body = splitFile(await show(`refs/heads/mdbisync/linear:${path}`)).body;
+          assert.equal(await withLinearUrls(path, body), document.content, `${path} differs from Linear (I1)`);
         }
-        const tree = (await fixture.remote.text(['ls-tree', '-r', '--name-only', 'refs/heads/mdbisync/linear'])).split('\n');
         assert.ok(!tree.includes(trashed), 'a file without a document stayed');
         process.stdout.write(`# ${slice} from Linear: ${Object.keys(ids).length} documents, ${confirmed.graphql} GraphQL requests\n`);
 
