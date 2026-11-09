@@ -84,11 +84,12 @@ export async function stageRelease(options: {
   const pkg = releasePackage(JSON.parse(await readFile(join(source, 'package.json'), 'utf8')), version);
   const cli = (pkg.bin as Record<string, string>).mdbisync!;
   // Every bundle the build declares ships, including those only run by path from another bundle.
-  const bundles = [...RELEASE_BUNDLES];
+  const bundles = RELEASE_BUNDLES;
   for (const named of [...validateAction(action), cli]) {
     if (!bundles.includes(named)) throw new Error(`Release entry is not a declared bundle: ${named}`);
   }
-  const distFiles = await readdir(join(source, 'dist'));
+  // Without dist/ there is nothing to list; the check below names the missing files.
+  const distFiles = await readdir(join(source, 'dist')).catch(() => [] as string[]);
   const notices = bundles.map((file) => `${file}.LEGAL.txt`).filter((file) => distFiles.includes(file.slice(5)));
   const files = ['action.yml', '.pre-commit-hooks.yaml', 'LICENSE', 'README.md', NOTICES_FILE, ...notices, ...bundles];
   // Refuse missing, symlinked and empty files before creating any release output.

@@ -152,6 +152,9 @@ test('the build declares the bundles the action runs, and a release without any 
       await writeFile(join(partial, 'release.json'), JSON.stringify(manifest));
       await assert.rejects(verifyReleaseDirectory(partial, sourceSha, version), new RegExp(`Missing release file: ${bundle}`));
     }
+    // A failed build removes dist/; staging names what is missing.
+    await rm(join(source, 'dist'), { recursive: true });
+    await assert.rejects(stageRelease({ ...options, output: join(root, 'no-dist') }), /Missing release file: dist\//);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

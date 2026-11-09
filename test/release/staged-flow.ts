@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { type AddressInfo } from 'node:net';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { loadMapping } from '../../src/mapping/index.ts';
 import { validateAction } from '../../src/release/package.ts';
@@ -106,27 +106,28 @@ function runProcess(command: string, args: string[], cwd: string, env: Record<st
 interface Job {
   fixture: Fixture;
   world: FakeWorld;
-  workspace: string;
 }
 
 /**
  * A repository whose required Linear-format hook comes from a repository of
- * its own, as in a deployment, with one security hook; with `synced`, the sync's state as an initial
- * sync leaves it, with `docs/plan.md` linked to the Linear document `plan`.
+ * its own, as in a deployment, with one security hook; with `synced`, the
+ * sync's state as an initial sync leaves it, with `docs/plan.md` linked to
+ * the Linear document `plan`.
  */
 async function prepareJob(synced: boolean): Promise<Job> {
   const fixture = await createFixture();
-  const hooksRepo = join(fixture.root, 'format-hook');
-  await mkdir(hooksRepo);
-  const hooks = new Git(hooksRepo, { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email });
-  await hooks.run(['init', '--quiet', '--initial-branch=main']);
-  await writeFile(join(hooksRepo, '.pre-commit-hooks.yaml'), '- id: linear-format\n  name: Linear format\n  entry: "true"\n  language: system\n');
-  await hooks.run(['add', '--all']);
-  await hooks.run(['commit', '--quiet', '-m', 'Hook']);
-  await fixture.seed({
-    'docs/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n\n# Notes\n',
-    'docs/plan.md': '---\ncategory: work\n---\n\nOriginal.\n',
-    '.pre-commit-config.yaml': `repos:
+  try {
+    const hooksRepo = join(fixture.root, 'format-hook');
+    await mkdir(hooksRepo);
+    const hooks = new Git(hooksRepo, { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email });
+    await hooks.run(['init', '--quiet', '--initial-branch=main']);
+    await writeFile(join(hooksRepo, '.pre-commit-hooks.yaml'), '- id: linear-format\n  name: Linear format\n  entry: "true"\n  language: system\n');
+    await hooks.run(['add', '--all']);
+    await hooks.run(['commit', '--quiet', '-m', 'Hook']);
+    await fixture.seed({
+      'docs/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n\n# Notes\n',
+      'docs/plan.md': '---\ncategory: work\n---\n\nOriginal.\n',
+      '.pre-commit-config.yaml': `repos:
   - repo: ${hooksRepo}
     rev: ${await hooks.text(['rev-parse', 'HEAD'])}
     hooks:
@@ -140,36 +141,43 @@ async function prepareJob(synced: boolean): Promise<Job> {
         language: system
         stages: [pre-commit]
 `,
-  });
-  const world = fakeWorld();
-  if (synced) {
-    const config = resolveStateConfig({});
-    const setup = await fixture.clone('setup');
-    const fetched = await fetchState(setup, config);
-    await loadMapping(setup, fetched.tracked);
-    const initial = {
-      linear: await commitTree(setup, { parents: [fetched.tracked], base: fetched.tracked, changes: new Map(), message: 'Initial state', identity: IDENTITY }),
-      ids: await commitIds(setup, null, new Map([['docs/plan.md', { id: 'plan' }]]), IDENTITY),
-      uploads: await commitUploads(setup, null, new Map(), IDENTITY),
-    };
-    const pushed = await pushAtomic(setup, config, Object.entries(initial).map(([store, next]) => ({ ref: stateRef(config, store as 'ids' | 'linear' | 'uploads'), expected: null, next })));
-    assert.equal(pushed.ok, true);
-    world.linear.documents.push({ id: 'plan', title: 'plan', content: 'Original.\n', projectId: 'project-api', createdAt: '2026-01-01T00:00:00Z' });
+    });
+    const world = fakeWorld();
+    if (synced) {
+      const config = resolveStateConfig({});
+      const setup = await fixture.clone('setup');
+      const fetched = await fetchState(setup, config);
+      await loadMapping(setup, fetched.tracked);
+      const initial = {
+        linear: await commitTree(setup, { parents: [fetched.tracked], base: fetched.tracked, changes: new Map(), message: 'Initial state', identity: IDENTITY }),
+        ids: await commitIds(setup, null, new Map([['docs/plan.md', { id: 'plan' }]]), IDENTITY),
+        uploads: await commitUploads(setup, null, new Map(), IDENTITY),
+      };
+      const pushed = await pushAtomic(setup, config, Object.entries(initial).map(([store, next]) => ({ ref: stateRef(config, store as 'ids' | 'linear' | 'uploads'), expected: null, next })));
+      assert.equal(pushed.ok, true);
+      world.linear.documents.push({ id: 'plan', title: 'plan', content: 'Original.\n', projectId: 'project-api', createdAt: '2026-01-01T00:00:00Z' });
+    }
+    return { fixture, world };
+  } catch (error) {
+    await fixture.cleanup();
+    throw error;
   }
-  return { fixture, world, workspace: (await fixture.clone('workspace')).dir };
 }
 
 /**
- * Runs the template's three steps on the release, as the runner would, and
- * returns what the hooks step printed (empty when its `if:` skipped it).
+ * Runs the template's job on the release, as the runner would: a fresh
+ * checkout, the stage, hooks and apply steps, then the action's `post` entry
+ * for each of its steps, last first. Returns what the hooks step printed
+ * (empty when its `if:` skipped it).
  */
 async function runTemplate(release: string, template: string, inputs: Record<string, string>, job: Job): Promise<string> {
   const [stage, hooks, apply] = await templateSteps(template);
-  const [main] = validateAction(parse(await readFile(join(release, 'action.yml'), 'utf8')));
-  const defaults = (parse(await readFile(join(release, 'action.yml'), 'utf8')) as { inputs: Record<string, { default?: string }> }).inputs;
-  const server = await serve(job.world);
-  // One folder per run of the template: the runner's files, its home and its temporary directory.
+  const action: unknown = parse(await readFile(join(release, 'action.yml'), 'utf8'));
+  const [main, post] = validateAction(action);
+  const defaults = (action as { inputs: Record<string, { default?: string }> }).inputs;
+  // One folder per run of the template: its checkout, the runner's files, its home and its temporary directory.
   const run = await mkdtemp(join(job.fixture.root, 'run-'));
+  const workspace = (await job.fixture.clone(join(basename(run), 'workspace'))).dir;
   const home = join(run, 'home');
   const runnerTemp = join(run, 'temp');
   await mkdir(home);
@@ -180,40 +188,54 @@ async function runTemplate(release: string, template: string, inputs: Record<str
     'steps.app-token.outputs.token': 'app-token',
     ...Object.fromEntries(Object.entries(inputs).map(([name, value]) => [`inputs.${name}`, value])),
   };
-  const runnerEnv = async (name: string) => {
-    const files = { GITHUB_OUTPUT: join(run, `${name}.output`), GITHUB_STATE: join(run, `${name}.state`) };
-    for (const file of Object.values(files)) await writeFile(file, '');
-    return { PATH: process.env['PATH'] ?? '', HOME: home, LANG: 'C.UTF-8', GITHUB_WORKSPACE: job.workspace, RUNNER_TEMP: runnerTemp, GITHUB_STEP_SUMMARY: '', ...files };
+  /** The runner's environment for one step, with command files of its own. */
+  const runnerEnv = async (name: string): Promise<Record<string, string>> => {
+    const files: Record<string, string> = {};
+    for (const file of ['OUTPUT', 'STATE', 'ENV', 'PATH', 'STEP_SUMMARY']) {
+      files[`GITHUB_${file}`] = join(run, `${name}.${file.toLowerCase()}`);
+      await writeFile(files[`GITHUB_${file}`] as string, '');
+    }
+    return { PATH: process.env['PATH'] ?? '', HOME: home, LANG: 'C.UTF-8', GITHUB_WORKSPACE: workspace, RUNNER_TEMP: runnerTemp, ...files };
   };
-  /** A `uses:` step of this action: the template's inputs over action.yml's defaults, pointed at the fakes. */
-  const action = async (name: string, step: Step) => {
-    const runner = await runnerEnv(name);
-    const env: Record<string, string> = { ...runner };
-    const given: Record<string, string> = {
-      ...Object.fromEntries(Object.entries(defaults).map(([input, spec]) => [input, spec.default ?? ''])),
-      ...Object.fromEntries(Object.entries(step.with ?? {}).map(([input, value]) => [input, expand(value, context)])),
-      // Offline only: the fakes, the fixture's repository and no wait for checks the fake has none of.
-      'linear-api-url': `${server.url}/linear`,
-      'github-api-url': `${server.url}/github`,
-      repository: 'example/repository',
-      'merge-grace-seconds': '0',
-    };
-    for (const [input, value] of Object.entries(given)) env[`INPUT_${input.toUpperCase()}`] = value;
-    const result = await runProcess(process.execPath, [join(release, main!)], job.workspace, env);
-    assert.equal(result.status, 0, `${template} ${name}:\n${result.output}`);
-    return fileCommands(runner.GITHUB_OUTPUT);
-  };
+  const server = await serve(job.world);
   try {
-    for (const [output, value] of Object.entries(await action('stage', stage))) context[`steps.stage.outputs.${output}`] = value;
+    /** A `uses:` step's inputs: the template's over action.yml's defaults, pointed at the fakes. */
+    const actionInputs = (step: Step) => {
+      const given: Record<string, string> = {
+        ...Object.fromEntries(Object.entries(defaults).map(([input, spec]) => [input, spec.default ?? ''])),
+        ...Object.fromEntries(Object.entries(step.with ?? {}).map(([input, value]) => [input, expand(value, context)])),
+        // Offline only: the fakes, the fixture's repository and no wait for checks the fake has none of.
+        'linear-api-url': `${server.url}/linear`,
+        'github-api-url': `${server.url}/github`,
+        repository: 'example/repository',
+        'merge-grace-seconds': '0',
+      };
+      return Object.fromEntries(Object.entries(given).map(([input, value]) => [`INPUT_${input.toUpperCase()}`, value]));
+    };
+    const ran: Array<{ name: string; step: Step; state: string }> = [];
+    const runAction = async (name: string, step: Step) => {
+      const runner = await runnerEnv(name);
+      const result = await runProcess(process.execPath, [join(release, main!)], workspace, { ...runner, ...actionInputs(step) });
+      assert.equal(result.status, 0, `${template} ${name}:\n${result.output}`);
+      ran.push({ name, step, state: runner.GITHUB_STATE as string });
+      return fileCommands(runner.GITHUB_OUTPUT as string);
+    };
+    for (const [output, value] of Object.entries(await runAction('stage', stage))) context[`steps.stage.outputs.${output}`] = value;
     let printed = '';
     if (hooks.if === undefined || condition(hooks.if, context)) {
       const env: Record<string, string> = { ...(await runnerEnv('hooks')), ...Object.fromEntries(Object.entries(hooks.env ?? {}).map(([key, value]) => [key, expand(value, context)])) };
       // The runner's default shell for a `run:` step on Linux.
-      const result = await runProcess('bash', ['-e', '-c', hooks.run ?? ''], job.workspace, env);
+      const result = await runProcess('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', hooks.run ?? ''], workspace, env);
       assert.equal(result.status, 0, `${template} ${HOOKS_STEP}:\n${result.output}`);
       printed = result.output;
     }
-    await action('apply', apply);
+    await runAction('apply', apply);
+    // At the end of the job the runner runs each step's post entry, last first, with that step's inputs and saved state.
+    for (const { name, step, state } of ran.reverse()) {
+      const saved = Object.fromEntries(Object.entries(await fileCommands(state)).map(([key, value]) => [`STATE_${key}`, value]));
+      const result = await runProcess(process.execPath, [join(release, post!)], workspace, { ...(await runnerEnv(`${name}-post`)), ...actionInputs(step), ...saved });
+      assert.equal(result.status, 0, `${template} ${name} post:\n${result.output}`);
+    }
     return printed;
   } finally {
     await server.close();
