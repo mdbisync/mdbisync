@@ -13,7 +13,7 @@ import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS
 import type { LiveWorld, RunContext } from './context.ts';
 import type { RunTree } from './corpus.ts';
 import { FIXTURE_PREPARATION } from './runner.ts';
-import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
+import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
@@ -1479,9 +1479,26 @@ describe('quiet runs through the harness', () => {
    * remote; `pullRequests` is what GitHub lists before and after it, and
    * `writes` the document writes the proxy sees during it.
    */
+  it('gives each same-run merge case its own check setup', () => {
+    const byId = new Map(scenarios.map((scenario) => [scenario.id, scenario]));
+    // Fast checks and slow checks publish the workflow; the no-check case starts without it.
+    assert.equal(publishesCheckWorkflow(byId.get('L2-38')!), true);
+    assert.equal(publishesCheckWorkflow(byId.get('L2-39')!), false);
+    assert.equal(publishesCheckWorkflow(byId.get('L2-40')!), true);
+    assert.ok(byId.get('L2-40')!.setup.fixtures.includes('pending-check'));
+    // Positive grace on every run, never the harness's deferring default.
+    for (const id of ['L2-38', 'L2-39', 'L2-40']) {
+      const runs = byId.get(id)!.steps.filter((step) => step.kind === 'run');
+      assert.ok(runs.length > 0 && runs.every((step) => typeof step.args.mergeGraceSeconds === 'number' && step.args.mergeGraceSeconds > 0), id);
+      assert.ok(byId.get(id)!.checks.assertions.some((assertion) => assertion.subject === 'quiet.last'), id);
+      assert.ok(!byId.get(id)!.checks.assertions.some((assertion) => assertion.subject.endsWith('.changed')), id);
+    }
+  });
+
   async function watchedRun(options: { moves: Array<'state' | 'tracked-tree' | 'tracked-commit' | 'sync'>; report?: Record<string, unknown>; pullRequests?: [unknown[], unknown[]]; writes?: number; watch?: boolean }) {
     const { ctx, remoteGit } = await fakeRun();
     mkdirSync(await ctx.engineClone(), { recursive: true });
+    mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
     if (options.watch !== false) ctx.scenario = { ...ctx.scenario, checks: { ...ctx.scenario.checks, assertions: [{ subject: 'quiet.last', operator: 'equal', expected: [] }] } };
     const lists = options.pullRequests ?? [[MERGED], [MERGED]];
     let listed = 0;

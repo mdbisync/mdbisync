@@ -16,7 +16,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { editBlock, editParagraph, noteSentence, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
-import { CHECK_MARKER, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { CHECK_MARKER } from '../../corpus/check-workflow.ts';
 import { EnvBlockedError } from './results.ts';
 import { commitAsPerson, documentId, documentPaths, projectFolders, targetPath } from './step-helpers.ts';
 import type { Step } from './spec.ts';
@@ -135,23 +135,27 @@ async function addReviewDocument(ctx: RunContext): Promise<void> {
 /** A document's own icon and color, which a conflict's mark must give back. */
 export const OWN_MARK = { icon: 'Bug', color: '#5e6ad2' } as const;
 
+/** Fixtures whose starting tree publishes the pull request check workflow. */
+export const CHECK_WORKFLOW_FIXTURES: ReadonlySet<string> = new Set(['check-workflow', 'pending-check']);
+
+/** The starting tree publishes the check workflow: a check fault needs it, or a fixture asks for it. */
+export function publishesCheckWorkflow(scenario: { steps: readonly Step[]; setup: { fixtures: readonly string[] } }): boolean {
+  return scenario.steps.some((step) => step.kind === 'fault' && step.action === 'checks') || scenario.setup.fixtures.some((fixture) => CHECK_WORKFLOW_FIXTURES.has(fixture));
+}
+
 export const SETUP_FIXTURES: Record<string, SetupFixture> = {
   ...Object.fromEntries([...DOCUMENT_FIXTURES].map((name) => [name, { beforeSync: addReviewDocument }])),
-  // Same-run merge scenarios: the check workflow every slice publishes is the
-  // "fast CI" case. These two change it before the initial sync, so the
-  // converged start already holds the change and no scenario push makes it.
-  // Both paths lie outside every annotated folder, so nothing syncs them.
-  'no-check-workflow': {
-    async beforeSync(ctx) {
-      await commitAsPerson(ctx, new Map([[CHECK_WORKFLOW_PATH, null]]), 'Remove the pull request check', true);
-      ctx.observations.set('fixture.checks', 'none');
-    },
-  },
+  // Same-run merge scenarios. A starting tree has no pull request check
+  // workflow unless the scenario has a `fault.checks` step or one of these
+  // fixtures (CHECK_WORKFLOW_FIXTURES): `check-workflow` publishes it (the
+  // fast-check case), and `pending-check` also holds its check pending with
+  // a marker committed before the initial sync, so the converged start has
+  // it. Both paths lie outside every annotated folder; nothing syncs them.
+  'check-workflow': {},
   'pending-check': {
     async beforeSync(ctx) {
       // The check workflow keeps a head with this marker pending; `fault.checks` with `passed` removes it.
       await commitAsPerson(ctx, new Map([[CHECK_MARKER, 'pending\n']]), 'Hold the pull request check', true);
-      ctx.observations.set('fixture.checks', 'pending');
     },
   },
   'custom-icon-color': {

@@ -6,8 +6,7 @@
   "setup": {
     "state": "converged",
     "fixtures": [
-      "mini",
-      "no-check-workflow"
+      "mini"
     ],
     "teamZoneLock": true
   },

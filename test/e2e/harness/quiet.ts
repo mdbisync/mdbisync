@@ -26,7 +26,6 @@
 // world, not from the engine's own account alone.
 
 import type { RunContext } from './context.ts';
-import { fetchRef } from './checks.ts';
 import type { ProxyRequestRecord } from './fault-proxy.ts';
 
 export const QUIET_SUBJECT = /^quiet\.(\d+|last)$/;
@@ -98,7 +97,7 @@ export function quietFailures(input: QuietInput): string[] {
     if (nonEmpty(field(report, ['sync', list]))) failures.push(`the run ${list} documents`);
   }
   for (const list of ['changed', 'removed']) {
-    if (nonEmpty(field(report, ['capture', list]))) failures.push(`the run captured ${list === 'changed' ? 'changed' : 'removed'} documents into git`);
+    if (nonEmpty(field(report, ['capture', list]))) failures.push(`the run captured ${list} documents into git`);
   }
 
   const earlier = new Map(before.pullRequests.map((pr) => [pr.number, pr]));
@@ -128,14 +127,24 @@ export function watchesQuiet(ctx: RunContext): boolean {
   return ctx.live !== null && ctx.scenario.checks.assertions.some((assertion) => QUIET_SUBJECT.test(assertion.subject));
 }
 
-export async function snapshotWorld(ctx: RunContext): Promise<RunWorld> {
+/**
+ * The world now. One listing of the run's refs gives every tip at the same
+ * moment; only the tracked tree needs a fetch. `throughProxy` is false for
+ * a run the Linear proxy cannot see (an Actions run talks to Linear
+ * directly), so its document writes are left to its report.
+ */
+export async function snapshotWorld(ctx: RunContext, options: { throughProxy: boolean }): Promise<RunWorld> {
   if (ctx.live === null) throw new Error('a quiet run needs the live world');
-  const git = await ctx.person();
-  // The person's clone has the tracked branch checked out, so read its tip through FETCH_HEAD.
-  await git.run(['fetch', '--quiet', 'origin', ctx.names.trackedBranch]);
-  const trackedTip = (await git.text(['rev-parse', 'FETCH_HEAD'])).trim();
-  const trackedTree = (await git.text(['rev-parse', 'FETCH_HEAD^{tree}'])).trim();
-  const stateTips = Object.fromEntries(await Promise.all(STATE_STORES.map(async (store) => [store, await fetchRef(git, `${ctx.names.refPrefix}/${store}`)]))) as RunWorld['stateTips'];
+  const refs = new Map((await ctx.live.sandbox.runRefs()).filter((entry) => entry.runId === ctx.names.runId).map((entry) => [entry.ref, entry.oid]));
+  const tip = (ref: string) => refs.get(ref) ?? null;
+  const trackedTip = tip(`refs/heads/${ctx.names.trackedBranch}`);
+  let trackedTree: string | null = null;
+  if (trackedTip !== null) {
+    const git = await ctx.person();
+    await git.run(['fetch', '--quiet', 'origin', trackedTip]);
+    trackedTree = (await git.text(['rev-parse', `${trackedTip}^{tree}`])).trim();
+  }
+  const stateTips = Object.fromEntries(STATE_STORES.map((store) => [store, tip(`${ctx.names.refPrefix}/${store}`)])) as RunWorld['stateTips'];
   const pullRequests = (await ctx.live.rest.pullRequests(ctx.names.syncBranch))
     .filter((pr) => pr.head.ref === ctx.names.syncBranch)
     .map((pr) => ({ number: pr.number, state: pr.state, headSha: pr.head.sha, mergedAt: pr.merged_at, title: pr.title, body: pr.body ?? '' }))
@@ -143,10 +152,10 @@ export async function snapshotWorld(ctx: RunContext): Promise<RunWorld> {
   return {
     trackedTip,
     trackedTree,
-    syncTip: await fetchRef(git, `refs/heads/${ctx.names.syncBranch}`),
+    syncTip: tip(`refs/heads/${ctx.names.syncBranch}`),
     stateTips,
     pullRequests,
-    proxyIndex: ctx.proxy === null ? null : ctx.proxy.requests.length,
+    proxyIndex: !options.throughProxy || ctx.proxy === null ? null : ctx.proxy.requests.length,
   };
 }
 

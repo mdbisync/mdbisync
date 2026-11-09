@@ -24,7 +24,7 @@ import { classify, EnvBlockedError, ProductError, type CheckOutcome, type Scenar
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
-import { prepareFixtures, UNSAFE_TITLES } from './fixtures.ts';
+import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtures.ts';
 import { BEFORE_VIEW, takeStartView } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
 
@@ -121,7 +121,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     manifest = await sandbox.manifest();
     ctx.phase('tracked branch');
     created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names, {
-      checks: ctx.scenario.steps.some((step) => step.kind === 'fault' && step.action === 'checks'),
+      checks: publishesCheckWorkflow(ctx.scenario),
     });
   } catch (error) {
     if (error instanceof CorpusMissingError) throw new EnvBlockedError(`corpus: ${error.message}`);
@@ -229,7 +229,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   }
   // The scenario's own edits and runs start here: setup's edits are not the scenario's.
   ctx.engine.setupRuns = ctx.engine.results.length;
-  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.)/.test(key)) ctx.observations.delete(key);
+  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.)/.test(key)) ctx.observations.delete(key);
   await recordStart(ctx, live);
 }
 

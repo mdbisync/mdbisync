@@ -130,9 +130,11 @@ that asserts `quiet`; an unwatched run gives no verdict.
 
 Same-run merge scenarios set a positive merge grace with
 `run.sync.args.mergeGraceSeconds` (0 to 120; the harness otherwise passes 0,
-deferring every merge). Every slice publishes the pull request check workflow;
-the `no-check-workflow` fixture removes it and the `pending-check` fixture
-holds its check pending, both before the initial sync.
+deferring every merge). A starting tree holds the pull request check workflow
+only for a scenario with a `fault.checks` step or the `check-workflow` fixture;
+without either it has no checks. The `pending-check` fixture publishes the
+workflow and holds its check pending with a marker committed before the
+initial sync.
 
 `proposedRule` records a testable proposed behavior. The concrete checks remain
 binding until the behavior and its specification are deliberately revised.

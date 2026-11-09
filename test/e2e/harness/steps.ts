@@ -173,21 +173,20 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
     ctx.observations.set('pause.reachedAt', Date.now());
     return;
   }
-  await watchQuiet(ctx, async () => {
-    const trigger = ctx.engine.trigger;
-    if (trigger !== undefined) {
-      // A fault that happens in the middle of this run: pause, act, go on.
-      delete ctx.engine.trigger;
-      ctx.checkpoints.pause(trigger.checkpoint);
-      const running = await startPaused(ctx, call, trigger.checkpoint);
-      await trigger.action();
-      ctx.checkpoints.resume(trigger.checkpoint);
-      delete ctx.engine.pending;
-      settleResult(ctx, await running.done);
-      return;
-    }
-    settleResult(ctx, await runEngine(call));
-  });
+  const trigger = ctx.engine.trigger;
+  if (trigger !== undefined) {
+    // A fault that happens in the middle of this run: pause, act, go on. The fault's own
+    // writes fall inside the run, so this run gives no quiet verdict.
+    delete ctx.engine.trigger;
+    ctx.checkpoints.pause(trigger.checkpoint);
+    const running = await startPaused(ctx, call, trigger.checkpoint);
+    await trigger.action();
+    ctx.checkpoints.resume(trigger.checkpoint);
+    delete ctx.engine.pending;
+    settleResult(ctx, await running.done);
+    return;
+  }
+  await watchQuiet(ctx, { throughProxy: true }, async () => settleResult(ctx, await runEngine(call)));
 }
 
 /**
@@ -195,14 +194,14 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
  * the world around it and records why the run was not quiet
  * (`harness.quiet.<n>`, empty when it was), for the `quiet.<n|last>` subject.
  */
-async function watchQuiet(ctx: RunContext, run: () => Promise<void>): Promise<void> {
+async function watchQuiet(ctx: RunContext, options: { throughProxy: boolean }, run: () => Promise<void>): Promise<void> {
   if (!watchesQuiet(ctx)) return run();
-  const before = await snapshotWorld(ctx);
+  const before = await snapshotWorld(ctx, options);
   const count = ctx.engine.results.length;
   await run();
   const result = ctx.engine.results.at(-1);
   if (ctx.engine.results.length !== count + 1 || result === undefined) throw new Error('a watched invocation recorded no single engine run');
-  const after = await snapshotWorld(ctx);
+  const after = await snapshotWorld(ctx, options);
   const n = ctx.engine.results.length - 1 - ctx.engine.setupRuns;
   ctx.observations.set(`harness.quiet.${n}`, quietFailures({ exitCode: result.exitCode, report: result.report, before, after, documentWrites: writesBetween(ctx, before, after) }));
 }
@@ -295,7 +294,10 @@ async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Prom
   if (event === 'schedule') throw new EnvBlockedError(SCHEDULE_BLOCKED);
   const command = (typeof args.command === 'string' ? args.command : 'sync') as CommandName;
   await requireWorkflows(ctx, command);
-  await watchQuiet(ctx, () => startWorkflowRun(ctx, event, command, args));
+  // Only a dispatched run starts after the snapshot before it. A push or pull request run
+  // started on an earlier step and may already have written, so it gives no quiet verdict.
+  if (event === 'workflow_dispatch') await watchQuiet(ctx, { throughProxy: false }, () => startWorkflowRun(ctx, event, command, args));
+  else await startWorkflowRun(ctx, event, command, args);
 }
 
 async function startWorkflowRun(ctx: RunContext, event: string, command: CommandName, args: Record<string, unknown>): Promise<void> {
