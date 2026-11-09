@@ -13,6 +13,7 @@ import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
+import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
@@ -54,6 +55,12 @@ export interface CaptureResult {
   /** Captured content that exceeds Linear's write limit; paths and counts only. */
   writeBackWarnings: Array<{ path: string; code: 'linear-content-too-large-to-write-back'; length: number; limit: number }>;
   summary: string;
+  /**
+   * The run's annotated containers as this capture listed them (trash
+   * included), by `containerKey`; absent when capture listed the places of
+   * a changed annotation, or listed nothing. Never serialize these.
+   */
+  containers?: Map<string, LinearDocument[]>;
 }
 
 const CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
@@ -121,7 +128,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       folders.set('projectId' in resolved ? `project:${resolved.projectId}` : `team:${resolved.teamId}`, folder);
       return resolved;
     });
-    for (const document of await linear.listDocumentsInPlaces(places, {includeArchived:true})) listed.set(document.id, document);
+    const inPlaces = await linear.listDocumentsInPlaces(places, {includeArchived:true});
+    for (const document of inPlaces) listed.set(document.id, document);
+    // The write step counts its containers from this listing when it has nothing to write.
+    if (!changedPlace) result.containers = containersOf(context, inPlaces);
     // Looking up known ids also finds trash, project moves and moves out of scope.
     const missing = [...byId.keys()].filter((id) => !listed.has(id));
     for (const document of await linear.getDocuments(missing)) listed.set(document.id, document);
