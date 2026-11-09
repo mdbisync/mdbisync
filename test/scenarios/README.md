@@ -13,6 +13,14 @@ engine passes the scenarios. An execution harness supplies the adapters below.
 Missing adapters, fixtures, observations or golden forms must fail explicitly
 (or report an unavailable environment with a reason), never silently pass.
 
+The Actions security canary (`L2-41`) dispatches the copied three-step sync
+workflow and uses Actions again while settling. Before running it, configure
+`CANARY_HOOK_KEY` as a repository secret and supply the same known value to
+the harness as `MDBISYNC_TEST_HOOK_KEY`. The harness does not change repository
+settings. Its hook records environment names and own-run secret match flags
+in the report artifact; it never records secret values or unrelated process
+data. It requires a Linux runner with readable `/proc`.
+
 ## Setup and execution
 
 `version` selects this contract. `id` must equal the filename without `.yaml`.

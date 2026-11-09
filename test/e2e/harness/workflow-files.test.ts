@@ -15,7 +15,7 @@ const RUN = {
 };
 const SHA = 'a'.repeat(40);
 
-type Step = { uses?: string; with?: Record<string, unknown>; if?: string };
+type Step = { name?: string; run?: string; env?: Record<string, string>; uses?: string; with?: Record<string, unknown>; if?: string };
 const jobsOf = (text: string) => Object.values((parse(text) as { jobs: Record<string, { 'runs-on': unknown; steps: Step[] }> }).jobs);
 
 describe('workflow templates rendered for a run', () => {
@@ -113,6 +113,20 @@ describe('workflow templates rendered for a run', () => {
     const action = job!.steps.find((step) => step.uses?.startsWith(`${ACTION_REPOSITORY}@`));
     assert.equal(action?.with?.['operation'], 'sync');
     assert.equal(action?.with?.['tracked-branch'], RUN.trackedBranch);
+  });
+
+  it('wires the known key only into the separate hook step and retains stage/apply', () => {
+    for (const file of [WORKFLOW_FILES.sync, WORKFLOW_FILES['initial-sync']]) {
+      const [job] = jobsOf(renderForRun(readTemplate(file), { ...RUN, securityCanary: true }));
+      const steps = job!.steps;
+      assert.deepEqual(steps.filter(step => step.uses?.startsWith(ACTION_REPOSITORY)).map(step => step.with?.['security-step']), ['stage', 'apply']);
+      const hook = steps.find(step => step.name === 'Run the security hooks')!;
+      assert.equal(hook.env?.['CANARY_HOOK_KEY'], '${{ secrets.CANARY_HOOK_KEY }}');
+      assert.ok(Object.values(hook.env!).every(value => !/LINEAR|app-token/.test(value)));
+      const prepare = steps.findIndex(step => step.name === 'Prepare own-run canary comparisons');
+      assert.ok(prepare < steps.findIndex(step => step.with?.['security-step'] === 'stage'));
+      assert.ok(String(steps.find(step => step.uses?.startsWith('actions/upload-artifact@'))?.with?.['path']).includes('mdbisync-report'));
+    }
   });
 
   it('renders every template that exists, and finds the workflow of each command', () => {

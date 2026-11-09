@@ -11,6 +11,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMap, isSeq, parseDocument, type Document, type YAMLMap } from 'yaml';
+import { CANARY_KEY, CANARY_PREPARE } from './security-canary.ts';
 import type { CommandName } from '../../../src/commands.ts';
 import { PREREQUISITE_STEPS, REPORT_ARTIFACT } from './workflows.ts';
 
@@ -51,6 +52,7 @@ export interface RunWorkflowOptions {
   group: string;
   /** The release commit under test; the template's pin when absent. */
   actionSha?: string;
+  securityCanary?: boolean;
 }
 
 export function readTemplate(file: string): string {
@@ -126,6 +128,20 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
     const uses = (item as YAMLMap).get('uses');
     return typeof uses === 'string' && uses.startsWith(`${ACTION_REPOSITORY}@`);
   };
+  if (options.securityCanary && steps.items.some(isAction)) {
+    const hooks = steps.items.find(item => (item as YAMLMap).get('name') === 'Run the security hooks') as YAMLMap | undefined;
+    if (hooks === undefined) throw new Error('Security canary needs a separate hooks step');
+    hooks.setIn(['env', CANARY_KEY], '${{ secrets.CANARY_HOOK_KEY }}');
+    const stage = steps.items.findIndex(isAction);
+    steps.items.splice(stage, 0, doc.createNode({
+      name: 'Prepare own-run canary comparisons',
+      run: CANARY_PREPARE,
+      env: {
+        CANARY_LINEAR_SECRET: '${{ secrets.LINEAR_TEST_APP_CLIENT_SECRET }}',
+        CANARY_APP_TOKEN: '${{ steps.app-token.outputs.token }}',
+      },
+    }));
+  }
   // The stage step runs before the hooks step; the last action step is the one whose report the harness reads.
   const last = steps.items.findLastIndex(isAction);
   for (let index = 0; index < steps.items.length; index += 1) {
