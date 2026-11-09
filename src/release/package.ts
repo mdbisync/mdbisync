@@ -22,7 +22,7 @@ export function validateVersion(version: string): string {
 }
 
 export function validateSha(sha: string): void {
-  if (sha.length !== 40 || !/^[a-f0-9]{40}$/.test(sha)) throw new Error('Expected a full lowercase source SHA');
+  if (sha.length !== 40 || !/^[a-f0-9]{40}$/.test(sha)) throw new Error('Expected a full lowercase commit SHA');
 }
 
 function bundlePath(value: unknown): string {

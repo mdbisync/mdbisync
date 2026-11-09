@@ -115,17 +115,22 @@ package contains only bundled code and has no install scripts.
 `linear-format` fixes Markdown and exits 1 when it changes a file; a second
 run passes. `linear-format-check` reports changes without writing them.
 Both refuse unsupported constructs with a file, line and rule, leaving the
-file unchanged. The hooks run serially so duplicate titles are checked
-together. Keep `linear-format` enabled for synchronization; optionally add
-`linear-format-check` after it.
+file unchanged. The hooks avoid running multiple formatter processes at once.
+Checks see the files selected by pre-commit; use `--all-files` to check
+the repository, including existing files. Keep `linear-format` enabled for
+synchronization; optionally add `linear-format-check` after it.
 
-Copy [examples/pre-commit.yml](examples/pre-commit.yml) to
+Copy [examples/pre-commit.yml](https://github.com/mikhail-yaskou/mdbisync/blob/main/examples/pre-commit.yml) to
 `.github/workflows/pre-commit.yml` in your synchronized repository. It runs
-the entire pre-commit configuration on pull requests, commits fixes to
-same-repository branches, and reruns checks in that job. Fork pull requests
+the entire pre-commit configuration on pull requests, commits tracked-file
+fixes to same-repository branches, and reruns checks in that job. Fork pull requests
 that need fixes fail with a ready-to-apply patch. The workflow checks out
 the exact pull request head; if the branch moves before its push, the push
-fails without overwriting newer work.
+fails without overwriting newer work. The workflow publishes the
+`pre-commit` check on a new fixing commit too; require this check in branch
+rules. Forks without fixes use the original job check. Other required CI
+must also run on the fixed tree or explicitly report its result on that SHA, since the token
+push does not trigger more workflows.
 
 To generate the test corpus with the same pin, run:
 

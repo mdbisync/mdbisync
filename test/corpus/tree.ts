@@ -6,6 +6,7 @@
 // lookalikes, unusual typography) lives under eng/edge-cases/, so a reader
 // can open the tidy part first.
 
+import { validateSha } from "../../src/release/package.ts";
 import { COMPANY, PROFILE_PATHS, PROFILES } from "./company.ts";
 import { gitattributes, idLine, markdownFile, relativeLink, type Canaries, type CorpusFile } from "./model.ts";
 import type { Rng } from "./rng.ts";
@@ -152,7 +153,7 @@ export function treeFiles(_rng: Rng, canaries: Canaries, hookRevision: string): 
  * fake secret pattern and needs no toolchain.
  */
 export function preCommitConfig(hookRevision: string): string {
-  if (hookRevision.length !== 40 || !/^[a-f0-9]{40}$/.test(hookRevision)) throw new Error("--hook-rev must be a full release commit SHA");
+  validateSha(hookRevision);
   return [
     "repos:",
     "  - repo: https://github.com/mikhail-yaskou/mdbisync",

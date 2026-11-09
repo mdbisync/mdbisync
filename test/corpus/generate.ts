@@ -52,7 +52,7 @@ export type Corpus = {
   slices: Record<Slice, string[]>;
 };
 
-export function buildCorpus(seed: string = DEFAULT_SEED, bankDir: string = DEFAULT_BANK, hookRevision: string): Corpus {
+export function buildCorpus(hookRevision: string, seed: string = DEFAULT_SEED, bankDir: string = DEFAULT_BANK): Corpus {
   const rng = new Rng(seed);
   const canaryRng = rng.fork("canaries");
   const canaries = new Canaries(() => canaryRng.hex(8));
@@ -130,7 +130,7 @@ function main(): void {
     },
   });
   if (values["hook-rev"] === undefined) throw new Error("--hook-rev is required: pin a bundled release commit, not a source commit");
-  const corpus = buildCorpus(values.seed, values.bank, values["hook-rev"]);
+  const corpus = buildCorpus(values["hook-rev"], values.seed, values.bank);
   writeCorpus(corpus, resolve(values.out), values.replace);
   const lfsBytes = corpus.manifest.files.filter((f) => f.lfs).reduce((sum, f) => sum + f.bytes, 0);
   console.log(`corpus: ${corpus.files.length} files, ${(lfsBytes / 1024 / 1024).toFixed(1)} MiB in LFS, written to ${resolve(values.out)}`);

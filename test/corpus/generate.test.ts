@@ -19,7 +19,7 @@ import { COLLISIONS, EDGE, LOOSE, preCommitConfig } from "./tree.ts";
 // The default corpus, built once for the tests that only read it.
 let defaultCorpus: ReturnType<typeof buildCorpus> | undefined;
 function corpus(): ReturnType<typeof buildCorpus> {
-  defaultCorpus ??= buildCorpus(undefined, undefined, "a".repeat(40));
+  defaultCorpus ??= buildCorpus("a".repeat(40));
   return defaultCorpus;
 }
 
@@ -37,8 +37,8 @@ test("the same seed writes byte-identical trees, and the result passes the corpu
   const a = mkdtempSync(join(tmpdir(), "corpus-a-"));
   const b = mkdtempSync(join(tmpdir(), "corpus-b-"));
   try {
-    writeCorpus(buildCorpus("determinism", undefined, "a".repeat(40)), a, false);
-    writeCorpus(buildCorpus("determinism", undefined, "a".repeat(40)), b, false);
+    writeCorpus(buildCorpus("a".repeat(40), "determinism"), a, false);
+    writeCorpus(buildCorpus("a".repeat(40), "determinism"), b, false);
     const left = treeDigest(a);
     const right = treeDigest(b);
     assert.ok(left.size >= 2000, `only ${left.size} files`);
@@ -56,7 +56,7 @@ test("the same seed writes byte-identical trees, and the result passes the corpu
 
 test("a different seed changes the generated content but not the layout rules", () => {
   const one = corpus();
-  const two = buildCorpus("seed-two", undefined, "a".repeat(40));
+  const two = buildCorpus("a".repeat(40), "seed-two");
   const text = (c: ReturnType<typeof buildCorpus>) => c.files.filter((f) => f.group === "work-documents").map((f) => f.content.toString()).join("");
   assert.notEqual(text(one), text(two));
   assert.equal(one.files.filter((f) => f.group === "pairwise").length, two.files.filter((f) => f.group === "pairwise").length);
@@ -284,7 +284,7 @@ test("the corpus configuration requires and retains a full release commit pin", 
   assert.match(preCommitConfig(revision), /id: linear-format/);
   assert.match(preCommitConfig(revision), /alias: security/);
   for (const invalid of ["", "main", "v0.1.0-rc.1", "HOOK_REV_PLACEHOLDER", "a".repeat(40) + "\n"]) {
-    assert.throws(() => preCommitConfig(invalid), /full release commit SHA/);
+    assert.throws(() => preCommitConfig(invalid), /full lowercase commit SHA/);
   }
   const generated = corpus().files.find((file) => file.path === ".pre-commit-config.yaml")!;
   assert.match(generated.content.toString(), /rev: a{40}\n/);
