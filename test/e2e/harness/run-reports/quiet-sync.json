@@ -47,7 +47,9 @@
     "branchMoved": false,
     "checks": null,
     "merged": null,
-    "paths": []
+    "paths": [],
+    "marked": [],
+    "decided": []
   },
   "capture": {
     "ok": true,

@@ -53,7 +53,9 @@
     "merged": null,
     "paths": [
       "docs/handbook/faq/equipment.md"
-    ]
+    ],
+    "marked": [],
+    "decided": []
   },
   "capture": {
     "ok": true,
