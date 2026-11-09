@@ -221,9 +221,19 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   for (const entry of plan.overwrite) documentIds.set(entry.path, entry.documentId);
   // A file left out while writing on an earlier run keeps the id reserved for it then.
   const reserved = await readReservedIds(git, expected.ids);
+  const saved = new Map<string, string>();
   for (const entry of plan.create) {
     const chosen = (resumed ? previous.get(entry.path)?.id : undefined) ?? reserved.get(entry.path);
-    documentIds.set(entry.path, chosen !== undefined && !sources.documents.has(chosen) ? chosen : newId());
+    if (chosen !== undefined && !sources.documents.has(chosen)) saved.set(entry.path, chosen);
+  }
+  // A saved id may belong to a document that was archived or trashed since:
+  // the listing shows live documents only, and Linear refuses to create a
+  // second document with an existing id. Such an id is not reused.
+  const taken = new Set<string>();
+  if (saved.size > 0) for (const document of await linear.getDocuments([...new Set(saved.values())])) taken.add(document.id);
+  for (const entry of plan.create) {
+    const chosen = saved.get(entry.path);
+    documentIds.set(entry.path, chosen !== undefined && !taken.has(chosen) ? chosen : newId());
     ids.set(entry.path, { id: documentIds.get(entry.path) as string });
   }
 
@@ -344,7 +354,10 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     }
 
     if (result.stopped !== undefined || result.failed.length > 0) {
-      if (unpushed > 0) await pushProgress();
+      // Always leave a progress commit: even a run that only trashed
+      // documents has changed Linear, and the sync must not run on the old
+      // state until initial sync finishes.
+      if (unpushed > 0 || (await readInitialSyncProgress(git, expected.ids)) === null) await pushProgress();
       result.code = result.stopped !== undefined ? 'stopped' : 'write-failed';
       return { plan, result };
     }
