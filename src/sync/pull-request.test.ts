@@ -9,6 +9,8 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
+import { detectConflicts, MARKERS } from '../merge/index.ts';
+import { MARKS } from './marks.ts';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
@@ -533,22 +535,152 @@ describe('sync: the sync pull request', () => {
     assert.equal((await fixture.remote.run(['merge-base', '--is-ancestor', commit, 'refs/heads/main'], { okCodes: [0, 1] })).code, 0);
   });
 
-  for (const side of ['tracked', 'linear']) it(`a closed sync branch conflicting with ${side} is preserved and reports a conflict`, async () => {
-    const path = 'eng/notes/plan.md';
-    await editInLinear(path, `# Plan\n\nChanged in Linear. ${CANARY}\n`);
+  // Pending sync-branch edits that conflict with a later edit (MDS-011-2C). The plan's paragraph is edited on the
+  // sync branch by a person or CI, and later in Linear or on the tracked branch; a Linear edit of another document
+  // opens the pull request first.
+  const PLAN = 'eng/notes/plan.md';
+  const planText = (paragraph: string) => `---\nowner: example\n---\n\n# Plan\n\n${paragraph} ${CANARY}\n`;
+  const BRANCH_EDIT = 'Reviewed on the branch.';
+  const LATER_EDIT = { linear: 'Edited again in Linear.', tracked: 'Edited on the tracked branch.' } as const;
+
+  /** Runs until one run changes nothing and is complete (I6); returns that quiet run. */
+  async function settle(limit = 6) {
+    for (let attempt = 0; attempt < limit; attempt += 1) {
+      const run = await sync();
+      assert.equal(run.result.exitCode, 0, run.result.stderr);
+      if (run.report.changed === false && run.report.complete) return run;
+    }
+    assert.fail(`the sync did not settle in ${limit} runs`);
+  }
+
+  /** One conflict in `text`, its git and Linear versions holding the given paragraphs. */
+  function assertOneConflict(text: string, git: string, linear: string) {
+    const found = detectConflicts(text);
+    assert.equal(found.length, 1, 'expected exactly one conflict');
+    assert.ok(found[0]?.git?.includes(git), 'the git version is not the expected one');
+    assert.ok(found[0]?.linear?.includes(linear), 'the Linear version is not the expected one');
+    assert.equal(text.split(MARKERS.git).length, 2, 'markers are nested or repeated');
+  }
+
+  const isAncestorOn = async (commit: string, ref: string) => (await fixture.remote.run(['merge-base', '--is-ancestor', commit, ref], { okCodes: [0, 1] })).code === 0;
+
+  /** A pending sync-branch edit of the plan, with its pull request open or closed. */
+  async function pendingBranchEdit(state: 'open' | 'closed'): Promise<string> {
+    await editInLinear('combined/guide.md', `# Guide\n\nHow to start, edited in Linear. ${CANARY}\n`);
+    const opened = await sync();
+    assert.equal(opened.report.pullRequest?.pullRequest?.opened, true);
+    const commit = await editRef(SYNC_BRANCH, PLAN, planText(BRANCH_EDIT));
+    if (state === 'closed') {
+      const first = world.github.pullRequests[0];
+      assert.ok(first);
+      first.state = 'closed';
+    }
+    return commit;
+  }
+
+  for (const state of ['open', 'closed'] as const) for (const side of ['linear', 'tracked'] as const) {
+    it(`MDS-011-2C: a pending sync-branch edit conflicting with a later ${side} edit, pull request ${state}: both versions kept between markers, then both sides converge`, async () => {
+      const commit = await pendingBranchEdit(state);
+      if (side === 'linear') await editInLinear(PLAN, `# Plan\n\n${LATER_EDIT.linear} ${CANARY}\n`);
+      else await editRef('refs/heads/main', PLAN, planText(LATER_EDIT.tracked));
+
+      const run = await sync();
+      assert.equal(run.result.exitCode, 0, run.result.stderr);
+      assert.equal(run.report.pullRequest?.code, undefined, JSON.stringify(run.report.pullRequest));
+      assert.deepEqual(run.report.pullRequest?.marked, [PLAN]);
+      assert.equal(run.report.pullRequest?.branchMoved, true);
+      assert.ok(run.report.pullRequest?.paths.includes(PLAN));
+      assert.match(run.summary, /Both versions are kept between conflict markers/);
+      assert.equal(world.github.pullRequests.length, state === 'open' ? 1 : 2);
+      assert.equal(openPullRequests().length, 1);
+      assert.equal(openPullRequests()[0]?.head, world.github.pullRequests[0]?.head);
+      // The branch keeps the person's commit and gains a merge holding both versions: the git version is the
+      // git-side edit (the branch's against Linear, the tracked branch's against the branch).
+      assert.ok(await isAncestorOn(commit, SYNC_BRANCH), 'the sync branch lost the pending commit');
+      const head = await rev(SYNC_BRANCH);
+      assert.equal((await fixture.remote.text(['rev-parse', `${head}^@`])).split('\n').length, 2, 'the reconciliation is not a merge commit');
+      const [git, linear] = side === 'linear' ? [BRANCH_EDIT, LATER_EDIT.linear] : [LATER_EDIT.tracked, BRANCH_EDIT];
+      assertOneConflict(await show(`${SYNC_BRANCH}:${PLAN}`), git, linear);
+      assert.match(await show(`${SYNC_BRANCH}:${PLAN}`), /^---\nowner: example\n---\n/, 'front matter was lost');
+      // Linear's state ref holds only what Linear returned: no intended content, no markers yet.
+      assert.ok(!(await show(`refs/mdbisync/linear:${PLAN}`)).includes(MARKERS.git), "markers reached Linear's state before Linear held them");
+
+      const quiet = await settle();
+      assert.deepEqual(quiet.writes, []);
+      const tracked = await show(`refs/heads/main:${PLAN}`);
+      assertOneConflict(tracked, git, linear);
+      const document = await documentOf(PLAN);
+      assert.equal(document.content, tracked.slice(tracked.indexOf('# ')), 'Linear and the tracked branch differ (I1)');
+      assert.deepEqual({ icon: document.icon, color: document.color }, MARKS.conflict);
+      assert.ok(await isAncestorOn(commit, 'refs/heads/main'), 'the tracked branch lost the pending commit');
+      assert.ok(await isAncestorOn(head, 'refs/heads/main'), 'the tracked branch lost the reconciliation');
+      assert.equal(openPullRequests().length, 0);
+      assert.match(await show('refs/heads/main:combined/guide.md'), /edited in Linear/);
+    });
+  }
+
+  it('MDS-011-2C: a sync-branch edit conflicting with both a tracked edit and a Linear edit of the same paragraph converges, all three kept', async () => {
+    await editInLinear(PLAN, `# Plan\n\nChanged in Linear. ${CANARY}\n`);
     await sync();
-    const commit = await editRef(SYNC_BRANCH, path, `# Plan\n\nReviewed on the branch. ${CANARY}\n`);
-    const first = world.github.pullRequests[0];
-    assert.ok(first);
-    first.state = 'closed';
-    if (side === 'tracked') await editRef('refs/heads/main', path, `# Plan\n\nEdited on the tracked branch. ${CANARY}\n`);
-    else await editInLinear(path, `# Plan\n\nEdited again in Linear. ${CANARY}\n`);
+    const commit = await editRef(SYNC_BRANCH, PLAN, planText(BRANCH_EDIT));
+    await editRef('refs/heads/main', PLAN, planText(LATER_EDIT.tracked));
+    await editInLinear(PLAN, `# Plan\n\n${LATER_EDIT.linear} ${CANARY}\n`);
+    await settle();
+    const tracked = await show(`refs/heads/main:${PLAN}`);
+    for (const text of [BRANCH_EDIT, LATER_EDIT.tracked, LATER_EDIT.linear]) assert.ok(tracked.includes(text), `the edit "${text}" was lost (I2)`);
+    assert.equal((await documentOf(PLAN)).content, tracked.slice(tracked.indexOf('# ')));
+    assert.ok(await isAncestorOn(commit, 'refs/heads/main'));
+  });
+
+  it('MDS-011-2C: a person resolves the markers on the sync branch; the resolution is kept and reaches Linear', async () => {
+    const commit = await pendingBranchEdit('open');
+    await editInLinear(PLAN, `# Plan\n\n${LATER_EDIT.linear} ${CANARY}\n`);
+    const reconciled = await sync();
+    assert.deepEqual(reconciled.report.pullRequest?.marked, [PLAN]);
+    const resolution = await editRef(SYNC_BRANCH, PLAN, planText('Reviewed on the branch and edited again in Linear.'));
+
+    const quiet = await settle();
+    assert.deepEqual(quiet.writes, []);
+    const tracked = await show(`refs/heads/main:${PLAN}`);
+    assert.equal(detectConflicts(tracked).length, 0);
+    assert.match(tracked, /Reviewed on the branch and edited again in Linear\./);
+    assert.equal((await documentOf(PLAN)).content, tracked.slice(tracked.indexOf('# ')));
+    for (const kept of [commit, resolution]) assert.ok(await isAncestorOn(kept, 'refs/heads/main'), 'a commit was lost');
+    assert.equal(world.github.pullRequests.length, 1);
+  });
+
+  it('MDS-011-2C: a person merges the tracked branch into the sync branch by hand; the sync keeps that resolution', async () => {
+    const commit = await pendingBranchEdit('open');
+    await editRef('refs/heads/main', PLAN, planText(LATER_EDIT.tracked));
+    // The person's own merge commit: parents (sync branch, tracked branch), one resolved paragraph, no markers.
+    const parents = [await rev(SYNC_BRANCH), await rev('refs/heads/main')] as const;
+    const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: planText('Resolved by a person.') });
+    const resolution = await commitFile(parents[0], PLAN, blob, parents[1]);
+    await fixture.remote.run(['update-ref', SYNC_BRANCH, resolution, parents[0]]);
+    syncValues.push(resolution);
+
+    const run = await sync();
+    assert.deepEqual(run.report.pullRequest?.marked, []);
+    assert.equal(await rev(SYNC_BRANCH), resolution, 'the sync replaced the resolution');
+    const quiet = await settle();
+    assert.deepEqual(quiet.writes, []);
+    const tracked = await show(`refs/heads/main:${PLAN}`);
+    assert.equal(detectConflicts(tracked).length, 0);
+    assert.match(tracked, /Resolved by a person\./);
+    assert.equal((await documentOf(PLAN)).content, tracked.slice(tracked.indexOf('# ')));
+    for (const kept of [commit, resolution]) assert.ok(await isAncestorOn(kept, 'refs/heads/main'), 'a commit was lost');
+  });
+
+  it('MDS-011-2C: a conflicting file that is no document cannot hold markers: the branch is kept and a conflict reported', async () => {
+    const path = '.pre-commit-config.yaml';
+    await pendingBranchEdit('open');
+    const commit = await editRef(SYNC_BRANCH, path, `${PRE_COMMIT}# changed on the branch\n`);
+    await editRef('refs/heads/main', path, `${PRE_COMMIT}# changed on the tracked branch\n`);
     const run = await sync();
     assert.equal(run.report.pullRequest?.code, 'conflict');
-    assert.equal(run.report.pullRequest?.pullRequest, null);
-    assert.equal(world.github.pullRequests.length, 1);
+    assert.deepEqual(run.report.pullRequest?.marked, []);
     assert.equal(await rev(SYNC_BRANCH), commit);
-    assert.match(run.summary, /resolve the conflicts there/);
+    assert.match(run.summary, /A conflicting file that is not a document waits/);
   });
 
   it('git edits alone open no pull request, run after run (L2-01)', async () => {
@@ -790,13 +922,13 @@ describe('sync: the sync pull request', () => {
     assert.match(run.summary, /a person has not merged yet/);
   });
 
-  /** A commit on `base` with one file replaced, made on the bare remote. */
-  async function commitFile(base: string, path: string, blob: string): Promise<string> {
+  /** A commit on `base` with one file replaced, made on the bare remote; a merge when `other` is a second parent. */
+  async function commitFile(base: string, path: string, blob: string, other?: string): Promise<string> {
     const index = join(fixture.root, 'scratch.index');
     const env = { GIT_INDEX_FILE: index, GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' };
     await fixture.remote.run(['read-tree', base], { env });
     await fixture.remote.run(['update-index', '--add', '--cacheinfo', `100644,${blob},${path}`], { env });
     const tree = await fixture.remote.text(['write-tree'], { env });
-    return fixture.remote.text(['commit-tree', tree, '-p', base, '-m', 'Edit'], { env });
+    return fixture.remote.text(['commit-tree', tree, '-p', base, ...(other === undefined ? [] : ['-p', other]), '-m', 'Edit'], { env });
   }
 });
