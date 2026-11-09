@@ -6,10 +6,12 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
+import type { Definition, Image, Link, Nodes } from 'mdast';
+import { parse, visit } from '../../../src/format/markdown.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
-import { HarnessGapError, ProductError, type CheckOutcome } from './results.ts';
+import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
 import { refreshView, resolveSubject } from './subjects.ts';
 
@@ -26,40 +28,187 @@ export function titleOf(path: string, folderOfPath: string): string {
   return relative.replace(/\.md$/, '');
 }
 
-/** Replaces upload URLs with the relative path of the file they hold, seen from `documentPath`. */
-export function mapImageLinks(content: string, urlToPath: ReadonlyMap<string, string>, documentPath: string): string {
-  let result = content;
-  const base = posix.dirname(documentPath);
-  for (const [url, path] of urlToPath) result = result.split(url).join(posix.relative(base, path) || path);
-  return result;
+
+/**
+ * The repository file a relative link destination points to, with its
+ * fragment; undefined for an external URL, an anchor in the same document, a
+ * query, or a path above the repository. A leading `/` is the repository root.
+ */
+export function linkedFile(fromPath: string, destination: string): { path: string; fragment: string | undefined } | undefined {
+  if (destination === '' || destination.startsWith('#') || destination.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(destination)) return undefined;
+  const hash = destination.indexOf('#');
+  const target = hash === -1 ? destination : destination.slice(0, hash);
+  if (target === '' || target.includes('?')) return undefined;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(target);
+  } catch {
+    return undefined;
+  }
+  const path = posix.normalize(decoded.startsWith('/') ? decoded.slice(1) : posix.join(posix.dirname(fromPath), decoded));
+  if (path === '.' || path === '..' || path.startsWith('../') || path.endsWith('/')) return undefined;
+  return { path, fragment: hash === -1 ? undefined : destination.slice(hash + 1) };
+}
+
+/** What a file's links become in Linear. */
+export interface LinkTargets {
+  /** Every tracked file's SHA-256 by path, and the upload URL of each uploaded hash. */
+  hashes: ReadonlyMap<string, string>;
+  uploadsByHash: ReadonlyMap<string, string>;
+  /** Synchronized documents by path, and the URL prefix their links use. */
+  ids?: ReadonlyMap<string, { id: string }>;
+  documentUrlBase?: string;
+}
+
+/** A link, image or definition destination in a Markdown body. */
+export interface Destination {
+  /** Offsets of the raw destination, angle brackets included. */
+  from: number;
+  to: number;
+  /** The destination as the parser reads it (escapes and entities resolved). */
+  url: string;
+  /** An image, or a definition only images use. */
+  image: boolean;
+}
+
+/** Where a node's destination sits: after the `](` that ends its text, or after a definition's `]:`. */
+function destinationSpan(body: string, node: Link | Image | Definition): { from: number; to: number } | undefined {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (start === undefined || end === undefined) return undefined;
+  let at: number;
+  if (node.type === 'definition') {
+    let close = start + 1;
+    while (close < end && body[close] !== ']') close += body[close] === '\\' ? 2 : 1;
+    if (body[close + 1] !== ':') return undefined;
+    at = close + 2;
+  } else {
+    // Autolinks and bare URLs have no `](`.
+    if (body[end - 1] !== ')') return undefined;
+    const textEnd = node.type === 'link' ? (node.children.at(-1)?.position?.end.offset ?? start + 1) : start + 2;
+    const open = body.indexOf('](', textEnd);
+    if (open === -1 || open >= end) return undefined;
+    at = open + 2;
+  }
+  while (at < end && /[ \t\r\n]/.test(body[at] as string)) at += 1;
+  if (body[at] === '<') {
+    let close = at + 1;
+    while (close < end && body[close] !== '>') close += body[close] === '\\' ? 2 : 1;
+    return close < end ? { from: at, to: close + 1 } : undefined;
+  }
+  let to = at;
+  let depth = 0;
+  while (to < end) {
+    const char = body[to] as string;
+    if (char === '\\') to += 2;
+    else if (/[ \t\r\n]/.test(char)) break;
+    else if (char === '(') {
+      depth += 1;
+      to += 1;
+    } else if (char === ')') {
+      if (depth === 0) break;
+      depth -= 1;
+      to += 1;
+    } else to += 1;
+  }
+  return to > at ? { from: at, to } : undefined;
 }
 
 /**
- * A file's text as Linear should hold it: each relative link to a file whose
- * bytes were uploaded becomes that upload's URL, link by link, so two links
- * to equal bytes at different paths each keep their own place.
+ * Every link, image and definition destination of a Markdown body, in text
+ * order, as the Markdown parser finds them: nothing inside code, and labels
+ * of any form.
  */
-export function linkUploads(text: string, documentPath: string, hashes: ReadonlyMap<string, string>, uploadsByHash: ReadonlyMap<string, string>): string {
-  const base = posix.dirname(documentPath);
-  return text.replace(/(\]\(\s*)(<[^>]*>|[^)\s]+)/g, (whole, open: string, target: string) => {
-    const written = target.startsWith('<') ? target.slice(1, -1) : target;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(written) || written.startsWith('#')) return whole;
-    let path: string;
-    try {
-      path = posix.normalize(posix.join(base, decodeURI(written.split('#')[0] as string)));
-    } catch {
-      return whole;
+export function linkDestinations(body: string): Destination[] {
+  const tree = parse(body);
+  const imageLabels = new Set<string>();
+  const linkLabels = new Set<string>();
+  visit(tree, (node: Nodes) => {
+    if (node.type === 'imageReference') imageLabels.add(node.identifier);
+    if (node.type === 'linkReference') linkLabels.add(node.identifier);
+  });
+  const found: Destination[] = [];
+  visit(tree, (node: Nodes) => {
+    if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;
+    const span = destinationSpan(body, node);
+    if (span === undefined) return;
+    const image = node.type === 'image' || (node.type === 'definition' && imageLabels.has(node.identifier) && !linkLabels.has(node.identifier));
+    found.push({ ...span, url: node.url, image });
+  });
+  return found.sort((a, b) => a.from - b.from);
+}
+
+/** What a fragment cannot hold as it is in a link destination, percent-encoded. */
+function encodeFragment(fragment: string): string {
+  return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/g, (char) => encodeURIComponent(char));
+}
+
+/** Replaces destinations by offset; `replace` returns the new raw destination, or undefined to keep it. */
+function rewriteDestinations(body: string, replace: (destination: Destination) => string | undefined): string {
+  let result = '';
+  let at = 0;
+  for (const destination of linkDestinations(body)) {
+    const next = replace(destination);
+    if (next === undefined) continue;
+    result += body.slice(at, destination.from) + next;
+    at = destination.to;
+  }
+  return result + body.slice(at);
+}
+
+/**
+ * A file's text as Linear should hold it, link by link:
+ * - a link (not an image) to a synchronized document, itself included,
+ *   becomes that document's URL by id in angle brackets, `<base>/<id>`, with
+ *   its fragment kept (links between documents);
+ * - a link or image to a file whose bytes were uploaded becomes the upload's
+ *   URL; only the path changes, so a destination in angle brackets keeps them;
+ * - everything else stays as written, code included.
+ * Each occurrence is mapped on its own, so two links to equal bytes at
+ * different paths each keep their own place.
+ */
+export function linearLinks(text: string, documentPath: string, targets: LinkTargets): string {
+  return rewriteDestinations(text, (destination) => {
+    const file = linkedFile(documentPath, destination.url);
+    if (file === undefined) return undefined;
+    const document = destination.image ? undefined : targets.ids?.get(file.path);
+    if (document !== undefined && targets.documentUrlBase !== undefined) {
+      return `<${targets.documentUrlBase}/${document.id}${file.fragment === undefined ? '' : `#${encodeFragment(file.fragment)}`}>`;
     }
-    const hash = hashes.get(path);
-    const url = hash === undefined ? undefined : uploadsByHash.get(hash);
-    // Only the path becomes the URL: a destination in angle brackets keeps them, as Linear stores it.
-    return url === undefined ? whole : `${open}${target.startsWith('<') ? `<${url}>` : url}`;
+    const hash = targets.hashes.get(file.path);
+    const url = hash === undefined ? undefined : targets.uploadsByHash.get(hash);
+    if (url === undefined) return undefined;
+    return text[destination.from] === '<' ? `<${url}>` : url;
+  });
+}
+
+/**
+ * The way back for a comparison: document URLs of synchronized documents
+ * become relative links (in angle brackets, as the engine writes a link the
+ * file did not have) and upload URLs the paths of the files they hold.
+ */
+export function gitLinks(content: string, documentPath: string, targets: Required<Pick<LinkTargets, 'ids' | 'documentUrlBase'>> & { uploads: ReadonlyMap<string, string> }): string {
+  const paths = new Map([...targets.ids].map(([path, entry]) => [entry.id, path]));
+  const prefix = `${targets.documentUrlBase}/`;
+  return rewriteDestinations(content, (destination) => {
+    if (destination.url.startsWith(prefix)) {
+      const rest = destination.url.slice(prefix.length);
+      const hash = rest.indexOf('#');
+      const path = paths.get(hash === -1 ? rest : rest.slice(0, hash));
+      if (path === undefined) return undefined;
+      const relative = posix.relative(posix.dirname(documentPath), path).split('/').map((segment) => encodeURIComponent(segment)).join('/');
+      return `<${relative}${hash === -1 ? '' : rest.slice(hash)}>`;
+    }
+    const path = targets.uploads.get(destination.url);
+    if (path === undefined) return undefined;
+    const relative = posix.relative(posix.dirname(documentPath), path) || path;
+    return content[destination.from] === '<' ? `<${relative}>` : relative;
   });
 }
 
 /** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
-export function sameAsFile(text: string, content: string, path: string, sides: Pick<Sides, 'hashes' | 'uploadsByHash'>): boolean {
-  return linkUploads(stripFrontMatter(text), path, sides.hashes, sides.uploadsByHash) === content;
+export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
+  return linearLinks(stripFrontMatter(text), path, sides) === content;
 }
 
 /**
@@ -130,6 +279,8 @@ export interface Sides {
   tip: string;
   /** Annotated folders of the tracked branch. */
   folders: Folder[];
+  /** The URL prefix of the workspace's documents, for links between synchronized documents. */
+  documentUrlBase: string;
 }
 
 /** A file's SHA-256: an LFS pointer's object id, else the hash of the bytes. */
@@ -206,7 +357,7 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   const missing = [...ids.values()].map((entry) => entry.id).filter((id) => !documents.has(id));
   if (missing.length > 0) for (const document of await world.app.getDocuments(missing, { withContent: true })) documents.set(document.id, document);
   const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
-  return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders };
+  return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders, documentUrlBase: world.documentUrlBase };
 }
 
 // --- invariants ---------------------------------------------------------------
@@ -451,27 +602,35 @@ export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
   let cached: Promise<Sides> | undefined;
   const sides = () => (cached ??= readSides(ctx));
   const outcomes: CheckOutcome[] = [];
+  // A check the product cannot satisfy yet (a "not implemented" command in I6, a value the report lacks) fails
+  // on its own; every other check is still evaluated, so one missing command hides no other result.
+  const productFailure = (error: unknown) => error instanceof ProductError || error instanceof NotImplementedError;
   for (const id of INVARIANTS) {
     if (!ctx.scenario.checks.invariants[id].required) continue;
     try {
       outcomes.push(await INVARIANT_CHECKS[id](ctx, sides));
     } catch (error) {
-      if (error instanceof ProductError) outcomes.push(bad(id, error.message));
+      if (productFailure(error)) outcomes.push(bad(id, (error as Error).message));
       else throw error;
     }
   }
   // I6 ran the sync once more: assertions read the world as it is now.
   refreshView(ctx);
   for (const assertion of ctx.scenario.checks.assertions) {
-    const actual = await resolveSubject(ctx, assertion.subject);
-    if (!actual.known) throw new HarnessGapError(`assertion subject ${assertion.subject}`);
-    let expected = assertion.expected;
-    if (assertion.operator === 'same-as') {
-      const other = await resolveSubject(ctx, String(assertion.expected));
-      if (!other.known) throw new HarnessGapError(`assertion subject ${String(assertion.expected)}`);
-      expected = other.value;
+    try {
+      const actual = await resolveSubject(ctx, assertion.subject);
+      if (!actual.known) throw new HarnessGapError(`assertion subject ${assertion.subject}`);
+      let expected = assertion.expected;
+      if (assertion.operator === 'same-as') {
+        const other = await resolveSubject(ctx, String(assertion.expected));
+        if (!other.known) throw new HarnessGapError(`assertion subject ${String(assertion.expected)}`);
+        expected = other.value;
+      }
+      outcomes.push(compare(assertion.operator, actual.value, expected) ? ok(assertion.subject) : bad(assertion.subject, `${assertion.operator} did not hold`));
+    } catch (error) {
+      if (productFailure(error)) outcomes.push(bad(assertion.subject, (error as Error).message));
+      else throw error;
     }
-    outcomes.push(compare(assertion.operator, actual.value, expected) ? ok(assertion.subject) : bad(assertion.subject, `${assertion.operator} did not hold`));
   }
   return outcomes;
 }
