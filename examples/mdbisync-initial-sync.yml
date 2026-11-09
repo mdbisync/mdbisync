@@ -109,8 +109,9 @@ jobs:
           MDBISYNC_NODE: ${{ steps.stage.outputs.node }}
           MDBISYNC_HOOKS: ${{ steps.stage.outputs.hooks }}
           # SCANNER_API_KEY: ${{ secrets.SCANNER_API_KEY }}
-      # A document the hooks have not seen (it changed after they ran) keeps
-      # the tracked branch's version and is listed as left out.
+      # Takes Linear's documents from the stage step's reads, so it records
+      # what the hooks saw; a document they have not seen (the hooks step did
+      # not run) keeps the tracked branch's version and is listed as left out.
       - name: Initial sync
         uses: mdbisync/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2
         with:

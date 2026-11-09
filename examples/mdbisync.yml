@@ -96,8 +96,9 @@ jobs:
           MDBISYNC_NODE: ${{ steps.stage.outputs.node }}
           MDBISYNC_HOOKS: ${{ steps.stage.outputs.hooks }}
           # SCANNER_API_KEY: ${{ secrets.SCANNER_API_KEY }}
-      # Syncs both ways; a change from Linear the hooks have not seen (it
-      # changed after they ran) waits for the next run.
+      # Syncs both ways, taking Linear's changes from the stage step's reads,
+      # so it pushes what the hooks saw; a later change in Linear waits for
+      # the next run.
       - name: Sync
         uses: mdbisync/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2
         with:

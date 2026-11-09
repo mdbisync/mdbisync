@@ -48,6 +48,8 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   const state = { ...context.fetched.state };
   const trackedTip = context.fetched.tracked;
   const captured = await capture(context, {config:options.config, state, ...(options.security ? {security:options.security} : {}), ...(options.fetch ? {fetch:options.fetch} : {})});
+  // Also when the capture ended early: the steps after it never take an answer kept by the stage step.
+  context.linear.transport.reads?.end();
   const changed = captured.changed.length > 0 || captured.removed.length > 0 || captured.blocked.length > 0;
   if (!captured.ok) return {complete:false, changed, trackedTip, capture:captured};
   await checkpoint('after-capture-push-before-pr');
