@@ -99,14 +99,26 @@ describe('engine driver', () => {
     assert.equal(env['MDBISYNC_CONFIRM'], 'true');
   });
 
-  it('recognizes a command that answers "not implemented"', async () => {
+  it('recognizes a command that answers "not implemented", and only that answer', async () => {
+    // Stub engines, so the test does not depend on which commands the real engine has implemented.
     const dir = fresh('engine-');
-    const result = await runEngine({
-      command: 'sync', names: runNames('4f1a9c'), cwd: dir, repository: 'o/r', hooksDir: dir, reportFile: join(dir, 'r.json'), summaryFile: join(dir, 's.md'),
+    const call = {
+      command: 'sync' as const, names: runNames('4f1a9c'), cwd: dir, repository: 'o/r', hooksDir: dir, reportFile: join(dir, 'r.json'), summaryFile: join(dir, 's.md'),
       linearUrl: 'http://127.0.0.1:1', credentials: { linearClientId: '', linearClientSecret: '', githubToken: '' }, extraEnv: {}, timeoutMs: 30_000,
-    });
-    assert.equal(result.notImplemented, true);
-    assert.equal(result.timedOut, false);
+    };
+    const stub = (name: string, script: string) => {
+      const file = join(dir, name);
+      writeFileSync(file, script);
+      return { ...process.env, MDBISYNC_ENGINE: file };
+    };
+    const notImplemented = await runEngine(call, stub('not-implemented.mjs', "process.stderr.write('sync: not implemented\\n');\nprocess.exitCode = 10;\n"));
+    assert.equal(notImplemented.notImplemented, true);
+    assert.equal(notImplemented.timedOut, false);
+    // Another failure with the same words elsewhere, or another exit code, is not that answer.
+    const refused = await runEngine(call, stub('refused.mjs', "process.stderr.write('run initial sync first\\n');\nprocess.exitCode = 4;\n"));
+    assert.equal(refused.notImplemented, false);
+    const otherCode = await runEngine(call, stub('other-code.mjs', "process.stderr.write('sync: not implemented\\n');\nprocess.exitCode = 1;\n"));
+    assert.equal(otherCode.notImplemented, false);
   });
 
   it('kills an engine that runs too long', async () => {
