@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 import { runCli } from '../cli.ts';
+import { appCreationUrl } from '../setup/app.ts';
+import { QUICKSTART_URL } from '../setup/fixes.ts';
 import { checkLinearFormatHook, readHookConfig, securityHooks } from '../setup/hooks.ts';
 import { readAnnotation } from '../mapping/annotations.ts';
 
@@ -38,6 +40,8 @@ test('init creates usable workflows, matching hook pins and folder annotations, 
     annotation: { folder: 'guides', readme: 'guides/README.md', team: 'Planning', project: 'Roadmap' },
   });
   assert.match(result.stdout, /MDBISYNC_LINEAR_CLIENT_SECRET/);
+  assert.ok(result.stdout.includes(appCreationUrl()), 'init prints the link that creates the GitHub App');
+  assert.ok(result.stdout.includes(`${QUICKSTART_URL}#github-app`), 'init links the GitHub App section');
   assert.match(result.stdout, /merge commits/i);
   assert.match(result.stdout, /pre-commit install/);
   assert.match(result.stdout, /dry run/i);

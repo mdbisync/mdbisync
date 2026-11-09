@@ -65,7 +65,9 @@ step with the bare message, without `error:`.
 Every run checks its setup before it writes anything; `check` runs only
 that. The job summary has one row per check, with the state `passed`,
 `failed`, `warning` or `not-checked` (an earlier failure made it impossible
-to check):
+to check). A failed row, the summary's first line and the run's last line
+link the [quickstart](quickstart.md) section that fixes the failure, for
+example [GitHub App](quickstart.md#github-app) for a missing permission:
 
 | Check | What it checks |
 | --- | --- |

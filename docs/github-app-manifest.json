@@ -1,0 +1,17 @@
+{
+  "description": "Two-way sync between Linear documents and Markdown in this repository.",
+  "url": "https://github.com/mdbisync/mdbisync",
+  "hook_attributes": {
+    "url": "https://github.com/mdbisync/mdbisync",
+    "active": false
+  },
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "pull_requests": "write",
+    "workflows": "write",
+    "checks": "read",
+    "statuses": "read"
+  },
+  "default_events": []
+}
