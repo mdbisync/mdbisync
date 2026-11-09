@@ -288,7 +288,7 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
     // a document with a matched title and is deleted, which archives it.
     const team = [...live.teams.values()][0];
     if (team !== undefined) {
-      const helper = await live.world.createProject(ctx.names.project(8), [team.id]);
+      const helper = await live.world.createProject(ctx.names.helperProject(), [team.id]);
       const archived = await editor.createDocument({ projectId: helper.id }, { title: first.title, content: 'An older copy.\n' });
       await live.world.deleteProject(helper, ctx.names.runId);
       ctx.observations.set('setup.archivedDocument', archived.id);
@@ -378,7 +378,7 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
         if (teamId === undefined) continue;
         for (const document of await live.world.runTeamDocuments(teamId)) if (document.runId === ctx.names.runId) zone.set(document.id, document);
       }
-      await live.world.archiveRunTeamDocuments([...zone.values()], ctx.names.runId, ctx.names.project(8), (document) => created.has(document.id) || runOfTeamTitle(document.title) === ctx.names.runId);
+      await live.world.archiveRunTeamDocuments([...zone.values()], ctx.names.runId, ctx.names.helperProject(), (document) => created.has(document.id) || runOfTeamTitle(document.title) === ctx.names.runId);
     });
   }
   return problems.length === 0 ? { ok: true } : { ok: false, detail: problems.join('; ') };

@@ -326,6 +326,16 @@ describe('oracles', () => {
 });
 
 describe('team-zone cleanup', () => {
+  it('names helper projects so cleanup finds them and no annotation ever maps one', async () => {
+    const { RUN_PROJECT_PATTERN, runOfProject } = await import('./isolation.ts');
+    const { PROJECT_PLACEHOLDERS } = await import('./corpus.ts');
+    const names = runNames('aaaaaa');
+    assert.match(names.helperProject(), RUN_PROJECT_PATTERN);
+    assert.equal(runOfProject(names.helperProject()), 'aaaaaa');
+    const placeholderProjects = PROJECT_PLACEHOLDERS.map((_, index) => names.project(index));
+    assert.ok(!placeholderProjects.includes(names.helperProject()));
+  });
+
   it('archives a run\'s team-zone documents through a run project of their team, restoring trashed ones first', async () => {
     const { LinearWorld } = await import('./linear-world.ts');
     const calls: string[] = [];
@@ -344,14 +354,14 @@ describe('team-zone cleanup', () => {
       { id: 'd2', title: 'aaaaaa/guides/old', projectId: null, teamId: 'team-eng', trashed: true },
       { id: 'd3', title: 'aaaaaa/notes', projectId: null, teamId: 'team-docs', trashed: false },
       { id: 'd4', title: 'in a project already', projectId: 'p', teamId: 'team-eng', trashed: false },
-    ], 'aaaaaa', 'Workshop agenda aaaaaa');
+    ], 'aaaaaa', 'Spare shelf aaaaaa');
     assert.equal(archived, 3);
     assert.deepEqual(calls, [
-      'CreateProject Workshop agenda aaaaaa team-eng', 'move d1 project-team-eng', 'restore d2', 'move d2 project-team-eng', 'DeleteProject project-team-eng',
-      'CreateProject Workshop agenda aaaaaa team-docs', 'move d3 project-team-docs', 'DeleteProject project-team-docs',
+      'CreateProject Spare shelf aaaaaa team-eng', 'move d1 project-team-eng', 'restore d2', 'move d2 project-team-eng', 'DeleteProject project-team-eng',
+      'CreateProject Spare shelf aaaaaa team-docs', 'move d3 project-team-docs', 'DeleteProject project-team-docs',
     ]);
     // Never another run's document.
-    await assert.rejects(world.archiveRunTeamDocuments([{ id: 'x', title: 'bbbbbb/notes', projectId: null, teamId: 'team-eng', trashed: false }], 'aaaaaa', 'Workshop agenda aaaaaa'), /not a team-zone document of run aaaaaa/);
+    await assert.rejects(world.archiveRunTeamDocuments([{ id: 'x', title: 'bbbbbb/notes', projectId: null, teamId: 'team-eng', trashed: false }], 'aaaaaa', 'Spare shelf aaaaaa'), /not a team-zone document of run aaaaaa/);
   });
 });
 
@@ -656,7 +666,7 @@ describe('linear executors', () => {
     assert.equal(ctx.observations.get('expected.destinationPath'), 'docs/handbook/plan.md');
     ctx.observations.delete('target.paths');
     await runStep(ctx, { kind: 'linear', action: 'out-of-scope', args: { variants: ['unmapped-project', 'trash'] } });
-    assert.deepEqual(created, ['Workshop agenda aaaaaa']);
+    assert.deepEqual(created, ['Spare shelf aaaaaa']);
     assert.equal((ctx.observations.get('target.paths') as string[]).length, 2);
     assert.ok([...linear.documents.values()].some((document) => document.trashed));
   });

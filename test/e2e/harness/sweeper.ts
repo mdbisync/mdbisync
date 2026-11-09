@@ -95,7 +95,7 @@ export async function sweep(targets: SweepTargets, stateDir: string, now = Date.
         byRun.set(document.runId, [...(byRun.get(document.runId) ?? []), document]);
       }
       for (const [runId, documents] of byRun) {
-        report.archivedDocuments += await targets.world.archiveRunTeamDocuments(documents, runId, runNames(runId).project(8));
+        report.archivedDocuments += await targets.world.archiveRunTeamDocuments(documents, runId, runNames(runId).helperProject());
       }
     });
   }

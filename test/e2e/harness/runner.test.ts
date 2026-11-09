@@ -318,7 +318,7 @@ describe('sweeper', () => {
     assert.deepEqual(report.errors, []);
     assert.deepEqual(report.removedRefs.sort(), ['refs/heads/t/111111/main', 'refs/mdbisync-t/111111/ids']);
     assert.deepEqual(deleted, ['Field notes 111111']);
-    assert.deepEqual(archived, ['111111:Workshop agenda 111111:d1']);
+    assert.deepEqual(archived, ['111111:Spare shelf 111111:d1']);
     assert.equal(report.archivedDocuments, 1);
     const left = (await bare.text(['for-each-ref', '--format=%(refname)'])).split('\n').sort();
     assert.deepEqual(left, ['refs/heads/main', 'refs/heads/t/222222/main', 'refs/heads/t/333333/main']);
