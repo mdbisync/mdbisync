@@ -842,7 +842,8 @@ describe('marker-driven checks', () => {
     assert.deepEqual(await resolveSubject(ctx, 'runs.0.writes.pullRequests'), { known: true, value: 1 });
     assert.equal(await holds(ctx, total), false);
     assert.equal(await holds(ctx, linear), false);
-    await assert.rejects(resolveSubject(ctx, 'runs.last.writes.documents'), /a run's writes are linear, git, pullRequests, total/);
+    await assert.rejects(resolveSubject(ctx, 'runs.last.writes.documents'), /runs\.last\.writes\.documents: a run's writes are writes\.linear, writes\.git, writes\.pullRequests, writes\.total/);
+    await assert.rejects(resolveSubject(ctx, 'runs.last.writes'), /runs\.last\.writes: a run's writes are/);
 
     // The contract the product must meet: a sync after the merge that writes nothing.
     const quiet = (await fakeRun()).ctx;

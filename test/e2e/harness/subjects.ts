@@ -1622,21 +1622,37 @@ function pathsNamed(value: unknown): string[] {
  * `initialSync` or `linearToGit`). They are counted the same way for every
  * operation:
  *
- * - `linear`: documents the run created, overwrote, moved, restored, trashed
- *   or marked as blocked in Linear, each path once, and never fewer than the
- *   report's own `writtenDocuments` and `writtenCount`.
- * - `git`: the state the run pushed: a capture that took Linear's changes,
- *   the `linear` record (a sync's merge or ordinary commit, an initial sync's
- *   record that moved), an initial sync's progress pushes, a moved sync
- *   branch. A run that reports `changed` while it names no write moved a
- *   state ref the report does not list (the `ids` or `uploads` ref alone):
- *   that counts as one.
+ * - `linear`: documents the run created, overwrote, moved, restored or
+ *   trashed in Linear, each path once, and never fewer than the report's own
+ *   `writtenDocuments` and `writtenCount`.
+ * - `git`: the state the run pushed: a capture that finished and took
+ *   Linear's changes (a refused capture lists its candidates but pushed
+ *   nothing), the `linear` record (a sync's merge or ordinary commit, an
+ *   initial sync's record that moved), an initial sync's progress pushes, a
+ *   moved sync branch. A run that reports `changed` while it names no write
+ *   moved a state ref the report does not list (the `ids` or `uploads` ref
+ *   alone): that counts as one.
+ *
+ * A security-blocked document is not counted. The capture lists it on every
+ * run while it stays blocked, and the run reports `changed` for it, also
+ * when its mark is already in place and nothing is written; the report does
+ * not say whether this run wrote the mark. So `changed` does not count for a
+ * run that lists a blocked document, nor for a sync whose capture did not
+ * finish: that run stops after the capture, and its `changed` only says the
+ * capture had candidates.
  * - `pullRequests`: pull requests the run opened, updated, merged or closed.
  * - `total`: their sum.
  *
- * The world-wide `writes.*` subjects count the same kinds from the world
- * since setup; these say what one run wrote. A report without `changed` is
- * not a run report, and it gives no writes.
+ * The count covers what the report names, nothing more. Writes the report
+ * does not name are missed: an `ids` push for a held removal, the icon and
+ * color of a mark on a changed document, uploads, the body of a pull
+ * request whose merge was refused. A zero-write contract therefore also
+ * needs I6 and the world-wide `writes.*` subjects, which the harness counts
+ * from the world since setup (Linear mutations, new commits on the tracked
+ * branch, the sync branch and the state refs, new pull requests); those
+ * differ in kind from these (a merge is a tracked-branch commit there, a
+ * pull request write here). A report without `changed` is not a run
+ * report, and it gives no writes.
  */
 export function runWrites(report: Record<string, unknown>): RunWrites {
   if (typeof report['changed'] !== 'boolean') throw new ProductError("the engine's report gives no changed, so it gives no writes");
@@ -1652,7 +1668,6 @@ export function runWrites(report: Record<string, unknown>): RunWrites {
     ...pathsNamed(sync?.['restored']),
     ...pathsNamed(sync?.['relocated']),
     ...pathsNamed(sync?.['trashed']),
-    ...pathsNamed(capture?.['blocked']),
     ...pathsNamed(initial?.['created']),
     ...pathsNamed(initial?.['overwritten']),
     ...pathsNamed(initial?.['trashed']),
@@ -1660,7 +1675,10 @@ export function runWrites(report: Record<string, unknown>): RunWrites {
   const reported = [report['writtenDocuments'], report['writtenCount']].filter((value): value is number => typeof value === 'number');
   const linear = Math.max(documents.size, ...reported);
 
-  const captured = namedList(capture?.['changed']).length + namedList(capture?.['removed']).length + namedList(capture?.['blocked']).length > 0;
+  const captured = capture?.['ok'] === true && namedList(capture['changed']).length + namedList(capture['removed']).length > 0;
+  const blocked = namedList(capture?.['blocked']).length > 0;
+  // A sync whose capture did not finish ends there: its `changed` only says the capture had candidates.
+  const refused = capture !== null && capture['ok'] !== true;
   const initialRecord = recordOf(report['record']);
   const reverseRecord = recordOf(reverse?.['record']);
   const progress = (value: unknown) => (typeof value === 'number' ? value : 0);
@@ -1681,7 +1699,7 @@ export function runWrites(report: Record<string, unknown>): RunWrites {
     (reversePullRequest?.['opened'] === true || reversePullRequest?.['updated'] === true ? 1 : 0) +
     (typeof reverse?.['closedPullRequest'] === 'number' ? 1 : 0);
 
-  const git = named === 0 && linear === 0 && pullRequests === 0 && report['changed'] === true ? 1 : named;
+  const git = named === 0 && linear === 0 && pullRequests === 0 && report['changed'] === true && !blocked && !refused ? 1 : named;
   return { linear, git, pullRequests, total: linear + git + pullRequests };
 }
 
@@ -1697,7 +1715,8 @@ function engineValue(ctx: RunContext, subject: string): unknown {
   if (runMatch !== null && path[0] === 'writes') {
     const writes = runWrites(result.report);
     const kind = path.length === 2 ? path[1] : undefined;
-    if (kind === undefined || !Object.hasOwn(writes, kind)) throw new Error(`a run's writes are ${Object.keys(writes).join(', ')}, not ${path.slice(1).join('.')}`);
+    // A scenario that names another kind is wrong, not the product: a harness error.
+    if (kind === undefined || !Object.hasOwn(writes, kind)) throw new Error(`${subject}: a run's writes are ${Object.keys(writes).map((name) => `writes.${name}`).join(', ')}`);
     return writes[kind as keyof RunWrites];
   }
   // The report is the job summary in structured form: `summary.code` is the report's `code`.

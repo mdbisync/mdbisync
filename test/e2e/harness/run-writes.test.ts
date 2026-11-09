@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import type { ReverseReport, RunReport, SyncReport } from '../../../src/run/finish.ts';
+import type { ConfirmedReport, ReverseReport, RunReport, SyncReport } from '../../../src/run/finish.ts';
 import type { PullRequestResult } from '../../../src/sync/index.ts';
 import { ProductError } from './results.ts';
 import { runWrites, type RunWrites } from './subjects.ts';
@@ -10,7 +10,8 @@ import { runWrites, type RunWrites } from './subjects.ts';
 // Engine run reports, fixed: the three runs of L1R-03 as the engine reported
 // them live (the reverse initial sync, the first sync after a person merged
 // its pull request, which created two documents, and the quiet run after it),
-// and two more sync runs whose writes the report names elsewhere.
+// two more sync runs whose writes the report names elsewhere, and a
+// confirmed initial sync from git to Linear.
 const RUN_REPORTS = join(import.meta.dirname, 'run-reports');
 
 function runReport(name: string): Record<string, unknown> {
@@ -40,6 +41,15 @@ const REVERSE_KEYS = {
 const PULL_REQUEST_KEYS = {
   needed: true, pullRequest: true, branchMoved: true, checks: true, merged: true, paths: true, code: true, status: true, reason: true,
 } satisfies Record<keyof PullRequestResult, true>;
+const CONFIRMED_KEYS = {
+  complete: true, created: true, overwritten: true, unchanged: true, skippedCompleted: true, trashed: true,
+  leftOutAtWrite: true, failed: true, notAttempted: true, stopped: true, progressPushes: true, reformatted: true,
+} satisfies Record<keyof ConfirmedReport, true>;
+const CAPTURE_KEYS = {
+  ok: true, changed: true, removed: true, heldRemovals: true, blocked: true, leftOut: true, writeBackWarnings: true, stopped: true, rebuiltIds: true,
+} satisfies Record<keyof NonNullable<RunReport['capture']>, true>;
+/** The capture's fields it leaves out unless they apply. */
+const CAPTURE_OPTIONAL = ['stopped', 'rebuiltIds'];
 /** The pull request step's fields it may leave out: only its ending's. */
 const PULL_REQUEST_OPTIONAL = ['code', 'status', 'reason'];
 
@@ -49,6 +59,8 @@ const EXPECTED: Record<string, RunWrites> = {
   'quiet-sync': { linear: 0, git: 0, pullRequests: 0, total: 0 },
   'state-ref-only-sync': { linear: 0, git: 1, pullRequests: 0, total: 1 },
   'sync-pull-request-opened': { linear: 0, git: 2, pullRequests: 1, total: 3 },
+  // Three created and one overwritten; the record and one progress push.
+  'initial-sync-to-linear': { linear: 4, git: 2, pullRequests: 0, total: 6 },
 };
 
 describe('run report fixtures', () => {
@@ -64,6 +76,11 @@ describe('run report fixtures', () => {
       assert.deepEqual(Object.keys(report).sort(), Object.keys(REPORT_KEYS).sort());
       if (report['sync'] !== null) assert.deepEqual(Object.keys(report['sync'] as object).sort(), Object.keys(SYNC_KEYS).sort());
       if (report['linearToGit'] !== null) assert.deepEqual(Object.keys(report['linearToGit'] as object).sort(), Object.keys(REVERSE_KEYS).sort());
+      if (report['initialSync'] !== null) assert.deepEqual(Object.keys(report['initialSync'] as object).sort(), Object.keys(CONFIRMED_KEYS).sort());
+      if (report['capture'] !== null) {
+        const required = Object.keys(CAPTURE_KEYS).filter((key) => !CAPTURE_OPTIONAL.includes(key));
+        assert.deepEqual(Object.keys(report['capture'] as object).filter((key) => !CAPTURE_OPTIONAL.includes(key)).sort(), required.sort());
+      }
       if (report['pullRequest'] !== null) {
         const keys = Object.keys(report['pullRequest'] as object);
         const required = Object.keys(PULL_REQUEST_KEYS).filter((key) => !PULL_REQUEST_OPTIONAL.includes(key));
@@ -94,12 +111,24 @@ describe('a run\'s writes, from its report', () => {
       ...report,
       changed: true,
       sync: { ...(report['sync'] as object), updated: ['eng/b.md'], relocated: [{ from: 'eng/a.md', to: 'eng/b.md' }], trashed: ['eng/c.md'], restored: ['eng/d.md'] },
-      capture: { ...(report['capture'] as object), blocked: [{ id: 'x', path: 'eng/e.md', findings: [] }] },
     };
-    const writes = runWrites(moved);
-    assert.equal(writes.linear, 4);
-    // The blocked document is also a change the capture pushed.
-    assert.equal(writes.git, 1);
+    assert.deepEqual(runWrites(moved), { linear: 3, git: 0, pullRequests: 0, total: 3 });
+  });
+
+  it('counts no write for a document that stays blocked', () => {
+    // The capture lists it on every run, and the run reports changed, though its mark is already in place.
+    const report = runReport('quiet-sync');
+    const blocked = { ...report, changed: true, capture: { ...(report['capture'] as object), blocked: [{ id: 'x', path: 'eng/e.md', findings: [{ hook: 'secret-check', line: 5 }] }] } };
+    assert.deepEqual(runWrites(blocked), { linear: 0, git: 0, pullRequests: 0, total: 0 });
+  });
+
+  it('counts the capture only when it finished, not a refused one with its candidates', () => {
+    const opened = runReport('sync-pull-request-opened');
+    assert.equal(runWrites({ ...opened, pullRequest: null }).git, 1);
+    const refused: Record<string, unknown> = { ...opened, ok: false, code: 'state-moved', pullRequest: null, sync: null, capture: { ...(opened['capture'] as object), ok: false } };
+    // The engine reports changed for its candidates, but the run stopped at the refused push.
+    assert.equal(refused['changed'], true);
+    assert.deepEqual(runWrites(refused), { linear: 0, git: 0, pullRequests: 0, total: 0 });
   });
 
   it('counts a merge and a closed pull request', () => {
