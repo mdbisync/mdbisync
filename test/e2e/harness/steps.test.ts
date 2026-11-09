@@ -702,14 +702,15 @@ describe('marker-driven checks', () => {
 
   it('keeps the L5-17 setup error visible to scenario assertions', async () => {
     const { ctx } = await fakeRun();
+    ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: { pullRequest: { pullRequest: { number: 1, opened: true } } } });
     ctx.engine.results.push({ command: 'sync', exitCode: 1, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: {
-      summary: { code: 'setup-error', setupErrorCheck: 'format' }, pullRequests: { state: 'open', merged: 0 }, writes: { linear: 0 },
+      summary: null, code: 'check-failed', pullRequest: { code: 'check-failed', checks: { failed: ['format'] }, merged: null }, writtenCount: 0,
     } });
     const scenario = scenarios.find((item) => item.id === 'L5-17')!;
-    for (const assertion of scenario.checks.assertions.filter((item) => item.subject.startsWith('runs.0.'))) {
+    for (const assertion of scenario.checks.assertions.filter((item) => item.subject.startsWith('runs.1.'))) {
       const subject = await resolveSubject(ctx, assertion.subject);
       assert.equal(subject.known, true);
-      assert.equal(subject.value, assertion.expected, assertion.subject);
+      assert.deepEqual(subject.value, assertion.expected, assertion.subject);
     }
   });
 });

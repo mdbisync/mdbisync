@@ -193,10 +193,15 @@ async function settle(ctx: RunContext, limit = 4): Promise<void> {
  * deployer copies them and rendered for this run (its branches, refs,
  * concurrency group and the sandbox's runner and secret names), committed
  * as a person would. `MDBISYNC_TEST_ACTION_SHA` names the release commit
- * under test; without it the templates' own pin runs.
+ * under test; without it the templates' own pin runs. Only the command's
+ * workflow and the pull request check go in: a sync workflow in an initial
+ * sync scenario would start on the scenario's own pushes, as a deployer is
+ * told to avoid.
  */
-async function installWorkflows(ctx: RunContext): Promise<void> {
-  if (ctx.observations.has('workflows.installed')) return;
+async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'): Promise<void> {
+  const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
+  const wanted = [workflowFor(command), WORKFLOW_FILES['pre-commit']].filter((file) => !installed.includes(file));
+  if (wanted.length === 0) return;
   const git = await ctx.person();
   await pull(git, ctx);
   const actionSha = process.env[ACTION_SHA_ENV]?.trim() ?? '';
@@ -207,20 +212,21 @@ async function installWorkflows(ctx: RunContext): Promise<void> {
     refPrefix: ctx.names.refPrefix,
     group: `mdbisync-${ctx.names.runId}`,
     ...(actionSha === '' ? {} : { actionSha }),
-  });
+  }, wanted);
+  if (files.size === 0) return;
   mkdirSync(join(git.dir, '.github', 'workflows'), { recursive: true });
   for (const [file, text] of files) writeFileSync(join(git.dir, '.github', 'workflows', file), text);
   await git.run(['add', '--all']);
   await git.run(['commit', '--quiet', '--no-verify', '-m', 'Add the sync workflows']);
   await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
   ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
-  ctx.observations.set('workflows.installed', true);
+  ctx.observations.set('workflows.installed', [...installed, ...files.keys()]);
 }
 
 async function requireWorkflows(ctx: RunContext, command: CommandName = 'sync'): Promise<void> {
   const world = live(ctx);
   // Check-fault runs may already carry the harness's PR check workflow.
-  await installWorkflows(ctx);
+  await installWorkflows(ctx, command);
   const file = workflowFor(command);
   if (!(await world.rest.workflowExists(file, ctx.names.trackedBranch))) {
     throw new NotImplementedError(command, `the workflow template ${file} is not in examples/`);

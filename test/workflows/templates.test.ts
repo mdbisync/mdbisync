@@ -16,7 +16,7 @@ const CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1';
 const ACTION = 'mikhail-yaskou/mdbisync@';
 
 /** The templates that run the action. */
-const SYNC_TEMPLATES = ['mdbisync-initial-sync.yml'];
+const SYNC_TEMPLATES = ['mdbisync-initial-sync.yml', 'mdbisync.yml'];
 
 interface Step {
   name?: string;
@@ -99,12 +99,36 @@ describe('workflow templates', () => {
       it('installs a pinned pre-commit before mdbisync, for the security hooks on content from Linear', () => {
         const all = steps(file);
         const action = all.findIndex((step) => step.uses?.startsWith(ACTION));
-        const install = all.findIndex((step) => /pipx install pre-commit==\d+\.\d+\.\d+\b/.test(step.run ?? ''));
+        // A runner that brings its own pre-commit keeps it; otherwise the pinned version is installed.
+        const install = all.findIndex((step) => /^command -v pre-commit \|\| pipx install pre-commit==\d+\.\d+\.\d+$/.test(step.run?.trim() ?? ''));
         assert.ok(install >= 0 && install < action, `${file}: pre-commit is not installed before the sync`);
         assert.equal(all[install]?.env, undefined, `${file}: the install step gets an environment`);
       });
     });
   }
+
+  describe('mdbisync.yml', () => {
+    const file = 'mdbisync.yml';
+
+    it('runs on pushes to main, every five minutes and by hand', () => {
+      const on = workflow(file).on;
+      assert.deepEqual(Object.keys(on).sort(), ['push', 'schedule', 'workflow_dispatch']);
+      assert.deepEqual(on['push'], { branches: ['main'] });
+      assert.deepEqual(on['schedule'], [{ cron: '*/5 * * * *' }]);
+      assert.equal(on['workflow_dispatch'], null);
+    });
+
+    it('runs the sync entry point', () => {
+      const action = actionStep(file);
+      assert.equal(action.with?.['operation'], 'sync');
+      assert.equal(action.with?.['direction'], undefined);
+    });
+  });
+
+  it('the sync and the initial sync share one concurrency group', () => {
+    const groups = new Set(SYNC_TEMPLATES.map((file) => workflow(file).concurrency?.group));
+    assert.deepEqual([...groups], ['mdbisync']);
+  });
 
   describe('mdbisync-initial-sync.yml', () => {
     const file = 'mdbisync-initial-sync.yml';

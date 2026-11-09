@@ -70,7 +70,7 @@ export interface PullRequestResult {
   /**
    * Why the step did not do all it could this run. Waiting for checks is not
    * one: a later run merges.
-   * - `check-failed`: a check on the head failed; a setup error, the repository's checks must pass Linear's form.
+   * - `check-failed`: a check on the head failed; a setup error, the repository's checks must pass Linear's form. The tracked-to-Linear write step is paused until they pass.
    * - `conflict`: `linear` and the tracked branch, or `linear` and the sync branch, change the same lines; steps 3 to 5 merge them, and a later run takes the result.
    * - `merge-refused`: GitHub would not merge (the head moved, or the pull request cannot be merged now); a later run tries again.
    * - `merge-blocked`: GitHub refused the merge for the same reason as an earlier run, on the same head and tracked branch; a setup error, a person must change what blocks it.
@@ -315,7 +315,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     case 'check-failed':
       lines.push(
         `Setup error: ${result.checks?.failed.length === 1 ? 'a check' : 'checks'} failed on the sync pull request ${link}: ${names(result.checks?.failed)}.`,
-        "The sync does not merge it. Checks on the sync pull request must pass Linear's form: fix the repository's configuration, and a later run merges once they pass.",
+        "The sync does not merge it and writes no tracked-branch changes to Linear until the checks pass. Checks on the sync pull request must pass Linear's form: fix the repository's configuration or rerun the failed check, and a later run merges once they pass.",
       );
       break;
     case 'conflict':

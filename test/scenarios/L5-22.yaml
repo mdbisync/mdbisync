@@ -63,7 +63,7 @@
         "expected": "linear.body"
       },
       {
-        "subject": "summary.code",
+        "subject": "runs.0.capture.writeBackWarnings.0.code",
         "operator": "equal",
         "expected": "linear-content-too-large-to-write-back"
       }

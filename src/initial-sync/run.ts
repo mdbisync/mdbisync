@@ -2,11 +2,11 @@
 // the tracked branch (colliding ones included, so they are linted too) and
 // all documents of every annotated place, including trash. Reads only.
 
-import { assessCapacity, containerKey } from '../run/capacity.ts';
+import { assessCapacity, containerKey, readContainerDocuments } from '../run/capacity.ts';
 import { type LinearDocument } from '../linear/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { readBlobs, readUploads } from '../state/index.ts';
-import { type InitialSyncPlan, type PlaceDocuments, type PlanInput, annotatedPlaces, leaveOutAtWrite, placeId, planInitialSync } from './plan.ts';
+import { type InitialSyncPlan, type PlaceDocuments, type PlanInput, annotatedPlaces, leaveOutAtWrite, planInitialSync } from './plan.ts';
 import { predictUploadLeaveOuts } from './uploads.ts';
 
 export interface PlanSources {
@@ -21,24 +21,19 @@ export interface PlanSources {
  * confirmed run. Bodies of trashed and archived documents are not needed.
  */
 export async function readPlanSources(context: RunContext, options: { withContent?: boolean } = {}): Promise<PlanSources> {
-  const { git, mapping, targets, linear } = context;
+  const { git, mapping, linear } = context;
   const files = [...mapping.documents, ...mapping.leftOut];
   const blobs = await readBlobs(git, files.map((file) => file.oid));
   const texts = new Map(files.map((file) => [file.path, (blobs.get(file.oid) as Buffer).toString('utf8')]));
   const places: PlaceDocuments[] = [];
   const documents = new Map<string, LinearDocument>();
-  const containers = new Map<string, LinearDocument[]>();
+  const containers = await readContainerDocuments(context);
+  if (options.withContent) {
+    const liveIds = [...new Set([...containers.values()].flat().filter((document) => !document.trashed && document.archivedAt === null).map((document) => document.id))];
+    for (const document of await linear.getDocuments(liveIds, { withContent: true })) documents.set(document.id, document);
+  }
   for (const { place } of annotatedPlaces(mapping.zones)) {
-    const key = containerKey(context, place);
-    let listed = containers.get(key);
-    if (listed === undefined) {
-      listed = await linear.listDocuments(placeId(targets, place), { withContent: false, includeArchived: true });
-      containers.set(key, listed);
-    }
-    if (options.withContent) {
-      const liveIds = listed.filter((document) => !document.trashed && document.archivedAt === null && !documents.has(document.id)).map((document) => document.id);
-      for (const document of await linear.getDocuments(liveIds, { withContent: true })) documents.set(document.id, document);
-    }
+    const listed = containers.get(containerKey(context, place)) as LinearDocument[];
     for (const document of listed) if (!documents.has(document.id)) documents.set(document.id, document);
     places.push({ place, documents: listed });
   }
