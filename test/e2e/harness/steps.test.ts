@@ -20,7 +20,7 @@ import { EnvBlockedError, ProductError } from './results.ts';
 import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
 import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, installHooks, PERSON, personCommit, Sandbox } from './sandbox.ts';
-import { engineEntry } from './engine.ts';
+import { engineEntry, type EngineResult } from './engine.ts';
 import { preCommitConfig } from '../../corpus/tree.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { waitForCheck } from './check-fault.ts';
@@ -624,6 +624,11 @@ async function localHookConfig(root: string): Promise<string> {
  * documents, their ids ref, and Linear holding the same texts. With `hooks`,
  * the person's commits go through the corpus's hooks from a local hook repository.
  */
+/** A finished engine run with the given report, as the harness records it. */
+function engineRun(command: EngineResult['command'], report: Record<string, unknown>): EngineResult {
+  return { command, exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report };
+}
+
 async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
@@ -1424,6 +1429,67 @@ describe('subjects', () => {
     assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
     refreshView(ctx);
     assert.equal(((await resolveSubject(ctx, 'corpus.validPaths')).value as string[]).includes('eng/platform/footnotes.md'), false);
+  });
+
+  it('honor a file its run left out at write in I1 and I7, and still fail on an unexplained missing mapping', async () => {
+    const { ctx } = await fakeRun();
+    // Two files in git with no id and no document: one the run left out for its oversized upload, one it did not explain.
+    const git = await ctx.person();
+    for (const path of ['eng/platform/large.md', 'eng/platform/lost.md']) writeFileSync(join(git.dir, path), '# Large\n\n![a](a.bin)\n');
+    await git.run(['add', '--', 'eng/platform/large.md', 'eng/platform/lost.md']);
+    await git.run(['commit', '--quiet', '-m', 'Add two files']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    const initialSync = { created: [], overwritten: [], unchanged: ['eng/platform/plan.md'], leftOutAtWrite: [{ path: 'eng/platform/large.md', rule: 'upload-too-large', files: ['eng/platform/a.bin'] }] as unknown[] };
+    ctx.engine.results.push(engineRun('initial-sync', { summary: { leftOutFiles: [] }, initialSync, sync: null }));
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const sides = await readSides(ctx);
+    assert.deepEqual([...sides.omitted], [['eng/platform/large.md', 'write: upload-too-large']]);
+    assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => sides)).detail, '1 files differ from their documents: eng/platform/lost.md (no document)');
+    assert.equal((await INVARIANT_CHECKS.I7(ctx, async () => sides)).detail, '1 problems: eng/platform/lost.md has no id');
+    // Once the run also leaves the second file out with its rule, both checks hold.
+    initialSync.leftOutAtWrite.push({ path: 'eng/platform/lost.md', rule: 'content-too-long' });
+    const both = await readSides(ctx);
+    assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => both), { name: 'I1', ok: true });
+    assert.deepEqual(await INVARIANT_CHECKS.I7(ctx, async () => both), { name: 'I7', ok: true });
+  });
+
+  it('honor a file the run itself left out at lint in I1, keeping the check of its mapped document in I7', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    // A synchronized file gains a footnote: its run leaves it out, and its document stays as it was.
+    const git = await ctx.person();
+    writeFileSync(join(git.dir, 'docs/handbook/start.md'), '# Start\n\nWelcome.[^1]\n\n[^1]: A footnote.\n');
+    await git.run(['commit', '--quiet', '-am', 'Add a footnote']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => readSides(ctx))).detail, '1 files differ from their documents: docs/handbook/start.md');
+    const sync = (leftOut: unknown[]) => engineRun('sync', { initialSync: null, sync: { updated: [], created: [], adopted: [], restored: [], leftOut, leftOutAtWrite: [] } });
+    ctx.engine.results.push(sync([{ path: 'docs/handbook/start.md', rules: ['footnote'] }]));
+    const sides = await readSides(ctx);
+    assert.deepEqual([...sides.omitted], [['docs/handbook/start.md', 'lint: footnote']]);
+    assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
+    assert.deepEqual(await INVARIANT_CHECKS.I7(ctx, async () => sides), { name: 'I7', ok: true });
+    // Its mapped document is still checked: trashed, I7 says so.
+    await linear.trashDocument(ids['docs/handbook/start.md']?.id as string);
+    assert.equal((await INVARIANT_CHECKS.I7(ctx, async () => readSides(ctx))).detail, "1 problems: docs/handbook/start.md: its document is in Linear's trash");
+    // A later run whose tree no longer leaves it out takes the omission back: I1 compares the file again.
+    ctx.engine.results.push(sync([]));
+    assert.equal((await readSides(ctx)).omitted.size, 0);
+    assert.match((await INVARIANT_CHECKS.I1(ctx, async () => readSides(ctx))).detail ?? '', /docs\/handbook\/start\.md/);
+  });
+
+  it('count only explained omissions from the runs\' reports, the latest decision about a path winning', async () => {
+    const { deliberateOmissions } = await import('./checks.ts');
+    const initial = (initialSync: Record<string, unknown>, leftOutFiles: unknown[] = []) => ({ report: { summary: { leftOutFiles }, initialSync, sync: null } });
+    const sync = (fields: Record<string, unknown>) => ({ report: { initialSync: null, sync: { leftOut: [], leftOutAtWrite: [], ...fields } } });
+    // A rule found from linked files counts only with those files; an entry without a rule never counts.
+    const leftOutAtWrite = [{ path: 'a.md', rule: 'upload-too-large' }, { path: 'b.md', rule: '' }, { path: 'c.md', rule: 'upload-unreadable', files: ['c.bin'] }];
+    assert.deepEqual([...deliberateOmissions([initial({ leftOutAtWrite }, [{ path: 'd.md', rules: ['footnote'] }])])], [['d.md', 'lint: footnote'], ['c.md', 'write: upload-unreadable']]);
+    // A dry run and a refused run decide nothing.
+    assert.equal(deliberateOmissions([{ report: { summary: { leftOutFiles: [{ path: 'd.md', rules: ['footnote'] }] }, initialSync: null, sync: null } }, { report: null }]).size, 0);
+    // A write-time omission outlives runs that do not write the path; a run that writes it takes it back in.
+    const tooLong = initial({ leftOutAtWrite: [{ path: 'c.md', rule: 'content-too-long' }] });
+    assert.deepEqual([...deliberateOmissions([tooLong, sync({})])], [['c.md', 'write: content-too-long']]);
+    assert.equal(deliberateOmissions([tooLong, sync({}), sync({ updated: ['c.md'] })]).size, 0);
   });
 
   it('tell a trashed document from an archived or missing one in I7, reading unlisted ids one by one', async () => {
