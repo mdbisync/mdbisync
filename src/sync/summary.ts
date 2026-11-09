@@ -5,6 +5,7 @@ import { cell } from '../run/summary.ts';
 import { renderCapacity } from '../run/capacity.ts';
 import { describeStop } from '../linear/index.ts';
 import { type CycleResult } from './cycle.ts';
+import { renderPullRequest } from './pull-request.ts';
 import { type SkipReason } from './write.ts';
 
 const REASONS: Record<SkipReason, string> = {
@@ -17,7 +18,11 @@ const REASONS: Record<SkipReason, string> = {
 export function renderSync(result: CycleResult): string {
   const write = result.write;
   const lines = ['## Sync', '', result.capture.summary, ''];
-  if (write === undefined) { lines.push('Capture did not finish; no tracked-branch changes were written.', ''); return lines.join('\n'); }
+  if (result.pullRequest !== undefined) lines.push(...renderPullRequest(result.pullRequest));
+  if (write === undefined) {
+    if (result.pullRequest === undefined) lines.push('Capture did not finish; no tracked-branch changes were written.', '');
+    return lines.join('\n');
+  }
   lines.push('### Tracked branch to Linear', '');
   if (write.complete && write.record === null && !write.changed) {
     lines.push('Linear already holds the tracked branch: nothing to write.', '');

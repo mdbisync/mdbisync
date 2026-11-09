@@ -84,7 +84,13 @@ export async function runOperation(
     }
   };
   const syncCycle = async (context: RunContext) => {
-    sync = await runSyncCycle(context, { config: inputs.state, documentCap: inputs.documentCap, transforms, ...(options.fetch ? { fetch: options.fetch } : {}) });
+    sync = await runSyncCycle(context, {
+      config: inputs.state,
+      documentCap: inputs.documentCap,
+      github: { ...inputs.github, ...(options.fetch ? { fetch: options.fetch } : {}) },
+      transforms,
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    });
     workSummary = renderSync(sync);
   };
 

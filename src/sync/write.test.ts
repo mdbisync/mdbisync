@@ -455,6 +455,23 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal((await documentOf('eng/notes/spaced.md')).content, `# Spaced\n\n![Chart](${url})\n\n${CANARY}`, 'Linear dropped the brackets');
     // The record keeps an image: Linear's form of the file, not the file's spelling without its brackets.
     assert.match(await show('refs/mdbisync/linear:eng/notes/spaced.md'), /!\[Chart\]\(\.\.\/media\/chart%20copy\.png\)/);
+    // Linear's form differs from the file: the next run's sync pull request
+    // carries it to the tracked branch, and once it is merged a run
+    // writes nothing.
+    world.github.merge = async (pr, sha) => {
+      const base = await rev(`refs/heads/${pr.base}`);
+      const tree = (await fixture.remote.text(['merge-tree', '--write-tree', base, sha])).split('\n')[0] as string;
+      const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number}`], {
+        env: { GIT_AUTHOR_NAME: 'bot', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'bot', GIT_COMMITTER_EMAIL: 'bot@example.com' },
+      });
+      await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
+      return { sha: commit };
+    };
+    assert.deepEqual((await sync()).writes, ['POST /pulls']);
+    assert.deepEqual((await sync()).writes, ['PUT /pulls/1/merge']);
+    assert.match(await show('refs/heads/main:eng/notes/spaced.md'), /!\[Chart\]\(\.\.\/media\/chart%20copy\.png\)/);
+    // The run after the merge records it on `linear` and writes nothing to Linear (L2-34); the next one changes nothing.
+    assert.deepEqual((await sync()).writes, []);
     await assertIdempotent();
   });
 
@@ -798,7 +815,8 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/backend/notes.md': `# Notes\n\nFirst paragraph, edited in git.\n\nSecond paragraph. ${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, ['UpdateDocument']);
+    // The Linear edit goes to the tracked branch through the sync pull request; the git edit goes to Linear.
+    assert.deepEqual(writes, ['POST /pulls', 'UpdateDocument']);
     assert.equal((await documentOf('eng/backend/notes.md')).content, `# Notes\n\nFirst paragraph, edited in git.\n\nSecond paragraph, edited in Linear. ${CANARY}\n`);
     assert.equal(report.complete, true);
     await assertMergeRecord(previous);
