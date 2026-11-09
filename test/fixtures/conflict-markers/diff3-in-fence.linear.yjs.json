@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"code_block","attrs":{"id":"<id>","language":"text"},"children":[{"text":"<<<<<<< ours\na\n||||||| base\nb\n=======\nc\n>>>>>>> theirs","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-233a77d2","marks":{"attribution":"user"}}]}
-  ]
-}
