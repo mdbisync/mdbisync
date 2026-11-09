@@ -52,6 +52,12 @@ export interface CaptureResult {
   blocked: Array<{ id: string; path: string; findings: SecurityFinding[] }>;
   changed: string[];
   removed: string[];
+  /**
+   * Files whose documents Linear did not return while their place listed no
+   * document at all: a blank answer reads the same, so they stay until a
+   * later capture finds them gone again while some place lists documents.
+   */
+  heldRemovals: string[];
   leftOut: Array<{ id: string; rule: string }>;
   /** The `ids` ref was lost: how many of the recorded files got their document back by title, of how many. */
   rebuiltIds?: { matched: number; files: number };
@@ -67,6 +73,14 @@ export interface CaptureResult {
 }
 
 const CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
+const HELD = /^Removal-held: (\S+)$/gm;
+
+/** The ids whose removal the last capture held, from its ids commit. */
+async function readHeld(context: RunContext, state: StateSnapshot): Promise<Set<string>> {
+  if (state.ids === null) return new Set();
+  const log = await context.git.text(['log', '--format=%B', '--grep=^Capture document ids', '-1', state.ids]);
+  return new Set([...log.matchAll(HELD)].map((match) => match[1]!));
+}
 
 /** Cursor is in ids history, so ordinary id commits by later steps cannot erase it. */
 async function readCursor(context: RunContext, state: StateSnapshot): Promise<string | null> {
@@ -87,7 +101,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   const uploads = await readUploads(git, state.uploads);
   const reserved = await readReservedIds(git, state.ids);
   const gate = options.security ?? await securityGate(git, fetched.tracked);
-  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], leftOut:[], writeBackWarnings:[], summary:''};
+  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], heldRemovals:[], leftOut:[], writeBackWarnings:[], summary:''};
   let published = false;
   try {
     // Capture the old place before a git annotation change moves its documents.
@@ -135,9 +149,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const folders = new Map<string, string>();
     const places = annotatedPlaces(mapping.zones).map(({place, folder}) => {
       const resolved = placeId(targets, place);
-      folders.set('projectId' in resolved ? `project:${resolved.projectId}` : `team:${resolved.teamId}`, folder);
+      folders.set(placeKeyOf(resolved), folder);
       return resolved;
     });
+    // The place a known file's document belongs in: its zone's project, or its team zone.
+    const recordedPlace = (path: string): string | undefined => {
+      const zone = nearestZone(mapping.zones, folderOf(path));
+      if (zone === undefined) return undefined;
+      const resolved = placeId(targets, zone.project === undefined ? {kind:'team', team:zone.team} : {kind:'project', team:zone.team, project:zone.project});
+      return placeKeyOf(resolved);
+    };
     const inPlaces = await linear.listDocumentsInPlaces(places, {includeArchived:true});
     for (const document of inPlaces) listed.set(document.id, document);
     // The write step counts its containers from this listing when it has nothing to write.
@@ -146,12 +167,25 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const missing = [...byId.keys()].filter((id) => !listed.has(id));
     for (const document of await linear.getDocuments(missing)) listed.set(document.id, document);
     // A known id that neither answer has: `document(id:)` tells a document Linear no longer has (removed from the
-    // trash for good) from one a list left out. A document gone for good is a deletion.
-    const gone = new Set<string>();
+    // trash for good) from one a list left out. A document gone for good is a deletion. But Linear has answered a
+    // lookup with nothing while everything existed, and a blank answer reads the same as every document removed for
+    // good. So a removal counts at once only when the document's place listed documents (trash included) in this run.
+    // Otherwise it is held; the next capture confirms it when it finds the id gone again while some place lists
+    // documents, so a blank answer for every place holds it again however long it lasts.
+    const notFound: string[] = [];
     for (const id of missing.filter((id) => !listed.has(id))) {
       const document = await linear.getDocument(id);
-      if (document === null) gone.add(id);
+      if (document === null) notFound.push(id);
       else listed.set(id, document);
+    }
+    const answered = new Set(inPlaces.map(placeKeyOf));
+    const heldBefore = await readHeld(context, state);
+    const gone = new Set<string>();
+    const held = new Set<string>();
+    for (const id of notFound) {
+      const place = recordedPlace(byId.get(id)!.path);
+      if ((place !== undefined && answered.has(place)) || (heldBefore.has(id) && answered.size > 0)) gone.add(id);
+      else held.add(id);
     }
     // Git-only exclusions keep their last accepted identity and place. A
     // collision or an annotation recorded for other files is not a Linear move.
@@ -179,7 +213,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       if ('projectId' in resolved ? resolved.projectId === doc.projectId : doc.projectId === null && resolved.teamId === doc.teamId) retained.set(id, old.path);
     }
-    const folderFor = (doc: LinearDocument) => folders.get(doc.projectId !== null ? `project:${doc.projectId}` : `team:${doc.teamId}`);
+    const folderFor = (doc: LinearDocument) => folders.get(placeKeyOf(doc));
     const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && (folderFor(doc) !== undefined || retained.has(doc.id));
     const normalizedTime = (doc: LinearDocument) => {
       const time = new Date(doc.updatedAt);
@@ -229,6 +263,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       documentIds.delete(old.path);
       result.removed.push(old.path);
     }
+    for (const id of held) result.heldRemovals.push(byId.get(id)!.path);
     const paths = new Map<string, string>();
     const reservations = new Set(occupied);
     const allocated = new Map<string, string>();
@@ -371,9 +406,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     // Advance only to timestamps actually observed; equality is reread next run
     // so documents sharing a timestamp or edited during pagination are not lost.
-    const through = result.leftOut.length > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
-    const message = through === null ? 'Capture document ids' : `Capture document ids\n\nCapture-through: ${through}`;
-    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always: through !== cursor, reserved });
+    // A place that listed nothing may have left out changes too: the cursor holds while a removal is held.
+    const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
+    const trailers = [...(through === null ? [] : [`Capture-through: ${through}`]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
+    const message = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
+    // Record a held removal, and a cleared one, so the next capture reads what this one held.
+    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always: through !== cursor || held.size > 0 || heldBefore.size > 0, reserved });
     // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
@@ -427,7 +465,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       result.code = 'linear-failed';
       result.failure = { operation: error.operation, error: describeLinearError(error as LinearError) };
     }
-    if (!published) { result.changed = []; result.removed = []; }
+    if (!published) { result.changed = []; result.removed = []; result.heldRemovals = []; }
     result.summary = renderCapture(result, gate.configured);
     return result;
   } finally { await gate.close?.(); }
@@ -486,8 +524,16 @@ function relocatedHead(head: string): string {
   return `---\n${yaml}---\n\n`;
 }
 
+/** The key of a document's place, or of a resolved place: its project, or its team zone. */
+function placeKeyOf(place: {projectId?: string | null; teamId?: string | null}): string {
+  return place.projectId != null ? `project:${place.projectId}` : `team:${place.teamId}`;
+}
+
 function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
+  if (result.heldRemovals.length > 0) {
+    summary += `\nRemoval held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path) => JSON.stringify(path)).join(', ')}.`;
+  }
   if (result.rebuiltIds !== undefined) {
     summary += `\nThe document id map was lost: rebuilt by matching titles to paths, ${result.rebuiltIds.matched} of ${result.rebuiltIds.files} files matched. A document renamed in Linear since the last run comes back as a new file next to its old one.`;
   }

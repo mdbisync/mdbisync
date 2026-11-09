@@ -17,9 +17,10 @@ export type ExitStatus = 'success' | 'warning' | 'failure';
 /**
  * Why a sync run is partial, or undefined when it is not: Linear stopped it
  * (in the setup check, the capture or the write step), failed a request
- * while capturing, failed or rejected a write, or a state ref moved. A
- * container at its document cap is not partial: the next run cannot go on
- * until a person makes room; nor is a sync pull request that needs a person.
+ * while capturing, held a removal it could not confirm, failed or rejected
+ * a write, or a state ref moved. A container at its document cap is not
+ * partial: the next run cannot go on until a person makes room; nor is a
+ * sync pull request that needs a person.
  */
 export function partialCode(outcome: OperationOutcome): string | undefined {
   if (pullRequestEnding(outcome) !== null) return undefined;
@@ -74,5 +75,7 @@ function linearPartialCode(outcome: OperationOutcome): string | undefined {
   // Every way a capture ends unfinished (a stop, a failed request, a moved ref) leaves its state for the next run.
   if (outcome.captured !== undefined && !outcome.captured.ok) return outcome.captured.code ?? 'stopped';
   const code = outcome.sync?.write?.code;
-  return code === 'container-cap' ? undefined : code;
+  if (code !== undefined) return code === 'container-cap' ? undefined : code;
+  // Capture held a removal Linear's answers could not confirm; the next run decides it.
+  return (outcome.captured?.heldRemovals.length ?? 0) > 0 ? 'removal-held' : undefined;
 }

@@ -14,7 +14,7 @@ const read = (file: string) => readFileSync(new URL(file, EXAMPLES), 'utf8');
 
 const APP_TOKEN = 'actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510';
 const CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1';
-const ACTION = 'mikhail-yaskou/mdbisync@';
+const ACTION = 'mdbisync/mdbisync@';
 
 /** The templates that run the action. */
 const SYNC_TEMPLATES = ['mdbisync-initial-sync.yml', 'mdbisync.yml'];

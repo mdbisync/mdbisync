@@ -59,5 +59,6 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   const moved = pullRequest.branchMoved || pullRequest.merged !== null || pullRequest.pullRequest?.opened === true;
   const createSyncBranch = context.fetched.sync === null && !pullRequest.branchMoved;
   const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, containers: captured.containers, createSyncBranch, state:captured.state, captured:captured.documents, ...(options.transforms ? { transforms: options.transforms } : {}) });
-  return {complete:write.complete && pullRequest.code === undefined, changed:changed || moved || write.changed, trackedTip, capture:captured, pullRequest, write};
+  // A held removal waits for the next run to confirm it.
+  return {complete:write.complete && pullRequest.code === undefined && captured.heldRemovals.length === 0, changed:changed || moved || write.changed, trackedTip, capture:captured, pullRequest, write};
 }
