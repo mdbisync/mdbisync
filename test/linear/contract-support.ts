@@ -156,6 +156,114 @@ export function stateOf(document: LinearDocument): DocumentState {
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** One read of just-created documents: which of the asked ids came back, and when. */
+export interface CreatedRead {
+  /** Linear's request id of every attempt of this read, a retry included. */
+  requestIds: Array<string | undefined>;
+  /** The first attempt's start and the last attempt's answer. */
+  startedAt: string | undefined;
+  finishedAt: string | undefined;
+  /** From the last create's answer to this read's answer, by the request log's clocks. */
+  sinceCreateMs: number | undefined;
+  returned: string[];
+  missing: string[];
+  /** The read failed; its error's name, never a server message. */
+  error?: string;
+}
+
+/** Every read the contract made of the documents it had just created. */
+export interface CreatedReadDiagnosis {
+  /** Linear's request id of every attempt of the creates, a retry included. */
+  createRequestIds: Array<string | undefined>;
+  createsFinishedAt: string | undefined;
+  pauseMs: number;
+  maxReads: number;
+  reads: CreatedRead[];
+}
+
+export interface CreatedReadOptions {
+  /** Pause before each delayed read. */
+  pauseMs?: number;
+  /** Reads at most: the immediate one and the delayed ones. */
+  maxReads?: number;
+  /**
+   * Receives the diagnosis before the first read; it is filled in place, so
+   * the caller keeps every read also when one throws.
+   */
+  record?: (diagnosis: CreatedReadDiagnosis) => void;
+}
+
+/**
+ * Reads documents right after their creates answered, and, while some asked
+ * id is absent, again after a pause, at most `maxReads` times. Each read is
+ * one GetDocuments request for all the ids, as the client sends it.
+ *
+ * Linear's reads can lag behind its writes: in a live batch, two of fifteen
+ * runs read [] right after both creates had answered 200, while later
+ * operations and cleanup found both documents. In the slower run the
+ * documents were still absent from a read 1.4 s after the last create and
+ * present 2.4 s after it. Three reads with two pauses of two seconds (about
+ * four seconds) cover that with margin and match the cleanup's archival
+ * verification budget; an id absent after them is a failure, not lag.
+ *
+ * Returns the last read's documents for the caller's exact assertions. The
+ * diagnosis keeps every read's request ids, timing and ids, never content.
+ * A read that throws is recorded and its error rethrown unchanged: a failed
+ * request is not lag. Never repeats a write.
+ */
+export async function readCreated(
+  linear: LinearClient,
+  requests: readonly LogEntry[],
+  ids: readonly string[],
+  options: CreatedReadOptions = {},
+): Promise<{ documents: LinearDocument[]; diagnosis: CreatedReadDiagnosis }> {
+  const pauseMs = Number.isFinite(options.pauseMs) && options.pauseMs! >= 0 ? options.pauseMs! : 2_000;
+  const maxReads = Number.isSafeInteger(options.maxReads) && options.maxReads! >= 1 ? options.maxReads! : 3;
+  const creates = lastCalls(requests, 'CreateDocument', ids.length);
+  const createsFinishedAt = creates.at(-1)?.finishedAt;
+  const diagnosis: CreatedReadDiagnosis = { createRequestIds: creates.map((entry) => entry.requestId), createsFinishedAt, pauseMs, maxReads, reads: [] };
+  options.record?.(diagnosis);
+  let documents: LinearDocument[] = [];
+  for (let read = 1; read <= maxReads; read += 1) {
+    if (read > 1) await pause(pauseMs);
+    const logged = requests.length;
+    let failure: unknown;
+    try {
+      documents = await linear.getDocuments(ids, { withContent: true });
+    } catch (error) {
+      failure = error;
+      documents = [];
+    }
+    const attempts = requests.slice(logged).filter((entry) => entry.operation === 'GetDocuments');
+    const returned = documents.map((document) => document.id);
+    const missing = ids.filter((id) => !returned.includes(id));
+    const finishedAt = attempts.at(-1)?.finishedAt;
+    diagnosis.reads.push({
+      requestIds: attempts.map((entry) => entry.requestId),
+      startedAt: attempts[0]?.startedAt,
+      finishedAt,
+      sinceCreateMs: finishedAt && createsFinishedAt ? Date.parse(finishedAt) - Date.parse(createsFinishedAt) : undefined,
+      returned,
+      missing,
+      ...(failure === undefined ? {} : { error: failure instanceof Error ? failure.name : 'Unknown error' }),
+    });
+    if (failure !== undefined) throw failure;
+    if (missing.length === 0) break;
+  }
+  return { documents, diagnosis };
+}
+
+/** The log entries of an operation's last `calls` calls, every attempt of each (a call starts at attempt 1). */
+export function lastCalls(requests: readonly LogEntry[], operation: string, calls: number): LogEntry[] {
+  const entries = requests.filter((entry) => entry.operation === operation);
+  let start = entries.length;
+  for (let found = 0; found < calls && start > 0; ) {
+    start -= 1;
+    if (entries[start]!.attempt === 1) found += 1;
+  }
+  return entries.slice(start);
+}
+
 /** An unconfirmed read after trash, and the one permitted delayed read. */
 export interface TrashReadDiagnosis {
   trashRequestId: string | undefined;
