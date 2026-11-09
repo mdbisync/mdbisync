@@ -11,6 +11,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
+import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { detectConflicts, MARKERS, RETITLED_COMMENT } from '../merge/index.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
@@ -93,11 +94,13 @@ describe('sync: conflicts through the cycle (L3)', () => {
     await rm(reportFile(), { force: true });
     await rm(summaryFile(), { force: true });
     const writesBefore = world.writes.length;
+    const mark = await markWorld(world, fixture);
     const result = await runCli([command], { env: env(extra), cwd, fetch: fakeFetch(world) });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
     for (const text of texts) assert.ok(!text.includes(CANARY), 'content reached the output or a pull request (I5)');
+    await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: false });
     return { result, report, summary, writes: world.writes.slice(writesBefore) };
   }
 
@@ -262,6 +265,9 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.ok(first.report.sync?.updated.includes('eng/notes/fence.md'), 'the other git edit waited for the conflict');
     assert.match((await documentOf('eng/notes/fence.md')).content ?? '', /Rewritten in git/);
     assert.match(first.summary, /1 document with conflict markers/);
+    // Two documents written, the conflict mark's icon and color, and its notice.
+    assert.equal(first.report.sync?.updated.length, 2);
+    assert.deepEqual(first.report.writes.linear, { CommentOnDocument: 1, UpdateDocument: 3 });
 
     await settle();
     const expected = `# Plan\n\nAlpha paragraph.\n\n${MARKERS.git}\n\nBeta paragraph, git.\n\n${MARKERS.linear}\n\nBeta paragraph, Linear.\n\n${MARKERS.end}\n\nGamma paragraph. ${CANARY}\n`;

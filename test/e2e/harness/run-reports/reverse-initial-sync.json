@@ -81,5 +81,17 @@
       "updated": false
     },
     "closedPullRequest": null
+  },
+  "writes": {
+    "linear": {},
+    "git": {
+      "ids": 1,
+      "linear": 1,
+      "syncBranch": 1,
+      "uploads": 1
+    },
+    "pullRequests": {
+      "opened": 1
+    }
   }
 }

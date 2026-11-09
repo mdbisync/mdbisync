@@ -26,7 +26,7 @@ import { rm } from 'node:fs/promises';
 import { LinearReads } from '../linear/index.ts';
 import { type CycleResult, capture, renderSync, runSyncCycle } from '../sync/index.ts';
 import { type SecurityStep, answeringGate, readsFolder, stageNothing, stagingGate } from '../sync/staged.ts';
-import { type RefusedPush, refusedPushes } from '../state/index.ts';
+import { type RefRole, type RefusedPush, movedRefs, refusedPushes } from '../state/index.ts';
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
 import { type Operation, type PreflightOptions, type PreflightOutcome, type RunContext, runPreflight } from './preflight.ts';
 
@@ -47,6 +47,40 @@ export interface OperationOutcome extends PreflightOutcome {
   refusedPushes: readonly RefusedPush[];
   /** The staged security steps' first step: how many sets of files it staged for the hooks. */
   staged?: { sets: number };
+  /** What this run wrote, counted where each write succeeded. */
+  writes: RunWrites;
+}
+
+/**
+ * The writes one run made, by kind, each counted where it succeeded: a
+ * refused, failed or unanswered write is never counted. Keys are sorted;
+ * a kind the run did not write is absent.
+ */
+export interface RunWrites {
+  /** Linear mutations by operation (`CreateDocument`, `UpdateDocument`, ...) and stored file uploads (`FileUpload`). */
+  linear: Record<string, number>;
+  /**
+   * Refs moved by accepted pushes, by role: the `linear`, `ids` and `uploads`
+   * state refs, `syncBranch`, `trackedBranch`, `other`. LFS objects uploaded
+   * before a push are content, not a change: nothing refers to them until a
+   * ref moves, so they are not counted.
+   */
+  git: Partial<Record<RefRole, number>>;
+  /** Pull request calls GitHub accepted: `opened`, `updated`, `merged`, `closed`. */
+  pullRequests: Record<string, number>;
+}
+
+function noWrites(): RunWrites {
+  return { linear: {}, git: {}, pullRequests: {} };
+}
+
+function sortedCounts(counts: ReadonlyMap<string, number>): Record<string, number> {
+  return Object.fromEntries([...counts].filter(([, count]) => count > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+/** The refs moved since `before`: the working copy may have served earlier runs. */
+function movedSince(before: ReadonlyMap<RefRole, number>, after: ReadonlyMap<RefRole, number>): Map<RefRole, number> {
+  return new Map([...after].map(([role, count]) => [role, count - (before.get(role) ?? 0)]));
 }
 
 /** The staged security steps: which one this run is, and the folder they share. */
@@ -68,7 +102,7 @@ export async function runOperation(
   // Only a sync and a confirmed initial sync from Linear take Linear's text; nothing else has a set for the hooks.
   if (security?.step === 'stage' && operation === 'initial-sync' && !(initialSync?.direction === 'linear-to-git' && initialSync.confirm)) {
     await stageNothing(security.folder, null);
-    return { operation, ok: true, notImplemented: false, refusedPushes: [], summary: renderStaged(0), staged: { sets: 0 } };
+    return { operation, ok: true, notImplemented: false, refusedPushes: [], summary: renderStaged(0), staged: { sets: 0 }, writes: noWrites() };
   }
   try {
     // The stage step keeps Linear's answers to its reads; the apply step's capture takes them instead of reading again.
@@ -99,6 +133,8 @@ async function runWithSecurity(
   let reverse: ReverseResult | undefined;
   let sync: CycleResult | undefined;
   let workSummary = '';
+  const pullRequestWrites = new Map<string, number>();
+  const refsBefore = movedRefs(options.git);
 
   // Uploads rewrite links to files that are not Markdown; document links, links to synchronized documents.
   const transforms = () => [uploadsTransform({ config: inputs.state }), documentLinks()];
@@ -117,7 +153,7 @@ async function runWithSecurity(
   };
   const linearToGit = async (context: RunContext, confirm: boolean) => {
     if (confirm) {
-      const github = { ...inputs.github, ...(options.fetch ? { fetch: options.fetch } : {}) };
+      const github = { ...inputs.github, writes: pullRequestWrites, ...(options.fetch ? { fetch: options.fetch } : {}) };
       if (security?.step === 'stage') {
         const gate = await stagingGate(context.git, context.fetched.tracked, security.folder);
         const ended = gate.configured ? (await confirmLinearToGit(context, { config: inputs.state, github, security: gate, stageOnly: true })).result.code : undefined;
@@ -155,7 +191,7 @@ async function runWithSecurity(
       config: inputs.state,
       documentCap: inputs.documentCap,
       mergeGraceSeconds: inputs.mergeGraceSeconds,
-      github: { ...inputs.github, ...(options.fetch ? { fetch: options.fetch } : {}) },
+      github: { ...inputs.github, writes: pullRequestWrites, ...(options.fetch ? { fetch: options.fetch } : {}) },
       transforms,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });
@@ -163,7 +199,7 @@ async function runWithSecurity(
   };
 
   const refusePending = initialSync?.direction === 'git-to-linear' && initialSync.confirm;
-  const preflight = await runPreflight(
+  const { linearWrites, ...preflight } = await runPreflight(
     operation,
     inputs,
     refusePending ? { ...options, refusePendingInitialPullRequest: true } : options,
@@ -174,8 +210,13 @@ async function runWithSecurity(
         : (context) => (initialSync.direction === 'git-to-linear' ? gitToLinear : linearToGit)(context, initialSync.confirm),
   );
   const refused = refusedPushes(options.git);
-  if (!preflight.ok) return { ...preflight, notImplemented: false, refusedPushes: refused };
-  const outcome: OperationOutcome = { ...preflight, notImplemented: false, refusedPushes: refused };
+  const writes: RunWrites = {
+    linear: sortedCounts(linearWrites ?? new Map<string, number>()),
+    git: sortedCounts(movedSince(refsBefore, movedRefs(options.git))),
+    pullRequests: sortedCounts(pullRequestWrites),
+  };
+  if (!preflight.ok) return { ...preflight, notImplemented: false, refusedPushes: refused, writes };
+  const outcome: OperationOutcome = { ...preflight, notImplemented: false, refusedPushes: refused, writes };
   if (plan !== undefined) outcome.plan = plan;
   if (workSummary !== '') outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;
   if (confirmed !== undefined) outcome.confirmed = confirmed;

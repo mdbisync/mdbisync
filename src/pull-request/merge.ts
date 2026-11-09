@@ -123,7 +123,7 @@ const REASON_LENGTH = 300;
  * `sha`, the commit whose checks the caller read.
  */
 export async function mergePullRequest(target: GitHubRepository, number: number, sha: string): Promise<MergeOutcome> {
-  const answer = await request(target, 'PUT', `/pulls/${number}/merge`, { merge_method: 'merge', sha });
+  const answer = await request(target, 'PUT', `/pulls/${number}/merge`, { merge_method: 'merge', sha }, { kind: 'merged', accepted: 200 });
   const body = answer.json as { merged?: unknown; sha?: unknown; message?: unknown } | null;
   if (answer.status === 200 && body !== null && body.merged === true && typeof body.sha === 'string') return { merged: true, sha: body.sha };
   if (answer.status === 405 || answer.status === 409 || answer.status === 422) {
