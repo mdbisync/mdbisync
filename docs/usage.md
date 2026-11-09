@@ -75,8 +75,9 @@ annotation is valid and its team and project exist in Linear, and
 whether pre-commit hooks marked `alias: security` exist (without them the run
 goes on and says that content is pushed unchecked). Files left out by a title
 collision are listed too, without stopping the run. The result goes to the
-job summary as names and states, never document content. `check` runs it
-alone.
+job summary as names and states, never document content. A failure names
+what is missing and links the [quickstart](quickstart.md) section that fixes
+it. `check` runs it alone.
 
 The command line reads the action's inputs (see `action.yml`) from
 environment variables: `MDBISYNC_LINEAR_CLIENT_ID` for `linear-client-id`,
