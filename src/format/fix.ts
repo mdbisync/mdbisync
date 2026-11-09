@@ -7,7 +7,7 @@ import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem,
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
 import { lintText } from './lint.ts';
-import { end, parse, splitFile, start, visit } from './markdown.ts';
+import { end, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -18,6 +18,18 @@ export interface FixOptions {
    * file is taken to exist.
    */
   linkedFileExists?: (url: string) => boolean;
+}
+
+/**
+ * The existence check `fix` takes, by the sync's own rule: a link names a
+ * file the sync uploads when it resolves to a repository path, as the sync
+ * resolves it, and that path is a file.
+ */
+export function linkedFileCheck(documentPath: string, isFile: (path: string) => boolean): (url: string) => boolean {
+  return (url) => {
+    const target = resolveTarget(documentPath, url);
+    return target !== null && isFile(target);
+  };
 }
 
 /** Returns the text in Linear's form, or the text itself when lint finds a problem. */
@@ -151,7 +163,8 @@ class Writer {
       // Linear turns a list item holding only a link to an uploaded file into
       // a block: a video player for a video, which it writes on the item's
       // line, and a file block for any other file, which it writes below.
-      if (VIDEO.test(attachment.url.split(/[?#]/)[0]!)) return `${marker} [${label}](${destination})`;
+      // The video form is recorded for bullet items only.
+      if (marker === '*' && VIDEO.test(attachment.url.split(/[?#]/)[0]!)) return `${marker} [${label}](${destination})`;
       return `${marker} \n${indent}[${label}](${destination})`;
     }
     if (first === undefined) return marker;

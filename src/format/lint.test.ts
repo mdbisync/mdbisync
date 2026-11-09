@@ -119,9 +119,9 @@ describe('lint and fix commands', () => {
     try {
       writeFileSync(join(folder, 'media', 'demo one.mp4'), 'video');
       writeFileSync(join(folder, 'media', 'summary.pdf'), '%PDF');
-      writeFileSync(join(folder, 'notes.md'), '* [Demo](media/demo%20one.mp4)\n* [Summary](media/summary.pdf)\n* [Gone](media/gone.pdf)\n');
+      writeFileSync(join(folder, 'notes.md'), '* [Demo](media/demo%20one.mp4)\n* [Summary](media/summary.pdf)\n* [Gone](media/gone.pdf)\n* [Folder](media)\n');
       assert.equal(runFix(['links'], dir).exitCode, 1);
-      assert.equal(readFileSync(join(folder, 'notes.md'), 'utf8'), '* [Demo](media/demo%20one.mp4)\n* \n  [Summary](media/summary.pdf)\n* [Gone](<media/gone.pdf>)');
+      assert.equal(readFileSync(join(folder, 'notes.md'), 'utf8'), '* [Demo](media/demo%20one.mp4)\n* \n  [Summary](media/summary.pdf)\n* [Gone](<media/gone.pdf>)\n* [Folder](<media>)');
       assert.deepEqual(runLint(['links'], dir), { exitCode: 0, stdout: '', stderr: '' });
     } finally {
       rmSync(folder, { recursive: true, force: true });

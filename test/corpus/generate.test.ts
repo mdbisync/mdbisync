@@ -14,7 +14,7 @@ import { parse } from "yaml";
 import { CONTENT_LIMIT, gitattributes, SHARED_IMAGE_USERS } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
-import { fixText, lintText } from "../../src/format/index.ts";
+import { fixText, linkedFileCheck, lintText } from "../../src/format/index.ts";
 import { COLLISIONS, EDGE, EDGE_ZONE, LOOSE, preCommitConfig } from "./tree.ts";
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from "./check-workflow.ts";
 
@@ -206,11 +206,14 @@ test("bank fixtures whose links still reach their files are copied unchanged, th
 });
 
 test("every synced document outside the lint-error set is already in Linear's form", () => {
-  const files = corpus().files.filter((f) => f.synced && f.kind === "markdown");
+  const built = corpus();
+  const paths = new Set(built.files.map((f) => f.path));
+  const files = built.files.filter((f) => f.synced && f.kind === "markdown");
   for (const file of files) {
     const text = file.content.toString("utf8");
     if (file.expected === "lint-error") continue;
-    assert.equal(fixText(text), text, `${file.path} is not in Linear's form`);
+    // A link to a file the corpus does not have is not uploaded, so Linear keeps it as a link.
+    assert.equal(fixText(text, { linkedFileExists: linkedFileCheck(file.path, (path) => paths.has(path)) }), text, `${file.path} is not in Linear's form`);
     assert.notEqual(file.expected, "fixable", `${file.path} is still classed fixable`);
   }
   // The lint-error files are written as generated: fix never touches them.

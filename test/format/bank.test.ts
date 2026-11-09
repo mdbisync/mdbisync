@@ -21,7 +21,7 @@ describe('fix on the fixture bank', () => {
     it(`${fixture.file} (${fixture.class})`, () => {
       const source = read(fixture);
       // Like the fix command: a link to a file that is not there is not uploaded.
-      const options = { linkedFileExists: linkedFileResolver(join(bank.dir, fixture.file)) };
+      const options = { linkedFileExists: linkedFileResolver(fixture.file, bank.dir) };
       const fixed = fixText(source, options);
       assert.equal(fixText(fixed, options), fixed, 'L0-01: a second fix changes nothing');
       if (fixture.class === 'fixable') {
