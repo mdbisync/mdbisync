@@ -129,7 +129,7 @@ describe('workflow templates', () => {
         const all = steps(file);
         const action = all.findIndex((step) => step.uses?.startsWith(ACTION));
         // A runner that brings its own pre-commit keeps it; otherwise the pinned version is installed.
-        const install = all.findIndex((step) => /^command -v pre-commit \|\| pipx install pre-commit==\d+\.\d+\.\d+$/.test(step.run?.trim() ?? ''));
+        const install = all.findIndex((step) => step.name === 'Install pre-commit' && /pip install pre-commit==\d+\.\d+\.\d+/.test(step.run ?? ''));
         assert.ok(install >= 0 && install < action, `${file}: pre-commit is not installed before the sync`);
         assert.equal(all[install]?.env, undefined, `${file}: the install step gets an environment`);
       });
