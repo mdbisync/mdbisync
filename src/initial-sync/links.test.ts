@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, it } from 'node:test';
-import { type LinkSpellings, documentUrlBase, linkDestinations, linksFromLinear, linksToLinear, relativeLink, resolveRelative } from './links.ts';
+import { type LinearClient } from '../linear/index.ts';
+import { type LinkSpellings, documentLinks, documentUrlBase, linkDestinations, linksFromLinear, linksToLinear, relativeLink, resolveRelative } from './links.ts';
+import { type TransformContext } from './transform.ts';
 
 const BASE = documentUrlBase('example-team');
 const ids = (paths: Record<string, string>) => ({ base: BASE, ids: new Map(Object.entries(paths)) });
@@ -70,6 +72,55 @@ describe('document links', () => {
     assert.deepEqual(linkDestinations(body).map((d) => body.slice(d.from, d.to)), ['a_(b).md', '<c\\>d.md>', 'e\\)f.md']);
   });
 
+  it('keeps document URLs the file already has, and they do not take the spelling of a rewritten link', () => {
+    const map = ids({ 'eng/guide.md': 'id-guide' });
+    const body = `Already [a](<${BASE}/id-guide>) and [b](${BASE}/id-guide), then [c](./guide.md).`;
+    const seen: LinkSpellings = new Map();
+    const written = linksToLinear(body, 'eng/plan.md', map, seen);
+    assert.equal(written, `Already [a](<${BASE}/id-guide>) and [b](${BASE}/id-guide), then [c](<${BASE}/id-guide>).`);
+    assert.equal(linksFromLinear(written, 'eng/plan.md', map, seen), body);
+  });
+
+  it('writes a fragment the parser decoded so that it reads back the same', () => {
+    const map = ids({ 'eng/guide.md': 'id-guide' });
+    for (const body of ['[x](guide.md#a&amp;copy;)', '[x](<guide.md#a\\>b>)', '[x](guide.md#a&gt;b)', '[x](guide.md#a\\(b)']) {
+      const seen: LinkSpellings = new Map();
+      const written = linksToLinear(body, 'eng/plan.md', map, seen);
+      const [destination] = linkDestinations(written);
+      assert.ok(destination !== undefined && destination.url.startsWith(`${BASE}/id-guide#`), `${body} -> ${written}`);
+      assert.equal(written.slice(destination.to), ')', `${body}: the link ends early: ${written}`);
+      assert.equal(linksFromLinear(written, 'eng/plan.md', map, seen), body);
+    }
+  });
+
+  it('does not touch what it cannot place exactly: links split over quoted lines, labels with escapes done right', () => {
+    const map = ids({ 'eng/guide.md': 'id-guide' });
+    const quoted = '> [x](\n> guide.md)';
+    assert.equal(linksToLinear(quoted, 'eng/plan.md', map), quoted);
+    const definition = '[go][a\\]:b]\n\n[a\\]:b]: guide.md';
+    assert.equal(linksToLinear(definition, 'eng/plan.md', map), `[go][a\\]:b]\n\n[a\\]:b]: <${BASE}/id-guide>`);
+  });
+
+  it('leaves a definition an image uses as it is', () => {
+    const map = ids({ 'eng/guide.md': 'id-guide' });
+    const body = '![diagram][d] and [the guide][g]\n\n[d]: ./guide.md\n[g]: ./guide.md';
+    assert.equal(linksToLinear(body, 'eng/plan.md', map), `![diagram][d] and [the guide][g]\n\n[d]: ./guide.md\n[g]: <${BASE}/id-guide>`);
+  });
+
+  it('reads the workspace URL key only for a document that links another, once per run', async () => {
+    let requests = 0;
+    const linear = { request: async () => ((requests += 1), { organization: { urlKey: 'example-team' } }) } as unknown as LinearClient;
+    const context = { linear, documentIds: new Map([['eng/guide.md', 'id-guide'], ['eng/plan.md', 'id-plan']]) } as unknown as TransformContext;
+    const transform = documentLinks();
+    await transform.prepare?.(context);
+    assert.equal(await transform.apply({ path: 'eng/guide.md', body: 'No links. [site](<https://example.com>)' }), 'No links. [site](<https://example.com>)');
+    assert.equal(requests, 0);
+    assert.equal(await transform.apply({ path: 'eng/plan.md', body: '[g](guide.md)' }), `[g](<${BASE}/id-guide>)`);
+    assert.equal(await transform.apply({ path: 'eng/guide.md', body: '[p](plan.md)' }), `[p](<${BASE}/id-plan>)`);
+    assert.equal(requests, 1);
+    assert.equal(transform.restore({ path: 'eng/plan.md', body: `[g](<${BASE}/id-guide>)` }), '[g](guide.md)');
+  });
+
   it('round-trips every bank fixture exactly, with every bank document synchronized', () => {
     const root = join(import.meta.dirname, '../../test/fixtures');
     const files = (readdirSync(root, { recursive: true }) as string[])
@@ -88,7 +139,8 @@ describe('document links', () => {
         const seen: LinkSpellings = new Map();
         const written = linksToLinear(text, file, map, seen);
         if (written !== text) linked += 1;
-        assert.ok(!/\]\(<?(?:\.\.\/)*[^):]*\.md/.test(written) || written.includes('unsynced'), `${variant}: a link to a document is left relative`);
+        const leftRelative = linkDestinations(written).filter((d) => map.ids.has(resolveRelative(file, d.url)?.path ?? ''));
+        assert.deepEqual(leftRelative, [], `${variant}: a link to a document is left relative`);
         assert.equal(linksFromLinear(written, file, map, seen), text, variant);
       }
     }

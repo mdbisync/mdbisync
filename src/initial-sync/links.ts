@@ -67,15 +67,38 @@ export function relativeLink(fromPath: string, toPath: string): string {
   return relative.split('/').map((segment) => encodeURIComponent(segment)).join('/');
 }
 
-/** Every link and link definition destination of a Markdown body, in text order. Images are not links here. */
+/**
+ * Every link and link definition destination of a Markdown body, in text
+ * order. Images are not links here, nor is a definition an image uses.
+ */
 export function linkDestinations(body: string): Destination[] {
+  const tree = parse(body);
+  const imageLabels = new Set<string>();
+  visit(tree, (node: Nodes) => {
+    if (node.type === 'imageReference') imageLabels.add(node.identifier);
+  });
   const found: Destination[] = [];
-  visit(parse(body), (node: Nodes) => {
+  visit(tree, (node: Nodes) => {
     if (node.type !== 'link' && node.type !== 'definition') return;
+    if (node.type === 'definition' && imageLabels.has(node.identifier)) return;
     const span = destinationSpan(body, node);
-    if (span !== undefined) found.push({ ...span, url: node.url });
+    // A span is used only when it reads back as the parser's destination; anything else (a link split over
+    // quoted lines, say) stays as it is rather than being rewritten in the wrong place.
+    if (span !== undefined && destinationUrl(body.slice(span.from, span.to)) === node.url) found.push({ ...span, url: node.url });
   });
   return found.sort((a, b) => a.from - b.from);
+}
+
+/** The URL the parser reads from a raw destination, or undefined when it is not one. */
+function destinationUrl(raw: string): string | undefined {
+  const paragraph = parse(`[x](${raw})`).children[0];
+  const link = paragraph?.type === 'paragraph' && paragraph.children.length === 1 ? paragraph.children[0] : undefined;
+  return link?.type === 'link' ? link.url : undefined;
+}
+
+/** Percent-encodes what a fragment cannot hold as it is in a link destination (the parser has resolved escapes and entities). */
+function encodeFragment(fragment: string): string {
+  return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/g, (char) => encodeURIComponent(char));
 }
 
 /** Replaces destinations by offset; `replace` returns the new raw destination, or undefined to keep it. */
@@ -98,7 +121,10 @@ export interface LinkMap {
   ids: ReadonlyMap<string, string>;
 }
 
-/** Each written URL with the raw destinations it replaced, in text order. */
+/**
+ * By document URL, the raw destinations the file had for it, in text order:
+ * the relative links it replaced, and the document URLs the file already had.
+ */
 export type LinkSpellings = Map<string, string[]>;
 
 /**
@@ -107,15 +133,41 @@ export type LinkSpellings = Map<string, string[]>;
  * the way back can restore the exact spelling of each link.
  */
 export function linksToLinear(body: string, fromPath: string, map: LinkMap, seen?: LinkSpellings): string {
+  const remember = (url: string, raw: string) => seen?.set(url, [...(seen.get(url) ?? []), raw]);
   return rewrite(body, (destination) => {
+    const original = body.slice(destination.from, destination.to);
+    // A document URL the file already has comes back as it is.
+    if (destination.url.startsWith(`${map.base}/`)) {
+      remember(destination.url, original);
+      return undefined;
+    }
     const target = resolveRelative(fromPath, destination.url);
     if (target === undefined) return undefined;
     const id = map.ids.get(target.path);
     if (id === undefined) return undefined;
-    const url = `${map.base}/${id}${target.fragment === undefined ? '' : `#${target.fragment}`}`;
-    const raw = `<${url}>`;
-    if (seen !== undefined) seen.set(url, [...(seen.get(url) ?? []), body.slice(destination.from, destination.to)]);
+    const raw = `<${map.base}/${id}${target.fragment === undefined ? '' : `#${encodeFragment(target.fragment)}`}>`;
+    remember(destinationUrl(raw) ?? raw.slice(1, -1), original);
     return raw;
+  });
+}
+
+const reversed = new WeakMap<ReadonlyMap<string, string>, ReadonlyMap<string, string>>();
+
+/** Id → path, built once per map: a run restores every document with the same one. */
+function pathsById(ids: ReadonlyMap<string, string>): ReadonlyMap<string, string> {
+  let paths = reversed.get(ids);
+  if (paths === undefined) {
+    paths = new Map([...ids].map(([path, id]) => [id, path]));
+    reversed.set(ids, paths);
+  }
+  return paths;
+}
+
+/** Whether a body has a relative link to one of the documents. */
+export function hasDocumentLinks(body: string, fromPath: string, ids: ReadonlyMap<string, string>): boolean {
+  return linkDestinations(body).some((destination) => {
+    const target = resolveRelative(fromPath, destination.url);
+    return target !== undefined && ids.has(target.path);
   });
 }
 
@@ -125,7 +177,7 @@ export function linksToLinear(body: string, fromPath: string, map: LinkMap, seen
  * `seen` knows one; otherwise the shortest relative path in angle brackets.
  */
 export function linksFromLinear(content: string, fromPath: string, map: LinkMap, seen?: ReadonlyMap<string, readonly string[]>): string {
-  const paths = new Map([...map.ids].map(([path, id]) => [id, path]));
+  const paths = pathsById(map.ids);
   const prefix = `${map.base}/`;
   const used = new Map<string, number>();
   return rewrite(content, (destination) => {
@@ -162,9 +214,11 @@ function destinationSpan(body: string, node: Link | Definition): { from: number;
     if (open === -1 || open >= end) return undefined;
     at = open + 2;
   } else {
-    const colon = body.indexOf(']:', start);
-    if (colon === -1 || colon >= end) return undefined;
-    at = colon + 2;
+    // The label ends at the first unescaped `]`.
+    let close = start + 1;
+    while (close < end && body[close] !== ']') close += body[close] === '\\' ? 2 : 1;
+    if (body[close + 1] !== ':') return undefined;
+    at = close + 2;
   }
   while (at < end && /[ \t\r\n]/.test(body[at] as string)) at += 1;
   if (body[at] === '<') {
@@ -197,25 +251,38 @@ export async function workspaceUrlKey(linear: LinearClient): Promise<string> {
   return data.organization.urlKey;
 }
 
-/** The transform for an initial sync from git to Linear. */
+/**
+ * The transform for an initial sync from git to Linear. The workspace's URL
+ * key is read with the first document that links another, so a run without
+ * such links makes no request for it; a stop on that request stops the run
+ * like any other write.
+ */
 export function documentLinks(): BodyTransform {
+  let context: TransformContext | undefined;
   let map: LinkMap | undefined;
-  /** By document path: each written URL and the raw destination it replaced. */
+  /** By document path, for the documents rewritten: the destinations the file had for each document URL. */
   const seen = new Map<string, LinkSpellings>();
   return {
     name: 'document-links',
-    async prepare(context: TransformContext) {
-      map = context.documentIds.size === 0 ? undefined : { base: documentUrlBase(await workspaceUrlKey(context.linear)), ids: context.documentIds };
+    async prepare(run: TransformContext) {
+      context = run;
     },
     async apply({ path, body }) {
-      if (map === undefined) return body;
+      if (context === undefined) throw new Error('document-links: apply before prepare');
+      if (map === undefined) {
+        if (!hasDocumentLinks(body, path, context.documentIds)) return body;
+        map = { base: documentUrlBase(await workspaceUrlKey(context.linear)), ids: context.documentIds };
+      }
       const urls: LinkSpellings = new Map();
-      seen.set(path, urls);
-      return linksToLinear(body, path, map, urls);
+      const written = linksToLinear(body, path, map, urls);
+      if (written !== body) seen.set(path, urls);
+      else seen.delete(path);
+      return written;
     },
     restore({ path, body }) {
-      if (map === undefined) return body;
-      return linksFromLinear(body, path, map, seen.get(path));
+      // In an initial sync only what this transform wrote comes back; a document it did not rewrite stays as it is.
+      const urls = seen.get(path);
+      return map === undefined || urls === undefined ? body : linksFromLinear(body, path, map, urls);
     },
   };
 }

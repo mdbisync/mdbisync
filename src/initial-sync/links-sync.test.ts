@@ -101,6 +101,46 @@ describe('links between synchronized documents in a confirmed initial sync', () 
     assert.deepEqual(again.report.initialSync?.unchanged, SYNCED_PATHS);
   });
 
+  it('a rate limit on the workspace URL key stops the run like a write; the next run finishes', async () => {
+    const world = fakeWorld();
+    const fake = fakeFetch(world);
+    let limited = 0;
+    const limitKey: typeof fetch = async (input, init) => {
+      if (String(init?.body ?? '').includes('"operationName":"WorkspaceUrlKey"') && limited === 0) {
+        limited += 1;
+        world.requests.push(`POST ${String(input)}`);
+        return new Response(JSON.stringify({ errors: [{ message: 'Rate limit exceeded', extensions: { code: 'RATELIMITED' } }] }), { status: 429 });
+      }
+      return fake(input, init);
+    };
+    await rm(reportFile(), { force: true });
+    const env = {
+      PATH: process.env.PATH ?? '',
+      HOME: process.env.HOME ?? '',
+      MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
+      MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
+      MDBISYNC_LINEAR_API_URL: LINEAR_API,
+      MDBISYNC_GITHUB_TOKEN: 'gh-token',
+      MDBISYNC_GITHUB_API_URL: GITHUB_API,
+      MDBISYNC_REPOSITORY: 'owner/repo',
+      MDBISYNC_REPORT_FILE: reportFile(),
+      MDBISYNC_DIRECTION: 'git-to-linear',
+      MDBISYNC_CONFIRM: 'true',
+      GITHUB_STEP_SUMMARY: join(fixture.root, 'summary.md'),
+    };
+    const first = await runCli(['initial-sync'], { env, cwd, fetch: limitKey });
+    assert.equal(limited, 1);
+    assert.equal(first.exitCode, INCOMPLETE_EXIT_CODE, first.stderr);
+    const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
+    assert.equal(report.code, 'stopped');
+    // The document before the first link was written; nothing after the stop.
+    assert.deepEqual(report.initialSync?.created, ['eng/README.md']);
+
+    const second = await run(world);
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    await assertLinked(world);
+  });
+
   it('L1-15 with links: a resumed run creates the documents a recorded one links with the ids that run chose', async () => {
     const world = fakeWorld();
     const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '2' };
