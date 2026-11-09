@@ -74,7 +74,7 @@ describe('Linear client against a fake Linear', () => {
     assert.equal(request?.operation, 'CreateDocument');
     assert.equal(request?.headers.authorization, 'Bearer run-token');
     assert.deepEqual(request?.variables?.input, { title: 'Plans', content: 'Body', projectId: 'project-1' });
-    assert.deepEqual(linear.stats.toJSON(), { total: 1, storagePuts: 0, byOperation: { CreateDocument: 1 } });
+    assert.deepEqual(linear.stats.toJSON(), { total: 1, storagePuts: 0, writesAfterStop: 0, byOperation: { CreateDocument: 1 } });
   });
 
   it('stops writing at a 429 on the 30th request and returns what it finished', async () => {
@@ -89,10 +89,16 @@ describe('Linear client against a fake Linear', () => {
     assert.equal(outcome.failed.length, 0);
     assert.equal(outcome.interrupted?.item, titles[29], 'the item hit by the 429 may be partly applied');
     assert.deepEqual(outcome.notAttempted, titles.slice(30));
-    assert.deepEqual(outcome.stopped, { kind: 'rate-limited', operation: 'CreateDocument', retryAfterSeconds: undefined });
+    // The stop carries the rate-limit headers of the answer that stopped the client.
+    assert.deepEqual(outcome.stopped, { kind: 'rate-limited', operation: 'CreateDocument', retryAfterSeconds: undefined, limits: logs[29]?.rateLimitHeaders });
+    assert.equal(outcome.stopped?.limits?.['x-ratelimit-requests-limit'], '5000');
     assert.equal(fake.graphqlCount(), 30, 'nothing is sent after the 429');
 
+    assert.equal(linear.stats.writesAfterStop, 0, 'the 429 itself was sent before the stop');
     await assert.rejects(linear.rateLimitStatus(), LinearStoppedError);
+    assert.equal(linear.stats.writesAfterStop, 0, 'a refused read is not a write');
+    await assert.rejects(linear.createDocument({ projectId: 'project-1' }, { title: 'Late' }), LinearStoppedError);
+    assert.equal(linear.stats.writesAfterStop, 1, 'a refused write is counted');
     assert.equal(fake.graphqlCount(), 30, 'a stopped client sends nothing');
   });
 
@@ -121,7 +127,7 @@ describe('Linear client against a fake Linear', () => {
     const linear = client();
     const error = await linear.createDocument({ teamId: 'team-1' }, { title: 'Plans' }).catch((e: unknown) => e);
     assert.ok(error instanceof LinearStoppedError);
-    assert.deepEqual(error.reason, { kind: 'rate-limited', operation: 'CreateDocument', retryAfterSeconds: 120 });
+    assert.deepEqual(error.reason, { kind: 'rate-limited', operation: 'CreateDocument', retryAfterSeconds: 120, limits: logs[0]?.rateLimitHeaders });
     assert.deepEqual(sleeps, []);
     assert.equal(fake.graphqlCount(), 1);
   });
@@ -160,7 +166,9 @@ describe('Linear client against a fake Linear', () => {
       header: 'x-ratelimit-endpoint-requests-remaining',
       remaining: 2,
       threshold: 5,
+      limits: logs[2]?.rateLimitHeaders,
     });
+    assert.equal(outcome.stopped?.limits?.['x-ratelimit-endpoint-requests-limit'], '100');
     assert.equal(fake.graphqlCount(), 3);
     assert.equal(logs[2]?.rateLimitHeaders['x-ratelimit-endpoint-name'], 'documentCreate');
     assert.equal(logs[2]?.stop?.kind, 'budget-low');
@@ -485,7 +493,7 @@ describe('Linear client against a fake Linear', () => {
     assert.equal(put?.headers['x-goog-meta-x'], 'y');
     assert.equal(put?.headers.authorization, undefined, 'the run token never goes to storage');
     assert.equal(put?.bodyBytes, 7);
-    assert.deepEqual(linear.stats.toJSON(), { total: 1, storagePuts: 1, byOperation: { FileUpload: 1 } });
+    assert.deepEqual(linear.stats.toJSON(), { total: 1, storagePuts: 1, writesAfterStop: 0, byOperation: { FileUpload: 1 } });
   });
 });
 

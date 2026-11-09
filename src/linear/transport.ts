@@ -18,6 +18,7 @@ import {
 import {
   DEFAULT_BUDGET_FLOOR,
   findLowBudget,
+  limitsOf,
   parseRetryAfter,
   readRateLimitHeaders,
   type BudgetFloor,
@@ -144,11 +145,11 @@ export class GraphQLTransport {
     variables: Record<string, unknown> = {},
   ): Promise<T> {
     for (let attempt = 1; ; attempt += 1) {
-      if (this.#stopped) throw new LinearStoppedError(operation, this.#stopped);
+      if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
       const info: RequestInfo = { operation, kind, attempt };
       await this.#hooks.beforeRequest?.(info);
       // Another request may have stopped the client while this one waited.
-      if (this.#stopped) throw new LinearStoppedError(operation, this.#stopped);
+      if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
 
       const started = Date.now();
       this.stats.count(operation);
@@ -208,7 +209,7 @@ export class GraphQLTransport {
           await this.#sleep(retryAfterSeconds * 1000);
           continue;
         }
-        this.#stopped = { kind: 'rate-limited', operation, retryAfterSeconds };
+        this.#stopped = { kind: 'rate-limited', operation, retryAfterSeconds, ...limitsOf(rateLimit) };
         this.#log({ ...entry, retryAfterSeconds, stop: this.#stopped });
         throw new LinearStoppedError(operation, this.#stopped);
       }
@@ -227,6 +228,12 @@ export class GraphQLTransport {
       }
       return body.data as T;
     }
+  }
+
+  /** A request after the stop is refused without being sent; a refused write is counted, so a run can show it stopped writing. */
+  #refuse(operation: string, kind: OperationKind, reason: StopReason): LinearStoppedError {
+    if (kind === 'mutation') this.stats.writesAfterStop += 1;
+    return new LinearStoppedError(operation, reason);
   }
 
   #log(entry: LogEntry): void {

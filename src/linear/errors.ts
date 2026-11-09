@@ -1,9 +1,14 @@
 // Errors raised by the Linear client. Messages carry operation names, HTTP
 // statuses and Linear's error codes only, never document content or tokens.
 
-/** Why the client stopped sending requests for the rest of the run. */
+/**
+ * Why the client stopped sending requests for the rest of the run. `limits`
+ * holds the `x-ratelimit-*` and `x-complexity` headers of the answer that
+ * stopped it (the hourly and endpoint limits, what remains and when they
+ * reset), when Linear sent any; they hold no content.
+ */
 export type StopReason =
-  | { kind: 'rate-limited'; operation: string; retryAfterSeconds?: number | undefined }
+  | { kind: 'rate-limited'; operation: string; retryAfterSeconds?: number | undefined; limits?: Record<string, string> }
   | {
       kind: 'budget-low';
       operation: string;
@@ -11,6 +16,7 @@ export type StopReason =
       header: string;
       remaining: number;
       threshold: number;
+      limits?: Record<string, string>;
     };
 
 export class LinearError extends Error {
@@ -138,6 +144,27 @@ export class LinearUploadError extends LinearError {}
 export interface GraphQLErrorShape {
   message?: string;
   extensions?: { code?: unknown; type?: unknown; [key: string]: unknown };
+}
+
+/**
+ * A Linear error as its class, Linear's code and the HTTP status, for a
+ * summary or a report; never Linear's message, which may quote content.
+ */
+export function describeLinearError(error: LinearError): string {
+  const code = (error as { code?: unknown }).code;
+  const status = (error as { httpStatus?: unknown }).httpStatus;
+  return [error.name, typeof code === 'string' ? code : undefined, typeof status === 'number' ? `HTTP ${status}` : undefined].filter(Boolean).join(' ');
+}
+
+/**
+ * The request may succeed when tried again: it did not complete, or Linear
+ * answered with a server error. A refusal (forbidden, invalid input, not
+ * found) is not transient: it comes back on every run until a person acts.
+ */
+export function isTransientLinearError(error: LinearError): boolean {
+  if (error instanceof LinearNetworkError) return true;
+  const status = (error as { httpStatus?: unknown }).httpStatus;
+  return typeof status === 'number' && status >= 500;
 }
 
 export function describeStop(reason: StopReason): string {

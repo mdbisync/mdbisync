@@ -5,7 +5,9 @@ import { type ContainerCapacity } from './capacity.ts';
 import { writeFile } from 'node:fs/promises';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
-import { type PullRequestResult, type SyncRecord, type WriteResult, pullRequestFailure } from '../sync/index.ts';
+import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
+import { type ExitStatus, exitStatusOf, pullRequestEnding } from './exit.ts';
+import { cell } from './summary.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 
@@ -15,6 +17,10 @@ export interface RunReport {
   ok: boolean;
   /** Why the run stopped before writing, or why a confirmed initial sync or a sync run did not finish. */
   code: string | null;
+  /** `warning` for a partial run (it recorded what it finished; the next run goes on), `failure` when it could not run. */
+  exitStatus: ExitStatus;
+  /** Why Linear stopped the run, with the rate-limit headers of the answer that stopped it; null when it did not stop. */
+  stop: WriteStop | null;
   /**
    * The run finished its work: a confirmed initial sync recorded the state,
    * or a sync run made every change and recorded it with a merge commit.
@@ -42,8 +48,18 @@ export interface RunReport {
   skippedCompletedCount: number;
   /** Files over the upload limit, by repository path; the documents that link them are left out. */
   oversizeFiles: string[];
-  /** The run continued an unfinished initial sync. */
+  /** The run continued an unfinished initial sync, or a sync went on from a partial record an earlier run left. */
   resumed: boolean;
+  /** Documents created or overwritten in Linear by this run (the same as `writtenCount`). */
+  writtenDocuments: number;
+  /** Writes the run tried after Linear stopped it (rate limit, low budget); each was refused without a request. */
+  writesAfterLimit: number;
+  /** A document whose write failed or was rejected is among those recorded as written; never true for a correct run. */
+  failedWriteRecorded: boolean;
+  /** The job summary gives Linear's endpoint rate-limit headers of the answer that stopped the run. */
+  endpointLimitHeadersPresent: boolean;
+  /** A document Linear rejected (an error answer, not a lost request) is named in the job summary. */
+  rejectedDocumentNamed: boolean;
   /** The run stopped writing before it finished (rate limit, low budget, test threshold). */
   stoppedEarly: boolean;
   /** Every document this run wrote has its id in the `ids` state ref. */
@@ -117,7 +133,9 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     capacity: outcome.plan?.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? outcome.captured?.code ?? pullRequestFailure(outcome.sync?.pullRequest)?.code ?? confirmed?.code ?? reverse?.code ?? null,
+    code: outcome.code ?? outcome.captured?.code ?? pullRequestEnding(outcome)?.code ?? confirmed?.code ?? reverse?.code ?? (outcome.stopped === undefined ? null : 'stopped'),
+    exitStatus: exitStatusOf(outcome),
+    stop: outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped ?? reverse?.stopped ?? null,
     complete: outcome.sync?.complete ?? confirmed?.complete ?? reverse?.complete ?? false,
     changed:
       outcome.sync?.changed ??
@@ -143,7 +161,8 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
       ),
     ].sort(),
     resumed: confirmed?.resumed ?? reverse?.resumed ?? false,
-    stoppedEarly: confirmed?.stopped !== undefined || reverse?.stopped !== undefined || outcome.captured?.stopped !== undefined,
+    ...faultFacts(outcome, outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped ?? reverse?.stopped, confirmed?.failed ?? [], [...(confirmed?.created ?? []), ...(confirmed?.overwritten ?? [])]),
+    stoppedEarly: confirmed?.stopped !== undefined || reverse?.stopped !== undefined || outcome.stopped !== undefined || outcome.captured?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
     progressRecorded: confirmed?.progressRecorded ?? (reverse !== undefined && reverse.code !== 'state-moved'),
     record:
@@ -188,7 +207,9 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     capacity: write.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? pullRequestFailure(outcome.sync?.pullRequest)?.code ?? write.code ?? null,
+    code: outcome.code ?? pullRequestEnding(outcome)?.code ?? write.code ?? null,
+    exitStatus: exitStatusOf(outcome),
+    stop: write.stopped ?? null,
     complete: outcome.sync!.complete,
     changed: outcome.sync!.changed,
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
@@ -219,11 +240,35 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     writtenCount: new Set([...write.updated, ...write.created, ...write.restored, ...write.relocated.map((entry) => entry.to)]).size,
     skippedCompletedCount: 0,
     oversizeFiles: [...new Set(write.leftOutAtWrite.filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
-    resumed: false,
+    resumed: write.resumed,
+    ...faultFacts(outcome, write.stopped, write.failed, [...write.updated, ...write.created, ...write.relocated.map((entry) => entry.to)]),
     stoppedEarly: write.stopped !== undefined,
     progressRecorded: write.code !== 'state-moved',
     record: null,
     linearToGit: null,
+  };
+}
+
+/**
+ * What the run did about Linear's faults, read from its results and its
+ * job summary: the summary is what a person reads, so a fact about it is
+ * checked in its text.
+ */
+/** The requests that write a document; a failed read is never a rejection of a document. */
+const WRITES = new Set(['CreateDocument', 'UpdateDocument', 'TrashDocument']);
+
+function faultFacts(outcome: OperationOutcome, stop: WriteStop | undefined, failed: ReadonlyArray<{ path: string; operation: string; error: string }>, written: readonly string[]) {
+  const recorded = new Set(written);
+  const limits = stop === undefined || stop.kind === 'test-threshold' ? {} : (stop.limits ?? {});
+  const endpointHeaders = Object.keys(limits).filter((name) => name.startsWith('x-ratelimit-endpoint-'));
+  // A rejection is Linear's error answer to the write; a lost request or a server error is not.
+  const rejected = failed.filter((entry) => WRITES.has(entry.operation) && entry.error.startsWith('LinearGraphQLError') && !/HTTP 5\d\d/.test(entry.error));
+  return {
+    writtenDocuments: recorded.size,
+    writesAfterLimit: outcome.writesAfterStop ?? 0,
+    failedWriteRecorded: failed.some((entry) => recorded.has(entry.path)),
+    endpointLimitHeadersPresent: endpointHeaders.length > 0 && endpointHeaders.every((name) => outcome.summary.includes(`| ${name} |`)),
+    rejectedDocumentNamed: rejected.length > 0 && rejected.every((entry) => outcome.summary.includes(cell(entry.path))),
   };
 }
 

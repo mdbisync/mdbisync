@@ -24,7 +24,7 @@ import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, 
 import { createHash, randomUUID } from 'node:crypto';
 import { documentPath } from './paths.ts';
 import { splitFile } from '../format/index.ts';
-import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError } from '../linear/index.ts';
+import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
@@ -94,6 +94,8 @@ export interface WriteResult {
   complete: boolean;
   /** Something was written to Linear or a state ref moved. */
   changed: boolean;
+  /** The run went on from a partial record that an earlier run left on `linear`. */
+  resumed: boolean;
   code?: 'stopped' | 'write-failed' | 'state-moved' | 'container-cap';
   /** Content written to existing documents (a rename or move may come with it). */
   updated: string[];
@@ -151,6 +153,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const result: WriteResult = {
     complete: false,
     changed: false,
+    resumed: await wentOnFromPartial(git, [context.fetched.state.linear, linearTip]),
     updated: [],
     relocated: [],
     created: [],
@@ -178,7 +181,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       result.stopped = error.reason;
     } else {
       result.code = 'write-failed';
-      result.failed = result.notAttempted.map((path) => ({ path, operation: error.operation, error: describeError(error) }));
+      result.failed = result.notAttempted.map((path) => ({ path, operation: error.operation, error: describeLinearError(error) }));
     }
     return result;
   }
@@ -249,11 +252,42 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     result.notAttempted = merge.changes.map(changePath);
     return result;
   }
+  /** Reserved ids that a document in Linear already has (archived, trashed or retitled since): Linear refuses to create a second one. */
+  const taken = new Set<string>();
+  /** The new documents that would use a reserved id. */
+  const usingReserved = new Set(creates.filter((change) => !adoptable.has(change.path) && reserved.has(change.path)).map((change) => change.path));
+  /** Why the reserved ids could not be checked: those creates could be refused or collide, so they wait for the next run. */
+  let unchecked: LinearError | undefined;
+  try {
+    const listed = new Set([...containers.values()].flat().map((document) => document.id));
+    const saved = [...new Set([...usingReserved].map((path) => reserved.get(path) as string))];
+    for (const id of saved) if (listed.has(id)) taken.add(id);
+    // A document moved out of the targets is not in their listing.
+    const unlisted = saved.filter((id) => !listed.has(id));
+    if (unlisted.length > 0) for (const document of await linear.getDocuments(unlisted, { withContent: false })) taken.add(document.id);
+  } catch (error) {
+    if (error instanceof LinearStoppedError) {
+      // Stopped before any write or upload: nothing to record, and the next run starts again.
+      result.stopped = error.reason;
+      result.notAttempted = merge.changes.map(changePath);
+      result.code = 'stopped';
+      return result;
+    }
+    if (!(error instanceof LinearError)) throw error;
+    unchecked = error;
+  }
   const documentIds = new Map<string, string>();
   for (const [path, entry] of ids) documentIds.set(path, entry.id);
   for (const change of merge.changes) if (change.kind === 'keep') documentIds.set(change.to, change.id);
-  // A new document left out by an earlier run keeps the id it was given, since other documents may link to it.
-  for (const change of creates) documentIds.set(change.path, change.restore?.recreate ?? change.restore?.id ?? adoptable.get(change.path)?.id ?? reserved.get(change.path) ?? newId());
+  // A new document gets its id before any write, so documents written in this run can link to it. A new document an
+  // earlier run did not create (left out, failed, refused or stopped) keeps the id reserved for it then, since documents
+  // written then may link to it; an id Linear already gives another document is not reused. A document to restore
+  // keeps its own id, or gets the one derived from it when Linear no longer has it.
+  for (const change of creates) {
+    const saved = reserved.get(change.path);
+    const restoreId = change.restore?.recreate ?? change.restore?.id;
+    documentIds.set(change.path, restoreId ?? adoptable.get(change.path)?.id ?? (saved !== undefined && !taken.has(saved) ? saved : newId()));
+  }
 
   /** What Linear stores now for each path whose document this run wrote, with the body sent for it. */
   const stored = new Map<string, { content: string; sent: string }>();
@@ -265,8 +299,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     nextIds.delete(change.from);
     documentIds.set(change.to, change.id);
   }
-  // Reserved ids of files still in the tree; a file that is gone frees its id.
+  // Reserved ids of files still in the tree; a file that is gone frees its id. Every new document this run creates is
+  // reserved until its id is in the map, so each ids push, also one in the middle of the run, keeps the ids the written
+  // documents may link to. An adopted document is not reserved: its id is not ours to create with.
   const nextReserved = new Map([...reserved].filter(([path]) => resultFiles.has(path)));
+  for (const change of creates) if (!adoptable.has(change.path)) nextReserved.set(change.path, documentIds.get(change.path) as string);
   /** Paths of the merge result whose changes were not made: the record keeps the `linear` tip's version. */
   const notDone: DocumentChange[] = [];
   // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
@@ -299,7 +336,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         if (error instanceof LinearStoppedError) stopAt(start, error.reason);
         if (!(error instanceof LinearError)) throw error;
         // The batch cannot be checked against Linear, so none of it is written.
-        for (const change of batch) result.failed.push({ path: changePath(change), operation: error.operation, error: describeError(error) });
+        for (const change of batch) result.failed.push({ path: changePath(change), operation: error.operation, error: describeLinearError(error) });
         notDone.push(...batch);
         continue;
       }
@@ -309,6 +346,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         const stop = linear.stopped ?? (stopAfter !== undefined && written >= stopAfter ? { kind: 'test-threshold' as const, documents: stopAfter } : undefined);
         if (stop !== undefined) stopAt(start + index, stop);
         const path = changePath(change);
+        if (change.kind === 'create' && unchecked !== undefined && usingReserved.has(path)) {
+          result.failed.push({ path, operation: unchecked.operation, error: describeLinearError(unchecked) });
+          notDone.push(change);
+          continue;
+        }
         try {
           const done = await apply(change, current);
           if (done) written += 1;
@@ -316,14 +358,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         } catch (error) {
           if (error instanceof LeaveOutError) {
             result.leftOutAtWrite.push(error.files.length > 0 ? { path, rule: error.rule, files: [...error.files] } : { path, rule: error.rule });
-            if (change.kind === 'create') nextReserved.set(path, documentIds.get(path) as string);
             notDone.push(change);
             continue;
           }
           // The write may have been applied; the next run reads it again.
           if (error instanceof LinearStoppedError) stopAt(start + index, error.reason);
           if (error instanceof LinearError) {
-            result.failed.push({ path, operation: error.operation, error: describeError(error) });
+            result.failed.push({ path, operation: error.operation, error: describeLinearError(error) });
             notDone.push(change);
             continue;
           }
@@ -336,7 +377,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       result.code = 'state-moved';
       return result;
     }
-    if (!(error instanceof StopWriting)) throw error;
+    if (error instanceof LinearStoppedError) {
+      // Stopped before the writes (preparing the transforms; a stop inside the loop is a StopWriting): no change is
+      // made. Uploads the preparation finished are still recorded, so the next run does not send them again.
+      result.stopped = error.reason;
+      result.notAttempted = merge.changes.map(changePath);
+      notDone.splice(0, notDone.length, ...merge.changes);
+    } else if (!(error instanceof StopWriting)) throw error;
   }
   if (written > 0) result.changed = true;
   // Report only the conflicts and decided cases this run carried out.
@@ -419,7 +466,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       const oldestFirst = [...listed].sort((a, b) => compare(a.createdAt, b.createdAt) || compare(a.id, b.id));
       for (const path of paths) {
         const title = (merge.result.get(path) as SideFile).title.normalize('NFC');
-        const document = oldestFirst.find((candidate) => !mapped.has(candidate.id) && candidate.title.normalize('NFC') === title);
+        const fits = (candidate: LinearDocument) => !mapped.has(candidate.id) && candidate.title.normalize('NFC') === title;
+        // The document with the reserved id first: an earlier run created it and lost the answer, and documents may link to it.
+        const document = oldestFirst.find((candidate) => candidate.id === reserved.get(path) && fits(candidate)) ?? oldestFirst.find(fits);
         if (document !== undefined) {
           mapped.add(document.id);
           found.set(path, document);
@@ -778,6 +827,18 @@ function withoutUploads(client: LinearClient): LinearClient {
   });
 }
 
+/**
+ * Whether the run goes on from a partial record an earlier run left: the
+ * `linear` tip it found, before its capture added a commit, or the tip it
+ * writes on.
+ */
+async function wentOnFromPartial(git: RunContext['git'], tips: ReadonlyArray<Oid | null>): Promise<boolean> {
+  for (const tip of new Set(tips)) {
+    if (tip !== null && (await git.text(['log', '-1', '--format=%s', tip])) === PARTIAL_RECORD_MESSAGE) return true;
+  }
+  return false;
+}
+
 /** The paths of the record a change touches. */
 function pathsOf(change: DocumentChange): string[] {
   if (change.kind === 'keep') return change.from === change.to ? [change.to] : [change.from, change.to];
@@ -789,12 +850,6 @@ function stableId(...parts: string[]): string {
   const hex = createHash('sha256').update(parts.join('\0')).digest('hex');
   const variant = ((parseInt(hex[16] as string, 16) & 0x3) | 0x8).toString(16);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-}
-
-function describeError(error: LinearError): string {
-  const code = (error as { code?: unknown }).code;
-  const status = (error as { httpStatus?: unknown }).httpStatus;
-  return [error.name, typeof code === 'string' ? code : undefined, typeof status === 'number' ? `HTTP ${status}` : undefined].filter(Boolean).join(' ');
 }
 
 function compare(a: string, b: string): number {
