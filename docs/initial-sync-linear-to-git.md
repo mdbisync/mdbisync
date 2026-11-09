@@ -49,7 +49,7 @@ Its job summary lists, by path and never with document content:
 | Overwrite | A file whose path a document's title names. It will get the document's text; its front matter stays. |
 | Create | A document without a file. It will become a new file at the path its title names. |
 | Remove | A synchronized file without a document. The pull request will remove it. |
-| Kept | A folder's annotation `README.md` without a document. It stays, since the folder's mapping depends on it. |
+| Kept | A folder's annotation `README.md` without a document. It stays, since the folder's mapping depends on it. Shown only when there is one. |
 | Left out | A file or document the run cannot take, with the rule that stops it. |
 
 Read the **Remove** table carefully. If a file there should stay, create its
@@ -73,15 +73,18 @@ What it writes to git:
   came from, so it never uploads it to Linear again;
 - a link to another synchronized document's Linear URL becomes a relative
   link to that document's file;
-- state refs under `refs/mdbisync/` that tie each file to its document, and
+- state refs (under `refs/mdbisync/` by default) that tie each file to its
+  document, and
   the sync branch (`mdbisync/linear` by default) with one commit on top of the
   tracked branch;
 - a pull request titled **Initial sync from Linear** from the sync branch to
   the tracked branch. Its description counts the files it overwrites,
-  creates and removes, and lists the removed files.
+  creates and removes, and lists the first 100 removed files.
 
-Before anything is pushed, the repository's security hooks (marked
-`alias: security`) check each document's text with the files it embeds.
+When the repository has security hooks (marked `alias: security`), they
+check each document's text with the files it embeds before anything is
+pushed. Without them, Linear's content reaches git unchecked, and the run's
+summary says so.
 
 ### File names for titles
 
@@ -96,7 +99,17 @@ afterwards, is in [usage.md](usage.md#file-names-for-titles).
 ### What is left out
 
 The job summary's **Left out** table names each file or document the run did
-not take, and why. A new file is left out of the pull request; an existing
+not take, and why.
+
+The dry run already leaves out the files the sync cannot keep in Linear's
+form: those with a finding of the `linear-format` linter (its rules are in
+[linear-format.md](linear-format.md)), a title that collides with another
+file's or is too long, or a file git does not store as text (in LFS,
+binary). Such a file stays in git as it is, and the document whose title
+names it is not taken.
+
+The confirmed run can leave out more once it has each document's text, for
+the rules below. A new file is left out of the pull request; an existing
 file keeps the tracked branch's text and stays tied to its document.
 
 | Rule | Why |
@@ -122,8 +135,9 @@ does not merge it and does not add to it.
 
 1. Open the pull request **Initial sync from Linear**; the job summary of the
    confirmed run gives its number.
-2. Read the **Removed files** list in its description and the *Files
-   changed* tab. Each removed file had no document in Linear.
+2. Read the **Removed files** list in its description, which shows the
+   first 100, and the *Files changed* tab, which shows all of them. Each
+   removed file had no document in Linear.
 3. To keep a file the pull request removes, either create its document in
    Linear and run the confirmed initial sync again (the open pull request
    then shows the new result and its description is rewritten), or merge
@@ -135,9 +149,11 @@ does not merge it and does not add to it.
 5. Enable the sync workflow again.
 
 Until the merge, every sync run writes nothing and stops with exit code 4
-and `initial-pull-request-pending`, and an initial sync from git to Linear
-waits too. After the merge, the first sync finds nothing to write: it changes
-no document in Linear and opens no pull request. An annotation `README.md`
+and `initial-pull-request-pending`, and a confirmed initial sync from git to
+Linear waits too. After the merge, when the confirmed run left nothing out,
+the first sync finds nothing to write: it changes no document in Linear and
+opens no pull request. Documents the run left out are read again by the
+sync, which brings them in through an ordinary sync pull request. An annotation `README.md`
 that was kept without a document becomes a document once you edit its body
 in git.
 

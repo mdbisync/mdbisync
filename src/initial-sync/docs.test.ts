@@ -7,16 +7,21 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
-import { PULL_REQUEST_TITLE } from './reverse.ts';
+import { PULL_REQUEST_TITLE, RECORD_LEFT_OUT_RULES } from './reverse.ts';
 
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 const PAGE = 'docs/initial-sync-linear-to-git.md';
 const page = read(PAGE);
 const flat = page.replace(/\n> ?/g, ' ').replace(/\s+/g, ' ');
 
-/** GitHub's anchor for a heading: lowercase, punctuation dropped, spaces as hyphens. */
+/** GitHub's anchors for the headings outside code fences: lowercase, punctuation dropped, spaces as hyphens. */
 function anchors(markdown: string): Set<string> {
-  const headings = [...markdown.matchAll(/^#{1,6} (.+)$/gm)].map((match) => match[1]!);
+  let fenced = false;
+  const headings: string[] = [];
+  for (const line of markdown.split('\n')) {
+    if (line.startsWith('```')) fenced = !fenced;
+    else if (!fenced && /^#{1,6} /.test(line)) headings.push(line.replace(/^#+ /, ''));
+  }
   return new Set(headings.map((heading) => heading.toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, '').replace(/ /g, '-')));
 }
 
@@ -37,16 +42,7 @@ describe('the initial sync from Linear to git page', () => {
   });
 
   it('explains every rule that leaves a document out of the record', () => {
-    const source = read('src/initial-sync/reverse.ts');
-    // Each call that leaves documents out ends its line with the rule's name: `keepTracked(failed, 'download-failed');`.
-    const rules = source
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith('keepTracked(') || line.startsWith('leaveOut('))
-      .map((line) => /, '([a-z-]+)'\);$/.exec(line)?.[1])
-      .filter((rule): rule is string => rule !== undefined);
-    assert.ok(rules.length >= 5, `found only ${rules.join(', ')}`);
-    for (const rule of new Set(rules)) assert.match(page, new RegExp(`^\\| \`${rule}\` \\|`, 'm'), `the rule ${rule}`);
+    for (const rule of RECORD_LEFT_OUT_RULES) assert.match(page, new RegExp(`^\\| \`${rule}\` \\|`, 'm'), `the rule ${rule}`);
   });
 
   it('spells out the merge by a person', () => {

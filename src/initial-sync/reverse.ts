@@ -79,6 +79,10 @@ export const REVERSE_RECORD_MESSAGE = INITIAL_SYNC_FROM_LINEAR_RECORD;
 
 export const PULL_REQUEST_TITLE = 'Initial sync from Linear';
 
+/** Why a confirmed run leaves out a planned file once its text is known (`ReverseResult.leftOutAtRecord`). */
+export const RECORD_LEFT_OUT_RULES = ['download-failed', 'front-matter-boundary', 'title-not-a-path', 'security-hook', 'security-unchecked'] as const;
+export type RecordLeftOutRule = (typeof RECORD_LEFT_OUT_RULES)[number];
+
 /** A document and the file it is, or becomes. */
 export interface ReverseEntry {
   path: string;
@@ -248,7 +252,7 @@ export interface ReverseResult {
    * Such a file keeps the tracked branch's version; an existing one also keeps
    * its document's id (`front-matter-boundary`, `download-failed`).
    */
-  leftOutAtRecord: Array<{ path: string; rule: string }>;
+  leftOutAtRecord: Array<{ path: string; rule: RecordLeftOutRule }>;
   notAttempted: string[];
   stopped?: WriteStop;
   progressPushes: number;
@@ -446,7 +450,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       const fenced = head.replace(/^﻿/, '') !== '';
       return fenced && body !== '' && !head.endsWith('\n') ? `${head}\n${body}` : head + body;
     };
-    const leaveOut = (paths: Iterable<string>, rule: string) => {
+    const leaveOut = (paths: Iterable<string>, rule: RecordLeftOutRule) => {
       const out = new Set(paths);
       if (out.size === 0) return;
       for (const path of out) {
@@ -484,7 +488,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     // A new file is left out; an existing one keeps the tracked text and its
     // document's id, so the document stays its document and is not adopted and overwritten later.
     const keptTracked = new Set<string>();
-    const keepTracked = (paths: readonly string[], rule: string) => {
+    const keepTracked = (paths: readonly string[], rule: RecordLeftOutRule) => {
       const kept = new Set(paths.filter((path) => !created.has(path)));
       for (const path of kept) {
         result.leftOutAtRecord.push({ path, rule });
