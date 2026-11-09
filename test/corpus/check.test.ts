@@ -206,3 +206,13 @@ test("a synced document that is not in Linear's form is reported under --lint, a
     assert.deepEqual(checkLinearForm(root, only(lintError)), []);
   });
 });
+
+test("a mid slice that loses a user of the shared image is reported", () => {
+  const user = manifest.files.find((f) => f.synced && f.links.includes("docs/handbook/assets/shared-logo.png"))!;
+  withChange("corpus-slices/mid.json", (b) => {
+    const mid = JSON.parse(b.toString()) as { slice: string; paths: string[] };
+    return Buffer.from(JSON.stringify({ ...mid, paths: mid.paths.filter((p) => p !== user.path) }));
+  }, () => {
+    assert.ok(problems().includes("slice mid: the most-shared image is embedded by 39 documents, not 40"));
+  });
+});

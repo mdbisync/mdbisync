@@ -78,6 +78,8 @@ export const MINIMUMS: Partial<Record<Group, number>> = {
 export const MIN_TOTAL_FILES = 2000;
 export const MAX_LFS_BYTES = 300 * 1024 * 1024;
 export const MAX_NON_LFS_IMAGES = 50;
+/** Documents that embed the one image shared across the corpus, in the `mid` and `full` slices. */
+export const SHARED_IMAGE_USERS = 40;
 /** Linear rejects documents over this many characters. */
 export const CONTENT_LIMIT = 250_000;
 /** Linear's upload limit on the free plan. */

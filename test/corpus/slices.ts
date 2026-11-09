@@ -4,7 +4,7 @@
 
 import { posix } from "node:path";
 import { BANK_UNSYNCED } from "./bank.ts";
-import { extension, isLfs, type CorpusFile } from "./model.ts";
+import { extension, isLfs, kindOf, type CorpusFile } from "./model.ts";
 import type { Rng } from "./rng.ts";
 import { BANK_HOME, COLLISIONS, DOCS_PROJECTS, ENG_PROJECTS } from "./tree.ts";
 
@@ -86,13 +86,26 @@ function pickMid(files: CorpusFile[], rng: Rng): string[] {
     share.set(g, (share.get(g) as number) + 1);
     left--;
   }
-  const picked: string[] = [];
+  // Every document that embeds the most-shared image goes in first, so the
+  // slice has one image used by many documents; they count against their group's share.
+  const shared = sharedImageUsers(documents);
+  const picked: string[] = shared.map((f) => f.path);
   for (const g of groups) {
-    const pool = rng.shuffle(documents.filter((f) => f.group === g));
-    picked.push(...pool.slice(0, share.get(g)).map((f) => f.path));
+    const already = shared.filter((f) => f.group === g).length;
+    if (already > (share.get(g) as number)) throw new Error(`group ${g} has ${already} users of the shared image, more than its mid share`);
+    const pool = rng.shuffle(documents.filter((f) => f.group === g && !picked.includes(f.path)));
+    picked.push(...pool.slice(0, (share.get(g) as number) - already).map((f) => f.path));
   }
   if (picked.length !== MID_DOCUMENTS) throw new Error(`the mid slice has ${picked.length} documents, not ${MID_DOCUMENTS}`);
   return picked;
+}
+
+/** The documents that embed the image most documents embed. */
+export function sharedImageUsers(documents: CorpusFile[]): CorpusFile[] {
+  const counts = new Map<string, number>();
+  for (const f of documents) for (const target of new Set(f.links)) if (kindOf(target) === "image") counts.set(target, (counts.get(target) ?? 0) + 1);
+  const [image] = [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0] ?? [];
+  return image === undefined ? [] : documents.filter((f) => f.links.includes(image));
 }
 
 export function makeSlices(files: CorpusFile[], rng: Rng): Record<Slice, string[]> {

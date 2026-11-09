@@ -97,6 +97,19 @@ test("one image is used by exactly 40 documents, and two files are over the uplo
   assert.deepEqual(tooLarge.sort(), ["attachment", "image"]);
 });
 
+test("the mid slice holds all 40 documents that embed the shared image, and full holds the oversize roles", () => {
+  const built = corpus();
+  const mid = new Set(built.slices.mid);
+  const users = built.files.filter((f) => f.links.includes("docs/handbook/assets/shared-logo.png"));
+  assert.deepEqual(users.filter((f) => !mid.has(f.path)).map((f) => f.path), []);
+  assert.ok(mid.has("docs/handbook/assets/shared-logo.png"));
+  const full = new Set(built.slices.full);
+  for (const role of ["pdf-11mb", "image-over-10mb"]) {
+    const file = built.files.find((f) => f.role === role);
+    assert.ok(file && full.has(file.path), role);
+  }
+});
+
 test("duplicate-title fixtures are taken from the bank once, never paired by the generator", () => {
   const built = corpus();
   const generated = built.files.filter((f) => f.path.startsWith(`${COLLISIONS}/`) && f.group !== "construct-singles");
