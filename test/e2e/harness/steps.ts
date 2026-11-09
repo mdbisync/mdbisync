@@ -18,7 +18,7 @@ import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
-import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, stripFrontMatter } from './checks.ts';
+import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
 import { faultChecks } from './check-fault.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
@@ -130,7 +130,7 @@ async function offlineFormat(ctx: RunContext, command: 'lint' | 'fix', args: Rec
     const output = readInput(dir, input.files.keys());
     if (pass === 0) {
       // Compared with Linear's recorded form, a file counts without its front matter, which stays in git.
-      const reaching = new Map([...output].filter(([path]) => input.golden.has(path)).map(([path, text]) => [path, stripFrontMatter(text)]));
+      const reaching = new Map([...output].filter(([path]) => input.golden.has(path)).map(([path, text]) => [path, bodyOf(text)]));
       ctx.observations.set('fix.output', args.input === 'lint-errors' ? only(output) : reaching);
       ctx.observations.set('fix.validOutput', reaching);
       ctx.observations.set('fix.first.bytes', hashes(output));
@@ -577,10 +577,10 @@ const GIT: Record<string, Executor> = {
       cleanTokens.push(cleanToken);
     }
     if (cleanTokens.length > 0) ctx.observations.set('edits.clean', cleanTokens);
-    if (args.fixture === 'adjacent-paragraphs') ctx.observations.set('fixture.base', stripFrontMatter(text));
+    if (args.fixture === 'adjacent-paragraphs') ctx.observations.set('fixture.base', bodyOf(text));
     await commitAsPerson(ctx, changes, 'Update the review date');
     // The text as committed: the hooks may have fixed it.
-    ctx.observations.set('edited.gitBody', stripFrontMatter(await readWorking(git, path)));
+    ctx.observations.set('edited.gitBody', bodyOf(await readWorking(git, path)));
   },
   'git.edit-many': async (ctx, args) => {
     const count = typeof args.documents === 'number' ? args.documents : 10;
@@ -676,7 +676,7 @@ const GIT: Record<string, Executor> = {
     await pull(git, ctx);
     const token = nextToken(ctx);
     const destination = sibling(path, `rewritten-${token}.md`);
-    const text = stripFrontMatter(await readWorking(git, path));
+    const text = bodyOf(await readWorking(git, path));
     const lines = text.split('\n');
     const keep = Math.floor(lines.length * (1 - Number(args.rewriteFraction ?? 1)));
     const body = [...lines.slice(0, keep), `# Rewritten notes`, '', noteSentence(token), '', 'Everything else on this page was replaced by the new plan.', ''].join('\n');
@@ -825,7 +825,7 @@ const GIT: Record<string, Executor> = {
     // The text as committed: the hooks may have fixed it.
     const committed = await readWorking(git, path);
     retireDiscarded(ctx, text, committed);
-    ctx.observations.set('resolved.body', stripFrontMatter(committed));
+    ctx.observations.set('resolved.body', bodyOf(committed));
   },
   'git.conflict-again': async (ctx) => {
     const path = targetPath(ctx);

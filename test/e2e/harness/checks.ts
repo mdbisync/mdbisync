@@ -21,7 +21,7 @@ import { refreshView, resolveSubject } from './subjects.ts';
  * The body of a file as the engine sends it to Linear: without a byte order
  * mark, front matter and the blank lines after it, by the engine's own rule.
  */
-export function stripFrontMatter(text: string): string {
+export function bodyOf(text: string): string {
   return splitFile(text).body;
 }
 
@@ -218,7 +218,7 @@ export function gitLinks(content: string, documentPath: string, targets: Require
 
 /** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
 export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
-  return linearLinks(stripFrontMatter(text), path, sides) === content;
+  return linearLinks(bodyOf(text), path, sides) === content;
 }
 
 /**

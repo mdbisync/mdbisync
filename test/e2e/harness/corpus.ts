@@ -13,6 +13,7 @@
 
 import { runNames, type RunNames } from './isolation.ts';
 import { CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 
 export const CORPUS_DIR = 'corpus';
 export const SLICES_DIR = 'corpus-slices';
@@ -80,9 +81,9 @@ export interface Annotation {
 
 /** Reads `linear-team` and `linear-project` from a README's front matter. */
 export function readAnnotation(text: string): Annotation | null {
-  const match = /^(?:﻿)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
-  if (match === null) return null;
-  const field = (name: string) => new RegExp(`^${name}:\\s*["']?([^"'\\r\\n]+?)["']?\\s*$`, 'm').exec(match[1] as string)?.[1] ?? null;
+  const yaml = findFrontMatter(text)?.yaml;
+  if (yaml === undefined) return null;
+  const field = (name: string) => new RegExp(`^${name}:\\s*["']?([^"'\\r\\n]+?)["']?\\s*$`, 'm').exec(yaml)?.[1] ?? null;
   const team = field('linear-team');
   const project = field('linear-project');
   return team === null && project === null ? null : { team, project };
