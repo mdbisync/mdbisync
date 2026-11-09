@@ -13,7 +13,8 @@ import { runCli } from '../cli.ts';
 import { NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { CHECK_NAMES } from '../setup/index.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
-import { type Fixture, createFixture } from '../state/test-helpers.ts';
+import { commitIds, commitUploads } from '../state/index.ts';
+import { IDENTITY, type Fixture, createFixture } from '../state/test-helpers.ts';
 import { type RunReport } from './finish.ts';
 import { INPUT_NAMES, environmentName } from './inputs.ts';
 
@@ -229,8 +230,11 @@ describe('preflight', () => {
 
   describe('with sync state', () => {
     before(async () => {
-      // Any commit stands in for the recorded state: the preflight only needs the ref.
+      // Any commit stands in for the recorded state: the preflight only needs the ref. The map and the cache are
+      // empty, as an initial sync of no documents records them; a missing one would be recovered as lost.
       await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', 'refs/heads/main']);
+      await fixture.remote.run(['update-ref', 'refs/mdbisync/ids', await commitIds(fixture.remote, null, new Map(), IDENTITY)]);
+      await fixture.remote.run(['update-ref', 'refs/mdbisync/uploads', await commitUploads(fixture.remote, null, new Map(), IDENTITY)]);
     });
 
     const cases: Array<[string, (world: FakeWorld) => void, string, RegExp]> = [

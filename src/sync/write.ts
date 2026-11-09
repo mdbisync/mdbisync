@@ -47,7 +47,10 @@ import {
   readIds,
   readReservedIds,
   readUploads,
+  UPLOADS_REBUILT,
+  uploadsRebuilding,
   stateRef,
+  branchRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { type CreateChange, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
@@ -63,6 +66,11 @@ export const REREAD_BATCH = 50;
 export interface WriteOptions {
   documentCap?: number | undefined;
   config: StateConfig;
+  /**
+   * The sync branch does not exist after step 2: the record creates it at the new `linear` tip, in the same push, so
+   * it follows `linear` from the first record on (a missing branch then means a person deleted it).
+   */
+  createSyncBranch?: boolean;
   /** The state refs after capture: the expected old values of this step's push. */
   state: StateSnapshot;
   /**
@@ -180,10 +188,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     }
     return result;
   }
-  // The upload cache is gone (capture records it on every run, so only a fresh setup or a lost ref starts without it):
-  // each document that links a file is written again with fresh uploads, and the cache is recorded anew.
-  const cacheLost = context.fetched.state.uploads === null;
-  if (!cacheLost && (await alreadyMerged(git, linearTip, tracked))) {
+  // The upload cache was lost (or never recorded): each document that links a file is written again with fresh
+  // uploads, run after run, until one run has done them all and marks the cache complete.
+  const cacheLost = await uploadsRebuilding(git, expected.uploads);
+  const nothingNew = await alreadyMerged(git, linearTip, tracked);
+  if (nothingNew && !cacheLost) {
     result.capacity = assessCapacity(context, containers, [], options.documentCap);
     if (capacityBlocked(result.capacity)) {
       result.code = 'container-cap';
@@ -197,6 +206,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const ids = await readIds(git, expected.ids);
   const reserved = await readReservedIds(git, expected.ids);
   const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts);
+  // The tracked branch has nothing new: only the documents the cache rebuild relinks are written.
+  if (nothingNew) merge.changes.length = 0;
   result.leftOut = merge.leftOut;
   for (const path of merge.conflicts) if (merge.result.has(path) || merge.linear.has(path) || ids.has(path)) result.skipped.push({ path, reason: 'conflict' });
   for (const entry of merge.held) result.skipped.push({ path: entry.from, reason: 'renamed-to-unwritable' });
@@ -284,7 +295,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
   // before any upload of this run (preparing may upload ahead of the writes), so this run's uploads never count as
   // what Linear held.
-  const tipUploads = new Map(uploads);
+  // While the cache is filled again, the URLs it held are unknown: a document that links a file cannot be checked
+  // against the tip, and its write goes ahead (see `holdsVersion`).
+  const tipUploads = cacheLost ? new Map<string, string>() : new Map(uploads);
 
   let written = 0;
   try {
@@ -394,6 +407,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Documents with the same text: those needing nothing, and those only renamed or moved (their write must
     // carry the new link too).
     const sameText = [...merge.unchanged, ...merge.changes.filter((change): change is KeepChange => change.kind === 'keep' && !change.content)];
+    /** While the cache is filled again: documents that link a file, with the text they get from it. */
+    const relinked: Array<{ change: KeepChange; written: string }> = [];
     for (const change of sameText) {
       const next = merge.result.get(change.to) as SideFile;
       const previous = merge.linear.get(change.from) as SideFile;
@@ -404,17 +419,38 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       let differs: boolean;
       try {
         const written = await transformBody(transforms, change.to, splitFile(text).body);
+        if (cacheLost && !moved) {
+          // Whether it links a file shows in the tip's form, which has no cache to take URLs from.
+          const links = await transformBody(tipTransforms, change.from, splitFile(textOf(previous)).body).then(() => false, (error: unknown) => error instanceof UploadRefusedError);
+          if (links) relinked.push({ change, written });
+          continue;
+        }
         differs = written !== (await transformBody(tipTransforms, change.from, splitFile(textOf(previous)).body));
       } catch (error) {
         // Left out or stopped: the write reports it, or stops before it.
         if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError)) throw error;
         differs = true;
       }
-      if (!differs) continue;
+      if (differs) markContent(change);
+    }
+    // A run that stopped partway already wrote some: only documents that do not hold their text with the cache's URLs
+    // are written again, so the rebuild gets further every run.
+    if (relinked.length > 0) {
+      let held: Map<string, string | null | undefined> | undefined;
+      try {
+        held = new Map((await linear.getDocuments(relinked.map(({ change }) => change.id), { withContent: true })).map((document) => [document.id, document.content]));
+      } catch (error) {
+        // Not read: each is written, and the write's own read decides.
+        if (!(error instanceof LinearError) || error instanceof LinearStoppedError) throw error;
+      }
+      for (const { change, written } of relinked) if (held?.get(change.id) !== written) markContent(change);
+    }
+    merge.changes.sort((a, b) => compare(changePath(a), changePath(b)));
+
+    function markContent(change: KeepChange): void {
       if (merge.changes.includes(change)) change.content = true;
       else merge.changes.push({ ...change, content: true });
     }
-    merge.changes.sort((a, b) => compare(changePath(a), changePath(b)));
   }
 
   /** Live, unmapped documents with the title of a new file in its place, from a run that created them and stopped. */
@@ -687,13 +723,15 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: true });
     for (const path of nextIds.keys()) nextReserved.delete(path);
     const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved });
-    const uploadsCommit = expected.uploads === null && uploads.size === 0 ? null : await commitUploads(git, expected.uploads, uploads, identity);
+    const rebuilt = cacheLost && merged ? { message: UPLOADS_REBUILT, always: true } : {};
+    const uploadsCommit = expected.uploads === null && uploads.size === 0 && !cacheLost ? null : await commitUploads(git, expected.uploads, uploads, identity, rebuilt);
 
     const updates: RefUpdate[] = [
       { ref: stateRef(options.config, 'linear'), expected: linearTip, next: commit },
       { ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit },
     ];
     if (uploadsCommit !== null) updates.push({ ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit });
+    if (options.createSyncBranch === true && commit !== linearTip) updates.push({ ref: branchRef(options.config.syncBranch), expected: null, next: commit });
     const pushed = await pushAtomic(git, options.config, updates);
     if (!pushed.ok) {
       result.refusedPush = pushed;

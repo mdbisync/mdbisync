@@ -38,6 +38,8 @@ export {
   type RefUpdate,
   type StateSnapshot,
   UPLOADS_FILE,
+  UPLOADS_REBUILDING,
+  UPLOADS_REBUILT,
   type UploadMap,
   commitIds,
   commitUploads,
@@ -46,4 +48,5 @@ export {
   readFiles,
   readIds,
   readUploads,
+  uploadsRebuilding,
 } from './state.ts';

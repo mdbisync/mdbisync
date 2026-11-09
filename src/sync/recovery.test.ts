@@ -6,6 +6,7 @@
 // converge with no duplicate document.
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -14,7 +15,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { Git } from '../state/index.ts';
+import { Git, UPLOADS_REBUILDING, UPLOADS_REBUILT } from '../state/index.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture, remoteRef } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE } from './write.ts';
@@ -37,6 +38,7 @@ const TREE: Record<string, string | Buffer> = {
   'eng/notes/plan.md': `---\nowner: example\n---\n\n# Plan\n\nSteps one and two. ${CANARY}\n`,
   'eng/notes/review.md': `# Review\n\nFindings. See the [plan](plan.md). ${CANARY}\n`,
   'eng/notes/diagram.md': `# Diagram\n\n![Diagram](../media/diagram.png)\n\n${CANARY}\n`,
+  'eng/notes/chart.md': `# Chart\n\n![Chart](../media/diagram.png)\n\n${CANARY}\n`,
   'eng/media/diagram.png': DIAGRAM,
   'combined/README.md': `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\n${CANARY}\n`,
   'combined/guide.md': `# Guide\n\nHow to start. ${CANARY}\n`,
@@ -250,6 +252,56 @@ describe('sync: lost state and deleted branches', () => {
     await assertQuiet();
   });
 
+  it('L5-14: a re-upload that stops partway goes on in the next run until every linking document has a fresh upload', async () => {
+    const tracked = await rev('refs/heads/main');
+    await fixture.remote.run(['update-ref', '-d', STATE('uploads')]);
+    const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '1' };
+    Object.assign(process.env, hooks);
+    let first;
+    try {
+      first = await sync();
+    } finally {
+      for (const name of Object.keys(hooks)) delete process.env[name];
+    }
+    assert.equal(first.report.stoppedEarly, true);
+    assert.equal(first.report.sync?.updated.length, 1);
+    const fresh = () => world.linear.uploads.filter((upload) => upload.bytes?.equals(DIAGRAM)).map((upload) => upload.assetUrl);
+    const subject = () => fixture.remote.text(['log', '-1', '--format=%s', '--fixed-strings', `--grep=${UPLOADS_REBUILDING}`, `--grep=${UPLOADS_REBUILT}`, STATE('uploads')]);
+    assert.equal(await subject(), UPLOADS_REBUILDING, 'the stopped run leaves the rebuild to the next');
+
+    await settle();
+    assert.equal(await subject(), UPLOADS_REBUILT);
+    // The image is in the cache again under its one fresh upload, and every document that links it holds that URL.
+    const cache = JSON.parse(await show(`${STATE('uploads')}:uploads.json`)) as Record<string, string>;
+    const latest = fresh().at(-1)!;
+    assert.equal(cache[createHash('sha256').update(DIAGRAM).digest('hex')], latest);
+    assert.equal(fresh().length, 2, 'uploaded once more, then taken from the cache');
+    for (const title of ['diagram', 'chart']) assert.ok(live().find((d) => d.title === title)?.content?.includes(latest), `${title} links the fresh upload`);
+    assert.equal(await rev('refs/heads/main'), tracked, 'the tracked branch does not change');
+    // A git edit of a linking document reaches Linear afterwards: it is not taken for an edit made in Linear.
+    await commit({ 'eng/notes/chart.md': `# Chart\n\n![Chart](../media/diagram.png)\n\nEdited in git. ${CANARY}\n` });
+    await settle();
+    assert.match(live().find((d) => d.title === 'chart')?.content ?? '', /Edited in git/);
+    await assertQuiet();
+  });
+
+  it('L5-13: a document trashed in Linear while the ids ref was lost is removed, not created again', async () => {
+    const before = await ids();
+    const documents = world.linear.documents.length;
+    await fixture.remote.run(['update-ref', '-d', STATE('ids')]);
+    const guide = world.linear.documents.find((document) => document.id === before['combined/guide.md']?.id)!;
+    guide.trashed = true;
+    guide.archivedAt = new Date().toISOString();
+    touch(guide);
+
+    await settle();
+    assert.equal((await ids())['combined/guide.md'], undefined);
+    assert.equal((await fixture.remote.run(['cat-file', '-e', 'refs/heads/main:combined/guide.md'], { okCodes: [0, 128] })).code, 128, 'the file is removed');
+    assert.equal(world.linear.documents.length, documents, 'nothing is created');
+    await assertConverged();
+    await assertQuiet();
+  });
+
   it('L5-15: a lost linear ref: the sync refuses and asks for initial sync, which restores it', async () => {
     const documents = structuredClone(world.linear.documents);
     await fixture.remote.run(['update-ref', '-d', STATE('linear')]);
@@ -312,6 +364,11 @@ describe('sync: lost state and deleted branches', () => {
   });
 
   it('L5-18: a sync branch deleted by a person is recreated from linear by the next run', async () => {
+    // A Linear edit goes to the tracked branch through a sync pull request, which makes the branch.
+    const notes = world.linear.documents.find((document) => document.title === 'backend/notes')!;
+    notes.content = `# Notes\n\nFirst paragraph, edited in Linear. ${CANARY}\n`;
+    touch(notes);
+    await settle();
     assert.notEqual(await remoteRef(fixture, SYNC_BRANCH), null);
     await fixture.remote.run(['update-ref', '-d', SYNC_BRANCH]);
 

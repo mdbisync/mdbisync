@@ -13,7 +13,7 @@ import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
-import { type CommitIdentity, type PushRefusal, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads } from '../state/index.ts';
+import { type CommitIdentity, type PushRefusal, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
@@ -97,7 +97,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     if (state.ids === null) {
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
-      for (const [path, entry] of await rebuildIds(linear, targets, recorded.documents)) ids.set(path, entry);
+      const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
+      const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
+      for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents })) ids.set(path, entry);
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length };
     }
     const cursor = await readCursor(context, state);
@@ -327,7 +329,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const through = result.leftOut.length > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
     const message = through === null ? 'Capture document ids' : `Capture document ids\n\nCapture-through: ${through}`;
     const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always: through !== cursor, reserved });
-    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity);
+    // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
+    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes', identity });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.

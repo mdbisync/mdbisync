@@ -358,10 +358,26 @@ export function commitIds(
   return commitJsonFiles(git, parent, files, options.message ?? 'Update document ids', identity, options.always === true);
 }
 
-/** Commits the upload cache on top of `parent`. Returns `parent` when nothing changed. */
-export function commitUploads(git: Git, parent: Oid | null, uploads: UploadMap, identity: CommitIdentity): Promise<Oid> {
+/**
+ * The upload cache was lost and is being filled again: the sync writes every
+ * document that links a file with fresh uploads until a run has done them
+ * all. The cache's commit messages carry it, so a run that stops partway
+ * leaves it to the next: the latest of these two subjects says which.
+ */
+export const UPLOADS_REBUILDING = 'Upload cache lost: uploading again';
+export const UPLOADS_REBUILT = 'Upload cache uploaded again';
+
+/** Whether the upload cache is being filled again: it does not exist, or its latest rebuild mark is the start. */
+export async function uploadsRebuilding(git: Git, commit: Oid | null): Promise<boolean> {
+  if (commit === null) return true;
+  const subject = await git.text(['log', '-1', '--format=%s', '--fixed-strings', `--grep=${UPLOADS_REBUILDING}`, `--grep=${UPLOADS_REBUILT}`, commit]);
+  return subject.trim() === UPLOADS_REBUILDING;
+}
+
+/** Commits the upload cache on top of `parent`. Returns `parent` when nothing changed, unless `always`. */
+export function commitUploads(git: Git, parent: Oid | null, uploads: UploadMap, identity: CommitIdentity, options: CommitStateOptions = {}): Promise<Oid> {
   const data = Object.fromEntries([...uploads.entries()].sort(([a], [b]) => compareStrings(a, b)));
-  return commitJsonFiles(git, parent, new Map([[UPLOADS_FILE, data]]), 'Update upload cache', identity);
+  return commitJsonFiles(git, parent, new Map([[UPLOADS_FILE, data]]), options.message ?? 'Update upload cache', identity, options.always === true);
 }
 
 function compareStrings(a: string, b: string): number {
