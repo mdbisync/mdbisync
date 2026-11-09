@@ -54,7 +54,9 @@ Copy the workflow templates from
 into `.github/workflows/`:
 
 - `mdbisync-initial-sync.yml` runs the initial sync by hand from the Actions
-  tab, with a `direction` and a `confirm` box (unchecked: a dry run).
+  tab, with a `direction` and a `confirm` box (unchecked: a dry run). It
+  installs `pre-commit`, which the repository's security hooks need when
+  documents come from Linear.
 
 It shares the concurrency group `mdbisync` with the sync, so runs of one
 repository never overlap. It mints the GitHub App's installation token with

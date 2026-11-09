@@ -95,6 +95,14 @@ describe('workflow templates', () => {
           if (step.uses !== CHECKOUT) assert.ok(!/steps\.app-token/.test(text), `${file}: ${label} sees the App token`);
         }
       });
+
+      it('installs a pinned pre-commit before mdbisync, for the security hooks on content from Linear', () => {
+        const all = steps(file);
+        const action = all.findIndex((step) => step.uses?.startsWith(ACTION));
+        const install = all.findIndex((step) => /pipx install pre-commit==\d+\.\d+\.\d+\b/.test(step.run ?? ''));
+        assert.ok(install >= 0 && install < action, `${file}: pre-commit is not installed before the sync`);
+        assert.equal(all[install]?.env, undefined, `${file}: the install step gets an environment`);
+      });
     });
   }
 
