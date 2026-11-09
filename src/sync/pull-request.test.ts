@@ -297,6 +297,27 @@ describe('sync: the sync pull request', () => {
     assert.equal(world.github.pullRequests[0]?.merged, false);
   });
 
+  it('a record left on the sync branch by a closed pull request is not carried into the next sync pull request', async () => {
+    const main = await rev('refs/heads/main');
+    const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: `# Guide\n\nAbandoned text. ${CANARY}\n` });
+    const changed = await commitFile(main, 'combined/guide.md', blob);
+    const record = await fixture.remote.text(['commit-tree', `${changed}^{tree}`, '-p', main, '-m', INITIAL_SYNC_FROM_LINEAR_RECORD], {
+      env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' },
+    });
+    await fixture.remote.run(['update-ref', SYNC_BRANCH, record]);
+    syncValues.push(record);
+    world.github.pullRequests.push({ number: 1, title: 'Initial sync from Linear', body: '', head: 'mdbisync/linear', base: 'main', state: 'closed', merged: false });
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nCarried. ${CANARY}\n`);
+
+    const opened = await sync();
+    assert.equal(opened.result.exitCode, 0, opened.result.stderr);
+    assert.deepEqual(opened.report.pullRequest?.paths, ['eng/notes/plan.md']);
+    const merged = await sync();
+    assert.deepEqual(merged.writes, ['PUT /pulls/2/merge'], JSON.stringify(merged.report.pullRequest));
+    assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Carried\./);
+    assert.doesNotMatch(await show('refs/heads/main:combined/guide.md'), /Abandoned/);
+  });
+
   it('a sync branch holding an initial sync from Linear that changed nothing is reused', async () => {
     // Such a record needed no pull request, so the tracked branch never merges it.
     const main = await rev('refs/heads/main');
@@ -363,6 +384,7 @@ describe('sync: the sync pull request', () => {
       env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' },
     });
     await fixture.remote.run(['update-ref', SYNC_BRANCH, record]);
+    world.github.pullRequests.push({ number: 1, title: 'Initial sync from Linear', body: '', head: 'mdbisync/linear', base: 'main', state: 'open', merged: false });
     await editInLinear('eng/notes/plan.md', `# Plan\n\nNot yet. ${CANARY}\n`);
     const linearWrites = world.linear.writes.count;
 

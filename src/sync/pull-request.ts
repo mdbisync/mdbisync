@@ -2,7 +2,9 @@
 // the one sync pull request.
 //
 // The sync branch follows `linear` by fast-forwards and merge commits, never
-// by a force push. It moves only when `linear` brings the tracked branch
+// by a force push. When no pull request is open, the new head holds exactly
+// the tracked branch with `linear` merged in, so nothing a closed pull request
+// left on the branch is carried on. It moves only when `linear` brings the tracked branch
 // something the branch does not bring yet: `linear` gains a merge of the
 // tracked branch on every run that writes to Linear (step 5), and moving the
 // branch for those would restart the checks on every run. A run that moved
@@ -104,8 +106,6 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   const linear = options.state.linear;
   const result: PullRequestResult = { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [] };
   if (linear === null) return result;
-  // That record can remove files from the tracked branch; a person merges it, and nothing else may ride along.
-  if (sync !== null && (await holdsInitialRecord(git, sync, tracked))) return { ...result, code: 'initial-pull-request-pending' };
 
   const trackedTree = await git.text(['rev-parse', `${tracked}^{tree}`]);
   const wanted = await mergedTree(git, tracked, linear);
@@ -117,16 +117,24 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   if (!result.needed && !pending) return result;
 
   try {
-    const open = await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
+    const open = sync === null ? null : await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
+    // That record can remove files from the tracked branch: a person merges its pull request, and nothing else may ride along.
+    if (open !== null && pending && (await holdsInitialRecord(git, sync as Oid))) return { ...result, code: 'initial-pull-request-pending' };
 
+    const identity = options.identity ?? SYNC_IDENTITY;
     let head: Oid | null = sync;
-    if (sync === null || !pending) {
-      head = await advance(git, sync, linear, options.identity ?? SYNC_IDENTITY);
+    if (open === null) {
+      // No pull request carries the branch, so what it holds beyond the tracked
+      // branch (a pull request closed unmerged, an initial sync's abandoned
+      // record) is not carried on: the new head holds exactly the tracked
+      // branch with Linear's state merged in.
+      if (!result.needed) return result;
+      head = await restart(git, sync, linear, wanted, identity);
     } else {
-      const candidate = await advance(git, sync, linear, options.identity ?? SYNC_IDENTITY);
+      const candidate = await advance(git, sync as Oid, linear, identity);
       if (candidate === null) return { ...result, code: 'conflict' };
       if (candidate !== sync) {
-        const now = await mergedTree(git, tracked, sync);
+        const now = await mergedTree(git, tracked, sync as Oid);
         const next = await mergedTree(git, tracked, candidate);
         if (next === null) return { ...result, code: 'conflict' };
         if (next !== now) head = candidate;
@@ -142,7 +150,6 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const headTree = await mergedTree(git, tracked, head);
     if (headTree !== null) result.paths = (await git.text(['diff', '--name-only', '--no-renames', trackedTree, headTree])).split('\n').filter(Boolean);
 
-    if (open === null && !result.needed) return result;
     const { pullRequest, opened } = await ensurePullRequest(github, {
       head: config.syncBranch,
       base: config.trackedBranch,
@@ -168,22 +175,17 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 }
 
 /**
- * Whether the sync branch holds an initial sync's record from Linear that
- * changes the tracked branch and that the tracked branch has not merged: the
- * head of the pull request a person merges. A record that changed nothing
- * needed no pull request and is never merged, so it does not count.
+ * Whether the sync branch's head is an initial sync's record from Linear that
+ * changes the tracked branch: the head of the pull request a person merges.
+ * A record that changed nothing needed no pull request. Once no pull request
+ * carries the record, a later head leaves it behind (see `restart`).
  */
-async function holdsInitialRecord(git: Git, sync: Oid, tracked: Oid): Promise<boolean> {
-  const records = await git.text(['log', '--format=%H', '--fixed-strings', `--grep=${INITIAL_SYNC_FROM_LINEAR_RECORD}`, `${tracked}..${sync}`]);
-  for (const record of records.split('\n').filter(Boolean)) {
-    const [subject] = (await git.text(['show', '-s', '--format=%s', record])).split('\n');
-    if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) continue;
-    const parent = await git.run(['rev-parse', '--verify', '--quiet', `${record}^1`], { okCodes: [0, 1] });
-    if (parent.code !== 0) return true;
-    const changed = await git.run(['diff', '--quiet', parent.stdout.toString('utf8').trim(), record], { okCodes: [0, 1] });
-    if (changed.code === 1) return true;
-  }
-  return false;
+async function holdsInitialRecord(git: Git, sync: Oid): Promise<boolean> {
+  const [subject] = (await git.text(['show', '-s', '--format=%s', sync])).split('\n');
+  if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
+  const parent = await git.run(['rev-parse', '--verify', '--quiet', `${sync}^1`], { okCodes: [0, 1] });
+  if (parent.code !== 0) return true;
+  return (await git.run(['diff', '--quiet', parent.stdout.toString('utf8').trim(), sync], { okCodes: [0, 1] })).code === 1;
 }
 
 /** The tree of `into` with `from` merged in; null on a conflict. */
@@ -197,12 +199,27 @@ async function isAncestor(git: Git, ancestor: Oid, descendant: Oid): Promise<boo
   return (await git.run(['merge-base', '--is-ancestor', ancestor, descendant], { okCodes: [0, 1] })).code === 0;
 }
 
-/** The sync branch moved forward to hold `linear`: `linear` itself, a merge of both, or the branch as it is; null on a conflict. */
-async function advance(git: Git, sync: Oid | null, linear: Oid, identity: CommitIdentity): Promise<Oid | null> {
+/**
+ * A new head for a sync branch no pull request carries: `linear` when the
+ * branch is new or `linear` descends from it; otherwise a merge commit of the
+ * branch and `linear` whose tree is `wanted`, the tracked branch with
+ * `linear` merged in, so nothing else the branch held is carried on.
+ */
+async function restart(git: Git, sync: Oid | null, linear: Oid, wanted: string, identity: CommitIdentity): Promise<Oid> {
   if (sync === null || (await isAncestor(git, sync, linear))) return linear;
+  return commitMerge(git, wanted, sync, linear, identity);
+}
+
+/** The open pull request's branch moved forward to hold `linear`: `linear` itself, a merge of both, or the branch as it is; null on a conflict. */
+async function advance(git: Git, sync: Oid, linear: Oid, identity: CommitIdentity): Promise<Oid | null> {
+  if (await isAncestor(git, sync, linear)) return linear;
   if (await isAncestor(git, linear, sync)) return sync;
   const tree = await mergedTree(git, sync, linear);
   if (tree === null) return null;
+  return commitMerge(git, tree, sync, linear, identity);
+}
+
+function commitMerge(git: Git, tree: string, sync: Oid, linear: Oid, identity: CommitIdentity): Promise<Oid> {
   return git.text(['commit-tree', '--no-gpg-sign', tree, '-p', sync, '-p', linear, '-m', SYNC_BRANCH_MERGE_MESSAGE], {
     env: { GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email, GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email },
   });

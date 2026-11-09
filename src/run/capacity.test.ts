@@ -122,7 +122,8 @@ describe('container document capacity', () => {
       assert.ok(result.report.capacity.every((c) => c.planned === 1 && c.total === count + 2 && c.status === (blocked ? 'over-cap' : 'warning')));
       if (blocked) {
         assert.equal(result.report.code, 'container-cap');
-        assert.deepEqual(world.writes.slice(writesBefore), []);
+        // The cap stops every Linear write; the sync pull request takes what capture found to the tracked branch.
+        assert.deepEqual(world.writes.slice(writesBefore).filter((write) => !write.endsWith(' /pulls')), []);
         assert.equal(await refs(), result.refsBeforeWrite, 'the capacity stop must leave the captured state untouched');
         assert.equal(result.report.changed, true, 'capture records the newly observed live documents');
         assert.equal(result.report.capture?.changed.length, 2);

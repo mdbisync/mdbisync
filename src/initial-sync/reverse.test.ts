@@ -223,16 +223,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.writes.length, writes);
     assert.equal(world.github.pullRequests[0]?.merged, false);
 
-    // L1R-03: after the merge the sync runs, and finds nothing to write to Linear (I6).
     await merge(world);
-    const mutationsBefore = linearMutations(world).length;
-    const after = await run(world, {}, 'sync');
-    assert.equal(after.result.exitCode, 0, after.result.stderr);
-    assert.equal(after.report.code, null);
-    assert.equal(after.report.writtenCount, 0);
-    assert.equal(linearMutations(world).length, mutationsBefore, 'the sync wrote to Linear after the merge');
-    // Merged, the tracked branch holds Linear's state: the synchronized folders equal `linear`.
-    assert.equal(await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']), await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']));
 
     // Running initial sync again with nothing new opens nothing and leaves the merged pull request's branch alone.
     const syncBranch = (await refs())['refs/heads/mdbisync/linear'];
@@ -241,9 +232,20 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(rerun.report.linearToGit?.pullRequest, null);
     assert.equal((await refs())['refs/heads/mdbisync/linear'], syncBranch);
     assert.equal(world.github.pullRequests.length, 1);
-    const afterRerun = await run(world, {}, 'sync');
-    assert.equal(afterRerun.result.exitCode, 0, afterRerun.result.stderr);
-    assert.equal(afterRerun.report.code, null);
+
+    // L1R-03: after the merge the sync runs, and finds nothing to write to Linear (I6).
+    const mutationsBefore = linearMutations(world).length;
+    const after = await run(world, {}, 'sync');
+    assert.equal(after.result.exitCode, 0, after.result.stderr);
+    assert.equal(after.report.code, null);
+    assert.equal(after.report.writtenCount, 0);
+    assert.equal(linearMutations(world).length, mutationsBefore, 'the sync wrote to Linear after the merge');
+    // Merged, the tracked branch holds Linear's state, except the one document
+    // the initial sync left out for its title: capture takes it in under the
+    // file name rule, and the sync pull request carries it to the tracked branch.
+    assert.equal(await fixture.remote.text(['diff', '--name-status', 'refs/heads/main', 'refs/mdbisync/linear']), 'A\teng/notes/Q3%3A plans%3F.md');
+    assert.deepEqual(after.report.pullRequest?.paths, ['eng/notes/Q3%3A plans%3F.md']);
+    assert.equal(after.report.pullRequest?.pullRequest?.opened, true);
   });
 
   it('runs again with nothing changed: refs stay, no second pull request', async () => {
