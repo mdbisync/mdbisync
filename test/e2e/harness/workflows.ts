@@ -17,6 +17,7 @@
 // scenario then stops at that run. Any other failure stays the run's result
 // for the scenario's checks.
 
+import { CANARY_EVIDENCE } from './security-canary.ts';
 import { inflateRawSync } from 'node:zlib';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { CommandName } from '../../../src/commands.ts';
@@ -172,6 +173,7 @@ export function environmentBlocker(run: WorkflowRun, jobs: readonly WorkflowJob[
 export async function runResult(rest: SandboxRest, run: WorkflowRun, command: CommandName, logFiles?: ReadonlyMap<string, string>): Promise<EngineResult> {
   let report: Record<string, unknown> | null = null;
   let summary = '';
+  let securityCanary = '';
   const artifacts = await rest.request<{ artifacts: Array<{ id: number; name: string; expired: boolean }> }>('GET', `/actions/runs/${run.id}/artifacts`);
   const artifact = artifacts.artifacts.find((candidate) => candidate.name === REPORT_ARTIFACT && !candidate.expired);
   if (artifact !== undefined) {
@@ -184,6 +186,7 @@ export async function runResult(rest: SandboxRest, run: WorkflowRun, command: Co
         report = null;
       }
     }
+    securityCanary = files.get(CANARY_EVIDENCE)?.toString('utf8') ?? '';
     summary = files.get('summary.md')?.toString('utf8') ?? '';
   }
   const logs = [...(logFiles ?? await runLogs(rest, run)).values()].join('\n');
@@ -198,6 +201,7 @@ export async function runResult(rest: SandboxRest, run: WorkflowRun, command: Co
     stdout: logs,
     stderr: '',
     summary,
+    securityCanary,
     report,
   };
 }

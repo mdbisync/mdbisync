@@ -283,7 +283,7 @@ describe('workflows', () => {
   });
 
   /** A sandbox's Actions for one run: the workflow registry, dispatches, runs, their jobs and logs. */
-  function fakeActions(ctx: RunContext, remoteGit: Git, options: { conclusion: string; jobs: WorkflowJob[]; logs: Record<string, string>; registeredAfter?: number }) {
+  function fakeActions(ctx: RunContext, remoteGit: Git, options: { conclusion: string; jobs: WorkflowJob[]; logs: Record<string, string>; registeredAfter?: number; workflow?: string }) {
     const runs: WorkflowRun[] = [];
     const dispatched: Array<string | number> = [];
     let registryReads = 0;
@@ -293,7 +293,7 @@ describe('workflows', () => {
       workflowId: async () => (++registryReads > (options.registeredAfter ?? 0) ? 99 : undefined),
       dispatchWorkflow: async (workflow: string | number) => {
         dispatched.push(workflow);
-        runs.push({ id: 500 + runs.length, event: 'workflow_dispatch', status: 'completed', conclusion: options.conclusion, created_at: new Date().toISOString(), path: '.github/workflows/mdbisync-initial-sync.yml' });
+        runs.push({ id: 500 + runs.length, event: 'workflow_dispatch', status: 'completed', conclusion: options.conclusion, created_at: new Date().toISOString(), path: `.github/workflows/${options.workflow ?? 'mdbisync-initial-sync.yml'}` });
       },
       workflowRuns: async () => {
         // Each push to the tracked branch starts a skipped registering run of the initial sync first, then the sync's run.
@@ -340,6 +340,15 @@ describe('workflows', () => {
     assert.equal(ctx.observations.get('runs.0.exitCode'), 1);
     assert.equal(ctx.observations.has('workflows.blocker'), false);
     assert.equal(existsSync(join(ctx.runDir, 'workflows')), false);
+  });
+
+  it('settles an Actions scenario with dispatches instead of local sync processes', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, mode: 'actions', setup: { ...ctx.scenario.setup, fixtures: ['actions-security-canary'] } };
+    const { dispatched } = fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml' });
+    await STEP_ACTIONS['run.settle']!(ctx, {});
+    assert.deepEqual(dispatched, [99, 99, 99, 99], 'without a changed=false report, settle keeps dispatching to its limit');
+    assert.equal(ctx.engine.results.length, 4);
   });
 
   it('dispatch the initial sync by its registry id once its push has registered it', async () => {

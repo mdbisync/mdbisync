@@ -135,6 +135,7 @@ const CONTENT_TYPES: Record<string, string> = {
   mp4: 'video/mp4',
   mov: 'video/quicktime',
   webm: 'video/webm',
+  mp3: 'audio/mpeg',
 };
 
 export function contentTypeOf(file: string): string {

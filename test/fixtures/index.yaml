@@ -595,6 +595,8 @@ known_constructs:
     class: fixable
   - construct: video-in-item-webm
     class: fixable
+  - construct: audio-in-item
+    class: fixable
 assets:
   - file: "assets/pixel.png"
     kind: png
@@ -632,6 +634,9 @@ assets:
     corpus: false
   - file: "assets/clip.webm"
     kind: webm
+    corpus: false
+  - file: "assets/clip.mp3"
+    kind: mp3
     corpus: false
 fixtures:
   - file: "construct-singles/heading-atx-h1.md"
@@ -2382,6 +2387,23 @@ fixtures:
     corpus: false
     missing_target: true
     note: "sent with its relative link, as a sync without uploads sends it"
+  - file: "list-items/audio-mp3.md"
+    group: list-items
+    construct: audio-in-item
+    class: fixable
+    basis: known
+    canary: kx-c508f251
+    corpus: false
+    note: "a bullet item holding only an uploaded MP3 link; form recorded by a full-slice sync readback, not yet by the probe"
+  - file: "list-items/audio-not-uploaded.md"
+    group: list-items
+    construct: audio-in-item-relative
+    class: unchanged
+    basis: assumed
+    canary: kx-f7252e1b
+    corpus: false
+    missing_target: true
+    note: "a link Linear cannot resolve stays a link, as for other files"
   - file: "list-items/file-not-uploaded.md"
     group: list-items
     construct: attachment-in-item-relative
