@@ -97,12 +97,15 @@ describe('sync: the tracked branch to Linear', () => {
     return { result, report, summary, graphql, writes: world.writes.slice(writesBefore) };
   }
 
-  // Mutate after capture's content read, before the next Linear request in write.
+  // Mutate after the capture, before the next Linear request in write. The capture lists the documents, then reads
+  // the content of those that changed since the record, if any: a run whose record holds them all reads none.
   const afterCapture = (change: () => void) => {
+    let listed = false;
     let read = false;
     world.linear.beforeQuery = (operation, variables) => {
-      if (read) { delete world.linear.beforeQuery; change(); }
-      else if (operation === 'GetDocuments' && variables.withContent === true) read = true;
+      if (!listed) listed = operation === 'ListDocuments';
+      else if (!read && operation === 'GetDocuments' && variables.withContent === true) read = true;
+      else { delete world.linear.beforeQuery; change(); }
     };
   };
 
@@ -378,6 +381,20 @@ describe('sync: the tracked branch to Linear', () => {
     // The skipped document keeps what `linear` said before; the written one has its new text.
     assert.equal(await show('refs/mdbisync/linear:eng/notes/review.md'), TREE['eng/notes/review.md']);
     assert.match(await show('refs/mdbisync/linear:eng/backend/notes.md'), /Other edit/);
+  });
+
+  it('a rename in Linear after the capture, of a document that already holds the git text, reaches git', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    const text = `# Review\n\nThe same words on both sides. ${CANARY}`;
+    afterCapture(() => { Object.assign(document, { content: text, title: 'retro' }); touch(document); });
+    await commit({ 'eng/notes/review.md': `${text}\n` });
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    // The record keeps the old title: the document is not named as recorded at its new time.
+    assert.doesNotMatch(await fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/ids']), new RegExp(`Document-recorded: ${document.id} ${document.updatedAt}`));
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.match(await show('refs/mdbisync/linear:eng/notes/retro.md'), /The same words on both sides/);
   });
 
   it('L2-15: a run that stops partway records what it wrote; the next run writes the rest and merges', async () => {
@@ -692,10 +709,13 @@ describe('sync: the tracked branch to Linear', () => {
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.sync?.skipped, []);
-    assert.deepEqual(kinds(writes), ['UpdateDocument']);
-    assert.equal(world.linear.uploads.length, uploadsBefore, 'capture recovered the cached bytes without another upload');
-    assert.deepEqual(uploadUrls((await documentOf('eng/notes/figure.md')).content), [previousUrl]);
-    assert.ok((await show('refs/mdbisync/uploads:uploads.json')).includes(previousUrl));
+    // The capture does not read the figure again: the record holds it as Linear does. Its image is not in the
+    // cache, so it is uploaded once more, and the cache records the new upload.
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+    assert.equal(world.linear.uploads.length, uploadsBefore + 1);
+    const [url] = uploadUrls((await documentOf('eng/notes/figure.md')).content);
+    assert.ok(url !== undefined && url !== previousUrl, 'the figure does not link the new upload');
+    assert.ok((await show('refs/mdbisync/uploads:uploads.json')).includes(url));
     assert.ok((await show('refs/mdbisync/linear:eng/notes/figure.md')).includes('../media/diagram.png'));
   });
 
@@ -708,6 +728,25 @@ describe('sync: the tracked branch to Linear', () => {
     assert.deepEqual(report.sync?.failed.map((entry) => entry.path), ['eng/notes/review.md']);
     // Nothing was written, so `linear` stays where it was.
     assert.equal(report.sync?.record, null);
+  });
+
+  it('a caption edited in git after a partial run that changed its image reaches Linear', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const review = await documentOf('eng/notes/review.md');
+    // The figure takes the new image; the review, edited in Linear meanwhile, is skipped: the record is partial and
+    // keeps the old bytes.
+    afterCapture(() => { review.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}`; touch(review); });
+    await commit({
+      'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1'),
+      'eng/notes/review.md': `# Review\n\nEdited too. ${CANARY}\n`,
+    });
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.deepEqual(first.report.sync?.updated, ['eng/notes/figure.md']);
+    assert.deepEqual(first.report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'edited-in-linear' }]);
+    await commit({ 'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nA new caption. ${CANARY}\n` });
+    for (let run = 0; run < 3 && !/A new caption/.test(figure.content ?? ''); run += 1) assert.equal((await sync()).result.exitCode, 0);
+    assert.match(figure.content ?? '', /A new caption/);
   });
 
   it('an image update Linear rejects is tried again by the next run', async () => {

@@ -264,4 +264,28 @@ describe('sync: the Linear request budget (I9)', () => {
     const runReports = await syncAndSettle();
     assertBudget(runReports);
   });
+
+  it('an icon, a color and a comment changed in Linear move no ref, and a later edit is still captured (L2-30)', async () => {
+    const refs = async () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
+    const before = await refs();
+    Object.assign(byTitle('plan'), { icon: 'Fire' });
+    touch(byTitle('plan'));
+    Object.assign(byTitle('errors'), { color: '#123456' });
+    touch(byTitle('errors'));
+    // Linear moves a document's update time when someone comments on it.
+    world.linear.comments.set('comment-review', { documentContentId: 'review-content', body: 'Looks good.' });
+    touch(byTitle('review'));
+    const runReports = await syncAndSettle();
+    for (const run of runReports) assert.equal(run.report.changed, false, 'a run changed something');
+    assert.equal(await refs(), before, 'a run moved a ref');
+    assertBudget(runReports);
+
+    // The documents read again find their edit, though no cursor was recorded for the edits above.
+    const plan = byTitle('plan');
+    plan.content = '# Plan\n\nSteps one, two and three.\n';
+    touch(plan);
+    await syncAndSettle();
+    assert.match((await tracked('eng/notes/plan.md')) ?? '', /Steps one, two and three\./);
+    assert.notEqual(await refs(), before);
+  });
 });

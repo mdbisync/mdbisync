@@ -18,6 +18,7 @@ import { type CommitIdentity, type Git, type StateConfig, type StateSnapshot, ty
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
+import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { lastSynchronized } from './merge.ts';
@@ -86,9 +87,8 @@ export function captureCursorTrailer(through: string): string {
 
 /** A document's update time in the cursor's form, so cursor times compare as text. */
 export function cursorTime(document: LinearDocument): string {
-  const time = new Date(document.updatedAt);
-  if (!Number.isFinite(time.getTime())) throw new Error('a document has an invalid update time');
-  return time.toISOString();
+  // The same form as a recorded document's time: the capture compares the two as text.
+  return recordedTime(document.updatedAt);
 }
 const HELD = /^Removal-held: (\S+)$/gm;
 
@@ -233,7 +233,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const folderFor = (doc: LinearDocument) => folders.get(placeKeyOf(doc));
     const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && (folderFor(doc) !== undefined || retained.has(doc.id));
     const normalizedTime = cursorTime;
-    let selected = [...listed.values()].filter((doc) => !byId.has(doc.id) || byId.get(doc.id)?.entry.saved !== undefined || cursor === null || normalizedTime(doc) >= cursor);
+    // A document still at the update time a run recorded it with is in the record as Linear holds it.
+    const recordedTimes = await readRecorded(git, state.ids);
+    const asRecorded = (doc: LinearDocument) => recordedTimes.get(doc.id) === normalizedTime(doc);
+    let selected = [...listed.values()].filter((doc) => !byId.has(doc.id) || byId.get(doc.id)?.entry.saved !== undefined || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor)));
     const invalidZone = (doc: LinearDocument, path: string) => {
       const zone = nearestZone(mapping.zones, folderOf(path));
       if (zone === undefined) return true;
@@ -447,12 +450,18 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
     const trailers = [...(through === null ? [] : [captureCursorTrailer(through)]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
     const message = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
-    // Record a held removal, and a cleared one, so the next capture reads what this one held.
-    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always: through !== cursor || held.size > 0 || heldBefore.size > 0, reserved });
     // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes', identity });
+    // Record a held removal, and a cleared one, so the next capture reads what this one held.
+    // The cursor alone moves no ref: an edit that changes nothing in git (an icon, a color,
+    // a comment) leaves every ref where it was, and the next capture reads those documents
+    // again. The cursor moves with the next capture that records a change; until then it
+    // only holds back, which rereads more and loses nothing.
+    const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
+    const always = held.size > 0 || heldBefore.size > 0 || (through !== cursor && recordsChange);
+    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always, reserved });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.
     if (prepared.oids.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...prepared.oids]);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
