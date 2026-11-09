@@ -92,13 +92,15 @@ describe('workflow templates', () => {
 
       it('gives the App token to checkout and mdbisync, and the Linear secrets to mdbisync only', () => {
         const actions = actionSteps(file);
+        assert.equal(actions[0].with?.['cleanup-tokens'], false);
+        assert.equal(actions[1].with?.['cleanup-tokens'], undefined);
         for (const action of actions) {
           assert.equal(action.with?.['github-token'], '${{ steps.app-token.outputs.token }}');
           assert.equal(action.with?.['linear-client-id'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}');
           assert.equal(action.with?.['linear-client-secret'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}');
           // The same inputs in both steps, so the apply step runs the operation the stage step staged.
-          const { 'security-step': _stage, ...same } = actions[0].with ?? {};
-          const { 'security-step': _apply, ...other } = action.with ?? {};
+          const { 'security-step': _stage, 'cleanup-tokens': _cleanup, ...same } = actions[0].with ?? {};
+          const { 'security-step': _apply, 'cleanup-tokens': _otherCleanup, ...other } = action.with ?? {};
           assert.deepEqual(other, same);
         }
         for (const step of steps(file)) {

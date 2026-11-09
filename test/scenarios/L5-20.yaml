@@ -78,6 +78,16 @@
         "subject": "report.activeLinearTokens",
         "operator": "equal",
         "expected": 0
+      },
+      {
+        "subject": "tokens.activeBeforeCleanup",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "tokens.activeAfterCleanup",
+        "operator": "equal",
+        "expected": 0
       }
     ]
   }

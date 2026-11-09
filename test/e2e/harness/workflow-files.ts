@@ -105,6 +105,8 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
     if (options.actionSha !== undefined) step.set('uses', `${ACTION_REPOSITORY}@${options.actionSha}`);
     if (!isMap(step.get('with'))) step.set('with', doc.createNode({}));
     const inputs = step.get('with') as YAMLMap;
+    // Workers share this app; a run's concurrency group does not own it.
+    inputs.set('cleanup-tokens', false);
     inputs.set('tracked-branch', options.trackedBranch);
     inputs.set('sync-branch', options.syncBranch);
     inputs.set('state-ref-prefix', options.refPrefix);

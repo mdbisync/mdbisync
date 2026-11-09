@@ -33,6 +33,7 @@ describe('workflow templates rendered for a run', () => {
     // The stage step gets the run's branches and refs too, and leaves the report to the apply step.
     const stage = job!.steps.find((step) => step.uses?.startsWith(`${ACTION_REPOSITORY}@`))!;
     assert.equal(stage.with?.['security-step'], 'stage');
+    assert.equal(stage.with?.['cleanup-tokens'], false);
     assert.equal(stage.uses, `${ACTION_REPOSITORY}@${SHA}`);
     assert.equal(stage.with?.['tracked-branch'], RUN.trackedBranch);
     assert.equal(stage.with?.['report-file'], undefined);

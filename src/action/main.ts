@@ -20,6 +20,7 @@ import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs
 import { runOperation } from "../run/operation.ts";
 import { Git } from "../state/index.ts";
 import { SECURITY_STEPS, type SecurityStep, stageFolder } from "../sync/staged.ts";
+import { cleanupAppTokens } from "../linear/cleanup.ts";
 import { LINEAR_TOKEN_STATE } from "./state.ts";
 
 export const OPERATIONS = ["sync", "initial-sync"] as const;
@@ -82,24 +83,37 @@ export async function run(options: RunOptions = {}): Promise<void> {
     const get = (name: InputName) => core.getInput(name);
     const inputs = readInputs(get);
     const initialSync = operation === "initial-sync" ? readInitialSyncInputs(get) : undefined;
+    const cleanupValue = core.getInput("cleanup-tokens");
+    const cleanupTokens = cleanupValue === "" ? false : core.getBooleanInput("cleanup-tokens");
     const step = parseSecurityStep(core.getInput("security-step"));
+    if (cleanupTokens && step === "apply") throw new Error("cleanup-tokens belongs before the stage step, not apply");
     const security = step === undefined ? undefined : { step, folder: stageFolder() };
     const serverUrl = process.env["GITHUB_SERVER_URL"] || "https://github.com";
     const auth = gitAuthEnv(inputs.github.token, serverUrl);
     // The header's encoded form is not the token itself; mask it too.
     for (const [key, value] of Object.entries(auth)) if (key.startsWith("GIT_CONFIG_VALUE_")) core.setSecret(value.split(" ").pop() as string);
+    const tokenLifecycle = {
+      minted: (token: string) => {
+        core.setSecret(token);
+        core.saveState(LINEAR_TOKEN_STATE, token);
+      },
+      revoked: () => core.saveState(LINEAR_TOKEN_STATE, ""),
+    };
+    if (cleanupTokens) {
+      await cleanupAppTokens(inputs.linear, {
+        exclusive: true,
+        baseUrl: inputs.linear.apiUrl,
+        lifecycle: tokenLifecycle,
+        onRevokeError: () => { throw new Error("token cleanup revocation failed"); },
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      });
+      core.info("token cleanup: replaced stale app tokens and restored read/write scopes");
+    }
     const outcome = await runOperation(operation, inputs, initialSync, {
       git: new Git(process.env["GITHUB_WORKSPACE"] || process.cwd(), auth),
       warn: (message) => core.warning(message),
       log: (entry) => core.info(JSON.stringify(entry)),
-      tokenLifecycle: {
-        minted: (token) => {
-          // Secrets and the App token are masked already; this token is new to the runner.
-          core.setSecret(token);
-          core.saveState(LINEAR_TOKEN_STATE, token);
-        },
-        revoked: () => core.saveState(LINEAR_TOKEN_STATE, ""),
-      },
+      tokenLifecycle,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }, security);
     if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(outcome.summary).write();
