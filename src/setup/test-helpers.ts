@@ -162,9 +162,19 @@ function github(world: FakeWorld, method: string, path: string, init: RequestIni
  * setup check's empty-bodied probe, which the probes answer.
  */
 function pullRequests(world: FakeWorld, method: string, rest: string, init: RequestInit | undefined): Response | undefined {
-  const [path, search = ''] = rest.split('?');
-  if (path !== '/pulls') return undefined;
+  const [path = '', search = ''] = rest.split('?');
   const store = world.github.pullRequests;
+  const one = /^\/pulls\/(\d+)$/.exec(path);
+  if (one !== null && method === 'PATCH') {
+    const pr = store.find((candidate) => candidate.number === Number(one[1]));
+    if (pr === undefined) return json(404, { message: 'Not Found' });
+    const body = JSON.parse(String(init?.body ?? '{}')) as { title?: string; body?: string };
+    if (body.title !== undefined) pr.title = body.title;
+    if (body.body !== undefined) pr.body = body.body;
+    world.writes.push(`${method} ${path}`);
+    return json(200, pullRequestNode(pr));
+  }
+  if (path !== '/pulls') return undefined;
   if (method === 'GET') {
     const query = new URLSearchParams(search);
     const state = query.get('state') ?? 'open';

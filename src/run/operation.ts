@@ -73,10 +73,11 @@ export async function runOperation(
     }
   };
 
+  const refusePending = initialSync?.direction === 'git-to-linear' && initialSync.confirm;
   const preflight = await runPreflight(
     operation,
     inputs,
-    options,
+    refusePending ? { ...options, refusePendingInitialPullRequest: true } : options,
     initialSync === undefined
       ? undefined
       : (context) => (initialSync.direction === 'git-to-linear' ? gitToLinear : linearToGit)(context, initialSync.confirm),

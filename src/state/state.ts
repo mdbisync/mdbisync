@@ -260,18 +260,18 @@ export async function readInitialSyncProgress(git: Git, commit: Oid | null): Pro
 export const INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear's state";
 
 /**
- * Whether `linear` is an initial sync's record from Linear that the tracked
- * branch has not taken yet: not merged, and with a tree that differs from
- * the tracked branch's.
+ * Whether the pull request of an initial sync from Linear waits for a
+ * person: `linear` is such a record, the sync branch (the pull request's
+ * head) still points at it, and the tracked branch has not merged it. A
+ * record that needed no pull request moves no sync branch, so it never waits.
  */
-export async function initialPullRequestPending(git: Git, linear: Oid | null, tracked: Oid): Promise<boolean> {
-  if (linear === null) return false;
+export async function initialPullRequestPending(git: Git, state: { linear: Oid | null; sync: Oid | null; tracked: Oid }): Promise<boolean> {
+  const { linear, sync, tracked } = state;
+  if (linear === null || sync !== linear) return false;
   const [subject] = (await git.text(['show', '-s', '--format=%s', linear])).split('\n');
   if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
   const merged = await git.run(['merge-base', '--is-ancestor', linear, tracked], { okCodes: [0, 1] });
-  if (merged.code === 0) return false;
-  const trees = (await git.text(['show', '-s', '--format=%T', linear, tracked])).split('\n');
-  return trees[0] !== trees[1];
+  return merged.code !== 0;
 }
 
 export interface CommitStateOptions {

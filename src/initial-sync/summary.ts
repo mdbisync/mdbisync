@@ -61,25 +61,10 @@ export function renderDryRun(plan: InitialSyncPlan): string {
     `- leave out ${count(plan.leftOut.length, 'file')}, which stay in git only until they are fixed.`,
     '',
   ];
-  const section = (title: string, total: number, head: string[], rows: string[][]) => {
-    lines.push(`### ${title} (${total})`, '');
-    if (rows.length === 0) {
-      lines.push('None.', '');
-      return;
-    }
-    lines.push(`| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`);
-    for (const row of rows) lines.push(`| ${row.map(cell).join(' | ')} |`);
-    lines.push('');
-  };
-  section('Create', plan.create.length, ['Path', 'In Linear'], plan.create.map((entry) => [entry.path, placeLabel(entry.place)]));
-  section('Overwrite', plan.overwrite.length, ['Path', 'In Linear', 'Document'], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]));
-  section('Move to trash', plan.trash.length, ['Path', 'In Linear', 'Document'], plan.trash.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]));
-  section(
-    'Left out',
-    plan.leftOut.length,
-    ['Path', 'Rules', 'Lines', 'Collides with'],
-    plan.leftOut.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? []).join(', ')]),
-  );
+  pushTable(lines, 'Create', ['Path', 'In Linear'], plan.create.map((entry) => [entry.path, placeLabel(entry.place)]), true);
+  pushTable(lines, 'Overwrite', ['Path', 'In Linear', 'Document'], plan.overwrite.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines, 'Move to trash', ['Path', 'In Linear', 'Document'], plan.trash.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
+  pushTable(lines, 'Left out', LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
   return lines.join('\n');
 }
 
@@ -107,22 +92,9 @@ export function renderConfirmed(plan: InitialSyncPlan, result: ConfirmedResult):
     const why = result.stopped.kind === 'test-threshold' ? `the test threshold of ${result.stopped.documents} documents` : describeStop(result.stopped);
     lines.push(`Stopped: ${why}. Not written yet: ${count(result.notAttempted.length, 'item')}.`, '');
   }
-  const table = (title: string, head: string[], rows: string[][]) => {
-    if (rows.length === 0) return;
-    lines.push(`### ${title} (${rows.length})`, '', `| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`);
-    for (const row of rows) lines.push(`| ${row.map(cell).join(' | ')} |`);
-    lines.push('');
-  };
-  table('Failed', ['Path', 'Operation', 'Error'], result.failed.map((entry) => [entry.path, entry.operation, entry.error]));
-  table('Moved to trash', ['Path'], result.trashed.map((path) => [path]));
-  table(
-    'Left out',
-    ['Path', 'Rules', 'Lines', 'Collides with'],
-    [
-      ...plan.leftOut.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? []).join(', ')]),
-      ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, '', '']),
-    ],
-  );
+  pushTable(lines, 'Failed', ['Path', 'Operation', 'Error'], result.failed.map((entry) => [entry.path, entry.operation, entry.error]), false);
+  pushTable(lines, 'Moved to trash', ['Path'], result.trashed.map((path) => [path]), false);
+  pushTable(lines, 'Left out', LEFT_OUT_HEAD, [...leftOutRows(plan.leftOut), ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, '', ''])], false);
   if (result.record !== null && result.record.reformatted.length > 0) {
     lines.push(
       `Linear stores ${count(result.record.reformatted.length, 'file')} in a different form than the tracked branch; the next sync proposes that form in its pull request.`,
@@ -169,7 +141,7 @@ export function renderReverseDryRun(plan: ReversePlan): string {
   pushTable(lines, 'Create', ['Path', 'From Linear', 'Document'], plan.create.map((entry) => [entry.path, placeLabel(entry.place), entry.documentId]), true);
   pushTable(lines, 'Remove', ['Path'], plan.remove.map((path) => [path]), true);
   pushTable(lines, 'Kept', ['Path', 'Why'], plan.kept.map((entry) => [entry.path, 'holds the annotation of its folder']), false);
-  pushTable(lines, 'Left out', ['Path', 'Rules', 'Lines', 'Collides with'], leftOutRows(plan.leftOut), true);
+  pushTable(lines, 'Left out', LEFT_OUT_HEAD, leftOutRows(plan.leftOut), true);
   return lines.join('\n');
 }
 
@@ -182,7 +154,9 @@ export function renderReverseConfirmed(plan: ReversePlan, result: ReverseResult)
     : result.code === 'state-moved'
       ? 'A state ref moved while this run was working, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done.'
       : result.code === 'pull-request-failed'
-        ? `The sync state is recorded, but GitHub refused to open the pull request (HTTP ${result.pullRequestStatus ?? 0}). Run initial sync again with the same inputs to open it.`
+        ? `The sync state is recorded, but the pull request could not be opened (${result.pullRequestStatus === undefined ? 'GitHub could not be reached' : `GitHub answered HTTP ${result.pullRequestStatus}`}). Run initial sync again with the same inputs to open it.`
+        : result.code === 'sync-branch-changed'
+          ? 'The sync branch holds commits this sync did not make, so nothing was recorded. Merge or close its pull request and delete the branch, then run initial sync again.'
         : 'The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already taken are skipped.';
   const lines = [
     '## Initial sync from Linear to the tracked branch',
@@ -200,9 +174,11 @@ export function renderReverseConfirmed(plan: ReversePlan, result: ReverseResult)
     lines.push(`Stopped: ${why}. Not taken yet: ${count(result.notAttempted.length, 'document')}.`, '');
   }
   pushTable(lines, 'Remove', ['Path'], plan.remove.map((path) => [path]), false);
-  pushTable(lines, 'Left out', ['Path', 'Rules', 'Lines', 'Collides with'], [...leftOutRows(plan.leftOut), ...result.leftOutAtRecord.map((entry) => [entry.path, entry.rule, '', ''])], false);
+  pushTable(lines, 'Left out', LEFT_OUT_HEAD, [...leftOutRows(plan.leftOut), ...result.leftOutAtRecord.map((entry) => [entry.path, entry.rule, '', ''])], false);
   return lines.join('\n');
 }
+
+const LEFT_OUT_HEAD = ['Path', 'Rules', 'Lines', 'Collides with'];
 
 function leftOutRows(entries: readonly LeftOutEntry[]): string[][] {
   return entries.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? []).join(', ')]);

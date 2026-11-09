@@ -52,6 +52,8 @@ export interface PreflightOptions {
   fetch?: typeof fetch;
   /** Safe per-request diagnostics; emitted immediately, including on failure. */
   log: (entry: LogEntry) => void;
+  /** Refuse, writing nothing, while the pull request of an initial sync from Linear waits for a person. */
+  refusePendingInitialPullRequest?: boolean;
 }
 
 /**
@@ -68,9 +70,14 @@ export async function runPreflight(
   const fetched = await fetchState(git, inputs.state);
   if (operation === 'sync') {
     const unfinished = (await readInitialSyncProgress(git, fetched.state.ids)) !== null;
-    const pending = await initialPullRequestPending(git, fetched.state.linear, fetched.tracked);
+    const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, sync: fetched.sync, tracked: fetched.tracked });
     const refusal = checkSyncState(fetched.state, inputs.state, unfinished, pending);
     if (refusal !== null) return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
+  } else if (options.refusePendingInitialPullRequest === true) {
+    // Writing Linear from the tracked branch while that pull request is open would leave it to be merged over the new state.
+    const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, sync: fetched.sync, tracked: fetched.tracked });
+    const refusal = checkSyncState(fetched.state, inputs.state, false, pending);
+    if (refusal?.code === 'initial-pull-request-pending') return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   }
 
   const mapping = await loadMapping(git, fetched.tracked);

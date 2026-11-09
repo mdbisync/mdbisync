@@ -6,4 +6,5 @@ export {
   ensurePullRequest,
   findOpenPullRequest,
   openPullRequest,
+  updatePullRequest,
 } from './github.ts';

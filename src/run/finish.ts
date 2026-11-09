@@ -29,7 +29,7 @@ export interface RunReport {
   stoppedEarly: boolean;
   /** Every document this run wrote has its id in the `ids` state ref. */
   progressRecorded: boolean;
-  /** The `linear` record this run made or confirmed; null when it recorded none. */
+  /** The `linear` record an initial sync from git to Linear made or confirmed; null otherwise (a run from Linear reports its record under `linearToGit`). */
   record: { kind: 'initial'; commit: string; moved: boolean; hasTrackedParent: boolean; reformattedCount: number } | null;
   /** A confirmed initial sync from Linear: what it took and the pull request it left for a person; null for other runs. */
   linearToGit: ReverseReport | null;
@@ -82,7 +82,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     resumed: confirmed?.resumed ?? reverse?.resumed ?? false,
     stoppedEarly: confirmed?.stopped !== undefined || reverse?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
-    progressRecorded: confirmed?.progressRecorded ?? false,
+    progressRecorded: confirmed?.progressRecorded ?? (reverse !== undefined && reverse.code !== 'state-moved'),
     record:
       confirmed?.record == null
         ? null

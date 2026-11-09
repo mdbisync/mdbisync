@@ -17,6 +17,8 @@ export interface PullRequest {
   url: string;
   head: string;
   base: string;
+  title: string;
+  body: string;
 }
 
 export interface NewPullRequest {
@@ -57,18 +59,40 @@ export async function openPullRequest(target: GitHubRepository, spec: NewPullReq
   return opened;
 }
 
-/** The open pull request from `head` into `base`, opened when there is none. */
+/** Replaces a pull request's title and description. */
+export async function updatePullRequest(target: GitHubRepository, number: number, text: { title: string; body: string }): Promise<PullRequest> {
+  const answer = await request(target, 'PATCH', `/pulls/${number}`, { title: text.title, body: text.body });
+  const updated = answer.status === 200 ? toPullRequest(answer.json) : null;
+  if (updated === null) throw new PullRequestError('updating a pull request', answer.status);
+  return updated;
+}
+
+/**
+ * The open pull request from `head` into `base`, opened when there is none.
+ * An open one gets the new title and description, which describe its head as
+ * it is now.
+ */
 export async function ensurePullRequest(target: GitHubRepository, spec: NewPullRequest): Promise<{ pullRequest: PullRequest; opened: boolean }> {
   const open = await findOpenPullRequest(target, spec.head, spec.base);
-  if (open !== null) return { pullRequest: open, opened: false };
+  if (open !== null) {
+    const current = open.title === spec.title && open.body === spec.body;
+    return { pullRequest: current ? open : await updatePullRequest(target, open.number, spec), opened: false };
+  }
   return { pullRequest: await openPullRequest(target, spec), opened: true };
 }
 
 function toPullRequest(value: unknown): PullRequest | null {
-  const pr = value as { number?: unknown; html_url?: unknown; head?: { ref?: unknown }; base?: { ref?: unknown } } | null;
+  const pr = value as { number?: unknown; html_url?: unknown; title?: unknown; body?: unknown; head?: { ref?: unknown }; base?: { ref?: unknown } } | null;
   if (pr === null || typeof pr !== 'object' || typeof pr.number !== 'number') return null;
   if (typeof pr.head?.ref !== 'string' || typeof pr.base?.ref !== 'string') return null;
-  return { number: pr.number, url: typeof pr.html_url === 'string' ? pr.html_url : '', head: pr.head.ref, base: pr.base.ref };
+  return {
+    number: pr.number,
+    url: typeof pr.html_url === 'string' ? pr.html_url : '',
+    head: pr.head.ref,
+    base: pr.base.ref,
+    title: typeof pr.title === 'string' ? pr.title : '',
+    body: typeof pr.body === 'string' ? pr.body : '',
+  };
 }
 
 async function request(target: GitHubRepository, method: string, path: string, body?: Record<string, unknown>): Promise<{ status: number; json: unknown }> {

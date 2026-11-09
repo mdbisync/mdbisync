@@ -307,9 +307,13 @@ describe('initial sync from Linear to the tracked branch', () => {
     const world = fakeWorld();
     // A team document titled like a path into the project folder `eng/notes`.
     world.linear.documents = [...linearDocuments(), doc('doc-stray', 'notes/stray', { teamId: 'team-eng' }, `# Stray\n\n${CANARY}`)];
+    // The dry run already says so, as the confirmed run does.
+    const dry = await run(world, { MDBISYNC_CONFIRM: '' });
+    assert.deepEqual(dry.report.summary?.leftOutFiles.find((entry) => entry.path === 'eng/notes/stray.md')?.rules, ['title-not-a-path']);
+    assert.ok(!(dry.report.summary?.plan.create ?? []).includes('eng/notes/stray.md'));
     const { result, report } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/stray.md', rule: 'title-not-a-path' }]);
+    assert.deepEqual(report.summary?.leftOutFiles.find((entry) => entry.path === 'eng/notes/stray.md')?.rules, ['title-not-a-path']);
     assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/notes/stray.md'));
     assert.equal((await readIds())['eng/notes/stray.md'], undefined);
   });
@@ -327,6 +331,106 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(again.result.exitCode, 0, again.result.stderr);
     assert.deepEqual(Object.keys(await readIds()).sort(), Object.keys(IDS).filter((path) => path !== 'combined/README.md'));
     assert.equal(world.github.pullRequests.length, 1, 'a second pull request was opened');
+  });
+
+  it('leaves out a document whose text would read as front matter, and keeps a header that ends the file', async () => {
+    const world = fakeWorld();
+    world.linear.documents = [
+      ...linearDocuments(),
+      doc('doc-fenced', 'fenced', { projectId: 'project-api' }, `---\nlinear-team: DOCS\n---\nLooks like metadata. ${CANARY}`),
+      doc('doc-sub-readme', 'sub/README', { teamId: 'team-eng' }, `---\nlinear-project: Handbook\n---\n${CANARY}`),
+    ];
+    await fixture.seed({ 'eng/notes/README.md': '---\nlinear-project: Field notes\n---' });
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.linearToGit?.leftOutAtRecord, [
+      { path: 'eng/notes/fenced.md', rule: 'front-matter-boundary' },
+      { path: 'eng/sub/README.md', rule: 'front-matter-boundary' },
+    ]);
+    const tree = await files('refs/mdbisync/linear');
+    assert.ok(!tree.includes('eng/notes/fenced.md') && !tree.includes('eng/sub/README.md'));
+    assert.equal((await readIds())['eng/notes/fenced.md'], undefined);
+    // The annotation-only README ended at its fence: the body starts on the next line.
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/README.md'), `---\nlinear-project: Field notes\n---\n# Field notes\n\n${CANARY}`);
+  });
+
+  it('records its own marker even when an earlier record from the other direction has the same tree', async () => {
+    const world = fakeWorld();
+    // Linear stores the text in its own form, so the record differs from the tracked branch.
+    world.linear.store = (content) => content.replace('# ', '#  ');
+    world.github.pullRequests = [];
+    const gitToLinear = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
+    assert.equal(gitToLinear.result.exitCode, 0, gitToLinear.result.stderr);
+    const { result } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', 'refs/mdbisync/linear']), REVERSE_RECORD_MESSAGE);
+    assert.equal(world.github.pullRequests.length, 1);
+    assert.equal((await run(world, {}, 'sync')).report.code, 'initial-pull-request-pending');
+  });
+
+  it('opens no pull request when the tracked branch already equals Linear, and the sync then runs after other commits', async () => {
+    const world = fakeWorld();
+    assert.equal((await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' })).result.exitCode, 0);
+    for (const store of ['linear', 'ids', 'uploads']) await fixture.remote.run(['update-ref', '-d', `refs/mdbisync/${store}`]);
+    const { result, report, summary } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(report.linearToGit?.record?.changesTracked, false);
+    assert.equal(report.linearToGit?.pullRequest, null);
+    assert.deepEqual(world.github.pullRequests, []);
+    assert.equal((await refs())['refs/heads/mdbisync/linear'], undefined);
+    assert.match(summary, /no pull request is needed/);
+
+    await fixture.seed({ 'src/app.txt': 'unrelated work\n' });
+    const sync = await run(world, {}, 'sync');
+    assert.equal(sync.result.exitCode, COMMANDS.sync.notImplementedExitCode, sync.result.stderr);
+  });
+
+  it('does not overwrite commits a person pushed to the open pull request', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    assert.equal((await run(world)).result.exitCode, 0);
+    const head = await fixture.remote.text(['rev-parse', 'refs/heads/mdbisync/linear']);
+    const fix = await fixture.remote.text(['commit-tree', `${head}^{tree}`, '-p', head, '-m', 'Fix a typo'], {
+      env: { GIT_AUTHOR_NAME: 'A person', GIT_AUTHOR_EMAIL: 'person@example.com', GIT_COMMITTER_NAME: 'A person', GIT_COMMITTER_EMAIL: 'person@example.com' },
+    });
+    await fixture.remote.run(['update-ref', 'refs/heads/mdbisync/linear', fix]);
+    world.linear.documents.push(doc('doc-later', 'later', { projectId: 'project-api' }, `# Later\n\n${CANARY}`));
+    const before = await refs();
+
+    const { result, report, summary } = await run(world);
+    assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE);
+    assert.equal(report.code, 'sync-branch-changed');
+    assert.match(summary, /holds commits this sync did not make/);
+    assert.deepEqual(await refs(), before);
+  });
+
+  it('a rerun after Linear changed moves the pull request to the new record and rewrites its description', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    assert.equal((await run(world)).result.exitCode, 0);
+    world.linear.documents = world.linear.documents.filter((d) => d.id !== 'doc-plan');
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(world.github.pullRequests.length, 1);
+    assert.equal(report.linearToGit?.pullRequest?.opened, false);
+    assert.match(world.github.pullRequests[0]?.body ?? '', /eng\/notes\/plan\.md/);
+    assert.equal((await refs())['refs/heads/mdbisync/linear'], report.linearToGit?.record?.commit);
+    assert.ok(!(await files('refs/heads/mdbisync/linear')).includes('eng/notes/plan.md'));
+  });
+
+  it('an initial sync from git to Linear waits while that pull request is open', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    assert.equal((await run(world)).result.exitCode, 0);
+    const before = await refs();
+    const writes = world.writes.length;
+    const { result, report } = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
+    assert.equal(result.exitCode, NO_STATE_EXIT_CODE, result.stderr);
+    assert.equal(report.code, 'initial-pull-request-pending');
+    assert.deepEqual(await refs(), before);
+    assert.equal(world.writes.length, writes);
+    // Its dry run still shows what it would do.
+    assert.equal((await run(world, { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: '' })).result.exitCode, 0);
   });
 });
 
