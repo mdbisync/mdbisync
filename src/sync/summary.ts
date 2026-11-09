@@ -41,6 +41,8 @@ export function renderSync(result: CycleResult): string {
       `- wrote ${count(write.updated.length, 'document')} with the file's new text;`,
       `- renamed or moved ${count(write.relocated.length, 'document')};`,
       `- created ${count(write.created.length, 'document')};`,
+      `- restored ${count(write.restored.length, 'document')} that Linear had removed while git changed them;`,
+      `- ${count(write.conflicts.length, 'document')} with conflict markers, where both sides changed the same lines; either side resolves them by editing the text;`,
       `- moved ${count(write.trashed.length, 'document')} of removed files to Linear's trash, from which they can be restored;`,
       `- skipped ${count(write.skipped.length, 'document')};`,
       `- left out ${count(write.leftOut.length + write.leftOutAtWrite.length, 'file')}, which stay in git only until they are fixed.`,
@@ -59,6 +61,8 @@ export function renderSync(result: CycleResult): string {
   };
   table('Failed', ['Path', 'Operation', 'Error'], write.failed.map((entry) => [entry.path, entry.operation, entry.error]));
   table('Skipped', ['Path', 'Why'], write.skipped.map((entry) => [entry.path, REASONS[entry.reason]]));
+  table('Conflict markers', ['Path'], write.conflicts.map((path) => [path]));
+  table('Decided by the conflict rules', ['Rule', 'What happened'], write.decided.map((entry) => [entry.summary.code, entry.summary.text]));
   table('Renamed or moved', ['From', 'To'], write.relocated.map((entry) => [entry.from, entry.to]));
   table('Moved to trash', ['Path'], write.trashed.map((path) => [path]));
   table('Left out', ['Path', 'Rules'], [...write.leftOut.map((entry) => [entry.path, entry.rules.join(', ')]), ...write.leftOutAtWrite.map((entry) => [entry.path, entry.rule])]);

@@ -673,11 +673,14 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, []);
-    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'conflict' }]);
+    // Both versions are written between the conflict markers, and the document gets the conflict mark and its notice.
+    assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument', 'CommentOnDocument']);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(report.sync?.conflicts, ['eng/notes/review.md']);
     assert.ok(report.capture?.changed.includes('eng/notes/review.md'));
-    assert.match(await show('refs/mdbisync/linear:eng/notes/review.md'), /Typed in Linear meanwhile/);
-    assert.match(document.content ?? '', /Typed in Linear meanwhile/);
+    for (const text of [document.content ?? '', await show('refs/mdbisync/linear:eng/notes/review.md')]) {
+      assert.match(text, /\*\*Sync conflict: git version\*\*\n\nFindings, fixed in git\. [^\n]+\n\n\*\*Sync conflict: Linear version\*\*\n\nTyped in Linear meanwhile\. [^\n]+\n\n\*\*Sync conflict: end\*\*/);
+    }
   });
 
   it('a left-out file is compared with what Linear was given, not with a git version it never received', async () => {
@@ -822,7 +825,7 @@ describe('sync: the tracked branch to Linear', () => {
     await assertMergeRecord(previous);
   });
 
-  it('edits of the same paragraph on both sides are not written; the record is an ordinary commit', async () => {
+  it('edits of the same paragraph on both sides are written with conflict markers; the record is a merge commit', async () => {
     const linearText = `# Notes\n\nFirst paragraph, Linear's way.\n\nSecond paragraph. ${CANARY}\n`;
     await captured('eng/backend/notes.md', linearText);
     await commit({
@@ -831,11 +834,14 @@ describe('sync: the tracked branch to Linear', () => {
     });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, ['UpdateDocument']);
-    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/backend/notes.md', reason: 'conflict' }]);
-    assert.equal((await documentOf('eng/backend/notes.md')).content, body('', linearText));
-    assert.equal(report.sync?.record?.kind, 'ordinary');
-    assert.equal(await show('refs/mdbisync/linear:eng/backend/notes.md'), linearText);
+    // The marked text, the conflict mark and its notice, then the other document.
+    assert.deepEqual(writes, ['UpdateDocument', 'UpdateDocument', 'CommentOnDocument', 'UpdateDocument']);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(report.sync?.conflicts, ['eng/backend/notes.md']);
+    const marked = `# Notes\n\n**Sync conflict: git version**\n\nFirst paragraph, git's way.\n\n**Sync conflict: Linear version**\n\nFirst paragraph, Linear's way.\n\n**Sync conflict: end**\n\nSecond paragraph. ${CANARY}\n`;
+    assert.equal((await documentOf('eng/backend/notes.md')).content, marked);
+    assert.equal(report.sync?.record?.kind, 'merge');
+    assert.equal(await show('refs/mdbisync/linear:eng/backend/notes.md'), marked);
     assert.match(await show('refs/mdbisync/linear:eng/notes/review.md'), /Another edit/);
   });
 

@@ -7,7 +7,8 @@ import { readAnnotation } from '../mapping/index.ts';
 import { lintText, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
-import { type Git, type IdMap, type Oid, listTree, readBlobs } from '../state/index.ts';
+import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
+import { type Git, type IdMap, type Oid, buildTree, listTree, readBlobs } from '../state/index.ts';
 
 /** A synchronized file of one side: its path, blob, Linear title and place. */
 export interface SideFile {
@@ -31,11 +32,25 @@ export interface KeepChange {
   title: boolean;
   /** The project or team changed. */
   place: boolean;
+  /** A neutral comment for the document once it is written (its Linear title was set back). */
+  comment?: string;
 }
 
 export interface CreateChange {
   kind: 'create';
   path: string;
+  /**
+   * The document Linear removed while git changed its file: it is
+   * restored with this id, so its comments stay, or created anew when Linear
+   * no longer has it.
+   */
+  restore?: { id: string; gone: StructuralSummary };
+}
+
+/** A case the structural conflict rules decided, for the run summary. */
+export interface Decided {
+  path: string;
+  summary: StructuralSummary;
 }
 
 export interface TrashChange {
@@ -49,10 +64,18 @@ export type DocumentChange = KeepChange | CreateChange | TrashChange;
 export interface LocalMerge {
   /** The merge base: the tracked commit `linear` last took in. */
   base: Oid;
-  /** The merged tree, with git's own markers in conflicted files. */
+  /**
+   * The merged tree. Documents git could not merge hold the sync's conflict
+   * marker paragraphs, and delete or rename conflicts are decided by the
+   * structural rules.
+   */
   tree: Oid;
-  /** Paths git could not merge on its own; neither side's version is written to Linear. */
+  /** Paths that could not be merged even so (not Markdown documents); neither side's version is written to Linear. */
   conflicts: string[];
+  /** Documents of the merge result whose text holds conflict markers this merge wrote. */
+  marked: string[];
+  /** Cases the structural rules decided. */
+  decided: Decided[];
   /** Synchronized files of the `linear` tip, by path. */
   linear: Map<string, SideFile>;
   /** Synchronized files of the merge result, by path. */
@@ -85,16 +108,18 @@ export interface HeldRename {
  * synchronized paths to documents; a path whose document is unknown is
  * created.
  */
-export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdMap, facts: LinearFacts = LINEAR_FACTS): Promise<LocalMerge> {
+export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdMap, facts: LinearFacts = LINEAR_FACTS, options: MergeOptions = {}): Promise<LocalMerge> {
   const base = await git.text(['merge-base', linear, tracked]);
   const merged = await git.run(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', linear, tracked], { okCodes: [0, 1] });
-  const [tree, ...rest] = merged.stdout.toString('utf8').split('\0');
-  if (tree === undefined || !/^[0-9a-f]{40,64}$/.test(tree)) throw new Error('git merge-tree gave no tree');
-  const conflicts = [...new Set(rest.filter((path) => path !== ''))].sort(compare);
+  const [gitTree, ...rest] = merged.stdout.toString('utf8').split('\0');
+  if (gitTree === undefined || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error('git merge-tree gave no tree');
+  const unmerged = [...new Set(rest.filter((path) => path !== ''))].sort(compare);
+  const renames = await renamesBetween(git, base, tracked);
+  const resolved = await resolveConflicts(git, { base, linear, tracked, tree: gitTree, unmerged, renames, ids, knownId: options.knownId });
+  const { tree, unresolved: conflicts } = resolved;
 
   const linearSide = await synchronizedFiles(git, linear, facts);
   const resultSide = await synchronizedFiles(git, tree, facts);
-  const renames = await renamesBetween(git, base, tracked);
   const conflicted = new Set(conflicts);
 
   const changes: DocumentChange[] = [];
@@ -110,7 +135,9 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
       continue;
     }
     let to: string | undefined;
-    if (resultSide.files.has(from)) to = from;
+    const decidedPath = resolved.moves.get(from);
+    if (decidedPath !== undefined && resultSide.files.has(decidedPath) && !ids.has(decidedPath)) to = decidedPath;
+    else if (resultSide.files.has(from)) to = from;
     else {
       const renamed = renames.get(from);
       if (renamed !== undefined && !ids.has(renamed) && !claimed.has(renamed)) {
@@ -141,6 +168,8 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
       title: previous === undefined || previous.title.normalize('NFC') !== next.title.normalize('NFC'),
       place: previous === undefined || placeKey(previous.place) !== placeKey(next.place),
     };
+    const comment = resolved.comments.get(from);
+    if (comment !== undefined && (change.title || change.place)) change.comment = comment;
     if (change.content || change.title || change.place) changes.push(change);
     else unchanged.push(change);
   }
@@ -154,7 +183,8 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
         const annotation = readAnnotation(path, (blobs.get(file.oid) as Buffer).toString('utf8'));
         if ('annotation' in annotation && annotation.annotation !== null) continue;
       }
-      changes.push({ kind: 'create', path });
+      const restore = resolved.restores.get(path);
+      changes.push(restore === undefined ? { kind: 'create', path } : { kind: 'create', path, restore });
     }
   }
   changes.sort((a, b) => compare(changePath(a), changePath(b)));
@@ -163,6 +193,8 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     base,
     tree,
     conflicts,
+    marked: resolved.marked.filter((path) => resultSide.files.has(path)).sort(compare),
+    decided: resolved.decided,
     linear: linearSide.files,
     result: resultSide.files,
     leftOut: resultSide.leftOut,
@@ -234,6 +266,123 @@ export async function lastSynchronized(git: Git, linear: Oid, path: string, fact
 
 function toSideFile(document: MappedDocument): SideFile {
   return { path: document.path, oid: document.oid, title: document.title, place: document.place };
+}
+
+export interface MergeOptions {
+  /**
+   * The id a path's document last had in `refs/mdbisync/ids`, also after
+   * Linear removed it; undefined when the path never had one. Finds a
+   * document Linear renamed or removed since the merge base.
+   */
+  knownId?: ((path: string) => Promise<string | undefined>) | undefined;
+}
+
+interface ConflictInput {
+  base: Oid;
+  linear: Oid;
+  tracked: Oid;
+  /** git's merge result, with its own markers in the unmerged files. */
+  tree: Oid;
+  /** Paths git could not merge. */
+  unmerged: string[];
+  /** git's renames between the merge base and the tracked branch. */
+  renames: Map<string, string>;
+  ids: IdMap;
+  knownId?: MergeOptions['knownId'];
+}
+
+interface Resolved {
+  tree: Oid;
+  unresolved: string[];
+  /** A document's path on the `linear` tip → its path in the result, where the rules moved it. */
+  moves: Map<string, string>;
+  /** A document's path on the `linear` tip → the comment it gets once written. */
+  comments: Map<string, string>;
+  /** A result path → the document Linear removed, to restore there. */
+  restores: Map<string, { id: string; gone: StructuralSummary }>;
+  marked: string[];
+  decided: Decided[];
+}
+
+/**
+ * Step 3's own merge of the documents git could not merge: per document,
+ * the base, tracked and Linear versions go to the structural rules, which
+ * merge the text with the conflict marker paragraphs and decide deletes
+ * and renames. The result replaces git's
+ * conflicted files in the tree. Files other than Markdown documents stay
+ * unresolved.
+ */
+async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolved> {
+  const out: Resolved = { tree: input.tree, unresolved: [], moves: new Map(), comments: new Map(), restores: new Map(), marked: [], decided: [] };
+  if (input.unmerged.length === 0) return out;
+  const [baseFiles, gitFiles, linearFiles] = await Promise.all([filesOf(git, input.base), filesOf(git, input.tracked), filesOf(git, input.linear)]);
+  const linearRenames = await renamesBetween(git, input.base, input.linear);
+  const pathById = new Map([...input.ids].map(([path, entry]) => [entry.id, path]));
+  const knownId = async (path: string) => input.knownId?.(path);
+
+  const basePathOf = (path: string): string | null => {
+    if (baseFiles.has(path)) return path;
+    for (const [from, to] of [...input.renames, ...linearRenames]) if (to === path && baseFiles.has(from)) return from;
+    return null;
+  };
+  // Linear's side is found by the document's id first: a title change in
+  // Linear moves the file, and a heavy edit hides that move from git.
+  const linearPathOf = async (basePath: string): Promise<string | null> => {
+    const id = await knownId(basePath);
+    const byId = id === undefined ? undefined : pathById.get(id);
+    if (byId !== undefined && linearFiles.has(byId)) return byId;
+    const renamed = linearRenames.get(basePath);
+    if (renamed !== undefined && linearFiles.has(renamed)) return renamed;
+    return linearFiles.has(basePath) && (id === undefined || byId === basePath) ? basePath : null;
+  };
+
+  const groups: Array<{ basePath: string | null; gitPath: string | null; linearPath: string | null; involved: string[] }> = [];
+  const seen = new Set<string>();
+  for (const path of input.unmerged) {
+    if (seen.has(path)) continue;
+    const basePath = basePathOf(path);
+    const gitPath = basePath === null ? (gitFiles.has(path) ? path : null) : (input.renames.get(basePath) ?? (gitFiles.has(basePath) ? basePath : null));
+    const linearPath = basePath === null ? (linearFiles.has(path) ? path : null) : await linearPathOf(basePath);
+    const involved = [...new Set([path, basePath, gitPath, linearPath].filter((entry): entry is string => entry !== null))];
+    for (const entry of involved) seen.add(entry);
+    if (involved.every((entry) => entry.toLowerCase().endsWith('.md'))) groups.push({ basePath, gitPath, linearPath, involved });
+    else out.unresolved.push(...involved.filter((entry) => input.unmerged.includes(entry)));
+  }
+
+  const blobs = await readBlobs(git, groups.flatMap(({ basePath, gitPath, linearPath }) => [
+    ...(basePath === null ? [] : [baseFiles.get(basePath) as Oid]),
+    ...(gitPath === null ? [] : [gitFiles.get(gitPath) as Oid]),
+    ...(linearPath === null ? [] : [linearFiles.get(linearPath) as Oid]),
+  ]));
+  const version = (files: Map<string, Oid>, path: string | null): Version | null =>
+    path === null ? null : { path, text: (blobs.get(files.get(path) as Oid) as Buffer).toString('utf8') };
+
+  const changes = new Map<string, string | null>();
+  for (const { basePath, gitPath, linearPath, involved } of groups) {
+    const versions = {
+      // Both sides added the path: an empty base, so the whole text is merged.
+      base: version(baseFiles, basePath) ?? { path: involved[0] as string, text: '' },
+      git: version(gitFiles, gitPath),
+      linear: version(linearFiles, linearPath),
+    };
+    const result: StructuralResult = await resolveStructural(versions);
+    for (const path of involved) changes.set(path, null);
+    if (result.path !== null && result.text !== null) changes.set(result.path, result.text);
+    if (linearPath !== null && result.path !== null && result.path !== linearPath) out.moves.set(linearPath, result.path);
+    if (linearPath !== null && result.linear.comment !== undefined) out.comments.set(linearPath, result.linear.comment);
+    let summary = result.summary;
+    if (result.kind === 'linear-deleted-git-changed' && result.path !== null) {
+      const gone = (await resolveStructural({ ...versions, linearGone: true })).summary as StructuralSummary;
+      const id = basePath === null ? undefined : await knownId(basePath);
+      if (id !== undefined) out.restores.set(result.path, { id, gone });
+      else summary = gone;
+    }
+    if (result.path !== null && result.conflicts.length > 0) out.marked.push(result.path);
+    if (summary !== null) out.decided.push({ path: result.path ?? basePath ?? (involved[0] as string), summary });
+  }
+  out.tree = await buildTree(git, input.tree, changes);
+  out.unresolved.sort(compare);
+  return out;
 }
 
 /** Renames git detects between two commits: old path → new path. */
