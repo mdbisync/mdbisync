@@ -3,8 +3,9 @@
 //
 // The tidy part reads like one company's documentation. Everything that
 // exists to exercise an edge case (sizes, odd names, lint errors, marker
-// lookalikes, unusual typography) lives under eng/edge-cases/, so a reader
-// can open the tidy part first.
+// lookalikes, unusual typography) lives in the eng/edge-cases project, and the
+// cases whose titles need the team zone (long titles, duplicate titles) in
+// eng/edge-cases (team zone), so a reader can open the tidy part first.
 
 import { validateSha } from "../../src/release/package.ts";
 import { COMPANY, PROFILE_PATHS, PROFILES } from "./company.ts";

@@ -8,6 +8,7 @@
 
 import { COMPANY, CUSTOMERS, DEPOTS, PEOPLE, PROFILES, REGIONS, SERVICES, type Kind, type Profile, type Topic } from "./company.ts";
 import type { Rng } from "./rng.ts";
+import { capitalize } from "./text.ts";
 
 /** An image or link the caller placed for the document, already as Markdown. */
 export type Media = { markdown: string; kind: "image" | "attachment"; label: string };
@@ -934,7 +935,8 @@ function release(input: WriteInput, f: Figures): Draft {
   const mobile = profile.name === "Driver app";
   const support = profile.name === "Help center";
   const version = mobile ? `3.${index}` : support ? `4.${index}` : `4.${index}.${rng.int(0, 2)}`;
-  const date = weekDate(index * 2 + rng.int(0, 1), 2);
+  // Two releases a week, on Tuesday and Thursday, so even a long series stays within the corpus timeline.
+  const date = weekDate(Math.floor(index / 2), index % 2 === 0 ? 1 : 3);
   const product = mobile ? "Driver app" : "Kitewing";
   const heading = support ? `What's new in ${product} ${version}` : `${product} ${version}`;
   const body = [
@@ -989,6 +991,14 @@ function retro(input: WriteInput, f: Figures): Draft {
   return { heading, folder: "retros", name: `sprint-${index + 1}`, body: body.join("\n") };
 }
 
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** The month of a monthly series, counted from September 2025, where the dated documents start. */
+function monthOf(index: number): { month: string; year: number; mm: string } {
+  const n = index + 8;
+  return { month: MONTHS[n % 12] as string, year: 2025 + Math.floor(n / 12), mm: String((n % 12) + 1).padStart(2, "0") };
+}
+
 function spec(input: WriteInput, topic: Topic, f: Figures): Draft {
   const { rng, profile } = input;
   const [pm, designer, eng] = people(rng, 3) as [string, string, string];
@@ -1032,7 +1042,7 @@ function spec(input: WriteInput, topic: Topic, f: Figures): Draft {
     "",
     "## Out of scope",
     "",
-    `* ${topic.risk.replace(/ could | would | may /, " will not be solved here: it ")}`,
+    `* The known risk stays open: ${lower(topic.risk)} We handle it in a later step.`,
     "",
     ...f.rest(),
   ];
@@ -1093,7 +1103,7 @@ function okr(input: WriteInput, f: Figures): Draft {
         tp.summary,
         "",
         table(["Key result", "Target", "Score"], [
-          [`${tp.metric.charAt(0).toUpperCase()}${tp.metric.slice(1)}`, amount(tp.after, tp.unit), score],
+          [capitalize(tp.metric), amount(tp.after, tp.unit), score],
           ["Rolled out to every depot", "100%", (rng.int(3, 10) / 10).toFixed(1)],
         ]),
         "",
@@ -1111,8 +1121,7 @@ function okr(input: WriteInput, f: Figures): Draft {
 
 function newsletter(input: WriteInput, f: Figures): Draft {
   const { rng, index } = input;
-  const month = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][(index + 8) % 12] as string;
-  const year = 2025 + Math.floor((index + 8) / 12);
+  const { month, year, mm } = monthOf(index);
   const pick = rng.shuffle(Object.values(PROFILES).flatMap((p) => p.topics)).slice(0, 3);
   const joiners = people(rng, 2);
   const heading = `${COMPANY} monthly, ${month} ${year}`;
@@ -1145,13 +1154,12 @@ function newsletter(input: WriteInput, f: Figures): Draft {
     "",
     ...f.rest(),
   ];
-  return { heading, folder: "newsletter", name: `${year}-${String(((index + 8) % 12) + 1).padStart(2, "0")}-${month.toLowerCase()}`, body: body.join("\n") };
+  return { heading, folder: "newsletter", name: `${year}-${mm}-${month.toLowerCase()}`, body: body.join("\n") };
 }
 
 function apichangelog(input: WriteInput, f: Figures): Draft {
   const { rng, index } = input;
-  const month = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][(index + 6) % 12] as string;
-  const year = 2025 + Math.floor((index + 6) / 12);
+  const { month, year, mm } = monthOf(index);
   const resource = rng.pick(["orders", "routes", "stops", "events", "invoices"]);
   const heading = `API changelog, ${month} ${year}`;
   const body = [
@@ -1166,18 +1174,18 @@ function apichangelog(input: WriteInput, f: Figures): Draft {
     "",
     "## Changed",
     "",
-    `* Exports of more than ${rng.int(5, 50) * 1000} rows are split into pages of 10,000.`,
+    `* Exports of more than ${(rng.int(5, 50) * 1000).toLocaleString("en-US")} rows are split into pages of 10,000.`,
     "",
     ...(index % 3 === 2 ? ["## Breaking", "", `* The old \`/v1/${resource}\` endpoint stops on ${weekDate(index * 4 + 20)}. Move to \`/v2\` before then.`, ""] : []),
     "## Example",
     "",
     "```sh",
-    `curl -H "Authorization: Bearer $TOKEN" "https://api.kitewing.example/v2/${resource}?updatedSince=${weekDate(index * 4)}"`,
+    `curl -H "Authorization: Bearer $TOKEN" "https://api.kitewing.example/v2/${resource}?updatedSince=${weekDate(index * 4 + 1)}"`,
     "```",
     "",
     ...f.rest(),
   ];
-  return { heading, folder: "changelog", name: `${year}-${String(((index + 6) % 12) + 1).padStart(2, "0")}`, body: body.join("\n") };
+  return { heading, folder: "changelog", name: `${year}-${mm}`, body: body.join("\n") };
 }
 
 export function writeDocument(input: WriteInput): Draft {

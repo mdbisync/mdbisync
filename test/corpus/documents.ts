@@ -4,7 +4,9 @@
 // HTML and extensions, weekly digests with links, and localization pages
 // read like Kitewing's own documentation and live in its team and project
 // folders. Pairwise construct samples, size extremes, odd names, marker
-// lookalikes, lint errors and unusual typography live under eng/edge-cases/.
+// lookalikes, lint errors and unusual typography live in the eng/edge-cases
+// project; long titles and duplicate titles, which need the team zone, live in
+// eng/edge-cases (team zone).
 
 import { posix } from "node:path";
 import { fixText } from "../../src/format/index.ts";
@@ -144,7 +146,7 @@ function isDot(ref: AssetRef): boolean {
   return ref.label.endsWith("status dot");
 }
 
-/** Work documents added in the projects and team DOCS only; no Linear container may pass about 800 documents. */
+/** Work documents added in the projects only; no Linear container may pass about 800 documents. */
 const EXTRA_OUTSIDE_ENG_ZONE = 400;
 
 type Planned = { home: Home; kind: Kind; topic: Topic | null; index: number };
@@ -153,7 +155,7 @@ type Planned = { home: Home; kind: Kind; topic: Topic | null; index: number };
  * The work documents: one per topic and topic kind, the fixed series
  * (quarterly goals, newsletter, API changelog), then dated series dealt round
  * by round over every home until `total`, then `extra` more dated series in
- * the projects and team DOCS only, so team ENG's zone does not grow.
+ * the projects only, so team ENG's zone does not grow.
  */
 function plan(total: number, extra: number): Planned[] {
   const out: Planned[] = [];
@@ -169,6 +171,7 @@ function plan(total: number, extra: number): Planned[] {
   const dated = (k: Kind) => !TOPIC_KINDS.includes(k) && FIXED_SERIES[k] === undefined;
   const series = HOMES.map((home) => ({ home, kinds: profileOf(home).kinds.filter(dated), turn: 0, next: new Map<Kind, number>() })).filter((s) => s.kinds.length > 0);
   const deal = (from: typeof series, until: number) => {
+    if (from.length === 0 && out.length < until) throw new Error("no home has a dated series to fill the work documents");
     while (out.length < until) {
       for (const s of from) {
         if (out.length >= until) break;
@@ -180,7 +183,7 @@ function plan(total: number, extra: number): Planned[] {
     }
   };
   deal(series, total);
-  deal(series.filter((s) => s.home.scope === "project" || s.home.team === "DOCS"), total + extra);
+  deal(series.filter((s) => s.home.scope === "project"), total + extra);
   return out;
 }
 

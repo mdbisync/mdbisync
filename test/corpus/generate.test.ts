@@ -317,8 +317,8 @@ test("edge cases stay in the edge-case area and the Markdown reference, away fro
   const edgeGroups = new Set(["pairwise", "size-spectrum", "conflict-markers", "lint-errors"]);
   for (const file of corpus().files) {
     if (file.kind !== "markdown" || [`${EDGE}/`, `${EDGE_ZONE}/`, "docs/reference/", `${LOOSE}/`].some((p) => file.path.startsWith(p))) continue;
-    assert.ok(!edgeGroups.has(file.group), `${file.path} (${file.group}) belongs in ${EDGE}`);
-    assert.notEqual(file.expected, "lint-error", `${file.path} is a lint error outside ${EDGE}`);
+    assert.ok(!edgeGroups.has(file.group), `${file.path} (${file.group}) belongs in ${EDGE} or ${EDGE_ZONE}`);
+    assert.notEqual(file.expected, "lint-error", `${file.path} is a lint error outside ${EDGE} and ${EDGE_ZONE}`);
   }
 });
 

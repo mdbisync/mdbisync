@@ -42,7 +42,7 @@ export type Kind =
   | "article" | "onboarding" | "faq" | "roadmap" | "meeting" | "status" | "handoff" | "release" | "retro"
   | "spec" | "callnotes" | "okr" | "newsletter" | "apichangelog";
 
-/** Kinds written once per topic; the others are dated series that mention several topics. */
+/** Kinds written once per topic. Kinds in FIXED_SERIES have a fixed length; every other kind is a dated series. */
 export const TOPIC_KINDS: readonly Kind[] = ["rfc", "design", "adr", "runbook", "postmortem", "api", "howto", "experiment", "launch", "policy", "article", "onboarding", "faq", "roadmap", "spec"];
 
 /** Series with a fixed length: quarterly goals, a monthly newsletter, a monthly API changelog. */
@@ -330,7 +330,7 @@ export const PROFILES: Record<string, Profile> = {
   "eng/data.pipeline": {
     name: "Data pipeline",
     about: "The data pipeline collects events from every service and turns them into the tables behind reports, billing and planning.",
-    kinds: ["design", "runbook", "postmortem", "api", "adr", "okr", "apichangelog", "status"],
+    kinds: ["design", "runbook", "postmortem", "api", "adr", "okr", "apichangelog", "status", "meeting", "retro"],
     screens: ["PIPELINE RUNS", "TABLE FRESHNESS", "DATA QUALITY"],
     labels: ["EVENTS", "INGEST", "CLEAN", "MODEL", "REPORTS"],
     charts: ["ROWS PER DAY", "PIPELINE DELAY MIN", "FAILED CHECKS"],
@@ -365,7 +365,7 @@ export const PROFILES: Record<string, Profile> = {
   "eng/search (beta)": {
     name: "Shipment search",
     about: "Search lets planners and support find any order, stop or parcel by number, address or customer in under a second.",
-    kinds: ["rfc", "experiment", "design", "spec", "okr", "status", "meeting"],
+    kinds: ["rfc", "experiment", "design", "spec", "okr", "status", "meeting", "retro"],
     screens: ["SEARCH", "RESULTS", "RELEVANCE"],
     labels: ["QUERY", "PARSE", "RETRIEVE", "RANK", "RESULTS"],
     charts: ["QUERY LATENCY MS", "CLICK-THROUGH %", "ZERO RESULTS %"],
