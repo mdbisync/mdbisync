@@ -416,12 +416,24 @@ class FakeLinear {
     return document;
   }
 
-  async listDocuments(place: { projectId?: string; teamId?: string }) {
-    return [...this.documents.values()].filter((document) => (place.projectId !== undefined ? document.projectId === place.projectId : document.teamId === place.teamId)).map((document) => ({ ...document }));
+  /** Ids left out of every `documents(...)` query while `document(id:)` still answers: an opt-in, not Linear's measured behaviour. */
+  unlisted = new Set<string>();
+
+  /** Lists a place's documents; trashed and archived ones only with `includeArchived`, as Linear does. */
+  async listDocuments(place: { projectId?: string; teamId?: string }, options: { includeArchived?: boolean } = {}) {
+    return [...this.documents.values()]
+      .filter((document) => (place.projectId !== undefined ? document.projectId === place.projectId : document.teamId === place.teamId))
+      .filter((document) => !this.unlisted.has(document.id) && (options.includeArchived === true || (!document.trashed && document.archivedAt === null)))
+      .map((document) => ({ ...document }));
   }
 
   async getDocuments(ids: readonly string[]) {
-    return ids.flatMap((id) => (this.documents.has(id) ? [{ ...(this.documents.get(id) as LinearDocument) }] : []));
+    return ids.flatMap((id) => (this.documents.has(id) && !this.unlisted.has(id) ? [{ ...(this.documents.get(id) as LinearDocument) }] : []));
+  }
+
+  async getDocument(id: string) {
+    const document = this.documents.get(id);
+    return document === undefined ? null : { ...document };
   }
 
   async createDocument(place: { projectId?: string; teamId?: string }, input: { title: string; content?: string }) {
@@ -434,12 +446,13 @@ class FakeLinear {
     return { ...document };
   }
 
+  /** `documentDelete`: only to the trash, with `archivedAt` set. */
   async trashDocument(id: string) {
-    (this.documents.get(id) as LinearDocument).trashed = true;
+    Object.assign(this.documents.get(id) as LinearDocument, { trashed: true, archivedAt: new Date().toISOString() });
   }
 
   async restoreDocument(id: string) {
-    (this.documents.get(id) as LinearDocument).trashed = false;
+    Object.assign(this.documents.get(id) as LinearDocument, { trashed: false, archivedAt: null });
   }
 
   async commentOnDocument(documentContentId: string, body: string) {
@@ -937,6 +950,34 @@ describe('subjects', () => {
     assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
     refreshView(ctx);
     assert.equal(((await resolveSubject(ctx, 'corpus.validPaths')).value as string[]).includes('eng/platform/footnotes.md'), false);
+  });
+
+  it('tell a trashed document from an archived or missing one in I7, reading unlisted ids one by one', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const i7 = async () => INVARIANT_CHECKS.I7(ctx, async () => readSides(ctx));
+    assert.deepEqual(await i7(), { name: 'I7', ok: true });
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    const notes = ids['eng/platform/notes.md']?.id as string;
+    const start = ids['docs/handbook/start.md']?.id as string;
+    // Trashed and read back by the batch read by id, as Linear answers.
+    await linear.trashDocument(plan);
+    assert.match((await i7()).detail ?? '', /^1 problems: eng\/platform\/plan\.md: its document is in Linear's trash$/);
+    // Trashed, archived and deleted, none returned by any list: each read on its own.
+    for (const id of [plan, notes, start]) linear.unlisted.add(id);
+    (linear.documents.get(notes) as LinearDocument).archivedAt = new Date().toISOString();
+    linear.documents.delete(start);
+    const reads: string[] = [];
+    const getDocument = linear.getDocument.bind(linear);
+    linear.getDocument = async (id: string) => {
+      reads.push(id);
+      return getDocument(id);
+    };
+    const detail = (await i7()).detail ?? '';
+    assert.match(detail, /eng\/platform\/plan\.md: its document is in Linear's trash/);
+    assert.match(detail, /eng\/platform\/notes\.md: its document is archived/);
+    assert.match(detail, /docs\/handbook\/start\.md: its document is not in Linear/);
+    assert.deepEqual(reads.sort(), [plan, notes, start].sort());
   });
 
   it('count the engine\'s commits as git writes and not the scenario\'s own', async () => {

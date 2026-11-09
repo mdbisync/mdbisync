@@ -9,7 +9,7 @@ import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts'
 import type { Definition, Image, Link, Nodes } from 'mdast';
 import { parse, visit } from '../../../src/format/markdown.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
-import type { RunContext } from './context.ts';
+import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
@@ -20,6 +20,13 @@ import { refreshView, resolveSubject } from './subjects.ts';
 /** Removes a YAML front matter block at the start of a file. */
 export function stripFrontMatter(text: string): string {
   return text.replace(/^(?:﻿)?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
+}
+
+/** Where a mapped id's document is: in use, in the trash, archived (with its project), or gone. */
+export function documentState(document: Pick<LinearDocument, 'trashed' | 'archivedAt'> | undefined): 'active' | 'trashed' | 'archived' | 'missing' {
+  if (document === undefined) return 'missing';
+  if (document.trashed) return 'trashed';
+  return document.archivedAt === null ? 'active' : 'archived';
 }
 
 /** The Linear title of a synchronized file: its path below its annotated folder, without `.md`. */
@@ -457,10 +464,12 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
         problems.push(`${path} has no id`);
         continue;
       }
-      const document = s.documents.get(entry.id);
+      // An id no list returned is read on its own, so the report tells a trashed document from a missing one.
+      const document = s.documents.get(entry.id) ?? (await (ctx.live as LiveWorld).app.getDocument(entry.id)) ?? undefined;
       const folder = owningFolder(path, folders);
-      if (document === undefined) problems.push(`${path}: its id is not in Linear`);
-      else if (folder !== null && document.title !== titleOf(path, folder.folder)) problems.push(`${path}: title differs from its path`);
+      const state = documentState(document);
+      if (state !== 'active') problems.push(`${path}: its document is ${state === 'missing' ? 'not in Linear' : state === 'trashed' ? "in Linear's trash" : 'archived'}`);
+      else if (folder !== null && document?.title !== titleOf(path, folder.folder)) problems.push(`${path}: title differs from its path`);
     }
     for (const path of s.ids.keys()) if (!s.files.has(path)) problems.push(`${path} is mapped but not a synchronized file`);
     return problems.length === 0 ? ok('I7') : bad('I7', `${problems.length} problems: ${problems.slice(0, 10).join('; ')}`);
