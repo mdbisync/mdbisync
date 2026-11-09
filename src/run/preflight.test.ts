@@ -270,6 +270,7 @@ describe('preflight', () => {
         assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE);
         assert.equal(report.code, 'linear-format-hook-required');
         assert.ok(report.setupChecks.some((check) => check.name === 'linear-format-hook' && check.state === 'failed' && /no linear-format hook/.test(check.detail)));
+        assert.match(result.stderr, /sync: stopped before any write \(linear-format-hook-required\): .*no linear-format hook/);
         assert.deepEqual(world.writes, []);
       } finally {
         await fixture.seed({ '.pre-commit-config.yaml': PRE_COMMIT });

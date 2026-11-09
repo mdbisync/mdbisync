@@ -45,6 +45,8 @@ export interface SetupReport {
   ok: boolean;
   /** The first failure's code; absent when every check passed. */
   code?: FailureCode;
+  /** The first failure's detail, with its code. */
+  detail?: string;
   checks: CheckResult[];
   /** Ids of the pre-commit hooks marked `alias: security`; empty means content is pushed unchecked. */
   securityHooks: string[];
@@ -66,5 +68,5 @@ export function buildReport(checks: CheckResult[], securityHooks: string[]): Set
   const failure = checks.find((check) => check.state === 'failed');
   return failure?.code === undefined
     ? { ok: true, checks, securityHooks }
-    : { ok: false, code: failure.code, checks, securityHooks };
+    : { ok: false, code: failure.code, detail: failure.detail, checks, securityHooks };
 }
