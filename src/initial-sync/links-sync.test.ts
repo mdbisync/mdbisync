@@ -8,8 +8,14 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
+import { environmentName, readInputs } from '../run/inputs.ts';
+import { runPreflight } from '../run/preflight.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { Git } from '../state/index.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
+import { type ConfirmedResult, confirmInitialSync } from './confirm.ts';
+import { documentLinks } from './links.ts';
+import { type BodyTransform, LeaveOutError } from './transform.ts';
 
 const CANARY = 'kx-7d1e0b52';
 const BASE = 'https://linear.app/example-team/document';
@@ -139,6 +145,52 @@ describe('links between synchronized documents in a confirmed initial sync', () 
     const second = await run(world);
     assert.equal(second.result.exitCode, 0, second.result.stderr);
     await assertLinked(world);
+  });
+
+  it('a document left out while writing keeps its id, so a run after it writes nothing to the documents linking it', async () => {
+    const world = fakeWorld();
+    const values: Record<string, string> = {
+      MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
+      MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
+      MDBISYNC_LINEAR_API_URL: LINEAR_API,
+      MDBISYNC_GITHUB_TOKEN: 'gh-token',
+      MDBISYNC_GITHUB_API_URL: GITHUB_API,
+      MDBISYNC_REPOSITORY: 'owner/repo',
+      MDBISYNC_DIRECTION: 'git-to-linear',
+      MDBISYNC_CONFIRM: 'true',
+    };
+    const inputs = readInputs((name) => values[environmentName(name)] ?? '');
+    const leaveOutPlan: BodyTransform = {
+      name: 'leave-out',
+      apply: async ({ path, body }) => {
+        if (path === 'eng/notes/plan.md') throw new LeaveOutError('upload-too-large', 'an embedded file is over the upload limit');
+        return body;
+      },
+      restore: ({ body }) => body,
+    };
+    const confirm = async () => {
+      let result: ConfirmedResult | undefined;
+      const outcome = await runPreflight('initial-sync', inputs, { git: new Git(cwd), warn: () => undefined, fetch: fakeFetch(world) }, async (context) => {
+        result = (await confirmInitialSync(context, { config: inputs.state, transforms: [leaveOutPlan, documentLinks()], stopAfterDocuments: undefined })).result;
+      });
+      assert.equal(outcome.ok, true);
+      return result as ConfirmedResult;
+    };
+    const linkedFromGuide = () => /document\/([^>#]+)>/.exec(world.linear.documents.find((d) => d.title === 'guide')?.content ?? '')?.[1];
+
+    const first = await confirm();
+    assert.equal(first.complete, true);
+    assert.deepEqual(first.leftOutAtWrite, [{ path: 'eng/notes/plan.md', rule: 'upload-too-large' }]);
+    const linked = linkedFromGuide();
+    assert.ok(linked !== undefined, 'the guide does not link the plan');
+    // The recorded guide is the tracked file: its link comes back as it was written.
+    assert.deepEqual(first.record?.reformatted, []);
+
+    const writes = world.linear.writes.count;
+    const second = await confirm();
+    assert.equal(second.complete, true);
+    assert.equal(world.linear.writes.count, writes, 'the second run wrote again');
+    assert.equal(linkedFromGuide(), linked);
   });
 
   it('L1-15 with links: a resumed run creates the documents a recorded one links with the ids that run chose', async () => {
