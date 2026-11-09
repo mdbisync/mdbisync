@@ -22,7 +22,7 @@ export function validateVersion(version: string): string {
 }
 
 export function validateSha(sha: string): void {
-  if (sha.length !== 40 || !/^[a-f0-9]{40}$/.test(sha)) throw new Error('Expected a full lowercase source SHA');
+  if (sha.length !== 40 || !/^[a-f0-9]{40}$/.test(sha)) throw new Error('Expected a full lowercase commit SHA');
 }
 
 function bundlePath(value: unknown): string {
@@ -47,7 +47,7 @@ export function validateHooks(value: unknown): void {
   if (!Array.isArray(value) || value.length === 0) throw new Error('At least one Node hook is required');
   for (const item of value) {
     const hook = record(item);
-    if (hook.language !== 'node' || typeof hook.entry !== 'string' ||
+    if (hook.language !== 'node' || hook.language_version !== 'system' || typeof hook.entry !== 'string' ||
         !/^mdbisync (?:lint|fix)$/.test(hook.entry) ||
         (hook.additional_dependencies !== undefined &&
          (!Array.isArray(hook.additional_dependencies) || hook.additional_dependencies.length !== 0))) {
