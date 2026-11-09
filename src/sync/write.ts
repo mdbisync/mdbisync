@@ -74,10 +74,9 @@ export interface WriteOptions {
   /** The state refs after capture: the expected old values of this step's push. */
   state: StateSnapshot;
   /**
-   * Makes a fresh set of body transforms. The run uses two: one turns the
-   * merge result's files into what is written, the other turns the
-   * `linear` tip's files into what Linear should hold now, to tell whether
-   * a document changed in Linear since the capture.
+   * Makes fresh body transforms. The write set turns the merge result's
+   * files into what is written. Comparison sets detect linked file changes
+   * and changes in Linear since capture, without uploading.
    */
   transforms?: () => readonly BodyTransform[];
   identity?: CommitIdentity;
@@ -407,8 +406,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Documents with the same text: those needing nothing, and those only renamed or moved (their write must
     // carry the new link too).
     const sameText = [...merge.unchanged, ...merge.changes.filter((change): change is KeepChange => change.kind === 'keep' && !change.content)];
-    /** While the cache is filled again: documents that link a file, with the text they get from it. */
+    /** While the cache is filled again: documents that link a cached file, with the text they get from it. */
     const relinked: Array<{ change: KeepChange; written: string }> = [];
+    if (!cacheLost && changedNames.size === 0 && !sameText.some((change) => change.from !== change.to)) return;
+    // Comparing forms must not upload: an uncached file already needs a
+    // write. Only the write loop sends its bytes and handles its failures.
+    const comparisonTransforms = options.transforms?.() ?? [];
+    for (const transform of comparisonTransforms) await transform.prepare?.({ git, tracked: candidate, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads, documentIds });
     for (const change of sameText) {
       const next = merge.result.get(change.to) as SideFile;
       const previous = merge.linear.get(change.from) as SideFile;
@@ -418,16 +422,17 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       if (!moved && !cacheLost && ![...changedNames].some((name) => text.includes(name) || text.includes(encodeURI(name)) || text.includes(encodeURIComponent(name)))) continue;
       let differs: boolean;
       try {
-        const written = await transformBody(transforms, change.to, splitFile(text).body);
+        const written = await transformBody(comparisonTransforms, change.to, splitFile(text).body);
         if (cacheLost && !moved) {
-          // Whether it links a file shows in the tip's form, which has no cache to take URLs from.
+          // Every file it links is cached already (an uncached one throws above: a write). Whether it links one shows
+          // in the tip's form, which has no cache to take URLs from.
           const links = await transformBody(tipTransforms, change.from, splitFile(textOf(previous)).body).then(() => false, (error: unknown) => error instanceof UploadRefusedError);
           if (links) relinked.push({ change, written });
           continue;
         }
         differs = written !== (await transformBody(tipTransforms, change.from, splitFile(textOf(previous)).body));
       } catch (error) {
-        // Left out or stopped: the write reports it, or stops before it.
+        // Left out or uncached: the write reports it, or stops before it.
         if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError)) throw error;
         differs = true;
       }
