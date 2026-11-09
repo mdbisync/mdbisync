@@ -186,7 +186,10 @@ class Writer {
     const row = (cells: TableRow): string => {
       const texts = Array.from({ length: width }, (_, index) => {
         const cell = cells.children[index];
-        return cell ? this.inline(cell.children).trim() : '';
+        const text = cell ? this.inline(cell.children).trim() : '';
+        // Linear escapes a header cell containing only a hash. Apply this
+        // after inline rewrites, which drop an unnecessary hash escape.
+        return cells === node.children[0] && text === '#' ? '\\#' : text;
       });
       return `| ${texts.join(' | ')} |`;
     };

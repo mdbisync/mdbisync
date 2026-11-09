@@ -1443,6 +1443,14 @@ fixtures:
     class: unchanged
     basis: known
     canary: kx-5123bff2
+  - file: "tables/table-header-hash.md"
+    group: tables
+    construct: table-header-hash
+    class: unchanged
+    basis: assumed
+    canary: kx-a71b6d09
+    corpus: false
+    note: "expected fixed point for a lone hash header; dedicated live probe pending"
   - file: "tables/table-inline-marks.md"
     group: tables
     construct: table-inline-marks

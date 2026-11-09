@@ -100,7 +100,8 @@ Blocks:
   carry one.
 - `$$` math becomes a `math` fence.
 - Tables get outer pipes and short separators (`| -- | -- |`), and a row
-  gets as many cells as the header.
+  gets as many cells as the header. A header cell containing only `#` is
+  written as `\#`, preserving its text.
 - An image does not share a paragraph with text: the text before and after
   it becomes its own paragraph.
 - A list item holding only a link to a relative file other than Markdown
