@@ -17,7 +17,7 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { compare, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
@@ -876,6 +876,47 @@ describe('marker-driven checks', () => {
     await assert.rejects(waitForCheck(rest, 'abc', 'passed', { signal: AbortSignal.abort() }), { name: 'AbortError' });
   });
 
+  it("counts a run's writes from its report, so L1R-03's expected-zero total fails on the two documents written live", async () => {
+    const report = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, 'run-reports', `${name}.json`), 'utf8')) as Record<string, unknown>;
+    const run = (name: string) => ({ command: 'sync' as const, exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: report(name) });
+    const l1r03 = scenarios.find((item) => item.id === 'L1R-03')!;
+    const l2_34 = scenarios.find((item) => item.id === 'L2-34')!;
+    const total = l1r03.checks.assertions.find((item) => item.subject === 'runs.last.writes.total')!;
+    const linear = l2_34.checks.assertions.find((item) => item.subject === 'runs.last.writes.linear')!;
+    const holds = async (ctx: RunContext, assertion: typeof total) => {
+      const subject = await resolveSubject(ctx, assertion.subject);
+      assert.equal(subject.known, true);
+      return compare(assertion.operator, subject.value, assertion.expected);
+    };
+
+    // As live: the reverse initial sync, then the first sync after the person's merge created two documents.
+    const { ctx } = await fakeRun();
+    ctx.engine.results.push(run('reverse-initial-sync'), run('first-sync-two-created'));
+    // I6's own run (the quiet one) is not the scenario's last run.
+    ctx.observations.set('scenario.runsEnd', ctx.engine.results.length);
+    ctx.engine.results.push(run('quiet-sync'));
+    assert.deepEqual(await resolveSubject(ctx, 'runs.last.writes.total'), { known: true, value: 3 });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.last.writes.linear'), { known: true, value: 2 });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.0.writes.pullRequests'), { known: true, value: 1 });
+    assert.equal(await holds(ctx, total), false);
+    assert.equal(await holds(ctx, linear), false);
+    await assert.rejects(resolveSubject(ctx, 'runs.last.writes.documents'), /runs\.last\.writes\.documents: a run's writes are writes\.linear, writes\.git, writes\.pullRequests, writes\.total/);
+    await assert.rejects(resolveSubject(ctx, 'runs.last.writes'), /runs\.last\.writes: a run's writes are/);
+
+    // The contract the product must meet: a sync after the merge that writes nothing.
+    const quiet = (await fakeRun()).ctx;
+    quiet.engine.results.push(run('reverse-initial-sync'), run('quiet-sync'));
+    quiet.observations.set('scenario.runsEnd', quiet.engine.results.length);
+    assert.equal(await holds(quiet, total), true);
+    assert.equal(await holds(quiet, linear), true);
+
+    // A state ref moved with nothing else named is still a write.
+    const moved = (await fakeRun()).ctx;
+    moved.engine.results.push(run('state-ref-only-sync'));
+    assert.equal(await holds(moved, total), false);
+    assert.equal(await holds(moved, linear), true);
+  });
+
   it('keeps the L5-17 setup error visible to scenario assertions', async () => {
     const { ctx } = await fakeRun();
     ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: { pullRequest: { pullRequest: { number: 1, opened: true } } } });
@@ -1425,7 +1466,7 @@ describe('GraphQL HTTP fault scenario', () => {
 describe('subjects', () => {
   it('read the engine report by path and fail as a product error when it lacks a value', async () => {
     const { ctx } = await fakeRun();
-    ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { summary: { code: 'initial-sync-required' }, writes: { total: 0 } } });
+    ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { summary: { code: 'initial-sync-required' } } });
     assert.deepEqual(await resolveSubject(ctx, 'runs.0.summary.code'), { known: true, value: 'initial-sync-required' });
     assert.deepEqual(await resolveSubject(ctx, 'summary.code'), { known: true, value: 'initial-sync-required' });
     await assert.rejects(resolveSubject(ctx, 'runs.0.summary.plan.paths'), ProductError);
