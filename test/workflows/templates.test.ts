@@ -16,7 +16,7 @@ const CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1';
 const ACTION = 'mikhail-yaskou/mdbisync@';
 
 /** The templates that run the action. */
-const SYNC_TEMPLATES = ['mdbisync-initial-sync.yml'];
+const SYNC_TEMPLATES = ['mdbisync-initial-sync.yml', 'mdbisync.yml'];
 
 interface Step {
   name?: string;
@@ -97,6 +97,33 @@ describe('workflow templates', () => {
       });
     });
   }
+
+  describe('mdbisync.yml', () => {
+    const file = 'mdbisync.yml';
+
+    it('runs on pushes to main, every five minutes and by hand', () => {
+      const on = workflow(file).on;
+      assert.deepEqual(Object.keys(on).sort(), ['push', 'schedule', 'workflow_dispatch']);
+      assert.deepEqual(on['push'], { branches: ['main'] });
+      assert.deepEqual(on['schedule'], [{ cron: '*/5 * * * *' }]);
+      assert.equal(on['workflow_dispatch'], null);
+    });
+
+    it('runs the sync entry point after installing pre-commit for the security hooks', () => {
+      const all = steps(file);
+      const action = actionStep(file);
+      assert.equal(action.with?.['operation'], 'sync');
+      assert.equal(action.with?.['direction'], undefined);
+      const install = all.findIndex((step) => /pipx install pre-commit==\d+\.\d+\.\d+/.test(step.run ?? ''));
+      assert.ok(install >= 0 && install < all.findIndex((step) => step.uses === action.uses), 'pre-commit is installed before the sync');
+      assert.equal(all[install]?.env, undefined, 'the install step gets no environment');
+    });
+  });
+
+  it('the sync and the initial sync share one concurrency group', () => {
+    const groups = new Set(SYNC_TEMPLATES.map((file) => workflow(file).concurrency?.group));
+    assert.deepEqual([...groups], ['mdbisync']);
+  });
 
   describe('mdbisync-initial-sync.yml', () => {
     const file = 'mdbisync-initial-sync.yml';

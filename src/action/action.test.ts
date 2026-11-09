@@ -139,6 +139,18 @@ describe('the action entry points', () => {
     assert.equal(world.minted, 2);
     assert.equal(world.revoked, 2);
     assert.deepEqual(await tokenStates(), ['fake-token', '']);
+
+    // L2-37 (offline): the sync entry point on the converged repository writes nothing and revokes its token.
+    await writeFile(file('state'), '');
+    const writes = world.writes.length;
+    step({ operation: 'sync' });
+    const synced = await quietly(() => runMain({ fetch: fakeFetch(world) }));
+    assert.equal(process.exitCode ?? 0, 0, synced);
+    assert.ok(!synced.includes(CANARY), 'the sync printed content');
+    assert.equal(world.writes.length, writes, 'a converged sync wrote');
+    assert.equal(world.minted, 3);
+    assert.equal(world.revoked, 3);
+    assert.deepEqual(await tokenStates(), ['fake-token', '']);
   });
 
   it('a run whose revocation failed leaves the token in the state for post, which revokes it', async () => {
