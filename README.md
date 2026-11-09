@@ -147,7 +147,9 @@ initial sync from Linear to git, step by step:
 [docs/initial-sync-linear-to-git.md](docs/initial-sync-linear-to-git.md). How
 Markdown is kept in Linear's form: [docs/linear-format.md](docs/linear-format.md).
 What happens when both sides change one document, and how to resolve a
-conflict: [docs/conflicts.md](docs/conflicts.md).
+conflict: [docs/conflicts.md](docs/conflicts.md). What each message means,
+what to do about it, and how to recover with an initial sync:
+[docs/troubleshooting.md](docs/troubleshooting.md).
 
 ### Tokens left by interrupted jobs
 

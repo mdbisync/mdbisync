@@ -11,7 +11,8 @@ pull request" is the one pull request the sync opens and merges itself, and
 "the run summary" is the summary of a sync workflow run in the Actions tab.
 How to set up the workflows, the folder mapping and the setup check are in
 [usage.md](usage.md); what happens when both sides change the same document
-is in [conflicts.md](conflicts.md).
+is in [conflicts.md](conflicts.md), and what to do about each code and
+warning is in [troubleshooting.md](troubleshooting.md).
 
 ## One run
 
@@ -158,128 +159,112 @@ every run summary says so.
 - **Git to Linear:** a push to the tracked branch starts a run at once, so
   the change is in Linear when that run finishes, usually within a minute
   or two. If another run is going, the new one waits for it.
-- **Linear to git:** the next scheduled run captures the edit. GitHub
-  schedules every five minutes at best and often starts them late, so
-  expect five to fifteen minutes. The same run merges the sync pull request
-  when its checks pass within the grace period (`merge-grace-seconds`,
-  default 60 seconds); slower checks leave the merge to a later run, adding
-  another schedule interval. Run the workflow by hand to take a Linear edit
-  in sooner.
-- **A conflict** changes nothing here: both versions arrive on both sides
-  in the same runs that would have carried either edit.
-- **A failing check** on the sync pull request stops both directions until
-  it passes (see [Linear to the tracked branch](#linear-to-the-tracked-branch)).
+- **Linear to git:** the next scheduled run captures the edit. GitHub runs
+  schedules every five minutes at best and often starts them later. The
+  same run merges the sync pull request when its checks pass within the
+  grace period (`merge-grace-seconds`, default 60 seconds); slower checks
+  leave the merge to a later run, one more schedule interval. Run the
+  workflow by hand to take a Linear edit in sooner.
+- **A conflict** adds no delay: both versions arrive on both sides in the
+  same runs that would have carried either edit.
+- **A failing check** on the sync pull request holds both directions until
+  it passes: Linear's changes wait in the open pull request, and the
+  tracked branch's changes are not written to Linear
+  ([`check-failed`](troubleshooting.md#the-sync-pull-request)).
 
 ## The run summary
 
-Each run writes its summary to the Actions tab. It names paths, rules,
+Each run writes a job summary in the Actions tab. It names paths, rules,
 counts and states, never document content. It starts with the setup check
 ([setup check](usage.md#setup-check)) and goes on with a **Sync** section
-in the order of the steps. A section a run did not reach is missing.
+in the order of the steps; a part the run did not reach is missing. The run
+ends with a last line and, for the command line, an exit code. Every code,
+warning and last line, with what to do about it, is in
+[troubleshooting.md](troubleshooting.md); this section shows what an
+ordinary run says.
 
 ### Capture
 
-The first line of the **Sync** section counts what the capture took from
-Linear:
+The first line counts what step 1 took from Linear:
 
 > Captured 3 files; removed 1; blocked 0; left out 0.
 
-*Captured* files were changed, created, renamed or restored in Linear;
-*removed* files were trashed or moved out of the synchronized projects;
-*blocked* documents got the [blocked mark](#the-blocked-mark); *left out*
-documents were not taken this run. Further lines appear when they apply:
+*Captured* files were changed, created, renamed, moved or restored in
+Linear; *removed* files were trashed in Linear or moved out of the
+synchronized projects; *blocked* documents got the
+[blocked mark](#the-blocked-mark); *left out* documents were not taken this
+run (`capture-translation` or `security-unchecked`,
+[files left out](troubleshooting.md#files-left-out)). Lines that follow
+only when they apply:
 
-| Message | What it means |
+| Line | Where it is explained |
 | --- | --- |
-| Removal held for N files | Linear did not return these documents, while their place listed no document at all, as a blank answer from Linear would read. The files stay; the next run removes them if Linear still does not have them. The run is partial (`removal-held`). |
-| The document id map was lost | The map of files to document ids was missing and was rebuilt by matching titles to paths. A document renamed in Linear since the last run comes back as a new file next to its old one. |
-| Capture partial, will continue | Linear stopped the run (a rate limit) or failed a request. What was captured is kept, and the next run goes on from there. |
-| Content is pushed unchecked | The repository has no security hooks. |
-| `linear-content-too-large-to-write-back` | A document is longer than Linear accepts in a write. It is kept in git, but if it is changed in git while still over the limit, Linear will not take the change. |
-| Capture did not finish; no tracked-branch changes were written. | The run stopped in the capture, before steps 2 to 5. |
-
-A captured document can be left out with the rule `capture-translation`
-(the run could not turn it into a file, for example an embedded file it
-could not download) or `security-unchecked` (the security hooks have not
-seen its current text; the next run checks it).
+| Removal held for N files | [`removal-held`](troubleshooting.md#partial-sync-runs) |
+| The document id map was lost | [Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync) |
+| Capture partial, will continue | [`stopped` and `linear-failed`](troubleshooting.md#partial-sync-runs) |
+| Content is pushed unchecked | [The blocked mark](#the-blocked-mark) and the `security-hooks` warning of the [setup check](troubleshooting.md#setup-check) |
+| `linear-content-too-large-to-write-back` | [Other summary lines](troubleshooting.md#other-summary-lines) |
+| Capture did not finish; no tracked-branch changes were written. | The run stopped in step 1; the lines above say why. |
 
 ### Linear to the tracked branch
 
-What step 2 did with the sync pull request, in one of these messages:
+What step 2 did with the sync pull request. An ordinary run says one of:
 
-| Message | What it means |
+| Line | What it means |
 | --- | --- |
-| Merged the sync pull request with a merge commit | Every check on its head passed. |
+| Merged the sync pull request with a merge commit | Every check on its head passed; the tracked branch now holds Linear's changes. |
 | The tracked branch already holds every change from Linear | No pull request is needed. |
-| Opened the sync pull request | Opened this run; it names the checks it is waiting for, and a later run merges it if they did not pass within the grace period. |
+| Opened the sync pull request | Opened this run. It names the checks still running at the end of the grace period; a later run merges it. |
 | Added new Linear changes to the sync pull request | New captures joined the open pull request. |
 | The sync pull request waits for its checks | Nothing new; its checks are still running, and a later run merges it. |
-| Setup error: a check failed on the sync pull request (`check-failed`) | The repository's checks reject Linear's form. Nothing is merged and nothing is written to Linear until they pass: fix the configuration or rerun the check. |
-| Linear's latest changes and the tracked branch change the same lines (`conflict`) | The sync branch stays as it is this run. Conflicting documents get conflict markers; a conflicting file that is not a document waits for a person to merge it on the sync branch. |
-| GitHub did not merge the sync pull request (`merge-refused`) | GitHub refused the merge once, with the reason it gave; a later run tries again. |
-| Setup error: GitHub refused again to merge (`merge-blocked`) | The same refusal on the same head. Let the sync's App merge into the tracked branch (for example, adjust the branch's rules). |
-| The sync branch holds an initial sync from Linear (`initial-pull-request-pending`) | A person has not merged the [initial sync from Linear](initial-sync-linear-to-git.md) yet; the sync adds nothing and writes nothing until then. |
-| The sync branch moved while this run worked (`state-moved`) | Another writer moved the branch; the next run updates the pull request. |
-| A request to GitHub failed or got no answer (`github-failed`) | The next run tries again. |
 
-When they apply, it also counts the files the pull request changes and
-names the documents where pending edits on the sync branch met later edits
-(kept between conflict markers) or were decided by the conflict rules.
+Any other line names a code (`check-failed`, `conflict`, `merge-refused`,
+`merge-blocked`, `initial-pull-request-pending`, `state-moved`,
+`github-failed`), explained in
+[the sync pull request](troubleshooting.md#the-sync-pull-request). The
+section also counts the files the pull request changes, and names the
+documents where pending edits on the sync branch met later edits
+([conflicts.md](conflicts.md)).
 
 ### Tracked branch to Linear
 
-What steps 3 to 5 did. "Linear already holds the tracked branch: nothing to
-write." when there was nothing to do; otherwise one outcome:
+What steps 3 to 5 did. A run with nothing to do says "Linear already holds
+the tracked branch: nothing to write." Otherwise it gives one outcome:
 
 | Outcome | What it means |
 | --- | --- |
 | Linear now holds the tracked branch. | Every change was written and recorded. |
 | Some documents were not written; the next run writes them. | Some were skipped, failed or left out; the rest were written and recorded. |
-| A state ref moved while this run was writing | Another run moved the sync's refs; this one recorded nothing, and the next run writes again what is still missing. |
-| Nothing was written. (`container-cap`) | A Linear team or project would go over its document cap ([capacity](usage.md#initial-sync-from-git-to-linear)); make room or raise `document-cap`. |
+| A state ref moved while this run was writing | [`state-moved`](troubleshooting.md#partial-sync-runs) |
+| Nothing was written. | [`container-cap`](troubleshooting.md#container-cap) |
 
-followed by the counts: documents written with the file's new text, renamed
-or moved, created, restored (Linear had removed them while git changed
-them), with conflict markers, moved to Linear's trash, skipped, and files
-left out. Then the tables, each shown only when it has rows:
+Then it counts the documents written with the file's new text, renamed or
+moved, created, restored (Linear had removed them while git changed them),
+written with conflict markers, moved to Linear's trash, skipped, and the
+files left out. Tables follow, each only when it has rows:
 
 | Table | What it lists |
 | --- | --- |
-| Failed | Writes Linear refused or failed, with the operation and the error. The next run tries again. |
-| Skipped | Documents not written this run, with why. |
+| Failed | Writes Linear refused or failed, with the operation and the error ([`write-failed`](troubleshooting.md#partial-sync-runs)). |
+| Skipped | Documents not written this run, with why ([skipped documents](troubleshooting.md#skipped-documents)). |
 | Conflict markers | Documents this run wrote with conflict markers ([conflicts.md](conflicts.md)). |
-| Decided by the conflict rules | Deletes and renames that met an edit or another rename, with the rule that decided them ([deletes and renames](conflicts.md#deletes-and-renames)). |
+| Decided by the conflict rules | Deletes and renames that met an edit or another rename ([the rules](troubleshooting.md#decided-by-the-conflict-rules)). |
 | Renamed or moved | Documents renamed or moved, from and to. |
 | Moved to trash | Documents whose files were removed in git. |
-| Left out | Files that stay in git only, with the rules that stop them ([linear-format.md](linear-format.md)). |
+| Left out | Files that stay in git only, with their rules ([files left out](troubleshooting.md#files-left-out)). |
 
-A skipped document has one of these reasons:
+When Linear stopped the run part way, the section says why, with Linear's
+rate-limit headers, and how many items are not written yet. A **Container
+document capacity** table follows when a team or project holds 90% of its
+document cap or more ([`container-cap`](troubleshooting.md#container-cap)).
 
-| Reason | What it means |
-| --- | --- |
-| `edited-in-linear` | Changed in Linear since it was read; the next run takes that change in and writes again. |
-| `missing-in-linear` | Not found in Linear, or in its trash; the next run takes that in. |
-| `conflict` | Changed on both sides in a way git cannot merge; it is written when the conflict is resolved. |
-| `renamed-to-unwritable` | Its file was renamed to one that is in conflict or left out; the document stays as it is until that is fixed. |
+### How the run ends
 
-When the run stopped part way, the section says why (for example Linear's
-rate limit, with its rate-limit headers) and how many items are not written
-yet. A section on **Container document capacity** follows when a team or
-project is at 90% of its document cap or more.
-
-### How a run ends
-
-| Run | Job status | Exit code | Last message |
-| --- | --- | --- | --- |
-| Finished, or nothing to do | success | 0 | |
-| Partial: Linear stopped it, a request or write failed, a state ref moved, or a removal is held | warning | 5 | `sync: partial, will continue (<code>)` |
-| A failed check on the sync pull request, or a merge GitHub refuses again | failure | 3 | `sync: setup error (<code>): …` |
-| The sync branch moved, or a request to GitHub failed, in step 2 | failure | 5 | `sync: not finished (<code>); run it again` |
-| The setup check failed | failure | 3 | `sync: stopped before any write (<code>): …` |
-| No initial sync yet (`initial-sync-required`), or its pull request waits for a person | failure | 4 | `sync: stopped before any write (<code>)` or `sync: stopped short (initial-pull-request-pending): …` |
-| A team or project over its document cap | failure | 5 | `sync: stopped before any write (container-cap); …` |
-
-A partial run is not a failure: it kept what it could record, and the next
-scheduled run goes on from there. The `<code>` is one of `stopped`,
-`linear-failed`, `write-failed`, `state-moved` or `removal-held`. The exit
-code is the command line's; in the action the job status says the same.
+A finished run succeeds. A partial run (Linear stopped it, a request or a
+write failed, a state ref moved, a removal is held) ends with a warning,
+`sync: partial, will continue (<code>)`: it kept what it could record, and
+the next run goes on from there. Anything that needs a person (a failed
+check on the sync pull request, an initial sync waiting to be merged, the
+setup check, a full container) fails the run.
+[Last lines](troubleshooting.md#last-lines) gives every last line and exit
+code.

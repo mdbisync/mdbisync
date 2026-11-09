@@ -7,7 +7,9 @@ and no edit from either side is thrown away.
 
 In this page, "git" means the tracked branch (usually `main`), and "the run
 summary" is the summary of the sync workflow's run in the Actions tab
-([the run summary](sync-cycle.md#the-run-summary)).
+([the run summary](sync-cycle.md#the-run-summary)). What the summary's codes
+and messages mean, conflicts included, is in
+[troubleshooting.md](troubleshooting.md).
 
 ## How the two sides are merged
 

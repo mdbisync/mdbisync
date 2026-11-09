@@ -1,12 +1,13 @@
-// The public page on the sync cycle against the code: the sync pull
-// request's title, the blocked mark and its comment, every message, table,
-// code and skip reason of a sync run's summary, how a run ends, and the
-// links that lead to and from the page.
+// The public page on the sync cycle against the code: the run's steps, the
+// sync pull request's title, the blocked mark and its comment, every line
+// and table of a sync run's summary, and the links that lead to and from
+// the page. The codes and what to do about them are on the troubleshooting
+// page; this test checks that the codes and skip reasons it leaves there are
+// spelled there as the code spells them.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
-import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { PARTIAL } from '../run/stop.ts';
 import { BLOCKED_COMMENT, MARKS } from './marks.ts';
 import { SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
@@ -36,7 +37,7 @@ function anchors(markdown: string): Set<string> {
   return new Set(headings.map((heading) => heading.toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, '').replace(/ /g, '-')));
 }
 
-/** Asserts that a message is both in the code that writes it and on the page. */
+/** Asserts that each message is both in the code that writes it and on the page. */
 function described(source: string, messages: readonly string[]) {
   const code = flatSource(source);
   for (const message of messages) {
@@ -69,22 +70,20 @@ describe('the sync cycle page', () => {
     described('src/sync/summary.ts', ['Capture did not finish; no tracked-branch changes were written.']);
   });
 
-  it('describes every outcome of the sync pull request step', () => {
-    for (const code of codes('src/sync/pull-request.ts', /^ {2}code\?: 'check-failed'/)) assert.match(page, new RegExp(`^\\| .*\\(\`${code}\`\\) \\|`, 'm'), code);
+  it('describes every ordinary outcome of the sync pull request step, and names every other code', () => {
     described('src/sync/pull-request.ts', [
       'Merged the sync pull request with a merge commit',
       'The tracked branch already holds every change from Linear',
       'Opened the sync pull request',
       'Added new Linear changes to the sync pull request',
-      'failed on the sync pull request',
-      'Setup error: GitHub refused again to merge',
-      'GitHub did not merge the sync pull request',
-      'The sync branch holds an initial sync from Linear',
-      'The sync branch moved while this run worked',
     ]);
+    // "The sync pull request <link> waits for <checks>": the link sits between the words.
+    assert.ok(read('src/sync/pull-request.ts').includes('`The sync pull request ${link} waits for'));
+    assert.ok(flat.includes('| The sync pull request waits for its checks |'));
+    for (const code of codes('src/sync/pull-request.ts', /^ {2}code\?: 'check-failed'/)) assert.ok(flat.includes(`\`${code}\``), code);
   });
 
-  it('describes every outcome, table and skip reason of the write step', () => {
+  it('describes every outcome and table of the write step', () => {
     described('src/sync/summary.ts', [
       'Linear already holds the tracked branch: nothing to write.',
       'Linear now holds the tracked branch.',
@@ -95,33 +94,32 @@ describe('the sync cycle page', () => {
     const tables = [...read('src/sync/summary.ts').matchAll(/table\('([^']+)'/g)].map((match) => match[1]!);
     assert.ok(tables.length >= 7, `found only ${tables.join(', ')}`);
     for (const table of tables) assert.match(page, new RegExp(`^\\| ${table} \\|`, 'm'), `the table ${table}`);
-    for (const [reason, text] of Object.entries(SKIP_REASONS)) {
-      assert.ok(flat.includes(`| \`${reason}\` | ${text[0]!.toUpperCase()}${text.slice(1)}. |`), `the reason ${reason}`);
-    }
-    assert.ok(flat.includes('Container document capacity'));
+    assert.ok(flat.includes('**Container document capacity**'));
     assert.ok(read('src/run/capacity.ts').includes("'### Container document capacity'"));
   });
 
-  it('tells how a run ends, with the codes and exit codes the code uses', () => {
+  it('leaves the skip reasons and partial codes to troubleshooting.md, which spells them as the code does', () => {
+    const troubleshooting = read('docs/troubleshooting.md');
+    for (const [reason, text] of Object.entries(SKIP_REASONS)) {
+      assert.ok(troubleshooting.includes(`| \`${reason}\` | ${text[0]!.toUpperCase()}${text.slice(1)}. |`), `the reason ${reason}`);
+    }
     assert.ok(flat.includes(`\`sync: ${PARTIAL} (<code>)\``), 'the partial message');
-    const partial = [...codes('src/sync/capture.ts', /^ {2}code\?: 'state-moved'/), ...codes('src/sync/write.ts', /^ {2}code\?: 'stopped'/), 'removal-held'].filter((code) => code !== 'container-cap');
-    for (const code of new Set(partial)) assert.ok(flat.includes(`\`${code}\``), code);
-    assert.match(page, new RegExp(`\\| warning \\| ${INCOMPLETE_EXIT_CODE} \\|`));
-    assert.match(page, new RegExp(`\\| failure \\| ${SETUP_FAILED_EXIT_CODE} \\| \`sync: setup error`));
-    assert.match(page, new RegExp(`\\| failure \\| ${NO_STATE_EXIT_CODE} \\|`));
-    assert.match(page, new RegExp(`\\| failure \\| ${INCOMPLETE_EXIT_CODE} \\| \`sync: stopped before any write \\(container-cap\\)`));
+    const partial = [...codes('src/sync/capture.ts', /^ {2}code\?: 'state-moved'/), ...codes('src/sync/write.ts', /^ {2}code\?: 'stopped'/), 'removal-held'];
+    for (const code of new Set(partial)) assert.match(troubleshooting, new RegExp(`^\\| \`${code}\` \\|`, 'm'), code);
   });
 
-  it('is linked from the README and usage.md, and its links land on headings', () => {
+  it('is linked from the README, usage.md and conflicts.md, and its links land on headings', () => {
     assert.ok(read('README.md').includes(`](${PAGE})`), 'README');
     assert.ok(read('docs/usage.md').includes('](sync-cycle.md)'), 'usage.md');
+    assert.ok(read('docs/conflicts.md').includes('](sync-cycle.md#the-run-summary)'), 'conflicts.md');
     const targets: Record<string, Set<string>> = {
       '': anchors(page),
       'usage.md': anchors(read('docs/usage.md')),
       'conflicts.md': anchors(read('docs/conflicts.md')),
+      'troubleshooting.md': anchors(read('docs/troubleshooting.md')),
     };
-    const links = [...page.matchAll(/\]\(((?:usage\.md|conflicts\.md)?)#([^)]+)\)/g)];
-    assert.ok(links.length > 5);
-    for (const [, file, anchor] of links) assert.ok(targets[file!]!.has(anchor!), `${file}#${anchor}`);
+    const links = [...page.matchAll(/\]\(((?:usage|conflicts|troubleshooting)\.md)?#([^)]+)\)/g)];
+    assert.ok(links.length > 10);
+    for (const [, file, anchor] of links) assert.ok(targets[file ?? '']!.has(anchor!), `${file}#${anchor}`);
   });
 });
