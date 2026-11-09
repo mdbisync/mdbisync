@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { it } from 'node:test';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
-import { captureAssets } from './assets.ts';
+import { captureAssets, createAssetCapture } from './assets.ts';
 
 it('downloads new uploads next to the document, reuses content hashes and preserves ordinary links', async () => {
   const fixture = await createFixture();
@@ -81,4 +81,24 @@ it('returns replacement bytes when a cached LFS pointer has no readable object',
     assert.deepEqual(result.files.get('missing.png'),bytes);
     assert.equal(result.body,'![Image](missing.png)\n');
   } finally {await fixture.cleanup();}
+});
+
+it('restores cached upload spellings before restricting new downloads to the upload host', async () => {
+  const fixture = await createFixture();
+  try {
+    const previous = '![Image](<./image.png?download=1#page=2>)\n';
+    await fixture.seed({'docs/plan.md': previous, 'docs/image.png': Buffer.from('image')});
+    const git = await fixture.clone('cached-links');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const hash = createHash('sha256').update('image').digest('hex');
+    const url = 'https://storage.example.test/image.png';
+    const current = `![Image](<${url}?download=1#page=2>)\n`;
+    const read = createAssetCapture(git, resolveStateConfig({}), base, async () => { throw new Error('a cached link must not be downloaded'); });
+    const result = await read('docs/plan.md', current, new Map([[hash, url]]), previous);
+    assert.equal(result.body, previous);
+    assert.equal(result.files.size, 0);
+    const fresh = await read('docs/other.md', current, new Map([[hash, url]]));
+    assert.equal(fresh.body, '![Image](<image.png?download=1#page=2>)\n');
+    assert.equal(fresh.files.size, 0);
+  } finally { await fixture.cleanup(); }
 });

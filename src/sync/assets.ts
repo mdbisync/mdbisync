@@ -69,7 +69,10 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string): Promise<CapturedAssets> => {
     const files = new Map<string, Buffer>();
     const additions: UploadMap = new Map();
-    if (!destinations(body).some(({node}) => isUpload(node.url))) return {body, files, uploads: additions};
+    // Restore known URLs before restricting new downloads to the upload host.
+    const cachedUrls = [...uploads.values()];
+    const knownUpload = (url: string) => cachedUrls.some((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`));
+    if (!destinations(body).some(({node}) => isUpload(node.url) || knownUpload(node.url))) return {body, files, uploads: additions};
     await index();
     if (previousBody !== undefined) {
       const written: WrittenLink[] = [];
@@ -78,12 +81,13 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       }
       body = restoreFileLinks(body, written, new Map(uploads));
     }
-    const references = destinations(body).filter(({node}) => isUpload(node.url));
+    const references = destinations(body).filter(({node}) => isUpload(node.url) || knownUpload(node.url));
     const replacements: Array<{from: number; to: number; text: string}> = [];
     for (const {node, range} of references) {
+      const cached = cachedUrls.filter((known) => node.url === known || node.url.startsWith(`${known}?`) || node.url.startsWith(`${known}#`)).sort((a,b) => b.length - a.length)[0];
       const hashAt = node.url.indexOf('#');
-      const url = hashAt === -1 ? node.url : node.url.slice(0, hashAt);
-      const fragment = hashAt === -1 ? '' : node.url.slice(hashAt);
+      const url = cached ?? (hashAt === -1 ? node.url : node.url.slice(0, hashAt));
+      const suffix = cached === undefined ? (hashAt === -1 ? '' : node.url.slice(hashAt)) : node.url.slice(cached.length);
       let hash = [...uploads].find(([, known]) => known === url)?.[0];
       let assetPath = hash === undefined ? undefined : hashPaths.get(hash);
       if (assetPath !== undefined) {
@@ -104,7 +108,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         files.set(assetPath, asset.bytes);
       }
       additions.set(hash!, url);
-      replacements.push({...range, text: posix.relative(posix.dirname(path), assetPath).split('/').map(encodeURIComponent).join('/') + fragment});
+      replacements.push({...range, text: posix.relative(posix.dirname(path), assetPath).split('/').map(encodeURIComponent).join('/') + suffix});
     }
     let result = body;
     for (const replacement of replacements.sort((a,b) => b.from - a.from)) result = result.slice(0,replacement.from) + replacement.text + result.slice(replacement.to);
