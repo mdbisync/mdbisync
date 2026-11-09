@@ -5,7 +5,9 @@
 //   are read by path from the engine's run report (the JSON its report
 //   file holds; in actions mode the run's report artifact). These are facts
 //   only the engine knows: its decisions, plans and summary codes. A value
-//   the report lacks fails the scenario as a product error.
+//   the report lacks fails the scenario as a product error. One run's
+//   writes, `runs.<n|last>.writes.<kind>`, are counted from the results the
+//   report names (`runWrites`); the report has no field of that name.
 // - Harness: everything the two sides show (Linear documents, the tracked
 //   branch, state refs, pull requests, uploads, workflow runs) is computed
 //   by the harness from the world itself, never taken from the engine.
@@ -1667,6 +1669,119 @@ function pathValue(value: unknown, path: readonly string[]): { found: boolean; v
   return { found: true, value: current };
 }
 
+/** What one engine run wrote, by kind; see `runWrites`. */
+export interface RunWrites {
+  linear: number;
+  git: number;
+  pullRequests: number;
+  total: number;
+}
+
+function namedList(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function pathsNamed(value: unknown): string[] {
+  return namedList(value).map((entry) => (typeof entry === 'string' ? entry : String(recordOf(entry)?.['path'] ?? recordOf(entry)?.['to'] ?? '')));
+}
+
+/**
+ * What one engine run wrote, counted from its report: the subjects
+ * `runs.<n|last>.writes.linear|git|pullRequests|total`. The report has no
+ * `writes` field; it names its writes in the results of the operation it ran
+ * (a sync's `capture`, `sync` and `pullRequest`, a confirmed initial sync's
+ * `initialSync` or `linearToGit`). They are counted the same way for every
+ * operation:
+ *
+ * - `linear`: documents the run created, overwrote, moved, restored or
+ *   trashed in Linear, each path once, and never fewer than the report's own
+ *   `writtenDocuments` and `writtenCount`.
+ * - `git`: the state the run pushed: a capture that lists Linear's changes,
+ *   the `linear` record (a sync's merge or ordinary commit, an initial
+ *   sync's record that moved), an initial sync's progress pushes, a moved
+ *   sync branch. A run that reports `changed` while it names no write moved
+ *   a state ref the report does not list (the `ids` or `uploads` ref alone):
+ *   that counts as one.
+ *
+ * A capture that did not finish (`ok: false`) still counts when it lists
+ * changes. One that published them and then stopped (a lost lease while it
+ * saved document marks, a Linear failure after the push) keeps its lists;
+ * one whose first push was refused keeps them too, though it pushed nothing.
+ * The report does not tell the two apart, so both count: an expected-zero
+ * assertion may then fail on a refused push, but never passes on a
+ * published one. (A capture that failed before it published clears its
+ * lists.)
+ *
+ * A security-blocked document is not counted. The capture lists it on every
+ * run while it stays blocked, and the run reports `changed` for it, also
+ * when its mark is already in place and nothing is written; the report does
+ * not say whether this run wrote the mark. So `changed` does not count for a
+ * run that lists a blocked document.
+ * - `pullRequests`: pull requests the run opened, updated, merged or closed.
+ * - `total`: their sum.
+ *
+ * The count covers what the report names, nothing more. Writes the report
+ * does not name are missed: an `ids` push for a held removal, the icon and
+ * color of a mark on a changed document, uploads, the body of a pull
+ * request whose merge was refused. A zero-write contract therefore also
+ * needs I6 and the world-wide `writes.*` subjects, which the harness counts
+ * from the world since setup (Linear mutations, new commits on the tracked
+ * branch, the sync branch and the state refs, new pull requests); those
+ * differ in kind from these (a merge is a tracked-branch commit there, a
+ * pull request write here). A report without `changed` is not a run
+ * report, and it gives no writes.
+ */
+export function runWrites(report: Record<string, unknown>): RunWrites {
+  if (typeof report['changed'] !== 'boolean') throw new ProductError("the engine's report gives no changed, so it gives no writes");
+  const capture = recordOf(report['capture']);
+  const sync = recordOf(report['sync']);
+  const initial = recordOf(report['initialSync']);
+  const reverse = recordOf(report['linearToGit']);
+  const step = recordOf(report['pullRequest']);
+
+  const documents = new Set([
+    ...pathsNamed(sync?.['updated']),
+    ...pathsNamed(sync?.['created']),
+    ...pathsNamed(sync?.['restored']),
+    ...pathsNamed(sync?.['relocated']),
+    ...pathsNamed(sync?.['trashed']),
+    ...pathsNamed(initial?.['created']),
+    ...pathsNamed(initial?.['overwritten']),
+    ...pathsNamed(initial?.['trashed']),
+  ]);
+  const reported = [report['writtenDocuments'], report['writtenCount']].filter((value): value is number => typeof value === 'number');
+  const linear = Math.max(documents.size, ...reported);
+
+  const captured = namedList(capture?.['changed']).length + namedList(capture?.['removed']).length > 0;
+  const blocked = namedList(capture?.['blocked']).length > 0;
+  const initialRecord = recordOf(report['record']);
+  const reverseRecord = recordOf(reverse?.['record']);
+  const progress = (value: unknown) => (typeof value === 'number' ? value : 0);
+  const named =
+    (captured ? 1 : 0) +
+    (recordOf(sync?.['record']) !== null ? 1 : 0) +
+    (initial !== null && initialRecord?.['moved'] === true ? 1 : 0) +
+    (reverseRecord?.['moved'] === true ? 1 : 0) +
+    progress(initial?.['progressPushes']) +
+    progress(reverse?.['progressPushes']) +
+    (step?.['branchMoved'] === true ? 1 : 0);
+
+  const stepPullRequest = recordOf(step?.['pullRequest']);
+  const reversePullRequest = recordOf(reverse?.['pullRequest']);
+  const pullRequests =
+    (stepPullRequest?.['opened'] === true ? 1 : 0) +
+    (typeof step?.['merged'] === 'string' ? 1 : 0) +
+    (reversePullRequest?.['opened'] === true || reversePullRequest?.['updated'] === true ? 1 : 0) +
+    (typeof reverse?.['closedPullRequest'] === 'number' ? 1 : 0);
+
+  const git = named === 0 && linear === 0 && pullRequests === 0 && report['changed'] === true && !blocked ? 1 : named;
+  return { linear, git, pullRequests, total: linear + git + pullRequests };
+}
+
 function engineValue(ctx: RunContext, subject: string): unknown {
   const own = ownResults(ctx);
   const runMatch = /^runs\.(\d+|last)\.(.+)$/.exec(subject);
@@ -1675,6 +1790,14 @@ function engineValue(ctx: RunContext, subject: string): unknown {
   const result = own[index];
   if (result === undefined) throw new ProductError(`the scenario has no engine run ${runMatch?.[1] ?? 'last'} for ${subject}`);
   if (result.report === null) throw new ProductError(`engine run ${index} wrote no report, so it gives no ${subject}`);
+  // A run's writes are counted from its report's results (`runWrites`), never read from a field of that name.
+  if (runMatch !== null && path[0] === 'writes') {
+    const writes = runWrites(result.report);
+    const kind = path.length === 2 ? path[1] : undefined;
+    // A scenario that names another kind is wrong, not the product: a harness error.
+    if (kind === undefined || !Object.hasOwn(writes, kind)) throw new Error(`${subject}: a run's writes are ${Object.keys(writes).map((name) => `writes.${name}`).join(', ')}`);
+    return writes[kind as keyof RunWrites];
+  }
   // The report is the job summary in structured form: `summary.code` is the report's `code`.
   // A sync's report has `summary: null` (that field holds an initial sync's plan), so a `summary` that does not
   // hold the next key sends the path to the top level.
