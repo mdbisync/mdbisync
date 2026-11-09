@@ -768,6 +768,33 @@ describe('initial sync from Linear to the tracked branch', () => {
     });
   }
 
+  it('refuses sync after the initial branch moves elsewhere, but lets a new initial sync to Linear replace the abandoned record', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    assert.equal((await run(world)).result.exitCode, 0);
+    const initial = world.github.pullRequests[0];
+    assert.ok(initial);
+    initial.state = 'closed';
+    const tracked = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
+    await fixture.remote.run(['update-ref', 'refs/heads/mdbisync/linear', tracked]);
+    const before = await refs();
+    const writes = world.writes.length;
+    const refused = await run(world, {}, 'sync');
+    assert.equal(refused.result.exitCode, NO_STATE_EXIT_CODE, refused.result.stderr);
+    assert.equal(refused.report.code, 'initial-pull-request-pending');
+    assert.deepEqual(await refs(), before);
+    assert.equal(world.writes.length, writes);
+
+    await fixture.remote.run(['update-ref', '-d', 'refs/heads/mdbisync/linear']);
+    const restarted = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
+    assert.equal(restarted.result.exitCode, 0, restarted.result.stderr);
+    assert.notEqual((await refs())['refs/mdbisync/linear'], before['refs/mdbisync/linear']);
+    assert.equal(initial.merged, false);
+    const synced = await run(world, {}, 'sync');
+    assert.equal(synced.result.exitCode, 0, synced.result.stderr);
+    assert.notEqual(synced.report.code, 'initial-pull-request-pending');
+  });
+
   it('opens no pull request when the tracked branch already equals Linear, and the sync then runs after other commits', async () => {
     const world = fakeWorld();
     assert.equal((await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' })).result.exitCode, 0);

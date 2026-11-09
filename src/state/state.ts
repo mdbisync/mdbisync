@@ -294,14 +294,20 @@ export async function isAncestor(git: Git, commit: Oid, of: Oid): Promise<boolea
  * that branch elsewhere does not cancel the unmerged record. A record with
  * its parent's tree needed no pull request, so it never waits.
  */
-export async function initialPullRequestPending(git: Git, state: { linear: Oid | null; sync: Oid | null; tracked: Oid }): Promise<boolean> {
+export async function initialPullRequestPending(git: Git, state: { linear: Oid | null; tracked: Oid }): Promise<boolean> {
   const { linear, tracked } = state;
   if (linear === null) return false;
   const [subject] = (await git.text(['show', '-s', '--format=%s', linear])).split('\n');
   if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
   if (await isAncestor(git, linear, tracked)) return false;
-  const trees = (await git.text(['show', '-s', '--format=%T', linear, `${linear}^`])).split('\n');
-  return trees[0] !== trees[1];
+  return initialRecordChangesParent(git, linear);
+}
+
+/** A parentless initial record also needs a person's approval. */
+export async function initialRecordChangesParent(git: Git, record: Oid): Promise<boolean> {
+  const parent = await git.run(['rev-parse', '--verify', '--quiet', `${record}^1`], { okCodes: [0, 1] });
+  if (parent.code !== 0) return true;
+  return (await git.run(['diff', '--quiet', parent.stdout.toString('utf8').trim(), record], { okCodes: [0, 1] })).code === 1;
 }
 
 export interface CommitStateOptions {
