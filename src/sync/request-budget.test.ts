@@ -86,7 +86,10 @@ describe('sync: the Linear request budget (I9)', () => {
     const merged = await fixture.remote.run(['merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
     if (merged.code !== 0) return { status: 405 };
     const tree = merged.stdout.toString('utf8').split('\n')[0] as string;
-    const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number}`]);
+    // GitHub's merge commit, with its own identity: the test needs none configured.
+    const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number}`], {
+      env: { GIT_AUTHOR_NAME: 'sync-app[bot]', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@example.com' },
+    });
     await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit.trim(), base]);
     return { sha: commit.trim() };
   }
