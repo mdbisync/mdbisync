@@ -634,7 +634,8 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/backend/notes.md': `# Notes\n\nFirst paragraph, edited in git.\n\nSecond paragraph. ${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, ['UpdateDocument']);
+    // The Linear edit goes to the tracked branch through the sync pull request; the git edit goes to Linear.
+    assert.deepEqual(writes, ['POST /pulls', 'UpdateDocument']);
     assert.equal((await documentOf('eng/backend/notes.md')).content, `# Notes\n\nFirst paragraph, edited in git.\n\nSecond paragraph, edited in Linear. ${CANARY}\n`);
     assert.equal(report.complete, true);
     await assertMergeRecord(previous);

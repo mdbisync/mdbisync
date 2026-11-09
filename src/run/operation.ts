@@ -83,6 +83,7 @@ export async function runOperation(
   const cycle = async (context: RunContext) => {
     sync = await runSyncCycle(context, {
       config: inputs.state,
+      github,
       transforms: () => [uploadsTransform({ config: inputs.state }), documentLinks()],
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });

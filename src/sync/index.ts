@@ -2,6 +2,7 @@
 
 export { type CycleOptions, type CycleResult, runSyncCycle } from './cycle.ts';
 export { type CreateChange, type DocumentChange, type KeepChange, type LocalMerge, type TrashChange, mergeLocally } from './merge.ts';
+export { type PullRequestResult, SYNC_BRANCH_MERGE_MESSAGE, SYNC_PULL_REQUEST_TITLE, syncPullRequest } from './pull-request.ts';
 export { renderSync } from './summary.ts';
 export {
   IDS_MESSAGE,

@@ -70,6 +70,17 @@ export interface FakePullRequest {
   merged: boolean;
 }
 
+/** A check run or commit status on a commit in the fake repository. */
+export interface FakeCheck {
+  name: string;
+  /** Check runs: `queued`, `in_progress` or `completed`; commit statuses use `pending` or `completed`. */
+  status: 'queued' | 'in_progress' | 'pending' | 'completed';
+  /** For a completed check: `success`, `failure`, `neutral`, `skipped`, `cancelled`, `timed_out`, or a status's `error`. */
+  conclusion?: string;
+  /** A commit status (the statuses API) instead of a check run. */
+  commitStatus?: boolean;
+}
+
 export interface FakeWorld {
   github: {
     tokenValid: boolean;
@@ -80,6 +91,14 @@ export interface FakeWorld {
     pullRequests: FakePullRequest[];
     /** Answer 422 to every pull request a run tries to open. */
     refusePullRequests?: boolean;
+    /** Checks by commit; a commit without an entry has none. */
+    checks?: Map<string, FakeCheck[]>;
+    /**
+     * Merges a pull request as GitHub would, while its head is `sha`: the
+     * test moves the base branch and answers the merge commit, or answers
+     * GitHub's refusal status. Without it, GitHub answers 405.
+     */
+    merge?: (pr: FakePullRequest, sha: string) => Promise<{ sha: string } | { status: number }>;
   };
   /**
    * `unavailable`: the token endpoint answers 503, as in an outage.
@@ -158,7 +177,7 @@ function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-function github(world: FakeWorld, method: string, path: string, init: RequestInit | undefined): Response {
+async function github(world: FakeWorld, method: string, path: string, init: RequestInit | undefined): Promise<Response> {
   if (!world.github.tokenValid) return json(401, { message: 'Bad credentials' });
   if (world.github.rateLimitedRepository) return json(403, { message: 'API rate limit exceeded for installation.' });
   const repo = /^\/repos\/[^/]+\/[^/]+/.exec(path);
@@ -171,6 +190,10 @@ function github(world: FakeWorld, method: string, path: string, init: RequestIni
   }
   const pulls = pullRequests(world, method, rest, init);
   if (pulls !== undefined) return pulls;
+  const merged = await mergeRequest(world, method, rest, init);
+  if (merged !== undefined) return merged;
+  const checks = commitChecks(world, method, rest);
+  if (checks !== undefined) return checks;
   const probe = PERMISSION_PROBES.find((candidate) => candidate.method === method && rest === candidate.path(rest.split('/')[2] ?? ''));
   if (probe === undefined) return json(404, { message: 'Not Found' });
   if (world.github.rateLimited) return json(403, { message: 'You have exceeded a secondary rate limit.' });
@@ -226,6 +249,44 @@ function pullRequests(world: FakeWorld, method: string, rest: string, init: Requ
   const pr: FakePullRequest = { number: store.length + 1, title: body.title ?? '', body: body.body ?? '', head: body.head, base: body.base ?? '', state: 'open', merged: false };
   store.push(pr);
   return json(201, pullRequestNode(pr));
+}
+
+/** `PUT /pulls/<n>/merge` with a merge commit; undefined for other requests. */
+async function mergeRequest(world: FakeWorld, method: string, rest: string, init: RequestInit | undefined): Promise<Response | undefined> {
+  const one = /^\/pulls\/(\d+)\/merge$/.exec(rest);
+  if (one === null || method !== 'PUT') return undefined;
+  const pr = world.github.pullRequests.find((candidate) => candidate.number === Number(one[1]));
+  if (pr === undefined) return json(404, { message: 'Not Found' });
+  if (pr.state !== 'open') return json(422, { message: 'Pull Request is not open' });
+  const body = JSON.parse(String(init?.body ?? '{}')) as { merge_method?: string; sha?: string };
+  if (body.merge_method !== 'merge' || body.sha === undefined) return json(422, { message: 'Validation Failed' });
+  const answer = world.github.merge === undefined ? { status: 405 } : await world.github.merge(pr, body.sha);
+  if ('status' in answer) return json(answer.status, { message: 'Pull Request is not mergeable' });
+  world.writes.push(`${method} ${rest}`);
+  Object.assign(pr, { state: 'closed', merged: true });
+  return json(200, { sha: answer.sha, merged: true, message: 'Pull Request successfully merged' });
+}
+
+/**
+ * A commit's check runs and combined status. The setup check's probe of
+ * check runs (`per_page=1`) reads the same list.
+ */
+function commitChecks(world: FakeWorld, method: string, rest: string): Response | undefined {
+  const match = /^\/commits\/([0-9a-f]+)\/(check-runs|status)(\?.*)?$/.exec(rest);
+  if (match === null || method !== 'GET') return undefined;
+  if (world.github.rateLimited) return json(403, { message: 'You have exceeded a secondary rate limit.' });
+  if (match[2] === 'check-runs' && world.github.missing.has('checks:read')) return json(403, { message: 'Resource not accessible by integration' });
+  if (match[2] === 'status' && world.github.missing.has('statuses:read')) return json(403, { message: 'Resource not accessible by integration' });
+  const all = world.github.checks?.get(match[1] as string) ?? [];
+  if (match[2] === 'status') {
+    const statuses = all.filter((check) => check.commitStatus === true).map((check) => ({ context: check.name, state: check.status === 'completed' ? check.conclusion : 'pending' }));
+    return json(200, { state: statuses.length === 0 ? 'pending' : 'success', total_count: statuses.length, statuses });
+  }
+  const runs = all.filter((check) => check.commitStatus !== true);
+  const page = Number(new URLSearchParams(match[3] ?? '').get('page') ?? '1');
+  const size = Number(new URLSearchParams(match[3] ?? '').get('per_page') ?? '30');
+  const slice = runs.slice((page - 1) * size, page * size);
+  return json(200, { total_count: runs.length, check_runs: slice.map((check) => ({ name: check.name, status: check.status, conclusion: check.conclusion ?? null })) });
 }
 
 function pullRequestNode(pr: FakePullRequest) {

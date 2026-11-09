@@ -119,6 +119,17 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   if (outcome.captured !== undefined && !outcome.captured.ok) {
     return {exitCode:INCOMPLETE_EXIT_CODE, stdout:outcome.summary, stderr:`${stderr}${command}: capture did not finish (${outcome.captured.code})\n`};
   }
+  // A failed check on the sync pull request is a setup error: the repository's checks must pass Linear's form.
+  const pullRequest = outcome.sync?.pullRequest;
+  if (pullRequest?.code === "check-failed") {
+    return { exitCode: SETUP_FAILED_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: setup error (${pullRequest.code}): a check failed on the sync pull request\n` };
+  }
+  if (pullRequest?.code === "initial-pull-request-pending") {
+    return { exitCode: NO_STATE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: stopped short (${pullRequest.code})\n` };
+  }
+  if (pullRequest?.code === "state-moved" || pullRequest?.code === "github-failed") {
+    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${pullRequest.code}); run it again\n` };
+  }
   const write = outcome.sync?.write;
   // Skipped documents are normal (the next run takes them in); a stop, a refused push or a failed write is not.
   if (write?.code !== undefined) {

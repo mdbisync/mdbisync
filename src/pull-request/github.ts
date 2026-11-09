@@ -1,6 +1,6 @@
 // Pull requests through GitHub's REST API, with the token the run acts as
 // (the deployer's GitHub App). Finds the open pull request from a branch or
-// opens one. Never merges: callers that may merge do it themselves.
+// opens one. Merging is in merge.ts, for the callers that may merge.
 
 import { DEFAULT_GITHUB_API_URL } from '../setup/github.ts';
 
@@ -95,7 +95,7 @@ function toPullRequest(value: unknown): PullRequest | null {
   };
 }
 
-async function request(target: GitHubRepository, method: string, path: string, body?: Record<string, unknown>): Promise<{ status: number; json: unknown }> {
+export async function request(target: GitHubRepository, method: string, path: string, body?: Record<string, unknown>): Promise<{ status: number; json: unknown }> {
   const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}/repos/${target.repository}`;
   const response = await (target.fetch ?? fetch)(`${base}${path}`, {
     method,

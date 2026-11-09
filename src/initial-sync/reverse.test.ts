@@ -223,18 +223,19 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.writes.length, writes);
     assert.equal(world.github.pullRequests[0]?.merged, false);
 
-    // After the merge the sync runs, and with both sides equal it writes nothing to Linear.
+    // After the merge the sync runs. It writes nothing to Linear: the tracked
+    // branch holds Linear's state, except the one document the initial sync
+    // left out for its title, which capture takes in under the file name rule
+    // and the sync pull request carries to the tracked branch.
     await merge(world);
     const writesBeforeSync = world.writes.length;
     const after = await run(world, {}, 'sync');
     assert.equal(after.result.exitCode, 0, after.result.stderr);
     assert.equal(after.report.code, null);
-    assert.equal(world.writes.length, writesBeforeSync);
-    const diff = await fixture.remote.text(['diff', '--name-status', 'refs/heads/main', 'refs/mdbisync/linear']);
-    // Merged, the tracked branch holds Linear's state. The one document the
-    // initial sync left out for its title is captured under the file name
-    // rule, and only it differs from the tracked branch.
-    assert.equal(diff, 'A\teng/notes/Q3%3A plans%3F.md');
+    assert.deepEqual(world.writes.slice(writesBeforeSync), ['POST /pulls']);
+    assert.equal(await fixture.remote.text(['diff', '--name-status', 'refs/heads/main', 'refs/mdbisync/linear']), 'A\teng/notes/Q3%3A plans%3F.md');
+    assert.equal(world.github.pullRequests.length, 2);
+    assert.deepEqual(after.report.pullRequest?.paths, ['eng/notes/Q3%3A plans%3F.md']);
   });
 
   it('runs again with nothing changed: refs stay, no second pull request', async () => {
