@@ -112,6 +112,14 @@
         "subject": "runs.0.failedWriteRecorded",
         "operator": "equal",
         "expected": false
+      },
+      {
+        "subject": "proxy.lostAnswers",
+        "operator": "contains-all",
+        "expected": [
+          "create",
+          "update"
+        ]
       }
     ]
   }

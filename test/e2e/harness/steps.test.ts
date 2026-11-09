@@ -641,6 +641,18 @@ describe('linear executors', () => {
     assert.deepEqual(await resolveSubject(ctx, 'blocked.commentFields'), { known: true, value: ['hook', 'line'] });
   });
 
+  it('reject a document by its recorded id and its name, without taking over the scenario\'s target', async () => {
+    const { ctx, ids, faults, remoteGit } = await fakeRun();
+    await runStep(ctx, { kind: 'fault', action: 'reject-document', args: { target: 'eng/platform/notes.md' } });
+    assert.deepEqual(faults, [{ kind: 'reject-document', ids: [ids['eng/platform/notes.md']?.id], titles: ['notes'] }]);
+    assert.equal(ctx.observations.has('target.path'), false);
+    // A converged run whose ids ref is gone is the engine's gap, not a quiet fall back to the name.
+    await remoteGit.run(['update-ref', '-d', `${ctx.names.refPrefix}/ids`]);
+    const git = await ctx.person();
+    await git.run(['update-ref', '-d', `${ctx.names.refPrefix}/ids`], { okCodes: [0, 1] });
+    await assert.rejects(runStep(ctx, { kind: 'fault', action: 'reject-document', args: { target: 'eng/platform/notes.md' } }), ProductError);
+  });
+
   it('tells the engine a document is gone for good when Linear cannot delete one', async () => {
     const { ctx, ids, faults } = await fakeRun();
     ctx.observations.set('fixture.trashedDocument', { path: 'eng/platform/notes.md', id: ids['eng/platform/notes.md']?.id });

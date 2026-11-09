@@ -30,7 +30,7 @@ import { burst, realClock, soak, type LoadDriver } from './load.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { HARNESS, personCommit } from './sandbox.ts';
 import type { Step } from './spec.ts';
-import type { Fault } from './fault-proxy.ts';
+import { writeError } from './fault-proxy.ts';
 import {
   commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
@@ -1083,18 +1083,6 @@ function http(ctx: RunContext): NonNullable<RunContext['proxy']> {
   return ctx.proxy;
 }
 
-/**
- * A write-error variant of a spec as the proxy's fault. `reset-after-apply`
- * may name the write it hits: `reset-after-apply-on-create` or `-on-update`.
- */
-export function writeError(variant: string): Fault {
-  const applied = /^reset-after-apply(?:-on-(create|update))?$/.exec(variant);
-  if (applied !== null) return { kind: 'write-error', variant: 'reset-after-apply', ...(applied[1] === undefined ? {} : { operation: applied[1] as 'create' | 'update' }), times: 1 };
-  if (variant === 'reset' || variant === 'connection-reset') return { kind: 'write-error', variant: 'reset', times: 1 };
-  if (variant === 'server-error' || variant === 'http-500') return { kind: 'write-error', variant: 'server-error', times: 1 };
-  throw new Error(`unknown write-error variant ${variant}`);
-}
-
 /** Commits a change to a file and registers the commit that puts it back for `fault.clear`. */
 async function changeUntilClear(ctx: RunContext, path: string, change: (text: string) => string, message: string): Promise<void> {
   const git = await ctx.person();
@@ -1148,11 +1136,13 @@ const FAULT: Record<string, Executor> = {
   },
   'fault.reject-document': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
-    setTarget(ctx, path);
     // A create names the document by its title; an update of an existing one may carry only its id.
     const id = (await readRunIds(ctx))?.get(path)?.id;
-    const title = path.replace(/\.md$/, '').split('/').pop() as string;
-    http(ctx).setFaults([{ kind: 'reject-document', targets: id === undefined ? [title] : [title, id] }]);
+    if (id === undefined && ['converged', 'conflicted'].includes(ctx.scenario.setup.state)) {
+      throw new ProductError('the engine recorded no id for the document to reject, though the run started converged');
+    }
+    const name = path.replace(/\.md$/, '').split('/').pop() as string;
+    http(ctx).setFaults([{ kind: 'reject-document', ids: id === undefined ? [] : [id], titles: [name] }]);
   },
   'fault.upload-error': async (ctx) => {
     http(ctx).setFaults([{ kind: 'upload-error', times: 1 }]);

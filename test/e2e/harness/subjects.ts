@@ -1229,8 +1229,11 @@ export const SUBJECTS: Record<string, Compute> = {
   'writes.total': async (env) => documentWrites(env.ctx) + (await gitWrites(env.ctx)) + (await pullRequestsSinceStart(env.ctx)).length,
   'http.retryCount': async (env) => {
     const records = proxyRecordsSinceStart(env.ctx);
-    return records.filter((record, index) => record.injected && records.slice(index + 1).some((later) => later.operation === record.operation)).length;
+    // A fault the proxy answered, or a write whose answer it dropped, followed by the same operation again.
+    return records.filter((record, index) => (record.injected || record.answerDropped === true) && records.slice(index + 1).some((later) => later.operation === record.operation)).length;
   },
+  // Which writes lost their answer after Linear applied them (L5-09): `create`, `update`.
+  'proxy.lostAnswers': async (env) => sorted(new Set(proxyRecordsSinceStart(env.ctx).filter((record) => record.answerDropped === true).map((record) => (/create/i.test(record.operation) ? 'create' : 'update')))),
   'run.completed': async (env) => ownResults(env.ctx).at(-1)?.exitCode === 0,
   'leases.refusedCount': async (env) => ownResults(env.ctx).filter((result) => result.report?.['atomicPushRefused'] === true).length,
   'leases.partialRefUpdates': async (env) => ownResults(env.ctx).reduce((sum, result) => sum + Number(result.report?.['partialRefUpdates'] ?? 0), 0),
