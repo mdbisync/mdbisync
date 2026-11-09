@@ -33,7 +33,7 @@ export type SecurityStep = (typeof SECURITY_STEPS)[number];
 export const STAGE_FOLDER = 'mdbisync-candidates';
 const MANIFEST = 'manifest.json';
 const ANSWERS = 'answers.json';
-const READS = 'linear-reads.json';
+const READS = 'linear-reads';
 const VERSION = 1;
 
 interface Manifest {
@@ -57,7 +57,7 @@ export function stageFolder(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /** Where the stage step keeps Linear's answers to its reads for the apply step. */
-export const readsFile = (folder: string) => join(folder, READS);
+export const readsFolder = (folder: string) => join(folder, READS);
 
 const sha256 = (content: Buffer | string) => createHash('sha256').update(content).digest('hex');
 

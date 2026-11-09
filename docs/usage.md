@@ -115,7 +115,9 @@ mdbisync steps:
    findings. It takes Linear's changes from the stage step's answers
    instead of reading them again, so a run reads Linear once and pushes
    what the hooks saw; a change made in Linear after the stage step waits
-   for the next run. Before it writes to Linear, it reads Linear itself. A
+   for the next run. A document whose blocked or conflict mark may change
+   is read again first, so a mark never overwrites an icon set in the
+   meantime, and the rest of the run reads Linear itself. A
    change the hooks have not seen, because the hooks step did not run or
    the tracked branch moved, is not pushed; the next run checks it.
 

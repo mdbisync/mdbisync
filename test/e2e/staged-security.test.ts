@@ -396,4 +396,26 @@ for (const file of process.argv.slice(2)) {
     assert.deepEqual((await report('apply')).capture.blocked.map(({ id, path }) => ({ id, path })), [{ id: 'plan', path: 'docs/plan.md' }]);
     assert.equal(await remoteHolds('A private-canary value'), false);
   });
+
+  it('a mark keeps the icon a person set after the stage step, and clearing it restores that icon', async () => {
+    edit('A private-canary value.\n');
+    const stage = await action('stage', { operation: 'sync', 'security-step': 'stage', 'report-file': '' });
+    assert.equal((await hooksStep(stage)).status, 0);
+    // A person changes the document's icon while the hooks run.
+    const document = world.linear.documents[0]!;
+    Object.assign(document, { icon: 'Star', color: '#00aa00' });
+    touch(document);
+    const apply = await action('apply', { operation: 'sync', 'security-step': 'apply' });
+    assert.equal(apply.status, 0, apply.stdout);
+    assert.deepEqual((await report('apply')).capture.blocked.map(({ id }) => id), ['plan']);
+    assert.notEqual(document.icon, 'Star', 'the document was not marked');
+
+    // The finding is removed in Linear: the next run clears the mark and restores the person's icon, not the stage step's.
+    edit('Clean again.\n');
+    const again = await action('stage-2', { operation: 'sync', 'security-step': 'stage', 'report-file': '' });
+    assert.equal((await hooksStep(again)).status, 0);
+    const cleared = await action('apply-2', { operation: 'sync', 'security-step': 'apply' });
+    assert.equal(cleared.status, 0, cleared.stdout);
+    assert.deepEqual([document.icon, document.color], ['Star', '#00aa00']);
+  });
 });

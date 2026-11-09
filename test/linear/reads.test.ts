@@ -4,6 +4,7 @@
 // still needs Linear.
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -39,7 +40,7 @@ describe('Linear reads kept for the next step', () => {
   });
 
   const paths = () => fake.received.map((request) => request.operation ?? request.path);
-  const file = () => join(dir, 'reads.json');
+  const index = () => join(dir, 'index.json');
 
   /** The stage step: a real token, every successful read kept. */
   async function record(work: (client: LinearClient) => Promise<void>): Promise<void> {
@@ -48,12 +49,12 @@ describe('Linear reads kept for the next step', () => {
       reads.tokenMinted(token.scope, token.context);
       await work(new LinearClient({ token: token.accessToken, auth: token.context, baseUrl: fake.url, reads }));
     });
-    await reads.save(file());
+    await reads.save(dir);
   }
 
   /** The apply step: the kept answers and a token minted on first need. */
   async function replay<T>(work: (client: LinearClient, reads: LinearReads) => Promise<T>): Promise<T> {
-    const reads = await LinearReads.replaying(file());
+    const reads = await LinearReads.replaying(dir);
     assert.ok(reads !== null && reads.token !== null);
     return withDeferredRunToken(credentials, reads.token, { baseUrl: fake.url, onRevokeError: (error) => assert.fail(String(error)) }, (token) =>
       work(new LinearClient({ token: () => token.accessToken(), auth: token.context, baseUrl: fake.url, reads }), reads));
@@ -103,7 +104,7 @@ describe('Linear reads kept for the next step', () => {
       await client.transport.request('Touch', 'mutation', MUTATION);
       await assert.rejects(client.transport.request('Broken', 'query', 'query Broken { broken }'));
     });
-    const text = await readFile(file(), 'utf8');
+    const text = await readFile(index(), 'utf8');
     assert.ok(!text.includes('fake-token'), 'the record holds the token');
     assert.ok(!text.includes('client-secret-value'), 'the record holds the client secret');
     const kept = JSON.parse(text) as { answers: unknown[]; token: { scope: string[] } };
@@ -115,13 +116,44 @@ describe('Linear reads kept for the next step', () => {
     await record(async (client) => {
       await client.transport.request('Teams', 'query', QUERY);
     });
-    const kept = JSON.parse(await readFile(file(), 'utf8')) as { answers: Array<{ body: string }> };
-    kept.answers[0]!.body = Buffer.from('{"errors":[{"message":"x"}]}').toString('base64');
-    await writeFile(file(), JSON.stringify(kept));
+    const kept = JSON.parse(await readFile(index(), 'utf8')) as { answers: Array<{ body: string }> };
+    const errorBody = Buffer.from('{"data":null,"errors":[{"message":"x"}]}');
+    const hash = createHash('sha256').update(errorBody).digest('hex');
+    await writeFile(join(dir, 'bodies', hash), errorBody);
+    kept.answers[0]!.body = hash;
+    await writeFile(index(), JSON.stringify(kept));
     await assert.rejects(replay((client) => client.transport.request('Teams', 'query', QUERY)), LinearHttpError);
   });
 
-  it('the apply step without a record from the stage step reads Linear itself', async () => {
-    assert.equal(await LinearReads.replaying(join(dir, 'missing.json')), null);
+  it('an answer with an empty error list is kept and answered as Linear gave it', async () => {
+    fake.operations.set('Teams', () => ({ body: { data: { teams: { nodes: [{ id: 'team-kept' }] } }, errors: [] } }));
+    await record(async (client) => {
+      await client.transport.request('Teams', 'query', QUERY);
+    });
+    fake.received.length = 0;
+    const data = await replay((client) => client.transport.request<{ teams: { nodes: Array<{ id: string }> } }>('Teams', 'query', QUERY));
+    assert.deepEqual(data.teams.nodes, [{ id: 'team-kept' }]);
+    assert.deepEqual(paths(), []);
+  });
+
+  it('the apply step without a usable record from the stage step reads Linear itself', async () => {
+    assert.equal(await LinearReads.replaying(join(dir, 'missing')), null);
+    await record(async (client) => {
+      await client.transport.request('Teams', 'query', QUERY);
+    });
+    // A record cut short (the stage step killed while writing it) is no record.
+    await writeFile(index(), '{"version":2,"token":');
+    assert.equal(await LinearReads.replaying(dir), null);
+    await writeFile(index(), '{"version":2,"token":{"scope":[],"context":{}}}');
+    assert.equal(await LinearReads.replaying(dir), null);
+  });
+
+  it('a body file that does not match its hash makes the record unusable', async () => {
+    await record(async (client) => {
+      await client.transport.request('Teams', 'query', QUERY);
+    });
+    const kept = JSON.parse(await readFile(index(), 'utf8')) as { answers: Array<{ body: string }> };
+    await writeFile(join(dir, 'bodies', kept.answers[0]!.body), 'changed');
+    assert.equal(await LinearReads.replaying(dir), null);
   });
 });

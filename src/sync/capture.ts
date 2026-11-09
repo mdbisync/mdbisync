@@ -18,6 +18,7 @@ import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, co
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
+import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
@@ -382,6 +383,28 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       result.summary = `Staged ${candidates.size} changed documents for the security hooks.`;
       return result;
     }
+    // The apply step's documents are the stage step's snapshot, and a mark
+    // saves and restores a document's icon and color. The documents whose
+    // mark may change are read again: a blocked one is marked over its
+    // current decoration, and any other that changed since then keeps its
+    // mark until the next run captures it.
+    const unmarked = new Set<string>();
+    if (linear.transport.reads?.mode === 'replay') {
+      const marking = [
+        ...result.blocked.map(({id}) => id),
+        ...[...candidates].filter(([id, {doc}]) => byId.get(id)?.entry.saved !== undefined || detectConflicts(doc.content ?? '').length > 0).map(([id]) => id),
+      ];
+      const current = marking.length === 0 ? new Map<string, LinearDocument>() : new Map((await linear.getDocuments(marking, {withContent: true})).map((doc) => [doc.id, doc]));
+      for (const blocked of result.blocked) {
+        const now = current.get(blocked.id);
+        const then = documents.get(blocked.id);
+        if (now === undefined || then === undefined || now.updatedAt === then.updatedAt) continue;
+        documents.set(blocked.id, {...now, content: then.content ?? null});
+        const entry = ids.get(blocked.path);
+        if (entry !== undefined && byId.get(blocked.id)?.entry.saved === undefined) ids.set(blocked.path, {...entry, saved: {icon: now.icon, color: now.color}});
+      }
+      for (const [id, {doc}] of candidates) if (marking.includes(id) && current.get(id)?.updatedAt !== doc.updatedAt) unmarked.add(id);
+    }
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);
       if (old !== undefined && old.path !== candidate.path) {
@@ -432,7 +455,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       const lostLease = new Error('state moved while recording document marks');
       const marked = [
-        ...[...candidates.values()].map(({doc, path}) => ({doc, path, blocked: [] as SecurityFinding[]})),
+        ...[...candidates.values()].filter(({doc}) => !unmarked.has(doc.id)).map(({doc, path}) => ({doc, path, blocked: [] as SecurityFinding[]})),
         ...result.blocked.map(({id, path, findings}) => ({doc: documents.get(id)!, path, blocked: findings})),
       ];
       try {

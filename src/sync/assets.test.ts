@@ -169,9 +169,9 @@ it('a download kept by the stage step is taken by the apply step without a reque
     const recording = LinearReads.recording();
     recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
     const staged = await createAssetCapture(git, resolveStateConfig({}), base, fetcher, recording)('plan.md', body, new Map());
-    await recording.save(join(dir, 'reads.json'));
+    await recording.save(dir);
     assert.equal(gets, 1);
-    const replaying = await LinearReads.replaying(join(dir, 'reads.json'));
+    const replaying = await LinearReads.replaying(dir);
     assert.ok(replaying !== null);
     const applied = await createAssetCapture(git, resolveStateConfig({}), base, fetcher, replaying)('plan.md', body, new Map());
     assert.equal(gets, 1, 'the apply step downloaded again');

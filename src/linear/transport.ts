@@ -267,7 +267,10 @@ function keptData<T>(operation: string, status: number, bytes: Buffer): T {
   } catch {
     body = undefined;
   }
-  if (body === undefined || body === null || body.errors !== undefined || body.data === undefined || body.data === null) throw new LinearHttpError(operation, status, undefined);
+  const errors = body?.errors;
+  if (body === undefined || body === null || (Array.isArray(errors) ? errors.length > 0 : errors !== undefined) || body.data === undefined || body.data === null) {
+    throw new LinearHttpError(operation, status, undefined);
+  }
   return body.data as T;
 }
 
