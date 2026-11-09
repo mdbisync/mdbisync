@@ -67,18 +67,19 @@ export async function findOpenPullRequest(target: GitHubRepository, head: string
 /** Opens a pull request; the caller checks first that none is open. */
 export async function openPullRequest(target: GitHubRepository, spec: NewPullRequest): Promise<PullRequest> {
   const answer = await request(target, 'POST', '/pulls', { title: spec.title, head: spec.head, base: spec.base, body: spec.body, maintainer_can_modify: false });
+  // GitHub's 201 is the write, also when its answer cannot be read.
+  if (answer.status === 201) wrote(target, 'opened');
   const opened = answer.status === 201 ? toPullRequest(answer.json) : null;
   if (opened === null) throw new PullRequestError('opening a pull request', answer.status);
-  wrote(target, 'opened');
   return opened;
 }
 
 /** Replaces a pull request's title and description. */
 export async function updatePullRequest(target: GitHubRepository, number: number, text: { title: string; body: string }): Promise<PullRequest> {
   const answer = await request(target, 'PATCH', `/pulls/${number}`, { title: text.title, body: text.body });
+  if (answer.status === 200) wrote(target, 'updated');
   const updated = answer.status === 200 ? toPullRequest(answer.json) : null;
   if (updated === null) throw new PullRequestError('updating a pull request', answer.status);
-  wrote(target, 'updated');
   return updated;
 }
 

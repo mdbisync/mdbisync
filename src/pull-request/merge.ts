@@ -125,10 +125,9 @@ const REASON_LENGTH = 300;
 export async function mergePullRequest(target: GitHubRepository, number: number, sha: string): Promise<MergeOutcome> {
   const answer = await request(target, 'PUT', `/pulls/${number}/merge`, { merge_method: 'merge', sha });
   const body = answer.json as { merged?: unknown; sha?: unknown; message?: unknown } | null;
-  if (answer.status === 200 && body !== null && body.merged === true && typeof body.sha === 'string') {
-    wrote(target, 'merged');
-    return { merged: true, sha: body.sha };
-  }
+  // GitHub's 200 is the merge, also when its answer cannot be read.
+  if (answer.status === 200) wrote(target, 'merged');
+  if (answer.status === 200 && body !== null && body.merged === true && typeof body.sha === 'string') return { merged: true, sha: body.sha };
   if (answer.status === 405 || answer.status === 409 || answer.status === 422) {
     return { merged: false, status: answer.status, reason: refusalReason(body?.message) };
   }

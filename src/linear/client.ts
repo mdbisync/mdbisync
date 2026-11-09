@@ -367,8 +367,11 @@ export class LinearClient {
         let found = false;
         try { found = await find(); } catch { /* Preserve the original mutation failure. */ }
         if (found) {
-          // The comment with this run's id is there: the create whose answer was lost was applied.
-          this.stats.wrote('CommentOnDocument');
+          // Linear's error answer refused this create, so the comment is another caller's. Without one (a lost
+          // answer, a server error) this create may be the one that was applied: it counts, so a zero-write
+          // check fails rather than passes on it.
+          const refused = error instanceof LinearGraphQLError && error.httpStatus < 500;
+          if (!refused) this.stats.wrote('CommentOnDocument');
           return existing();
         }
       }

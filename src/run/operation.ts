@@ -59,16 +59,23 @@ export interface OperationOutcome extends PreflightOutcome {
 export interface RunWrites {
   /** Linear mutations by operation (`CreateDocument`, `UpdateDocument`, ...) and stored file uploads (`FileUpload`). */
   linear: Record<string, number>;
-  /** Refs moved by accepted pushes, by role: the `linear`, `ids` and `uploads` state refs, `syncBranch`, `trackedBranch`, `other`. */
+  /**
+   * Refs moved by accepted pushes, by role: the `linear`, `ids` and `uploads`
+   * state refs, `syncBranch`, `trackedBranch`, `other`. LFS objects uploaded
+   * before a push are content, not a change: nothing refers to them until a
+   * ref moves, so they are not counted.
+   */
   git: Partial<Record<RefRole, number>>;
   /** Pull request calls GitHub accepted: `opened`, `updated`, `merged`, `closed`. */
   pullRequests: Record<string, number>;
 }
 
-const NO_WRITES: RunWrites = { linear: {}, git: {}, pullRequests: {} };
+function noWrites(): RunWrites {
+  return { linear: {}, git: {}, pullRequests: {} };
+}
 
 function sortedCounts(counts: ReadonlyMap<string, number>): Record<string, number> {
-  return Object.fromEntries([...counts].filter(([, count]) => count > 0).sort(([a], [b]) => a.localeCompare(b)));
+  return Object.fromEntries([...counts].filter(([, count]) => count > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
 /** The refs moved since `before`: the working copy may have served earlier runs. */
@@ -95,7 +102,7 @@ export async function runOperation(
   // Only a sync and a confirmed initial sync from Linear take Linear's text; nothing else has a set for the hooks.
   if (security?.step === 'stage' && operation === 'initial-sync' && !(initialSync?.direction === 'linear-to-git' && initialSync.confirm)) {
     await stageNothing(security.folder, null);
-    return { operation, ok: true, notImplemented: false, refusedPushes: [], summary: renderStaged(0), staged: { sets: 0 }, writes: NO_WRITES };
+    return { operation, ok: true, notImplemented: false, refusedPushes: [], summary: renderStaged(0), staged: { sets: 0 }, writes: noWrites() };
   }
   try {
     // The stage step keeps Linear's answers to its reads; the apply step's capture takes them instead of reading again.
@@ -192,7 +199,7 @@ async function runWithSecurity(
   };
 
   const refusePending = initialSync?.direction === 'git-to-linear' && initialSync.confirm;
-  const preflight = await runPreflight(
+  const { linearWrites, ...preflight } = await runPreflight(
     operation,
     inputs,
     refusePending ? { ...options, refusePendingInitialPullRequest: true } : options,
@@ -204,7 +211,7 @@ async function runWithSecurity(
   );
   const refused = refusedPushes(options.git);
   const writes: RunWrites = {
-    linear: sortedCounts(preflight.linearWrites ?? new Map<string, number>()),
+    linear: sortedCounts(linearWrites ?? new Map<string, number>()),
     git: sortedCounts(movedSince(refsBefore, movedRefs(options.git))),
     pullRequests: sortedCounts(pullRequestWrites),
   };

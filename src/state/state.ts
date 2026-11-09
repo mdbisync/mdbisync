@@ -184,7 +184,9 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
     // from a stale copy is refused, so the push is still reported as done.
     const input = changing.map((update) => `update ${localRef(config, update.ref)} ${update.next}\n`).join('');
     await git.run(['update-ref', '--stdin'], { input, okCodes: [0, 1, 128] });
-    logMoves(git, config, changing.map((update) => update.ref));
+    // A ref git reports up to date ('=') already held the new value: another run moved it, not this push.
+    const unchanged = new Set(lines.filter((line) => line.flag === '=').map((line) => line.ref));
+    logMoves(git, config, changing.map((update) => update.ref).filter((ref) => !unchanged.has(ref)));
     return { ok: true, updated: changing.map((update) => update.ref) };
   }
 
