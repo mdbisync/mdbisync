@@ -378,8 +378,12 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
    * ref moved.
    */
   async function record(): Promise<ReverseRecord | null | 'sync-branch-changed'> {
-    const restored = (entry: ReverseEntry): string =>
-      restoreBody(transforms, entry.path, (documents.get(entry.documentId) as LinearDocument).content ?? '');
+    // Linear is the model here and nothing was sent to it: its text is taken as
+    // it stands (kept), never put through the formatter, so the file equals the document.
+    const restored = (entry: ReverseEntry): string => {
+      const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
+      return restoreBody(transforms, entry.path, content, content);
+    };
     const textOf = (entry: ReverseEntry): string => {
       const body = restored(entry);
       const tracked = input.texts.get(entry.path);
