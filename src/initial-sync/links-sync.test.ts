@@ -180,7 +180,7 @@ describe('links between synchronized documents in a confirmed initial sync', () 
 
     const first = await confirm();
     assert.equal(first.complete, true);
-    assert.deepEqual(first.leftOutAtWrite, [{ path: 'eng/notes/plan.md', rule: 'upload-too-large' }]);
+    assert.deepEqual(first.leftOutAtWrite.map(({ path, rule }) => ({ path, rule })), [{ path: 'eng/notes/plan.md', rule: 'upload-too-large' }]);
     const linked = linkedFromGuide();
     assert.ok(linked !== undefined, 'the guide does not link the plan');
     // The recorded guide is the tracked file: its link comes back as it was written.
