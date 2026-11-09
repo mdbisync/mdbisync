@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { countAppRequest } from './app-reads.ts';
 import type { TestConfig } from './config.ts';
-import type { LiveWorld, RunContext } from './context.ts';
+import type { EditRecord, LiveWorld, RunContext } from './context.ts';
+import { retireMissingFrom } from './steps.ts';
 import { decodeHeldRun, encodeHeldRun, heldRunOf, HELD_RUN_FILE, loadHeldRun, saveHeldRun, type HeldRun } from './held-run.ts';
 import { runNames } from './isolation.ts';
 import { liveRuns, registerRun } from './locks.ts';
@@ -335,6 +336,7 @@ describe('ui-result', () => {
 
   it('keeps the outcomes of every check when one does not hold', async () => {
     const { runDir, checklist, deps } = heldRun();
+    await takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 2)), scenarios, deps);
     const wrong = answered(checklist, 3, { values: true }).replace('  - value: "orange"', '  - value: "red"');
     const outcome = await takeUpHeldRun(runDir, parseUiAnswers(wrong), scenarios, deps);
     assert.ok(outcome.state === 'done');
@@ -352,6 +354,7 @@ describe('ui-result', () => {
 
   it('keeps a newer result of the scenario from another run on the status page', async () => {
     const { runDir, outDir, checklist, deps } = heldRun();
+    await takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 2)), scenarios, deps);
     const outcome = await takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 3, { values: true })), scenarios, deps);
     assert.ok(outcome.state === 'done');
     const statusPage = join(outDir, 'test-status.md');
@@ -392,7 +395,8 @@ describe('ui-result', () => {
     assert.equal(existsSync(join(ended.runDir, HELD_RUN_FILE)), true);
 
     const { runDir, stateDir, remote, checklist, deps, steps } = heldRun();
-    await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 3)), scenarios, deps), /these values are not: ui\.listIcon/);
+    // Every item answered at once: the last one was seen before the harness settled the run.
+    await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 3, { values: true })), scenarios, deps), /item 3 comes after the harness step run\.settle, which has not run yet/);
     // Another scenario with as many items, and another run of the same scenario.
     const other = renderUiChecklist(byId('L6-04'), remote.names, { live: null, runDir });
     await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(other, 2)), scenarios, deps), /checklist is of L6-04 run a1b2c3, and the held run is L6-03 run a1b2c3/);
@@ -404,6 +408,36 @@ describe('ui-result', () => {
     assert.equal(remote.state.projects.length, 1);
     assert.ok(liveRuns(stateDir).has(RUN));
     assert.equal(loadHeldRun(runDir).stepIndex, 0);
+
+    // Values missing once every item is answered.
+    await takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 2)), scenarios, deps);
+    await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 3)), scenarios, deps), /these values are not: ui\.listIcon/);
+    assert.equal(loadHeldRun(runDir).stepIndex, 3);
+  });
+
+  it('lets the harness act on a UI step answered pass, before the steps after it', async () => {
+    const { runDir, checklist, deps } = heldRun();
+    const order: string[] = [];
+    const tracked: UiResultDeps = {
+      ...deps,
+      afterUiStep: async (_ctx, step) => void order.push(`after ui.${step.action}`),
+      runStep: async (_ctx, step) => void order.push(`${step.kind}.${step.action}`),
+    };
+    await takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 2)), scenarios, tracked);
+    assert.deepEqual(order, ['after ui.verify-editor', 'after ui.inspect-conflict', 'run.settle']);
+  });
+});
+
+describe('UI conflict resolution', () => {
+  it('retires the edits of the version the person discarded, and only those', () => {
+    const edits: EditRecord[] = [
+      { side: 'git', path: 'eng/plan.md', token: 'a1b2c3-001' },
+      { side: 'linear', path: 'eng/plan.md', token: 'a1b2c3-002' },
+      { side: 'linear', path: 'eng/plan.md', token: 'a1b2c3-003', removal: true },
+      { side: 'git', path: 'eng/other.md', token: 'a1b2c3-004' },
+    ];
+    retireMissingFrom({ edits }, 'eng/plan.md', '# Plan\n\nKept text a1b2c3-002.\n');
+    assert.deepEqual(edits.map((edit) => edit.retired === true), [true, false, false, false]);
   });
 });
 

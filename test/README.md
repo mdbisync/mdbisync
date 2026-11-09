@@ -246,7 +246,11 @@ node test/e2e/harness/cli.ts ui-result <run folder> <answered checklist> --statu
 The harness goes on from where the run stopped. It runs the harness steps
 between the answered items (such as `run.settle`); when it reaches an item
 that is not answered yet, it saves the run and keeps the hold, so the
-session answers the next items and runs `ui-result` again. Once every item
+session answers the next items (and the values) only after that step ran, and
+runs `ui-result` again; answers to items after a harness step that has not
+run yet are refused. When a person resolves a conflict in the UI, the
+harness reads the kept version and no longer expects the discarded edits
+(I2). Once every item
 is answered, it runs the checks, writes the result (pass, fail or
 expected-red) over the run's `env-blocked` one in the harness run's report
 and in the status page and evidence when given, cleans up and releases the

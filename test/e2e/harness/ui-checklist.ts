@@ -54,7 +54,7 @@ export function renderUiChecklist(scenario: Scenario, names: RunNames, ctx: Pick
     `- Team-zone documents start with: \`${names.teamZonePrefix}\``,
     `- The run's resources stay until this checklist is answered or for two hours, whichever comes first.`,
     '- Answer in this file: `pass` or `fail` after `result:`, what you saw after `observed:` (never document content), and a JSON value after each `value:`.',
-    `- Hand the answers back with \`node test/e2e/harness/cli.ts ui-result ${ctx.runDir} <this file>\`. With the items before a harness step answered, the harness runs that step and keeps the run; with every item answered, it runs the checks, records the result and cleans up. A \`fail\` ends the run there.`,
+    `- Hand the answers back with \`node test/e2e/harness/cli.ts ui-result ${ctx.runDir} <this file>\`. With the items before a harness step answered, the harness runs that step and keeps the run; answer the items after it, and the values, only once it ran. With every item answered, it runs the checks, records the result and cleans up. A \`fail\` ends the run there.`,
     '',
     '## Steps',
     '',

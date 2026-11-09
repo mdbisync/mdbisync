@@ -42,7 +42,7 @@ import {
 } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import type { Scenario, Step } from './spec.ts';
-import { runStep } from './steps.ts';
+import { afterUiStep, runStep } from './steps.ts';
 import { uiValueSubjects, type UiAnswers } from './ui-checklist.ts';
 
 export const UI_RESULT_FILE = 'ui-result.json';
@@ -52,6 +52,8 @@ export interface UiResultDeps extends Omit<RunnerDeps, 'outDir'> {
   attach?: (held: HeldRun, deps: UiResultDeps) => Promise<LiveWorld>;
   /** Runs one harness step; by default the harness's own. */
   runStep?: (ctx: RunContext, step: Step) => Promise<void>;
+  /** What the harness does once a UI step was answered pass (for example retiring the edits a resolution discarded). */
+  afterUiStep?: (ctx: RunContext, step: Step) => Promise<void>;
 }
 
 export type UiResultOutcome =
@@ -101,6 +103,16 @@ function checkAnswers(scenario: Scenario, held: HeldRun, answers: UiAnswers): Ma
   for (const item of answers.items) {
     if (firstOpen !== undefined && item.number > firstOpen.number && item.result !== null) {
       throw new Error(`item ${item.number} is answered but item ${firstOpen.number} before it is not: answer the items in order`);
+    }
+  }
+  // Items after a harness step that has not run yet must be answered after it ran: what the session saw
+  // before the step says nothing about the page after it. They come back in a later submission.
+  const pending = scenario.steps.findIndex((step, index) => index >= held.stepIndex && step.kind !== 'ui');
+  if (pending >= 0) {
+    const early = [...itemOf.entries()].filter(([index, item]) => index > pending && answers.items[item - 1]?.result !== null).map(([, item]) => item);
+    const blocking = scenario.steps[pending] as Step;
+    if (early.length > 0) {
+      throw new Error(`item ${early.join(', ')} comes after the harness step ${blocking.kind}.${blocking.action}, which has not run yet: hand back the items before it, then answer the rest once it ran`);
     }
   }
   const failed = answers.items.some((item) => item.result === 'fail');
@@ -213,6 +225,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
         }
         ctx.log(`ui item ${item} (${current.action}): ${answer.result}${answer.observed === '' ? '' : `: ${answer.observed}`}`);
         if (answer.result === 'fail') throw new ProductError(`UI step ${item} (${current.action}) failed${answer.observed === '' ? '' : `: ${answer.observed}`}`);
+        await (deps.afterUiStep ?? afterUiStep)(ctx, current);
         continue;
       }
       ctx.log(`step ${current.kind}.${current.action}`);
