@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import type { Definition, Image, Link, Nodes } from 'mdast';
-import { parse, visit } from '../../../src/format/markdown.ts';
+import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
@@ -17,9 +17,12 @@ import { refreshView, resolveSubject } from './subjects.ts';
 
 // --- pure helpers ----------------------------------------------------------
 
-/** Removes a YAML front matter block at the start of a file. */
-export function stripFrontMatter(text: string): string {
-  return text.replace(/^(?:﻿)?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
+/**
+ * The body of a file as the engine sends it to Linear: without a byte order
+ * mark, front matter and the blank lines after it, by the engine's own rule.
+ */
+export function bodyOf(text: string): string {
+  return splitFile(text).body;
 }
 
 /** Where a mapped id's document is: in use, in the trash, archived (with its project), or gone. */
@@ -215,7 +218,7 @@ export function gitLinks(content: string, documentPath: string, targets: Require
 
 /** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
 export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
-  return linearLinks(stripFrontMatter(text), path, sides) === content;
+  return linearLinks(bodyOf(text), path, sides) === content;
 }
 
 /**

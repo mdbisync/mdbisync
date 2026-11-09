@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts';
 import { Git, readIds } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { runChecks, snapshotRefs, stripFrontMatter, titleOf } from './checks.ts';
+import { runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, owningFolder, readAnnotation } from './corpus.ts';
@@ -265,7 +265,7 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
     const team = folder.team === null ? undefined : live.teams.get(folder.team);
     const place = project !== undefined ? { projectId: project.id } : team !== undefined ? { teamId: team.id } : null;
     if (place === null) continue;
-    const document = await live.editors['editor-a'].createDocument(place, { title: titleOf(target, folder.folder), content: stripFrontMatter(texts.get(target) ?? '') });
+    const document = await live.editors['editor-a'].createDocument(place, { title: titleOf(target, folder.folder), content: bodyOf(texts.get(target) ?? '') });
     live.seededDocuments.push(document.id);
     seededPaths.set(target, document.id);
   }

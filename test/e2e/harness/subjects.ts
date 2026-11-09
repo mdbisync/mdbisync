@@ -23,9 +23,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { listTree, readBlobs, readIds, readUploads, type Git } from '../../../src/state/index.ts';
+import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readFixture, readOptional } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, snapshotRefs, stripFrontMatter, titleOf, type Sides } from './checks.ts';
+import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { owningFolder, type Folder } from './corpus.ts';
@@ -33,7 +34,6 @@ import { REPO_ROOT, engineEntry } from './engine.ts';
 import { isAppBot } from './workflows.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { documentPaths, projectFolders } from './step-helpers.ts';
-import { linearPart } from './offline.ts';
 import { UNSAFE_TITLES } from './fixtures.ts';
 
 // --- views of the world ---------------------------------------------------------------
@@ -156,17 +156,18 @@ async function target(env: Env): Promise<{ path: string; id: string | undefined;
 function documentBody(view: View, path: string, document: LinearDocument | undefined): string | null {
   if (document === undefined) return null;
   const file = view.files.get(path);
-  if (file !== undefined && sameAsFile(file, document.content ?? '', path, view)) return stripFrontMatter(file);
+  if (file !== undefined && sameAsFile(file, document.content ?? '', path, view)) return bodyOf(file);
   return gitLinks(document.content ?? '', path, view);
 }
 
 function fileBody(view: View, path: string): string | null {
   const text = view.files.get(path);
-  return text === undefined ? null : stripFrontMatter(text);
+  return text === undefined ? null : bodyOf(text);
 }
 
+/** The YAML of a file's front matter, found by the engine's own rule. */
 function frontMatter(text: string | undefined | null): string | null {
-  return text === undefined || text === null ? null : (/^(?:﻿)?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(text)?.[0] ?? null);
+  return text === undefined || text === null ? null : (findFrontMatter(text)?.yaml ?? null);
 }
 
 /** Each synchronized file's value, or the target's when the scenario acted on one document. */
@@ -636,7 +637,7 @@ export const SUBJECTS: Record<string, Compute> = {
     for (const [path, text] of view.files) {
       const fixture = path.startsWith(`${BANK_HOME}/`) ? fixtures.get(path.slice(BANK_HOME.length + 1)) : undefined;
       const recorded = fixture !== undefined && readFixture(bank, fixture) === text ? readOptional(join(bank.dir, goldenMarkdownPath(fixture.file))) : undefined;
-      result.set(path, recorded ?? linearPart(fixed.get(path) ?? text));
+      result.set(path, recorded ?? bodyOf(fixed.get(path) ?? text));
     }
     return result;
   },
@@ -654,7 +655,7 @@ export const SUBJECTS: Record<string, Compute> = {
       const id = view.ids.get(path)?.id;
       // Every occurrence counts: a fragment kept on one of two equal links does not cover the other.
       const actual = documentLinks(id === undefined ? '' : (view.documents.get(id)?.content ?? ''), view.documentUrlBase).filter((link) => link.includes('#'));
-      const expected = documentLinks(linearLinks(stripFrontMatter(view.files.get(path) ?? ''), path, view), view.documentUrlBase).filter((link) => link.includes('#'));
+      const expected = documentLinks(linearLinks(bodyOf(view.files.get(path) ?? ''), path, view), view.documentUrlBase).filter((link) => link.includes('#'));
       anchored += expected.length;
       if (JSON.stringify(sorted(actual)) !== JSON.stringify(sorted(expected))) return false;
     }
@@ -925,7 +926,7 @@ export const SUBJECTS: Record<string, Compute> = {
     if (tip === null) return null;
     const files = await treeFiles(await person(env.ctx), tip, (candidate) => candidate === path);
     const text = files.get(path)?.toString('utf8');
-    return text === undefined ? null : stripFrontMatter(text);
+    return text === undefined ? null : bodyOf(text);
   },
 
   // --- uploads -----------------------------------------------------------------------------------
@@ -952,7 +953,7 @@ export const SUBJECTS: Record<string, Compute> = {
       const content = id === undefined ? undefined : view.documents.get(id)?.content;
       if (content === undefined || content === null) continue;
       // Every image link, external ones too, so the two lists line up position by position.
-      const fileImages = imageLinks(stripFrontMatter(text)).map((link) => (/^[a-z]+:/i.test(link) ? null : resolveLink(path, link)));
+      const fileImages = imageLinks(bodyOf(text)).map((link) => (/^[a-z]+:/i.test(link) ? null : resolveLink(path, link)));
       const documentImages = imageLinks(content);
       if (fileImages.length !== documentImages.length) continue; // not converged; I1 reports it
       fileImages.forEach((image, index) => {
@@ -1047,7 +1048,7 @@ export const SUBJECTS: Record<string, Compute> = {
     if (head === null) return null;
     const view = await env.view();
     const files = await treeFiles(head.git, head.commit, (path) => path.endsWith('.md') && owningFolder(path, view.folders) !== null);
-    return new Map([...files].map(([path, bytes]) => [path, stripFrontMatter(bytes.toString('utf8'))]));
+    return new Map([...files].map(([path, bytes]) => [path, bodyOf(bytes.toString('utf8'))]));
   },
   'expected.linearTree': async (env) => linearTree(env.ctx, await env.view()),
   'pullRequests.gitOnlyPaths': async (env) => {
@@ -1065,7 +1066,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const files = await treeFiles(head.git, head.commit, (path) => path.endsWith('.md') && owningFolder(path, view.folders) !== null);
     const seen = new Map<string, number>();
     for (const bytes of files.values()) {
-      const hash = sha256(stripFrontMatter(bytes.toString('utf8')));
+      const hash = sha256(bodyOf(bytes.toString('utf8')));
       seen.set(hash, (seen.get(hash) ?? 0) + 1);
     }
     return [...seen.values()].reduce((sum, count) => sum + count - 1, 0);
@@ -1474,7 +1475,7 @@ async function linkMap(env: Env, kind: LinkKind): Promise<Map<string, string[]>>
     capture = await treeFiles(await person(env.ctx), tip, (path) => paths.includes(path));
   }
   for (const path of paths) {
-    const text = stripFrontMatter(view.files.get(path) ?? '');
+    const text = bodyOf(view.files.get(path) ?? '');
     const id = view.ids.get(path)?.id;
     const content = id === undefined ? '' : (view.documents.get(id)?.content ?? '');
     const links = relativeLinks(text);
@@ -1497,7 +1498,7 @@ async function linkMap(env: Env, kind: LinkKind): Promise<Map<string, string[]>>
         result.set(path, sorted(links));
         break;
       case 'relative-capture':
-        result.set(path, sorted(relativeLinks(stripFrontMatter(capture?.get(path)?.toString('utf8') ?? ''))));
+        result.set(path, sorted(relativeLinks(bodyOf(capture?.get(path)?.toString('utf8') ?? ''))));
         break;
     }
   }
