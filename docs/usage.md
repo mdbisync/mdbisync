@@ -7,6 +7,39 @@ Linear OAuth app, the GitHub App, the secrets and the workflows) are on
 [mdbisync.com](https://mdbisync.com/#setup). How Markdown is kept in
 Linear's form is in [linear-format.md](linear-format.md).
 
+## Generate repository files
+
+Run the released CLI at your repository root. Supply the full release commit
+SHA used by the action and hook, plus the folders to synchronize:
+
+```sh
+mdbisync init --release-sha <release-sha> --release-version vX.Y.Z \
+  --folder notes --team ENG \
+  --folder notes/planning --project "Field notes" \
+  --no-security-hooks
+```
+
+`--folder` starts a folder's options; its `--team` and `--project` names
+apply only to that folder. A project can inherit a team from an ancestor.
+`--release-version` is an optional workflow comment; the SHA determines
+what runs. The command writes both sync workflows and `pre-commit.yml`,
+adds the required `linear-format` hook with that same SHA, and annotates
+the folders' `README.md` files. It preserves their bodies and other front
+matter, and keeps custom hooks. Identical files are left unchanged on a
+rerun. Conflicting workflows, annotations or hook pins cause an error
+before any file is written; reconcile those files before retrying.
+
+Use `--security-hooks` for two optional examples marked `alias: security`:
+Gitleaks in a Docker image pinned by version and SHA-256 digest, and a
+private-key pattern hook. Docker must be available wherever those hooks
+run. Review these examples for your repository's privacy requirements;
+without security hooks, runs warn that content is pushed unchecked.
+
+Flags work without a terminal. With a terminal attached, `init` asks for
+missing setup choices. It changes local files only and prints the remaining
+admin steps: apps, secrets, merge commits, local hook installation and the
+first initial-sync dry run. See `mdbisync init --help` for the flags.
+
 ## Folder mapping
 
 A folder maps to Linear through its `README.md` front matter:
