@@ -1,8 +1,7 @@
 // The commands of the command-line entry and their exit codes.
 // `sync`, `initial-sync` and `check` run the preflight (the sync's state and
-// the setup check). A command that is not built yet, and after a passed
-// preflight an `initial-sync` from Linear to git, report "not implemented"
-// and exit with their own code, so callers and tests can tell the stubs apart.
+// the setup check). A command that is not built yet reports "not implemented"
+// and exits with its own code, so callers and tests can tell the stubs apart.
 
 export interface CommandInfo {
   readonly summary: string;
@@ -26,7 +25,10 @@ export const PREFLIGHT_COMMANDS = ["sync", "initial-sync", "check"] as const sat
 export const USAGE_EXIT_CODE = 2;
 /** The setup check failed; nothing was written. */
 export const SETUP_FAILED_EXIT_CODE = 3;
-/** The sync has no state; nothing was written; run initial sync first. */
+/**
+ * The sync has no state, or its state waits for a person to merge the
+ * initial sync's pull request; nothing was written.
+ */
 export const NO_STATE_EXIT_CODE = 4;
 /**
  * A confirmed initial sync wrote part of its work and stopped; a sync run is

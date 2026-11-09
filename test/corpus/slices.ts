@@ -3,8 +3,9 @@
 // its documents, the files they embed or link, and the support files.
 
 import { posix } from "node:path";
+import { CHECK_WORKFLOW_PATH } from "./check-workflow.ts";
 import { BANK_UNSYNCED } from "./bank.ts";
-import { extension, isLfs, type CorpusFile } from "./model.ts";
+import { extension, isLfs, SHARED_IMAGE_USERS, type CorpusFile } from "./model.ts";
 import type { Rng } from "./rng.ts";
 import { BANK_HOME, COLLISIONS, DOCS_PROJECTS, ENG_PROJECTS } from "./tree.ts";
 
@@ -14,7 +15,7 @@ export type Slice = (typeof SLICES)[number];
 export const MINI_DOCUMENTS = 12;
 export const MID_DOCUMENTS = 200;
 
-const SUPPORT = [".gitattributes", ".pre-commit-config.yaml"];
+const SUPPORT = [".gitattributes", ".pre-commit-config.yaml", CHECK_WORKFLOW_PATH];
 
 function isDocument(file: CorpusFile): boolean {
   return file.synced && file.kind === "markdown";
@@ -86,13 +87,22 @@ function pickMid(files: CorpusFile[], rng: Rng): string[] {
     share.set(g, (share.get(g) as number) + 1);
     left--;
   }
-  const picked: string[] = [];
+  // Every document that embeds the shared image goes in first, so the slice
+  // has one image used by many documents; they count against their group's share.
+  const image = files.find((f) => f.role === "shared-image");
+  const shared = image === undefined ? [] : documents.filter((f) => f.links.includes(image.path));
+  if (shared.length !== SHARED_IMAGE_USERS) throw new Error(`the mid slice can take ${shared.length} users of the shared image, not ${SHARED_IMAGE_USERS}`);
+  const picked = new Set(shared.map((f) => f.path));
+  const sharedPerGroup = new Map<string, number>();
+  for (const f of shared) sharedPerGroup.set(f.group, (sharedPerGroup.get(f.group) ?? 0) + 1);
   for (const g of groups) {
-    const pool = rng.shuffle(documents.filter((f) => f.group === g));
-    picked.push(...pool.slice(0, share.get(g)).map((f) => f.path));
+    const already = sharedPerGroup.get(g) ?? 0;
+    if (already > (share.get(g) as number)) throw new Error(`group ${g} has ${already} users of the shared image, more than its mid share`);
+    const pool = rng.shuffle(documents.filter((f) => f.group === g && !picked.has(f.path)));
+    for (const f of pool.slice(0, (share.get(g) as number) - already)) picked.add(f.path);
   }
-  if (picked.length !== MID_DOCUMENTS) throw new Error(`the mid slice has ${picked.length} documents, not ${MID_DOCUMENTS}`);
-  return picked;
+  if (picked.size !== MID_DOCUMENTS) throw new Error(`the mid slice has ${picked.size} documents, not ${MID_DOCUMENTS}`);
+  return [...picked];
 }
 
 export function makeSlices(files: CorpusFile[], rng: Rng): Record<Slice, string[]> {

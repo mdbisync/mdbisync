@@ -2,6 +2,14 @@
 
 export { type CycleOptions, type CycleResult, runSyncCycle } from './cycle.ts';
 export { type CreateChange, type DocumentChange, type KeepChange, type LocalMerge, type TrashChange, mergeLocally } from './merge.ts';
+export {
+  type PullRequestFailure,
+  type PullRequestResult,
+  SYNC_BRANCH_MERGE_MESSAGE,
+  SYNC_PULL_REQUEST_TITLE,
+  pullRequestFailure,
+  syncPullRequest,
+} from './pull-request.ts';
 export { renderSync } from './summary.ts';
 export {
   IDS_MESSAGE,
@@ -14,3 +22,4 @@ export {
   type WriteResult,
   writeTrackedToLinear,
 } from './write.ts';
+export {capture, type CaptureOptions, type CaptureResult} from './capture.ts';

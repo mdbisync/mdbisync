@@ -18,7 +18,7 @@ import {
   renderStateRefusal,
   runSetupCheck,
 } from '../setup/index.ts';
-import { type FetchedState, type Git, fetchState, readInitialSyncProgress } from '../state/index.ts';
+import { type FetchedState, type Git, fetchState, initialPullRequestPending, readInitialSyncProgress } from '../state/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
 import { renderStoppedBeforeWriting } from './stop.ts';
@@ -50,6 +50,8 @@ export interface PreflightOutcome {
    * partial, and the next run starts again.
    */
   stopped?: StopReason;
+  /** Writes the run tried after Linear stopped its client; each was refused without a request. */
+  writesAfterStop?: number;
 }
 
 export interface PreflightOptions {
@@ -59,6 +61,8 @@ export interface PreflightOptions {
   fetch?: typeof fetch;
   /** Safe per-request diagnostics; emitted immediately, including on failure. */
   log: (entry: LogEntry) => void;
+  /** Refuse, writing nothing, while the pull request of an initial sync from Linear waits for a person. */
+  refusePendingInitialPullRequest?: boolean;
 }
 
 /**
@@ -75,8 +79,14 @@ export async function runPreflight(
   const fetched = await fetchState(git, inputs.state);
   if (operation === 'sync') {
     const unfinished = (await readInitialSyncProgress(git, fetched.state.ids)) !== null;
-    const refusal = checkSyncState(fetched.state, inputs.state, unfinished);
+    const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, sync: fetched.sync, tracked: fetched.tracked });
+    const refusal = checkSyncState(fetched.state, inputs.state, unfinished, pending);
     if (refusal !== null) return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
+  } else if (options.refusePendingInitialPullRequest === true) {
+    // Writing Linear from the tracked branch while that pull request is open would leave it to be merged over the new state.
+    const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, sync: fetched.sync, tracked: fetched.tracked });
+    const refusal = checkSyncState(fetched.state, inputs.state, false, pending);
+    if (refusal?.code === 'initial-pull-request-pending') return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   }
 
   const mapping = await loadMapping(git, fetched.tracked);
@@ -99,11 +109,11 @@ export async function runPreflight(
         const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
         setup = report;
         if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear });
-        return outcome(operation, report);
+        return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop };
       } catch (error) {
         // Linear stopped the client (a rate limit, a budget running low) outside the steps that record their progress.
         if (!(error instanceof LinearStoppedError)) throw error;
-        return stoppedOutcome(operation, error.reason, setup);
+        return { ...stoppedOutcome(operation, error.reason, setup), writesAfterStop: stats.writesAfterStop };
       }
     });
   } catch (error) {

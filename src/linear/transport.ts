@@ -119,6 +119,15 @@ export class GraphQLTransport {
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
+  /** Authenticated storage GET, restricted to Linear's documented upload host. */
+  async fetchUpload(url: string, init: RequestInit = {}): Promise<Response> {
+    const target = new URL(url);
+    if (target.protocol !== 'https:' || target.hostname !== 'uploads.linear.app' || target.username !== '' || target.password !== '' || target.port !== '') {
+      throw new Error('upload destination is not allowed');
+    }
+    return this.fetch(url, { ...init, method: 'GET', redirect: 'manual', headers: { authorization: `Bearer ${this.#token}` } });
+  }
+
   /** Why the client stopped, or undefined while it is running. */
   get stopped(): StopReason | undefined {
     return this.#stopped;
@@ -136,11 +145,11 @@ export class GraphQLTransport {
     variables: Record<string, unknown> = {},
   ): Promise<T> {
     for (let attempt = 1; ; attempt += 1) {
-      if (this.#stopped) throw new LinearStoppedError(operation, this.#stopped);
+      if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
       const info: RequestInfo = { operation, kind, attempt };
       await this.#hooks.beforeRequest?.(info);
       // Another request may have stopped the client while this one waited.
-      if (this.#stopped) throw new LinearStoppedError(operation, this.#stopped);
+      if (this.#stopped) throw this.#refuse(operation, kind, this.#stopped);
 
       const started = Date.now();
       this.stats.count(operation);
@@ -219,6 +228,12 @@ export class GraphQLTransport {
       }
       return body.data as T;
     }
+  }
+
+  /** A request after the stop is refused without being sent; a refused write is counted, so a run can show it stopped writing. */
+  #refuse(operation: string, kind: OperationKind, reason: StopReason): LinearStoppedError {
+    if (kind === 'mutation') this.stats.writesAfterStop += 1;
+    return new LinearStoppedError(operation, reason);
   }
 
   #log(entry: LogEntry): void {

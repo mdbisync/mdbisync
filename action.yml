@@ -38,21 +38,25 @@ inputs:
     description: "Prefix of the sync's state refs."
     required: false
     default: refs/mdbisync
+  document-cap:
+    description: "Maximum documents per Linear container, including trash. Warn at 90%; stop before writing above the cap."
+    required: false
+    default: "1000"
   report-file:
     description: "Path to write the run's report as JSON (names and states only). Leave empty for none."
     required: false
     default: ""
   direction:
-    description: "Initial sync only, and required there: `git-to-linear` (Linear is made equal to the tracked branch) or `linear-to-git`. There is no default."
+    description: "Initial sync only, and required there: `git-to-linear` (Linear is made equal to the tracked branch) or `linear-to-git` (one pull request, which a person merges, makes the synchronized folders equal to Linear). There is no default."
     required: false
     default: ""
   confirm:
-    description: "Initial sync only: `true` writes; anything else is a dry run that lists by path what would be created, overwritten, moved to Linear's trash and left out, and writes nothing."
+    description: "Initial sync only: `true` writes; anything else is a dry run that lists by path what would be created, overwritten, moved to Linear's trash (or, from Linear, removed from the tracked branch) and left out, and writes nothing."
     required: false
     default: ""
 outputs:
   code:
-    description: "Why the run stopped before writing, for example `initial-sync-required`, or why a confirmed initial sync did not finish (`stopped`, `write-failed`, `state-moved`); empty when it finished."
+    description: "Why the run stopped before writing, for example `initial-sync-required`, or why a confirmed initial sync did not finish (`stopped`, `write-failed`, `state-moved`, `pull-request-failed`, `sync-branch-changed`); empty when it finished."
 runs:
   using: node24
   main: dist/action-main.js

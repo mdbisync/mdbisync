@@ -5,21 +5,22 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { LinearClient } from '../../../src/linear/index.ts';
+import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts';
 import { Git, readIds } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { runChecks, snapshotRefs, stripFrontMatter, titleOf } from './checks.ts';
+import { runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, owningFolder, readAnnotation } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
 import { BudgetBlockedError, estimate, type Governor } from './governor.ts';
 import { SandboxRest, githubToken } from './github.ts';
-import { newRunId, runNames, type RunNames } from './isolation.ts';
+import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
+import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
-import { CorpusMissingError, Sandbox } from './sandbox.ts';
+import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
 import { prepareFixtures, UNSAFE_TITLES } from './fixtures.ts';
@@ -27,6 +28,10 @@ import { BEFORE_VIEW, takeStartView } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
 
 export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
+/** A team zone holds about this many documents, trashed ones included (measured 2026-11-09: QUOTA_EXCEEDED at 1,000 trashed). */
+export const ZONE_CAP = 1_000;
+/** The harness warns from here on. */
+export const ZONE_TRASH_WARNING = 900;
 /** The longest setup, team-lock wait included; a full slice alone takes under a minute. */
 export const SETUP_TIMEOUT_MS = 15 * 60_000;
 /** How long a setup past its deadline gets to stop before cleanup runs anyway. */
@@ -114,7 +119,9 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     ctx.phase('corpus manifest');
     manifest = await sandbox.manifest();
     ctx.phase('tracked branch');
-    created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names);
+    created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names, {
+      checks: ctx.scenario.steps.some((step) => step.kind === 'fault' && step.action === 'checks'),
+    });
   } catch (error) {
     if (error instanceof CorpusMissingError) throw new EnvBlockedError(`corpus: ${error.message}`);
     throw error;
@@ -172,6 +179,23 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
       }
     }
   }
+
+  // Trashed documents per team zone the run uses, counted once the team lock is held so another run's work
+  // is not counted as this run's. They count against the zone's cap and cannot be purged. Only a measure:
+  // a count that cannot be read is logged and leaves the run alone.
+  const trash: Record<string, { before: number; after?: number }> = {};
+  for (const key of tree.teamZones.keys()) {
+    const team = teams.get(key);
+    if (team === undefined) continue;
+    try {
+      const before = await world.trashedInZone(team.id);
+      trash[key] = { before };
+      if (before >= ZONE_TRASH_WARNING) ctx.log(`warning: team ${key}'s zone holds ${before} trashed documents, near the cap of about ${ZONE_CAP}; creates there fail with QUOTA_EXCEEDED at the cap`);
+    } catch (error) {
+      ctx.log(`could not count team ${key}'s trashed documents: ${(error as Error).message}`);
+    }
+  }
+  ctx.observations.set('zone.trash', trash);
 
   const readmes = new Map<string, string>();
   for (const [target, source] of tree.paths) {
@@ -241,7 +265,7 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
     const team = folder.team === null ? undefined : live.teams.get(folder.team);
     const place = project !== undefined ? { projectId: project.id } : team !== undefined ? { teamId: team.id } : null;
     if (place === null) continue;
-    const document = await live.editors['editor-a'].createDocument(place, { title: titleOf(target, folder.folder), content: stripFrontMatter(texts.get(target) ?? '') });
+    const document = await live.editors['editor-a'].createDocument(place, { title: titleOf(target, folder.folder), content: bodyOf(texts.get(target) ?? '') });
     live.seededDocuments.push(document.id);
     seededPaths.set(target, document.id);
   }
@@ -274,7 +298,7 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
     // a document with a matched title and is deleted, which archives it.
     const team = [...live.teams.values()][0];
     if (team !== undefined) {
-      const helper = await live.world.createProject(ctx.names.project(8), [team.id]);
+      const helper = await live.world.createProject(ctx.names.helperProject('archived-copy'), [team.id]);
       const archived = await editor.createDocument({ projectId: helper.id }, { title: first.title, content: 'An older copy.\n' });
       await live.world.deleteProject(helper, ctx.names.runId);
       ctx.observations.set('setup.archivedDocument', archived.id);
@@ -353,22 +377,34 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
     for (const project of live.projects.values()) {
       await attempt(`project ${project.name}`, () => live.world.deleteProject(project, ctx.names.runId));
     }
-    // Project documents went with their projects; team-zone documents the run made go to the trash.
-    await attempt('created team-zone documents', () => live.world.trashTeamZoneDocuments([...created]));
+    // Project documents went with their projects. Team-zone documents the run made (by id: seeded or recorded;
+    // by title: the run's prefix) are archived through a run project of their team, never trashed: trashed
+    // documents count against a team zone's cap and cannot be purged.
+    // Reads go through the harness's own editor client, not the app whose budget the scenarios share.
+    const zone = new Map<string, LinearDocument>();
+    await attempt('team-zone documents by id', async () => {
+      for (const document of await live.world.client.getDocuments([...created])) if (document.projectId === null) zone.set(document.id, document);
+    });
     for (const team of live.tree.teamZones.keys()) {
       const teamId = live.teams.get(team)?.id;
       if (teamId === undefined) continue;
+      // This run's own documents, trashed ones included: archiving them takes them out of the zone's trash.
       await attempt(`team ${team} documents`, async () => {
-        for (const document of await live.world.runTeamDocuments(teamId)) {
-          if (document.runId === ctx.names.runId) await live.world.trashRunDocument(document, ctx.names.runId);
-        }
+        for (const document of await live.world.runTeamDocuments(teamId, { trashed: true })) if (document.runId === ctx.names.runId) zone.set(document.id, document);
       });
     }
+    await attempt('archiving team-zone documents', () => live.world.archiveRunTeamDocuments([...zone.values()], ctx.names.runId, ctx.names.helperProject('archive'), (document) => created.has(document.id) || runOfTeamTitle(document.title) === ctx.names.runId));
   }
   return problems.length === 0 ? { ok: true } : { ok: false, detail: problems.join('; ') };
 }
 
+/** Runs one scenario and counts the harness's own requests through the app while it runs. */
 export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: string = newRunId()): Promise<ScenarioResult> {
+  const { result, requests } = await withAppRequests(() => runScenarioCounted(scenario, deps, runId));
+  return { ...result, harnessAppRequests: requests };
+}
+
+async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: string): Promise<Omit<ScenarioResult, 'harnessAppRequests'>> {
   const names: RunNames = runNames(runId);
   const started = Date.now();
   const runDir = join(deps.outDir, 'runs', `${scenario.id}-${runId}`);
@@ -377,6 +413,7 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
   const heartbeat = setInterval(() => registration.heartbeat(), 60_000);
   const log = (line: string) => deps.log(`${scenario.id} ${runId}: ${line}`);
   let person: Git | undefined;
+  let hooksInstalled = false;
   let engineDir: string | undefined;
   let phase = 'admission';
   // Set when setup missed its deadline: setup stops at its next phase or lock wait, and creates nothing more.
@@ -405,6 +442,13 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
       if (ctx.live === null) throw new Error('offline scenarios have no repository');
       person ??= await ctx.live.sandbox.clone(names, join(runDir, 'person'));
       return person;
+    },
+    async personHooks() {
+      if (ctx.live === null) throw new Error('offline scenarios have no repository');
+      if (hooksInstalled) return;
+      // No sandbox credentials: npm runs while the public hooks install.
+      await installHooks(await ctx.person(), { signal: ctx.signal });
+      hooksInstalled = true;
     },
     async engineClone() {
       if (ctx.live === null) throw new Error('offline scenarios have no repository');
@@ -477,6 +521,20 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
       } catch (cleanupError) {
         cleanupOutcome = { ok: false, detail: (cleanupError as Error).message };
       }
+      // The zone's trash after cleanup: a run should leave it as it found it.
+      const trash = ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> | undefined;
+      if (trash !== undefined && ctx.live !== null) {
+        for (const [key, counts] of Object.entries(trash)) {
+          const teamId = ctx.live.teams.get(key)?.id;
+          if (teamId === undefined) continue;
+          try {
+            counts.after = await ctx.live.world.trashedInZone(teamId);
+            if (counts.after > counts.before) ctx.log(`warning: the run left ${counts.after - counts.before} more trashed documents in team ${key}'s zone`);
+          } catch (error) {
+            ctx.log(`could not count team ${key}'s trashed documents after the run: ${(error as Error).message}`);
+          }
+        }
+      }
     }
     await ctx.proxy?.close();
     locks.splice(0).reverse().forEach((lock) => lock.release());
@@ -504,13 +562,14 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
     checks,
     cleanup: cleanupOutcome,
     ...(ctx.observations.has('metrics') ? { metrics: ctx.observations.get('metrics') as Record<string, unknown> } : {}),
+    ...(ctx.observations.has('zone.trash') ? { teamZoneTrash: ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> } : {}),
   };
 }
 
 export function skippedResult(scenario: Scenario, reason: string): ScenarioResult {
   return {
     id: scenario.id, level: levelOf(scenario.id), slice: scenario.slice, mode: scenario.mode, runId: '', result: 'skipped', reason,
-    startedAt: new Date().toISOString(), durationMs: 0, engineRequests: 0, harnessRequests: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true },
+    startedAt: new Date().toISOString(), durationMs: 0, engineRequests: 0, harnessRequests: 0, harnessAppRequests: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true },
   };
 }
 

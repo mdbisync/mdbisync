@@ -31,8 +31,16 @@ export interface FakeDocument {
   updatedAt?: string;
   icon?: string | null;
   color?: string | null;
+  /** In the trash; Linear then sets `archivedAt` too. */
   trashed?: boolean;
   archivedAt?: string;
+  /**
+   * Left out of every `documents(...)` query, even with `includeArchived`,
+   * while `document(id:)` still answers for it. Not Linear's measured
+   * behaviour (lists return trashed and archived documents): an opt-in to
+   * reproduce a list that misses a document.
+   */
+  unlisted?: boolean;
   /** The stored content. */
   content?: string;
 }
@@ -47,7 +55,7 @@ export interface FakeUpload {
 }
 
 /** Where the fake's asset URLs point. */
-export const UPLOADS_HOST = 'https://uploads.linear.test';
+export const UPLOADS_HOST = 'https://uploads.linear.app';
 
 /** How the fake answers document writes. */
 export interface FakeWrites {
@@ -59,8 +67,47 @@ export interface FakeWrites {
   reject?: (operation: string, variables: Record<string, unknown>) => boolean;
 }
 
+/** A pull request in the fake repository; tests merge or close it by changing `state`. */
+export interface FakePullRequest {
+  number: number;
+  title: string;
+  body: string;
+  head: string;
+  base: string;
+  state: 'open' | 'closed';
+  merged: boolean;
+}
+
+/** A check run or commit status on a commit in the fake repository. */
+export interface FakeCheck {
+  name: string;
+  /** Check runs: `queued`, `in_progress` or `completed`; commit statuses use `pending` or `completed`. */
+  status: 'queued' | 'in_progress' | 'pending' | 'completed';
+  /** For a completed check: `success`, `failure`, `neutral`, `skipped`, `cancelled`, `timed_out`, or a status's `error`. */
+  conclusion?: string;
+  /** A commit status (the statuses API) instead of a check run. */
+  commitStatus?: boolean;
+}
+
 export interface FakeWorld {
-  github: { tokenValid: boolean; missing: Set<string>; allowMergeCommit: boolean; rateLimited: boolean; rateLimitedRepository: boolean };
+  github: {
+    tokenValid: boolean;
+    missing: Set<string>;
+    allowMergeCommit: boolean;
+    rateLimited: boolean;
+    rateLimitedRepository: boolean;
+    pullRequests: FakePullRequest[];
+    /** Answer 422 to every pull request a run tries to open. */
+    refusePullRequests?: boolean;
+    /** Checks by commit; a commit without an entry has none. */
+    checks?: Map<string, FakeCheck[]>;
+    /**
+     * Merges a pull request as GitHub would, while its head is `sha`: the
+     * test moves the base branch and answers the merge commit, or answers
+     * GitHub's refusal status. Without it, GitHub answers 405.
+     */
+    merge?: (pr: FakePullRequest, sha: string) => Promise<{ sha: string } | { status: number }>;
+  };
   /**
    * `unavailable`: the token endpoint answers 503, as in an outage.
    * `store`: what Linear stores for written content (the identity unless a test reformats).
@@ -72,8 +119,12 @@ export interface FakeWorld {
     teams: FakeTeam[];
     projects: FakeProject[];
     documents: FakeDocument[];
+    /** Optional deterministic query-boundary edits by a test user. */
+    beforeQuery?: (operation: string, variables: Record<string, unknown>) => void;
     writes: FakeWrites;
     store: (content: string) => string;
+    /** The workspace's URL key, in its document URLs. */
+    urlKey: string;
     uploads: FakeUpload[];
     /** Comments on documents, by comment id. */
     comments: Map<string, { documentContentId: string; body: string }>;
@@ -89,7 +140,7 @@ export interface FakeWorld {
 
 export function fakeWorld(): FakeWorld {
   return {
-    github: { tokenValid: true, missing: new Set(), allowMergeCommit: true, rateLimited: false, rateLimitedRepository: false },
+    github: { tokenValid: true, missing: new Set(), allowMergeCommit: true, rateLimited: false, rateLimitedRepository: false, pullRequests: [] },
     linear: {
       credentialsValid: true,
       unavailable: false,
@@ -105,6 +156,7 @@ export function fakeWorld(): FakeWorld {
       documents: [],
       writes: { count: 0 },
       store: (content) => content,
+      urlKey: 'example-team',
       uploads: [],
       comments: new Map(),
     },
@@ -120,6 +172,10 @@ export function fakeFetch(world: FakeWorld): typeof fetch {
     const url = String(input);
     const method = init?.method ?? 'GET';
     world.requests.push(`${method} ${url}`);
+    if (method === 'GET' && url.startsWith(`${UPLOADS_HOST}/`)) {
+      const upload = world.linear.uploads.find((entry) => entry.assetUrl === url);
+      return upload?.bytes === undefined ? new Response(null, {status:404}) : new Response(upload.bytes, {headers:{'content-type':upload.contentType}});
+    }
     if (url.startsWith(GITHUB_API)) return github(world, method, url.slice(GITHUB_API.length), init);
     if (url.startsWith(LINEAR_API)) return linear(world, url.slice(LINEAR_API.length), init);
     throw new Error(`unexpected request to ${url}`);
@@ -130,7 +186,7 @@ function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-function github(world: FakeWorld, method: string, path: string, init: RequestInit | undefined): Response {
+async function github(world: FakeWorld, method: string, path: string, init: RequestInit | undefined): Promise<Response> {
   if (!world.github.tokenValid) return json(401, { message: 'Bad credentials' });
   if (world.github.rateLimitedRepository) return json(403, { message: 'API rate limit exceeded for installation.' });
   const repo = /^\/repos\/[^/]+\/[^/]+/.exec(path);
@@ -141,6 +197,12 @@ function github(world: FakeWorld, method: string, path: string, init: RequestIni
     const writable = !world.github.missing.has('contents:write');
     return json(200, { full_name: repo[0].slice(7), ...(writable ? { allow_merge_commit: world.github.allowMergeCommit } : {}) });
   }
+  const pulls = pullRequests(world, method, rest, init);
+  if (pulls !== undefined) return pulls;
+  const merged = await mergeRequest(world, method, rest, init);
+  if (merged !== undefined) return merged;
+  const checks = commitChecks(world, method, rest);
+  if (checks !== undefined) return checks;
   const probe = PERMISSION_PROBES.find((candidate) => candidate.method === method && rest === candidate.path(rest.split('/')[2] ?? ''));
   if (probe === undefined) return json(404, { message: 'Not Found' });
   if (world.github.rateLimited) return json(403, { message: 'You have exceeded a secondary rate limit.' });
@@ -154,6 +216,91 @@ function github(world: FakeWorld, method: string, path: string, init: RequestIni
     return json(201, {});
   }
   return json(422, { message: 'Invalid request.' });
+}
+
+/**
+ * Lists and opens pull requests; undefined for other requests, and for the
+ * setup check's empty-bodied probe, which the probes answer.
+ */
+function pullRequests(world: FakeWorld, method: string, rest: string, init: RequestInit | undefined): Response | undefined {
+  const [path = '', search = ''] = rest.split('?');
+  const store = world.github.pullRequests;
+  const one = /^\/pulls\/(\d+)$/.exec(path);
+  if (one !== null && method === 'PATCH') {
+    const pr = store.find((candidate) => candidate.number === Number(one[1]));
+    if (pr === undefined) return json(404, { message: 'Not Found' });
+    const body = JSON.parse(String(init?.body ?? '{}')) as { title?: string; body?: string; state?: 'open' | 'closed' };
+    if (body.title !== undefined) pr.title = body.title;
+    if (body.body !== undefined) pr.body = body.body;
+    if (body.state !== undefined) pr.state = body.state;
+    world.writes.push(`${method} ${path}`);
+    return json(200, pullRequestNode(pr));
+  }
+  if (path !== '/pulls') return undefined;
+  if (method === 'GET') {
+    const query = new URLSearchParams(search);
+    const state = query.get('state') ?? 'open';
+    const head = query.get('head');
+    const base = query.get('base');
+    const found = store.filter(
+      (pr) => (state === 'all' || pr.state === state) && (head === null || `owner:${pr.head}` === head) && (base === null || pr.base === base),
+    );
+    return json(200, found.map(pullRequestNode));
+  }
+  if (method !== 'POST') return undefined;
+  const body = JSON.parse(String(init?.body ?? '{}')) as { title?: string; head?: string; base?: string; body?: string };
+  if (body.head === undefined) return undefined;
+  if (world.github.missing.has('pull_requests:write')) return json(403, { message: 'Resource not accessible by integration' });
+  if (world.github.refusePullRequests) return json(422, { message: 'Validation Failed' });
+  if (store.some((pr) => pr.state === 'open' && pr.head === body.head && pr.base === body.base)) {
+    return json(422, { message: 'Validation Failed', errors: [{ message: 'A pull request already exists' }] });
+  }
+  world.writes.push(`${method} ${path}`);
+  const pr: FakePullRequest = { number: store.length + 1, title: body.title ?? '', body: body.body ?? '', head: body.head, base: body.base ?? '', state: 'open', merged: false };
+  store.push(pr);
+  return json(201, pullRequestNode(pr));
+}
+
+/** `PUT /pulls/<n>/merge` with a merge commit; undefined for other requests. */
+async function mergeRequest(world: FakeWorld, method: string, rest: string, init: RequestInit | undefined): Promise<Response | undefined> {
+  const one = /^\/pulls\/(\d+)\/merge$/.exec(rest);
+  if (one === null || method !== 'PUT') return undefined;
+  const pr = world.github.pullRequests.find((candidate) => candidate.number === Number(one[1]));
+  if (pr === undefined) return json(404, { message: 'Not Found' });
+  if (pr.state !== 'open') return json(422, { message: 'Pull Request is not open' });
+  const body = JSON.parse(String(init?.body ?? '{}')) as { merge_method?: string; sha?: string };
+  if (body.merge_method !== 'merge' || body.sha === undefined) return json(422, { message: 'Validation Failed' });
+  const answer = world.github.merge === undefined ? { status: 405 } : await world.github.merge(pr, body.sha);
+  if ('status' in answer) return json(answer.status, { message: 'Pull Request is not mergeable' });
+  world.writes.push(`${method} ${rest}`);
+  Object.assign(pr, { state: 'closed', merged: true });
+  return json(200, { sha: answer.sha, merged: true, message: 'Pull Request successfully merged' });
+}
+
+/**
+ * A commit's check runs and combined status. The setup check's probe of
+ * check runs (`per_page=1`) reads the same list.
+ */
+function commitChecks(world: FakeWorld, method: string, rest: string): Response | undefined {
+  const match = /^\/commits\/([0-9a-f]+)\/(check-runs|status)(\?.*)?$/.exec(rest);
+  if (match === null || method !== 'GET') return undefined;
+  if (world.github.rateLimited) return json(403, { message: 'You have exceeded a secondary rate limit.' });
+  if (match[2] === 'check-runs' && world.github.missing.has('checks:read')) return json(403, { message: 'Resource not accessible by integration' });
+  if (match[2] === 'status' && world.github.missing.has('statuses:read')) return json(403, { message: 'Resource not accessible by integration' });
+  const all = world.github.checks?.get(match[1] as string) ?? [];
+  if (match[2] === 'status') {
+    const statuses = all.filter((check) => check.commitStatus === true).map((check) => ({ context: check.name, state: check.status === 'completed' ? check.conclusion : 'pending' }));
+    return json(200, { state: statuses.length === 0 ? 'pending' : 'success', total_count: statuses.length, statuses });
+  }
+  const runs = all.filter((check) => check.commitStatus !== true);
+  const page = Number(new URLSearchParams(match[3] ?? '').get('page') ?? '1');
+  const size = Number(new URLSearchParams(match[3] ?? '').get('per_page') ?? '30');
+  const slice = runs.slice((page - 1) * size, page * size);
+  return json(200, { total_count: runs.length, check_runs: slice.map((check) => ({ name: check.name, status: check.status, conclusion: check.conclusion ?? null })) });
+}
+
+function pullRequestNode(pr: FakePullRequest) {
+  return { number: pr.number, html_url: `https://github.test/owner/repo/pull/${pr.number}`, state: pr.state, head: { ref: pr.head }, base: { ref: pr.base }, title: pr.title, body: pr.body };
 }
 
 async function linear(world: FakeWorld, path: string, init: RequestInit | undefined): Promise<Response> {
@@ -191,6 +338,7 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     }
     return json(200, { data: documentMutation(world, operationName, variables) ?? {} });
   }
+  world.linear.beforeQuery?.(operationName, variables);
   if (operationName === 'SetupTeams') {
     const refs = variables.refs as string[];
     return json(200, { data: { teams: { nodes: world.linear.teams.filter((team) => refs.includes(team.key) || refs.includes(team.name)) } } });
@@ -202,6 +350,7 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
     return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
+  if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
   if (operationName === 'FindDocumentComment') {
     const id = variables.id as string;
@@ -211,8 +360,14 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
   if (operationName === 'GetDocuments') {
     // Read by id: trashed documents are included, unknown ids are absent.
     const ids = variables.ids as string[];
-    const nodes = world.linear.documents.filter((d) => ids.includes(d.id)).map((d) => documentNode(d, variables.withContent === true));
+    const nodes = world.linear.documents.filter((d) => ids.includes(d.id) && d.unlisted !== true).map((d) => documentNode(d, variables.withContent === true));
     return json(200, { data: { documents: { nodes } } });
+  }
+  if (operationName === 'GetDocument') {
+    // `document(id:)`: trashed and archived documents too; an unknown id is a GraphQL error, as in Linear.
+    const document = world.linear.documents.find((d) => d.id === variables.id);
+    if (document === undefined) return json(200, { errors: [{ message: 'Entity not found: Document', extensions: { code: 'INPUT_ERROR' } }], data: null });
+    return json(200, { data: { document: documentNode(document, variables.withContent === true) } });
   }
   return json(400, { errors: [{ message: `unknown operation ${operationName}`, extensions: { code: 'INPUT_ERROR' } }] });
 }
@@ -272,7 +427,9 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
   if (operation === 'TrashDocument') {
     const document = documents.find((d) => d.id === variables.id);
     if (document !== undefined) {
+      // `documentDelete` only moves the document to the trash, and sets `archivedAt` with it.
       document.trashed = true;
+      document.archivedAt = new Date().toISOString();
       touch(document);
     }
     return { documentDelete: { success: document !== undefined } };
@@ -292,6 +449,7 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     const document = documents.find((d) => d.id === variables.id);
     if (document !== undefined) {
       delete document.trashed;
+      delete document.archivedAt;
       touch(document);
     }
     return { documentUnarchive: { success: document !== undefined } };
@@ -335,11 +493,12 @@ function documentNode(d: FakeDocument, withContent: boolean) {
 
 /** One project's or team zone's documents, oldest first, in pages of `first` after the cursor (an index). */
 function listDocuments(world: FakeWorld, variables: Record<string, unknown>) {
-  const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } } };
-  const projectId = filter.project?.id.eq;
-  const teamId = filter.team?.id.eq;
+  type Filter = {project?:{id:{eq:string}}; team?:{id:{eq:string}}; or?:Filter[]};
+  const filter = variables.filter as Filter;
+  const matches = (doc: FakeDocument, rule: Filter): boolean => rule.or !== undefined ? rule.or.some((nested) => matches(doc, nested)) : rule.project !== undefined ? doc.projectId === rule.project.id.eq : rule.team !== undefined && doc.teamId === rule.team.id.eq && doc.projectId === undefined;
   const matching = world.linear.documents
-    .filter((d) => (projectId !== undefined ? d.projectId === projectId : d.teamId === teamId && d.projectId === undefined))
+    .filter((d) => matches(d, filter))
+    .filter((d) => d.unlisted !== true)
     .filter((d) => variables.includeArchived === true || (d.trashed !== true && d.archivedAt === undefined))
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
   const start = variables.after === null ? 0 : Number(variables.after);

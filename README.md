@@ -3,11 +3,12 @@
 Two-way sync between Markdown files in a Git repository and Linear documents,
 run as a GitHub Action.
 
-**Status:** early development. `lint` and `fix` work on Markdown files.
-`check` checks a repository's setup. `initial-sync` from git to Linear
-works, as a dry run and confirmed; `sync` and `initial-sync` from Linear to
-git run the same check (and `sync` refuses to run without its state) and
-then answer "not implemented".
+**Status:** early development. `lint` and `fix` work on Markdown files
+([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)).
+`check` checks a repository's setup. `initial-sync` works in both
+directions, as a dry run and confirmed. `sync` captures Linear changes into
+its state ref, takes them to the tracked branch through the sync pull
+request, and writes tracked-branch changes to Linear.
 
 ## Folder mapping
 
@@ -51,7 +52,13 @@ and so on.
 `initial-sync` with `direction: git-to-linear` makes Linear equal to the
 tracked branch. Without `confirm: true` it is a dry run: it lists by path
 what it would create, overwrite and move to Linear's trash, and the files it
-leaves out, and writes nothing. With `confirm: true`:
+leaves out, and writes nothing. The files left out include documents that
+link a file over Linear's 10 MB upload limit (`upload-too-large`) or an LFS
+object stored with LFS extensions, which the run cannot read
+(`upload-unreadable`), each with the files that
+cause it; the dry run judges a file in LFS by its pointer, so it uploads and
+downloads nothing. An LFS object missing from the remote is found only by
+the confirmed run. With `confirm: true`:
 
 - a document whose title is a file's path keeps its id, comments and history
   and gets the file's text (front matter stays in git); a file without a
@@ -59,6 +66,12 @@ leaves out, and writes nothing. With `confirm: true`:
   written;
 - the documents of the annotated projects and team zones that match no file
   are moved to Linear's trash, from which they can be restored;
+- a relative link to another synchronized document, such as
+  `[setup](../guide.md#setup)`, becomes a link to that document in Linear
+  (`https://linear.app/<workspace>/document/<id>#setup`), also when the
+  document is created in the same run; the recorded file keeps the link as
+  it was written. Links to files that are not synchronized documents stay as
+  they are;
 - document ids go to `refs/mdbisync/ids` as the run goes, and at the end
   one push records `refs/mdbisync/linear` (the tracked branch with each
   synchronized file as Linear stores it), `ids` and `uploads`.
@@ -69,6 +82,67 @@ the documents it already wrote, and a document created just before a crash
 is found by its title, not created twice. When the state refs are lost, a
 new confirmed run rebuilds them without duplicating documents.
 
+Before creating documents, the dry run and sync report containers at or above
+90% of their document cap. Counts include live, trashed and archived documents
+returned by Linear, plus planned additions; trashing documents frees no space.
+Above the cap, a confirmed initial sync or `sync` stops before uploads,
+document writes or state pushes and exits with code 5 (`container-cap`).
+Set the `document-cap` action input or `MDBISYNC_DOCUMENT_CAP` environment
+variable to a positive integer to override the default of 1,000.
+
+## Initial sync from Linear to git
+
+`initial-sync` with `direction: linear-to-git` makes the synchronized folders
+of the tracked branch equal to Linear through one pull request, and writes
+nothing to Linear. Without `confirm: true` it is a dry run: it lists by path
+the files it would overwrite, create and remove, and what it leaves out, and
+writes nothing. With `confirm: true`:
+
+- a file whose path a document's title names gets the document's text (its
+  front matter stays); a document without a file becomes a new file at the
+  path its title names; a synchronized file without a document is removed,
+  except a folder's annotation `README.md`;
+- document ids go to `refs/mdbisync/ids` as the run goes, and at the end one
+  push records `refs/mdbisync/linear` (one commit on top of the tracked
+  branch, with the synchronized folders as Linear holds them), `ids`,
+  `uploads` and the sync branch, which points at the same commit;
+- it opens a pull request from the sync branch to the tracked branch.
+
+**A person reviews and merges that pull request**, with a merge commit: it can
+remove files (they stay in the history). The sync never merges it, and `sync`
+refuses to run until it is merged. A title that is not a plain path as it is
+(for example one with `:` or `?`), or that would collide with another file,
+is left out and listed. A run that stops early exits with code 5; run it
+again with the same inputs to go on without duplicate files.
+
+## The sync pull request
+
+Linear's changes reach the tracked branch only through one pull request from
+the sync branch (`mdbisync/linear` by default), which the sync opens and
+merges itself, acting as the deployer's GitHub App so that CI runs on it.
+
+- A run opens the pull request when merging Linear's state would change the
+  tracked branch. Changes made in git alone open none.
+- Later Linear changes join the open pull request's branch by fast-forward or
+  merge commit; the branch is never force-pushed. The branch moves only when
+  Linear brings something new, so the checks on its head are not restarted by
+  every run.
+- A run reads the checks on the head itself (check runs and commit
+  statuses) and never waits for them. When every check has finished and
+  passed, it merges with a merge commit; while one still runs, a later run
+  merges. A run that moved the branch or opened the pull request leaves the
+  merge to a later run, after the checks have started.
+- A check that fails is a setup error: the run summary names it, the run
+  exits with code 3, and the pull request stays open until the repository's
+  checks pass Linear's form.
+- After the merge, the next run finds nothing to write and opens no pull
+  request.
+- While the open pull request of an initial sync from Linear waits for a
+  person, `sync` adds nothing to its branch and writes nothing to Linear. A
+  pull request closed without a merge leaves its content behind: the next
+  sync pull request carries only the tracked branch with Linear's state
+  merged in.
+
 ## Layout
 
 | Path | What |
@@ -78,6 +152,9 @@ new confirmed run rebuilds them without duplicating documents.
 | `src/run/` | Inputs and the preflight every run starts with |
 | `src/mapping/` | Folder annotations and the mapping of files to documents |
 | `src/setup/` | The setup check and the refusal to sync without state |
+| `src/format/` | `lint` and `fix`: Markdown in Linear's form ([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)) |
+| `src/initial-sync/` | Initial sync in both directions: plan, dry run, confirmed run |
+| `src/pull-request/` | Pull requests through GitHub's REST API: open, update, read checks, merge |
 | `src/linear/` | Linear client |
 | `src/state/` | The sync's state refs, trees and LFS reads |
 | `action.yml` | Action metadata (`node24`, bundled `main` and `post`) |
@@ -86,7 +163,11 @@ new confirmed run rebuilds them without duplicating documents.
 
 ## Development
 
-Requires Node 24.
+Requires Node 24 and pre-commit (install the hook runner before `npm test`).
+Capture with security hooks also requires pre-commit on the runner PATH;
+install it before invoking the action, for example with
+`pipx install pre-commit==4.6.2`. Missing tooling stops the run without
+marking documents as security failures.
 
 ```sh
 npm ci                  # exact versions from package-lock.json, install scripts off
@@ -136,25 +217,12 @@ downloaded when installing or running them. Use npm 11.16.0 or newer: npm
 11.12.1 rejects pre-commit's local Git package installation. The release
 package contains only bundled code and has no install scripts.
 
-`linear-format` fixes Markdown and exits 1 when it changes a file; a second
-run passes. `linear-format-check` reports changes without writing them.
-Both refuse unsupported constructs with a file, line and rule, leaving the
-file unchanged. The hooks avoid running multiple formatter processes at once.
-Checks see the files selected by pre-commit; use `--all-files` to check
-the repository, including existing files. Keep `linear-format` enabled for
-synchronization; optionally add `linear-format-check` after it.
-
-Copy [examples/pre-commit.yml](https://github.com/mikhail-yaskou/mdbisync/blob/main/examples/pre-commit.yml) to
-`.github/workflows/pre-commit.yml` in your synchronized repository. It runs
-the entire pre-commit configuration on pull requests, commits tracked-file
-fixes to same-repository branches, and reruns checks in that job. Fork pull requests
-that need fixes fail with a ready-to-apply patch. The workflow checks out
-the exact pull request head; if the branch moves before its push, the push
-fails without overwriting newer work. The workflow publishes the
-`pre-commit` check on a new fixing commit too; require this check in branch
-rules. Forks without fixes use the original job check. Other required CI
-must also run on the fixed tree or explicitly report its result on that SHA, since the token
-push does not trigger more workflows.
+`linear-format` fixes Markdown into Linear's form and exits 1 when it changes
+a file; a second run passes. `linear-format-check` reports changes without
+writing them. Both refuse constructs Linear would lose, with a file, line and
+rule, leaving the file unchanged. Every rule, what `fix` changes, and the CI
+workflow that commits the fixes to pull requests ([examples/pre-commit.yml](https://github.com/mikhail-yaskou/mdbisync/blob/main/examples/pre-commit.yml))
+are described in [docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md).
 
 To generate the test corpus with the same pin, run:
 

@@ -50,6 +50,8 @@ jobs:
           npm audit signatures
           npm run check:install-scripts
           npm run check:cyrillic
+      - name: Install pre-commit
+        run: pipx install pre-commit==4.6.2
       - name: Check, build and test source
         run: |
           npm run typecheck

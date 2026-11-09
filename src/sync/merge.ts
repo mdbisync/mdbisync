@@ -3,6 +3,7 @@
 // The result says, per synchronized path, what Linear must change so that
 // it holds the merge result: a write, a rename or move, a create or a trash.
 
+import { readAnnotation } from '../mapping/index.ts';
 import { lintText, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
@@ -144,7 +145,17 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     else unchanged.push(change);
   }
   for (const path of resultSide.files.keys()) {
-    if (!claimed.has(path) && !conflicted.has(path)) changes.push({ kind: 'create', path });
+    if (!claimed.has(path) && !conflicted.has(path)) {
+      const file = resultSide.files.get(path)!;
+      const previous = linearSide.files.get(path);
+      // Capture keeps an annotation-only carrier after its document leaves.
+      // It is repository configuration, not a request to recreate that document.
+      if ((path === 'README.md' || path.endsWith('/README.md')) && previous !== undefined && body(previous.oid) === '' && body(file.oid) === '') {
+        const annotation = readAnnotation(path, (blobs.get(file.oid) as Buffer).toString('utf8'));
+        if ('annotation' in annotation && annotation.annotation !== null) continue;
+      }
+      changes.push({ kind: 'create', path });
+    }
   }
   changes.sort((a, b) => compare(changePath(a), changePath(b)));
 
@@ -199,6 +210,26 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
   for (const file of mapping.unsynced) if (file.place !== undefined) leave(file.path, [file.reason]);
   leftOut.sort((a, b) => compare(a.path, b.path));
   return { mapping, files, leftOut, leftOutPaths: new Set(leftOut.map((entry) => entry.path)) };
+}
+
+/** Versions of the `linear` chain examined for a file's last synchronized version. */
+export const BASELINE_DEPTH = 20;
+
+/**
+ * The newest commit of the `linear` chain, walking its own commits only
+ * (first parents: records and captures, never the tracked branch's), in
+ * which a file was synchronized by the run's own rules (mapped, accepted by
+ * the linter, a title Linear takes, no collision). That version is what
+ * Linear was last given, with its title, place and linked files. Null when
+ * none of the last `BASELINE_DEPTH` versions on the chain was synchronized.
+ */
+export async function lastSynchronized(git: Git, linear: Oid, path: string, facts: LinearFacts = LINEAR_FACTS): Promise<{ commit: Oid; file: SideFile; text: string } | null> {
+  const log = await git.text(['log', '--first-parent', '--format=%H', '-n', String(BASELINE_DEPTH), linear, '--', path]);
+  for (const commit of log.split('\n').filter(Boolean)) {
+    const file = (await synchronizedFiles(git, commit, facts)).files.get(path);
+    if (file !== undefined) return { commit, file, text: ((await readBlobs(git, [file.oid])).get(file.oid) as Buffer).toString('utf8') };
+  }
+  return null;
 }
 
 function toSideFile(document: MappedDocument): SideFile {

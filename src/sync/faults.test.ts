@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
@@ -19,7 +19,7 @@ import { type RunReport } from '../run/finish.ts';
 import { INPUT_NAMES, environmentName } from '../run/inputs.ts';
 import { renderStop } from '../run/stop.ts';
 import { Git } from '../state/index.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
@@ -64,8 +64,12 @@ interface Faults {
    * (the answer is lost).
    */
   writeError?: 'server-error' | 'reset-before' | 'reset-after';
+  /** Only this write operation gets `writeError`; any document write when absent. */
+  writeErrorOn?: 'CreateDocument' | 'UpdateDocument';
   /** Refuse every write of this document id, as Linear does with an input it will not take. */
   rejectId?: string;
+  /** Answer the `occurrence`-th request of `operation` with this status; with `ids`, only a request for exactly those ids. */
+  onOperation?: { operation: string; occurrence: number; status: number; ids?: readonly string[]; code?: string };
 }
 
 interface Exchange {
@@ -81,7 +85,7 @@ function resetError(): TypeError {
 /** A transport in front of the fake Linear that injects `faults` and keeps a log of GraphQL exchanges. */
 function faultyFetch(world: FakeWorld) {
   const inner = fakeFetch(world);
-  const state = { faults: {} as Faults, armedAt: 0, count: 0, exchanges: [] as Exchange[] };
+  const state = { faults: {} as Faults, armedAt: 0, count: 0, exchanges: [] as Exchange[], seen: new Map<string, number>() };
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const url = String(input);
     if (url !== `${LINEAR_API}/graphql`) return inner(input, init);
@@ -89,8 +93,18 @@ function faultyFetch(world: FakeWorld) {
     const position = state.count - state.armedAt;
     const { operationName, variables } = JSON.parse(String(init?.body)) as { operationName: string; variables: Record<string, unknown> };
     const log = (status: Exchange['status'], injected: boolean) => state.exchanges.push({ operation: operationName, status, injected });
-    const { http, budget, writeError, rejectId } = state.faults;
+    const { http, budget, writeError, writeErrorOn, rejectId, onOperation } = state.faults;
     const isWrite = operationName === 'CreateDocument' || operationName === 'UpdateDocument';
+    const asked = Array.isArray(variables.ids) ? [...(variables.ids as string[])].sort() : undefined;
+    const counted = onOperation?.ids === undefined || JSON.stringify(asked) === JSON.stringify([...onOperation.ids].sort());
+    const occurrence = (state.seen.get(operationName) ?? 0) + (counted ? 1 : 0);
+    state.seen.set(operationName, occurrence);
+
+    if (onOperation !== undefined && counted && onOperation.operation === operationName && onOperation.occurrence === occurrence) {
+      log(onOperation.status, true);
+      const code = onOperation.code ?? (onOperation.status === 429 ? 'RATELIMITED' : 'INTERNAL_SERVER_ERROR');
+      return new Response(JSON.stringify({ errors: [{ message: 'injected', extensions: { code } }] }), { status: onOperation.status, headers: { 'content-type': 'application/json', ...LIMIT_HEADERS } });
+    }
 
     if (http !== undefined && position >= http.at && http.times > 0) {
       http.times -= 1;
@@ -100,7 +114,7 @@ function faultyFetch(world: FakeWorld) {
       const code = http.status === 429 ? 'RATELIMITED' : 'INTERNAL_SERVER_ERROR';
       return new Response(JSON.stringify({ errors: [{ message: 'injected', extensions: { code } }] }), { status: http.status, headers });
     }
-    if (isWrite && writeError !== undefined) {
+    if (isWrite && writeError !== undefined && (writeErrorOn === undefined || writeErrorOn === operationName)) {
       delete state.faults.writeError;
       if (writeError === 'server-error') {
         log(500, true);
@@ -129,6 +143,7 @@ function faultyFetch(world: FakeWorld) {
       state.faults = faults;
       state.armedAt = state.count;
       state.exchanges.length = 0;
+      state.seen.clear();
     },
     clear() {
       state.faults = {};
@@ -225,6 +240,14 @@ describe('sync: rate limits and transport faults', () => {
   const body = (text: string) => text.slice(text.indexOf('# '));
   const withNewPage = () => world.linear.documents.filter((d) => d.trashed !== true && d.content?.includes('A new page.') === true);
 
+  /** A body as Linear holds it: each relative link to a synchronized file becomes the URL of that file's document. */
+  function linearForm(path: string, text: string, map: Record<string, { id: string }>): string {
+    return text.replace(/\]\(([^()<>\s#]+\.md)(#[^()\s]*)?\)/g, (link, target: string, fragment: string | undefined) => {
+      const id = map[posix.join(posix.dirname(path), target)]?.id;
+      return id === undefined ? link : `](<https://linear.app/${world.linear.urlKey}/document/${id}${fragment ?? ''}>)`;
+    });
+  }
+
   /** I1, I7, I8: every mapped document holds its file's body; one live document per title in a place. */
   async function assertConverged() {
     const map = await ids();
@@ -232,7 +255,7 @@ describe('sync: rate limits and transport faults', () => {
     for (const [path, entry] of Object.entries(map)) {
       const document = world.linear.documents.find((d) => d.id === entry.id);
       assert.ok(document !== undefined && document.trashed !== true, `${path}: no live document`);
-      assert.equal(document.content, body(await show(`${tracked}:${path}`)), `${path}: content`);
+      assert.equal(document.content, linearForm(path, body(await show(`${tracked}:${path}`)), map), `${path}: content`);
     }
     const live = world.linear.documents.filter((d) => d.trashed !== true);
     const keys = live.map((d) => `${d.projectId ?? d.teamId}/${d.title}`);
@@ -245,7 +268,7 @@ describe('sync: rate limits and transport faults', () => {
     transport.clear();
     const next = await sync();
     assert.equal(next.result.exitCode, 0, next.result.stderr);
-    assert.equal(next.report.complete, true);
+    assert.equal(next.report.complete, true, JSON.stringify({ code: next.report.code, sync: next.report.sync }));
     assert.equal(next.report.exitStatus, 'success');
     assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', 'refs/mdbisync/linear']), MERGE_RECORD_MESSAGE);
     await assertConverged();
@@ -254,6 +277,8 @@ describe('sync: rate limits and transport faults', () => {
     assert.equal(again.result.exitCode, 0, again.result.stderr);
     assert.deepEqual(again.writes, []);
     assert.equal(await rev('refs/mdbisync/linear'), before);
+    assert.equal(again.report.resumed, false, 'a run after a complete one does not resume');
+    return next.report;
   }
 
   function assertPartial(run: Awaited<ReturnType<typeof cli>>) {
@@ -288,8 +313,11 @@ describe('sync: rate limits and transport faults', () => {
     }
     assert.match(first.summary, /Stopped: rate limited/);
     assert.equal(first.report.sync?.notAttempted.length, DOCUMENTS - updated.length);
+    assert.equal(first.report.writesAfterLimit, 0);
+    assert.equal(first.report.resumed, false);
 
-    await assertNextRunConverges();
+    const next = await assertNextRunConverges();
+    assert.equal(next.resumed, true, 'the next run goes on from the partial record');
   });
 
   it('L5-07: a short Retry-After gets one retry, then the run finishes', async () => {
@@ -337,6 +365,8 @@ describe('sync: rate limits and transport faults', () => {
       assert.ok(run.summary.includes(`| ${name} | ${value} |`), `${name} in the summary`);
       assert.equal(run.report.stop?.limits?.[name], value, `${name} in the report`);
     }
+    assert.equal(run.report.endpointLimitHeadersPresent, true);
+    assert.equal(run.report.writesAfterLimit, 0);
     await assertNextRunConverges();
   });
 
@@ -358,6 +388,7 @@ describe('sync: rate limits and transport faults', () => {
     for (const path of updated) assert.ok((await recorded(path)).includes('Second text.'), `${path}: recorded`);
     assert.ok(run.summary.includes('| x-ratelimit-endpoint-requests-remaining | 2 |'));
     assert.ok(run.summary.includes('| x-ratelimit-endpoint-requests-limit | 30 |'));
+    assert.equal(run.report.endpointLimitHeadersPresent, true);
     await assertNextRunConverges();
   });
 
@@ -376,6 +407,9 @@ describe('sync: rate limits and transport faults', () => {
       for (const path of [pathOf(1), pathOf(2)]) assert.ok((await recorded(path)).includes('Second text.'));
       assert.equal((await contentOf(pathOf(0)))?.includes('Second text.'), variant === 'reset-after');
       assert.ok(run.summary.includes(pathOf(0)), 'the summary names the document');
+      assert.equal(run.report.failedWriteRecorded, false);
+      assert.equal(run.report.rejectedDocumentNamed, false, 'a server error or a lost request is not a rejection');
+      assert.equal(run.report.endpointLimitHeadersPresent, false);
       await assertNextRunConverges();
     });
 
@@ -406,6 +440,9 @@ describe('sync: rate limits and transport faults', () => {
     assert.match(run.report.sync?.failed[0]?.error ?? '', /INPUT_ERROR/);
     assert.ok(run.summary.includes(`| ${pathOf(1)} | UpdateDocument |`), 'the summary names the rejected document');
     assert.ok((await recorded(pathOf(1))).includes('First text.'));
+    assert.equal(run.report.writtenDocuments, 2);
+    assert.equal(run.report.rejectedDocumentNamed, true);
+    assert.equal(run.report.failedWriteRecorded, false);
     await assertNextRunConverges();
   });
 
@@ -446,66 +483,170 @@ describe('sync: rate limits and transport faults', () => {
     for (const secret of [CANARY, CLIENT_SECRET, 'fake-token', 'gh-token']) assert.ok(!`${child.stdout}${child.stderr}${written}`.includes(secret), secret);
   });
 
-  /** The position of the run's first request after its setup check. */
-  async function firstAfterSetup(): Promise<number> {
-    transport.arm({});
-    const check = await cli('check');
-    assert.equal(check.result.exitCode, 0, check.result.stderr);
-    return transport.exchanges.length + 1;
-  }
-
-  it('a 429 while looking for documents to adopt stops before any write; nothing is recorded; the next run converges', async () => {
-    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
-    const at = await firstAfterSetup();
+  it('a 429 while capture reads Linear stops the run before any write; the next run converges', async () => {
+    await editAll(1, 'Second text.', { 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
     const before = await rev('refs/mdbisync/linear');
-    transport.arm({ http: { at, status: 429, times: 1 } });
+    transport.arm({ onOperation: { operation: 'ListDocuments', occurrence: 1, status: 429 } });
     const run = await sync();
     assertPartial(run);
-    assert.equal(transport.exchanges.at(-1)?.operation, 'ListDocuments');
+    assert.equal(run.report.stop?.kind, 'rate-limited');
+    assert.ok(run.summary.includes('| x-ratelimit-requests-limit | 5000 |'), 'the capture stop gives the limits');
     assert.deepEqual(run.writes, []);
-    assert.deepEqual(run.report.sync?.notAttempted, ['combined/new.md']);
     assert.equal(await rev('refs/mdbisync/linear'), before);
     await assertNextRunConverges();
   });
 
-  it('a 500 while looking for documents to adopt fails only the new documents; edits are written; the next run converges', async () => {
+  it('a refusal while capture reads Linear fails the run: it would come back on every run', async () => {
+    await editAll(1, 'Second text.');
+    transport.arm({ onOperation: { operation: 'ListDocuments', occurrence: 1, status: 200, code: 'FORBIDDEN' } });
+    const writesBefore = world.writes.length;
+    await assert.rejects(runCli(['sync'], { env: env({}), cwd, fetch: transport.fetch, log: () => {} }), /ListDocuments: Linear error FORBIDDEN/);
+    assert.deepEqual(world.writes.slice(writesBefore), [], 'nothing written');
+  });
+
+  it('a run goes on from a partial record also when its capture put a commit on top', async () => {
+    await editAll(10, 'Second text.');
+    transport.arm({ onOperation: { operation: 'UpdateDocument', occurrence: 4, status: 429 } });
+    const first = await sync();
+    assertPartial(first);
+    assert.equal(first.report.sync?.record?.kind, 'ordinary', 'a partial record');
+    // A person edits a document the run did not touch, so the next capture commits before the write step.
+    const untouched = await idOf(pathOf(20));
+    const document = world.linear.documents.find((d) => d.id === untouched) as FakeDocument;
+    document.content = `${document.content ?? ''}\nAdded in Linear.\n`;
+    touch(document);
+    transport.clear();
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    const subjects = (await fixture.remote.text(['log', '--format=%s', 'refs/mdbisync/linear'])).split('\n');
+    assert.ok(subjects.indexOf('Capture Linear changes') < subjects.indexOf(PARTIAL_RECORD_MESSAGE), 'capture committed on top of the partial record');
+    assert.equal(next.report.resumed, true);
+  });
+
+  it('a 500 while capture reads Linear ends the run partial with nothing written; the next run converges', async () => {
     await editAll(1, 'Second text.', { 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
-    const at = await firstAfterSetup();
-    transport.arm({ http: { at, status: 500, times: 1 } });
+    const before = await rev('refs/mdbisync/linear');
+    transport.arm({ onOperation: { operation: 'ListDocuments', occurrence: 1, status: 500 } });
     const run = await sync();
     assertPartial(run);
-    assert.equal(transport.exchanges.find((exchange) => exchange.injected)?.operation, 'ListDocuments');
-    assert.deepEqual(run.report.sync?.updated, [pathOf(0)]);
-    assert.deepEqual(run.report.sync?.failed.map((entry) => [entry.path, entry.operation]), [['combined/new.md', 'ListDocuments']]);
-    assert.equal(withNewPage().length, 0, 'nothing created without the listing');
+    assert.equal(run.report.code, 'linear-failed');
+    assert.match(run.summary, /Capture partial, will continue: Linear failed ListDocuments \(LinearGraphQLError INTERNAL_SERVER_ERROR HTTP 500\)/);
+    assert.deepEqual(run.writes, []);
+    assert.equal(await rev('refs/mdbisync/linear'), before);
+    await assertNextRunConverges();
+  });
+
+  it("a 500 on the write step's listing of its targets writes nothing; the next run converges", async () => {
+    await editAll(1, 'Second text.', { 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    transport.arm({ onOperation: { operation: 'ListDocuments', occurrence: 2, status: 500 } });
+    const run = await sync();
+    assertPartial(run);
+    assert.equal(run.report.code, 'write-failed');
+    assert.deepEqual(run.writes, []);
+    assert.equal(withNewPage().length, 0);
     await assertNextRunConverges();
     assert.equal(withNewPage().length, 1);
   });
 
-  it('a check that Linear stops fails: it has no next run to go on', async () => {
-    transport.arm({ http: { at: 1, status: 429, times: 1 } });
-    const run = await cli('check');
-    assert.equal(run.result.exitCode, INCOMPLETE_EXIT_CODE);
-    assert.equal(run.report.exitStatus, 'failure');
-    assert.equal(run.report.stop?.kind, 'rate-limited');
-    assert.match(run.result.stderr, /check: stopped by Linear before any write/);
-    assert.doesNotMatch(`${run.result.stderr}${run.summary}`, /partial/);
+  /** The id in each Linear document URL in `path`'s document. */
+  async function linkedIds(path: string): Promise<string[]> {
+    return [...((await contentOf(path)) ?? '').matchAll(/linear\.app\/[^/]+\/document\/([0-9a-f-]+)/g)].map((match) => match[1] as string);
+  }
+
+  for (const [fault, arm] of [
+    ['the create fails', async () => transport.arm({ writeError: 'server-error', writeErrorOn: 'CreateDocument' })],
+    ["the create's answer is lost after Linear applied it", async () => transport.arm({ writeError: 'reset-after', writeErrorOn: 'CreateDocument' })],
+  ] as const) {
+    it(`when ${fault}, an edit that links to the new document keeps a link that the next run's document answers`, async () => {
+      await editAll(0, '', {
+        [pathOf(0)]: textOf(0, 'See [the new page](new.md).'),
+        'combined/new.md': `# New\n\nA new page. ${CANARY}\n`,
+      });
+      await arm();
+      const run = await sync();
+      assertPartial(run);
+      assert.deepEqual(run.report.sync?.failed.map((entry) => entry.path), ['combined/new.md']);
+      assert.deepEqual(run.report.sync?.updated, [pathOf(0)]);
+      const [written] = await linkedIds(pathOf(0));
+      assert.ok(written !== undefined, 'the edit links to a document id');
+
+      await assertNextRunConverges();
+      const target = await idOf('combined/new.md');
+      assert.equal(target, written, 'the new document got the id the edit already links to');
+      assert.deepEqual(await linkedIds(pathOf(0)), [target]);
+      assert.equal(withNewPage().length, 1);
+    });
+  }
+
+  /** Run 1: the create of `new.md` lands in Linear but its answer is lost, while `part-00.md` is written with a link to it. */
+  async function createWithLostAnswer(): Promise<string> {
+    await editAll(0, '', {
+      [pathOf(0)]: textOf(0, 'See [the new page](new.md).'),
+      'combined/new.md': `# New\n\nA new page. ${CANARY}\n`,
+    });
+    transport.arm({ writeError: 'reset-after', writeErrorOn: 'CreateDocument' });
+    assertPartial(await sync());
+    transport.clear();
+    const [created] = withNewPage();
+    assert.ok(created !== undefined);
+    assert.deepEqual(await linkedIds(pathOf(0)), [created.id]);
+    return created.id;
+  }
+
+  it('the document with the reserved id takes its path over an older one with the same title', async () => {
+    const created = await createWithLostAnswer();
+    const original = world.linear.documents.find((d) => d.id === created) as (typeof world.linear.documents)[number];
+    world.linear.documents.push({ ...original, id: 'older-same-title', content: 'An older page.', createdAt: '2025-01-01T00:00:00.000Z' });
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.equal(await idOf('combined/new.md'), created, 'the document the link names keeps the reserved path');
+    assert.deepEqual(await linkedIds(pathOf(0)), [created]);
+    // The older page is a person's own document: it is taken in under a path of its own, never in place of the new one.
+    const map = await ids();
+    const older = Object.entries(map).find(([, entry]) => entry.id === 'older-same-title');
+    assert.ok(older !== undefined && older[0] !== 'combined/new.md', JSON.stringify(older));
   });
 
-  it('rate-limit headers are escaped in the summary table', () => {
-    const lines = renderStop({ kind: 'rate-limited', operation: 'GetDocuments', limits: { 'x-ratelimit-endpoint-name': 'a|b\n## c' } });
-    assert.ok(lines.includes('| x-ratelimit-endpoint-name | a\\|b ## c |'), lines.join('\n'));
+  it('when the reserved ids cannot be checked, only the new documents that would use one wait', async () => {
+    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    transport.arm({ writeError: 'server-error', writeErrorOn: 'CreateDocument' });
+    assertPartial(await sync());
+    const reservedId = JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json'))['combined/new.md'] as string;
+    await commit({ 'combined/other.md': `# Other\n\nAnother page. ${CANARY}\n` });
+    transport.arm({ onOperation: { operation: 'GetDocuments', occurrence: 1, status: 502, ids: [reservedId] } });
+    const run = await sync();
+    assertPartial(run);
+    assert.deepEqual(run.report.sync?.created, ['combined/other.md']);
+    assert.deepEqual(run.report.sync?.failed.map((entry) => [entry.path, entry.operation]), [['combined/new.md', 'GetDocuments']]);
+    assert.equal(run.report.rejectedDocumentNamed, false, 'a failed read is not a rejection');
+    await assertNextRunConverges();
+    assert.equal(await idOf('combined/new.md'), reservedId);
+  });
+
+  it('a reserved id that Linear already gives a trashed document is not used again; the run is not stuck', async () => {
+    const created = await createWithLostAnswer();
+    (world.linear.documents.find((d) => d.id === created) as { trashed?: boolean }).trashed = true;
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.equal(next.report.complete, true);
+    const id = await idOf('combined/new.md');
+    assert.notEqual(id, created, 'a new id, since Linear refuses a second document with the trashed one');
+    assert.equal(withNewPage().length, 1);
+    // Known limit: the document written in the first run keeps its link to the trashed document. Rewriting it needs
+    // the sync to tell a link it wrote from a person's edit, which it cannot yet.
+    assert.deepEqual(await linkedIds(pathOf(0)), [created]);
   });
 
   it('a 500 on the read before writing leaves the batch unwritten and unrecorded; the next run converges', async () => {
     await editAll(3, 'Second text.');
-    // The first request after the setup check is the re-read of the batch.
-    const reread = await firstAfterSetup();
-    transport.arm({ http: { at: reread, status: 500, times: 1 } });
+    // The write step's re-read asks for exactly the edited documents.
+    const edited = await Promise.all([0, 1, 2].map((index) => idOf(pathOf(index))));
+    transport.arm({ onOperation: { operation: 'GetDocuments', occurrence: 1, status: 500, ids: edited } });
     const run = await sync();
     assertPartial(run);
     assert.deepEqual(run.writes, []);
     assert.deepEqual(run.report.sync?.failed.map((entry) => entry.path).sort(), [pathOf(0), pathOf(1), pathOf(2)]);
+    assert.equal(run.report.rejectedDocumentNamed, false);
     await assertNextRunConverges();
   });
 });

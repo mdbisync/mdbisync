@@ -14,7 +14,33 @@ export {
   planInitialSync,
 } from './plan.ts';
 export { type PlanSources, planFromRepository, readPlanSources } from './run.ts';
-export { DIRECTIONS, type Direction, type PlanReport, placeLabel, renderConfirmed, renderDryRun, toPlanReport } from './summary.ts';
+export {
+  DIRECTIONS,
+  type Direction,
+  type PlanReport,
+  placeLabel,
+  renderConfirmed,
+  renderDryRun,
+  renderReverseConfirmed,
+  renderReverseDryRun,
+  toPlanReport,
+  toReversePlanReport,
+} from './summary.ts';
+export {
+  PULL_REQUEST_TITLE,
+  REVERSE_RECORD_MESSAGE,
+  type ReverseEntry,
+  type ReverseOptions,
+  type ReversePlan,
+  type ReversePlanInput,
+  type ReverseRecord,
+  type ReverseResult,
+  confirmLinearToGit,
+  isPlainTitle,
+  planLinearToGit,
+  planLinearToGitFromRepository,
+  pullRequestBody,
+} from './reverse.ts';
 export {
   type ConfirmOptions,
   type ConfirmedResult,
@@ -42,3 +68,4 @@ export {
   restoreFileLinks,
   uploadsTransform,
 } from './uploads.ts';
+export { documentLinks, documentUrlBase, linksFromLinear, linksToLinear, relativeLink, resolveRelative, workspaceUrlKey } from './links.ts';

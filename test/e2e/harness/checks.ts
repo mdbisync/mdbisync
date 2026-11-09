@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import type { Definition, Image, Link, Nodes } from 'mdast';
-import { parse, visit } from '../../../src/format/markdown.ts';
+import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
@@ -17,9 +17,19 @@ import { refreshView, resolveSubject } from './subjects.ts';
 
 // --- pure helpers ----------------------------------------------------------
 
-/** Removes a YAML front matter block at the start of a file. */
-export function stripFrontMatter(text: string): string {
-  return text.replace(/^(?:﻿)?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
+/**
+ * The body of a file as the engine sends it to Linear: without a byte order
+ * mark, front matter and the blank lines after it, by the engine's own rule.
+ */
+export function bodyOf(text: string): string {
+  return splitFile(text).body;
+}
+
+/** Where a mapped id's document is: in use, in the trash, archived (with its project), or gone. */
+export function documentState(document: Pick<LinearDocument, 'trashed' | 'archivedAt'> | undefined): 'active' | 'trashed' | 'archived' | 'missing' {
+  if (document === undefined) return 'missing';
+  if (document.trashed) return 'trashed';
+  return document.archivedAt === null || document.archivedAt === undefined ? 'active' : 'archived';
 }
 
 /** The Linear title of a synchronized file: its path below its annotated folder, without `.md`. */
@@ -208,7 +218,7 @@ export function gitLinks(content: string, documentPath: string, targets: Require
 
 /** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
 export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
-  return linearLinks(stripFrontMatter(text), path, sides) === content;
+  return linearLinks(bodyOf(text), path, sides) === content;
 }
 
 /**
@@ -267,7 +277,7 @@ export interface Sides {
   ids: IdMap;
   /** Upload URL → file path in the tree. */
   uploads: Map<string, string>;
-  /** Documents by id. */
+  /** Documents by id: every listed one, and every mapped id's document that Linear still has, trashed and archived ones included. */
   documents: Map<string, LinearDocument>;
   /** Every document in the run's projects and team-zone prefix. */
   allDocuments: LinearDocument[];
@@ -303,6 +313,9 @@ export async function fetchRef(git: Git, ref: string): Promise<string | null> {
     return null;
   }
 }
+
+/** Single-document reads `readSides` sends at once. */
+const SINGLE_READS_AT_ONCE = 5;
 
 /** Reads both sides; without `allowNoIds`, a run with no ids state ref is a product error. */
 export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean } = {}): Promise<Sides> {
@@ -356,6 +369,14 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   const documents = new Map(allDocuments.map((document) => [document.id, document]));
   const missing = [...ids.values()].map((entry) => entry.id).filter((id) => !documents.has(id));
   if (missing.length > 0) for (const document of await world.app.getDocuments(missing, { withContent: true })) documents.set(document.id, document);
+  // An id that no list and no batch read returned is read on its own, so the checks tell a trashed or
+  // archived document from one Linear no longer has. Measured, the batch read returns trashed and
+  // archived documents, so this stays rare; the reads run a few at a time.
+  const unresolved = missing.filter((id) => !documents.has(id));
+  for (let start = 0; start < unresolved.length; start += SINGLE_READS_AT_ONCE) {
+    const read = await Promise.all(unresolved.slice(start, start + SINGLE_READS_AT_ONCE).map((id) => world.app.getDocument(id)));
+    for (const document of read) if (document !== null) documents.set(document.id, document);
+  }
   const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
   return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders, documentUrlBase: world.documentUrlBase };
 }
@@ -445,7 +466,7 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     return ok('I6');
   },
 
-  async I7(ctx, sides) {
+  async I7(_ctx, sides) {
     const s = await sides();
     const readmes = new Map<string, string>();
     for (const path of s.files.keys()) if (/(^|\/)README\.md$/.test(path)) readmes.set(path, s.files.get(path) as string);
@@ -459,8 +480,9 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
       }
       const document = s.documents.get(entry.id);
       const folder = owningFolder(path, folders);
-      if (document === undefined) problems.push(`${path}: its id is not in Linear`);
-      else if (folder !== null && document.title !== titleOf(path, folder.folder)) problems.push(`${path}: title differs from its path`);
+      const state = documentState(document);
+      if (state !== 'active') problems.push(`${path}: its document is ${state === 'missing' ? 'not in Linear' : state === 'trashed' ? "in Linear's trash" : 'archived'}`);
+      else if (folder !== null && document?.title !== titleOf(path, folder.folder)) problems.push(`${path}: title differs from its path`);
     }
     for (const path of s.ids.keys()) if (!s.files.has(path)) problems.push(`${path} is mapped but not a synchronized file`);
     return problems.length === 0 ? ok('I7') : bad('I7', `${problems.length} problems: ${problems.slice(0, 10).join('; ')}`);

@@ -10,8 +10,9 @@ import { Git } from '../../../src/state/index.ts';
 import { checkpoint, CHECKPOINTS, HOOKS_DIR_ENV, HOOKS_ENV, hooksDir, testStopAfterDocuments } from '../../../src/test-hooks.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { annotatedFolders, buildRunTree, readAnnotation } from './corpus.ts';
+import { CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { engineInputs, inputEnv, runEngine, startEngine } from './engine.ts';
-import { operationOf, startFaultProxy } from './fault-proxy.ts';
+import { operationOf, startFaultProxy, writeApplied, writeError, writeFields } from './fault-proxy.ts';
 import { runNames } from './isolation.ts';
 import { Sandbox } from './sandbox.ts';
 
@@ -204,9 +205,12 @@ describe('fault proxy', () => {
       // A forwarded request with rewritten headers is still a real request (I9 counts it).
       assert.equal(proxy.requests.at(-1)?.injected, false);
 
-      proxy.setFaults([{ kind: 'reject-document', target: 'weekly-plan' }]);
+      proxy.setFaults([{ kind: 'reject-document', ids: ['doc-7f3a'], titles: ['weekly-plan'] }]);
       const rejected = await fetch(`${proxy.url}/graphql`, { method: 'POST', body: JSON.stringify({ query: 'mutation CreateDocument { a }', operationName: 'CreateDocument', variables: { input: { title: 'notes/weekly-plan' } } }) });
       assert.match(await rejected.text(), /INPUT_ERROR/);
+      // An update that carries only the document's id is refused too.
+      const update = await fetch(`${proxy.url}/graphql`, { method: 'POST', body: JSON.stringify({ query: 'mutation UpdateDocument { a }', operationName: 'UpdateDocument', variables: { id: 'doc-7f3a', input: { content: 'New text.' } } }) });
+      assert.match(await update.text(), /INPUT_ERROR/);
       assert.equal((await post(proxy.url, 'mutation CreateDocument { other }')).status, 200);
 
       proxy.setFaults([{ kind: 'upload-error', times: 1 }]);
@@ -216,6 +220,112 @@ describe('fault proxy', () => {
       await proxy.close();
       await up.close();
     }
+  });
+
+  it('drops the answer of a write Linear has applied, only for the write it names', async () => {
+    const up = await upstream();
+    const proxy = await startFaultProxy(up.url);
+    try {
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset-after-apply', operation: 'create', times: 1 }]);
+      // An update passes: the fault names creates.
+      assert.equal((await post(proxy.url, 'mutation UpdateDocument { a }')).status, 200);
+      const before = up.calls();
+      // The create reaches Linear, then the connection drops before its answer.
+      await assert.rejects(post(proxy.url, 'mutation CreateDocument { a }'));
+      assert.equal(up.calls(), before + 1);
+      // Linear answered 200; the answer was dropped and the record says so.
+      assert.equal(proxy.requests.at(-1)?.status, 200);
+      assert.equal(proxy.requests.at(-1)?.answerDropped, true);
+      // It was a real request, counted for I9.
+      assert.equal(proxy.requests.at(-1)?.injected, false);
+      // Once only.
+      assert.equal((await post(proxy.url, 'mutation CreateDocument { a }')).status, 200);
+      // A plain reset drops the write before Linear sees it.
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset', times: 1 }]);
+      const calls = up.calls();
+      await assert.rejects(post(proxy.url, 'mutation UpdateDocument { a }'));
+      assert.equal(up.calls(), calls);
+    } finally {
+      await proxy.close();
+      await up.close();
+    }
+  });
+
+  it('rejects a document by its write fields only, before a lost-answer fault, and keeps that fault for a write that reaches Linear', async () => {
+    assert.deepEqual(writeFields(JSON.stringify({ query: 'mutation UpdateDocument { a }', variables: { id: 'doc-1', input: { title: 'guides/plan', content: 'See weekly-plan.' } } })), { ids: ['doc-1'], titles: ['guides/plan'] });
+    const up2 = await upstream();
+    const proxy2 = await startFaultProxy(up2.url);
+    const send2 = (variables: unknown, name = 'UpdateDocument') => fetch(`${proxy2.url}/graphql`, { method: 'POST', body: JSON.stringify({ query: `mutation ${name} { a }`, operationName: name, variables }) });
+    try {
+      proxy2.setFaults([{ kind: 'write-error', variant: 'reset-after-apply', times: 1 }, { kind: 'reject-document', ids: ['doc-1'], titles: ['weekly-plan'] }]);
+      // The rejected document is refused even though a lost-answer fault comes first in the list; that fault stays armed.
+      assert.match(await (await send2({ id: 'doc-1', input: { content: 'New text.' } })).text(), /INPUT_ERROR/);
+      assert.match(await (await send2({ input: { title: 'notes/weekly-plan' } }, 'CreateDocument')).text(), /INPUT_ERROR/);
+      // The next other write, whose content only mentions the name, is not rejected: it reaches Linear and loses its answer.
+      await assert.rejects(send2({ id: 'doc-2', input: { content: 'Read weekly-plan first.' } }));
+      assert.equal(proxy2.requests.at(-1)?.answerDropped, true);
+      // Spent once: the next write is answered.
+      assert.equal((await send2({ id: 'doc-2', input: { content: 'Again.' } })).status, 200);
+    } finally {
+      await proxy2.close();
+      await up2.close();
+    }
+  });
+
+  it('keeps a lost-answer fault armed while Linear refuses the write', async () => {
+    let refuse = true;
+    const proxy = await startFaultProxy('http://upstream.invalid', {
+      fetch: async () => {
+        // GraphQL refuses with HTTP 200 and errors; then a write that Linear applies.
+        const body = refuse ? { data: null, errors: [{ message: 'refused', extensions: { code: 'INPUT_ERROR' } }] } : { data: { documentUpdate: { success: true } } };
+        refuse = false;
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    try {
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset-after-apply', times: 1 }]);
+      // The refusal reaches the engine as it is, and is no lost answer.
+      const refused = await post(proxy.url, 'mutation UpdateDocument { a }');
+      assert.match(await refused.text(), /refused/);
+      assert.equal(proxy.requests.at(-1)?.answerDropped, undefined);
+      // The next write is applied, and its answer is the one lost.
+      await assert.rejects(post(proxy.url, 'mutation UpdateDocument { a }'));
+      assert.equal(proxy.requests.at(-1)?.answerDropped, true);
+    } finally {
+      await proxy.close();
+    }
+    assert.equal(writeApplied(Buffer.from(JSON.stringify({ data: { documentCreate: { success: false } } }))), false);
+    assert.equal(writeApplied(Buffer.from('not json')), false);
+  });
+
+  it('keeps a lost-answer fault armed when the write never reached Linear', async () => {
+    let fail = true;
+    const proxy = await startFaultProxy('http://upstream.invalid', {
+      fetch: async () => {
+        if (fail) {
+          fail = false;
+          throw new Error('network down');
+        }
+        return new Response(JSON.stringify({ data: { ok: true } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    try {
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset-after-apply', times: 1 }]);
+      assert.equal((await post(proxy.url, 'mutation UpdateDocument { a }')).status, 502);
+      await assert.rejects(post(proxy.url, 'mutation UpdateDocument { a }'));
+      assert.equal(proxy.requests.at(-1)?.answerDropped, true);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it('names write-error variants the way specs write them', async () => {
+    // writeError lives next to the proxy's faults.
+    assert.deepEqual(writeError('http-500'), { kind: 'write-error', variant: 'server-error', times: 1 });
+    assert.deepEqual(writeError('connection-reset'), { kind: 'write-error', variant: 'reset', times: 1 });
+    assert.deepEqual(writeError('reset-after-apply'), { kind: 'write-error', variant: 'reset-after-apply', times: 1 });
+    assert.deepEqual(writeError('reset-after-apply-on-update'), { kind: 'write-error', variant: 'reset-after-apply', operation: 'update', times: 1 });
+    assert.throws(() => writeError('surprise'), /unknown write-error variant/);
   });
 });
 
@@ -235,6 +345,7 @@ const CORPUS: Record<string, string> = {
   'combined/note.md': '# Note\n\nkx-00000004\n',
   '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n',
   '.github/workflows/x.yml': 'on: push\n',
+  [CHECK_WORKFLOW_PATH]: CHECK_WORKFLOW,
 };
 
 describe('run tree from a slice', () => {
@@ -246,14 +357,14 @@ describe('run tree from a slice', () => {
     assert.equal(annotatedFolders(readmes).length, 5);
   });
 
-  it('puts team-zone files below the run id, renames projects and leaves out workflows', () => {
+  it('puts team-zone files below the run id, renames projects and excludes unrelated workflows', () => {
     const names = runNames('4f1a9c');
     const tree = buildRunTree({ slice: 'mini', paths: Object.keys(CORPUS) }, readmes, names);
     assert.equal(tree.paths.get('eng/4f1a9c/guides/start.md'), 'eng/guides/start.md');
     assert.equal(tree.paths.get('eng/README.md'), 'eng/README.md');
     assert.equal(tree.paths.get('eng/alpha/plan.md'), 'eng/alpha/plan.md');
     assert.equal(tree.paths.get('combined/note.md'), 'combined/note.md');
-    assert.equal([...tree.paths.keys()].some((path) => path.startsWith('.github/')), false);
+    assert.deepEqual([...tree.paths.keys()].filter((path) => path.startsWith('.github/')), [CHECK_WORKFLOW_PATH]);
     assert.equal(tree.projects.get('PROJECT_ENG_1'), 'Field notes 4f1a9c');
     assert.equal(tree.projects.get('PROJECT_DOCS_1'), 'Library index 4f1a9c');
     assert.match(tree.rewritten.get('eng/alpha/README.md') as string, /linear-project: Field notes 4f1a9c/);
@@ -270,7 +381,8 @@ describe('run tree from a slice', () => {
       const paths = corpus.slices[slice];
       const readmes = new Map(paths.filter((path) => /(^|\/)README\.md$/.test(path)).map((path) => [path, text.get(path) ?? '']));
       const tree = buildRunTree({ slice, paths }, readmes, names);
-      assert.equal(tree.paths.size, paths.filter((path) => !path.startsWith('.github/')).length, slice);
+      assert.equal(tree.paths.size, paths.filter((path) => !path.startsWith('.github/') || path === CHECK_WORKFLOW_PATH).length, slice);
+      assert.equal(tree.paths.get(CHECK_WORKFLOW_PATH), CHECK_WORKFLOW_PATH);
       // Every project of the slice gets a run project, and only ENG has a team zone.
       for (const [target, readme] of tree.rewritten) assert.doesNotMatch(readme, /PROJECT_[A-Z]+/, `${slice} ${target}`);
       assert.deepEqual([...tree.teamZones.keys()], tree.teamZones.size === 0 ? [] : ['ENG'], slice);
@@ -306,6 +418,12 @@ describe('run tree from a slice', () => {
     const files = (await new Git(remote).text(['ls-tree', '-r', '--name-only', names.trackedBranch])).split('\n');
     assert.ok(files.includes('eng/4f1a9c/guides/start.md'));
     assert.ok(!files.some((file) => file.startsWith('corpus')));
+    assert.ok(!files.some((file) => file.startsWith('.github/')));
+    const enabled = runNames('abcdef');
+    await sandbox.createTrackedBranch('mini', enabled, { checks: true });
+    const enabledFiles = (await new Git(remote).text(['ls-tree', '-r', '--name-only', enabled.trackedBranch])).split('\n');
+    assert.deepEqual(enabledFiles.filter((file) => file.startsWith('.github/')), [CHECK_WORKFLOW_PATH]);
+    await sandbox.deleteRunRefs(enabled.runId, [`refs/heads/${enabled.trackedBranch}`]);
     assert.equal((await new Git(remote).text(['rev-parse', `refs/heads/${names.trackedBranch}`])).trim(), commit);
     assert.match(await new Git(remote).text(['show', `${names.trackedBranch}:eng/alpha/README.md`]), /Field notes 4f1a9c/);
     await assert.rejects(sandbox.createTrackedBranch('full', names), /corpus-slices\/full\.json/);

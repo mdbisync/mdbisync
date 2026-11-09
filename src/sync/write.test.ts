@@ -12,7 +12,8 @@ import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git } from '../state/index.ts';
-import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
+import { fixText } from '../format/index.ts';
+import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
@@ -95,6 +96,15 @@ describe('sync: the tracked branch to Linear', () => {
     const graphql = world.requests.slice(before).filter((request) => request === `POST ${LINEAR_API}/graphql`).length;
     return { result, report, summary, graphql, writes: world.writes.slice(writesBefore) };
   }
+
+  // Mutate after capture's content read, before the next Linear request in write.
+  const afterCapture = (change: () => void) => {
+    let read = false;
+    world.linear.beforeQuery = (operation, variables) => {
+      if (read) { delete world.linear.beforeQuery; change(); }
+      else if (operation === 'GetDocuments' && variables.withContent === true) read = true;
+    };
+  };
 
   const sync = (extra: Record<string, string> = {}) => cli('sync', extra);
 
@@ -182,8 +192,10 @@ describe('sync: the tracked branch to Linear', () => {
     await assertMergeRecord(previous);
     // The record holds the tracked tree: Linear kept the text.
     assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
-    // I9: one read again of the document and one write, plus the run's own few requests.
-    assert.ok(graphql <= 1 * 1.5 + 5, `requests: ${graphql}`);
+    // I9: one read again and one write, plus setup and one capacity list per annotated container.
+    const capacityLists = report.capacity.length;
+    assert.equal(capacityLists, 3);
+    assert.ok(graphql <= 1 * 1.5 + 5 + capacityLists, `requests: ${graphql}`);
     await assertConverged();
     await assertIdempotent();
   });
@@ -348,8 +360,7 @@ describe('sync: the tracked branch to Linear', () => {
 
   it('a document edited in Linear since the capture is not overwritten; the record is an ordinary commit', async () => {
     const document = await documentOf('eng/notes/review.md');
-    document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}`;
-    touch(document);
+    afterCapture(() => { document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}`; touch(document); });
     const previous = await rev('refs/mdbisync/linear');
     await commit({
       'eng/notes/review.md': `# Review\n\nEdited in git. ${CANARY}\n`,
@@ -401,7 +412,7 @@ describe('sync: the tracked branch to Linear', () => {
 
   it('a document created by a run that died before recording its id is adopted by its title, not created twice', async () => {
     await commit({ 'combined/faq.md': `# FAQ\n\nAnswers. ${CANARY}\n` });
-    world.linear.documents.push({ id: 'orphan', title: 'faq', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# FAQ\n\nAnswers. ${CANARY}\n` });
+    afterCapture(() => world.linear.documents.push({ id: 'orphan', title: 'faq', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# FAQ\n\nAnswers. ${CANARY}\n` }));
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(writes, []);
@@ -410,7 +421,7 @@ describe('sync: the tracked branch to Linear', () => {
     await assertConverged();
   });
 
-  const uploadUrls = (text: string | null | undefined) => [...(text ?? '').matchAll(/https:\/\/uploads\.linear\.test\/[^)\s]+/g)].map((match) => match[0]);
+  const uploadUrls = (text: string | null | undefined) => [...(text ?? '').matchAll(/https:\/\/uploads\.linear\.app\/[^)\s]+/g)].map((match) => match[0]);
   /** Upload requests, single or batched, whatever the operation is called. */
   const isUpload = (write: string) => /^FileUpload/.test(write);
   const kinds = (writes: string[]) => writes.map((write) => (isUpload(write) ? 'upload' : write));
@@ -430,6 +441,39 @@ describe('sync: the tracked branch to Linear', () => {
     assert.match(figure.content ?? '', /edited/);
     // `linear` keeps the relative link: its tree is the tracked tree.
     assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
+  });
+
+  it("an image in angle brackets in a document Linear reformats is recorded in Linear's form, still an image; the next run writes nothing", async () => {
+    // Like Linear: the stored text is in Linear's form, a link to an uploaded file stored as a file.
+    world.linear.store = (content) => fixText(content.replaceAll(`${UPLOADS_HOST}/`, 'uploaded/')).replaceAll('uploaded/', `${UPLOADS_HOST}/`);
+    await commit({
+      'eng/media/chart copy.png': Buffer.from('chart copy bytes').toString('latin1'),
+      'eng/notes/spaced.md': `# Spaced\n\n![Chart](<../media/chart copy.png>)\n\n${CANARY}\n`,
+    });
+    const { result } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    const [url] = uploadUrls((await documentOf('eng/notes/spaced.md')).content);
+    assert.equal((await documentOf('eng/notes/spaced.md')).content, `# Spaced\n\n![Chart](${url})\n\n${CANARY}`, 'Linear dropped the brackets');
+    // The record keeps an image: Linear's form of the file, not the file's spelling without its brackets.
+    assert.match(await show('refs/mdbisync/linear:eng/notes/spaced.md'), /!\[Chart\]\(\.\.\/media\/chart%20copy\.png\)/);
+    // Linear's form differs from the file: the next run's sync pull request
+    // carries it to the tracked branch, and once it is merged a run
+    // writes nothing.
+    world.github.merge = async (pr, sha) => {
+      const base = await rev(`refs/heads/${pr.base}`);
+      const tree = (await fixture.remote.text(['merge-tree', '--write-tree', base, sha])).split('\n')[0] as string;
+      const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number}`], {
+        env: { GIT_AUTHOR_NAME: 'bot', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'bot', GIT_COMMITTER_EMAIL: 'bot@example.com' },
+      });
+      await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
+      return { sha: commit };
+    };
+    assert.deepEqual((await sync()).writes, ['POST /pulls']);
+    assert.deepEqual((await sync()).writes, ['PUT /pulls/1/merge']);
+    assert.match(await show('refs/heads/main:eng/notes/spaced.md'), /!\[Chart\]\(\.\.\/media\/chart%20copy\.png\)/);
+    // The run after the merge records it on `linear` and writes nothing to Linear (L2-34); the next one changes nothing.
+    assert.deepEqual((await sync()).writes, []);
     await assertIdempotent();
   });
 
@@ -624,6 +668,8 @@ describe('sync: the tracked branch to Linear', () => {
   });
 
   it('with the upload cache lost, an edited document with an image is written, not taken for a Linear edit', async () => {
+    const previousUrl = uploadUrls((await documentOf('eng/notes/figure.md')).content)[0]!;
+    const uploadsBefore = world.linear.uploads.length;
     const empty = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: '{}\n' });
     const tree = await fixture.remote.text(['mktree'], { input: `100644 blob ${empty}\tuploads.json\n` });
     const lost = await fixture.remote.text(['commit-tree', tree, '-p', 'refs/mdbisync/uploads', '-m', 'Cache lost'], {
@@ -634,7 +680,11 @@ describe('sync: the tracked branch to Linear', () => {
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.sync?.skipped, []);
-    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+    assert.deepEqual(kinds(writes), ['UpdateDocument']);
+    assert.equal(world.linear.uploads.length, uploadsBefore, 'capture recovered the cached bytes without another upload');
+    assert.deepEqual(uploadUrls((await documentOf('eng/notes/figure.md')).content), [previousUrl]);
+    assert.ok((await show('refs/mdbisync/uploads:uploads.json')).includes(previousUrl));
+    assert.ok((await show('refs/mdbisync/linear:eng/notes/figure.md')).includes('../media/diagram.png'));
   });
 
   it('a write Linear rejects is listed, and the run exits to be run again', async () => {
@@ -669,8 +719,7 @@ describe('sync: the tracked branch to Linear', () => {
 
   it('a document moved to another project in Linear since the capture is not moved or trashed by git', async () => {
     const document = await documentOf('eng/notes/review.md');
-    document.projectId = 'project-archive';
-    touch(document);
+    afterCapture(() => { document.projectId = 'project-archive'; touch(document); });
     await commit({ 'eng/notes/review.md': null });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
@@ -718,6 +767,151 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
+  it('a left-out file fixed in git does not overwrite an edit made in Linear after capture', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
+    assert.deepEqual((await sync()).writes, []);
+    afterCapture(() => { document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}\n`; touch(document); });
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'edited-in-linear' }]);
+    assert.match(document.content ?? '', /Typed in Linear meanwhile/);
+  });
+
+  it('an edit of an excluded file made before capture is recorded and conflicts with a different git fix', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
+    assert.deepEqual((await sync()).writes, []);
+    document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}\n`;
+    touch(document);
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'conflict' }]);
+    assert.ok(report.capture?.changed.includes('eng/notes/review.md'));
+    assert.match(await show('refs/mdbisync/linear:eng/notes/review.md'), /Typed in Linear meanwhile/);
+    assert.match(document.content ?? '', /Typed in Linear meanwhile/);
+  });
+
+  it('a left-out file is compared with what Linear was given, not with a git version it never received', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    // Two git commits between runs: a clean version Linear never receives, then one the linter leaves out.
+    await commit({ 'eng/notes/review.md': `# Review\n\nA version Linear never sees. ${CANARY}\n` });
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
+    assert.deepEqual((await sync()).writes, []);
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.match(document.content ?? '', /fixed in git/);
+  });
+
+  it('a link to another synchronized document is written as its Linear URL; `linear` keeps the relative link', async () => {
+    const plan = await documentOf('eng/notes/plan.md');
+    await commit({ 'eng/notes/review.md': `# Review\n\nSee [the plan](plan.md). ${CANARY}\n` });
+    const { result, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    const review = await documentOf('eng/notes/review.md');
+    assert.ok((review.content ?? '').includes(plan.id) || (review.content ?? '').includes('linear.app'), 'the link was not written as a Linear URL');
+    assert.ok(!(review.content ?? '').includes('](plan.md)'), 'the relative link reached Linear');
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
+  });
+
+  /** Leaves a file out with one commit, syncs, fixes it with another, syncs; the fix must reach the untouched document. */
+  async function leftOutThenFixed(breaking: Record<string, string | null>, fixing: Record<string, string | null>, path: string) {
+    const document = await documentOf(path);
+    await commit(breaking);
+    assert.equal((await sync()).result.exitCode, 0);
+    await commit(fixing);
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.skipped, [], 'an untouched document was taken for a Linear edit');
+    assert.equal(report.complete, true);
+    return document;
+  }
+
+  it('a file left out for a title collision and then fixed reaches its untouched document', async () => {
+    const document = await leftOutThenFixed(
+      { 'eng/notes/review.md': `# Review\n\nAn edit made while colliding. ${CANARY}\n`, 'eng/notes/Review.md': `# Other\n\nSame title. ${CANARY}\n` },
+      { 'eng/notes/Review.md': null, 'eng/notes/review.md': `# Review\n\nAfter the collision. ${CANARY}\n` },
+      'eng/notes/review.md',
+    );
+    assert.match(document.content ?? '', /After the collision/);
+  });
+
+  it('a file left out in the commit that moves its folder to another project is moved and written once fixed', async () => {
+    const document = await leftOutThenFixed(
+      {
+        'eng/notes/README.md': `---\nlinear-project: Archive\n---\n\n# Field notes\n\n${CANARY}\n`,
+        'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n`,
+      },
+      { 'eng/notes/review.md': `# Review\n\nFindings, fixed. ${CANARY}\n` },
+      'eng/notes/review.md',
+    );
+    assert.equal(document.projectId, 'project-archive');
+    assert.match(document.content ?? '', /fixed/);
+  });
+
+  it('a file left out in the commit that changes its image is written with the new image once fixed', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    await leftOutThenFixed(
+      {
+        'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1'),
+        'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows.[^1] ${CANARY}\n\n[^1]: A note.\n`,
+      },
+      { 'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows, fixed. ${CANARY}\n` },
+      'eng/notes/figure.md',
+    );
+    const [after] = uploadUrls(figure.content);
+    assert.ok(after !== undefined && after !== before, 'the document kept the old image');
+  });
+
+  it('a file that stopped being text and became text again reaches its untouched document', async () => {
+    const document = await leftOutThenFixed(
+      { 'eng/notes/review.md': `# Review\n\nBroken\u0000bytes. ${CANARY}\n` },
+      { 'eng/notes/review.md': `# Review\n\nText again. ${CANARY}\n` },
+      'eng/notes/review.md',
+    );
+    assert.match(document.content ?? '', /Text again/);
+  });
+
+  it('a move that makes a relative link point at another image writes the other image', async () => {
+    await commit({ 'eng/notes/media/diagram.png': Buffer.from('a different diagram').toString('latin1') });
+    assert.equal((await sync()).result.exitCode, 0);
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    // From eng/notes/sub/, `../media/diagram.png` is eng/notes/media/diagram.png.
+    await commit({}, [['eng/notes/figure.md', 'eng/notes/sub/figure.md']]);
+    const { result, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+    const [after] = uploadUrls(figure.content);
+    assert.ok(after !== undefined && after !== before, 'the moved document kept the old image');
+    assert.equal(figure.title, 'sub/figure');
+  });
+
+  it('a file renamed in the same commit that changes its image is written with the new image', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    await commit({ 'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1') }, [['eng/notes/figure.md', 'eng/notes/illustration.md']]);
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+    assert.equal(figure.title, 'illustration');
+    const [after] = uploadUrls(figure.content);
+    assert.ok(after !== undefined && after !== before, 'the renamed document kept the old image');
+    assert.equal(report.complete, true);
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
+  });
+
   /** What a capture does for an edit in Linear: the document's new text, committed onto `linear`. */
   async function captured(path: string, text: string) {
     const document = await documentOf(path);
@@ -737,7 +931,8 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/backend/notes.md': `# Notes\n\nFirst paragraph, edited in git.\n\nSecond paragraph. ${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, ['UpdateDocument']);
+    // The Linear edit goes to the tracked branch through the sync pull request; the git edit goes to Linear.
+    assert.deepEqual(writes, ['POST /pulls', 'UpdateDocument']);
     assert.equal((await documentOf('eng/backend/notes.md')).content, `# Notes\n\nFirst paragraph, edited in git.\n\nSecond paragraph, edited in Linear. ${CANARY}\n`);
     assert.equal(report.complete, true);
     await assertMergeRecord(previous);
@@ -762,7 +957,7 @@ describe('sync: the tracked branch to Linear', () => {
 
   it('a document trashed in Linear since the capture is not written; the run says so', async () => {
     const document = await documentOf('eng/notes/review.md');
-    document.trashed = true;
+    afterCapture(() => { document.trashed = true; touch(document); });
     await commit({ 'eng/notes/review.md': `# Review\n\nEdited in git. ${CANARY}\n` });
     const { result, report, writes, summary } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);

@@ -146,6 +146,27 @@ export interface GraphQLErrorShape {
   extensions?: { code?: unknown; type?: unknown; [key: string]: unknown };
 }
 
+/**
+ * A Linear error as its class, Linear's code and the HTTP status, for a
+ * summary or a report; never Linear's message, which may quote content.
+ */
+export function describeLinearError(error: LinearError): string {
+  const code = (error as { code?: unknown }).code;
+  const status = (error as { httpStatus?: unknown }).httpStatus;
+  return [error.name, typeof code === 'string' ? code : undefined, typeof status === 'number' ? `HTTP ${status}` : undefined].filter(Boolean).join(' ');
+}
+
+/**
+ * The request may succeed when tried again: it did not complete, or Linear
+ * answered with a server error. A refusal (forbidden, invalid input, not
+ * found) is not transient: it comes back on every run until a person acts.
+ */
+export function isTransientLinearError(error: LinearError): boolean {
+  if (error instanceof LinearNetworkError) return true;
+  const status = (error as { httpStatus?: unknown }).httpStatus;
+  return typeof status === 'number' && status >= 500;
+}
+
 export function describeStop(reason: StopReason): string {
   if (reason.kind === 'rate-limited') {
     return reason.retryAfterSeconds === undefined

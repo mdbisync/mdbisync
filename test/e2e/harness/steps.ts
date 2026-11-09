@@ -18,20 +18,22 @@ import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
-import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, stripFrontMatter } from './checks.ts';
+import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
+import { faultChecks } from './check-fault.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, postEntry, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
-import { fixableSample, hashes, linearPart, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
+import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { burst, realClock, soak, type LoadDriver } from './load.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
-import { HARNESS, personCommit } from './sandbox.ts';
+import { commitStaged, HARNESS, personCommit } from './sandbox.ts';
 import type { Step } from './spec.ts';
+import { writeError } from './fault-proxy.ts';
 import {
-  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readWorking, resolveDestination, setTarget, sibling, targetPath,
+  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import { jobSpans, maxOverlap, runResult, SCHEDULE_BLOCKED, waitForRun } from './workflows.ts';
 
@@ -128,7 +130,7 @@ async function offlineFormat(ctx: RunContext, command: 'lint' | 'fix', args: Rec
     const output = readInput(dir, input.files.keys());
     if (pass === 0) {
       // Compared with Linear's recorded form, a file counts without its front matter, which stays in git.
-      const reaching = new Map([...output].filter(([path]) => input.golden.has(path)).map(([path, text]) => [path, linearPart(text)]));
+      const reaching = new Map([...output].filter(([path]) => input.golden.has(path)).map(([path, text]) => [path, bodyOf(text)]));
       ctx.observations.set('fix.output', args.input === 'lint-errors' ? only(output) : reaching);
       ctx.observations.set('fix.validOutput', reaching);
       ctx.observations.set('fix.first.bytes', hashes(output));
@@ -202,7 +204,8 @@ async function installWorkflows(ctx: RunContext): Promise<void> {
 
 async function requireWorkflows(ctx: RunContext): Promise<void> {
   const world = live(ctx);
-  // A run's tree starts without `.github/`: the setup command writes the workflows, as a deployer runs it.
+  // The setup command writes the sync workflows, as a deployer runs it.
+  // Check-fault runs may already carry the harness's PR check workflow.
   await installWorkflows(ctx);
   if (!(await world.rest.workflowExists(SYNC_WORKFLOW, ctx.names.trackedBranch))) {
     throw new NotImplementedError('init', `the sync workflow ${SYNC_WORKFLOW} is not in the tracked branch`);
@@ -574,9 +577,10 @@ const GIT: Record<string, Executor> = {
       cleanTokens.push(cleanToken);
     }
     if (cleanTokens.length > 0) ctx.observations.set('edits.clean', cleanTokens);
-    if (args.fixture === 'adjacent-paragraphs') ctx.observations.set('fixture.base', stripFrontMatter(text));
+    if (args.fixture === 'adjacent-paragraphs') ctx.observations.set('fixture.base', bodyOf(text));
     await commitAsPerson(ctx, changes, 'Update the review date');
-    ctx.observations.set('edited.gitBody', stripFrontMatter(next));
+    // The text as committed: the hooks may have fixed it.
+    ctx.observations.set('edited.gitBody', bodyOf(await readWorking(git, path)));
   },
   'git.edit-many': async (ctx, args) => {
     const count = typeof args.documents === 'number' ? args.documents : 10;
@@ -617,11 +621,12 @@ const GIT: Record<string, Executor> = {
     const path = targetPath(ctx, args.target);
     setTarget(ctx, path);
     const git = await ctx.person();
+    await ctx.personHooks();
     await pull(git, ctx);
     const destination = typeof args.destination === 'string' ? resolveDestination(ctx, path, args.destination) : sibling(path, `moved-${nextToken(ctx)}.md`);
     mkdirSync(join(git.dir, destination.split('/').slice(0, -1).join('/')), { recursive: true });
     await git.run(['mv', path, destination]);
-    await git.run(['commit', '--quiet', '-m', 'Move a page']);
+    await commitStaged(git, [path, destination], 'Move a page', true);
     await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
     ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
     ctx.observations.set('git.moved', { from: path, to: destination });
@@ -671,7 +676,7 @@ const GIT: Record<string, Executor> = {
     await pull(git, ctx);
     const token = nextToken(ctx);
     const destination = sibling(path, `rewritten-${token}.md`);
-    const text = stripFrontMatter(await readWorking(git, path));
+    const text = bodyOf(await readWorking(git, path));
     const lines = text.split('\n');
     const keep = Math.floor(lines.length * (1 - Number(args.rewriteFraction ?? 1)));
     const body = [...lines.slice(0, keep), `# Rewritten notes`, '', noteSentence(token), '', 'Everything else on this page was replaced by the new plan.', ''].join('\n');
@@ -683,10 +688,11 @@ const GIT: Record<string, Executor> = {
     const folder = ctx.observations.get('fixture.folder') as { path: string; documents: string[] } | undefined;
     if (folder === undefined) throw new Error('git.move-folder needs the folder its setup prepares');
     const git = await ctx.person();
+    await ctx.personHooks();
     await pull(git, ctx);
     const renamed = `${folder.path}-archive`;
     await git.run(['mv', folder.path, renamed]);
-    await git.run(['commit', '--quiet', '-m', 'Rename a folder']);
+    await commitStaged(git, [folder.path, renamed], 'Rename a folder', true);
     await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
     ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
     ctx.observations.set('git.movedFolder', folder.documents.map((path) => ({ from: path, to: `${renamed}${path.slice(folder.path.length)}` })));
@@ -816,8 +822,10 @@ const GIT: Record<string, Executor> = {
     const resolved = resolveKeeping(text, 'git');
     if (resolved === text) throw new ProductError('the tracked branch holds no conflict markers to resolve');
     await commitAsPerson(ctx, new Map([[path, resolved]]), 'Resolve the conflict');
-    retireDiscarded(ctx, text, resolved);
-    ctx.observations.set('resolved.body', stripFrontMatter(resolved));
+    // The text as committed: the hooks may have fixed it.
+    const committed = await readWorking(git, path);
+    retireDiscarded(ctx, text, committed);
+    ctx.observations.set('resolved.body', bodyOf(committed));
   },
   'git.conflict-again': async (ctx) => {
     const path = targetPath(ctx);
@@ -1000,7 +1008,7 @@ const LINEAR: Record<string, Executor> = {
         // A run project that no folder names; cleanup deletes it with the run's projects.
         const team = [...world.teams.values()][0];
         if (team === undefined) throw new EnvBlockedError('the test workspace has no team');
-        const unmapped = await world.world.createProject(ctx.names.project(8), [team.id]);
+        const unmapped = await world.world.createProject(ctx.names.helperProject('unmapped'), [team.id]);
         world.projects.set('UNMAPPED', unmapped);
         await editor.updateDocument(id, { projectId: unmapped.id });
       } else if (variant === 'trash') {
@@ -1141,15 +1149,20 @@ const FAULT: Record<string, Executor> = {
   },
   'fault.write-error': async (ctx, args) => {
     const variants = Array.isArray(args.variants) ? (args.variants as string[]) : ['server-error'];
-    http(ctx).setFaults(variants.map((variant) => ({ kind: 'write-error' as const, variant: variant === 'reset' || variant === 'connection-reset' ? 'reset' as const : 'server-error' as const, times: 1 })));
+    http(ctx).setFaults(variants.map((variant) => writeError(variant)));
   },
   'fault.budget-headers': async (ctx, args) => {
     http(ctx).setFaults([{ kind: 'budget-headers', remaining: typeof args.remaining === 'number' ? args.remaining : 10, includeEndpointLimits: args.includeEndpointLimits === true }]);
   },
   'fault.reject-document': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
-    // The engine has not created the document yet: reject it by its title.
-    http(ctx).setFaults([{ kind: 'reject-document', target: path.replace(/\.md$/, '').split('/').pop() as string }]);
+    // A create names the document by its title; an update of an existing one may carry only its id.
+    const id = (await readRunIds(ctx))?.get(path)?.id;
+    if (id === undefined && ['converged', 'conflicted'].includes(ctx.scenario.setup.state)) {
+      throw new ProductError('the engine recorded no id for the document to reject, though the run started converged');
+    }
+    const name = path.replace(/\.md$/, '').split('/').pop() as string;
+    http(ctx).setFaults([{ kind: 'reject-document', ids: id === undefined ? [] : [id], titles: [name] }]);
   },
   'fault.upload-error': async (ctx) => {
     http(ctx).setFaults([{ kind: 'upload-error', times: 1 }]);
@@ -1167,9 +1180,7 @@ const FAULT: Record<string, Executor> = {
   'fault.merge-policy': async () => {
     throw new EnvBlockedError('needs the sandbox to refuse merge commits; agents do not change repository settings');
   },
-  'fault.checks': async () => {
-    throw new EnvBlockedError('needs a failing required check on the sync pull request; the GitHub App may only read checks');
-  },
+  'fault.checks': faultChecks,
   'fault.stale-lease': async (ctx, args) => {
     // Someone else moves a state ref while the run is between its reads and its atomic push.
     const store = typeof args.ref === 'string' ? args.ref : 'ids';

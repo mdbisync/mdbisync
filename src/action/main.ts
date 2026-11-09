@@ -5,8 +5,8 @@
 
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
-import { PARTIAL, partialCode, stoppedMessage } from "../run/exit.ts";
-import { writeRunReport } from "../run/finish.ts";
+import { PARTIAL, partialCode, pullRequestEnding, stoppedMessage } from "../run/exit.ts";
+import { unfinishedMessage, writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { runOperation } from "../run/operation.ts";
 import { Git } from "../state/index.ts";
@@ -36,6 +36,12 @@ export async function run(): Promise<void> {
     if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(outcome.summary).write();
     else core.info(outcome.summary);
     if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
+    const failure = pullRequestEnding(outcome);
+    if (failure !== null) {
+      core.setOutput("code", failure.code);
+      core.setFailed(`${operation}: ${failure.message}`);
+      return;
+    }
     const partial = partialCode(outcome);
     core.setOutput("code", partial ?? outcome.code ?? (outcome.stopped === undefined ? "" : "stopped"));
     // A partial sync kept what it could record; the next run goes on, so the job ends with a warning, not a failure.
@@ -52,9 +58,15 @@ export async function run(): Promise<void> {
       core.setFailed(`${operation}: stopped before any write (${outcome.code})`);
       return;
     }
-    if (outcome.confirmed !== undefined && !outcome.confirmed.complete) {
-      core.setOutput("code", outcome.confirmed.code ?? "");
-      core.setFailed(`${operation}: not finished (${outcome.confirmed.code}); run it again with the same inputs`);
+    if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write?.code === 'container-cap') {
+      core.setOutput("code", "container-cap");
+      core.setFailed(`${operation}: stopped before any write (container-cap); reduce additions or check document-cap`);
+      return;
+    }
+    const unfinished = outcome.confirmed ?? outcome.reverse;
+    if (unfinished !== undefined && !unfinished.complete) {
+      core.setOutput("code", unfinished.code ?? "");
+      core.setFailed(unfinishedMessage(operation, unfinished.code));
       return;
     }
     if (outcome.notImplemented) core.setFailed(notImplementedMessage(operation));

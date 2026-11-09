@@ -13,6 +13,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { LinearClient, mintAppToken, revokeToken, type RunToken, type LogEntry, type LinearHooks } from '../../../src/linear/index.ts';
+import { countAppRequest } from './app-reads.ts';
 import { loadTestConfig } from './config.ts';
 import { REPO_ROOT } from './engine.ts';
 import { Governor, budgetFromStatus, estimate, type App } from './governor.ts';
@@ -79,6 +80,7 @@ async function main(argv: string[]): Promise<number> {
   const tokens: Array<{ token: RunToken; hooks: LinearHooks }> = [];
   const harnessRunId = `${new Date().toISOString().slice(0, 10)}-${newRunId()}`;
   const hooksFor = (app: string) => ({
+    beforeRequest: countAppRequest,
     log: (entry: LogEntry) => { process.stderr.write(`${JSON.stringify({ harnessRunId, app, ...entry })}\n`); },
   });
   try {

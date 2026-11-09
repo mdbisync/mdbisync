@@ -12,6 +12,8 @@
 // titles start with the run id.
 
 import { runNames, type RunNames } from './isolation.ts';
+import { CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 
 export const CORPUS_DIR = 'corpus';
 export const SLICES_DIR = 'corpus-slices';
@@ -56,6 +58,8 @@ export const PROJECT_PLACEHOLDERS = [
   'PROJECT_DOCS_2',
   'PROJECT_DOCS_3',
   'PROJECT_COMBINED',
+  'PROJECT_ENG_5',
+  'PROJECT_ENG_6',
 ] as const;
 
 export function parseManifest(text: string): Manifest {
@@ -77,9 +81,9 @@ export interface Annotation {
 
 /** Reads `linear-team` and `linear-project` from a README's front matter. */
 export function readAnnotation(text: string): Annotation | null {
-  const match = /^(?:﻿)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
-  if (match === null) return null;
-  const field = (name: string) => new RegExp(`^${name}:\\s*["']?([^"'\\r\\n]+?)["']?\\s*$`, 'm').exec(match[1] as string)?.[1] ?? null;
+  const yaml = findFrontMatter(text)?.yaml;
+  if (yaml === undefined) return null;
+  const field = (name: string) => new RegExp(`^${name}:\\s*["']?([^"'\\r\\n]+?)["']?\\s*$`, 'm').exec(yaml)?.[1] ?? null;
   const team = field('linear-team');
   const project = field('linear-project');
   return team === null && project === null ? null : { team, project };
@@ -149,7 +153,7 @@ export function buildRunTree(slice: SliceList, readmes: ReadonlyMap<string, stri
   for (const folder of folders) if (folder.team !== null) teams.add(folder.team);
 
   for (const source of slice.paths) {
-    if (source.startsWith('.github/')) continue; // pushes must start no workflows
+    if (source.startsWith('.github/') && source !== CHECK_WORKFLOW_PATH) continue;
     let target = source;
     const owner = owningFolder(source, folders);
     if (owner !== null && zones.includes(owner) && source !== `${owner.folder}/README.md` && source !== 'README.md') {
