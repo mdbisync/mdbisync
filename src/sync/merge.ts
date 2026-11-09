@@ -341,7 +341,23 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
     if (byId !== undefined && linearFiles.has(byId)) return byId;
     const renamed = linearRenames.get(basePath);
     if (renamed !== undefined && linearFiles.has(renamed)) return renamed;
-    return linearFiles.has(basePath) ? basePath : null;
+    if (!linearFiles.has(basePath)) return null;
+    // Capture keeps a folder's annotation in its README after Linear removes the document: an annotation-only
+    // carrier whose document has no id any more is a removed document, not Linear's version of it.
+    if (id !== undefined && byId === undefined && (await annotationOnly(basePath))) {
+      removedCarriers.add(basePath);
+      return null;
+    }
+    return basePath;
+  };
+  /** Annotation-only carriers left on the `linear` tip by documents Linear removed. */
+  const removedCarriers = new Set<string>();
+  const annotationOnly = async (path: string): Promise<boolean> => {
+    if (path !== 'README.md' && !path.endsWith('/README.md')) return false;
+    const text = ((await readBlobs(git, [linearFiles.get(path) as Oid])).get(linearFiles.get(path) as Oid) as Buffer).toString('utf8');
+    if (splitFile(text).body.trim() !== '') return false;
+    const annotation = readAnnotation(path, text);
+    return 'annotation' in annotation && annotation.annotation !== null;
   };
 
   const groups: Array<{ basePath: string | null; gitPath: string | null; linearPath: string | null; involved: string[] }> = [];
@@ -355,7 +371,7 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
     for (const entry of involved) seen.add(entry);
     // A path of the group that one side holds for another document (git renamed onto a file Linear added) is a
     // collision of two documents: merging them would lose one, so it stays unresolved.
-    const collides = involved.some((entry) => (linearFiles.has(entry) && entry !== linearPath) || (gitFiles.has(entry) && entry !== gitPath));
+    const collides = involved.some((entry) => (linearFiles.has(entry) && entry !== linearPath && !removedCarriers.has(entry)) || (gitFiles.has(entry) && entry !== gitPath));
     if (!collides && involved.every((entry) => mapped.has(entry) || !input.unmerged.includes(entry))) groups.push({ basePath, gitPath, linearPath, involved });
     // Every path of the group waits, so neither document is trashed or overwritten until a person sorts it out.
     else out.unresolved.push(...involved);

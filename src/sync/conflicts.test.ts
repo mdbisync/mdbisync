@@ -100,8 +100,8 @@ describe('sync: conflicts through the cycle (L3)', () => {
     return { result, report, summary, writes: world.writes.slice(writesBefore) };
   }
 
-  async function sync() {
-    const run = await cli('sync');
+  async function sync(extra: Record<string, string> = {}) {
+    const run = await cli('sync', extra);
     assert.equal(run.result.exitCode, 0, run.result.stderr);
     const head = await fixture.remote.run(['rev-parse', '--verify', '--quiet', SYNC_BRANCH], { okCodes: [0, 1] });
     if (head.code === 0) {
@@ -123,8 +123,7 @@ describe('sync: conflicts through the cycle (L3)', () => {
     for (let i = 0; i < 6; i += 1) {
       const linearWrites = world.linear.writes.count;
       const run = await sync();
-      runs.push(run);
-      const open = world.github.pullRequests.some((pr) => pr.state === 'open');
+      runs.push(run);      const open = world.github.pullRequests.some((pr) => pr.state === 'open');
       const quiet = run.writes.length === 0 && world.linear.writes.count === linearWrites;
       if (!open && quiet && run.report.pullRequest?.needed === false) return runs;
     }
@@ -516,6 +515,36 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.match(added?.content ?? '', /Written in Linear/);
     assert.ok(!other.trashed, 'the renamed document was trashed');
     assert.match(other.content ?? '', /Untouched/);
+  });
+
+  it('L3-16: restoring a document in its own container does not count against a full container', async () => {
+    const document = await documentOf(DOC);
+    document.trashed = true;
+    document.archivedAt = new Date().toISOString();
+    touch(document);
+    await commitGit({ [DOC]: PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.') });
+    // The container is exactly full: its count includes the trashed document.
+    const cap = String(world.linear.documents.filter((d) => d.projectId === document.projectId).length);
+    const first = await sync({ MDBISYNC_DOCUMENT_CAP: cap });
+    assert.notEqual(first.report.code, 'container-cap', JSON.stringify(first.report.sync));
+    assert.deepEqual(first.report.sync?.restored, [DOC]);
+    assert.ok(!document.trashed);
+  });
+
+  it('L3-16: a folder README removed in Linear while git edits its body is restored with its id, not created again', async () => {
+    const path = 'eng/notes/README.md';
+    const document = await documentOf(path);
+    document.trashed = true;
+    document.archivedAt = new Date().toISOString();
+    touch(document);
+    const edited = (TREE[path] as string).replace('# Field notes', '# Field notes, edited in git');
+    await commitGit({ [path]: edited });
+    const [first] = await settle();
+    assert.deepEqual(first?.report.sync?.restored, [path]);
+    assert.deepEqual(first?.report.sync?.created, []);
+    assert.equal((await documentOf(path)).id, document.id);
+    assert.ok(!document.trashed);
+    await assertBothSides(path, edited);
   });
 
   it('L3-16: a run that recreated a gone document and lost its record does not create it twice', async () => {

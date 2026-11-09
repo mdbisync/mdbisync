@@ -238,7 +238,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const creates = merge.changes.filter((change): change is CreateChange => change.kind === 'create');
   // A document to restore keeps its own id; it is never adopted by title.
   const adoptable = await adoptableDocuments(creates.filter((change) => change.restore === undefined));
-  const additions = creates.filter((change) => !adoptable.has(change.path)).map((change) => merge.result.get(change.path) as SideFile);
+  // A document restored where it already is (in that container's trash) adds nothing: the container counts it already.
+  const restoresInPlace = (change: CreateChange) => {
+    if (change.restore === undefined || change.restore.recreate !== undefined) return false;
+    const destination = merge.result.get(change.path) as SideFile;
+    return containers.get(containerKey(context, destination.place))?.some((document) => document.id === change.restore?.id) === true;
+  };
+  const additions = creates.filter((change) => !adoptable.has(change.path) && !restoresInPlace(change)).map((change) => merge.result.get(change.path) as SideFile);
   // Moves consume destination capacity too; do not subtract departures, since writes may arrive first.
   for (const change of merge.changes) {
     if (change.kind !== 'keep' || !change.place) continue;
