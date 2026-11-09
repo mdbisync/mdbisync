@@ -22,7 +22,8 @@ import { withoutDocuments } from './fault-proxy.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
-import { documentLinks, encodeTitlePath, refreshView, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
+import { readRunIds } from './step-helpers.ts';
+import { documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
 import { maxOverlap, unzip, waitForRun } from './workflows.ts';
 
 const roots: string[] = [];
@@ -752,6 +753,34 @@ describe('subjects', () => {
     } finally {
       INVARIANT_CHECKS.I6 = original;
     }
+  });
+
+  it('keep parent-relative links: resolved from their own document, not from the repository root', async () => {
+    const { ctx } = await fakeRun();
+    assert.deepEqual(relativeLinks('[a](../assets/brief.pdf) [b](notes.md) [c](https://example.com) [d](#top) [e](//cdn.example.com/x)'), ['../assets/brief.pdf', 'notes.md']);
+    // An attachment linked as ../ from a nested document is an expected upload.
+    const git = await ctx.person();
+    spawnSync('mkdir', ['-p', join(git.dir, 'eng/platform/guides'), join(git.dir, 'eng/platform/assets')]);
+    writeFileSync(join(git.dir, 'eng/platform/guides/howto.md'), '# How to\n\nSee [the brief](../assets/brief.pdf).\n');
+    writeFileSync(join(git.dir, 'eng/platform/assets/brief.pdf'), 'pdf bytes');
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '-m', 'A nested guide']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    const files = ctx.live?.manifest.files ?? [];
+    files.push({ path: 'eng/platform/guides/howto.md', group: 'links', kind: 'markdown', synced: true, lfs: false, canary: null, class: null, rule: null });
+    files.push({ path: 'eng/platform/assets/brief.pdf', group: 'attachments', kind: 'attachment', synced: false, lfs: false, canary: null, class: null, rule: null });
+    ctx.live?.tree.paths.set('eng/platform/guides/howto.md', 'eng/platform/guides/howto.md');
+    ctx.live?.tree.paths.set('eng/platform/assets/brief.pdf', 'eng/platform/assets/brief.pdf');
+    // The guide has a document (an id), so its attachment is one Linear should hold.
+    const ids = await readRunIds(ctx);
+    const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify({ ...Object.fromEntries([...(ids ?? new Map())]), 'eng/platform/guides/howto.md': { id: 'doc-howto' } }) })).trim();
+    const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tids.json\n` })).trim();
+    const parent = (await git.text(['rev-parse', `${ctx.names.refPrefix}/ids`])).trim();
+    const commit = (await git.text(['commit-tree', tree, '-p', parent, '-m', 'ids'])).trim();
+    await git.run(['push', '--quiet', 'origin', `${commit}:${ctx.names.refPrefix}/ids`]);
+    refreshView(ctx);
+    const allowed = (await resolveSubject(ctx, 'assets.allowedBytes')).value as Map<string, string>;
+    assert.equal(allowed.get('eng/platform/assets/brief.pdf'), createHash('sha256').update('pdf bytes').digest('hex'));
   });
 
   it('check the upload cache only for documents the engine wrote, and read upload URLs in any link form', async () => {
