@@ -38,6 +38,18 @@ export interface CleanupResult {
   unconfirmedRestoreFailures: CleanupError[];
   /** The owned documents as the last read after the project deletions returned them. */
   final: DocumentState[];
+  /** Every post-deletion read, including absent documents and failed reads. */
+  archivalVerification: {
+    maxReads: number;
+    pauseMs: number;
+    samples: Array<{
+      elapsedMs: number;
+      requestIds: string[];
+      documents: DocumentState[];
+      missingIds: string[];
+      error?: string;
+    }>;
+  };
 }
 
 export interface CleanupOptions {
@@ -45,6 +57,8 @@ export interface CleanupOptions {
   pauseMs?: number;
   /** Reads that verify the archival, at most; a later one only while an earlier one finds a problem. */
   verifyReads?: number;
+  /** The client log, used to associate all request attempts with each sample. */
+  requests?: readonly LogEntry[];
 }
 
 /**
@@ -54,13 +68,23 @@ export interface CleanupOptions {
  * document whose project is gone, so the restore comes first. A document
  * may be in the trash when the read says so or when a trash was sent and no
  * restore confirmed, since a read right after a trash was once seen stale.
- * For the same reason the verifying read is repeated after a pause while it
- * finds a problem. Errors are collected, never thrown, so the test's own
+ * Archival has a read budget of 16 reads and at most 15 two-second pauses
+ * (30 seconds of waiting, plus client request time). Stop early only
+ * when every owned document is present, archived and not trashed. This is an
+ * operational budget, not a guarantee of backend consistency. Keep all read
+ * states and request ids; never repeat project deletion to obtain fresh reads.
+ * Errors are collected so the test's own
  * failure stays first.
  */
 export async function cleanUpOwned(linear: LinearClient, owned: OwnedRecords, options: CleanupOptions = {}): Promise<CleanupResult> {
-  const { pauseMs = 2_000, verifyReads = 3 } = options;
-  const result: CleanupResult = { errors: [], restored: [], unconfirmedRestoreFailures: [], final: [] };
+  const { pauseMs = 2_000, verifyReads = 16, requests = [] } = options;
+  if (!Number.isFinite(pauseMs) || pauseMs < 0 || !Number.isSafeInteger(verifyReads) || verifyReads < 1) {
+    throw new Error('Archival verification requires a finite nonnegative pause and a positive integer read budget');
+  }
+  const result: CleanupResult = {
+    errors: [], restored: [], unconfirmedRestoreFailures: [], final: [],
+    archivalVerification: { maxReads: verifyReads, pauseMs, samples: [] },
+  };
   const confirmed = new Set<string>();
   if (owned.documentIds.length > 0) {
     try {
@@ -94,18 +118,30 @@ export async function cleanUpOwned(linear: LinearClient, owned: OwnedRecords, op
   }
   if (owned.documentIds.length > 0) {
     let problems: CleanupError[] = [];
+    const started = performance.now();
     for (let read = 1; read <= verifyReads; read += 1) {
       if (read > 1) await pause(pauseMs);
+      const requestStart = requests.length;
+      const sample: CleanupResult['archivalVerification']['samples'][number] = {
+        elapsedMs: 0, requestIds: [], documents: [], missingIds: [],
+      };
       try {
         result.final = (await linear.getDocuments(owned.documentIds)).map(stateOf);
+        sample.documents = result.final;
+        sample.missingIds = owned.documentIds.filter((id) => !result.final.some((document) => document.id === id));
         problems = owned.documentIds.flatMap((id) => {
           const state = result.final.find((document) => document.id === id);
           const problem = state === undefined ? 'missing' : state.trashed ? 'still trashed' : state.archived ? undefined : 'not archived';
           return problem ? [{ operation: 'verify archived', documentId: id, error: new Error(`owned document ${problem}`) }] : [];
         });
       } catch (error) {
+        result.final = [];
+        sample.error = error instanceof Error ? error.name : 'Unknown error';
         problems = [{ operation: 'verify archived', error }];
       }
+      sample.elapsedMs = performance.now() - started;
+      sample.requestIds = requests.slice(requestStart).flatMap((entry) => entry.requestId ? [entry.requestId] : []);
+      result.archivalVerification.samples.push(sample);
       if (problems.length === 0) break;
     }
     result.errors.push(...problems);

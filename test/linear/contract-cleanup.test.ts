@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
-import type { TrashReadDiagnosis } from './contract-support.ts';
+import type { CleanupResult, TrashReadDiagnosis } from './contract-support.ts';
 
 import { LINEAR_API, fakeFetch, fakeWorld, type FakeWorld } from '../../src/setup/test-helpers.ts';
 
@@ -40,6 +40,8 @@ interface Faults {
   trashReadFault?: 'absent-once' | 'absent-always' | 'delayed-error';
   /** After the last DeleteProject, this many GetDocuments answers show no `archivedAt`. */
   staleArchiveReads?: number;
+  /** Every post-deletion read remains invalid or fails. */
+  archiveReadFault?: 'trashed' | 'absent' | 'error';
 }
 
 interface Served {
@@ -99,6 +101,13 @@ async function serve(world: FakeWorld, faults: Faults): Promise<Served> {
       if (faults.trashReadFault === 'delayed-error' && trashReads === 2) return { status: 503, headers, text: '{}' };
     }
     if (operationName === 'DeleteProject' && (deletes += 1) === 2) staleArchive = faults.staleArchiveReads ?? 0;
+    if (operationName === 'GetDocuments' && deletes === 2 && faults.archiveReadFault) {
+      if (faults.archiveReadFault === 'error') return { status: 503, headers, text: '{}' };
+      const body = JSON.parse(text) as { data: { documents: { nodes: Array<Record<string, unknown>> } } };
+      if (faults.archiveReadFault === 'absent') body.data.documents.nodes = [];
+      else for (const node of body.data.documents.nodes) node.trashed = true;
+      text = JSON.stringify(body);
+    }
     if (operationName === 'GetDocuments' && (staleTrash > 0 || staleArchive > 0)) {
       const body = JSON.parse(text) as { data: { documents: { nodes: Array<Record<string, unknown>> } } };
       for (const node of body.data.documents.nodes) {
@@ -148,6 +157,8 @@ interface Run {
   output: string;
   report: {
     cleanupFailed: boolean;
+    archivalVerification: CleanupResult['archivalVerification'];
+    requests: Array<{ operation: string; requestId?: string }>;
     cleanupErrors: Array<{ operation: string; documentId?: string; error: string }>;
     restoredInCleanup: string[];
     unconfirmedRestoreFailures: Array<{ operation: string; documentId?: string; error: string }>;
@@ -269,7 +280,7 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
   it('restores the trashed document before deleting its project when the trash assertion fails', async () => {
     const world = fakeWorld();
     // The read right after the trash, the diagnostic read and cleanup's own read are all stale.
-    const run = await runContract(world, { staleTrashReads: 3 });
+    const run = await runContract(world, { staleTrashReads: 3, staleArchiveReads: 15 });
     assert.equal(run.code, 1, run.output);
     assert.match(run.output, TRASH_TEST_FAILED);
     assert.match(run.output, /trash must be confirmed within two reads and one 50ms pause/);
@@ -305,14 +316,62 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
     assertArchivedNotTrashed(world);
   });
 
-  it('waits out a read that does not show the archival yet', async () => {
-    const world = fakeWorld();
-    const run = await runContract(world, { staleArchiveReads: 1 });
-    assert.equal(run.code, 0, run.output);
-    assert.equal(run.report.cleanupFailed, false);
-    assert.deepEqual(run.operations.slice(-2), ['GetDocuments', 'GetDocuments'], 'one more verifying read');
-    assertArchivedNotTrashed(world);
-  });
+  for (const staleArchiveReads of [1, 15]) {
+    it(`confirms archival after ${staleArchiveReads} stale reads without repeating deletion`, async () => {
+      const world = fakeWorld();
+      const run = await runContract(world, { staleArchiveReads });
+      assert.equal(run.code, 0, run.output);
+      assert.equal(run.report.cleanupFailed, false);
+      const verification = run.report.archivalVerification;
+      assert.equal(verification.maxReads, 16);
+      assert.equal(verification.pauseMs, PAUSE_MS);
+      assert.equal(verification.samples.length, staleArchiveReads + 1);
+      for (const sample of verification.samples.slice(0, -1)) {
+        assert.deepEqual(sample.documents.map((d) => [d.trashed, d.archived]), [[false, false], [false, false]]);
+      }
+      assert.deepEqual(verification.samples.at(-1)!.documents.map((d) => [d.trashed, d.archived]), [[false, true], [false, true]]);
+      assert.equal(run.operations.filter((op) => op === 'DeleteProject').length, 2);
+      assertArchivedNotTrashed(world);
+    });
+  }
+
+  for (const fault of ['active', 'trashed', 'absent', 'error'] as const) {
+    it(`fails at the archival bound and retains every ${fault} sample and request id`, async () => {
+      const world = fakeWorld();
+      const run = await runContract(world, fault === 'active' ? { staleArchiveReads: 16 } : { archiveReadFault: fault });
+      assert.equal(run.code, 1, run.output);
+      assert.match(run.output, /Contract cleanup failed/);
+      assert.equal(run.report.cleanupFailed, true);
+      assert.ok(run.report.cleanupErrors.every((entry) => entry.operation === 'verify archived'));
+      const verification = run.report.archivalVerification;
+      assert.equal(verification.samples.length, 16);
+      const deletion = run.operations.lastIndexOf('DeleteProject');
+      assert.equal(run.operations.filter((op) => op === 'DeleteProject').length, 2);
+      assert.ok(run.operations.slice(deletion + 1).every((op) => op === 'GetDocuments'));
+      const requestIds = run.report.requests.slice(run.report.requests.findLastIndex((entry) => entry.operation === 'DeleteProject') + 1)
+        .filter((entry) => entry.operation === 'GetDocuments').map((entry) => entry.requestId);
+      assert.deepEqual(verification.samples.flatMap((sample) => sample.requestIds), requestIds);
+      assert.equal(new Set(requestIds).size, 16);
+      for (const [index, sample] of verification.samples.entries()) {
+        assert.ok(sample.elapsedMs >= (verification.samples[index - 1]?.elapsedMs ?? 0));
+        assert.match(sample.requestIds[0]!, /^fake-\d+$/);
+        if (fault === 'error') {
+          assert.equal(sample.error, 'LinearHttpError');
+          assert.deepEqual(sample.documents, []);
+        } else if (fault === 'absent') {
+          assert.equal(sample.missingIds.length, 2);
+          assert.deepEqual(sample.documents, []);
+        } else {
+          assert.deepEqual(sample.documents.map((d) => [d.trashed, d.archived]),
+            fault === 'active' ? [[false, false], [false, false]] : [[true, true], [true, true]]);
+          assert.deepEqual(sample.missingIds, []);
+        }
+      }
+      assert.deepEqual(run.report.finalDocuments, verification.samples.at(-1)!.documents);
+      assert.ok(!JSON.stringify(run.report).includes('A short list of articles'));
+      assertArchivedNotTrashed(world);
+    });
+  }
 
   it('does not fail cleanup on a refused restore of a document its trash never reached', async () => {
     const world = fakeWorld();
