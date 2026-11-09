@@ -7,6 +7,7 @@
 // Linear's bad minutes does not fail its job. Other operations have no next
 // run to go on, so a stop fails them.
 
+import { pullRequestFailure } from '../sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
 
 export { PARTIAL } from './stop.ts';
@@ -21,6 +22,8 @@ export type ExitStatus = 'success' | 'warning' | 'failure';
  */
 export function partialCode(outcome: OperationOutcome): string | undefined {
   if (outcome.operation !== 'sync') return undefined;
+  // A failed check on the sync pull request needs a person, whatever else the run left.
+  if (pullRequestFailure(outcome.sync?.pullRequest) !== null) return undefined;
   if (outcome.stopped !== undefined) return 'stopped';
   // Every way a capture ends unfinished (a stop, a failed request, a moved ref) leaves its state for the next run.
   if (outcome.captured !== undefined && !outcome.captured.ok) return outcome.captured.code ?? 'stopped';
@@ -31,7 +34,7 @@ export function partialCode(outcome: OperationOutcome): string | undefined {
 export function exitStatusOf(outcome: OperationOutcome): ExitStatus {
   if (partialCode(outcome) !== undefined) return 'warning';
   if (!outcome.ok || outcome.notImplemented) return 'failure';
-  if (outcome.sync?.write?.code === 'container-cap') return 'failure';
+  if (outcome.sync?.write?.code === 'container-cap' || pullRequestFailure(outcome.sync?.pullRequest) !== null) return 'failure';
   const unfinished = outcome.confirmed ?? outcome.reverse;
   if (unfinished !== undefined && !unfinished.complete) return 'failure';
   return 'success';

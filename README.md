@@ -7,8 +7,8 @@ run as a GitHub Action.
 ([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)).
 `check` checks a repository's setup. `initial-sync` works in both
 directions, as a dry run and confirmed. `sync` captures Linear changes into
-its state ref, then writes tracked-branch changes to Linear. Publishing
-captured changes through a sync pull request is under development.
+its state ref, takes them to the tracked branch through the sync pull
+request, and writes tracked-branch changes to Linear.
 
 ## Folder mapping
 
@@ -115,6 +115,34 @@ refuses to run until it is merged. A title that is not a plain path as it is
 is left out and listed. A run that stops early exits with code 5; run it
 again with the same inputs to go on without duplicate files.
 
+## The sync pull request
+
+Linear's changes reach the tracked branch only through one pull request from
+the sync branch (`mdbisync/linear` by default), which the sync opens and
+merges itself, acting as the deployer's GitHub App so that CI runs on it.
+
+- A run opens the pull request when merging Linear's state would change the
+  tracked branch. Changes made in git alone open none.
+- Later Linear changes join the open pull request's branch by fast-forward or
+  merge commit; the branch is never force-pushed. The branch moves only when
+  Linear brings something new, so the checks on its head are not restarted by
+  every run.
+- A run reads the checks on the head itself (check runs and commit
+  statuses) and never waits for them. When every check has finished and
+  passed, it merges with a merge commit; while one still runs, a later run
+  merges. A run that moved the branch or opened the pull request leaves the
+  merge to a later run, after the checks have started.
+- A check that fails is a setup error: the run summary names it, the run
+  exits with code 3, and the pull request stays open until the repository's
+  checks pass Linear's form.
+- After the merge, the next run finds nothing to write and opens no pull
+  request.
+- While the open pull request of an initial sync from Linear waits for a
+  person, `sync` adds nothing to its branch and writes nothing to Linear. A
+  pull request closed without a merge leaves its content behind: the next
+  sync pull request carries only the tracked branch with Linear's state
+  merged in.
+
 ## Layout
 
 | Path | What |
@@ -126,7 +154,7 @@ again with the same inputs to go on without duplicate files.
 | `src/setup/` | The setup check and the refusal to sync without state |
 | `src/format/` | `lint` and `fix`: Markdown in Linear's form ([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)) |
 | `src/initial-sync/` | Initial sync in both directions: plan, dry run, confirmed run |
-| `src/pull-request/` | Pull requests through GitHub's REST API |
+| `src/pull-request/` | Pull requests through GitHub's REST API: open, update, read checks, merge |
 | `src/linear/` | Linear client |
 | `src/state/` | The sync's state refs, trees and LFS reads |
 | `action.yml` | Action metadata (`node24`, bundled `main` and `post`) |

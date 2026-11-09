@@ -6,6 +6,7 @@
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
 import { PARTIAL, partialCode, stoppedMessage } from "../run/exit.ts";
+import { pullRequestFailure } from "../sync/index.ts";
 import { unfinishedMessage, writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { runOperation } from "../run/operation.ts";
@@ -36,6 +37,12 @@ export async function run(): Promise<void> {
     if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(outcome.summary).write();
     else core.info(outcome.summary);
     if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
+    const failure = pullRequestFailure(outcome.sync?.pullRequest);
+    if (failure !== null) {
+      core.setOutput("code", failure.code);
+      core.setFailed(`${operation}: ${failure.message}`);
+      return;
+    }
     const partial = partialCode(outcome);
     core.setOutput("code", partial ?? outcome.code ?? (outcome.stopped === undefined ? "" : "stopped"));
     // A partial sync kept what it could record; the next run goes on, so the job ends with a warning, not a failure.

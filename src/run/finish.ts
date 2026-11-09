@@ -5,7 +5,7 @@ import { type ContainerCapacity } from './capacity.ts';
 import { writeFile } from 'node:fs/promises';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
-import { type SyncRecord, type WriteResult } from '../sync/index.ts';
+import { type PullRequestResult, type SyncRecord, type WriteResult, pullRequestFailure } from '../sync/index.ts';
 import { type ExitStatus, exitStatusOf } from './exit.ts';
 import { cell } from './summary.ts';
 import { type OperationOutcome } from './operation.ts';
@@ -39,6 +39,8 @@ export interface RunReport {
   initialSync: ConfirmedReport | null;
   /** A sync run's writes to Linear, by path; null for other runs. */
   sync: SyncReport | null;
+  /** A sync run's step 2, the sync pull request; null for other runs and when capture stopped before it. */
+  pullRequest: PullRequestResult | null;
   capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'stopped'> | null;
   /** Documents created or overwritten in Linear by this run. */
   writtenCount: number;
@@ -126,7 +128,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     capacity: outcome.plan?.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? outcome.captured?.code ?? confirmed?.code ?? reverse?.code ?? (outcome.stopped === undefined ? null : 'stopped'),
+    code: outcome.code ?? outcome.captured?.code ?? pullRequestFailure(outcome.sync?.pullRequest)?.code ?? confirmed?.code ?? reverse?.code ?? (outcome.stopped === undefined ? null : 'stopped'),
     exitStatus: exitStatusOf(outcome),
     stop: outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped ?? reverse?.stopped ?? null,
     complete: outcome.sync?.complete ?? confirmed?.complete ?? reverse?.complete ?? false,
@@ -141,6 +143,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     summary: outcome.plan ?? null,
     initialSync: confirmed === undefined ? null : toConfirmedReport(confirmed),
     capture: captureReport(outcome.captured),
+    pullRequest: outcome.sync?.pullRequest ?? null,
     sync: null,
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? reverse?.skippedCompleted.length ?? 0,
@@ -199,7 +202,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     capacity: write.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? write.code ?? null,
+    code: outcome.code ?? pullRequestFailure(outcome.sync?.pullRequest)?.code ?? write.code ?? null,
     exitStatus: exitStatusOf(outcome),
     stop: write.stopped ?? null,
     complete: outcome.sync!.complete,
@@ -210,6 +213,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     summary: null,
     initialSync: null,
     capture: captureReport(outcome.captured),
+    pullRequest: outcome.sync?.pullRequest ?? null,
     sync: {
       complete: write.complete,
       updated: write.updated,

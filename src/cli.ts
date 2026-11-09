@@ -20,6 +20,7 @@ import { unfinishedMessage, writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
 import { Git } from "./state/index.ts";
+import { pullRequestFailure } from "./sync/index.ts";
 import { VERSION } from "./version.ts";
 
 export interface CliResult {
@@ -106,6 +107,12 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   const summaryFile = env["GITHUB_STEP_SUMMARY"];
   if (summaryFile) await appendFile(summaryFile, outcome.summary);
   const stderr = warnings.join("");
+  // A failed check on the sync pull request is a setup error: a person fixes it, so it comes before a partial ending.
+  const failure = pullRequestFailure(outcome.sync?.pullRequest);
+  if (failure !== null) {
+    const exitCode = failure.kind === "setup" ? SETUP_FAILED_EXIT_CODE : failure.kind === "no-state" ? NO_STATE_EXIT_CODE : INCOMPLETE_EXIT_CODE;
+    return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: ${failure.message}\n` };
+  }
   // A partial run recorded what it finished; the next run goes on from there.
   const partial = partialCode(outcome);
   if (partial !== undefined) {
