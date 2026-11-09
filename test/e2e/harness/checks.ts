@@ -344,6 +344,7 @@ export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documen
   const gitText = [...sides.files.values()].join('\n');
   const linearText = [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n');
   return ctx.edits.filter((edit) => {
+    if (edit.retired === true) return false;
     const inGit = gitText.includes(edit.token);
     const inLinear = linearText.includes(edit.token);
     return edit.removal === true ? inGit || inLinear : !(inGit && inLinear);

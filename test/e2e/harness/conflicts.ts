@@ -19,6 +19,28 @@ export type MarkerKind = keyof typeof MARKERS;
 
 /** The conflict mark a conflicted document carries in Linear. */
 export const CONFLICT_MARK = { icon: 'Alert', color: 'orange' } as const;
+
+/**
+ * Linear stores a color as a hex code; specs speak of the palette's names.
+ * The harness keeps its own table (not the engine's constants), so a wrong
+ * color in the engine still shows.
+ */
+export const PALETTE: Readonly<Record<string, string>> = {
+  '#f2994a': 'orange',
+  '#eb5757': 'red',
+  '#f2c94c': 'yellow',
+  '#4cb782': 'green',
+  '#4ea7fc': 'blue',
+  '#5e6ad2': 'indigo',
+  '#bb87fc': 'purple',
+  '#95a2b3': 'gray',
+};
+
+/** A document color as specs name it: the palette name for a known hex code, else the value as Linear has it. */
+export function colorLabel(color: string | null | undefined): string | null {
+  if (color === null || color === undefined) return null;
+  return PALETTE[color.toLowerCase()] ?? color;
+}
 /** The mark of a document a security hook blocked. */
 export const BLOCKED_MARK = { icon: 'Cross', color: 'red' } as const;
 

@@ -22,6 +22,8 @@ export interface EditRecord {
   token: string;
   /** The edit was a removal: the token must be gone on both sides. */
   removal?: boolean;
+  /** A conflict resolution discarded this edit on purpose (it kept the other version): I2 does not expect it. */
+  retired?: boolean;
 }
 
 export interface LiveWorld {
