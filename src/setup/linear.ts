@@ -2,6 +2,7 @@
 // and every annotated team and project exists. The resolved ids are what
 // the run then uses to list and place documents.
 
+import { setTimeout } from 'node:timers/promises';
 import { type LinearClient, LinearGraphQLError, LinearHttpError, LinearTokenError } from '../linear/index.ts';
 import { type Zone } from '../mapping/index.ts';
 import { type CheckResult, failed, notChecked, passed } from './report.ts';
@@ -29,6 +30,9 @@ export interface ResolvedTargets {
 
 /** Half of Linear's largest page; see `resolveTargets`. */
 const TEAM_REFS_PER_REQUEST = 125;
+
+/** The wait before asking again a token that saw no team at all. */
+export const TEAMS_RETRY_DELAY_MS = 3000;
 
 export function projectKey(team: string, project: string): string {
   return `${team}\0${project}`;
@@ -60,14 +64,16 @@ export function linearCredentialFailure(detail: string): CheckResult {
  * Looks up every annotated team (by key or name) and project (by name, in
  * its team): one request, plus one per further 125 team references. A
  * name that matches nothing, or more than one team or project, fails the
- * check and is named. When no annotated team is found, the lookup is asked
- * once more; when the token then sees no team at all, the check fails with
- * `linear-teams-not-visible` rather than naming every team as missing. A
- * credential error is returned as a failed `linear-credentials` item.
+ * check and is named. When the token sees no team at all, the lookup is
+ * asked once more after `retryDelayMs`; when it still sees none, the check
+ * fails with `linear-teams-not-visible` rather than naming every team as
+ * missing. A credential error is returned as a failed `linear-credentials`
+ * item.
  */
 export async function resolveTargets(
   client: LinearClient,
   zones: Iterable<Zone>,
+  retryDelayMs = TEAMS_RETRY_DELAY_MS,
 ): Promise<{ result: CheckResult; credentials?: CheckResult; targets?: ResolvedTargets }> {
   const zoneList = [...zones];
   const teamRefs = new Set<string>();
@@ -84,9 +90,9 @@ export async function resolveTargets(
   // A team matches a reference by key or by name, so a batch of references
   // matches at most twice as many teams: within one page when batches are
   // half a page. The first request also looks up the projects, so a usual
-  // run resolves its targets in one request. `probe` also asks whether the
-  // token sees any team at all.
-  const lookUp = async (probe: boolean) => {
+  // run resolves its targets in one request, and asks whether the token
+  // sees any team at all.
+  const lookUp = async () => {
     const teamNodes: LinearTeam[] = [];
     let projectNodes: ProjectNode[] = [];
     let seesTeams: boolean | undefined;
@@ -104,7 +110,7 @@ export async function resolveTargets(
         `query SetupTargets($refs: [String!]!, $first: Int!${withProjects ? ', $names: [String!]!' : ''}) {
           teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
           ${withProjects ? 'projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: 50) { nodes { id } } } pageInfo { hasNextPage } }' : ''}
-          ${probe && first ? 'visible: teams(first: 1) { nodes { id } }' : ''}
+          ${first ? 'visible: teams(first: 1) { nodes { id } }' : ''}
         }`,
         withProjects ? { refs: batch, first: batch.length * 2, names } : { refs: batch, first: batch.length * 2 },
       );
@@ -121,18 +127,20 @@ export async function resolveTargets(
   let teamNodes: LinearTeam[];
   let projectNodes: ProjectNode[];
   try {
-    let found = await lookUp(false);
-    // No annotated team at all: Linear has answered a run's token so once
-    // while earlier runs saw every team. Ask once more, and whether the
-    // token sees any team, before stopping the run.
-    if (found.teamNodes.length === 0) {
-      found = await lookUp(true);
-      if (found.teamNodes.length === 0 && found.seesTeams === false) {
+    let found = await lookUp();
+    // A token that sees no team at all: Linear has answered a run's token so
+    // once while the runs before and after it saw every team. Wait a moment
+    // and ask once more before stopping the run. A token that sees teams but
+    // not the annotated ones is a naming problem, asked only once.
+    if (found.seesTeams === false) {
+      await setTimeout(retryDelayMs);
+      found = await lookUp();
+      if (found.seesTeams === false) {
         return {
           result: failed(
             'annotation-targets',
             'linear-teams-not-visible',
-            `the Linear app sees no team, twice in a row, so none of the annotated teams (${[...refs].sort().map((ref) => `"${ref}"`).join(', ')}) can be found: check the app's team access in Linear`,
+            `the Linear app saw no team in two lookups, so none of the annotated teams (${[...refs].sort().map((ref) => `"${ref}"`).join(', ')}) can be found: check the app's team access in Linear`,
           ),
         };
       }

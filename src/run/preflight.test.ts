@@ -311,18 +311,18 @@ describe('preflight', () => {
       assert.equal(operations.filter((operation) => operation === 'SetupTargets').length, 2);
     });
 
-    it('a token that sees no team twice stops the sync and says the app sees no team, not that every team is missing', async () => {
+    it('a token that sees no team in two lookups stops the sync and says the app sees no team, not that every team is missing', async () => {
       const { world, operations } = counted((world) => (world.linear.teamsHidden = Infinity));
       const { result, report } = await run('sync', world);
       assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE);
       assert.equal(report.code, 'linear-teams-not-visible');
       assert.equal(operations.filter((operation) => operation === 'SetupTargets').length, 2);
       const detail = report.setupChecks.find((check) => check.name === 'annotation-targets')?.detail ?? '';
-      assert.match(detail, /the Linear app sees no team, twice in a row/);
+      assert.match(detail, /the Linear app saw no team in two lookups/);
       assert.match(detail, /"Docs", "ENG"/);
       assert.match(detail, /check the app's team access in Linear/);
       assert.doesNotMatch(detail, /not found in Linear/);
-      assert.match(result.stderr, /sync: stopped before any write \(linear-teams-not-visible\): the Linear app sees no team/);
+      assert.match(result.stderr, /sync: stopped before any write \(linear-teams-not-visible\): the Linear app saw no team/);
       assert.equal(world.minted, world.revoked, 'a minted token was not revoked');
     });
 
@@ -331,7 +331,7 @@ describe('preflight', () => {
       const { result, report } = await run('sync', world);
       assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE);
       assert.equal(report.code, 'annotation-target-not-found');
-      assert.equal(operations.filter((operation) => operation === 'SetupTargets').length, 2);
+      assert.equal(operations.filter((operation) => operation === 'SetupTargets').length, 1, 'a token that sees teams is asked once');
       assert.match(result.stderr, /not found in Linear: team "Docs", team "ENG"/);
     });
   });
