@@ -3,7 +3,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
-import { isMap, parseDocument } from 'yaml';
+import { isMap, parseDocument, stringify } from 'yaml';
 import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
@@ -343,10 +343,19 @@ function relocatedHead(head: string): string {
   const front = findFrontMatter(head);
   if (front === null) return head;
   const document = parseDocument(front.yaml, {logLevel:'error', prettyErrors:false});
+  const metadata = document.toJS() as Record<string, unknown>;
+  delete metadata[TEAM_KEY];
+  delete metadata[PROJECT_KEY];
   document.delete(TEAM_KEY);
   document.delete(PROJECT_KEY);
   if (isMap(document.contents) && document.contents.items.length === 0) return '';
-  return `---\n${document.toString()}---\n\n`;
+  let yaml: string;
+  try { yaml = document.toString(); }
+  catch {
+    // An unrelated value may alias an annotation's deleted anchor.
+    yaml = stringify(metadata);
+  }
+  return `---\n${yaml}---\n\n`;
 }
 
 function renderCapture(result: CaptureResult, configured: boolean): string {

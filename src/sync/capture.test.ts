@@ -220,7 +220,9 @@ describe('capture from Linear', () => {
       const ids = await readIds(context.git, context.fetched.state.ids);
       ids.set('docs/README.md', {id:readme.id});
       const tip = await commitIds(context.git, context.fetched.state.ids, ids, IDENTITY);
-      const carrier = TREE['docs/README.md'].replace('---\n', '---\ncategory: work\n');
+      const carrier = change === 'rename'
+        ? TREE['docs/README.md'].replace('linear-team: ENG', 'linear-team: &team ENG\ncategory: *team')
+        : TREE['docs/README.md'].replace('---\n', '---\ncategory: work\n');
       const linearTip = await commitTree(context.git, {parents:[context.fetched.state.linear!], base:context.fetched.state.linear!, changes:new Map([['docs/README.md', carrier]]), identity:IDENTITY, message:'Keep document metadata'});
       assert.equal((await pushAtomic(context.git, config, [
         {ref:stateRef(config,'ids'), expected:context.fetched.state.ids, next:tip},
@@ -242,7 +244,7 @@ describe('capture from Linear', () => {
       const moved = [...capturedIds].find(([,entry]) => entry.id === readme.id);
       if (change === 'rename' || change === 'move') {
         assert.ok(moved);
-        assert.ok((await text(moved[0])).includes('category: work'));
+        assert.ok((await text(moved[0])).includes(change === 'rename' ? 'category: ENG' : 'category: work'));
         assert.ok(!(await text(moved[0])).includes('linear-team:'));
         assert.ok(!(await text(moved[0])).includes('linear-project:'));
       } else assert.equal(moved, undefined);
