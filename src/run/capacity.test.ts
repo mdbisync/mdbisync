@@ -152,7 +152,8 @@ describe('container document capacity', () => {
     const blocked = await run('sync');
     assert.equal(blocked.exitCode, INCOMPLETE_EXIT_CODE, blocked.stderr);
     assert.equal(blocked.report.code, 'container-cap');
-    assert.equal(world.writes.length, writesBefore);
+    // Nothing reaches Linear; the sync pull request step may note GitHub's refused merge on its pull request.
+    assert.deepEqual(world.writes.slice(writesBefore).filter((write) => !write.includes('/pulls')), []);
   });
   it('a previously left-out document already at the destination is not counted as an addition', async () => {
     assert.equal((await run('initial-sync', true)).exitCode, 0);

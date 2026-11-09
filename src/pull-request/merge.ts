@@ -71,7 +71,10 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
 export type MergeOutcome =
   | { merged: true; sha: string }
   /** GitHub would not merge: the head moved (409), the pull request cannot be merged now (405), or it is not open (422). */
-  | { merged: false; status: number };
+  | { merged: false; status: number; reason: string };
+
+/** The longest reason kept from GitHub's answer. */
+const REASON_LENGTH = 300;
 
 /**
  * Merges a pull request with a merge commit, only while its head is still
@@ -79,8 +82,22 @@ export type MergeOutcome =
  */
 export async function mergePullRequest(target: GitHubRepository, number: number, sha: string): Promise<MergeOutcome> {
   const answer = await request(target, 'PUT', `/pulls/${number}/merge`, { merge_method: 'merge', sha });
-  const body = answer.json as { merged?: unknown; sha?: unknown } | null;
+  const body = answer.json as { merged?: unknown; sha?: unknown; message?: unknown } | null;
   if (answer.status === 200 && body !== null && body.merged === true && typeof body.sha === 'string') return { merged: true, sha: body.sha };
-  if (answer.status === 405 || answer.status === 409 || answer.status === 422) return { merged: false, status: answer.status };
+  if (answer.status === 405 || answer.status === 409 || answer.status === 422) {
+    return { merged: false, status: answer.status, reason: refusalReason(body?.message) };
+  }
   throw new PullRequestError('merging the sync pull request', answer.status);
+}
+
+/**
+ * GitHub's message for a refused merge (a repository rule, a required review)
+ * on one line, without backticks, so it can be quoted in Markdown.
+ */
+function refusalReason(message: unknown): string {
+  if (typeof message !== 'string') return '';
+  const line = message.replace(/[`\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // Cut by code points, so a character outside the BMP is never split.
+  const points = [...line];
+  return points.length > REASON_LENGTH ? `${points.slice(0, REASON_LENGTH - 1).join('')}…` : line;
 }

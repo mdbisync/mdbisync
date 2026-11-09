@@ -104,9 +104,18 @@ export interface FakeWorld {
     /**
      * Merges a pull request as GitHub would, while its head is `sha`: the
      * test moves the base branch and answers the merge commit, or answers
-     * GitHub's refusal status. Without it, GitHub answers 405.
+     * GitHub's refusal status, with its message when given. Without it,
+     * GitHub answers 405.
      */
-    merge?: (pr: FakePullRequest, sha: string) => Promise<{ sha: string } | { status: number }>;
+    merge?: (pr: FakePullRequest, sha: string) => Promise<{ sha: string } | { status: number; message?: string }>;
+    /**
+     * Breaks the connection of a request (`METHOD path`, the path after the
+     * repository): `before` GitHub handles it, or `after`, so its answer is
+     * lost. Undefined lets the request through. `body` is the request's JSON
+     * body, empty for none; the setup check's probes send bodies that lack
+     * required fields.
+     */
+    reset?: (request: string, body: Record<string, unknown>) => 'before' | 'after' | undefined;
   };
   /**
    * `unavailable`: the token endpoint answers 503, as in an outage.
@@ -178,7 +187,15 @@ export function fakeFetch(world: FakeWorld): typeof fetch {
       const upload = world.linear.uploads.find((entry) => entry.assetUrl === url);
       return upload?.bytes === undefined ? new Response(null, {status:404}) : new Response(upload.bytes, {headers:{'content-type':upload.contentType}});
     }
-    if (url.startsWith(GITHUB_API)) return github(world, method, url.slice(GITHUB_API.length), init);
+    if (url.startsWith(GITHUB_API)) {
+      const path = url.slice(GITHUB_API.length);
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const reset = world.github.reset?.(`${method} ${path.replace(/^\/repos\/[^/]+\/[^/]+/, '')}`, body);
+      if (reset === 'before') throw new TypeError('fetch failed', { cause: new Error('read ECONNRESET') });
+      const answer = await github(world, method, path, init);
+      if (reset === 'after') throw new TypeError('fetch failed', { cause: new Error('read ECONNRESET') });
+      return answer;
+    }
     if (url.startsWith(LINEAR_API)) return linear(world, url.slice(LINEAR_API.length), init);
     throw new Error(`unexpected request to ${url}`);
   };
@@ -273,7 +290,7 @@ async function mergeRequest(world: FakeWorld, method: string, rest: string, init
   const body = JSON.parse(String(init?.body ?? '{}')) as { merge_method?: string; sha?: string };
   if (body.merge_method !== 'merge' || body.sha === undefined) return json(422, { message: 'Validation Failed' });
   const answer = world.github.merge === undefined ? { status: 405 } : await world.github.merge(pr, body.sha);
-  if ('status' in answer) return json(answer.status, { message: 'Pull Request is not mergeable' });
+  if ('status' in answer) return json(answer.status, { message: answer.message ?? 'Pull Request is not mergeable' });
   world.writes.push(`${method} ${rest}`);
   Object.assign(pr, { state: 'closed', merged: true });
   return json(200, { sha: answer.sha, merged: true, message: 'Pull Request successfully merged' });
