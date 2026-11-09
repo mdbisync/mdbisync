@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { parse } from 'yaml';
 import { stageRelease, validateAction, validateHooks } from '../../src/release/package.ts';
 import { smokeRelease } from '../../src/release/smoke.ts';
+import { smokeStagedFlow } from './staged-flow.ts';
 
 const root = resolve(import.meta.dirname, '../..');
 
@@ -34,7 +35,7 @@ test('action and hook metadata prohibit runtime installs', async () => {
   validateHooks(parse(await readFile(join(root, '.pre-commit-hooks.yaml'), 'utf8')));
 });
 
-test('real bundles run from the isolated release tree and install as an offline Node hook', { timeout: 30_000 }, async () => {
+test('real bundles run from the isolated release tree, install as an offline Node hook and run the templates\' staged steps', { timeout: 90_000 }, async () => {
   const temporary = await mkdtemp(join(tmpdir(), 'release-contract-'));
   try {
     const source = join(temporary, 'source');
@@ -51,6 +52,7 @@ test('real bundles run from the isolated release tree and install as an offline 
     const hooks: unknown = parse(await readFile(join(source, '.pre-commit-hooks.yaml'), 'utf8'));
     await stageRelease({ source, output, sourceSha: 'a'.repeat(40), version, action, hooks });
     await smokeRelease(output);
+    await smokeStagedFlow(output);
     assert.match(await readFile(join(output, 'dist/THIRD_PARTY_NOTICES.txt'), 'utf8'), /@actions\/core [0-9.]+\nLicense: MIT/);
     assert.equal(await readFile(join(source, 'package.json'), 'utf8'), await readFile(join(root, 'package.json'), 'utf8'));
     await assert.rejects(readFile(join(output, 'package-lock.json')), /ENOENT/);

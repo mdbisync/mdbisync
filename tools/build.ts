@@ -8,6 +8,7 @@
 
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { build, type Metafile } from "esbuild";
+import { ENTRY_POINTS } from "../src/release/bundles.ts";
 import { readLockfile, packagePathOf, type LockedPackage } from "./lockfile.ts";
 import {
   INVENTORY_FILE,
@@ -21,13 +22,6 @@ import {
   parseInventory,
   readBundledPackage,
 } from "./licenses.ts";
-
-export const ENTRY_POINTS = {
-  cli: "src/cli.ts",
-  "action-main": "src/action/main.ts",
-  "action-post": "src/action/post.ts",
-  "action-hooks": "src/action/hooks.ts",
-} as const;
 
 export function findDevPackagesInBundle(metafile: Metafile, packages: readonly LockedPackage[]): string[] {
   const devPaths = new Set(packages.filter((pkg) => pkg.dev).map((pkg) => pkg.path));

@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { RELEASE_BUNDLES } from './bundles.ts';
 
 // Written by the build: license texts and notices of the bundled packages.
 export const NOTICES_FILE = 'dist/THIRD_PARTY_NOTICES.txt';
@@ -82,13 +83,21 @@ export async function stageRelease(options: {
   validateHooks(options.hooks);
   const pkg = releasePackage(JSON.parse(await readFile(join(source, 'package.json'), 'utf8')), version);
   const cli = (pkg.bin as Record<string, string>).mdbisync!;
-  const bundles = [...new Set([...validateAction(action), cli])].sort();
+  // Every bundle the build declares ships, including those only run by path from another bundle.
+  const bundles = [...RELEASE_BUNDLES];
+  for (const named of [...validateAction(action), cli]) {
+    if (!bundles.includes(named)) throw new Error(`Release entry is not a declared bundle: ${named}`);
+  }
   const distFiles = await readdir(join(source, 'dist'));
   const notices = bundles.map((file) => `${file}.LEGAL.txt`).filter((file) => distFiles.includes(file.slice(5)));
   const files = ['action.yml', '.pre-commit-hooks.yaml', 'LICENSE', 'README.md', NOTICES_FILE, ...notices, ...bundles];
-  // Refuse symlinks and empty bundles before creating any release output.
+  // Refuse missing, symlinked and empty files before creating any release output.
   for (const file of files) {
-    const info = await lstat(join(source, file));
+    const info = await lstat(join(source, file)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    });
+    if (info === undefined) throw new Error(`Missing release file: ${file}`);
     if (!info.isFile() || (bundles.includes(file) && info.size === 0)) throw new Error(`Invalid release file: ${file}`);
   }
   await mkdir(output);
@@ -111,7 +120,7 @@ export async function verifyReleaseDirectory(directory: string, sourceSha: strin
   if (manifest.source !== sourceSha || manifest.version !== version) throw new Error('Release provenance does not match the requested source and version');
   const hashes = record(manifest.files);
   const required = ['action.yml', '.pre-commit-hooks.yaml', 'LICENSE', 'README.md', NOTICES_FILE, 'package.json'];
-  for (const file of required) if (!(file in hashes)) throw new Error(`Missing release file: ${file}`);
+  for (const file of [...required, ...RELEASE_BUNDLES]) if (!(file in hashes)) throw new Error(`Missing release file: ${file}`);
   const actual: string[] = [];
   for (const file of await readdir(directory, { recursive: true })) {
     const info = await lstat(join(directory, file));
