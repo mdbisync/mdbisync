@@ -51,7 +51,26 @@ jobs:
       # The repository's hooks marked `alias: security` check Linear's
       # changes before anything is pushed; they run with pre-commit.
       - name: Install pre-commit
-        run: command -v pre-commit || pipx install pre-commit==4.6.2
+        shell: bash
+        run: |
+          if ! command -v pre-commit >/dev/null 2>&1; then
+            if ! command -v python3 >/dev/null 2>&1; then
+              echo '::error::Install Python 3 with venv support, or provide pre-commit on PATH.'
+              exit 1
+            fi
+            environment=$(mktemp -d "$RUNNER_TEMP/pre-commit.XXXXXX")
+            if ! python3 -m venv "$environment"; then
+              echo '::error::Python 3 venv support is required; install it, or provide pre-commit on PATH.'
+              exit 1
+            fi
+            if ! "$environment/bin/python" -m pip install pre-commit==4.6.2; then
+              echo '::error::Could not install pre-commit 4.6.2; use Python 3.10+ and allow access to PyPI.'
+              exit 1
+            fi
+            mkdir "$environment/commands"
+            ln -s "$environment/bin/pre-commit" "$environment/commands/pre-commit"
+            echo "$environment/commands" >> "$GITHUB_PATH"
+          fi
       # Reads Linear's changes into the runner's temporary directory for the
       # hooks and writes nothing. The action revokes its Linear token when it
       # ends, and again in its post step after a failed or cancelled run.

@@ -32,7 +32,26 @@ jobs:
       - name: Install compatible npm
         run: npm install --global --ignore-scripts npm@11.16.0
       - name: Install pre-commit
-        run: pipx install pre-commit==4.6.2
+        shell: bash
+        run: |
+          if [[ "$(pre-commit --version 2>/dev/null || true)" != "pre-commit 4.6.2" ]]; then
+            if ! command -v python3 >/dev/null 2>&1; then
+              echo '::error::Install Python 3 with venv support, or provide pre-commit on PATH.'
+              exit 1
+            fi
+            environment=$(mktemp -d "$RUNNER_TEMP/pre-commit.XXXXXX")
+            if ! python3 -m venv "$environment"; then
+              echo '::error::Python 3 venv support is required; install it, or provide pre-commit on PATH.'
+              exit 1
+            fi
+            if ! "$environment/bin/python" -m pip install pre-commit==4.6.2; then
+              echo '::error::Could not install pre-commit 4.6.2; use Python 3.10+ and allow access to PyPI.'
+              exit 1
+            fi
+            mkdir "$environment/commands"
+            ln -s "$environment/bin/pre-commit" "$environment/commands/pre-commit"
+            echo "$environment/commands" >> "$GITHUB_PATH"
+          fi
       - name: Run all hooks and collect fixes
         id: hooks
         shell: bash
