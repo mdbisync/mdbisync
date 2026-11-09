@@ -392,7 +392,7 @@ function renderCapture(result: CaptureResult, configured: boolean): string {
 }
 
 /** Apply only LFS, after the security gate. Other clean filters cannot change captured text. */
-async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: Map<string, Buffer | string | null>) {
+export async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: Map<string, Buffer | string | null>) {
   const dir = await mkdtemp(join(tmpdir(), 'capture-attributes-'));
   const env = { GIT_INDEX_FILE: join(dir, 'index') };
   const result = new Map(changes);
