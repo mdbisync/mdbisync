@@ -224,7 +224,7 @@ async function restorable(ctx: RunContext, id: string | undefined): Promise<bool
 }
 
 /** Where a document lives: `project:<name>` or `team:<key>`. */
-function placeOf(ctx: RunContext, document: LinearDocument | undefined): string | null {
+export function placeOf(ctx: RunContext, document: LinearDocument | undefined): string | null {
   const world = ctx.live;
   if (world === null || document === undefined) return null;
   if (document.projectId !== null) {
@@ -236,7 +236,7 @@ function placeOf(ctx: RunContext, document: LinearDocument | undefined): string 
 }
 
 /** Where a path's annotation says its document lives, and its title. */
-function expectedPlace(folders: readonly Folder[], path: string): { place: string; title: string } | null {
+export function expectedPlace(folders: readonly Folder[], path: string): { place: string; title: string } | null {
   const folder = owningFolder(path, folders);
   if (folder === null) return null;
   const place = folder.project !== null ? `project:${folder.project}` : `team:${folder.team}`;
@@ -381,6 +381,11 @@ export function linearForms(texts: ReadonlyMap<string, string>): Map<string, str
   }
 }
 
+/** A path segment of more than 180 bytes: its first 40 characters, `~` and 16 hex digits of SHA-256 of `source`. */
+export function shortSegment(segment: string, source: string): string {
+  return Buffer.byteLength(segment) > 180 ? `${[...segment].slice(0, 40).join('')}~${createHash('sha256').update(source).digest('hex').slice(0, 16)}` : segment;
+}
+
 const hex = (char: string) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
 
 /**
@@ -389,8 +394,10 @@ const hex = (char: string) => `%${char.charCodeAt(0).toString(16).toUpperCase().
  * segment, after Unicode NFC: percent-encode `%`, `\`, control characters and
  * `:*?"<>|`; encode the leading character of `.`, `..`, `.git` (any case) and
  * Windows device names; write an empty segment as `%00`; encode trailing
- * periods and spaces. Leading spaces stay as they are. Long segments and
- * collision suffixes are outside this oracle.
+ * periods and spaces. Leading spaces stay as they are. A segment whose
+ * encoded form is longer than 180 bytes is cut to its first 40 characters,
+ * `~` and the first 16 hex digits of SHA-256 of the segment as titled.
+ * Collision names are `pathFitsTitle`'s, in `checks.ts`.
  */
 export function encodeTitlePath(title: string): string {
   return title
@@ -400,7 +407,8 @@ export function encodeTitlePath(title: string): string {
       if (segment === '') return '%00';
       let encoded = segment.replace(/[%\\\u0000-\u001f\u007f:*?"<>|]/g, hex);
       if (/^(\.|\.\.|\.git)$/i.test(encoded) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(encoded)) encoded = `${hex(encoded)}${encoded.slice(1)}`;
-      return encoded.replace(/[. ]+$/, (tail) => [...tail].map(hex).join(''));
+      encoded = encoded.replace(/[. ]+$/, (tail) => [...tail].map(hex).join(''));
+      return shortSegment(encoded, segment);
     })
     .join('/');
 }

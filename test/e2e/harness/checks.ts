@@ -15,7 +15,7 @@ import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
-import { refreshView, resolveSubject } from './subjects.ts';
+import { encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
 
 // --- pure helpers ----------------------------------------------------------
 
@@ -38,6 +38,24 @@ export function documentState(document: Pick<LinearDocument, 'trashed' | 'archiv
 export function titleOf(path: string, folderOfPath: string): string {
   const relative = folderOfPath === '' ? path : path.slice(folderOfPath.length + 1);
   return relative.replace(/\.md$/, '');
+}
+
+/**
+ * Whether a file name below its annotated folder (`titleOf`'s result) is one
+ * the documented path rule gives the document with this title and id: the
+ * title as it is (an existing git spelling the rule keeps), its encoded path
+ * (`encodeTitlePath`), or its collision name directly in the folder: the
+ * encoded title with `/` flattened to `%2F` (cut like a long segment, hashing
+ * the title, past 180 bytes), `~`, the first twelve hex digits of
+ * SHA-256(document id) and an optional `-` and digits. A collision name made
+ * from another document's id, or one placed in a subfolder, does not fit.
+ * Whether the folder is the document's own place is I7's separate check.
+ */
+export function pathFitsTitle(stem: string, title: string, id: string): boolean {
+  const encoded = encodeTitlePath(title);
+  if (stem === title || stem === encoded) return true;
+  const collision = `${shortSegment(encoded.replaceAll('/', '%2F'), title)}~${createHash('sha256').update(id).digest('hex').slice(0, 12)}`;
+  return stem === collision || (stem.startsWith(`${collision}-`) && /^\d+$/.test(stem.slice(collision.length + 1)));
 }
 
 
@@ -544,7 +562,7 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     return ok('I6');
   },
 
-  async I7(_ctx, sides) {
+  async I7(ctx, sides) {
     const s = await sides();
     const readmes = new Map<string, string>();
     for (const path of s.files.keys()) if (/(^|\/)README\.md$/.test(path)) readmes.set(path, s.files.get(path) as string);
@@ -561,7 +579,13 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
       const folder = owningFolder(path, folders);
       const state = documentState(document);
       if (state !== 'active') problems.push(`${path}: its document is ${state === 'missing' ? 'not in Linear' : state === 'trashed' ? "in Linear's trash" : 'archived'}`);
-      else if (folder !== null && document?.title !== titleOf(path, folder.folder)) problems.push(`${path}: title differs from its path`);
+      else if (folder !== null && !pathFitsTitle(titleOf(path, folder.folder), (document as LinearDocument).title, entry.id)) problems.push(`${path}: title differs from its path`);
+      else if (folder !== null) {
+        // Live only: offline there is no world to name the document's place.
+        const place = placeOf(ctx, document);
+        const expected = expectedPlace(folders, path)?.place;
+        if (place !== null && place !== expected) problems.push(`${path}: its document is in ${place}, not in its folder's ${expected}`);
+      }
     }
     for (const path of s.ids.keys()) if (!s.files.has(path)) problems.push(`${path} is mapped but not a synchronized file`);
     return problems.length === 0 ? ok('I7') : bad('I7', `${problems.length} problems: ${problems.slice(0, 10).join('; ')}`);
