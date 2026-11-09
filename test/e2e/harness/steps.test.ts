@@ -17,7 +17,7 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { compare, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { assertionHolds, compare, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
@@ -1319,12 +1319,69 @@ describe('linear executors', () => {
     await runStep(ctx, { kind: 'linear', action: 'edit', args: { target: 'eng/platform/plan.md', fixture: 'fake-secret' } });
     const secret = ctx.observations.get('secret.value') as string;
     assert.match(secret, /^TESTKEY-[0-9a-f]{24}$/);
-    Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Cross', color: 'red' });
+    // Linear gives the color as a hex code; L2-35 names it by its palette name.
+    Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Cross', color: '#EB5757' });
     linear.comments.set(id, ['Blocked by hook `test-secret`, line 3.']);
     await runStep(ctx, { kind: 'linear', action: 'remove-secret', args: {} });
     assert.equal(ctx.observations.get('blocked.icon'), 'Cross');
     assert.ok(!(linear.documents.get(id)?.content ?? '').includes(secret));
     assert.deepEqual(await resolveSubject(ctx, 'blocked.commentFields'), { known: true, value: ['hook', 'line'] });
+    const mark = ['blocked.icon', 'blocked.color', 'blocked.commentFields'];
+    assert.deepEqual(await scenarioAssertions(ctx, 'L2-35', mark), new Map(mark.map((subject) => [subject, true])));
+    // A wrong color still fails L2-35.
+    ctx.observations.set('blocked.color', '#4cb782');
+    assert.deepEqual((await scenarioAssertions(ctx, 'L2-35', mark)).get('blocked.color'), false);
+  });
+
+  /** Whether each assertion of scenario `id` on `subjects` holds in `ctx`, compared as the runner compares them. */
+  async function scenarioAssertions(ctx: RunContext, id: string, subjects?: readonly string[]): Promise<Map<string, boolean>> {
+    const scenario = scenarios.find((candidate) => candidate.id === id)!;
+    const held = new Map<string, boolean>();
+    for (const assertion of scenario.checks.assertions) {
+      if (subjects !== undefined && !subjects.includes(assertion.subject)) continue;
+      held.set(assertion.subject, await assertionHolds(ctx, assertion));
+    }
+    return held;
+  }
+
+  it('compare a cross-project move (L2-25) with its recorded destination in the same form', async () => {
+    const { ctx, ids, remoteGit } = await fakeRun();
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    await runStep(ctx, { kind: 'linear', action: 'move-project', args: { target: 'eng/platform/plan.md' } });
+    // Where the sync left the document: the ids state ref names its path.
+    const landAt = async (path: string) => {
+      const moved = Object.fromEntries(Object.entries(ids).map(([key, entry]) => [entry.id === plan ? path : key, entry]));
+      const blob = (await remoteGit.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(moved) })).trim();
+      const tree = (await remoteGit.text(['mktree'], { input: `100644 blob ${blob}\tids.json\n` })).trim();
+      const commit = (await remoteGit.text(['commit-tree', tree, '-m', 'ids'])).trim();
+      await remoteGit.run(['update-ref', `${ctx.names.refPrefix}/ids`, commit]);
+      refreshView(ctx);
+    };
+    await landAt('docs/handbook/plan.md');
+    assert.deepEqual(await resolveSubject(ctx, 'tracked.movedPath'), { known: true, value: 'docs/handbook/plan.md' });
+    assert.deepEqual(await scenarioAssertions(ctx, 'L2-25'), new Map([['tracked.movedPath', true]]));
+    // Other path subjects keep naming every project folder by its role.
+    assert.deepEqual(await resolveSubject(ctx, 'tracked.documentPath'), { known: true, value: 'project/plan.md' });
+    // A document that stayed in its project reads `project/plan.md`, not the destination.
+    await landAt('eng/platform/plan.md');
+    assert.deepEqual(await resolveSubject(ctx, 'tracked.movedPath'), { known: true, value: 'project/plan.md' });
+    assert.deepEqual(await scenarioAssertions(ctx, 'L2-25'), new Map([['tracked.movedPath', false]]));
+    // So does one under another name in the destination's project.
+    await landAt('docs/handbook/other-plan.md');
+    assert.deepEqual(await scenarioAssertions(ctx, 'L2-25'), new Map([['tracked.movedPath', false]]));
+  });
+
+  it('read a recorded observation through the subject that normalizes it, and a direct one as recorded', async () => {
+    const { ctx } = await fakeRun();
+    ctx.observations.set('blocked.color', '#EB5757');
+    assert.deepEqual(await resolveSubject(ctx, 'blocked.color'), { known: true, value: 'red' });
+    ctx.observations.set('blocked.color', null);
+    assert.deepEqual(await resolveSubject(ctx, 'blocked.color'), { known: true, value: null });
+    // Direct observation subjects, and subjects a step overrides on purpose, return what was recorded.
+    ctx.observations.set('blocked.icon', 'Cross');
+    assert.deepEqual(await resolveSubject(ctx, 'blocked.icon'), { known: true, value: 'Cross' });
+    ctx.observations.set('golden.linearForm', 'recorded');
+    assert.deepEqual(await resolveSubject(ctx, 'golden.linearForm'), { known: true, value: 'recorded' });
   });
 
   it('reject a document by its recorded id and its name, without taking over the scenario\'s target', async () => {
