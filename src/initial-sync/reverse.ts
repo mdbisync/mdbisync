@@ -10,17 +10,22 @@
 // 2. Take the documents in path order and record their ids in the `ids`
 //    state ref as the run goes, in progress commits, so a stopped run
 //    resumes with the same inputs and skips what it recorded.
-// 3. Record: one atomic push of the final `ids`, `uploads` (created when
+// 3. Download the files the documents embed from Linear's upload host (a
+//    file the tracked tree already holds, by content hash, is linked
+//    instead), next to their documents, stored as `.gitattributes` decides.
+// 4. Record: one atomic push of the final `ids`, `uploads` (created when
 //    missing), `linear` and the sync branch. `linear` is one commit whose
 //    parent is the tracked branch, whose tree is the tracked tree with
 //    every synchronized file replaced by what Linear holds; the sync branch
 //    points at it.
-// 4. Open the pull request from the sync branch to the tracked branch, or
+// 5. Open the pull request from the sync branch to the tracked branch, or
 //    find the one a previous run opened. A person merges it: it can remove
 //    files. The sync refuses to run until it is merged.
 
+import { createHash } from 'node:crypto';
+import { posix } from 'node:path';
 import { splitFile } from '../format/index.ts';
-import { type LinearDocument } from '../linear/index.ts';
+import { type LinearDocument, LinearStoppedError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { type GitHubRepository, type PullRequest, PullRequestError, ensurePullRequest } from '../pull-request/index.ts';
@@ -32,6 +37,7 @@ import {
   type RefUpdate,
   type StateConfig,
   type StateSnapshot,
+  type UploadMap,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
   branchRef,
   commitIds,
@@ -45,9 +51,12 @@ import {
   readUploads,
   stateRef,
 } from '../state/index.ts';
+import { createAssetCapture } from '../sync/assets.ts';
+import { prepareLfs } from '../sync/capture.ts';
+import { documentPath, titlePath } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, SYNC_IDENTITY, type WriteStop } from './confirm.ts';
-import { type LeftOutEntry, type PlanInput, placeKey, planInitialSync } from './plan.ts';
+import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
 
@@ -66,6 +75,11 @@ export interface ReverseEntry {
   title: string;
   place: Place;
   documentId: string;
+  /**
+   * The title the file's path gives it: the document's title, or its encoded
+   * form when the title is not a path as it is.
+   */
+  fileTitle: string;
 }
 
 export interface ReversePlan {
@@ -87,45 +101,55 @@ export interface ReversePlanInput extends PlanInput {
 }
 
 /**
- * Builds the plan. A document is left out when its title is not a plain
- * path as it is (`title-not-a-path`) or when its file would collide with
- * another file, in a case-insensitive file system too (`duplicate-title`):
- * the older of two documents with one title keeps it.
+ * Builds the plan. A new file is named by the rule the sync's capture uses
+ * (`documentPath`): the title's path, with characters a path cannot hold
+ * percent-encoded; a name that would land on another file (in a
+ * case-insensitive file system too), or in a folder another annotation
+ * owns, gets a suffix made from the document's id instead. Titles in Linear
+ * stay as they are.
  */
 export function planLinearToGit(input: ReversePlanInput): ReversePlan {
   const plan = planInitialSync(input);
   const annotations = new Set(input.mapping.annotations.map((annotation) => annotation.readme));
   const result: ReversePlan = { overwrite: plan.overwrite.map(entryOf), create: [], remove: [], kept: [], leftOut: [...plan.leftOut] };
-  for (const entry of plan.create) {
+  const folders = new Map(annotatedPlaces(input.mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
+  const invalid = (place: Place) => (candidate: string) => !landsInPlace(input.mapping, candidate, place);
+
+  // A file without a document by title can be one by the naming rule: the file an earlier run named for an encoded title.
+  const gitOnly = new Map(plan.create.map((entry) => [entry.path, entry]));
+  const named = new Map<string, string>();
+  for (const entry of plan.trash) {
+    const folder = folders.get(placeKey(entry.place)) as string;
+    const plain = `${posix.join(folder, titlePath(entry.title))}.md`;
+    const suffix = `~${createHash('sha256').update(entry.documentId).digest('hex').slice(0, 12)}`;
+    for (const [path, file] of gitOnly) {
+      if (path !== plain && !(path.startsWith(folder === '' ? '' : `${folder}/`) && path.includes(suffix))) continue;
+      if (placeKey(file.place) !== placeKey(entry.place)) continue;
+      const others = new Set([...input.treePaths].filter((other) => other !== path));
+      if (documentPath(folder, entry.title, entry.documentId, others, path, invalid(entry.place)) !== path) continue;
+      result.overwrite.push({ path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: file.title });
+      named.set(entry.documentId, path);
+      gitOnly.delete(path);
+      break;
+    }
+  }
+  for (const entry of gitOnly.values()) {
     if (annotations.has(entry.path)) result.kept.push({ path: entry.path, reason: 'annotation' });
     else result.remove.push(entry.path);
   }
 
   const removed = new Set(result.remove);
-  const occupied = new Map<string, string>();
-  for (const path of input.treePaths) if (!removed.has(path)) occupied.set(pathKey(path), path);
-  const collision = (path: string): string | undefined => {
-    const key = pathKey(path);
-    const same = occupied.get(key);
-    if (same !== undefined) return same;
-    // A file where a folder is needed, or the other way round.
-    for (const [other, original] of occupied) if (other.startsWith(`${key}/`) || key.startsWith(`${other}/`)) return original;
-    return undefined;
-  };
+  const occupied = new Set([...input.treePaths].filter((path) => !removed.has(path)));
   // In the plan, a document without a file is listed for trash, oldest first within a path.
   for (const entry of plan.trash) {
-    if (!isPlainTitle(entry.title) || !landsInPlace(input.mapping, entry.path, entry.place)) {
-      result.leftOut.push({ path: entry.path, rules: ['title-not-a-path'], lines: [], documentId: entry.documentId });
-      continue;
-    }
-    const other = collision(entry.path);
-    if (other !== undefined) {
-      result.leftOut.push({ path: entry.path, rules: ['duplicate-title'], lines: [], collidesWith: [other], documentId: entry.documentId });
-      continue;
-    }
-    result.create.push(entryOf(entry));
-    occupied.set(pathKey(entry.path), entry.path);
+    if (named.has(entry.documentId)) continue;
+    const folder = folders.get(placeKey(entry.place)) as string;
+    const path = documentPath(folder, entry.title, entry.documentId, occupied, undefined, invalid(entry.place));
+    result.create.push({ path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: posix.relative(folder, path).slice(0, -'.md'.length) });
+    occupied.add(path);
   }
+  result.overwrite.sort((a, b) => compare(a.path, b.path));
+  result.create.sort((a, b) => compare(a.path, b.path));
   result.remove.sort(compare);
   result.leftOut.sort((a, b) => compare(a.path, b.path));
   return result;
@@ -137,26 +161,6 @@ function landsInPlace(mapping: RepositoryMapping, path: string, place: Place): b
   if (zone === undefined) return false;
   const zonePlace: Place = zone.project !== undefined ? { kind: 'project', team: zone.team, project: zone.project } : { kind: 'team', team: zone.team };
   return placeKey(zonePlace) === placeKey(place);
-}
-
-/**
- * A title that is a file path as it is: segments that are not empty, `.` or
- * `..`, without characters that file systems or URLs treat specially, without
- * leading or trailing spaces and dots, and not a name Windows reserves.
- * Other titles wait for a rule that encodes them.
- */
-export function isPlainTitle(title: string): boolean {
-  return title.split('/').every(
-    (segment) =>
-      segment !== '' &&
-      segment !== '.' &&
-      segment !== '..' &&
-      segment.toLowerCase() !== '.git' &&
-      !/[%\\\u0000-\u001f\u007f:*?"<>|]/.test(segment) &&
-      !/^[ ]|[. ]$/.test(segment) &&
-      !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(segment) &&
-      Buffer.byteLength(segment) <= 180,
-  );
 }
 
 /** The dry run's plan: reads the files and lists the documents, without content. */
@@ -173,6 +177,8 @@ export interface ReverseOptions {
   transforms?: readonly BodyTransform[];
   identity?: CommitIdentity;
   progressBatch?: number;
+  /** Downloads files from Linear's upload host; the Linear client's authenticated request by default. */
+  fetch?: typeof fetch;
   /** Stop after this many documents, as if the budget ran low; the test hook's value by default. */
   stopAfterDocuments?: number | undefined;
 }
@@ -196,7 +202,9 @@ export interface ReverseResult {
    * Planned files left out once their text was known: `front-matter-boundary`
    * when the document's text would not stay the file's body (it starts with
    * what reads as front matter), `title-not-a-path` when the new tree maps the
-   * file to another document. Such a file keeps the tracked branch's version.
+   * file to another document, `download-failed` when a file the document
+   * embeds could not be downloaded (gone, over 10 MB, redirected elsewhere).
+   * Such a file keeps the tracked branch's version.
    */
   leftOutAtRecord: Array<{ path: string; rule: string }>;
   notAttempted: string[];
@@ -330,8 +338,9 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
    * ref moved.
    */
   async function record(): Promise<ReverseRecord | null | 'sync-branch-changed'> {
-    const restored = (entry: ReverseEntry): string =>
-      restoreBody(transforms, entry.path, (documents.get(entry.documentId) as LinearDocument).content ?? '', (documents.get(entry.documentId) as LinearDocument).content ?? '');
+    // Each document's body once its embedded files are downloaded, the files, and their upload URLs by content hash.
+    const bodies = new Map<string, { body: string; files: Map<string, Buffer>; uploads: UploadMap }>();
+    const restored = (entry: ReverseEntry): string => (bodies.get(entry.path) as { body: string }).body;
     const textOf = (entry: ReverseEntry): string => {
       const body = restored(entry);
       const tracked = input.texts.get(entry.path);
@@ -356,9 +365,27 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     };
 
     let entries = [...plan.overwrite, ...plan.create];
+    const uploads = await readUploads(git, expected.uploads);
+    const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)));
+    const failed: string[] = [];
+    for (const entry of entries) {
+      const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
+      const tracked = input.texts.get(entry.path);
+      try {
+        // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
+        const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content), uploads, tracked === undefined ? undefined : splitFile(tracked).body);
+        bodies.set(entry.path, captured);
+      } catch (error) {
+        if (error instanceof LinearStoppedError) throw error;
+        // Not downloadable (gone, over the size limit, a redirect elsewhere): the file keeps the tracked branch's version.
+        failed.push(entry.path);
+      }
+    }
+    leaveOut(failed, 'download-failed');
     // The document's text must stay the file's body: text that reads as front
     // matter would become the file's metadata (or a folder's annotation).
     leaveOut(entries.filter((entry) => splitFile(textOf(entry)).body !== restored(entry)).map((entry) => entry.path), 'front-matter-boundary');
+    let lfsObjects: string[] = [];
     let commit = await build(entries);
     // The new tree must map every file back to its document's title and place.
     const created = new Set(plan.create.map((entry) => entry.path));
@@ -374,9 +401,16 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     }
 
     async function build(list: readonly ReverseEntry[]): Promise<Oid> {
-      const changes = new Map<string, string | null>(list.map((entry) => [entry.path, textOf(entry)]));
+      const changes = new Map<string, Buffer | string | null>();
+      for (const entry of list) {
+        for (const [path, bytes] of (bodies.get(entry.path) as { files: Map<string, Buffer> }).files) changes.set(path, bytes);
+        changes.set(entry.path, textOf(entry));
+      }
       for (const path of plan.remove) changes.set(path, null);
-      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false });
+      // `.gitattributes` decides what is stored in LFS, as for a person's commit.
+      const prepared = await prepareLfs(git, fetched.tracked, changes);
+      lfsObjects = prepared.oids;
+      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared.changes, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false });
     }
 
     const trees = (await git.text(['show', '-s', '--format=%T', commit, fetched.tracked])).split('\n');
@@ -402,7 +436,12 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       message: FINAL_IDS_MESSAGE,
       always: (await readInitialSyncProgress(git, expected.ids)) !== null,
     });
-    const uploadsCommit = await commitUploads(git, expected.uploads, await readUploads(git, expected.uploads), identity);
+    // The cache records each downloaded file, so the sync never uploads it again.
+    const finalUploads: UploadMap = new Map(uploads);
+    for (const entry of entries) for (const [hash, url] of (bodies.get(entry.path) as { uploads: UploadMap }).uploads) finalUploads.set(hash, url);
+    const uploadsCommit = await commitUploads(git, expected.uploads, finalUploads, identity);
+    // The objects reach the remote's LFS store before any ref points at their pointers.
+    if (lfsObjects.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...lfsObjects]);
     const updates: RefUpdate[] = [
       { ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit },
       { ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit },
@@ -445,7 +484,7 @@ function mismatches(mapping: RepositoryMapping, entries: readonly ReverseEntry[]
   return entries
     .filter((entry) => {
       const file = mapped.get(entry.path);
-      return file === undefined || placeKey(file.place) !== placeKey(entry.place) || file.title.normalize('NFC') !== entry.title.normalize('NFC');
+      return file === undefined || placeKey(file.place) !== placeKey(entry.place) || file.title.normalize('NFC') !== entry.fileTitle.normalize('NFC');
     })
     .map((entry) => entry.path)
     .sort(compare);
@@ -471,11 +510,7 @@ export function pullRequestBody(plan: ReversePlan, result: ReverseResult): strin
 }
 
 function entryOf(entry: { path: string; title: string; place: Place; documentId: string }): ReverseEntry {
-  return { path: entry.path, title: entry.title, place: entry.place, documentId: entry.documentId };
-}
-
-function pathKey(path: string): string {
-  return path.normalize('NFC').toLowerCase();
+  return { path: entry.path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: entry.title };
 }
 
 function count(n: number, noun: string): string {

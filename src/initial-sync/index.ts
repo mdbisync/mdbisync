@@ -36,7 +36,6 @@ export {
   type ReverseRecord,
   type ReverseResult,
   confirmLinearToGit,
-  isPlainTitle,
   planLinearToGit,
   planLinearToGitFromRepository,
   pullRequestBody,
