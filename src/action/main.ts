@@ -5,7 +5,7 @@
 
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
-import { writeRunReport } from "../run/finish.ts";
+import { unfinishedMessage, writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { runOperation } from "../run/operation.ts";
 import { Git } from "../state/index.ts";
@@ -43,7 +43,7 @@ export async function run(): Promise<void> {
     const unfinished = outcome.confirmed ?? outcome.reverse;
     if (unfinished !== undefined && !unfinished.complete) {
       core.setOutput("code", unfinished.code ?? "");
-      core.setFailed(`${operation}: not finished (${unfinished.code}); run it again with the same inputs`);
+      core.setFailed(unfinishedMessage(operation, unfinished.code));
       return;
     }
     // A sync that skipped documents succeeded (the next run takes them in); a stop, a refused push or a failed write did not.

@@ -67,18 +67,27 @@ export async function updatePullRequest(target: GitHubRepository, number: number
   return updated;
 }
 
+/** Closes a pull request without merging it. */
+export async function closePullRequest(target: GitHubRepository, number: number): Promise<void> {
+  const answer = await request(target, 'PATCH', `/pulls/${number}`, { state: 'closed' });
+  if (answer.status !== 200) throw new PullRequestError('closing a pull request', answer.status);
+}
+
 /**
  * The open pull request from `head` into `base`, opened when there is none.
  * An open one gets the new title and description, which describe its head as
  * it is now.
  */
-export async function ensurePullRequest(target: GitHubRepository, spec: NewPullRequest): Promise<{ pullRequest: PullRequest; opened: boolean }> {
+export async function ensurePullRequest(
+  target: GitHubRepository,
+  spec: NewPullRequest,
+): Promise<{ pullRequest: PullRequest; opened: boolean; updated: boolean }> {
   const open = await findOpenPullRequest(target, spec.head, spec.base);
   if (open !== null) {
-    const current = open.title === spec.title && open.body === spec.body;
-    return { pullRequest: current ? open : await updatePullRequest(target, open.number, spec), opened: false };
+    if (open.title === spec.title && open.body === spec.body) return { pullRequest: open, opened: false, updated: false };
+    return { pullRequest: await updatePullRequest(target, open.number, spec), opened: false, updated: true };
   }
-  return { pullRequest: await openPullRequest(target, spec), opened: true };
+  return { pullRequest: await openPullRequest(target, spec), opened: true, updated: false };
 }
 
 function toPullRequest(value: unknown): PullRequest | null {

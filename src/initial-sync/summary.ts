@@ -155,7 +155,7 @@ export function renderReverseDryRun(plan: ReversePlan): string {
 export function renderReverseConfirmed(plan: ReversePlan, result: ReverseResult): string {
   const outcome = result.complete
     ? result.pullRequest === null
-      ? 'The tracked branch already equals Linear: no pull request is needed. The sync state is recorded.'
+      ? `The tracked branch already equals Linear: no pull request is needed. The sync state is recorded.${result.closedPullRequest === undefined ? '' : ` Pull request #${result.closedPullRequest} of an earlier run had nothing left to carry and is closed.`}`
       : `The sync state is recorded and pull request #${result.pullRequest.number} ${result.pullRequest.opened ? 'is open' : 'was already open'}. A person reviews and merges it; the sync does not run until it is merged.`
     : result.code === 'state-moved'
       ? 'A state ref moved while this run was working, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done.'

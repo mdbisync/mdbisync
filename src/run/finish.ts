@@ -60,7 +60,9 @@ export interface ReverseReport {
   progressPushes: number;
   /** The record commit, which is also the pull request's head. */
   record: { commit: string; moved: boolean; hasTrackedParent: boolean; changesTracked: boolean } | null;
-  pullRequest: { number: number; url: string; opened: boolean } | null;
+  pullRequest: { number: number; url: string; opened: boolean; updated: boolean } | null;
+  /** An earlier run's pull request this run closed, because the tracked branch already equals Linear. */
+  closedPullRequest: number | null;
 }
 
 /** A sync run's writes to Linear, by path. */
@@ -107,7 +109,8 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     complete: confirmed?.complete ?? reverse?.complete ?? false,
     changed:
       (confirmed !== undefined && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true)) ||
-      (reverse !== undefined && (reverse.record?.moved === true || reverse.pullRequest?.opened === true)),
+      (reverse !== undefined &&
+        (reverse.record?.moved === true || reverse.progressPushes > 0 || reverse.pullRequest?.opened === true || reverse.pullRequest?.updated === true || reverse.closedPullRequest !== undefined)),
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
     securityHooks: outcome.setup?.securityHooks ?? null,
     notImplemented: outcome.notImplemented,
@@ -150,7 +153,11 @@ function toReverseReport(result: ReverseResult): ReverseReport {
       result.record === null
         ? null
         : { commit: result.record.linear, moved: result.record.moved, hasTrackedParent: result.record.hasTrackedParent, changesTracked: result.record.changesTracked },
-    pullRequest: result.pullRequest === null ? null : { number: result.pullRequest.number, url: result.pullRequest.url, opened: result.pullRequest.opened },
+    pullRequest:
+      result.pullRequest === null
+        ? null
+        : { number: result.pullRequest.number, url: result.pullRequest.url, opened: result.pullRequest.opened, updated: result.pullRequest.updated },
+    closedPullRequest: result.closedPullRequest ?? null,
   };
 }
 
@@ -207,6 +214,14 @@ function toConfirmedReport(result: ConfirmedResult): ConfirmedReport {
     progressPushes: result.progressPushes,
     reformatted: result.record?.reformatted ?? [],
   };
+}
+
+/** The one-line failure of an initial sync that did not finish: why, and what to do next. */
+export function unfinishedMessage(command: string, code: string | undefined): string {
+  if (code === 'sync-branch-changed') {
+    return `${command}: not finished (${code}); merge or close the pull request of the sync branch and delete the branch, then run it again`;
+  }
+  return `${command}: not finished (${code}); run it again with the same inputs`;
 }
 
 export async function writeRunReport(path: string, outcome: OperationOutcome): Promise<void> {

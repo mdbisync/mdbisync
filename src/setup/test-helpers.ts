@@ -192,9 +192,10 @@ function pullRequests(world: FakeWorld, method: string, rest: string, init: Requ
   if (one !== null && method === 'PATCH') {
     const pr = store.find((candidate) => candidate.number === Number(one[1]));
     if (pr === undefined) return json(404, { message: 'Not Found' });
-    const body = JSON.parse(String(init?.body ?? '{}')) as { title?: string; body?: string };
+    const body = JSON.parse(String(init?.body ?? '{}')) as { title?: string; body?: string; state?: 'open' | 'closed' };
     if (body.title !== undefined) pr.title = body.title;
     if (body.body !== undefined) pr.body = body.body;
+    if (body.state !== undefined) pr.state = body.state;
     world.writes.push(`${method} ${path}`);
     return json(200, pullRequestNode(pr));
   }

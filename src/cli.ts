@@ -15,7 +15,7 @@ import {
 } from "./commands.ts";
 import { type LogEntry } from "./linear/index.ts";
 import { runFix, runLint } from "./format/command.ts";
-import { writeRunReport } from "./run/finish.ts";
+import { unfinishedMessage, writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
 import { Git } from "./state/index.ts";
@@ -111,7 +111,7 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   }
   const unfinished = outcome.confirmed ?? outcome.reverse;
   if (unfinished !== undefined && !unfinished.complete) {
-    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${unfinished.code}); run it again with the same inputs\n` };
+    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${unfinishedMessage(command, unfinished.code)}\n` };
   }
   const write = outcome.sync?.write;
   // Skipped documents are normal (the next run takes them in); a stop, a refused push or a failed write is not.
