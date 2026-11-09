@@ -35,31 +35,76 @@ export function mapImageLinks(content: string, urlToPath: ReadonlyMap<string, st
 }
 
 /**
- * A file's text as Linear should hold it: each relative link to a file whose
- * bytes were uploaded becomes that upload's URL, link by link, so two links
- * to equal bytes at different paths each keep their own place.
+ * The repository file a relative link destination points to, with its
+ * fragment; undefined for an external URL, an anchor in the same document, a
+ * query, or a path above the repository. A leading `/` is the repository root.
  */
-export function linkUploads(text: string, documentPath: string, hashes: ReadonlyMap<string, string>, uploadsByHash: ReadonlyMap<string, string>): string {
-  const base = posix.dirname(documentPath);
-  return text.replace(/(\]\(\s*)(<[^>]*>|[^)\s]+)/g, (whole, open: string, target: string) => {
-    const written = target.startsWith('<') ? target.slice(1, -1) : target;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(written) || written.startsWith('#')) return whole;
-    let path: string;
-    try {
-      path = posix.normalize(posix.join(base, decodeURI(written.split('#')[0] as string)));
-    } catch {
-      return whole;
+export function linkedFile(fromPath: string, destination: string): { path: string; fragment: string | undefined } | undefined {
+  if (destination === '' || destination.startsWith('#') || destination.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(destination)) return undefined;
+  const hash = destination.indexOf('#');
+  const target = hash === -1 ? destination : destination.slice(0, hash);
+  if (target === '' || target.includes('?')) return undefined;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(target);
+  } catch {
+    return undefined;
+  }
+  const path = posix.normalize(decoded.startsWith('/') ? decoded.slice(1) : posix.join(posix.dirname(fromPath), decoded));
+  if (path === '.' || path === '..' || path.startsWith('../') || path.endsWith('/')) return undefined;
+  return { path, fragment: hash === -1 ? undefined : destination.slice(hash + 1) };
+}
+
+/** What a file's links become in Linear. */
+export interface LinkTargets {
+  /** Every tracked file's SHA-256 by path, and the upload URL of each uploaded hash. */
+  hashes: ReadonlyMap<string, string>;
+  uploadsByHash: ReadonlyMap<string, string>;
+  /** Synchronized documents by path, and the URL prefix their links use. */
+  ids?: ReadonlyMap<string, { id: string }>;
+  documentUrlBase?: string;
+}
+
+/**
+ * A file's text as Linear should hold it, link by link:
+ * - a link (not an image) to another synchronized document becomes that
+ *   document's URL by id, `<base>/<id>`, with its fragment kept;
+ * - a link or image to a file whose bytes were uploaded becomes the upload's URL;
+ * - everything else stays as written. Only the path changes: a destination
+ *   in angle brackets keeps them, as Linear stores it.
+ * Each occurrence is mapped on its own, so two links to equal bytes at
+ * different paths each keep their own place.
+ */
+export function linearLinks(text: string, documentPath: string, targets: LinkTargets): string {
+  const replace = (image: boolean, destination: string): string | undefined => {
+    const bracketed = destination.startsWith('<');
+    const written = bracketed ? destination.slice(1, -1) : destination;
+    const file = linkedFile(documentPath, written);
+    if (file === undefined) return undefined;
+    let url: string | undefined;
+    const document = image ? undefined : targets.ids?.get(file.path);
+    if (document !== undefined && targets.documentUrlBase !== undefined && file.path !== documentPath) {
+      url = `${targets.documentUrlBase}/${document.id}${file.fragment === undefined ? '' : `#${file.fragment}`}`;
+    } else {
+      const hash = targets.hashes.get(file.path);
+      url = hash === undefined ? undefined : targets.uploadsByHash.get(hash);
     }
-    const hash = hashes.get(path);
-    const url = hash === undefined ? undefined : uploadsByHash.get(hash);
-    // Only the path becomes the URL: a destination in angle brackets keeps them, as Linear stores it.
-    return url === undefined ? whole : `${open}${target.startsWith('<') ? `<${url}>` : url}`;
-  });
+    return url === undefined ? undefined : bracketed ? `<${url}>` : url;
+  };
+  return text
+    .replace(/(!?)(\[[^\]]*\]\(\s*)(<[^>]*>|[^)\s]+)/g, (whole, bang: string, open: string, destination: string) => {
+      const next = replace(bang === '!', destination);
+      return next === undefined ? whole : `${bang}${open}${next}`;
+    })
+    .replace(/^( {0,3}\[(?!\^)[^\]]+\]:[ \t]*)(<[^>]*>|\S+)/gm, (whole, open: string, destination: string) => {
+      const next = replace(false, destination);
+      return next === undefined ? whole : `${open}${next}`;
+    });
 }
 
 /** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
-export function sameAsFile(text: string, content: string, path: string, sides: Pick<Sides, 'hashes' | 'uploadsByHash'>): boolean {
-  return linkUploads(stripFrontMatter(text), path, sides.hashes, sides.uploadsByHash) === content;
+export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
+  return linearLinks(stripFrontMatter(text), path, sides) === content;
 }
 
 export interface CanaryHit {
@@ -121,6 +166,8 @@ export interface Sides {
   tip: string;
   /** Annotated folders of the tracked branch. */
   folders: Folder[];
+  /** The URL prefix of the workspace's documents, for links between synchronized documents. */
+  documentUrlBase: string;
 }
 
 /** A file's SHA-256: an LFS pointer's object id, else the hash of the bytes. */
@@ -196,7 +243,7 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   const missing = [...ids.values()].map((entry) => entry.id).filter((id) => !documents.has(id));
   if (missing.length > 0) for (const document of await world.app.getDocuments(missing, { withContent: true })) documents.set(document.id, document);
   const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
-  return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders };
+  return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders, documentUrlBase: world.documentUrlBase };
 }
 
 // --- invariants ---------------------------------------------------------------

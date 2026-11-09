@@ -25,7 +25,7 @@ import type { LinearDocument } from '../../../src/linear/index.ts';
 import { listTree, readBlobs, readIds, readUploads, type Git } from '../../../src/state/index.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readFixture, readOptional } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, lfsSize, lostEdits, mapImageLinks, readSides, sameAsFile, snapshotRefs, stripFrontMatter, titleOf, type Sides } from './checks.ts';
+import { canaryScan, fetchRef, fileHash, linearLinks, lfsSize, lostEdits, mapImageLinks, readSides, sameAsFile, snapshotRefs, stripFrontMatter, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { owningFolder, type Folder } from './corpus.ts';
@@ -323,8 +323,10 @@ function resolveLink(fromPath: string, link: string): string {
 }
 
 /** Slug ids of Linear document URLs a text links to. */
-function linkedSlugs(text: string): string[] {
-  return [...text.matchAll(/linear\.app\/[^/\s)]+\/document\/[^\s)#]*?-?([0-9a-f]{12})(?=[\s)#]|$)/g)].map((match) => match[1] as string);
+/** Links to documents of the workspace in a text, as `<id>` or `<id>#<fragment>`. */
+export function documentLinks(text: string, base: string): string[] {
+  const escaped = base.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  return [...text.matchAll(new RegExp(`${escaped}/([A-Za-z0-9-]+)(#[^\\s)>]*)?`, 'g'))].map((match) => `${match[1] as string}${match[2] ?? ''}`);
 }
 
 function manifestOf(ctx: RunContext) {
@@ -633,15 +635,19 @@ export const SUBJECTS: Record<string, Compute> = {
   'input.unsyncedLinks': async (env) => linkMap(env, 'unsynced-git'),
   'input.relativeLinks': async (env) => linkMap(env, 'relative-git'),
   'capture.relativeLinks': async (env) => linkMap(env, 'relative-capture'),
+  // Every link with a fragment to another synchronized document keeps its fragment on the document URL.
   'documents.supportedAnchorsPreserved': async (env) => {
     const view = await env.view();
+    let anchored = 0;
     for (const [path, text] of view.files) {
       const id = view.ids.get(path)?.id;
-      const content = id === undefined ? '' : (view.documents.get(id)?.content ?? '');
-      for (const link of relativeLinks(text).filter((candidate) => candidate.includes('#'))) {
-        if (view.ids.has(resolveLink(path, link)) && !content.includes(`#${link.split('#')[1]}`)) return false;
+      const actual = new Set(documentLinks(id === undefined ? '' : (view.documents.get(id)?.content ?? ''), view.documentUrlBase));
+      for (const expected of documentLinks(linearLinks(stripFrontMatter(text), path, view), view.documentUrlBase).filter((link) => link.includes('#'))) {
+        anchored += 1;
+        if (!actual.has(expected)) return false;
       }
     }
+    if (anchored === 0) throw new Error('the slice has no link with a fragment to another synchronized document');
     return true;
   },
   'documents.oversizeAssetReferences': async (env) => {
@@ -1432,28 +1438,25 @@ async function linkMap(env: Env, kind: LinkKind): Promise<Map<string, string[]>>
     if (tip === null) throw new ProductError('the run has no linear state ref');
     capture = await treeFiles(await person(env.ctx), tip, (path) => paths.includes(path));
   }
-  const slugOf = (path: string) => {
-    const id = view.ids.get(path)?.id;
-    return id === undefined ? undefined : view.documents.get(id)?.slugId;
-  };
   for (const path of paths) {
-    const text = view.files.get(path) ?? '';
+    const text = stripFrontMatter(view.files.get(path) ?? '');
     const id = view.ids.get(path)?.id;
     const content = id === undefined ? '' : (view.documents.get(id)?.content ?? '');
     const links = relativeLinks(text);
-    const isSynced = (link: string) => view.ids.has(resolveLink(path, link));
     switch (kind) {
       case 'synced-linear':
-        result.set(path, sorted(linkedSlugs(content)));
+        // The documents this one links to, by id and fragment.
+        result.set(path, sorted(documentLinks(content, view.documentUrlBase)));
         break;
       case 'synced-expected':
-        result.set(path, sorted(links.filter(isSynced).map((link) => slugOf(resolveLink(path, link)) ?? 'unknown')));
+        result.set(path, sorted(documentLinks(linearLinks(text, path, view), view.documentUrlBase)));
         break;
       case 'unsynced-linear':
         result.set(path, sorted(relativeLinks(content)));
         break;
       case 'unsynced-git':
-        result.set(path, sorted(links.filter((link) => !isSynced(link))));
+        // Links that stay as written: to files that are neither synchronized documents nor uploads.
+        result.set(path, sorted(relativeLinks(linearLinks(text, path, view))));
         break;
       case 'relative-git':
         result.set(path, sorted(links));

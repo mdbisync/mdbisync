@@ -92,6 +92,8 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   const editors = { 'editor-a': editorClient(config.editors['editor-a']), 'editor-b': editorClient(config.editors['editor-b']) };
   const world = new LinearWorld(editors['editor-a']);
   const teams = new Map((await world.teams()).map((team) => [team.key, team]));
+  // Links between synchronized documents are written as document URLs of this workspace.
+  const organization = await appClient.request<{ organization: { urlKey: string } }>('Organization', 'query', 'query Organization { organization { urlKey } }');
   const live: LiveWorld = {
     sandbox,
     rest: new SandboxRest(config, token.token),
@@ -107,6 +109,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     world,
     engineApp: { clientId: app.clientId, clientSecret: app.clientSecret },
     seededDocuments: [],
+    documentUrlBase: `https://linear.app/${organization.organization.urlKey}/document`,
     async download(url) {
       // Personal API keys go in the Authorization header as they are.
       const response = await fetch(url, { headers: { authorization: config.editors['editor-a'] } });

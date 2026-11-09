@@ -16,12 +16,12 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, reviewDocument, seeded
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { linkUploads, sameAsFile } from './checks.ts';
+import { linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, runStep, STEP_ACTIONS } from './steps.ts';
-import { encodeTitlePath, refreshView, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
+import { documentLinks, encodeTitlePath, refreshView, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
 import { maxOverlap, unzip, waitForRun } from './workflows.ts';
 
 const roots: string[] = [];
@@ -266,10 +266,32 @@ describe('oracles', () => {
     const hashes = new Map([['eng/media/a.png', 'h1'], ['eng/media/copy-of-a.png', 'h1'], ['eng/notes.pdf', 'h2']]);
     const uploads = new Map([['h1', 'https://uploads.linear.app/x/one'], ['h2', 'https://uploads.linear.app/x/two']]);
     const text = '![a](media/a.png) and ![b](<media/copy-of-a.png>) and [pdf](notes.pdf) and [web](https://example.com/a.png) and [anchor](#top)';
-    assert.equal(linkUploads(text, 'eng/plan.md', hashes, uploads), '![a](https://uploads.linear.app/x/one) and ![b](<https://uploads.linear.app/x/one>) and [pdf](https://uploads.linear.app/x/two) and [web](https://example.com/a.png) and [anchor](#top)');
+    assert.equal(linearLinks(text, 'eng/plan.md', { hashes, uploadsByHash: uploads }), '![a](https://uploads.linear.app/x/one) and ![b](<https://uploads.linear.app/x/one>) and [pdf](https://uploads.linear.app/x/two) and [web](https://example.com/a.png) and [anchor](#top)');
     // An attachment link as the fixer writes it keeps its angle brackets around the URL.
-    assert.equal(linkUploads('The [summary](<../assets/summary.pdf>)', 'eng/notes/plan.md', new Map([['eng/assets/summary.pdf', 'h2']]), uploads), 'The [summary](<https://uploads.linear.app/x/two>)');
+    assert.equal(linearLinks('The [summary](<../assets/summary.pdf>)', 'eng/notes/plan.md', { hashes: new Map([['eng/assets/summary.pdf', 'h2']]), uploadsByHash: uploads }), 'The [summary](<https://uploads.linear.app/x/two>)');
     assert.ok(sameAsFile('---\na: 1\n---\n![a](media/a.png)\n', '![a](https://uploads.linear.app/x/one)\n', 'eng/plan.md', { hashes, uploadsByHash: uploads }));
+  });
+
+  it('map links to other synchronized documents to their URLs by id, fragment and brackets kept', () => {
+    const targets = {
+      hashes: new Map([['eng/media/a.png', 'h1']]),
+      uploadsByHash: new Map([['h1', 'https://uploads.linear.app/x/one']]),
+      ids: new Map([['eng/guide.md', { id: 'g-1' }], ['eng/notes/plan.md', { id: 'p-1' }], ['docs/start.md', { id: 's-1' }]]),
+      documentUrlBase: 'https://linear.app/acme/document',
+    };
+    const text = [
+      'See [the guide](../guide.md#setup), [start](</docs/start.md>) and [self](plan.md#top).',
+      'Not synced: [data](../data.csv). External: [site](https://example.com). Image: ![a](../media/a.png).',
+      '',
+      '[ref]: ../guide.md',
+    ].join('\n');
+    assert.equal(linearLinks(text, 'eng/notes/plan.md', targets), [
+      'See [the guide](https://linear.app/acme/document/g-1#setup), [start](<https://linear.app/acme/document/s-1>) and [self](plan.md#top).',
+      'Not synced: [data](../data.csv). External: [site](https://example.com). Image: ![a](https://uploads.linear.app/x/one).',
+      '',
+      '[ref]: https://linear.app/acme/document/g-1',
+    ].join('\n'));
+    assert.deepEqual(documentLinks('[a](https://linear.app/acme/document/g-1#setup) [b](<https://linear.app/acme/document/s-1>) [c](https://linear.app/other/document/x)', targets.documentUrlBase), ['g-1#setup', 's-1']);
   });
 
   it('leave a document deleted for good out of every list the proxy passes on', () => {
@@ -430,6 +452,7 @@ async function fakeRun(options: { review?: string } = {}) {
     engineApp: { clientId: 'id', clientSecret: 'secret' },
     seededDocuments: [],
     download: async () => Buffer.alloc(0),
+    documentUrlBase: 'https://linear.app/test/document',
   };
   let person: Git | undefined;
   const faults: unknown[] = [];
@@ -649,6 +672,32 @@ describe('subjects', () => {
     assert.deepEqual(await resolveSubject(ctx, 'ids.paths'), { known: true, value: ['docs/handbook/README.md', 'docs/handbook/start.md', 'eng/platform/README.md', 'eng/platform/notes.md', 'eng/platform/plan.md'] });
     assert.deepEqual(await resolveSubject(ctx, 'conflicts.markerSetCount'), { known: true, value: 0 });
     assert.deepEqual(await resolveSubject(ctx, 'documents.duplicateCount'), { known: true, value: 0 });
+  });
+
+  it('check links between documents (L1-12) against the documents Linear holds', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    // plan.md links notes.md with a fragment and an unsynchronized file; Linear holds it with the document URL.
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    const notes = ids['eng/platform/notes.md']?.id as string;
+    const git = await ctx.person();
+    writeFileSync(join(git.dir, 'eng/platform/plan.md'), '# Plan\n\nSee [notes](notes.md#dates) and [data](data.csv).\n');
+    await git.run(['commit', '--quiet', '--all', '-m', 'Link the notes']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    for (const file of ctx.live?.manifest.files ?? []) if (file.path === 'eng/platform/plan.md') file.group = 'links';
+    (linear.documents.get(plan) as LinearDocument).content = `# Plan\n\nSee [notes](https://linear.app/test/document/${notes}#dates) and [data](data.csv).\n`;
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'documents.syncedLinks'), await resolveSubject(ctx, 'expected.linearUrls'));
+    assert.deepEqual((await resolveSubject(ctx, 'documents.syncedLinks')).value, new Map([['eng/platform/plan.md', [`${notes}#dates`]]]));
+    assert.deepEqual(await resolveSubject(ctx, 'documents.supportedAnchorsPreserved'), { known: true, value: true });
+    assert.deepEqual((await resolveSubject(ctx, 'documents.unsyncedLinks')).value, new Map([['eng/platform/plan.md', ['data.csv']]]));
+    assert.deepEqual(await resolveSubject(ctx, 'documents.unsyncedLinks'), await resolveSubject(ctx, 'input.unsyncedLinks'));
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const sides = await readSides(ctx);
+    assert.deepEqual((await INVARIANT_CHECKS.I1(ctx, async () => sides)).detail?.includes('plan.md') ?? false, false);
+    // A fragment lost on the way fails the anchor assertion.
+    (linear.documents.get(plan) as LinearDocument).content = `# Plan\n\nSee [notes](https://linear.app/test/document/${notes}) and [data](data.csv).\n`;
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'documents.supportedAnchorsPreserved'), { known: true, value: false });
   });
 
   it('count the engine\'s commits as git writes and not the scenario\'s own', async () => {
