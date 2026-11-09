@@ -17,7 +17,7 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { compare, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { compare, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
@@ -30,7 +30,7 @@ import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
 import { commitAsPerson, readRunIds } from './step-helpers.ts';
-import { documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
+import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
 import { prerequisiteErrors } from './workflow-files.ts';
@@ -522,6 +522,12 @@ describe('titles that are not paths', () => {
     assert.equal(encodeTitlePath('notes%3A'), 'notes%253A');
     assert.equal(encodeTitlePath('tab\there\u007f'), 'tab%09here%7F');
   });
+  it('cut a segment of more than 180 bytes to 40 characters and a hash of the segment', () => {
+    // Hashes written by hand: SHA-256 of 'x' x 200 and of 'é' x 100, first 16 hex digits.
+    assert.equal(encodeTitlePath(`a/${'x'.repeat(200)}`), `a/${'x'.repeat(40)}~aa20c23e32018340`);
+    assert.equal(encodeTitlePath('é'.repeat(100)), `${'é'.repeat(40)}~f42ec48e1e4b487e`, '200 bytes in 100 characters');
+    assert.equal(encodeTitlePath('x'.repeat(180)), 'x'.repeat(180), '180 bytes stay');
+  });
   it('keep leading spaces and encode trailing periods and spaces', () => {
     assert.equal(encodeTitlePath('  notes/leading spaces'), '  notes/leading spaces');
     assert.equal(encodeTitlePath(' leading'), ' leading');
@@ -669,6 +675,16 @@ function engineRun(command: EngineResult['command'], report: Record<string, unkn
  * documents, their ids ref, and Linear holding the same texts. With `hooks`,
  * the person's commits go through the corpus's hooks from a local hook repository.
  */
+/** Replaces the run's uploads state ref with one commit holding these hash → URL entries. */
+async function writeUploads(ctx: RunContext, entries: Record<string, string>): Promise<void> {
+  const git = await ctx.person();
+  const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(entries) })).trim();
+  const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
+  const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
+  await git.run(['push', '--quiet', 'origin', `+${commit}:${ctx.names.refPrefix}/uploads`]);
+  refreshView(ctx);
+}
+
 async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
@@ -1605,15 +1621,60 @@ describe('subjects', () => {
     // No uploads yet: the written document's image is missing from the cache.
     assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: false });
     // Once the written document's image is cached, the left-out document's image does not count.
-    const kept = createHash('sha256').update('kept bytes').digest('hex');
-    const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify({ [kept]: 'https://uploads.linear.app/x/kept' }) })).trim();
-    const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
-    const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
-    await git.run(['push', '--quiet', 'origin', `${commit}:${ctx.names.refPrefix}/uploads`]);
-    refreshView(ctx);
+    await writeUploads(ctx, { [fileHash(Buffer.from('kept bytes'))]: 'https://uploads.linear.app/x/kept' });
     assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: true });
     void linear;
     void ids;
+  });
+
+  it('expect no cache entry for an image link the input already held broken, and still one for every real image', async () => {
+    const { ctx } = await fakeRun();
+    const git = await ctx.person();
+    const notes = join(git.dir, 'eng/platform/notes.md');
+    const push = async (message: string) => {
+      await git.run(['add', '--all']);
+      await git.run(['commit', '--quiet', '-m', message]);
+      await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+      refreshView(ctx);
+    };
+    // The input: a written document with a deliberately broken image link beside two real images.
+    mkdirSync(join(git.dir, 'eng/platform/media'), { recursive: true });
+    const input = '# Notes\n\n![gone](../assets/does-not-exist.png) ![a](media/first.png) ![b](media/second.png)\n';
+    writeFileSync(notes, input);
+    writeFileSync(join(git.dir, 'eng/platform/media/first.png'), 'first bytes');
+    writeFileSync(join(git.dir, 'eng/platform/media/second.png'), 'second bytes');
+    await push('Images and a broken reference');
+    ctx.observations.set(BEFORE_VIEW, await takeStartView(ctx));
+    const [first, second, other] = ['first bytes', 'second bytes', 'other bytes'].map((text) => fileHash(Buffer.from(text))) as [string, string, string];
+    const cacheComplete = async () => (await resolveSubject(ctx, 'uploads.cacheComplete')).value;
+    // No uploads: the real images' missing entries fail.
+    assert.equal(await cacheComplete(), false);
+    // One real image cached, the other not: its missing entry still fails, whatever the broken link does.
+    await writeUploads(ctx, { [first]: 'https://uploads.linear.app/x/first' });
+    assert.equal(await cacheComplete(), false);
+    // An entry under another file's hash does not stand in for the real image's own.
+    await writeUploads(ctx, { [first]: 'https://uploads.linear.app/x/first', [other]: 'https://uploads.linear.app/x/other' });
+    assert.equal(await cacheComplete(), false);
+    // Both real images cached: the input's broken link has no file to upload, so it expects nothing and the check passes.
+    await writeUploads(ctx, { [first]: 'https://uploads.linear.app/x/first', [second]: 'https://uploads.linear.app/x/second' });
+    assert.equal(await cacheComplete(), true);
+    // The same broken target added to another written document is the run's link, not the input's: it fails.
+    const plan = join(git.dir, 'eng/platform/plan.md');
+    const planText = readFileSync(plan, 'utf8');
+    writeFileSync(plan, `${planText}\n![gone too](../assets/does-not-exist.png)\n`);
+    await push('The broken target in another document');
+    assert.equal(await cacheComplete(), false);
+    writeFileSync(plan, planText);
+    await push('Restore the plan');
+    assert.equal(await cacheComplete(), true);
+    // A link the run adds to a file the branch does not hold is not the input's broken reference: it still fails.
+    writeFileSync(notes, `${input}\n![new](media/new.png)\n`);
+    await push('A link to an image that was never committed');
+    assert.equal(await cacheComplete(), false);
+    // A document whose only image is the broken one checks nothing, so the check does not pass.
+    writeFileSync(notes, '# Notes\n\n![gone](../assets/does-not-exist.png)\n');
+    await push('Only the broken reference');
+    assert.equal(await cacheComplete(), false);
   });
 
   it('read conflict marks by the palette names specs use, from Linear\'s hex colors', async () => {
@@ -1763,6 +1824,49 @@ describe('subjects', () => {
     assert.match(detail, /eng\/platform\/notes\.md: its document is archived/);
     assert.match(detail, /docs\/handbook\/start\.md: its document is not in Linear/);
     assert.deepEqual(reads.sort(), [plan, notes, start].sort());
+  });
+
+  it('accept encoded and collision file names in I7 and still catch a wrong title, identity or place', async () => {
+    const { ctx, ids } = await fakeRun();
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const base = await readSides(ctx);
+    const start = ids['docs/handbook/start.md']?.id as string;
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    const suffix = (id: string) => createHash('sha256').update(id).digest('hex').slice(0, 12);
+    // The handbook document retitled `Notes: draft?*` (L2-22) and its file at `path`, mapped to `id`.
+    const i7 = async (path: string, title = 'Notes: draft?*', id = start, projectId = OTHER.id) => {
+      const files = new Map(base.files);
+      const text = files.get('docs/handbook/start.md') as string;
+      files.delete('docs/handbook/start.md');
+      files.set(path, text);
+      const mapped = new Map(base.ids);
+      mapped.delete('docs/handbook/start.md');
+      mapped.set(path, { id });
+      const documents = new Map(base.documents);
+      documents.set(start, { ...(base.documents.get(start) as LinearDocument), title, projectId });
+      return INVARIANT_CHECKS.I7(ctx, async () => ({ ...base, files, ids: mapped, documents }));
+    };
+    const pass = { name: 'I7', ok: true };
+    assert.deepEqual(await i7('docs/handbook/Notes%3A draft%3F%2A.md'), pass);
+    assert.deepEqual(await i7('docs/handbook/Notes: draft?*.md'), pass, 'a git spelling of the title is kept');
+    assert.deepEqual(await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(start)}.md`), pass);
+    assert.deepEqual(await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(start)}-1.md`), pass);
+    assert.deepEqual(await i7(`docs/handbook/a%2Fb %7C c~${suffix(start)}.md`, 'a/b | c'), pass, 'a flattened collision name');
+    assert.deepEqual(await i7('docs/handbook/a/b %7C c.md', 'a/b | c'), pass);
+    const wrong = (path: string) => new RegExp(`^1 problems: ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: title differs from its path$`);
+    // A wrong title, another document's suffix and a name outside the title's place all fail.
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F.md')).detail ?? '', wrong('docs/handbook/Notes%3A draft%3F.md'));
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F%2A.md', 'Notes: draft?')).detail ?? '', wrong('docs/handbook/Notes%3A draft%3F%2A.md'));
+    assert.match((await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(plan)}.md`)).detail ?? '', wrong(`docs/handbook/Notes%3A draft%3F%2A~${suffix(plan)}.md`));
+    assert.match((await i7(`docs/handbook/a/b %7C c~${suffix(start)}.md`, 'a/b | c')).detail ?? '', wrong(`docs/handbook/a/b %7C c~${suffix(start)}.md`));
+    assert.match((await i7('docs/handbook/drafts/Notes%3A draft%3F%2A.md')).detail ?? '', wrong('docs/handbook/drafts/Notes%3A draft%3F%2A.md'));
+    // A nested title's file directly in its folder, without the title's subfolder.
+    assert.match((await i7('docs/handbook/b %7C c.md', 'a/b | c')).detail ?? '', wrong('docs/handbook/b %7C c.md'));
+    // The right name for a document of another project: its folder is not the document's place.
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F%2A.md', 'Notes: draft?*', start, PROJECT.id)).detail ?? '', /^1 problems: docs\/handbook\/Notes%3A draft%3F%2A\.md: its document is in project:Field notes aaaaaa, not in its folder's project:Garden plans aaaaaa$/);
+    assert.match((await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(start)}.md`, 'Notes: draft?*', start, PROJECT.id)).detail ?? '', /its document is in project:Field notes aaaaaa/);
+    // Another document's identity on the right name: its own title differs.
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F%2A.md', 'Notes: draft?*', plan)).detail ?? '', /title differs from its path/);
   });
 
   it('count the engine\'s commits as git writes and not the scenario\'s own', async () => {
