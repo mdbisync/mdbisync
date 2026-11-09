@@ -89,6 +89,11 @@
     },
     "assertions": [
       {
+        "subject": "hook.source",
+        "operator": "equal",
+        "expected": "published"
+      },
+      {
         "subject": "runs.0.exitCode",
         "operator": "equal",
         "expected": 1
