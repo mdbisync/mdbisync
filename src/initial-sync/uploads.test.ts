@@ -436,6 +436,18 @@ describe('file links in a document', () => {
     assert.equal(resolveTarget('b.md', 'dir/'), null);
   });
 
+  it('an uploaded MP3 alone in a bullet round-trips byte for byte in the form fix writes', () => {
+    // Linear stores the link on the bullet's line with the upload URL in angle brackets.
+    const source = '## Attachments\n\n* \n  [Voice note](../media/voice-note.mp3)\n\nRef';
+    const fixed = fixText(source);
+    assert.equal(fixed, '## Attachments\n\n* [Voice note](<../media/voice-note.mp3>)\n\nRef');
+    const hash = '3'.repeat(64);
+    const isFile = (target: string) => target === 'media/voice-note.mp3';
+    const links = findFileLinks('notes/a.md', fixed, isFile).map((link) => ({ written: link.written, suffix: link.suffix, hash }));
+    const stored = '## Attachments\n\n* [Voice note](<https://uploads.example.test/3>)\n\nRef';
+    assert.equal(restoreFileLinks(stored, links, new Map([[hash, 'https://uploads.example.test/3']])), fixed);
+  });
+
   it('maps upload URLs back to each link as it was written, in order', () => {
     const uploads = new Map([
       ['1'.repeat(64), 'https://uploads.example.test/1'],
