@@ -10,6 +10,8 @@ export interface GitHubRepository {
   token: string;
   apiUrl?: string | undefined;
   fetch?: typeof fetch;
+  /** Bounds a sequence of requests, including reading their bodies. */
+  signal?: AbortSignal;
 }
 
 export interface PullRequest {
@@ -122,7 +124,7 @@ export async function request(target: GitHubRepository, method: string, path: st
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(target.signal ? [target.signal] : [])]),
     });
     status = response.status;
     text = await response.text();

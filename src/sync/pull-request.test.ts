@@ -13,8 +13,8 @@ import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from
 import { type RunReport } from '../run/finish.ts';
 import { type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
-import { type Fixture, createFixture } from '../state/test-helpers.ts';
-import { SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
+import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
+import { DEFAULT_MERGE_GRACE_SECONDS, SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
 import { CHECK_NAME } from '../../test/corpus/check-workflow.ts';
 
 const CANARY = 'kx-3c9d1e72';
@@ -45,6 +45,7 @@ describe('sync: the sync pull request', () => {
   let fixture: Fixture;
   let cwd: string;
   let world: FakeWorld;
+  let fetchOverride: typeof fetch | undefined;
   /** The tracked branch after initial sync: every later commit on it must be the scenario's own or a sync merge (I3). */
   let start: string;
   /** Every value the sync branch held, in order: it only moves forward (I4). */
@@ -57,6 +58,7 @@ describe('sync: the sync pull request', () => {
     await fixture.seed(TREE);
     cwd = (await fixture.clone('engine')).dir;
     world = fakeWorld();
+    fetchOverride = undefined;
     world.github.checks = new Map();
     world.github.merge = mergeOnRemote;
     const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
@@ -72,7 +74,7 @@ describe('sync: the sync pull request', () => {
     MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
     MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
     MDBISYNC_LINEAR_API_URL: LINEAR_API,
-    MDBISYNC_GITHUB_TOKEN: 'gh-token',
+    MDBISYNC_MERGE_GRACE_SECONDS: '0', MDBISYNC_GITHUB_TOKEN: 'gh-token',
     MDBISYNC_GITHUB_API_URL: GITHUB_API,
     MDBISYNC_REPOSITORY: 'owner/repo',
     MDBISYNC_REPORT_FILE: reportFile(),
@@ -84,7 +86,7 @@ describe('sync: the sync pull request', () => {
     await rm(reportFile(), { force: true });
     await rm(summaryFile(), { force: true });
     const writesBefore = world.writes.length;
-    const result = await runCli([command], { env: env(extra), cwd, fetch: fakeFetch(world) });
+    const result = await runCli([command], { env: env(extra), cwd, fetch: fetchOverride ?? fakeFetch(world) });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
@@ -150,6 +152,102 @@ describe('sync: the sync pull request', () => {
   }
   const checksOn = (sha: string, checks: FakeCheck[]) => world.github.checks?.set(sha, checks);
   const openPullRequests = () => world.github.pullRequests.filter((pr) => pr.state === 'open');
+
+  it('keeps action and CLI merge-grace defaults aligned', async () => {
+    const action = await readFile('action.yml', 'utf8');
+    assert.match(action, new RegExp(`merge-grace-seconds:[\\s\\S]*?default: \"${DEFAULT_MERGE_GRACE_SECONDS}\"`));
+  });
+
+  it('merges a new pull request in the same run after checks pass', async () => {
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
+    const transport = fakeFetch(world);
+    let observations = 0;
+    fetchOverride = async (input, init) => {
+      if (String(input).includes('/check-runs?') && world.github.pullRequests.length > 0) {
+        checksOn(await rev(SYNC_BRANCH), [{ name: 'ci', status: ++observations === 1 ? 'in_progress' : 'completed', conclusion: 'success' }]);
+      }
+      return transport(input, init);
+    };
+    const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '25' });
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(run.writes, ['POST /pulls', 'PUT /pulls/1/merge']);
+    assert.ok(run.report.pullRequest?.merged);
+    const head = await rev(SYNC_BRANCH);
+    assert.equal((await fixture.remote.text(['show', '-s', '--format=%P', await rev('refs/heads/main')])).split(' ')[1], head);
+  });
+
+  it('merges an existing pull request in the run that advances its head', async () => {
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nFirst edit.\n');
+    await sync();
+    const firstHead = await rev(SYNC_BRANCH);
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nSecond edit.\n');
+    const transport = fakeFetch(world);
+    fetchOverride = async (input, init) => {
+      if (String(input).includes('/check-runs?')) {
+        const head = await rev(SYNC_BRANCH);
+        checksOn(head, [{ name: 'ci', status: 'completed', conclusion: 'success' }]);
+      }
+      return transport(input, init);
+    };
+    const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '25' });
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.pullRequest?.branchMoved, true);
+    assert.ok(run.report.pullRequest?.merged);
+    assert.notEqual(await rev(SYNC_BRANCH), firstHead);
+    assert.equal(world.github.pullRequests.length, 1);
+  });
+
+  it('leaves pending checks open at the grace deadline, and reports failed checks as setup errors', async () => {
+    for (const failed of [false, true]) {
+      await editInLinear('eng/notes/plan.md', `# Plan\n\nReady ${failed}.\n`);
+      const transport = fakeFetch(world);
+      fetchOverride = async (input, init) => {
+        if (String(input).includes('/check-runs?') && world.github.pullRequests.length > 0) checksOn(await rev(SYNC_BRANCH), [{ name: 'ci', status: failed ? 'completed' : 'queued', conclusion: 'failure' }]);
+        return transport(input, init);
+      };
+      const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '1' });
+      assert.equal(run.result.exitCode, failed ? SETUP_FAILED_EXIT_CODE : 0, run.result.stderr);
+      assert.equal(run.report.pullRequest?.merged, null);
+      assert.equal(await rev('refs/heads/main'), start);
+      if (failed) assert.equal(run.report.pullRequest?.code, 'check-failed');
+      else assert.match(run.summary, /Waiting for `ci`/);
+    }
+  });
+
+  it('merges a head with no checks after the registration settle time using the default grace', async () => {
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
+    const began = performance.now();
+    const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '' });
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.ok(run.report.pullRequest?.merged);
+    assert.ok(performance.now() - began >= 15_000);
+    const quiet = await cli('sync');
+    assert.deepEqual(quiet.writes, []);
+  });
+
+  it('cannot merge a branch that moves while waiting using checks from its old head', async () => {
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
+    const transport = fakeFetch(world);
+    let observations = 0;
+    fetchOverride = async (input, init) => {
+      if (String(input).includes('/check-runs?') && world.github.pullRequests.length > 0) {
+        const head = await rev(SYNC_BRANCH);
+        checksOn(head, [{ name: 'ci', status: ++observations === 1 ? 'queued' : 'completed', conclusion: 'success' }]);
+        if (observations === 2) {
+          const tree = await rev(`${head}^{tree}`);
+          const next = await fixture.remote.text(['commit-tree', tree, '-p', head, '-m', 'Concurrent edit'], {
+            env: { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email },
+          });
+          await fixture.remote.run(['update-ref', SYNC_BRANCH, next, head]);
+        }
+      }
+      return transport(input, init);
+    };
+    const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '25' });
+    assert.equal(run.report.pullRequest?.merged, null);
+    assert.equal(run.report.pullRequest?.code, 'merge-refused');
+    assert.equal(await rev('refs/heads/main'), start);
+  });
 
   it('L2-20: a Linear edit reaches the tracked branch through the sync pull request, merged with a merge commit, front matter kept', async () => {
     await editInLinear('eng/notes/plan.md', `# Plan\n\nSteps one, two and three. ${CANARY}\n`);

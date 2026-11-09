@@ -47,3 +47,12 @@ it('validates a configurable document cap before contacting services', () => {
   }
   assert.equal(readInputs(given({ ...REQUIRED, repository: 'o/r', 'document-cap': '42' }), {}).documentCap, 42);
 });
+
+it('validates the bounded merge grace, including zero for deferred merging', () => {
+  for (const grace of ['-1', '1.5', 'NaN', 'Infinity', '121', '999999999999999999']) {
+    assert.throws(() => readInputs(given({ ...REQUIRED, repository: 'o/r', 'merge-grace-seconds': grace }), {}), InputError);
+  }
+  for (const grace of ['0', '60', '120']) {
+    assert.equal(readInputs(given({ ...REQUIRED, repository: 'o/r', 'merge-grace-seconds': grace }), {}).mergeGraceSeconds, Number(grace));
+  }
+});

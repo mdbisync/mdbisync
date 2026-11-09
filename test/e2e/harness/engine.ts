@@ -72,6 +72,8 @@ export function engineInputs(call: EngineCall): Record<string, string> {
     'sync-branch': call.names.syncBranch,
     'state-ref-prefix': call.names.refPrefix,
     'report-file': call.reportFile,
+    // These scenarios exercise deferred merging; callers can override it.
+    'merge-grace-seconds': '0',
   };
   if (call.command === 'initial-sync') {
     inputs.direction = call.direction ?? 'git-to-linear';

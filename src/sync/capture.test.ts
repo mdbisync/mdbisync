@@ -58,7 +58,7 @@ describe('capture from Linear', () => {
     const reportFile = join(fixture.root, 'capture-report.json');
     const result = await runCli(['sync'], {cwd: context.git.dir, fetch: fakeFetch(world), env: {
       MDBISYNC_LINEAR_CLIENT_ID: 'client', MDBISYNC_LINEAR_CLIENT_SECRET: 'secret', MDBISYNC_LINEAR_API_URL: LINEAR_API,
-      MDBISYNC_GITHUB_TOKEN: 'token', MDBISYNC_GITHUB_API_URL: GITHUB_API, MDBISYNC_REPOSITORY: 'example/repository', MDBISYNC_REPORT_FILE: reportFile,
+      MDBISYNC_MERGE_GRACE_SECONDS: '0', MDBISYNC_GITHUB_TOKEN: 'token', MDBISYNC_GITHUB_API_URL: GITHUB_API, MDBISYNC_REPOSITORY: 'example/repository', MDBISYNC_REPORT_FILE: reportFile,
     }});
     assert.equal(result.exitCode, 0, result.stderr);
     assert.ok(!result.stdout.includes('Private body canary'));
@@ -123,7 +123,7 @@ describe('capture from Linear', () => {
     };
     const result = await runCli(['sync'], {cwd:context.git.dir, fetch:fetcher, env:{
       MDBISYNC_LINEAR_CLIENT_ID:'client', MDBISYNC_LINEAR_CLIENT_SECRET:'secret', MDBISYNC_LINEAR_API_URL:LINEAR_API,
-      MDBISYNC_GITHUB_TOKEN:'token', MDBISYNC_GITHUB_API_URL:GITHUB_API, MDBISYNC_REPOSITORY:'example/repository', MDBISYNC_REPORT_FILE:reportFile,
+      MDBISYNC_MERGE_GRACE_SECONDS: '0', MDBISYNC_GITHUB_TOKEN:'token', MDBISYNC_GITHUB_API_URL:GITHUB_API, MDBISYNC_REPOSITORY:'example/repository', MDBISYNC_REPORT_FILE:reportFile,
     }});
     // Every partial sync exits with the incomplete code, so a script can tell it from a complete one.
     assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE, result.stderr);

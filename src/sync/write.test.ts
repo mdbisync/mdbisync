@@ -76,7 +76,7 @@ describe('sync: the tracked branch to Linear', () => {
     MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
     MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
     MDBISYNC_LINEAR_API_URL: LINEAR_API,
-    MDBISYNC_GITHUB_TOKEN: 'gh-token',
+    MDBISYNC_MERGE_GRACE_SECONDS: '0', MDBISYNC_GITHUB_TOKEN: 'gh-token',
     MDBISYNC_GITHUB_API_URL: GITHUB_API,
     MDBISYNC_REPOSITORY: 'owner/repo',
     MDBISYNC_REPORT_FILE: reportFile(),

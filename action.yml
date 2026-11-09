@@ -42,6 +42,10 @@ inputs:
     description: "Maximum documents per Linear container, including trash. Warn at 90%; stop before writing above the cap."
     required: false
     default: "1000"
+  merge-grace-seconds:
+    description: "Seconds to wait for checks after opening or updating the sync pull request (0 to 120). Zero leaves the merge to a later run."
+    required: false
+    default: "60"
   report-file:
     description: "Path to write the run's report as JSON (names and states only); the job summary goes beside it as summary.md. Leave empty for none."
     required: false
