@@ -87,5 +87,16 @@
   "skippedConcurrentDocument": false,
   "capturedTrackedTip": "c0e66191259920baa3abdfa6f88abac44bfb65db",
   "rereadWindowMs": null,
-  "linearToGit": null
+  "linearToGit": null,
+  "writes": {
+    "linear": {},
+    "git": {
+      "ids": 1,
+      "linear": 1,
+      "syncBranch": 1
+    },
+    "pullRequests": {
+      "opened": 1
+    }
+  }
 }

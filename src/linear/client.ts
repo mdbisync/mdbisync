@@ -255,6 +255,7 @@ export class LinearClient {
       { input: { ...input, ...place }, withContent: true },
     );
     const created = toDocument(succeeded('CreateDocument', data.documentCreate).document);
+    this.stats.wrote('CreateDocument');
     return this.#storedRecord('CreateDocument', created);
   }
 
@@ -275,6 +276,7 @@ export class LinearClient {
       { id, input: patch, withContent: patch.content !== undefined },
     );
     const updated = toDocument(succeeded('UpdateDocument', data.documentUpdate).document);
+    this.stats.wrote('UpdateDocument');
     return patch.content === undefined ? updated : this.#storedRecord('UpdateDocument', updated);
   }
 
@@ -287,6 +289,7 @@ export class LinearClient {
       { id },
     );
     succeeded('TrashDocument', data.documentDelete);
+    this.stats.wrote('TrashDocument');
   }
 
   async restoreDocument(id: string): Promise<void> {
@@ -297,6 +300,7 @@ export class LinearClient {
       { id },
     );
     succeeded('RestoreDocument', data.documentUnarchive);
+    this.stats.wrote('RestoreDocument');
   }
 
   /** Comments on a document; `documentContentId` comes from the document. */
@@ -309,7 +313,9 @@ export class LinearClient {
       }`,
       { input: { documentContentId, body, ...(id === undefined ? {} : { id }) } },
     );
-    return succeeded('CommentOnDocument', data.commentCreate).comment;
+    const comment = succeeded('CommentOnDocument', data.commentCreate).comment;
+    this.stats.wrote('CommentOnDocument');
+    return comment;
   }
 
   /** Update a previously posted notice without adding another comment. */
@@ -321,7 +327,9 @@ export class LinearClient {
       }`,
       { id, input: { body } },
     );
-    return succeeded('UpdateDocumentComment', data.commentUpdate).comment;
+    const comment = succeeded('UpdateDocumentComment', data.commentUpdate).comment;
+    this.stats.wrote('UpdateDocumentComment');
+    return comment;
   }
 
   /** Ensure one notice exists, including recovery after a lost create response. */
@@ -358,7 +366,11 @@ export class LinearClient {
       if (error instanceof LinearError && this.stopped === undefined) {
         let found = false;
         try { found = await find(); } catch { /* Preserve the original mutation failure. */ }
-        if (found) return existing();
+        if (found) {
+          // The comment with this run's id is there: the create whose answer was lost was applied.
+          this.stats.wrote('CommentOnDocument');
+          return existing();
+        }
       }
       throw error;
     }
@@ -452,6 +464,8 @@ export class LinearClient {
     if (!response.ok) {
       throw new LinearUploadError(operation, `${operation}: storage answered HTTP ${response.status}`);
     }
+    // A file is stored once storage took its bytes; the upload target alone stores nothing.
+    this.stats.wrote('FileUpload');
   }
 
   #refuseTooLong(operation: string, document: { title?: string | undefined; content?: string | undefined }): void {

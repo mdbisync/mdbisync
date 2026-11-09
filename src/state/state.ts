@@ -96,6 +96,36 @@ export function refusedPushes(git: Git): readonly RefusedPush[] {
   return refusals.get(git) ?? [];
 }
 
+/** What a moved ref is to the sync: one of the state refs, the sync branch or the tracked branch. */
+export type RefRole = Store | 'syncBranch' | 'trackedBranch' | 'other';
+
+const moves = new WeakMap<Git, Map<RefRole, number>>();
+
+/**
+ * The refs moved so far by pushes through this working copy that the
+ * remote accepted, by role; a copy. A refused push moves none and is not
+ * counted.
+ */
+export function movedRefs(git: Git): Map<RefRole, number> {
+  return new Map(moves.get(git) ?? []);
+}
+
+function refRole(config: StateConfig, ref: string): RefRole {
+  const store = STORES.find((name) => stateRef(config, name) === ref);
+  if (store !== undefined) return store;
+  if (ref === branchRef(config.syncBranch)) return 'syncBranch';
+  return ref === branchRef(config.trackedBranch) ? 'trackedBranch' : 'other';
+}
+
+function logMoves(git: Git, config: StateConfig, refs: readonly string[]): void {
+  const log = moves.get(git) ?? new Map<RefRole, number>();
+  for (const ref of refs) {
+    const role = refRole(config, ref);
+    log.set(role, (log.get(role) ?? 0) + 1);
+  }
+  moves.set(git, log);
+}
+
 export class NotFastForwardError extends Error {
   constructor(ref: string) {
     super(`refusing to move ${ref} to a commit that does not descend from its current value`);
@@ -154,6 +184,7 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
     // from a stale copy is refused, so the push is still reported as done.
     const input = changing.map((update) => `update ${localRef(config, update.ref)} ${update.next}\n`).join('');
     await git.run(['update-ref', '--stdin'], { input, okCodes: [0, 1, 128] });
+    logMoves(git, config, changing.map((update) => update.ref));
     return { ok: true, updated: changing.map((update) => update.ref) };
   }
 

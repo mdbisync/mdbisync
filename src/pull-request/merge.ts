@@ -4,7 +4,7 @@
 // private repository on GitHub Free cannot have.
 
 import { setTimeout as sleep } from 'node:timers/promises';
-import { type GitHubRepository, PullRequestError, request } from './github.ts';
+import { type GitHubRepository, PullRequestError, request, wrote } from './github.ts';
 
 /** Check run conclusions that let a merge go ahead. */
 const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
@@ -125,7 +125,10 @@ const REASON_LENGTH = 300;
 export async function mergePullRequest(target: GitHubRepository, number: number, sha: string): Promise<MergeOutcome> {
   const answer = await request(target, 'PUT', `/pulls/${number}/merge`, { merge_method: 'merge', sha });
   const body = answer.json as { merged?: unknown; sha?: unknown; message?: unknown } | null;
-  if (answer.status === 200 && body !== null && body.merged === true && typeof body.sha === 'string') return { merged: true, sha: body.sha };
+  if (answer.status === 200 && body !== null && body.merged === true && typeof body.sha === 'string') {
+    wrote(target, 'merged');
+    return { merged: true, sha: body.sha };
+  }
   if (answer.status === 405 || answer.status === 409 || answer.status === 422) {
     return { merged: false, status: answer.status, reason: refusalReason(body?.message) };
   }

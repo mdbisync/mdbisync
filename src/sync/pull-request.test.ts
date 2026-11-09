@@ -9,6 +9,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
+import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
@@ -86,11 +87,13 @@ describe('sync: the sync pull request', () => {
     await rm(reportFile(), { force: true });
     await rm(summaryFile(), { force: true });
     const writesBefore = world.writes.length;
+    const mark = await markWorld(world, fixture);
     const result = await runCli([command], { env: env(extra), cwd, fetch: fetchOverride ?? fakeFetch(world) });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
     for (const text of texts) assert.ok(!text.includes(CANARY), 'content reached the output or a pull request (I5)');
+    await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined });
     return { result, report, summary, writes: world.writes.slice(writesBefore) };
   }
 
@@ -600,6 +603,8 @@ describe('sync: the sync pull request', () => {
     assert.equal(first.report.pullRequest?.reason, RULE_TEXT);
     assert.ok(first.summary.includes(`(HTTP 405: \`${RULE_TEXT}\`); a later run tries again`), first.summary);
     assert.ok(world.github.pullRequests[0]?.body.includes(`(HTTP 405: \`${RULE_TEXT}\`)`), 'the pull request names the refusal');
+    // The note in the description is a write; the refused merge is not.
+    assert.deepEqual(first.report.writes.pullRequests, { updated: 1 });
 
     const second = await sync();
     assert.equal(second.result.exitCode, SETUP_FAILED_EXIT_CODE, second.result.stderr);
@@ -609,6 +614,7 @@ describe('sync: the sync pull request', () => {
     assert.ok(second.summary.includes(`Setup error: GitHub refused again to merge the sync pull request [#1]`), second.summary);
     assert.ok(second.summary.includes(RULE_TEXT), second.summary);
     assert.deepEqual(second.writes, [], 'a run that meets the same refusal changes nothing');
+    assert.deepEqual(second.report.writes, { linear: {}, git: {}, pullRequests: {} });
 
     const fromAction = await action();
     assert.equal(fromAction.exitCode, 1);
@@ -619,6 +625,7 @@ describe('sync: the sync pull request', () => {
     const fixed = await sync();
     assert.equal(fixed.result.exitCode, 0, fixed.result.stderr);
     assert.deepEqual(fixed.writes, ['PUT /pulls/1/merge']);
+    assert.deepEqual(fixed.report.writes.pullRequests, { merged: 1 });
     assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Needs a review\./);
   });
 
@@ -673,6 +680,8 @@ describe('sync: the sync pull request', () => {
     assert.equal(refused.result.exitCode, 0, refused.result.stderr);
     assert.equal(refused.report.pullRequest?.code, 'merge-refused');
     assert.equal(refused.report.pullRequest?.reason, RULE_TEXT);
+    // The note's request never reached GitHub: no pull request write is counted.
+    assert.deepEqual(refused.report.writes.pullRequests, {});
     delete world.github.reset;
     // Nothing was noted, so the next refusal is noted rather than reported as repeated.
     assert.equal((await sync()).report.pullRequest?.code, 'merge-refused');
