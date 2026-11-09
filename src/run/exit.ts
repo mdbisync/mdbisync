@@ -49,6 +49,16 @@ export function exitStatusOf(outcome: OperationOutcome): ExitStatus {
   return 'success';
 }
 
+/**
+ * The message of a run whose preflight stopped it before any write: its
+ * code and the failed check's detail (names and states only, as in the job
+ * summary), so the run's log says what failed without the summary.
+ */
+export function stoppedBeforeWritingMessage(command: string, outcome: OperationOutcome): string {
+  const check = outcome.setup?.checks.find((item) => item.state === 'failed' && item.code === outcome.code);
+  return `${command}: stopped before any write (${outcome.code})${check === undefined ? '' : `: ${check.detail}`}`;
+}
+
 /** The message of a run that is not a sync, stopped by Linear before any write. */
 export function stoppedMessage(outcome: OperationOutcome): string | undefined {
   if (outcome.stopped === undefined || partialCode(outcome) !== undefined) return undefined;

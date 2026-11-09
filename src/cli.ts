@@ -15,7 +15,7 @@ import {
 } from "./commands.ts";
 import { type LogEntry } from "./linear/index.ts";
 import { runFix, runLint } from "./format/command.ts";
-import { PARTIAL, partialCode, pullRequestEnding, stoppedMessage } from "./run/exit.ts";
+import { PARTIAL, partialCode, pullRequestEnding, stoppedBeforeWritingMessage, stoppedMessage } from "./run/exit.ts";
 import { unfinishedMessage, writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
@@ -121,7 +121,7 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   if (stopped !== undefined) return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${stopped}\n` };
   if (!outcome.ok) {
     const exitCode = outcome.code === "initial-sync-required" || outcome.code === "initial-pull-request-pending" ? NO_STATE_EXIT_CODE : SETUP_FAILED_EXIT_CODE;
-    return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (${outcome.code})\n` };
+    return { exitCode, stdout: outcome.summary, stderr: `${stderr}${stoppedBeforeWritingMessage(command, outcome)}\n` };
   }
   if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write?.code === 'container-cap') {
     return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (container-cap); reduce additions or check document-cap\n` };

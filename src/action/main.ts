@@ -13,7 +13,7 @@ import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
-import { PARTIAL, partialCode, pullRequestEnding, stoppedMessage } from "../run/exit.ts";
+import { PARTIAL, partialCode, pullRequestEnding, stoppedBeforeWritingMessage, stoppedMessage } from "../run/exit.ts";
 import { unfinishedMessage, writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { runOperation } from "../run/operation.ts";
@@ -106,7 +106,7 @@ export async function run(options: RunOptions = {}): Promise<void> {
       return;
     }
     if (!outcome.ok) {
-      core.setFailed(`${operation}: stopped before any write (${outcome.code})`);
+      core.setFailed(stoppedBeforeWritingMessage(operation, outcome));
       return;
     }
     if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write?.code === 'container-cap') {
