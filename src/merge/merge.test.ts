@@ -12,6 +12,28 @@ test('L3-01: edits to separate paragraphs merge without markers', async () => {
   assert.deepEqual(result.conflicts, []);
 });
 
+test('front matter is merged apart from the body: either side\'s change is kept, overlapping changes keep git\'s', async () => {
+  const file = (head: string, body: string) => `---\n${head}---\n\n${body}`;
+  const head = (owner: string, team: string) => `owner: ${owner}\nstatus: open\nteam: ${team}\n`;
+  const base = file(head('a', 'x'), 'first\n');
+  // Only the Linear side changed its front matter (a sync-branch edit merged as the Linear side).
+  const theirsOnly = await mergeMarkdown(base, file(head('a', 'x'), 'git\n'), file(head('b', 'x'), 'linear\n'));
+  assert.ok(theirsOnly.text.startsWith(file(head('b', 'x'), '')), theirsOnly.text);
+  assert.equal(theirsOnly.conflicts.length, 1);
+  // Both changed lines apart: both kept.
+  const both = await mergeMarkdown(base, file(head('a', 'y'), 'git\n'), file(head('b', 'x'), 'linear\n'));
+  assert.ok(both.text.startsWith(file(head('b', 'y'), '')), both.text);
+  // Both changed the same line: git's front matter.
+  const overlap = await mergeMarkdown(base, file(head('c', 'x'), 'git\n'), file(head('b', 'x'), 'linear\n'));
+  assert.ok(overlap.text.startsWith(file(head('c', 'x'), '')), overlap.text);
+  // A removal on the other side (a person's on the sync branch) is kept.
+  const removed = await mergeMarkdown(base, file(head('a', 'x'), 'git\n'), 'linear\n');
+  assert.ok(removed.text.startsWith(MARKERS.git), removed.text);
+  // A document Linear added has no front matter, and the git side's added one stays.
+  const added = await mergeMarkdown('', file(head('a', 'x'), 'git\n'), 'linear\n');
+  assert.ok(added.text.startsWith(file(head('a', 'x'), '')), added.text);
+});
+
 test('L3-02: both versions of a paragraph appear between marker paragraphs', async () => {
   const result = await mergeMarkdown('old\n', 'git edit\n', 'Linear edit\n');
   assert.equal(result.text, conflict('git edit', 'Linear edit'));

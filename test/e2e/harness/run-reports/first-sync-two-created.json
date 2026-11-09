@@ -57,7 +57,9 @@
     "branchMoved": false,
     "checks": null,
     "merged": null,
-    "paths": []
+    "paths": [],
+    "marked": [],
+    "decided": []
   },
   "capture": {
     "ok": true,
@@ -93,5 +95,15 @@
   "skippedConcurrentDocument": false,
   "capturedTrackedTip": "c0e66191259920baa3abdfa6f88abac44bfb65db",
   "rereadWindowMs": 310,
-  "linearToGit": null
+  "linearToGit": null,
+  "writes": {
+    "linear": {
+      "CreateDocument": 2
+    },
+    "git": {
+      "ids": 1,
+      "linear": 1
+    },
+    "pullRequests": {}
+  }
 }

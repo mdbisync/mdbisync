@@ -5,7 +5,8 @@ the checks every run makes, the workflows, both directions of the initial
 sync, the sync pull request, and how to pin a release. The setup steps (the
 Linear OAuth app, the GitHub App, the secrets and the workflows) are on
 [mdbisync.com](https://mdbisync.com/#setup). How Markdown is kept in
-Linear's form is in [linear-format.md](linear-format.md).
+Linear's form is in [linear-format.md](linear-format.md), and conflicts, when
+both sides change one document, in [conflicts.md](conflicts.md).
 
 ## Generate repository files
 
@@ -278,9 +279,23 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   branch with Linear's state merged in.
 - Closing an ordinary sync pull request opens a replacement from the same
   branch on the next run. Pending person edits and CI fixes are kept and new
-  captures are merged into them, without force pushes. If those pending edits
-  conflict with later changes, resolve the conflict on the sync branch; the
-  run summary explains which histories need merging.
+  captures are merged into them, without force pushes.
+- A pending edit on the sync branch that changes the same lines as a later
+  Linear edit or tracked-branch edit is not dropped and does not hold the
+  pull request. The next run merges the two into the sync branch with a
+  merge commit, both versions between the usual conflict marker paragraphs
+  (the sync branch's edit is the git version against Linear, the Linear
+  version against the tracked branch). The pull request carries the markers
+  to the tracked branch and from there to Linear, like any other conflict,
+  and the run summary names the documents. Front matter changes from both
+  sides are kept unless they change the same lines, where the git version's
+  wins. A pending delete or rename that meets an edit follows the usual
+  structural conflict rules (an edited document is kept), and the summary
+  names it too. Resolve a conflict by editing the text on
+  either side, or on the sync branch before the merge; a merge of your own
+  on the sync branch is kept as it is. Only a conflicting file that is not a
+  synchronized document, which cannot hold markers, still waits for you to
+  merge the tracked branch into the sync branch.
 
 ## Pre-release builds and pins
 

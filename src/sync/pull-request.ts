@@ -4,7 +4,10 @@
 // The sync branch follows `linear` by fast-forwards and merge commits, never
 // by a force push. An ordinary unmerged branch keeps its pending edits even
 // when its pull request is closed. A merged branch or an abandoned initial
-// snapshot starts again from Linear. It moves only when `linear` brings the tracked branch
+// snapshot starts again from Linear. Pending edits that change the same lines
+// as a later Linear capture or tracked-branch edit are merged with the sync's
+// conflict markers, both versions kept, so the pull request still merges and
+// the conflict travels like any text. It moves only when `linear` brings the tracked branch
 // something the branch does not bring yet: `linear` gains a merge of the
 // tracked branch on every run that writes to Linear (step 5), and moving the
 // branch for those would restart the checks on every run. A new head or pull
@@ -32,19 +35,24 @@ import { type RunContext } from '../run/preflight.ts';
 import {
   type CommitIdentity,
   type Git,
+  type IdMap,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
   type Oid,
   type StateConfig,
   type StateSnapshot,
   branchRef,
   pushAtomic,
+  readIds,
 } from '../state/index.ts';
+import { knownIdLookup, mergeWithMarkers } from './merge.ts';
 
 export const DEFAULT_MERGE_GRACE_SECONDS = 60;
 
 export const SYNC_PULL_REQUEST_TITLE = 'Changes from Linear';
 /** The message of a merge of `linear` into the sync branch. */
 export const SYNC_BRANCH_MERGE_MESSAGE = "Merge Linear's latest changes";
+/** The message of a merge of the tracked branch into the sync branch, made when pending edits there conflict with it. */
+export const TRACKED_MERGE_MESSAGE = 'Merge the tracked branch into the sync branch';
 /** Paths listed in the pull request's description; the rest are counted. */
 const LISTED_PATHS = 200;
 
@@ -71,10 +79,22 @@ export interface PullRequestResult {
   /** Files the pull request changes on the tracked branch. */
   paths: string[];
   /**
+   * Documents whose pending sync-branch edits changed the same lines as a
+   * later Linear or tracked-branch edit: this run's merge into the sync
+   * branch, pushed by this run, keeps both versions between conflict markers.
+   */
+  marked: string[];
+  /**
+   * Documents whose pending delete or rename met a later edit or rename on the
+   * other side: this run's merge into the sync branch decided them by the
+   * structural conflict rules (an edit keeps the document).
+   */
+  decided: string[];
+  /**
    * Why the step did not do all it could this run. Waiting for checks is not
    * one: a later run merges.
    * - `check-failed`: a check on the head failed; a setup error, the repository's checks must pass Linear's form. The tracked-to-Linear write step is paused until they pass.
-   * - `conflict`: the histories change the same lines. The write step reconciles tracked/Linear edits; pending sync-branch edits may need a person to merge the branch.
+   * - `conflict`: `linear` and the tracked branch change the same lines, which the write step merges with markers for the next run; or a conflicting file on the sync branch is no document, so it cannot hold markers and a person merges it.
    * - `merge-refused`: GitHub would not merge (the head moved, or the pull request cannot be merged now); a later run tries again.
    * - `merge-blocked`: GitHub refused the merge for the same reason as an earlier run, on the same head and tracked branch; a setup error, a person must change what blocks it.
    * - `initial-pull-request-pending`: the sync branch holds the record of an initial sync from Linear that a person has not merged.
@@ -127,7 +147,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   const tracked = fetched.tracked;
   const sync = fetched.sync;
   const linear = options.state.linear;
-  const result: PullRequestResult = { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [] };
+  const result: PullRequestResult = { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [] };
   if (linear === null) return result;
 
   const trackedTree = await git.text(['rev-parse', `${tracked}^{tree}`]);
@@ -153,6 +173,10 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     if (open !== null && pending && (await holdsInitialRecord(git, sync as Oid, tracked))) return { ...result, code: 'initial-pull-request-pending' };
 
     const identity = options.identity ?? SYNC_IDENTITY;
+    // The id map is read only when a merge has documents to resolve.
+    const merger = markedMerger(git, options.state.ids, identity);
+    /** What this run's merges into the sync branch resolved; reported only once the branch has moved to them. */
+    const resolved: Resolution = { marked: [], decided: [] };
     let head: Oid | null = sync;
     if (open === null && (!pending || (await holdsInitialRecord(git, sync as Oid, tracked)))) {
       // A merged branch can start again from Linear. An abandoned initial
@@ -162,28 +186,41 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       if (!result.needed) return result;
       head = await restart(git, sync, linear, wanted, identity);
     } else {
-      const candidate = await advance(git, sync as Oid, linear, identity);
-      if (candidate === null) return { ...result, code: 'conflict' };
-      if (candidate !== sync) {
+      const advanced = await advance(git, merger, sync as Oid, linear);
+      if (advanced === null) return { ...result, code: 'conflict' };
+      if (advanced.head !== sync) {
         const now = await mergedTree(git, tracked, sync as Oid);
-        const next = await mergedTree(git, tracked, candidate);
-        if (next === null) return { ...result, code: 'conflict' };
-        if (next !== now) head = candidate;
+        const next = await mergedTree(git, tracked, advanced.head);
+        if (next === null || next !== now) {
+          head = advanced.head;
+          addResolution(resolved, advanced);
+        }
       }
     }
     if (head === null) return { ...result, code: 'conflict' };
 
-    const headTree = await mergedTree(git, tracked, head);
-    // State records can be unmerged ancestors without adding any content.
-    if (headTree === null) return { ...result, code: 'conflict' };
+    let headTree = await mergedTree(git, tracked, head);
+    if (headTree === null) {
+      // Pending edits on the sync branch and a later tracked-branch edit change
+      // the same lines: the tracked branch is merged into the sync branch, both
+      // versions between conflict markers, so the pull request can merge.
+      const merged = await merger(head, tracked, [head, tracked], TRACKED_MERGE_MESSAGE);
+      // A conflicting file that cannot hold markers (it is no document) waits for a person.
+      if (merged === null) return { ...result, code: 'conflict' };
+      head = merged.head;
+      addResolution(resolved, merged);
+      headTree = await git.text(['rev-parse', `${head}^{tree}`]);
+    }
     if (open === null && !result.needed && headTree === trackedTree) return result;
 
     if (head !== sync) {
       const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: sync, next: head }]);
       if (!pushed.ok) return { ...result, code: 'state-moved' };
       result.branchMoved = true;
+      result.marked = [...new Set(resolved.marked)].sort();
+      result.decided = [...new Set(resolved.decided)].sort();
     }
-    if (headTree !== null) result.paths = (await git.text(['diff', '--name-only', '--no-renames', trackedTree, headTree])).split('\n').filter(Boolean);
+    result.paths = (await git.text(['diff', '--name-only', '--no-renames', trackedTree, headTree])).split('\n').filter(Boolean);
 
     // An earlier refusal stays noted while it still applies: the same head on the same tracked branch.
     const noted = open === null ? null : readRefusal(open.body);
@@ -273,20 +310,65 @@ async function isAncestor(git: Git, ancestor: Oid, descendant: Oid): Promise<boo
  */
 async function restart(git: Git, sync: Oid | null, linear: Oid, wanted: string, identity: CommitIdentity): Promise<Oid> {
   if (sync === null || (await isAncestor(git, sync, linear))) return linear;
-  return commitMerge(git, wanted, sync, linear, identity);
+  return commitMerge(git, wanted, [sync, linear], SYNC_BRANCH_MERGE_MESSAGE, identity);
 }
 
-/** The open pull request's branch moved forward to hold `linear`: `linear` itself, a merge of both, or the branch as it is; null on a conflict. */
-async function advance(git: Git, sync: Oid, linear: Oid, identity: CommitIdentity): Promise<Oid | null> {
-  if (await isAncestor(git, sync, linear)) return linear;
-  if (await isAncestor(git, linear, sync)) return sync;
-  const tree = await mergedTree(git, sync, linear);
-  if (tree === null) return null;
-  return commitMerge(git, tree, sync, linear, identity);
+/** Documents a merge into the sync branch resolved: with conflict markers, or by the structural rules (a delete or rename against an edit). */
+interface Resolution {
+  marked: string[];
+  decided: string[];
 }
 
-function commitMerge(git: Git, tree: string, sync: Oid, linear: Oid, identity: CommitIdentity): Promise<Oid> {
-  return git.text(['commit-tree', '--no-gpg-sign', tree, '-p', sync, '-p', linear, '-m', SYNC_BRANCH_MERGE_MESSAGE], {
+/** A new head and what its merge resolved. */
+interface Advanced extends Resolution {
+  head: Oid;
+}
+
+function addResolution(into: Resolution, from: Resolution): void {
+  into.marked.push(...from.marked);
+  into.decided.push(...from.decided);
+}
+
+/**
+ * A merge commit of `parents` whose tree merges `gitSide` into `linearSide`
+ * as step 3 does: documents both change on the same lines hold both texts
+ * between the conflict marker paragraphs, so neither version is lost and
+ * the pull request carries the conflict to the tracked branch like any
+ * text; deletes and renames against edits follow the structural rules.
+ * Only the sync branch gets this commit; Linear's state ref keeps only what
+ * Linear returned. Null when a conflicting file is no mapped document,
+ * which cannot hold markers.
+ */
+type Merger = (linearSide: Oid, gitSide: Oid, parents: [Oid, Oid], message: string) => Promise<Advanced | null>;
+
+function markedMerger(git: Git, idsCommit: Oid | null, identity: CommitIdentity): Merger {
+  let lookup: Promise<{ ids: IdMap; knownId: (path: string) => Promise<string | undefined> }> | undefined;
+  const idsOnce = () => (lookup ??= readIds(git, idsCommit).then((ids) => ({ ids, knownId: knownIdLookup(git, idsCommit, ids) })));
+  return async (linearSide, gitSide, parents, message) => {
+    const clean = await mergedTree(git, linearSide, gitSide);
+    if (clean !== null) return { head: await commitMerge(git, clean, parents, message, identity), marked: [], decided: [] };
+    const { ids, knownId } = await idsOnce();
+    const { resolved } = await mergeWithMarkers(git, linearSide, gitSide, ids, knownId);
+    if (resolved.unresolved.length > 0) return null;
+    return { head: await commitMerge(git, resolved.tree, parents, message, identity), marked: resolved.marked, decided: resolved.decided.map((entry) => entry.path) };
+  };
+}
+
+/**
+ * The pending branch moved forward to hold `linear`: `linear` itself, the
+ * branch as it is, or a merge of both. Edits on the branch that change the
+ * same lines as `linear` are kept as the git version between conflict
+ * markers, `linear`'s text as the Linear version. Null when a conflicting
+ * file cannot hold markers.
+ */
+async function advance(git: Git, merge: Merger, sync: Oid, linear: Oid): Promise<Advanced | null> {
+  if (await isAncestor(git, sync, linear)) return { head: linear, marked: [], decided: [] };
+  if (await isAncestor(git, linear, sync)) return { head: sync, marked: [], decided: [] };
+  return merge(linear, sync, [sync, linear], SYNC_BRANCH_MERGE_MESSAGE);
+}
+
+function commitMerge(git: Git, tree: string, parents: [Oid, Oid], message: string, identity: CommitIdentity): Promise<Oid> {
+  return git.text(['commit-tree', '--no-gpg-sign', tree, '-p', parents[0], '-p', parents[1], '-m', message], {
     env: { GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email, GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email },
   });
 }
@@ -351,7 +433,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       );
       break;
     case 'conflict':
-      lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is; this run merges the tracked branch into Linear's state. If pending edits on the sync branch still conflict on a later run, merge the tracked branch and Linear's state ref into that branch and resolve the conflicts there; the sync keeps those commits.");
+      lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
       break;
     case 'merge-refused':
       lines.push(`GitHub did not merge the sync pull request ${link} (${refusalText(result)}); a later run tries again.`);
@@ -383,6 +465,18 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       else lines.push(`The sync pull request ${link} waits for ${names(result.checks?.pending) || 'its checks'}; a later run merges it.`);
   }
   if (result.paths.length > 0) lines.push('', `Files it changes on the tracked branch: ${result.paths.length}.`);
+  if (result.marked.length > 0) {
+    lines.push(
+      '',
+      `Pending edits on the sync branch and later edits change the same lines in ${result.marked.length === 1 ? '1 document' : `${result.marked.length} documents`}: ${names(result.marked)}. Both versions are kept between conflict markers; edit the text on either side to resolve it.`,
+    );
+  }
+  if (result.decided.length > 0) {
+    lines.push(
+      '',
+      `Pending deletes or renames on the sync branch met later edits or renames in ${result.decided.length === 1 ? '1 document' : `${result.decided.length} documents`}: ${names(result.decided)}. The sync decided them by its structural conflict rules, as for any other conflict: an edited document is kept.`,
+    );
+  }
   lines.push('');
   return lines;
 }

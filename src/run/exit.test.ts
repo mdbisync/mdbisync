@@ -48,7 +48,7 @@ describe('the ending of a sync run', () => {
 
 describe('the message of a run stopped before any write', () => {
   const stopped = (fields: Record<string, unknown>): OperationOutcome =>
-    ({ operation: 'sync', ok: false, summary: '', notImplemented: false, refusedPushes: [], ...fields }) as OperationOutcome;
+    ({ operation: 'sync', ok: false, summary: '', notImplemented: false, refusedPushes: [], writes: { linear: {}, git: {}, pullRequests: {} }, ...fields }) as OperationOutcome;
 
   it('names the failed setup check, the first failure as the report records it', () => {
     const setup = buildReport([

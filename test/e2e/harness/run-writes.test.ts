@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { ConfirmedReport, ReverseReport, RunReport, SyncReport } from '../../../src/run/finish.ts';
+import type { RunWrites as ReportedWrites } from '../../../src/run/operation.ts';
 import type { PullRequestResult } from '../../../src/sync/index.ts';
 import { ProductError } from './results.ts';
 import { runWrites, type RunWrites } from './subjects.ts';
@@ -10,8 +11,10 @@ import { runWrites, type RunWrites } from './subjects.ts';
 // Engine run reports, fixed: the three runs of L1R-03 as the engine reported
 // them live (the reverse initial sync, the first sync after a person merged
 // its pull request, which created two documents, and the quiet run after it),
-// two more sync runs whose writes the report names elsewhere, and a
-// confirmed initial sync from git to Linear.
+// a sync that moved one state ref only, a sync that opened its pull request,
+// and a confirmed initial sync from git to Linear. The live reports predate
+// the report's `writes`; theirs are what the engine reports for the same
+// runs offline.
 const RUN_REPORTS = join(import.meta.dirname, 'run-reports');
 
 function runReport(name: string): Record<string, unknown> {
@@ -27,8 +30,9 @@ const REPORT_KEYS = {
   leftOutRules: true, paths: true, resumed: true, writtenDocuments: true, writesAfterLimit: true,
   failedWriteRecorded: true, endpointLimitHeadersPresent: true, rejectedDocumentNamed: true, stoppedEarly: true,
   progressRecorded: true, record: true, atomicPushRefused: true, partialRefUpdates: true,
-  skippedConcurrentDocument: true, capturedTrackedTip: true, rereadWindowMs: true, linearToGit: true,
+  skippedConcurrentDocument: true, capturedTrackedTip: true, rereadWindowMs: true, linearToGit: true, writes: true,
 } satisfies Record<keyof RunReport, true>;
+const WRITES_KEYS = { linear: true, git: true, pullRequests: true } satisfies Record<keyof ReportedWrites, true>;
 const SYNC_KEYS = {
   complete: true, updated: true, relocated: true, created: true, adopted: true, restored: true, trashed: true,
   conflicts: true, decided: true, skipped: true, leftOut: true, leftOutAtWrite: true, failed: true, notAttempted: true,
@@ -39,7 +43,7 @@ const REVERSE_KEYS = {
   notAttempted: true, stopped: true, progressPushes: true, record: true, pullRequest: true, closedPullRequest: true,
 } satisfies Record<keyof ReverseReport, true>;
 const PULL_REQUEST_KEYS = {
-  needed: true, pullRequest: true, branchMoved: true, checks: true, merged: true, paths: true, code: true, status: true, reason: true,
+  needed: true, pullRequest: true, branchMoved: true, checks: true, merged: true, paths: true, marked: true, decided: true, code: true, status: true, reason: true,
 } satisfies Record<keyof PullRequestResult, true>;
 const CONFIRMED_KEYS = {
   complete: true, created: true, overwritten: true, unchanged: true, skippedCompleted: true, trashed: true,
@@ -54,13 +58,16 @@ const CAPTURE_OPTIONAL = ['stopped', 'rebuiltIds'];
 const PULL_REQUEST_OPTIONAL = ['code', 'status', 'reason'];
 
 const EXPECTED: Record<string, RunWrites> = {
-  'reverse-initial-sync': { linear: 0, git: 1, pullRequests: 1, total: 2 },
-  'first-sync-two-created': { linear: 2, git: 1, pullRequests: 0, total: 3 },
+  // The record on the linear, ids and uploads refs and the sync branch; the pull request it opened.
+  'reverse-initial-sync': { linear: 0, git: 4, pullRequests: 1, total: 5 },
+  // Two documents created; the merge record on the linear ref and their ids.
+  'first-sync-two-created': { linear: 2, git: 2, pullRequests: 0, total: 4 },
   'quiet-sync': { linear: 0, git: 0, pullRequests: 0, total: 0 },
   'state-ref-only-sync': { linear: 0, git: 1, pullRequests: 0, total: 1 },
-  'sync-pull-request-opened': { linear: 0, git: 2, pullRequests: 1, total: 3 },
-  // Three created and one overwritten; the record and one progress push.
-  'initial-sync-to-linear': { linear: 4, git: 2, pullRequests: 0, total: 6 },
+  // The capture on the linear and ids refs, the sync branch, the pull request.
+  'sync-pull-request-opened': { linear: 0, git: 3, pullRequests: 1, total: 4 },
+  // Three created and one overwritten; a progress push and the record on ids, the linear and uploads refs.
+  'initial-sync-to-linear': { linear: 4, git: 4, pullRequests: 0, total: 8 },
 };
 
 describe('run report fixtures', () => {
@@ -74,6 +81,7 @@ describe('run report fixtures', () => {
     it(`${name} has the report's fields exactly`, () => {
       const report = runReport(name);
       assert.deepEqual(Object.keys(report).sort(), Object.keys(REPORT_KEYS).sort());
+      assert.deepEqual(Object.keys(report['writes'] as object).sort(), Object.keys(WRITES_KEYS).sort());
       if (report['sync'] !== null) assert.deepEqual(Object.keys(report['sync'] as object).sort(), Object.keys(SYNC_KEYS).sort());
       if (report['linearToGit'] !== null) assert.deepEqual(Object.keys(report['linearToGit'] as object).sort(), Object.keys(REVERSE_KEYS).sort());
       if (report['initialSync'] !== null) assert.deepEqual(Object.keys(report['initialSync'] as object).sort(), Object.keys(CONFIRMED_KEYS).sort());
@@ -97,58 +105,34 @@ describe('a run\'s writes, from its report', () => {
     });
   }
 
-  it('never counts fewer documents than the report says it wrote', () => {
-    const report = runReport('first-sync-two-created');
-    assert.equal(runWrites(report).linear, report['writtenDocuments']);
-    // A written document in a list this count does not read is still counted through writtenDocuments.
-    const unlisted = { ...report, sync: { ...(report['sync'] as object), created: [] }, writtenCount: 0 };
-    assert.equal(runWrites(unlisted).linear, 2);
-  });
-
-  it('counts each document once across the lists that name it', () => {
+  it('sums every operation of a kind', () => {
     const report = runReport('quiet-sync');
-    const moved = {
-      ...report,
-      changed: true,
-      sync: { ...(report['sync'] as object), updated: ['eng/b.md'], relocated: [{ from: 'eng/a.md', to: 'eng/b.md' }], trashed: ['eng/c.md'], restored: ['eng/d.md'] },
+    report['writes'] = {
+      linear: { CommentOnDocument: 1, CreateDocument: 2, FileUpload: 1, UpdateDocument: 3 },
+      git: { ids: 2, linear: 1, uploads: 1 },
+      pullRequests: { merged: 1, updated: 1 },
     };
-    assert.deepEqual(runWrites(moved), { linear: 3, git: 0, pullRequests: 0, total: 3 });
+    assert.deepEqual(runWrites(report), { linear: 7, git: 4, pullRequests: 2, total: 13 });
   });
 
-  it('counts no write for a document that stays blocked', () => {
-    // The capture lists it on every run, and the run reports changed, though its mark is already in place.
+  it('takes the writes from the engine, not from the results the report lists', () => {
+    // Lists of written documents, a capture, a record and a pull request: the engine reported none of them as written.
+    const listed = runReport('first-sync-two-created');
+    listed['writes'] = { linear: {}, git: {}, pullRequests: {} };
+    assert.deepEqual(runWrites(listed), { linear: 0, git: 0, pullRequests: 0, total: 0 });
+    // A run that reports `changed` and names nothing counts what the engine reports, not one unnamed move.
+    const quiet: Record<string, unknown> = { ...runReport('quiet-sync'), changed: true };
+    assert.deepEqual(runWrites(quiet), { linear: 0, git: 0, pullRequests: 0, total: 0 });
+    // A document that stays blocked is listed on every run; it counts only the writes the engine made.
+    const blocked = { ...quiet, capture: { ...(quiet['capture'] as object), blocked: [{ id: 'x', path: 'eng/e.md', findings: [{ hook: 'secret-check', line: 5 }] }] } };
+    assert.equal(runWrites(blocked).total, 0);
+  });
+
+  it('refuses a report that is not a run report, or whose writes are not counts', () => {
+    assert.throws(() => runWrites({ summary: { code: 'initial-sync-required' } }), /the engine's report gives no writes$/);
     const report = runReport('quiet-sync');
-    const blocked = { ...report, changed: true, capture: { ...(report['capture'] as object), blocked: [{ id: 'x', path: 'eng/e.md', findings: [{ hook: 'secret-check', line: 5 }] }] } };
-    assert.deepEqual(runWrites(blocked), { linear: 0, git: 0, pullRequests: 0, total: 0 });
-  });
-
-  it('counts a capture that lists changes also when it did not finish', () => {
-    const opened = runReport('sync-pull-request-opened');
-    const capture = opened['capture'] as Record<string, unknown>;
-    assert.equal(runWrites({ ...opened, pullRequest: null }).git, 1);
-    // Published, then a lost lease while it saved marks, or a Linear failure: it keeps its lists, and so does a
-    // capture whose first push was refused. The report does not tell them apart, so neither passes as zero writes.
-    for (const code of ['state-moved', 'stopped', 'linear-failed']) {
-      const unfinished: Record<string, unknown> = { ...opened, ok: false, code, pullRequest: null, sync: null, capture: { ...capture, ok: false } };
-      assert.deepEqual(runWrites(unfinished), { linear: 0, git: 1, pullRequests: 0, total: 1 }, code);
-    }
-    // One that failed before it published cleared its lists, and the run reports no change.
-    const cleared = { ...opened, ok: false, changed: false, code: 'linear-failed', pullRequest: null, sync: null, capture: { ...capture, ok: false, changed: [] } };
-    assert.deepEqual(runWrites(cleared), { linear: 0, git: 0, pullRequests: 0, total: 0 });
-  });
-
-  it('counts a merge and a closed pull request', () => {
-    const merged = runReport('quiet-sync');
-    merged['changed'] = true;
-    merged['pullRequest'] = { ...(merged['pullRequest'] as object), merged: 'c0e66191259920baa3abdfa6f88abac44bfb65db' };
-    assert.deepEqual(runWrites(merged), { linear: 0, git: 0, pullRequests: 1, total: 1 });
-    const closing = runReport('reverse-initial-sync');
-    const reverse = closing['linearToGit'] as Record<string, unknown>;
-    closing['linearToGit'] = { ...reverse, record: null, pullRequest: null, closedPullRequest: 15 };
-    assert.deepEqual(runWrites(closing), { linear: 0, git: 0, pullRequests: 1, total: 1 });
-  });
-
-  it('refuses a report that is not a run report', () => {
-    assert.throws(() => runWrites({ summary: { code: 'initial-sync-required' } }), ProductError);
+    assert.throws(() => runWrites({ ...report, writes: { linear: {}, git: {} } }), /gives no writes\.pullRequests/);
+    assert.throws(() => runWrites({ ...report, writes: { linear: { CreateDocument: -1 }, git: {}, pullRequests: {} } }), ProductError);
+    assert.throws(() => runWrites({ ...report, writes: { linear: {}, git: { ids: '1' }, pullRequests: {} } }), /writes\.git\.ids that is not a count/);
   });
 });
