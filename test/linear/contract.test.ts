@@ -3,7 +3,9 @@
 // app needs client credentials tokens with read and write scopes.
 // Optional: LINEAR_TEST_TEAM_KEY (default: the first team),
 // LINEAR_BASE_URL (a proxy in front of Linear), LINEAR_CONTRACT_REPORT (a
-// path for the JSON report of requests per operation).
+// path for the JSON report of requests per operation),
+// LINEAR_CONTRACT_PAUSE_MS (the pause before a diagnostic or verifying
+// read again, default 2000).
 //
 // Everything written is neutral work text in two short-lived projects, which
 // are removed at the end; their documents end archived, never in the
@@ -32,6 +34,7 @@ const clientId = process.env.LINEAR_TEST_APP_CLIENT_ID;
 const clientSecret = process.env.LINEAR_TEST_APP_CLIENT_SECRET;
 const baseUrl = process.env.LINEAR_BASE_URL;
 const live = Boolean(clientId && clientSecret);
+const pauseMs = Number(process.env.LINEAR_CONTRACT_PAUSE_MS ?? 2_000);
 
 // A 1x1 PNG.
 const PNG = Uint8Array.from(
@@ -51,7 +54,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   const projectIds: string[] = [];
   let first: LinearDocument;
   let second: LinearDocument;
-  // Documents whose trash succeeded and that were not restored since.
+  // Documents a trash was sent for (applied or not) and no restore confirmed since.
   const trashed = new Set<string>();
   let trashRead: TrashReadDiagnosis | undefined;
 
@@ -106,7 +109,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     let cleanup: CleanupResult | undefined;
     if (linear) {
       const documentIds = [first, second].filter((document) => document !== undefined).map((document) => document.id);
-      cleanup = await cleanUpOwned(linear, { projectIds, documentIds, trashed });
+      cleanup = await cleanUpOwned(linear, { projectIds, documentIds, trashed }, { pauseMs });
       cleanupErrors.push(...cleanup.errors);
     }
     if (token) {
@@ -132,6 +135,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
       cleanupFailed: cleanupErrors.length > 0,
       cleanupErrors: cleanupErrors.map(describeCleanup),
       restoredInCleanup: cleanup?.restored ?? [],
+      unconfirmedRestoreFailures: (cleanup?.unconfirmedRestoreFailures ?? []).map(describeCleanup),
       finalDocuments: cleanup?.final ?? [],
       ...(trashRead ? { trashRead } : {}),
     };
@@ -241,11 +245,12 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   });
 
   it('trashes and restores a document', async () => {
-    await measured('trashDocument', () => linear.trashDocument(second.id));
+    // Before the call: a trash may apply even when its answer is lost.
     trashed.add(second.id);
+    await measured('trashDocument', () => linear.trashDocument(second.id));
     const [read] = await linear.getDocuments([second.id]);
     assert.ok(read, 'a trashed document is still read by id');
-    if (read.trashed !== true) trashRead = await diagnoseTrashRead(linear, requests, read);
+    if (read.trashed !== true) trashRead = await diagnoseTrashRead(linear, requests, read, pauseMs);
     assert.equal(read.trashed, true);
     await measured('restoreDocument', () => linear.restoreDocument(second.id));
     trashed.delete(second.id);

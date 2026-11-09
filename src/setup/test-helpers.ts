@@ -397,8 +397,8 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     return { documentCreate: { success: true, document: documentNode(document, true) } };
   }
   if (operation === 'UpdateDocument') {
-    const document = documents.find((d) => d.id === variables.id);
-    if (document === undefined) return { documentUpdate: { success: false, document: null } };
+    // An unknown id was already answered with Linear's not-found error.
+    const document = documents.find((d) => d.id === variables.id)!;
     const input = variables.input as {
       content?: string;
       title?: string;
