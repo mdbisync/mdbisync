@@ -46,6 +46,8 @@ export interface CaptureResult {
   changed: string[];
   removed: string[];
   leftOut: Array<{ id: string; rule: string }>;
+  /** Captured content that exceeds Linear's write limit; paths and counts only. */
+  writeBackWarnings: Array<{ path: string; code: 'linear-content-too-large-to-write-back'; length: number; limit: number }>;
   summary: string;
 }
 
@@ -70,7 +72,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   const uploads = await readUploads(git, state.uploads);
   const reserved = await readReservedIds(git, state.ids);
   const gate = options.security ?? await securityGate(git, fetched.tracked);
-  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], leftOut:[], summary:''};
+  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], leftOut:[], writeBackWarnings:[], summary:''};
   let published = false;
   try {
     // Capture the old place before a git annotation change moves its documents.
@@ -313,6 +315,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     else {
       result.state = next;
       published = true;
+      for (const candidate of candidates.values()) {
+        const refusal = lengthRefusal({content: candidate.doc.content ?? ''}, linear.facts);
+        if (refusal !== undefined) result.writeBackWarnings.push({path: candidate.path, code: 'linear-content-too-large-to-write-back', length: refusal.length, limit: refusal.limit});
+      }
       const lostLease = new Error('state moved while recording document marks');
       const marked = [
         ...[...candidates.values()].map(({doc, path}) => ({doc, path, blocked: [] as SecurityFinding[]})),
@@ -381,6 +387,9 @@ function renderCapture(result: CaptureResult, configured: boolean): string {
   if (result.stopped !== undefined) summary += `\nCapture partial, will continue.\n\n${renderStop(result.stopped).join('\n')}`;
   if (result.failure !== undefined) summary += `\nCapture partial, will continue: Linear failed ${result.failure.operation} (${result.failure.error}).`;
   if (!configured) summary += '\nContent is pushed unchecked: no security hooks are configured.';
+  for (const warning of result.writeBackWarnings) {
+    summary += `\n${warning.code}: ${JSON.stringify(warning.path)} (${warning.length} characters; limit ${warning.limit}). Preserved in git; Linear will not accept it back if it is changed in git while still over the limit.`;
+  }
   return summary;
 }
 
