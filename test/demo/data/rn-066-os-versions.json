@@ -1,0 +1,33 @@
+{
+  "type": "hbar",
+  "title": "App users by operating system version",
+  "subtitle": "Share of monthly active users, September 2026",
+  "category": "OS version",
+  "categories": [
+    "iOS 18",
+    "iOS 17",
+    "iOS 16 and older",
+    "Android 15",
+    "Android 14",
+    "Android 13",
+    "Android 12",
+    "Android 11 and older"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Share of users",
+      "values": [
+        31.4,
+        9.2,
+        2.1,
+        21.7,
+        17.3,
+        10.1,
+        5.4,
+        2.8
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: iOS 18 has 31.4 % of users and Android 15 21.7 %; iOS 16 and older and Android 11 and older are under 3 % each"
+}

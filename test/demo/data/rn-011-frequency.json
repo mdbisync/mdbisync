@@ -1,0 +1,31 @@
+{
+  "type": "line",
+  "title": "Production deploys per week",
+  "subtitle": "All services, weekly average per quarter",
+  "category": "Quarter",
+  "categories": [
+    "Q1 2025",
+    "Q2 2025",
+    "Q3 2025",
+    "Q4 2025",
+    "Q1 2026",
+    "Q2 2026",
+    "Q3 2026"
+  ],
+  "unit": "",
+  "series": [
+    {
+      "name": "Deploys per week",
+      "values": [
+        38,
+        44,
+        52,
+        61,
+        70,
+        78,
+        84
+      ]
+    }
+  ],
+  "alt": "Line chart: weekly deploys grew from 38 in Q1 2025 to 84 in Q3 2026"
+}

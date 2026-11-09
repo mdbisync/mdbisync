@@ -1,0 +1,78 @@
+{
+  "type": "diagram",
+  "title": "Release pipeline with the load test stage",
+  "subtitle": "A release stops at the first failing stage",
+  "alt": "Diagram of the release pipeline: build and unit tests, deploy to staging, load test against the last release, canary in production, full rollout",
+  "rows": [
+    "CI",
+    "Staging",
+    "Production"
+  ],
+  "nodes": [
+    {
+      "id": "build",
+      "label": "Build and test",
+      "detail": "Image, unit and contract tests",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "deploy",
+      "label": "Deploy",
+      "detail": "Argo CD sync",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "load",
+      "label": "Load test",
+      "detail": "1.5 times last peak, 10 min",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "compare",
+      "label": "Compare",
+      "detail": "p95 and errors vs last release",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "canary",
+      "label": "Canary",
+      "detail": "5 % of traffic, 15 min",
+      "row": 2,
+      "col": 2
+    },
+    {
+      "id": "full",
+      "label": "Full rollout",
+      "detail": "All regions",
+      "row": 2,
+      "col": 3
+    }
+  ],
+  "edges": [
+    {
+      "from": "build",
+      "to": "deploy"
+    },
+    {
+      "from": "deploy",
+      "to": "load"
+    },
+    {
+      "from": "load",
+      "to": "compare"
+    },
+    {
+      "from": "compare",
+      "to": "canary",
+      "label": "pass"
+    },
+    {
+      "from": "canary",
+      "to": "full"
+    }
+  ]
+}

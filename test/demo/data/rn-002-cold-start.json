@@ -1,0 +1,27 @@
+{
+  "type": "hbar",
+  "title": "Cold start time by runtime",
+  "subtitle": "Median of 200 starts, 512 MB container, same HTTP service in each runtime",
+  "category": "Runtime",
+  "categories": [
+    "Go 1.24",
+    "Java 21 (native image)",
+    "Node.js 22",
+    "Python 3.13",
+    "Java 21 (JIT)"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "Median start to first response",
+      "values": [
+        41,
+        96,
+        182,
+        310,
+        1240
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: Go starts in 41 ms, a Java native image in 96 ms, Node.js in 182 ms, Python in 310 ms and Java with JIT in 1,240 ms"
+}

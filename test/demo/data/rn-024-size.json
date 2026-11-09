@@ -1,0 +1,34 @@
+{
+  "type": "bar",
+  "title": "Average encoded event size",
+  "subtitle": "100,000 events per type, before compression",
+  "category": "Event type",
+  "categories": [
+    "order.confirmed",
+    "payment.captured",
+    "product.updated",
+    "search_performed"
+  ],
+  "unit": "B",
+  "series": [
+    {
+      "name": "Protobuf",
+      "values": [
+        1180,
+        310,
+        2400,
+        140
+      ]
+    },
+    {
+      "name": "JSON",
+      "values": [
+        3050,
+        830,
+        6300,
+        380
+      ]
+    }
+  ],
+  "alt": "Bar chart: JSON payloads are about 2.6 times the size of Protobuf for every event type"
+}

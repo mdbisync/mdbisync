@@ -1,0 +1,78 @@
+{
+  "type": "diagram",
+  "title": "One cart, several sellers, several shipments",
+  "subtitle": "checkout-svc splits a paid order into one shipment group per seller",
+  "alt": "Diagram: a cart with items from three sellers becomes one payment and three seller shipments",
+  "rows": [
+    "Buyer",
+    "Order",
+    "Sellers"
+  ],
+  "nodes": [
+    {
+      "id": "cart",
+      "label": "Cart",
+      "detail": "5 items, 3 sellers",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "pay",
+      "label": "One payment",
+      "detail": "demo-pay, 64.80 EUR",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "order",
+      "label": "Order",
+      "detail": "orders-svc",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "s1",
+      "label": "Shipment A",
+      "detail": "2 items, seller 1",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "s2",
+      "label": "Shipment B",
+      "detail": "1 item, seller 2",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "s3",
+      "label": "Shipment C",
+      "detail": "2 items, seller 3",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "cart",
+      "to": "order"
+    },
+    {
+      "from": "order",
+      "to": "pay",
+      "label": "charge once"
+    },
+    {
+      "from": "order",
+      "to": "s1"
+    },
+    {
+      "from": "order",
+      "to": "s2"
+    },
+    {
+      "from": "order",
+      "to": "s3"
+    }
+  ]
+}

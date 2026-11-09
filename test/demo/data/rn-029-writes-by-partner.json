@@ -1,0 +1,23 @@
+{
+  "type": "bar",
+  "title": "Write calls by partner group",
+  "subtitle": "Share of all POST, PATCH and DELETE calls, January 2026",
+  "category": "Partner group",
+  "categories": [
+    "Top 4 partners",
+    "Next 20 partners",
+    "All other partners"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Share of write calls",
+      "values": [
+        52,
+        31,
+        17
+      ]
+    }
+  ],
+  "alt": "Bar chart: the top 4 partners make 52 % of write calls, the next 20 make 31 %, all others 17 %"
+}

@@ -1,0 +1,34 @@
+{
+  "type": "hbar",
+  "title": "Index size: whole table against the last three months",
+  "subtitle": "orders and order_lines, February 2026",
+  "category": "Index",
+  "categories": [
+    "orders primary key",
+    "orders by buyer",
+    "order_lines primary key",
+    "order_lines by seller"
+  ],
+  "unit": "GB",
+  "series": [
+    {
+      "name": "Whole table",
+      "values": [
+        41,
+        9,
+        11,
+        3
+      ]
+    },
+    {
+      "name": "Last 3 months",
+      "values": [
+        4.1,
+        0.9,
+        1.1,
+        0.4
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: indexes for the last three months are about a tenth of the whole-table indexes"
+}

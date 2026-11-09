@@ -1,0 +1,21 @@
+{
+  "type": "hbar",
+  "title": "Median time to roll back a bad release",
+  "subtitle": "Before canaries: first half of 2025. With canaries: December 2025 to May 2026",
+  "category": "Period",
+  "categories": [
+    "Before canaries",
+    "With canaries"
+  ],
+  "unit": "min",
+  "series": [
+    {
+      "name": "Median time to roll back",
+      "values": [
+        23,
+        1.2
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: median time to roll back fell from 23 minutes to 1.2 minutes"
+}

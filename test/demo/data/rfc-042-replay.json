@@ -1,0 +1,22 @@
+{
+  "type": "diagram",
+  "title": "Replaying webhook deliveries",
+  "subtitle": "Stored payloads go back through the normal delivery path",
+  "alt": "Diagram: a replay request creates a job that reads stored payloads and queues them for signed delivery to the partner",
+  "rows": ["Request", "Replay", "Delivery"],
+  "nodes": [
+    { "id": "api", "label": "POST replays", "detail": "Time range, event types", "row": 0, "col": 0 },
+    { "id": "hub", "label": "Seller Hub", "detail": "Replay button", "row": 0, "col": 2 },
+    { "id": "job", "label": "Replay job", "detail": "rpl_ id, 20 per second", "row": 1, "col": 1 },
+    { "id": "store", "label": "Payload store", "detail": "30 days, ZSTD", "row": 1, "col": 2 },
+    { "id": "queue", "label": "Delivery queue", "detail": "Signed, retried", "row": 2, "col": 1 },
+    { "id": "partner", "label": "Partner endpoint", "detail": "Replay flag set", "row": 2, "col": 2 }
+  ],
+  "edges": [
+    { "from": "api", "to": "job" },
+    { "from": "hub", "to": "job" },
+    { "from": "job", "to": "store", "label": "read" },
+    { "from": "job", "to": "queue" },
+    { "from": "queue", "to": "partner" }
+  ]
+}

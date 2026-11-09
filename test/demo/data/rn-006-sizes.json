@@ -1,0 +1,40 @@
+{
+  "type": "hbar",
+  "title": "Image size by service, before and after distroless",
+  "subtitle": "Compressed size in the registry",
+  "category": "Service",
+  "categories": [
+    "cart-svc",
+    "checkout-svc",
+    "catalog-svc",
+    "search-svc",
+    "web shop",
+    "reco-svc"
+  ],
+  "unit": "MB",
+  "series": [
+    {
+      "name": "Before",
+      "values": [
+        380,
+        412,
+        395,
+        640,
+        910,
+        1180
+      ]
+    },
+    {
+      "name": "After",
+      "values": [
+        21,
+        24,
+        22,
+        31,
+        172,
+        420
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: Go services shrank from about 400 MB to about 22 MB; the web shop from 910 to 172 MB"
+}

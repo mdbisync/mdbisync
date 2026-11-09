@@ -1,0 +1,28 @@
+{
+  "type": "bar",
+  "title": "Conversion of first-time buyers with and without guest checkout",
+  "subtitle": "Orders per checkout session of buyers without an account, 21 days, 50/50 split",
+  "category": "Platform",
+  "categories": [
+    "Web shop",
+    "App"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Account required",
+      "values": [
+        28.7,
+        22.4
+      ]
+    },
+    {
+      "name": "Guest checkout",
+      "values": [
+        36.9,
+        27.8
+      ]
+    }
+  ],
+  "alt": "Bar chart: guest checkout lifts first-time buyer conversion from 28.7 % to 36.9 % on the web and from 22.4 % to 27.8 % on the app"
+}

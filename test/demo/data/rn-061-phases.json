@@ -1,0 +1,27 @@
+{
+  "type": "hbar",
+  "title": "Where a cold start spends its time on low-end Android",
+  "subtitle": "Median of 3,420 ms split by phase, app 4.22",
+  "category": "Phase",
+  "categories": [
+    "Process start and runtime",
+    "Dependency injection graph",
+    "Home screen request",
+    "First image decode",
+    "Layout and first draw"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "Median",
+      "values": [
+        610,
+        940,
+        1050,
+        520,
+        300
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: the home screen request (1,050 ms) and dependency injection (940 ms) take the most time"
+}

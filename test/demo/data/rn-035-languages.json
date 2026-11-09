@@ -1,0 +1,29 @@
+{
+  "type": "hbar",
+  "title": "v2 calls by client, April 2026",
+  "subtitle": "Identified by User-Agent",
+  "category": "Client",
+  "categories": [
+    "TypeScript SDK",
+    "Python SDK",
+    "Go SDK",
+    "Java, own code",
+    "PHP, own code",
+    "Other, own code"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Share of calls",
+      "values": [
+        34,
+        21,
+        9,
+        6,
+        5,
+        25
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: TypeScript SDK 34 %, Python SDK 21 %, Go SDK 9 %, Java 6 %, PHP 5 %, other own code 25 %"
+}

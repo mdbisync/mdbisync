@@ -1,0 +1,29 @@
+{
+  "type": "line",
+  "title": "Reviewed orders that were legitimate",
+  "subtitle": "Share of reviewed orders released with no chargeback within 90 days",
+  "category": "Month",
+  "categories": [
+    "Nov",
+    "Dec",
+    "Jan",
+    "Feb",
+    "Mar"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Legitimate",
+      "values": [
+        71.3,
+        74.8,
+        70.2,
+        69.5,
+        52.4
+      ]
+    }
+  ],
+  "alt": "Line chart: about 70 % of reviewed orders were legitimate until February, 52.4 % in March",
+  "min": 0,
+  "max": 100
+}

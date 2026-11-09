@@ -1,0 +1,25 @@
+{
+  "type": "bar",
+  "title": "Image pull time on a fresh node",
+  "subtitle": "Median of 20 pulls, same node type",
+  "category": "Image",
+  "categories": [
+    "24 MB",
+    "172 MB",
+    "420 MB",
+    "910 MB"
+  ],
+  "unit": "s",
+  "series": [
+    {
+      "name": "Pull time",
+      "values": [
+        2.1,
+        7.4,
+        17.8,
+        38
+      ]
+    }
+  ],
+  "alt": "Bar chart: pull time grows with size, from 2.1 seconds for 24 MB to 38 seconds for 910 MB"
+}

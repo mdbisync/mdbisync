@@ -1,0 +1,74 @@
+{
+  "type": "diagram",
+  "title": "Checkout across two regions",
+  "subtitle": "Primary takes all traffic; on failover the load balancer sends it to the warm secondary",
+  "alt": "Diagram: global load balancer sends traffic to the primary region's checkout services and database; the database replicates asynchronously to a warm secondary region",
+  "rows": [
+    "Edge",
+    "Primary region",
+    "Secondary region"
+  ],
+  "nodes": [
+    {
+      "id": "glb",
+      "label": "Load balancer",
+      "detail": "Global, health-checked",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "p_svc",
+      "label": "Checkout services",
+      "detail": "100 % capacity",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "p_db",
+      "label": "Primary database",
+      "detail": "PostgreSQL, 4 databases",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "s_svc",
+      "label": "Checkout services",
+      "detail": "25 % capacity, warm",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "s_db",
+      "label": "Replica database",
+      "detail": "Async, RPO 30 s",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "glb",
+      "to": "p_svc",
+      "label": "all traffic"
+    },
+    {
+      "from": "glb",
+      "to": "s_svc",
+      "dashed": true
+    },
+    {
+      "from": "p_svc",
+      "to": "p_db"
+    },
+    {
+      "from": "p_db",
+      "to": "s_db",
+      "label": "replication"
+    },
+    {
+      "from": "s_svc",
+      "to": "s_db",
+      "dashed": true
+    }
+  ]
+}

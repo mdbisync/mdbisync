@@ -1,0 +1,17 @@
+{
+  "type": "bar",
+  "title": "Precision@10 of similar products by model and category",
+  "subtitle": "2,400 seed products, neighbours judged as acceptable substitutes",
+  "category": "Category group",
+  "categories": ["Fashion", "Furniture", "Electronics", "All"],
+  "unit": "",
+  "min": 0,
+  "max": 1,
+  "series": [
+    { "name": "Small text", "values": [0.58, 0.61, 0.79, 0.66] },
+    { "name": "Base text", "values": [0.63, 0.66, 0.84, 0.71] },
+    { "name": "Multilingual text", "values": [0.62, 0.65, 0.83, 0.7] },
+    { "name": "Image and text", "values": [0.86, 0.84, 0.8, 0.81] }
+  ],
+  "alt": "Grouped bar chart: the image and text model reaches 0.86 precision in fashion and 0.81 overall; text models are best for electronics"
+}

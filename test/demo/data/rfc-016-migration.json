@@ -1,0 +1,105 @@
+{
+  "type": "diagram",
+  "title": "Moving one service out of the shared database",
+  "subtitle": "Outside readers switch to the API or events before the tables move",
+  "alt": "Diagram: before, services read each other's tables in the shared database; after, orders-svc owns its database and others use its API and events",
+  "rows": [
+    "Before",
+    "During",
+    "After"
+  ],
+  "nodes": [
+    {
+      "id": "svc0",
+      "label": "orders-svc",
+      "detail": "Reads and writes",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "shared",
+      "label": "Shared database",
+      "detail": "214 tables, 9 services",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "other0",
+      "label": "fulfilment-svc",
+      "detail": "Joins orders tables",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "old",
+      "label": "Shared database",
+      "detail": "Orders tables, read-only",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "rep",
+      "label": "Logical replication",
+      "detail": "Copies rows",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "new1",
+      "label": "orders database",
+      "detail": "Catching up",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "other2",
+      "label": "fulfilment-svc",
+      "detail": "Uses API and events",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "svc2",
+      "label": "orders-svc",
+      "detail": "Owns its data",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "new2",
+      "label": "orders database",
+      "detail": "One owner",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "svc0",
+      "to": "shared"
+    },
+    {
+      "from": "other0",
+      "to": "shared",
+      "label": "joins",
+      "dashed": true
+    },
+    {
+      "from": "old",
+      "to": "rep"
+    },
+    {
+      "from": "rep",
+      "to": "new1"
+    },
+    {
+      "from": "svc2",
+      "to": "new2"
+    },
+    {
+      "from": "other2",
+      "to": "svc2",
+      "label": "API"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "type": "diagram",
+  "title": "Serving v1 and v2 side by side",
+  "subtitle": "One gateway, shared authentication and rate limits",
+  "alt": "Diagram: partners call api-gateway; v1 requests go through adapters, v2 requests go straight to the services",
+  "rows": ["Partners", "Gateway", "Services"],
+  "nodes": [
+    { "id": "partner", "label": "Partner apps", "detail": "REST over HTTPS", "row": 0, "col": 1 },
+    { "id": "gw", "label": "api-gateway", "detail": "OAuth, rate limits, validation", "row": 1, "col": 1 },
+    { "id": "v1", "label": "v1 adapters", "detail": "Retired 2026-06-30", "row": 1, "col": 0 },
+    { "id": "cat", "label": "catalog-svc", "detail": "Products, inventory", "row": 2, "col": 0 },
+    { "id": "ord", "label": "orders-svc", "detail": "Orders, shipments", "row": 2, "col": 1 },
+    { "id": "pay", "label": "demo-pay", "detail": "Refunds", "row": 2, "col": 2 }
+  ],
+  "edges": [
+    { "from": "partner", "to": "gw" },
+    { "from": "gw", "to": "v1", "label": "/v1/", "dashed": true },
+    { "from": "v1", "to": "cat", "dashed": true },
+    { "from": "gw", "to": "ord", "label": "/v2/" },
+    { "from": "gw", "to": "pay" },
+    { "from": "gw", "to": "cat" }
+  ]
+}

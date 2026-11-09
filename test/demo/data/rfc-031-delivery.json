@@ -1,0 +1,22 @@
+{
+  "type": "diagram",
+  "title": "Webhook delivery through notify-svc",
+  "subtitle": "One delivery queue, signed requests, retries for 72 hours",
+  "alt": "Diagram: services publish events to Kafka; notify-svc matches subscriptions, queues deliveries, signs and sends them to partners, and retries failures",
+  "rows": ["Producers", "Delivery", "Partners"],
+  "nodes": [
+    { "id": "ord", "label": "orders-svc", "detail": "Publishes through its outbox", "row": 0, "col": 0 },
+    { "id": "kafka", "label": "Kafka", "detail": "Domain events", "row": 0, "col": 1 },
+    { "id": "match", "label": "Match", "detail": "Subscriptions by event type", "row": 1, "col": 1 },
+    { "id": "queue", "label": "Delivery queue", "detail": "Ordered per subject", "row": 1, "col": 2 },
+    { "id": "retry", "label": "Retry schedule", "detail": "1 min to 12 h, 72 h in all", "row": 2, "col": 1 },
+    { "id": "partner", "label": "Partner endpoint", "detail": "Checks the signature", "row": 2, "col": 2 }
+  ],
+  "edges": [
+    { "from": "ord", "to": "kafka" },
+    { "from": "kafka", "to": "match" },
+    { "from": "match", "to": "queue" },
+    { "from": "queue", "to": "partner", "label": "signed POST" },
+    { "from": "queue", "to": "retry", "dashed": true, "label": "non-2xx" }
+  ]
+}

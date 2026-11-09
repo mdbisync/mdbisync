@@ -1,0 +1,69 @@
+{
+  "type": "diagram",
+  "title": "Saving a card without storing card numbers",
+  "subtitle": "The card number goes from the buyer's device to the vault; DemoMart keeps only a token",
+  "alt": "Diagram: the checkout page sends the card to the card vault, which returns a token; demo-pay stores the token and charges it through the card acquirer",
+  "rows": [
+    "Buyer's device",
+    "DemoMart",
+    "Payment partners"
+  ],
+  "nodes": [
+    {
+      "id": "form",
+      "label": "Card form",
+      "detail": "Hosted fields in the page",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "checkout",
+      "label": "checkout-svc",
+      "detail": "Never sees the number",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "pay",
+      "label": "demo-pay",
+      "detail": "Stores token and last four digits",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "vault",
+      "label": "Card vault",
+      "detail": "Keeps the card number",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "acq",
+      "label": "Card acquirer",
+      "detail": "Authorises and captures",
+      "row": 2,
+      "col": 1
+    }
+  ],
+  "edges": [
+    {
+      "from": "form",
+      "to": "vault",
+      "label": "card number"
+    },
+    {
+      "from": "vault",
+      "to": "checkout",
+      "label": "token"
+    },
+    {
+      "from": "checkout",
+      "to": "pay"
+    },
+    {
+      "from": "pay",
+      "to": "acq",
+      "label": "charge token"
+    }
+  ]
+}

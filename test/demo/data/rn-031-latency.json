@@ -1,0 +1,43 @@
+{
+  "type": "line",
+  "title": "p95 latency by page depth",
+  "subtitle": "GET /v1/products on a catalog of 420,000 products, 100 items per page",
+  "category": "Items skipped",
+  "categories": [
+    "0",
+    "10k",
+    "20k",
+    "40k",
+    "80k",
+    "160k",
+    "320k"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "Offset",
+      "values": [
+        45,
+        380,
+        720,
+        1450,
+        2900,
+        5800,
+        10000
+      ]
+    },
+    {
+      "name": "Cursor",
+      "values": [
+        42,
+        44,
+        43,
+        45,
+        44,
+        46,
+        45
+      ]
+    }
+  ],
+  "alt": "Line chart: offset latency grows from 45 ms to the 10-second timeout with depth; cursor latency stays near 45 ms"
+}

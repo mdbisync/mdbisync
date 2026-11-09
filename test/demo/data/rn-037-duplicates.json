@@ -1,0 +1,27 @@
+{
+  "type": "hbar",
+  "title": "Duplicate mutating calls within 60 seconds",
+  "subtitle": "Share of calls with the same body from the same partner, July 2025",
+  "category": "Endpoint",
+  "categories": [
+    "POST refunds",
+    "POST products",
+    "POST shipments",
+    "PATCH inventory",
+    "POST confirm"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Duplicates",
+      "values": [
+        0.31,
+        0.22,
+        0.18,
+        0.05,
+        0.04
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: 0.31 % of refund calls were duplicates, 0.22 % of product creations and 0.18 % of shipments"
+}

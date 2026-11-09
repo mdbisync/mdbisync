@@ -1,0 +1,12 @@
+{
+  "type": "hbar",
+  "title": "Preferred payout frequency",
+  "subtitle": "Payout survey, February 2026, 1,240 sellers",
+  "category": "Frequency",
+  "categories": ["Daily", "Twice a week", "Weekly", "Monthly"],
+  "unit": "%",
+  "series": [
+    { "name": "Sellers", "values": [34, 29, 31, 6] }
+  ],
+  "alt": "Horizontal bar chart: 34 % of sellers prefer daily payouts, 29 % twice a week, 31 % weekly and 6 % monthly"
+}

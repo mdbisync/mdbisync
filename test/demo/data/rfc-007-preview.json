@@ -1,0 +1,78 @@
+{
+  "type": "diagram",
+  "title": "A preview environment",
+  "subtitle": "Only changed services are built; the rest come from staging",
+  "alt": "Diagram: requests with a preview header reach the preview's cart-svc and web shop, while other services and Kafka are shared with staging",
+  "rows": [
+    "Entry",
+    "Preview pr-1234",
+    "Shared staging"
+  ],
+  "nodes": [
+    {
+      "id": "gw",
+      "label": "Gateway",
+      "detail": "Routes by x-preview",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "web",
+      "label": "Web shop",
+      "detail": "Built from the PR",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "cart",
+      "label": "cart-svc",
+      "detail": "Built from the PR",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "cat",
+      "label": "catalog-svc",
+      "detail": "Staging version",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "pay",
+      "label": "demo-pay",
+      "detail": "Staging version",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "kafka",
+      "label": "Kafka",
+      "detail": "Prefixed topics",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "gw",
+      "to": "web"
+    },
+    {
+      "from": "gw",
+      "to": "cart"
+    },
+    {
+      "from": "web",
+      "to": "cat"
+    },
+    {
+      "from": "cart",
+      "to": "pay"
+    },
+    {
+      "from": "cart",
+      "to": "kafka",
+      "dashed": true
+    }
+  ]
+}

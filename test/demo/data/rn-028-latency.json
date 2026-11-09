@@ -1,0 +1,39 @@
+{
+  "type": "bar",
+  "title": "p99 latency with field-level encryption",
+  "subtitle": "orders-svc in staging, 50,000 requests per bar",
+  "category": "Operation",
+  "categories": [
+    "Read one order",
+    "List 20 orders",
+    "Create an order"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "Clear text",
+      "values": [
+        3.1,
+        9.8,
+        6.0
+      ]
+    },
+    {
+      "name": "Encrypted, key cached",
+      "values": [
+        3.4,
+        11.2,
+        6.6
+      ]
+    },
+    {
+      "name": "Encrypted, cache miss",
+      "values": [
+        21.0,
+        29.0,
+        24.4
+      ]
+    }
+  ],
+  "alt": "Bar chart: encryption with a cached key adds under 1.5 ms; a cache miss adds about 18 ms"
+}

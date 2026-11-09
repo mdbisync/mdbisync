@@ -1,0 +1,29 @@
+{
+  "type": "line",
+  "title": "Trace storage cost by sampling rate",
+  "subtitle": "Projected monthly cost at November 2025 traffic, 14 days of retention",
+  "category": "Head sampling rate",
+  "categories": [
+    "1 %",
+    "2 %",
+    "5 %",
+    "10 %",
+    "25 %",
+    "100 %"
+  ],
+  "unit": "USD",
+  "series": [
+    {
+      "name": "Storage cost",
+      "values": [
+        610,
+        1050,
+        2400,
+        4700,
+        11600,
+        46000
+      ]
+    }
+  ],
+  "alt": "Line chart: trace storage cost grows from 610 USD a month at 1 % sampling to 46,000 USD at 100 %"
+}

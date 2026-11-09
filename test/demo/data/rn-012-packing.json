@@ -1,0 +1,31 @@
+{
+  "type": "bar",
+  "title": "Requested and used CPU by node pool",
+  "subtitle": "Share of the pool's allocatable CPU, May 2026 weekday average",
+  "category": "Node pool",
+  "categories": [
+    "general",
+    "batch-spot",
+    "ci"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Requested",
+      "values": [
+        72,
+        64,
+        58
+      ]
+    },
+    {
+      "name": "Used",
+      "values": [
+        41,
+        52,
+        49
+      ]
+    }
+  ],
+  "alt": "Bar chart: in the general pool 72 % of CPU is requested but only 41 % used"
+}

@@ -1,0 +1,60 @@
+{
+  "type": "line",
+  "title": "Signed-in sessions that use biometric sign-in",
+  "subtitle": "Weekly, from the release of biometric sign-in in app 5.4",
+  "category": "Week",
+  "categories": [
+    "Week 1",
+    "Week 2",
+    "Week 3",
+    "Week 4",
+    "Week 5",
+    "Week 6",
+    "Week 7",
+    "Week 8",
+    "Week 9",
+    "Week 10",
+    "Week 11",
+    "Week 12"
+  ],
+  "unit": "%",
+  "min": 0,
+  "max": 80,
+  "series": [
+    {
+      "name": "iOS",
+      "values": [
+        12,
+        27,
+        38,
+        46,
+        52,
+        57,
+        60,
+        63,
+        65,
+        66,
+        68,
+        69
+      ]
+    },
+    {
+      "name": "Android",
+      "values": [
+        8,
+        19,
+        29,
+        36,
+        42,
+        46,
+        49,
+        51,
+        53,
+        55,
+        56,
+        57
+      ]
+    }
+  ],
+  "alt": "Line chart: biometric sign-in grows to 69 % of signed-in sessions on iOS and 57 % on Android after 12 weeks"
+}

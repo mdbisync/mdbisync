@@ -1,0 +1,71 @@
+<!doctype html>
+<!--
+  Renders the glyph atlas of the demo pictures. Run once with a headless
+  Chromium that has DejaVu Sans installed, then convert the dumped JSON with
+  make-atlas.ts (see README.md in this folder):
+
+    chrome-headless-shell --no-sandbox --dump-dom --virtual-time-budget=5000 atlas.html > atlas.json.html
+-->
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "AtlasRegular"; src: local("DejaVu Sans"), local("DejaVuSans"); }
+  @font-face { font-family: "AtlasBold"; src: local("DejaVu Sans Bold"), local("DejaVuSans-Bold"); }
+</style>
+<body>
+<script>
+  const FONTS = [
+    { name: "regular", family: "AtlasRegular", weight: "normal", size: 26 },
+    { name: "bold", family: "AtlasBold", weight: "bold", size: 26 },
+    { name: "title", family: "AtlasBold", weight: "bold", size: 34 },
+  ];
+  const EXTRA = "°–—×µ…’‘“”€·≤≥→←±²³½";
+  const chars = [];
+  for (let c = 32; c < 127; c++) chars.push(String.fromCharCode(c));
+  for (const ch of EXTRA) chars.push(ch);
+
+  async function run() {
+    for (const f of FONTS) await document.fonts.load(`${f.weight} ${f.size}px ${f.family}`);
+    const out = { fonts: [] };
+    for (const f of FONTS) {
+      const cell = f.size * 3;
+      const canvas = document.createElement("canvas");
+      canvas.width = cell;
+      canvas.height = cell;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.font = `${f.weight} ${f.size}px ${f.family}`;
+      const m = ctx.measureText("Hg");
+      const font = {
+        name: f.name,
+        size: f.size,
+        ascent: Math.round(m.fontBoundingBoxAscent),
+        descent: Math.round(m.fontBoundingBoxDescent),
+        family: getComputedStyle(document.body).fontFamily,
+        glyphs: [],
+      };
+      const ox = f.size, oy = f.size * 2;
+      for (const ch of chars) {
+        ctx.clearRect(0, 0, cell, cell);
+        ctx.fillStyle = "#000";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText(ch, ox, oy);
+        const advance = Math.round(ctx.measureText(ch).width * 100) / 100;
+        const data = ctx.getImageData(0, 0, cell, cell).data;
+        let x0 = cell, y0 = cell, x1 = -1, y1 = -1;
+        for (let y = 0; y < cell; y++) for (let x = 0; x < cell; x++) {
+          if (data[(y * cell + x) * 4 + 3] > 0) {
+            if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y;
+          }
+        }
+        const alpha = [];
+        if (x1 >= 0) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) alpha.push(data[(y * cell + x) * 4 + 3]);
+        font.glyphs.push(x1 < 0
+          ? { ch: ch.codePointAt(0), advance, left: 0, top: 0, width: 0, height: 0, alpha }
+          : { ch: ch.codePointAt(0), advance, left: x0 - ox, top: y0 - oy, width: x1 - x0 + 1, height: y1 - y0 + 1, alpha });
+      }
+      out.fonts.push(font);
+    }
+    document.body.textContent = JSON.stringify(out);
+  }
+  run();
+</script>
+</body>

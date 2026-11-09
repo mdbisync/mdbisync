@@ -1,0 +1,21 @@
+{
+  "type": "bar",
+  "title": "Days from first API key to first order",
+  "subtitle": "Median per group of integrations",
+  "category": "Group",
+  "categories": [
+    "Own HTTP code",
+    "Community library"
+  ],
+  "unit": "days",
+  "series": [
+    {
+      "name": "Median",
+      "values": [
+        11,
+        4
+      ]
+    }
+  ],
+  "alt": "Bar chart: integrations with their own HTTP code took a median of 11 days to the first order, those with a community library 4"
+}

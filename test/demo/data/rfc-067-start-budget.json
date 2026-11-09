@@ -1,0 +1,66 @@
+{
+  "type": "diagram",
+  "title": "Cold start budget on low-end Android",
+  "subtitle": "2,000 ms from launch to first product image, by phase",
+  "alt": "Diagram: the cold start budget split into process start 500 ms, lazy dependency graph 300 ms, cached home screen 400 ms, first image 400 ms and first draw 400 ms",
+  "rows": [
+    "Before first frame",
+    "First content"
+  ],
+  "nodes": [
+    {
+      "id": "proc",
+      "label": "Process start",
+      "detail": "Budget 500 ms",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "di",
+      "label": "Lazy DI graph",
+      "detail": "Budget 300 ms",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "draw",
+      "label": "First draw",
+      "detail": "Budget 400 ms",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "home",
+      "label": "Cached home screen",
+      "detail": "Budget 400 ms",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "img",
+      "label": "First image",
+      "detail": "Budget 400 ms",
+      "row": 1,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "proc",
+      "to": "di"
+    },
+    {
+      "from": "di",
+      "to": "home"
+    },
+    {
+      "from": "home",
+      "to": "img"
+    },
+    {
+      "from": "di",
+      "to": "draw",
+      "dashed": true
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "type": "diagram",
+  "title": "Where a request is limited",
+  "subtitle": "Token buckets per partner and endpoint class, kept in Redis",
+  "alt": "Diagram: a request reaches api-gateway, which classifies it, checks the partner's bucket in Redis, and either forwards it or answers 429",
+  "rows": ["Edge", "Limiter", "Outcome"],
+  "nodes": [
+    { "id": "req", "label": "Partner request", "detail": "OAuth token, path", "row": 0, "col": 0 },
+    { "id": "gw", "label": "api-gateway", "detail": "Authenticates", "row": 0, "col": 1 },
+    { "id": "cls", "label": "Classify", "detail": "Read, write, order, bulk", "row": 1, "col": 1 },
+    { "id": "redis", "label": "Redis bucket", "detail": "Rate and burst", "row": 1, "col": 2 },
+    { "id": "ok", "label": "Forward", "detail": "RateLimit headers", "row": 2, "col": 1 },
+    { "id": "deny", "label": "429", "detail": "Retry-After", "row": 2, "col": 2 }
+  ],
+  "edges": [
+    { "from": "req", "to": "gw" },
+    { "from": "gw", "to": "cls" },
+    { "from": "cls", "to": "redis", "label": "take 1" },
+    { "from": "cls", "to": "ok", "label": "allowed" },
+    { "from": "redis", "to": "deny", "dashed": true, "label": "empty" }
+  ]
+}

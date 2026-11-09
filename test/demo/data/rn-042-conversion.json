@@ -1,0 +1,31 @@
+{
+  "type": "bar",
+  "title": "Checkout conversion, control and one-page variant",
+  "subtitle": "Orders per session that opened checkout, 50/50 split, 28 days",
+  "category": "Platform",
+  "categories": [
+    "Web",
+    "App",
+    "All"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Control (five steps)",
+      "values": [
+        43.8,
+        37.2,
+        41.2
+      ]
+    },
+    {
+      "name": "One-page checkout",
+      "values": [
+        47.1,
+        40.9,
+        44.7
+      ]
+    }
+  ],
+  "alt": "Bar chart: the one-page variant converts better on web (47.1 % against 43.8 %) and app (40.9 % against 37.2 %)"
+}

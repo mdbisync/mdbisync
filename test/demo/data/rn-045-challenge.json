@@ -1,0 +1,37 @@
+{
+  "type": "bar",
+  "title": "3-D Secure challenge rate by market",
+  "subtitle": "Share of card payments where the issuer asked the buyer to confirm, July 2025",
+  "category": "Market",
+  "categories": [
+    "DE",
+    "FR",
+    "NL",
+    "PL",
+    "ES"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Before exemptions",
+      "values": [
+        41.2,
+        36.8,
+        33.5,
+        44.9,
+        38.7
+      ]
+    },
+    {
+      "name": "With low-value and risk exemptions",
+      "values": [
+        22.6,
+        19.4,
+        18.1,
+        27.3,
+        21.5
+      ]
+    }
+  ],
+  "alt": "Bar chart: requesting exemptions roughly halves the 3-D Secure challenge rate in every market"
+}

@@ -1,0 +1,84 @@
+{
+  "type": "diagram",
+  "title": "Retrying a soft-declined payment",
+  "subtitle": "demo-pay picks the next delay from the decline reason; the buyer waits on the payment page",
+  "alt": "Diagram: a soft decline goes to the retry planner, which waits by reason and authorises again, or gives up and asks the buyer for another method",
+  "rows": [
+    "Payment",
+    "Retry",
+    "Outcome"
+  ],
+  "nodes": [
+    {
+      "id": "auth",
+      "label": "Authorise",
+      "detail": "Card acquirer",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "decline",
+      "label": "Soft decline",
+      "detail": "Reason code",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "plan",
+      "label": "Retry planner",
+      "detail": "Delay by reason",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "wait",
+      "label": "Wait",
+      "detail": "2 s to 90 s",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "ok",
+      "label": "Paid",
+      "detail": "Order confirmed",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "ask",
+      "label": "Ask the buyer",
+      "detail": "Another method",
+      "row": 2,
+      "col": 1
+    }
+  ],
+  "edges": [
+    {
+      "from": "auth",
+      "to": "decline"
+    },
+    {
+      "from": "decline",
+      "to": "plan"
+    },
+    {
+      "from": "plan",
+      "to": "wait",
+      "label": "retry"
+    },
+    {
+      "from": "wait",
+      "to": "auth"
+    },
+    {
+      "from": "auth",
+      "to": "ok",
+      "dashed": true
+    },
+    {
+      "from": "plan",
+      "to": "ask",
+      "label": "give up"
+    }
+  ]
+}

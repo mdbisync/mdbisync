@@ -1,0 +1,63 @@
+{
+  "type": "line",
+  "title": "Consumer lag on the sale night",
+  "subtitle": "Hourly maximum, 28 November 2025",
+  "category": "Time",
+  "categories": [
+    "18:00",
+    "19:00",
+    "20:00",
+    "21:00",
+    "22:00",
+    "23:00",
+    "00:00",
+    "01:00",
+    "02:00"
+  ],
+  "unit": "s",
+  "series": [
+    {
+      "name": "events-pipeline",
+      "values": [
+        1.5,
+        4,
+        22,
+        95,
+        60,
+        18,
+        5,
+        1.8,
+        1.5
+      ]
+    },
+    {
+      "name": "notify-svc",
+      "values": [
+        1,
+        2,
+        14,
+        48,
+        21,
+        6,
+        2,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "fulfilment-svc",
+      "values": [
+        1,
+        1,
+        3,
+        9,
+        5,
+        2,
+        1,
+        1,
+        1
+      ]
+    }
+  ],
+  "alt": "Line chart: events-pipeline lag peaks at 95 s at 21:00, notify-svc at 48 s, fulfilment-svc at 9 s; all recover by 01:00"
+}

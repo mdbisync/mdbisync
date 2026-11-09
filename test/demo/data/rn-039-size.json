@@ -1,0 +1,23 @@
+{
+  "type": "hbar",
+  "title": "Response size for 200 products",
+  "subtitle": "GET /v2/products?limit=200, median of 50 responses",
+  "category": "Encoding",
+  "categories": [
+    "None",
+    "gzip level 6",
+    "Brotli level 5"
+  ],
+  "unit": "KB",
+  "series": [
+    {
+      "name": "Size",
+      "values": [
+        412,
+        58,
+        47
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: 412 KB uncompressed, 58 KB with gzip and 47 KB with Brotli"
+}

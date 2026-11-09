@@ -1,0 +1,27 @@
+{
+  "type": "hbar",
+  "title": "Legitimate orders caught by each rule",
+  "subtitle": "Reviewed orders that turned out legitimate, November 2025 to February 2026",
+  "category": "Rule",
+  "categories": [
+    "Billing and delivery country differ",
+    "New account, order over 300 EUR",
+    "Three cards in one hour",
+    "Delivery to a parcel locker",
+    "Device seen with chargebacks"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Share of false positives",
+      "values": [
+        38.6,
+        24.1,
+        9.7,
+        18.2,
+        9.4
+      ]
+    }
+  ],
+  "alt": "Horizontal bars: the country mismatch rule causes 38.6 % of false positives and the new-account rule 24.1 %"
+}

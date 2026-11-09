@@ -1,0 +1,35 @@
+{
+  "type": "line",
+  "title": "Share of partner traffic on v2",
+  "subtitle": "Monthly, from general availability to the retirement of v1",
+  "category": "Month",
+  "categories": [
+    "Nov 2025",
+    "Dec 2025",
+    "Jan 2026",
+    "Feb 2026",
+    "Mar 2026",
+    "Apr 2026",
+    "May 2026",
+    "Jun 2026"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "v2",
+      "values": [
+        4,
+        12,
+        27,
+        44,
+        61,
+        78,
+        93,
+        99.6
+      ]
+    }
+  ],
+  "alt": "Line chart: v2 rose from 4 % of traffic in November 2025 to 99.6 % in June 2026",
+  "min": 0,
+  "max": 100
+}

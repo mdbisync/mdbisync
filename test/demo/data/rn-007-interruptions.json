@@ -1,0 +1,29 @@
+{
+  "type": "hbar",
+  "title": "Spot interruptions by instance type",
+  "subtitle": "Interruptions per 1,000 node hours, January to March 2026",
+  "category": "Instance type",
+  "categories": [
+    "Memory, 4 vCPU",
+    "General, 4 vCPU",
+    "Memory, 8 vCPU",
+    "General, 8 vCPU",
+    "Compute, 8 vCPU",
+    "Compute, 16 vCPU"
+  ],
+  "unit": "",
+  "series": [
+    {
+      "name": "Interruptions per 1,000 node hours",
+      "values": [
+        1.6,
+        2.1,
+        2.9,
+        3.4,
+        5.8,
+        7.2
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: interruption rates range from 1.6 to 7.2 per 1,000 node hours, highest for large compute instances"
+}

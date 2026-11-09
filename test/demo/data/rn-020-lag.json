@@ -1,0 +1,58 @@
+{
+  "type": "line",
+  "title": "Change data capture lag over a day",
+  "subtitle": "Commit to Kafka append, catalog database, 14 July 2025",
+  "category": "Time",
+  "categories": [
+    "00:00",
+    "02:00",
+    "04:00",
+    "06:00",
+    "08:00",
+    "10:00",
+    "12:00",
+    "14:00",
+    "16:00",
+    "18:00",
+    "20:00",
+    "22:00"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "p99",
+      "values": [
+        400,
+        380,
+        420,
+        900,
+        1300,
+        1500,
+        1400,
+        1600,
+        1900,
+        2100,
+        2400,
+        1100
+      ]
+    },
+    {
+      "name": "p50",
+      "values": [
+        120,
+        120,
+        130,
+        180,
+        260,
+        300,
+        280,
+        310,
+        330,
+        350,
+        380,
+        200
+      ]
+    }
+  ],
+  "alt": "Line chart: median lag stays under 400 ms; p99 lag peaks at 2,400 ms at 20:00"
+}

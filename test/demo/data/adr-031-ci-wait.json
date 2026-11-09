@@ -1,0 +1,46 @@
+{
+  "type": "bar",
+  "title": "Median CI queue wait by hour of day",
+  "subtitle": "Weekdays, four weeks before and four weeks after the switch",
+  "category": "Hour (UTC)",
+  "categories": [
+    "06",
+    "08",
+    "10",
+    "12",
+    "14",
+    "16",
+    "18",
+    "20"
+  ],
+  "unit": "s",
+  "series": [
+    {
+      "name": "Self-hosted machines",
+      "values": [
+        12,
+        310,
+        840,
+        620,
+        790,
+        510,
+        140,
+        20
+      ]
+    },
+    {
+      "name": "Ephemeral runners",
+      "values": [
+        28,
+        34,
+        37,
+        35,
+        36,
+        33,
+        30,
+        27
+      ]
+    }
+  ],
+  "alt": "Bar chart: queue wait on self-hosted machines peaks at 840 seconds at 10:00, ephemeral runners stay between 27 and 37 seconds"
+}

@@ -1,0 +1,46 @@
+{
+  "type": "line",
+  "title": "Alerts per week and alerts acted on",
+  "subtitle": "All services, January to April 2026; burn-rate alerting from week 10",
+  "category": "Week",
+  "categories": [
+    "W2",
+    "W4",
+    "W6",
+    "W8",
+    "W10",
+    "W12",
+    "W14",
+    "W16"
+  ],
+  "unit": "",
+  "series": [
+    {
+      "name": "Alerts",
+      "values": [
+        452,
+        431,
+        470,
+        418,
+        96,
+        22,
+        9,
+        7
+      ]
+    },
+    {
+      "name": "Acted on",
+      "values": [
+        27,
+        25,
+        30,
+        24,
+        14,
+        8,
+        6,
+        5
+      ]
+    }
+  ],
+  "alt": "Line chart: weekly alerts fall from about 450 to 7 after burn-rate alerting starts in week 10, while alerts acted on fall from 27 to 5"
+}

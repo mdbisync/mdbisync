@@ -1,0 +1,21 @@
+{
+  "type": "hbar",
+  "title": "Database CPU used by the relay at peak",
+  "subtitle": "orders database, staging, production size",
+  "category": "Relay",
+  "categories": [
+    "Polling every 500 ms",
+    "Log tailing"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Database CPU",
+      "values": [
+        7.5,
+        1.2
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: polling uses 7.5 % of database CPU, log tailing 1.2 %"
+}

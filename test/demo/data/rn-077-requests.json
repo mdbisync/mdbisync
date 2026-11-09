@@ -1,0 +1,12 @@
+{
+  "type": "hbar",
+  "title": "API requests per page load",
+  "subtitle": "Seller Hub with the REST client, April 2026",
+  "category": "Page",
+  "categories": ["Listings", "Orders", "Inventory", "Returns", "Payouts"],
+  "unit": "",
+  "series": [
+    { "name": "Requests", "values": [19, 14, 9, 7, 6] }
+  ],
+  "alt": "Horizontal bar chart: the listings page makes 19 requests per load, orders 14, inventory 9, returns 7 and payouts 6"
+}

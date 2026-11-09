@@ -1,0 +1,14 @@
+{
+  "type": "line",
+  "title": "Listing edits per week by source",
+  "subtitle": "Week 1 starts 2026-06-22; the bulk editor opened to all sellers in week 5",
+  "category": "Week",
+  "categories": ["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12"],
+  "unit": "",
+  "series": [
+    { "name": "Single edits", "values": [140000, 138000, 141000, 137000, 128000, 121000, 116000, 112000, 108000, 105000, 103000, 101000] },
+    { "name": "Bulk editor", "values": [18000, 19000, 21000, 22000, 41000, 55000, 64000, 72000, 79000, 85000, 91000, 96000] },
+    { "name": "CSV upload", "values": [52000, 51000, 53000, 50000, 41000, 35000, 31000, 28000, 26000, 24000, 22000, 21000] }
+  ],
+  "alt": "Line chart: bulk editor edits grow from 18,000 to 96,000 a week while single edits fall from 140,000 to 101,000 and CSV uploads from 52,000 to 21,000"
+}

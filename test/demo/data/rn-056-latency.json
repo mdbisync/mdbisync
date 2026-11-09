@@ -1,0 +1,15 @@
+{
+  "type": "line",
+  "title": "p99 suggestion latency by index size",
+  "subtitle": "2,000 prefix requests per second, 3 nodes, 16 GB heap each",
+  "category": "Index size (million entries)",
+  "categories": ["0.5", "1", "2", "4", "8", "16"],
+  "unit": "ms",
+  "min": 0,
+  "max": 125,
+  "series": [
+    { "name": "Completion suggester", "values": [9, 9, 10, 11, 14, 21] },
+    { "name": "Edge n-grams", "values": [18, 24, 35, 52, 79, 118] }
+  ],
+  "alt": "Line chart: the completion suggester stays between 9 and 21 ms up to 16 million entries; edge n-grams pass 50 ms at 4 million"
+}

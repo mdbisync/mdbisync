@@ -1,0 +1,13 @@
+{
+  "type": "bar",
+  "title": "Late shipments by carrier",
+  "subtitle": "First carrier scan after the promised dispatch date, 2.3 million shipments",
+  "category": "Carrier",
+  "categories": ["Carrier A", "Carrier B", "Carrier C", "Carrier D", "Carrier E"],
+  "unit": "%",
+  "series": [
+    { "name": "Q4 2025", "values": [3.6, 4.9, 2.9, 6.1, 4.2] },
+    { "name": "Q1 2026", "values": [3.1, 4.4, 2.7, 6.8, 3.9] }
+  ],
+  "alt": "Grouped bar chart of late shipment rates: Carrier C is lowest at 2.7 % in Q1 2026 and Carrier D highest at 6.8 %, the only one that got worse"
+}

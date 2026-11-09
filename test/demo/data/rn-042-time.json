@@ -1,0 +1,66 @@
+{
+  "type": "line",
+  "title": "Median time from cart to order",
+  "subtitle": "Seconds, daily median of completed checkouts, first 14 days of the experiment",
+  "category": "Day",
+  "categories": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14"
+  ],
+  "unit": "s",
+  "series": [
+    {
+      "name": "Control",
+      "values": [
+        212,
+        208,
+        215,
+        210,
+        206,
+        209,
+        213,
+        211,
+        207,
+        210,
+        205,
+        208,
+        212,
+        209
+      ]
+    },
+    {
+      "name": "One-page",
+      "values": [
+        171,
+        160,
+        152,
+        149,
+        147,
+        146,
+        148,
+        145,
+        146,
+        144,
+        147,
+        145,
+        143,
+        146
+      ]
+    }
+  ],
+  "alt": "Line chart: median checkout time falls from about 210 seconds to about 146 seconds with the one-page flow",
+  "min": 100,
+  "max": 250
+}

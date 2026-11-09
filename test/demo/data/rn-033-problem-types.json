@@ -1,0 +1,29 @@
+{
+  "type": "hbar",
+  "title": "v2 client errors by problem type",
+  "subtitle": "March 2026, share of all v2 4xx responses",
+  "category": "Problem type",
+  "categories": [
+    "validation-failed",
+    "not-found",
+    "rate-limited",
+    "invalid-state-transition",
+    "token-expired",
+    "Other"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Share",
+      "values": [
+        38,
+        21,
+        16,
+        11,
+        8,
+        6
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: validation failures are 38 % of v2 client errors, not-found 21 %, rate-limited 16 %"
+}

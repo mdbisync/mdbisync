@@ -1,0 +1,82 @@
+{
+  "type": "diagram",
+  "title": "The golden path for a new service",
+  "subtitle": "One command, two pull requests, a running service",
+  "alt": "Diagram: one command creates pull requests in the monorepo and the environments repository; merging them builds the service and deploys it with its database, topics and dashboards",
+  "rows": [
+    "Request",
+    "Pull requests",
+    "Result"
+  ],
+  "nodes": [
+    {
+      "id": "cmd",
+      "label": "new service",
+      "detail": "Name, team, options",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "mono",
+      "label": "Monorepo PR",
+      "detail": "Code and pipeline",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "env",
+      "label": "Environments PR",
+      "detail": "Manifest, database, topics",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "ci",
+      "label": "CI build",
+      "detail": "Image and tests",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "argo",
+      "label": "Argo CD",
+      "detail": "Deploys with canary",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "obs",
+      "label": "Dashboards",
+      "detail": "Objective 99.9 %",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "cmd",
+      "to": "mono"
+    },
+    {
+      "from": "cmd",
+      "to": "env"
+    },
+    {
+      "from": "mono",
+      "to": "ci"
+    },
+    {
+      "from": "ci",
+      "to": "argo"
+    },
+    {
+      "from": "env",
+      "to": "argo"
+    },
+    {
+      "from": "env",
+      "to": "obs",
+      "dashed": true
+    }
+  ]
+}

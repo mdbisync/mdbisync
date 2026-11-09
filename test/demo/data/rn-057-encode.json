@@ -1,0 +1,12 @@
+{
+  "type": "hbar",
+  "title": "Encoding time per listing, one CPU core",
+  "subtitle": "Median over 10,000 listings",
+  "category": "Model",
+  "categories": ["Small text (384)", "Base text (768)", "Multilingual text (768)", "Image and text (512)"],
+  "unit": "ms",
+  "series": [
+    { "name": "Median", "values": [4, 11, 12, 41] }
+  ],
+  "alt": "Horizontal bar chart of encoding time: 4 ms for the small text model up to 41 ms for the image and text model"
+}

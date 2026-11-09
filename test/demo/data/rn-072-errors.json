@@ -1,0 +1,13 @@
+{
+  "type": "bar",
+  "title": "Stock update problems by connection",
+  "subtitle": "Per 10,000 updates, September and October 2025",
+  "category": "Connection",
+  "categories": ["CSV upload", "API polling", "API push", "Plugin A", "Plugin B"],
+  "unit": "",
+  "series": [
+    { "name": "Rejected updates", "values": [42, 18, 11, 27, 35] },
+    { "name": "Oversold orders", "values": [9.5, 6.1, 1.2, 3.8, 7.4] }
+  ],
+  "alt": "Grouped bar chart per 10,000 updates: CSV upload has 42 rejected updates and 9.5 oversold orders, API push 11 and 1.2"
+}

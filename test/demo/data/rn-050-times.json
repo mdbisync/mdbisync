@@ -1,0 +1,37 @@
+{
+  "type": "hbar",
+  "title": "Time from refund request to money returned",
+  "subtitle": "Median days by payment method, May and June 2026",
+  "category": "Payment method",
+  "categories": [
+    "Card",
+    "Saved card",
+    "Mobile wallet",
+    "Bank transfer",
+    "Voucher balance"
+  ],
+  "unit": "days",
+  "series": [
+    {
+      "name": "Before self-service",
+      "values": [
+        6.8,
+        6.6,
+        5.9,
+        9.4,
+        3.1
+      ]
+    },
+    {
+      "name": "With self-service",
+      "values": [
+        3.2,
+        3.1,
+        2.4,
+        5.8,
+        0.1
+      ]
+    }
+  ],
+  "alt": "Horizontal grouped bars: self-service refunds cut the median time to money returned from 6.8 to 3.2 days for cards and from 9.4 to 5.8 days for bank transfers"
+}

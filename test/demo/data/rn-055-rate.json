@@ -1,0 +1,12 @@
+{
+  "type": "hbar",
+  "title": "Zero-result rate by category",
+  "subtitle": "All searches in December 2025, 21.4 million",
+  "category": "Category",
+  "categories": ["Furniture and home", "Electronics", "Garden and outdoor", "Toys and games", "Beauty", "Sports", "Fashion"],
+  "unit": "%",
+  "series": [
+    { "name": "Zero-result rate", "values": [4.1, 3.2, 2.6, 1.8, 1.5, 1.3, 0.9] }
+  ],
+  "alt": "Horizontal bar chart of zero-result rate by category, from 4.1 % for furniture and home down to 0.9 % for fashion"
+}

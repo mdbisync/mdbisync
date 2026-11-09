@@ -1,0 +1,12 @@
+{
+  "type": "hbar",
+  "title": "How sellers connect their stock",
+  "subtitle": "Share of 9,800 sellers who sent stock updates, October 2025",
+  "category": "Connection",
+  "categories": ["CSV upload", "API polling", "Plugin A", "Plugin B", "API push"],
+  "unit": "%",
+  "series": [
+    { "name": "Sellers", "values": [38, 21, 19, 13, 9] }
+  ],
+  "alt": "Horizontal bar chart: 38 % of sellers use CSV upload, 21 % API polling, 19 % Plugin A, 13 % Plugin B, 9 % API push"
+}

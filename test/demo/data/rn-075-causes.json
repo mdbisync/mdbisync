@@ -1,0 +1,12 @@
+{
+  "type": "hbar",
+  "title": "Causes of late shipments",
+  "subtitle": "Sample of 2,000 late shipments, Q1 2026",
+  "category": "Cause",
+  "categories": ["Label created after cut-off", "Carrier delay", "Address problem", "Dropped at the wrong depot"],
+  "unit": "%",
+  "series": [
+    { "name": "Late shipments", "values": [41, 33, 14, 12] }
+  ],
+  "alt": "Horizontal bar chart: 41 % of late shipments had a label created after the cut-off, 33 % were carrier delays, 14 % address problems, 12 % the wrong depot"
+}

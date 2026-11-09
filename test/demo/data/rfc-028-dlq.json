@@ -1,0 +1,74 @@
+{
+  "type": "diagram",
+  "title": "Retry, then park",
+  "subtitle": "One dead letter topic per consumer group",
+  "alt": "Diagram: a consumer retries a failing message three times with backoff, then publishes it to its dead letter topic and moves on; dlqctl can re-drive parked messages",
+  "rows": [
+    "Topic",
+    "Consumer",
+    "Dead letters"
+  ],
+  "nodes": [
+    {
+      "id": "topic",
+      "label": "orders.events",
+      "detail": "48 partitions",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "cons",
+      "label": "notify-svc",
+      "detail": "Consumer group",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "retry",
+      "label": "Retry",
+      "detail": "100 ms, 1 s, 10 s",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "dlq",
+      "label": "dlq.notify-svc",
+      "detail": "Reason in headers",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "tool",
+      "label": "dlqctl",
+      "detail": "Re-drive after a fix",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "topic",
+      "to": "cons"
+    },
+    {
+      "from": "cons",
+      "to": "retry",
+      "label": "fails"
+    },
+    {
+      "from": "retry",
+      "to": "dlq",
+      "label": "park"
+    },
+    {
+      "from": "dlq",
+      "to": "tool"
+    },
+    {
+      "from": "tool",
+      "to": "topic",
+      "label": "re-drive",
+      "dashed": true
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "type": "hbar",
+  "title": "Return rate by category",
+  "subtitle": "Return requests per delivered order line, December 2025 to May 2026",
+  "category": "Category",
+  "categories": ["Fashion", "Electronics", "Home", "Toys", "Beauty"],
+  "unit": "%",
+  "series": [
+    { "name": "Return rate", "values": [18.4, 7.9, 6.2, 4.5, 3.1] }
+  ],
+  "alt": "Horizontal bar chart of return rates: fashion 18.4 %, electronics 7.9 %, home 6.2 %, toys 4.5 %, beauty 3.1 %"
+}

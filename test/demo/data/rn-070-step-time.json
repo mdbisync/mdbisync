@@ -1,0 +1,12 @@
+{
+  "type": "bar",
+  "title": "Median time per onboarding step",
+  "subtitle": "Sellers who completed the step, Q4 2025, waiting time included",
+  "category": "Step",
+  "categories": ["Business details", "Identity check", "Bank account", "First listing"],
+  "unit": "min",
+  "series": [
+    { "name": "Median time", "values": [6, 31, 12, 22] }
+  ],
+  "alt": "Bar chart of median minutes per step: business details 6, identity check 31, bank account 12, first listing 22"
+}

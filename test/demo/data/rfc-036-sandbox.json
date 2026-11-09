@@ -1,0 +1,21 @@
+{
+  "type": "diagram",
+  "title": "Production and sandbox",
+  "subtitle": "Same code and API, separate data, fake providers",
+  "alt": "Diagram: production and sandbox hosts run the same services; the sandbox has its own database and fake carriers and payment test mode",
+  "rows": ["Hosts", "Services", "Providers"],
+  "nodes": [
+    { "id": "prod", "label": "api.example.com", "detail": "dm_live_ keys", "row": 0, "col": 0 },
+    { "id": "sbx", "label": "sandbox.api", "detail": "dm_test_ keys", "row": 0, "col": 2 },
+    { "id": "psvc", "label": "Production services", "detail": "Production database", "row": 1, "col": 0 },
+    { "id": "ssvc", "label": "Sandbox services", "detail": "Same images, own database", "row": 1, "col": 2 },
+    { "id": "real", "label": "Carriers, payments", "detail": "Real providers", "row": 2, "col": 0 },
+    { "id": "fake", "label": "Fakes", "detail": "Test mode, simulated carriers", "row": 2, "col": 2 }
+  ],
+  "edges": [
+    { "from": "prod", "to": "psvc" },
+    { "from": "sbx", "to": "ssvc" },
+    { "from": "psvc", "to": "real" },
+    { "from": "ssvc", "to": "fake" }
+  ]
+}

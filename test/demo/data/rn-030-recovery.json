@@ -1,0 +1,35 @@
+{
+  "type": "line",
+  "title": "Failed deliveries that a retry would recover",
+  "subtitle": "Cumulative share by hours since the first failure, June 2025",
+  "category": "Hours after first failure",
+  "categories": [
+    "1",
+    "2",
+    "6",
+    "12",
+    "24",
+    "48",
+    "72",
+    "96"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Recovered",
+      "values": [
+        41.0,
+        55.2,
+        74.8,
+        86.1,
+        94.3,
+        98.7,
+        99.6,
+        99.8
+      ]
+    }
+  ],
+  "alt": "Line chart: 41 % of failures recover within an hour, 94.3 % within a day and 99.6 % within 72 hours",
+  "min": 0,
+  "max": 100
+}

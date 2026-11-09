@@ -1,0 +1,52 @@
+{
+  "type": "bar",
+  "title": "Radar items by ring and quadrant",
+  "subtitle": "Technology radar 2026, 21 items",
+  "category": "Ring",
+  "categories": [
+    "Adopt",
+    "Trial",
+    "Assess",
+    "Hold"
+  ],
+  "unit": "",
+  "series": [
+    {
+      "name": "Languages",
+      "values": [
+        3,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "Data",
+      "values": [
+        3,
+        2,
+        0,
+        1
+      ]
+    },
+    {
+      "name": "Platform",
+      "values": [
+        2,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "Tools",
+      "values": [
+        2,
+        1,
+        0,
+        1
+      ]
+    }
+  ],
+  "alt": "Grouped bar chart of radar items per ring: most items are in Adopt, with one or two per quadrant in Trial, Assess and Hold"
+}

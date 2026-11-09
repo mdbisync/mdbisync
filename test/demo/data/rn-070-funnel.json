@@ -1,0 +1,14 @@
+{
+  "type": "hbar",
+  "title": "Seller onboarding funnel",
+  "subtitle": "4,000 sign-ups started in Q4 2025, share still in after each step",
+  "category": "Step",
+  "categories": ["Account created", "Business details", "Identity check passed", "Bank account added", "First listing published", "First sale in 30 days"],
+  "unit": "%",
+  "min": 0,
+  "max": 100,
+  "series": [
+    { "name": "Sellers remaining", "values": [100, 81, 63, 52, 41, 24] }
+  ],
+  "alt": "Horizontal bar chart of the onboarding funnel: 81 % complete business details, 63 % pass the identity check, 41 % publish a first listing, 24 % sell within 30 days"
+}

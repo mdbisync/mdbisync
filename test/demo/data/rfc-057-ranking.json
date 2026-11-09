@@ -1,0 +1,22 @@
+{
+  "type": "diagram",
+  "title": "Two-stage ranking with a learned model",
+  "subtitle": "Retrieval stays BM25; the model re-orders the top 200",
+  "alt": "Diagram: the query goes to search-svc, OpenSearch retrieves 200 results with BM25, the LambdaMART model re-ranks them; a weekly training job builds the model from click logs",
+  "rows": ["Request", "Ranking", "Training"],
+  "nodes": [
+    { "id": "client", "label": "Web shop or app", "detail": "Search query", "row": 0, "col": 0 },
+    { "id": "svc", "label": "search-svc", "detail": "Builds the query, logs features", "row": 0, "col": 1 },
+    { "id": "bm25", "label": "BM25 retrieval", "detail": "Top 200, typo tolerant", "row": 1, "col": 1 },
+    { "id": "ltr", "label": "LambdaMART", "detail": "48 features, rescore window 200", "row": 1, "col": 2 },
+    { "id": "logs", "label": "Click and order logs", "detail": "ClickHouse, 12 weeks", "row": 2, "col": 1 },
+    { "id": "train", "label": "Weekly training", "detail": "Gated on the judged set", "row": 2, "col": 2 }
+  ],
+  "edges": [
+    { "from": "client", "to": "svc" },
+    { "from": "svc", "to": "bm25" },
+    { "from": "bm25", "to": "ltr", "label": "200 hits" },
+    { "from": "logs", "to": "train" },
+    { "from": "train", "to": "ltr", "label": "model", "dashed": true }
+  ]
+}

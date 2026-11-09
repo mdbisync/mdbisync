@@ -1,0 +1,16 @@
+{
+  "type": "line",
+  "title": "Search latency on the busiest day of 2025",
+  "subtitle": "Friday 28 November, two-hour points, UTC",
+  "category": "Time (UTC)",
+  "categories": ["06:00", "08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00"],
+  "unit": "ms",
+  "min": 0,
+  "max": 250,
+  "series": [
+    { "name": "p50", "values": [31, 36, 42, 39, 37, 38, 41, 44, 35] },
+    { "name": "p95", "values": [88, 104, 139, 121, 112, 118, 133, 162, 97] },
+    { "name": "p99", "values": [131, 168, 212, 181, 166, 174, 196, 241, 149] }
+  ],
+  "alt": "Line chart of search latency: p99 crosses 200 ms at 10:00 and 20:00, peaking at 241 ms; p50 stays between 31 and 44 ms"
+}

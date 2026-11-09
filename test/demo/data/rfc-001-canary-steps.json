@@ -1,0 +1,77 @@
+{
+  "type": "diagram",
+  "title": "A canary release in four steps",
+  "subtitle": "Analysis runs between steps; a failure sends all traffic back to stable",
+  "alt": "Diagram: a release moves from 5 % to 25 % to 50 % to 100 % of traffic, with an analysis gate after each step and a rollback path",
+  "rows": [
+    "Traffic",
+    "Checks"
+  ],
+  "nodes": [
+    {
+      "id": "s1",
+      "label": "5 %",
+      "detail": "10 minutes",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "s2",
+      "label": "25 %",
+      "detail": "10 minutes",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "s3",
+      "label": "50 %",
+      "detail": "10 minutes",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "s4",
+      "label": "100 %",
+      "detail": "Promoted",
+      "row": 0,
+      "col": 3
+    },
+    {
+      "id": "an",
+      "label": "Analysis",
+      "detail": "Errors and p99 vs stable",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "rb",
+      "label": "Rollback",
+      "detail": "On failure, 1 min",
+      "row": 1,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "s1",
+      "to": "s2"
+    },
+    {
+      "from": "s2",
+      "to": "s3"
+    },
+    {
+      "from": "s3",
+      "to": "s4"
+    },
+    {
+      "from": "s1",
+      "to": "an",
+      "dashed": true
+    },
+    {
+      "from": "an",
+      "to": "rb"
+    }
+  ]
+}

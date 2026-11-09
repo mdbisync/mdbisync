@@ -1,0 +1,23 @@
+{
+  "type": "bar",
+  "title": "Import job throughput by kind",
+  "subtitle": "Rows applied per second, median of five runs",
+  "category": "Job kind",
+  "categories": [
+    "inventory",
+    "prices",
+    "products"
+  ],
+  "unit": "rows/s",
+  "series": [
+    {
+      "name": "Throughput",
+      "values": [
+        480,
+        455,
+        310
+      ]
+    }
+  ],
+  "alt": "Bar chart: import jobs apply 480 inventory rows, 455 price rows or 310 product rows per second"
+}

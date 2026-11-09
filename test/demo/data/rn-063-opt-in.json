@@ -1,0 +1,34 @@
+{
+  "type": "bar",
+  "title": "Push notification opt-in by moment of the prompt",
+  "subtitle": "New installs, 4 weeks per arm, share that allowed notifications",
+  "category": "Prompt shown",
+  "categories": [
+    "On first launch",
+    "After first order",
+    "After saving a product",
+    "From order tracking"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "iOS",
+      "values": [
+        38,
+        61,
+        54,
+        66
+      ]
+    },
+    {
+      "name": "Android 13 and later",
+      "values": [
+        52,
+        72,
+        67,
+        75
+      ]
+    }
+  ],
+  "alt": "Bar chart: opt-in is lowest on first launch (38 % iOS, 52 % Android) and highest from order tracking (66 % and 75 %)"
+}

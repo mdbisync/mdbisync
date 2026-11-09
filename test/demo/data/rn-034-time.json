@@ -1,0 +1,23 @@
+{
+  "type": "hbar",
+  "title": "Time to apply 60,000 price updates",
+  "subtitle": "One partner's full catalog, production-sized prototype",
+  "category": "Method",
+  "categories": [
+    "Single PATCH calls",
+    "Batches of 100",
+    "Import job"
+  ],
+  "unit": "min",
+  "series": [
+    {
+      "name": "Duration",
+      "values": [
+        100,
+        9.8,
+        2.1
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: single calls take 100 minutes, batches 9.8 minutes, an import job 2.1 minutes"
+}

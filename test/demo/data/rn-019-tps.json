@@ -1,0 +1,44 @@
+{
+  "type": "line",
+  "title": "Transactions per second by concurrent clients",
+  "subtitle": "Checkout-like pgbench script, PostgreSQL 16",
+  "category": "Clients",
+  "categories": [
+    "100",
+    "250",
+    "500",
+    "1000"
+  ],
+  "unit": "tx/s",
+  "series": [
+    {
+      "name": "Transaction mode",
+      "values": [
+        9100,
+        11400,
+        11900,
+        11600
+      ]
+    },
+    {
+      "name": "Session mode",
+      "values": [
+        9000,
+        9500,
+        7800,
+        4100
+      ]
+    },
+    {
+      "name": "Direct",
+      "values": [
+        9200,
+        9800,
+        7100,
+        3900
+      ]
+    }
+  ],
+  "alt": "Line chart: transaction mode holds about 11,600 transactions per second at 1,000 clients while session mode and direct connections fall to about 4,000",
+  "min": 0
+}

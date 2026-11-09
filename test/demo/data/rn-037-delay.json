@@ -1,0 +1,25 @@
+{
+  "type": "bar",
+  "title": "Delay between a call and its duplicate",
+  "subtitle": "All duplicates in July 2025",
+  "category": "Delay",
+  "categories": [
+    "under 1 s",
+    "1 to 5 s",
+    "5 to 30 s",
+    "30 to 60 s"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Share of duplicates",
+      "values": [
+        12,
+        46,
+        33,
+        9
+      ]
+    }
+  ],
+  "alt": "Bar chart: 46 % of duplicates came 1 to 5 seconds after the original, typical of client timeouts and retries"
+}

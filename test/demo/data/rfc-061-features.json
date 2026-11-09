@@ -1,0 +1,20 @@
+{
+  "type": "diagram",
+  "title": "Proposed personal features in ranking",
+  "subtitle": "Rejected after the online test; kept for the record",
+  "alt": "Diagram: a nightly job builds buyer profiles from views and orders into Redis; search-svc reads a profile and passes six personal features to the ranking model",
+  "rows": ["Nightly", "Per search"],
+  "nodes": [
+    { "id": "hist", "label": "Views and orders", "detail": "Last 180 days", "row": 0, "col": 0 },
+    { "id": "job", "label": "Profile job", "detail": "Decay, half-life 45 days", "row": 0, "col": 1 },
+    { "id": "redis", "label": "Profile store", "detail": "Redis, 1.1 KB per buyer", "row": 0, "col": 2 },
+    { "id": "svc", "label": "search-svc", "detail": "Fetch profile, 3 ms budget", "row": 1, "col": 1 },
+    { "id": "model", "label": "Ranking model", "detail": "48 core + 6 personal features", "row": 1, "col": 2 }
+  ],
+  "edges": [
+    { "from": "hist", "to": "job" },
+    { "from": "job", "to": "redis" },
+    { "from": "svc", "to": "redis", "label": "buyer key" },
+    { "from": "svc", "to": "model" }
+  ]
+}

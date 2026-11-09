@@ -1,0 +1,15 @@
+{
+  "type": "bar",
+  "title": "Searches followed by a click, by query class",
+  "subtitle": "A/B test, 14 days, 2.3 million searches per arm",
+  "category": "Query class",
+  "categories": ["Head", "Torso", "Tail"],
+  "unit": "%",
+  "min": 0,
+  "max": 70,
+  "series": [
+    { "name": "Exact matching", "values": [61, 44, 27] },
+    { "name": "Typo tolerance", "values": [61, 46, 33] }
+  ],
+  "alt": "Grouped bar chart: click-through unchanged for head queries at 61 %, up from 44 % to 46 % for torso and from 27 % to 33 % for tail"
+}

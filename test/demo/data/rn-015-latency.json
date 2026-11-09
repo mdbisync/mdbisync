@@ -1,0 +1,13 @@
+{
+  "type": "bar",
+  "title": "p99 publish latency by batch size",
+  "subtitle": "Order events, 1.2 KB average, 500,000 per run, median of five runs",
+  "category": "Batch size (events)",
+  "categories": ["1", "10", "50", "100", "500"],
+  "unit": "ms",
+  "series": [
+    { "name": "Kafka", "values": [12.4, 9.1, 7.8, 8.2, 14.6] },
+    { "name": "NATS JetStream", "values": [8.7, 7.2, 9.9, 12.5, 21.3] }
+  ],
+  "alt": "Bar chart of p99 publish latency: JetStream is faster for batches of 1 and 10, Kafka for 50 and more"
+}

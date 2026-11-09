@@ -1,0 +1,15 @@
+{
+  "type": "line",
+  "title": "Purchases per 1,000 searches, by week",
+  "subtitle": "Learning to rank A/B test, 28 days from 17 November 2025",
+  "category": "Week",
+  "categories": ["Week 1", "Week 2 (sales)", "Week 3", "Week 4"],
+  "unit": "",
+  "min": 25,
+  "max": 40,
+  "series": [
+    { "name": "Control", "values": [30.2, 35.8, 30.1, 29.5] },
+    { "name": "Learning to rank", "values": [32.4, 38.9, 32.6, 31.7] }
+  ],
+  "alt": "Line chart: learning to rank leads control in all four weeks, 38.9 against 35.8 purchases per 1,000 searches in the sales week"
+}

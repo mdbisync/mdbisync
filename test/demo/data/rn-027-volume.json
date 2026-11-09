@@ -1,0 +1,40 @@
+{
+  "type": "hbar",
+  "title": "Parked messages by consumer and cause",
+  "subtitle": "October 2025 to September 2026",
+  "category": "Consumer group",
+  "categories": [
+    "events-pipeline",
+    "search-svc",
+    "notify-svc",
+    "fulfilment-svc",
+    "demo-pay",
+    "recon-svc"
+  ],
+  "unit": "",
+  "series": [
+    {
+      "name": "Data problems",
+      "values": [
+        12250,
+        90,
+        140,
+        60,
+        35,
+        10
+      ]
+    },
+    {
+      "name": "Dependency problems",
+      "values": [
+        150,
+        2220,
+        1700,
+        360,
+        60,
+        50
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: events-pipeline parks mostly invalid data; search-svc and notify-svc park mostly dependency timeouts"
+}

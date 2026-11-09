@@ -1,0 +1,70 @@
+{
+  "type": "diagram",
+  "title": "Ephemeral CI runners",
+  "subtitle": "One pod per job, deleted when the job ends",
+  "alt": "Diagram: a CI job request reaches the runner controller, which creates a runner pod on a spot node; the pod reads caches from object storage and is deleted after the job",
+  "rows": [
+    "CI",
+    "Kubernetes",
+    "Storage"
+  ],
+  "nodes": [
+    {
+      "id": "ci",
+      "label": "CI service",
+      "detail": "Queued job",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "arc",
+      "label": "Runner controller",
+      "detail": "Watches the queue",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "pod",
+      "label": "Runner pod",
+      "detail": "Lives for one job",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "spot",
+      "label": "Spot node pool",
+      "detail": "ci, 0 to 40 nodes",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "cache",
+      "label": "Cache bucket",
+      "detail": "Go, npm, layers",
+      "row": 2,
+      "col": 1
+    }
+  ],
+  "edges": [
+    {
+      "from": "ci",
+      "to": "arc",
+      "label": "job"
+    },
+    {
+      "from": "arc",
+      "to": "pod",
+      "label": "creates"
+    },
+    {
+      "from": "pod",
+      "to": "spot",
+      "dashed": true
+    },
+    {
+      "from": "pod",
+      "to": "cache",
+      "label": "restore, save"
+    }
+  ]
+}

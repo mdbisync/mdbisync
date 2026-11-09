@@ -1,0 +1,23 @@
+{
+  "type": "hbar",
+  "title": "Decode time of one product image on low-end Android",
+  "subtitle": "800 by 800 pixels, median of 500 decodes",
+  "category": "Format",
+  "categories": [
+    "JPEG",
+    "WebP",
+    "AVIF"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "Decode time",
+      "values": [
+        11,
+        14,
+        38
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: AVIF takes 38 ms to decode on low-end Android against 11 ms for JPEG and 14 ms for WebP"
+}

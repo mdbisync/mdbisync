@@ -1,0 +1,25 @@
+{
+  "type": "bar",
+  "title": "State kept per partner and class",
+  "subtitle": "Bytes in Redis at 20 requests per second",
+  "category": "Algorithm",
+  "categories": [
+    "Fixed window",
+    "Sliding window counter",
+    "Sliding log",
+    "Token bucket"
+  ],
+  "unit": "bytes",
+  "series": [
+    {
+      "name": "Memory",
+      "values": [
+        16,
+        32,
+        3200,
+        32
+      ]
+    }
+  ],
+  "alt": "Bar chart: a sliding log needs 3,200 bytes per partner and class; the others need 32 bytes or less"
+}

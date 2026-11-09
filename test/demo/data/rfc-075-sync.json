@@ -1,0 +1,21 @@
+{
+  "type": "diagram",
+  "title": "Stock levels between a seller system and DemoMart",
+  "subtitle": "Versioned pushes in, reservation webhooks out",
+  "alt": "Diagram: the seller system pushes versioned stock levels to the inventory API; inventory-svc stores them; checkout reserves stock and a webhook tells the seller system",
+  "rows": ["Seller side", "DemoMart API", "DemoMart services"],
+  "nodes": [
+    { "id": "seller", "label": "Seller system", "detail": "Shop or warehouse software", "row": 0, "col": 1 },
+    { "id": "api", "label": "Inventory API", "detail": "PUT stock levels, 1,000 SKUs", "row": 1, "col": 0 },
+    { "id": "hooks", "label": "Webhooks", "detail": "inventory.reserved", "row": 1, "col": 2 },
+    { "id": "inv", "label": "catalog-svc", "detail": "Keeps level and version per SKU", "row": 2, "col": 0 },
+    { "id": "co", "label": "checkout-svc", "detail": "Reserves stock on payment", "row": 2, "col": 2 }
+  ],
+  "edges": [
+    { "from": "seller", "to": "api", "label": "push" },
+    { "from": "api", "to": "inv" },
+    { "from": "co", "to": "inv", "label": "reserve" },
+    { "from": "co", "to": "hooks" },
+    { "from": "hooks", "to": "seller", "dashed": true }
+  ]
+}

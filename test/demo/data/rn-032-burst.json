@@ -1,0 +1,25 @@
+{
+  "type": "hbar",
+  "title": "Largest one-second burst allowed",
+  "subtitle": "As a multiple of the per-second limit, simulated on a day of partner traffic",
+  "category": "Algorithm",
+  "categories": [
+    "Fixed window",
+    "Sliding window counter",
+    "Sliding log",
+    "Token bucket"
+  ],
+  "unit": "x",
+  "series": [
+    {
+      "name": "Burst",
+      "values": [
+        2.0,
+        1.1,
+        1.0,
+        1.0
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: a fixed window allows bursts of twice the limit; the other three stay at or near the limit"
+}

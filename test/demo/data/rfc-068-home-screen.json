@@ -1,0 +1,79 @@
+{
+  "type": "diagram",
+  "title": "Server-driven home screen",
+  "subtitle": "The layout comes from the server; the app only renders known sections",
+  "alt": "Diagram: the app requests a layout from home-svc, which combines feature flags, recommendations and campaigns into a layout document cached by the app",
+  "rows": [
+    "App",
+    "Layout service",
+    "Sources"
+  ],
+  "nodes": [
+    {
+      "id": "app",
+      "label": "DemoMart app",
+      "detail": "Renders known sections",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "cache",
+      "label": "Layout cache",
+      "detail": "Last layout, 24 hours",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "home",
+      "label": "home-svc",
+      "detail": "Builds the layout",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "flags",
+      "label": "Feature flags",
+      "detail": "Targeting rules",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "reco",
+      "label": "reco-svc",
+      "detail": "Personal rows",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "camp",
+      "label": "Campaigns",
+      "detail": "Banners and dates",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "app",
+      "to": "home",
+      "label": "GET /home"
+    },
+    {
+      "from": "app",
+      "to": "cache",
+      "dashed": true
+    },
+    {
+      "from": "flags",
+      "to": "home"
+    },
+    {
+      "from": "reco",
+      "to": "home"
+    },
+    {
+      "from": "camp",
+      "to": "home"
+    }
+  ]
+}

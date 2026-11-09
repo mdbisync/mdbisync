@@ -1,0 +1,69 @@
+{
+  "type": "diagram",
+  "title": "Tax calculation in checkout",
+  "subtitle": "One call per priced cart; results cached per cart version",
+  "alt": "Diagram: checkout-svc sends cart lines and the address to the tax service, which uses a tax rules provider and returns tax lines",
+  "rows": [
+    "Checkout",
+    "Tax",
+    "Rules"
+  ],
+  "nodes": [
+    {
+      "id": "cart",
+      "label": "Priced cart",
+      "detail": "Lines, address, seller origin",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "co",
+      "label": "checkout-svc",
+      "detail": "Asks for tax on change",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "tax",
+      "label": "tax-svc",
+      "detail": "Builds tax lines",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "cache",
+      "label": "Cache",
+      "detail": "Per cart version, 30 min",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "prov",
+      "label": "Rules provider",
+      "detail": "Rates by product code",
+      "row": 2,
+      "col": 1
+    }
+  ],
+  "edges": [
+    {
+      "from": "cart",
+      "to": "co"
+    },
+    {
+      "from": "co",
+      "to": "tax",
+      "label": "lines"
+    },
+    {
+      "from": "tax",
+      "to": "cache",
+      "dashed": true
+    },
+    {
+      "from": "tax",
+      "to": "prov",
+      "label": "rates"
+    }
+  ]
+}

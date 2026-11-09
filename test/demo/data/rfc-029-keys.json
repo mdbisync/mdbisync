@@ -1,0 +1,71 @@
+{
+  "type": "diagram",
+  "title": "Envelope encryption of personal data",
+  "subtitle": "One data key per account, wrapped by a key in the key management service",
+  "alt": "Diagram: the key management service holds the key encryption key; each account has a wrapped data key; services encrypt fields with the data key before writing them to the database",
+  "rows": [
+    "Keys",
+    "Service",
+    "Storage"
+  ],
+  "nodes": [
+    {
+      "id": "kms",
+      "label": "Key management",
+      "detail": "Key encryption key",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "dek",
+      "label": "Data key",
+      "detail": "Per buyer or seller",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "svc",
+      "label": "orders-svc",
+      "detail": "Seals fields, 5 min key cache",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "db",
+      "label": "orders database",
+      "detail": "Ciphertext only",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "bak",
+      "label": "Backups and replicas",
+      "detail": "Ciphertext only",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "kms",
+      "to": "dek",
+      "label": "wraps"
+    },
+    {
+      "from": "dek",
+      "to": "svc",
+      "label": "unwrap"
+    },
+    {
+      "from": "svc",
+      "to": "db",
+      "label": "write"
+    },
+    {
+      "from": "db",
+      "to": "bak",
+      "label": "copy",
+      "dashed": true
+    }
+  ]
+}

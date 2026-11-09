@@ -1,0 +1,43 @@
+{
+  "type": "line",
+  "title": "Orders database restore time by monthly drill",
+  "subtitle": "Full restore plus 24 hours of WAL, objective 60 minutes",
+  "category": "Drill",
+  "categories": [
+    "Nov 25",
+    "Dec 25",
+    "Jan 26",
+    "Feb 26",
+    "Mar 26",
+    "Apr 26",
+    "May 26",
+    "Jun 26",
+    "Jul 26",
+    "Aug 26",
+    "Sep 26",
+    "Oct 26"
+  ],
+  "unit": "min",
+  "series": [
+    {
+      "name": "Orders restore",
+      "values": [
+        58,
+        57,
+        56,
+        55,
+        54,
+        50,
+        50,
+        51,
+        51,
+        52,
+        52,
+        53
+      ]
+    }
+  ],
+  "alt": "Line chart: orders restore time falls from 58 to 50 minutes after partitioning in April 2026 and grows back to 53",
+  "min": 40,
+  "max": 60
+}

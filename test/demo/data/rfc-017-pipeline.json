@@ -1,0 +1,22 @@
+{
+  "type": "diagram",
+  "title": "Catalog changes to search, with change data capture",
+  "subtitle": "Each row change reaches the search index in seconds",
+  "alt": "Diagram: catalog-svc writes to PostgreSQL; Debezium reads the write-ahead log into Kafka topics; search-svc and the events pipeline consume them",
+  "rows": ["Source", "Stream", "Consumers"],
+  "nodes": [
+    { "id": "svc", "label": "catalog-svc", "detail": "Writes products and prices", "row": 0, "col": 0 },
+    { "id": "pg", "label": "PostgreSQL", "detail": "Write-ahead log, slot catalog_cdc", "row": 0, "col": 1 },
+    { "id": "dbz", "label": "Debezium", "detail": "Kafka Connect, 2 workers", "row": 1, "col": 1 },
+    { "id": "topic", "label": "catalog.cdc.*", "detail": "24 partitions, 3 days", "row": 1, "col": 2 },
+    { "id": "search", "label": "search-svc", "detail": "Batches into OpenSearch", "row": 2, "col": 2 },
+    { "id": "pipe", "label": "events-pipeline", "detail": "Copies to ClickHouse", "row": 2, "col": 1 }
+  ],
+  "edges": [
+    { "from": "svc", "to": "pg", "label": "SQL" },
+    { "from": "pg", "to": "dbz", "label": "WAL" },
+    { "from": "dbz", "to": "topic" },
+    { "from": "topic", "to": "search" },
+    { "from": "topic", "to": "pipe", "dashed": true }
+  ]
+}

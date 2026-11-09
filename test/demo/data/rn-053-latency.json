@@ -1,0 +1,12 @@
+{
+  "type": "hbar",
+  "title": "Added p99 latency for re-ranking the top 200",
+  "subtitle": "One production-sized search node, 300 queries per second",
+  "category": "Model",
+  "categories": ["BM25 + boosts", "LambdaMART, 48 features", "LambdaMART, 117 features"],
+  "unit": "ms",
+  "series": [
+    { "name": "Added p99", "values": [2, 11, 24] }
+  ],
+  "alt": "Horizontal bar chart of added p99 latency: 2 ms for boosts, 11 ms for 48 features, 24 ms for 117 features"
+}

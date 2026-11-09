@@ -1,0 +1,15 @@
+{
+  "type": "bar",
+  "title": "Share of listings and searches by language, other than English",
+  "subtitle": "3.1 million listings; 19.8 million searches in May 2026",
+  "category": "Language",
+  "categories": ["German", "French", "Spanish", "Italian", "Dutch"],
+  "unit": "%",
+  "min": 0,
+  "max": 6,
+  "series": [
+    { "name": "Listings", "values": [5.4, 3.9, 3.3, 2.6, 1.9] },
+    { "name": "Searches", "values": [5.2, 3.8, 3.0, 2.0, 3.1] }
+  ],
+  "alt": "Grouped bar chart: German is the largest non-English language with 5.4 % of listings and 5.2 % of searches; Dutch searches exceed Dutch listings"
+}

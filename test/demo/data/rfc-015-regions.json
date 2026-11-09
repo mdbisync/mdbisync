@@ -1,0 +1,68 @@
+{
+  "type": "diagram",
+  "title": "Checkout across two regions",
+  "subtitle": "Region A serves; region B is warm and scaled down",
+  "alt": "Diagram: DNS points checkout at region A; PostgreSQL replicates from region A to region B, where the checkout services run scaled down",
+  "rows": [
+    "Entry",
+    "Region A (active)",
+    "Region B (standby)"
+  ],
+  "nodes": [
+    {
+      "id": "dns",
+      "label": "DNS",
+      "detail": "TTL 60 s",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "a_svc",
+      "label": "Checkout services",
+      "detail": "Full size",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "a_db",
+      "label": "PostgreSQL",
+      "detail": "Primary",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "b_svc",
+      "label": "Checkout services",
+      "detail": "Scaled down",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "b_db",
+      "label": "PostgreSQL",
+      "detail": "Streaming replica",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "dns",
+      "to": "a_svc"
+    },
+    {
+      "from": "a_svc",
+      "to": "a_db"
+    },
+    {
+      "from": "a_db",
+      "to": "b_db",
+      "label": "replication"
+    },
+    {
+      "from": "b_svc",
+      "to": "b_db",
+      "dashed": true
+    }
+  ]
+}

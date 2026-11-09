@@ -1,0 +1,31 @@
+{
+  "type": "bar",
+  "title": "Fulfilment before and after Temporal",
+  "subtitle": "Monthly averages, January to May 2026 against June to September 2026",
+  "category": "Measure",
+  "categories": [
+    "Shipments pushed by hand",
+    "Late seller reminders",
+    "Retry-related pages"
+  ],
+  "unit": "",
+  "series": [
+    {
+      "name": "Before (cron jobs)",
+      "values": [
+        410,
+        96,
+        14
+      ]
+    },
+    {
+      "name": "After (Temporal)",
+      "values": [
+        12,
+        3,
+        1
+      ]
+    }
+  ],
+  "alt": "Bar chart: shipments pushed by hand fell from 410 to 12 a month, late seller reminders from 96 to 3, retry-related pages from 14 to 1"
+}

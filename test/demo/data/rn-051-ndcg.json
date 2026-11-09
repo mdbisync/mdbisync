@@ -1,0 +1,14 @@
+{
+  "type": "bar",
+  "title": "NDCG@10 by query class, BM25 baseline",
+  "subtitle": "600 judged queries per class, June 2025",
+  "category": "Query class",
+  "categories": ["Head", "Torso", "Tail", "All (traffic weighted)"],
+  "unit": "",
+  "min": 0,
+  "max": 1,
+  "series": [
+    { "name": "NDCG@10", "values": [0.71, 0.54, 0.38, 0.6] }
+  ],
+  "alt": "Bar chart of NDCG@10: head 0.71, torso 0.54, tail 0.38, traffic-weighted 0.60"
+}

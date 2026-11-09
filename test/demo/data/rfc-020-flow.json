@@ -1,0 +1,69 @@
+{
+  "type": "diagram",
+  "title": "Analytics events into ClickHouse",
+  "subtitle": "Batches of 100,000 rows or 5 seconds, whichever comes first",
+  "alt": "Diagram: web and app clients and Kafka domain events flow through events-pipeline into ClickHouse, which serves reports",
+  "rows": [
+    "Sources",
+    "Pipeline",
+    "Store"
+  ],
+  "nodes": [
+    {
+      "id": "web",
+      "label": "Web shop and app",
+      "detail": "Page views, searches, clicks",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "kafka",
+      "label": "Kafka",
+      "detail": "Domain events",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "pipe",
+      "label": "events-pipeline",
+      "detail": "Validates and batches",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "ch",
+      "label": "ClickHouse",
+      "detail": "3 shards, 2 replicas",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "reports",
+      "label": "Reports",
+      "detail": "Funnels, dashboards",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "web",
+      "to": "pipe",
+      "label": "HTTPS"
+    },
+    {
+      "from": "kafka",
+      "to": "pipe"
+    },
+    {
+      "from": "pipe",
+      "to": "ch",
+      "label": "insert"
+    },
+    {
+      "from": "ch",
+      "to": "reports",
+      "label": "SQL"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "type": "bar",
+  "title": "Deliveries that failed for good",
+  "subtitle": "Share of all webhook deliveries",
+  "category": "Period",
+  "categories": [
+    "June 2025, per-service webhooks",
+    "Q2 2026, notify-svc"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Failed for good",
+      "values": [
+        2.3,
+        0.14
+      ]
+    }
+  ],
+  "alt": "Bar chart: deliveries that failed for good fell from 2.3 % in June 2025 to 0.14 % in Q2 2026"
+}

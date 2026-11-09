@@ -1,0 +1,67 @@
+{
+  "type": "diagram",
+  "title": "Streaming reconciliation",
+  "subtitle": "Payment and order events matched by order id within 15 to 30 minutes",
+  "alt": "Diagram: payment and order events flow into recon-svc, which keeps state per open order and publishes mismatches to a topic read by the operations console",
+  "rows": [
+    "Events",
+    "Matching",
+    "Output"
+  ],
+  "nodes": [
+    {
+      "id": "pay",
+      "label": "payments.events",
+      "detail": "From demo-pay",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "ord",
+      "label": "orders.events",
+      "detail": "From orders-svc",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "recon",
+      "label": "recon-svc",
+      "detail": "State per open order",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "mis",
+      "label": "recon.mismatches",
+      "detail": "Kafka topic",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "ops",
+      "label": "Operations console",
+      "detail": "Mismatch queue",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "pay",
+      "to": "recon"
+    },
+    {
+      "from": "ord",
+      "to": "recon"
+    },
+    {
+      "from": "recon",
+      "to": "mis",
+      "label": "mismatch"
+    },
+    {
+      "from": "mis",
+      "to": "ops"
+    }
+  ]
+}

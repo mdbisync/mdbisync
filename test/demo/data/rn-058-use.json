@@ -1,0 +1,12 @@
+{
+  "type": "hbar",
+  "title": "Sessions that apply each facet",
+  "subtitle": "Category pages, 7.8 million sessions, 20 October to 30 November 2025",
+  "category": "Facet",
+  "categories": ["Price", "Size", "Brand", "Colour", "Rating", "Delivery by date", "Material", "Style", "Seller location"],
+  "unit": "%",
+  "series": [
+    { "name": "Share of sessions", "values": [17.2, 12.9, 9.4, 7.1, 5.3, 6.8, 3.1, 2.4, 0.6] }
+  ],
+  "alt": "Horizontal bar chart of facet use: price 17.2 %, size 12.9 %, brand 9.4 %, down to seller location 0.6 %"
+}

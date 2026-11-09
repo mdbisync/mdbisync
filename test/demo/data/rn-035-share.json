@@ -1,0 +1,27 @@
+{
+  "type": "line",
+  "title": "Share of v2 calls made through an SDK",
+  "subtitle": "All partners on v2, monthly",
+  "category": "Month",
+  "categories": [
+    "Jan 2026",
+    "Feb 2026",
+    "Mar 2026",
+    "Apr 2026"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Through an SDK",
+      "values": [
+        18,
+        39,
+        55,
+        64
+      ]
+    }
+  ],
+  "alt": "Line chart: calls through an SDK rose from 18 % in January to 64 % in April 2026",
+  "min": 0,
+  "max": 100
+}

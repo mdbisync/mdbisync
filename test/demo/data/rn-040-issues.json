@@ -1,0 +1,27 @@
+{
+  "type": "hbar",
+  "title": "Problems found in 30 partner integrations",
+  "subtitle": "Number of integrations with each problem, review of June 2025",
+  "category": "Problem",
+  "categories": [
+    "No backoff on retries",
+    "Matches error message text",
+    "Signature compared as plain string",
+    "Retries writes blindly",
+    "No signature check at all"
+  ],
+  "unit": "",
+  "series": [
+    {
+      "name": "Integrations",
+      "values": [
+        19,
+        14,
+        11,
+        7,
+        6
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: 19 of 30 integrations retried without backoff, 14 matched error text, 11 compared signatures as plain strings"
+}

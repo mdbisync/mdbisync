@@ -1,0 +1,23 @@
+{
+  "type": "diagram",
+  "title": "Language-aware indexing and search",
+  "subtitle": "Each listing fills its own language and English; each query searches both",
+  "alt": "Diagram: a listing is language-detected and indexed into its language sub-field and the English field; a query is language-detected and searches both fields",
+  "rows": ["Indexing", "Index", "Query"],
+  "nodes": [
+    { "id": "listing", "label": "Listing", "detail": "Title and description", "row": 0, "col": 0 },
+    { "id": "detect", "label": "Detect language", "detail": "Stored in lang", "row": 0, "col": 1 },
+    { "id": "en", "label": "title", "detail": "English analyser", "row": 1, "col": 1 },
+    { "id": "de", "label": "title.de", "detail": "German, decompounded", "row": 1, "col": 2 },
+    { "id": "query", "label": "Query", "detail": "Holzschreibtisch", "row": 2, "col": 0 },
+    { "id": "svc", "label": "search-svc", "detail": "Detect, boost own language 1.5", "row": 2, "col": 1 }
+  ],
+  "edges": [
+    { "from": "listing", "to": "detect" },
+    { "from": "detect", "to": "en" },
+    { "from": "detect", "to": "de" },
+    { "from": "query", "to": "svc" },
+    { "from": "svc", "to": "en", "dashed": true },
+    { "from": "svc", "to": "de" }
+  ]
+}

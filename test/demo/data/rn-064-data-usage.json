@@ -1,0 +1,23 @@
+{
+  "type": "bar",
+  "title": "Image data per browsing session by format",
+  "subtitle": "Median session of 42 product images, same pixel sizes, quality matched by SSIM",
+  "category": "Format",
+  "categories": [
+    "JPEG",
+    "WebP",
+    "AVIF"
+  ],
+  "unit": "MB",
+  "series": [
+    {
+      "name": "Data per session",
+      "values": [
+        9.6,
+        6.4,
+        4.1
+      ]
+    }
+  ],
+  "alt": "Bar chart: a browsing session uses 9.6 MB of images as JPEG, 6.4 MB as WebP and 4.1 MB as AVIF"
+}

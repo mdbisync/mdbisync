@@ -1,0 +1,75 @@
+{
+  "type": "line",
+  "title": "Storage forecast to the end of 2027",
+  "subtitle": "Actual to Q4 2025, forecast after",
+  "category": "Quarter",
+  "categories": [
+    "Q1 2025",
+    "Q2 2025",
+    "Q3 2025",
+    "Q4 2025",
+    "Q1 2026",
+    "Q2 2026",
+    "Q3 2026",
+    "Q4 2026",
+    "Q1 2027",
+    "Q2 2027",
+    "Q3 2027",
+    "Q4 2027"
+  ],
+  "unit": "GB",
+  "series": [
+    {
+      "name": "PostgreSQL",
+      "values": [
+        1450,
+        1600,
+        1750,
+        1900,
+        2050,
+        2200,
+        2350,
+        2500,
+        2700,
+        2900,
+        3150,
+        3400
+      ]
+    },
+    {
+      "name": "ClickHouse, all",
+      "values": [
+        330,
+        360,
+        385,
+        410,
+        470,
+        530,
+        590,
+        650,
+        710,
+        760,
+        820,
+        870
+      ]
+    },
+    {
+      "name": "ClickHouse, TTL",
+      "values": [
+        330,
+        360,
+        385,
+        410,
+        250,
+        250,
+        250,
+        251,
+        251,
+        252,
+        252,
+        253
+      ]
+    }
+  ],
+  "alt": "Line chart: PostgreSQL grows to 3,400 GB; ClickHouse grows to 870 GB without retention but stays near 250 GB with 13 months"
+}

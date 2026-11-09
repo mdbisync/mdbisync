@@ -1,0 +1,82 @@
+{
+  "type": "diagram",
+  "title": "Backfill through a dedicated topic",
+  "subtitle": "Replayed events never share a topic with live traffic",
+  "alt": "Diagram: backfill-svc reads events from ClickHouse and publishes them at a fixed rate to a backfill topic, which a separate consumer group reads into the consumer's read model",
+  "rows": [
+    "Source",
+    "Replay",
+    "Consumer"
+  ],
+  "nodes": [
+    {
+      "id": "ch",
+      "label": "ClickHouse",
+      "detail": "Domain events, 13 months",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "reg",
+      "label": "Schema registry",
+      "detail": "Schema by type and date",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "bf",
+      "label": "backfill-svc",
+      "detail": "2,000 events/s",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "topic",
+      "label": "backfill topic",
+      "detail": "One per job",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "cons",
+      "label": "notify-svc",
+      "detail": "Backfill consumer group",
+      "row": 2,
+      "col": 2
+    },
+    {
+      "id": "live",
+      "label": "orders.events",
+      "detail": "Live traffic, untouched",
+      "row": 2,
+      "col": 0
+    }
+  ],
+  "edges": [
+    {
+      "from": "ch",
+      "to": "bf",
+      "label": "read"
+    },
+    {
+      "from": "reg",
+      "to": "bf",
+      "label": "resolve",
+      "dashed": true
+    },
+    {
+      "from": "bf",
+      "to": "topic"
+    },
+    {
+      "from": "topic",
+      "to": "cons"
+    },
+    {
+      "from": "live",
+      "to": "cons",
+      "label": "live group",
+      "dashed": true
+    }
+  ]
+}

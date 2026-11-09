@@ -1,0 +1,27 @@
+{
+  "type": "hbar",
+  "title": "Checkout failover drill, time from start",
+  "subtitle": "Production drill on 22 September 2026, cumulative minutes",
+  "category": "Step",
+  "categories": [
+    "Failure declared",
+    "Databases promoted",
+    "Services scaled up",
+    "DNS switched",
+    "95 % of traffic in region B"
+  ],
+  "unit": "min",
+  "series": [
+    {
+      "name": "Minutes from start",
+      "values": [
+        1.5,
+        4.0,
+        7.5,
+        9.0,
+        11.0
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: the failover drill reached 95 % of traffic in region B after 11 minutes"
+}

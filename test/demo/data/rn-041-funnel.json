@@ -1,0 +1,31 @@
+{
+  "type": "hbar",
+  "title": "Sessions reaching each checkout step",
+  "subtitle": "Web and app, 4 to 31 January 2025, 412,600 sessions that opened the cart",
+  "category": "Step",
+  "categories": [
+    "Cart",
+    "Sign in or guest",
+    "Delivery address",
+    "Shipping option",
+    "Payment",
+    "Review",
+    "Order placed"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Share of cart sessions",
+      "values": [
+        100,
+        78.4,
+        66.1,
+        61.8,
+        54.2,
+        49.7,
+        41.3
+      ]
+    }
+  ],
+  "alt": "Funnel as horizontal bars: 78.4 % pass sign-in, 66.1 % the address, 54.2 % reach payment and 41.3 % place an order"
+}

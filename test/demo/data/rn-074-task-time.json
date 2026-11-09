@@ -1,0 +1,13 @@
+{
+  "type": "bar",
+  "title": "Time for a category price change",
+  "subtitle": "Sessions changing 50 or more prices in one category",
+  "category": "Percentile",
+  "categories": ["Median", "75th percentile", "90th percentile"],
+  "unit": "min",
+  "series": [
+    { "name": "Before the bulk editor", "values": [47, 82, 130] },
+    { "name": "After the bulk editor", "values": [6, 11, 19] }
+  ],
+  "alt": "Bar chart: the median category price change took 47 minutes before the bulk editor and 6 minutes after; the 90th percentile fell from 130 to 19 minutes"
+}

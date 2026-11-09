@@ -1,0 +1,45 @@
+{
+  "type": "line",
+  "title": "Abandoned carts that convert later, by reminder",
+  "subtitle": "Cumulative share of abandoned carts that become an order",
+  "category": "Days after abandonment",
+  "categories": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "No reminder",
+      "values": [
+        3.1,
+        4.6,
+        5.4,
+        5.9,
+        6.2,
+        6.4,
+        6.5
+      ]
+    },
+    {
+      "name": "Push or email reminder after 20 h",
+      "values": [
+        3.2,
+        7.9,
+        9.4,
+        10.1,
+        10.5,
+        10.8,
+        11.0
+      ]
+    }
+  ],
+  "alt": "Line chart: a reminder after 20 hours raises late conversion of abandoned carts from 6.5 % to 11.0 % within 7 days",
+  "min": 0,
+  "max": 12
+}

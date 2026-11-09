@@ -1,0 +1,37 @@
+{
+  "type": "bar",
+  "title": "Memory at idle and under load",
+  "subtitle": "Same service, 200 requests per second for the loaded figure",
+  "category": "Runtime",
+  "categories": [
+    "Go",
+    "Java native",
+    "Node.js",
+    "Python",
+    "Java JIT"
+  ],
+  "unit": "MB",
+  "series": [
+    {
+      "name": "Idle",
+      "values": [
+        14,
+        38,
+        52,
+        46,
+        210
+      ]
+    },
+    {
+      "name": "Under load",
+      "values": [
+        41,
+        92,
+        128,
+        164,
+        395
+      ]
+    }
+  ],
+  "alt": "Bar chart of memory use: Go uses least at idle and under load, Java with JIT the most"
+}

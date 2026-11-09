@@ -1,0 +1,39 @@
+{
+  "type": "line",
+  "title": "Recovered soft declines by retry attempt",
+  "subtitle": "Cumulative share of soft-declined card payments that succeed, by attempt",
+  "category": "Attempt",
+  "categories": [
+    "First try",
+    "Retry 1",
+    "Retry 2",
+    "Retry 3",
+    "Retry 4"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Fixed 30 s delay",
+      "values": [
+        0,
+        14.2,
+        18.9,
+        20.7,
+        21.4
+      ]
+    },
+    {
+      "name": "Reason-based schedule",
+      "values": [
+        0,
+        19.8,
+        27.5,
+        31.6,
+        33.1
+      ]
+    }
+  ],
+  "alt": "Line chart: a reason-based retry schedule recovers 33.1 % of soft declines after four retries, a fixed delay 21.4 %",
+  "min": 0,
+  "max": 40
+}

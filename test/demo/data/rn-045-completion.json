@@ -1,0 +1,23 @@
+{
+  "type": "hbar",
+  "title": "Share of challenged buyers who complete the challenge",
+  "subtitle": "By challenge type, July 2025, 214,000 challenges",
+  "category": "Challenge type",
+  "categories": [
+    "Banking app push",
+    "One-time code by text",
+    "Password page"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Completed",
+      "values": [
+        91.4,
+        83.2,
+        71.6
+      ]
+    }
+  ],
+  "alt": "Horizontal bars: 91.4 % of buyers complete an app push challenge, 83.2 % a text code and 71.6 % a password page"
+}

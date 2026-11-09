@@ -1,0 +1,74 @@
+{
+  "type": "diagram",
+  "title": "Scaling on request rate",
+  "subtitle": "KEDA reads the request rate and drives the pod autoscaler",
+  "alt": "Diagram: pods export request counters to Prometheus; KEDA queries the rate and sets the target of the horizontal pod autoscaler",
+  "rows": [
+    "Service",
+    "Metrics",
+    "Control"
+  ],
+  "nodes": [
+    {
+      "id": "lb",
+      "label": "Ingress",
+      "detail": "Spreads requests",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "pods",
+      "label": "checkout-svc pods",
+      "detail": "4 to 60 replicas",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "prom",
+      "label": "Prometheus",
+      "detail": "Requests per second",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "keda",
+      "label": "KEDA",
+      "detail": "Target 180 per pod",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "hpa",
+      "label": "Pod autoscaler",
+      "detail": "Sets replicas",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "lb",
+      "to": "pods"
+    },
+    {
+      "from": "pods",
+      "to": "prom",
+      "label": "metrics"
+    },
+    {
+      "from": "prom",
+      "to": "keda",
+      "label": "query"
+    },
+    {
+      "from": "keda",
+      "to": "hpa"
+    },
+    {
+      "from": "hpa",
+      "to": "pods",
+      "dashed": true,
+      "label": "scale"
+    }
+  ]
+}

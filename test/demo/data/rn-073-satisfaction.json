@@ -1,0 +1,14 @@
+{
+  "type": "bar",
+  "title": "Sellers who rate payouts good or very good",
+  "subtitle": "Payout survey, February 2026, 1,240 sellers, by monthly sales",
+  "category": "Monthly sales",
+  "categories": ["Under 1k EUR", "1k to 10k EUR", "10k to 50k EUR", "Over 50k EUR"],
+  "unit": "%",
+  "min": 0,
+  "max": 100,
+  "series": [
+    { "name": "Good or very good", "values": [48, 57, 66, 71] }
+  ],
+  "alt": "Bar chart: satisfaction with payouts rises from 48 % for sellers under 1,000 EUR a month to 71 % above 50,000 EUR"
+}

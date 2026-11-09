@@ -1,0 +1,34 @@
+{
+  "type": "hbar",
+  "title": "Point-in-time restore time by database",
+  "subtitle": "Latest drill of each database, 24 hours of WAL",
+  "category": "Database",
+  "categories": [
+    "orders (430 GB)",
+    "catalog (260 GB)",
+    "payments (120 GB)",
+    "identity (35 GB)"
+  ],
+  "unit": "min",
+  "series": [
+    {
+      "name": "Restore from full",
+      "values": [
+        41,
+        26,
+        13,
+        5
+      ]
+    },
+    {
+      "name": "WAL replay",
+      "values": [
+        12,
+        6,
+        4,
+        1
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: orders takes 41 minutes plus 12 of WAL replay; smaller databases restore faster"
+}

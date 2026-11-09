@@ -1,0 +1,28 @@
+{
+  "type": "bar",
+  "title": "Outbox publish delay, commit to Kafka",
+  "subtitle": "Replay of the sale peak, 9,000 events per second",
+  "category": "Percentile",
+  "categories": [
+    "Median",
+    "p99"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "Polling every 500 ms",
+      "values": [
+        260,
+        740
+      ]
+    },
+    {
+      "name": "Log tailing",
+      "values": [
+        18,
+        95
+      ]
+    }
+  ],
+  "alt": "Bar chart: log tailing publishes in 18 ms at the median and 95 ms at p99, against 260 and 740 ms for polling"
+}

@@ -1,0 +1,20 @@
+{
+  "type": "diagram",
+  "title": "Return requests decided by the seller",
+  "subtitle": "Support steps in only when buyer and seller disagree",
+  "alt": "Diagram: the buyer requests a return; the seller approves, refuses or offers a partial refund; a disputed case goes to support; an approved return gets a label and the refund follows the carrier scan",
+  "rows": ["Buyer", "Seller", "DemoMart"],
+  "nodes": [
+    { "id": "req", "label": "Return request", "detail": "Reason and photos", "row": 0, "col": 0 },
+    { "id": "lab", "label": "Return label", "detail": "Prepaid, in the app", "row": 0, "col": 2 },
+    { "id": "dec", "label": "Seller decides", "detail": "Within 2 business days", "row": 1, "col": 1 },
+    { "id": "sup", "label": "Support", "detail": "Disputes, within 3 days", "row": 2, "col": 0 },
+    { "id": "ref", "label": "Refund", "detail": "On the carrier scan", "row": 2, "col": 2 }
+  ],
+  "edges": [
+    { "from": "req", "to": "dec" },
+    { "from": "dec", "to": "lab", "label": "approve" },
+    { "from": "dec", "to": "sup", "label": "dispute", "dashed": true },
+    { "from": "lab", "to": "ref" }
+  ]
+}

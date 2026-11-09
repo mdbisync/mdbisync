@@ -1,0 +1,21 @@
+{
+  "type": "diagram",
+  "title": "Onboarding with checks in the background",
+  "subtitle": "The seller keeps working while the identity check runs",
+  "alt": "Diagram: business details start the identity check in the background while the seller creates a first listing draft; the draft is published when the check passes; bank details come before the first payout",
+  "rows": ["Seller", "Background", "Later"],
+  "nodes": [
+    { "id": "biz", "label": "Business details", "detail": "About 6 minutes", "row": 0, "col": 0 },
+    { "id": "draft", "label": "First listing", "detail": "Saved as a draft", "row": 0, "col": 1 },
+    { "id": "pub", "label": "Published", "detail": "Visible to buyers", "row": 0, "col": 2 },
+    { "id": "id", "label": "Identity check", "detail": "Median 31 minutes", "row": 1, "col": 1 },
+    { "id": "bank", "label": "Bank details", "detail": "Before the first payout", "row": 2, "col": 2 }
+  ],
+  "edges": [
+    { "from": "biz", "to": "draft" },
+    { "from": "biz", "to": "id", "label": "starts", "dashed": true },
+    { "from": "draft", "to": "pub" },
+    { "from": "id", "to": "pub", "label": "passed" },
+    { "from": "pub", "to": "bank", "dashed": true }
+  ]
+}

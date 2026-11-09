@@ -1,0 +1,79 @@
+{
+  "type": "diagram",
+  "title": "Offline cart in the app",
+  "subtitle": "Local changes first, merged with the server cart when online",
+  "alt": "Diagram: the cart screen writes to a local store and an outbox; a sync worker sends queued changes to cart-svc, which answers with the merged cart",
+  "rows": [
+    "App",
+    "Sync",
+    "Backend"
+  ],
+  "nodes": [
+    {
+      "id": "ui",
+      "label": "Cart screen",
+      "detail": "Reads the local cart",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "db",
+      "label": "Local store",
+      "detail": "SQLite, cart and outbox",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "worker",
+      "label": "Sync worker",
+      "detail": "Sends queued changes",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "gw",
+      "label": "api-gateway",
+      "detail": "Auth and rate limits",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "cart",
+      "label": "cart-svc",
+      "detail": "Merges by line version",
+      "row": 2,
+      "col": 2
+    },
+    {
+      "id": "redis",
+      "label": "Redis",
+      "detail": "Server cart, 30 days",
+      "row": 2,
+      "col": 1
+    }
+  ],
+  "edges": [
+    {
+      "from": "ui",
+      "to": "db",
+      "label": "write"
+    },
+    {
+      "from": "db",
+      "to": "worker"
+    },
+    {
+      "from": "worker",
+      "to": "gw",
+      "label": "online"
+    },
+    {
+      "from": "gw",
+      "to": "cart"
+    },
+    {
+      "from": "cart",
+      "to": "redis"
+    }
+  ]
+}

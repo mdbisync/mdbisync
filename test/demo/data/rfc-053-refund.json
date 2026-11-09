@@ -1,0 +1,72 @@
+{
+  "type": "diagram",
+  "title": "Self-service refund decision",
+  "subtitle": "Rules decide whether a refund is approved at once or goes to the seller",
+  "alt": "Diagram: a refund request is checked against rules; approved requests go straight to demo-pay, others go to the seller in Seller Hub",
+  "rows": [
+    "Request",
+    "Decision",
+    "Payment"
+  ],
+  "nodes": [
+    {
+      "id": "req",
+      "label": "Refund request",
+      "detail": "From the order page",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "rules",
+      "label": "Refund rules",
+      "detail": "Amount, return status, history",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "seller",
+      "label": "Seller review",
+      "detail": "Seller Hub, 48 h",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "pay",
+      "label": "demo-pay",
+      "detail": "Refund to the method",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "done",
+      "label": "Buyer notified",
+      "detail": "notify-svc",
+      "row": 2,
+      "col": 1
+    }
+  ],
+  "edges": [
+    {
+      "from": "req",
+      "to": "rules"
+    },
+    {
+      "from": "rules",
+      "to": "pay",
+      "label": "approve"
+    },
+    {
+      "from": "rules",
+      "to": "seller",
+      "label": "review"
+    },
+    {
+      "from": "seller",
+      "to": "pay"
+    },
+    {
+      "from": "pay",
+      "to": "done"
+    }
+  ]
+}

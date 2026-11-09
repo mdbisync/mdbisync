@@ -1,0 +1,39 @@
+{
+  "type": "bar",
+  "title": "Time to last byte by network",
+  "subtitle": "Same response, client in the same region",
+  "category": "Network",
+  "categories": [
+    "Data centre",
+    "Home broadband",
+    "Mobile 4G"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "None",
+      "values": [
+        38,
+        210,
+        1180
+      ]
+    },
+    {
+      "name": "gzip",
+      "values": [
+        31,
+        64,
+        240
+      ]
+    },
+    {
+      "name": "Brotli",
+      "values": [
+        33,
+        58,
+        205
+      ]
+    }
+  ],
+  "alt": "Grouped bar chart: on mobile 4G, compression cuts time to last byte from 1,180 ms to 240 ms with gzip and 205 ms with Brotli"
+}

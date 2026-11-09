@@ -1,0 +1,39 @@
+{
+  "type": "bar",
+  "title": "Checkout path latency with and without a mesh",
+  "subtitle": "Seven internal calls per checkout, 300 checkouts per second, staging copy",
+  "category": "Percentile",
+  "categories": [
+    "p50",
+    "p95",
+    "p99"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "No encryption",
+      "values": [
+        182,
+        340,
+        512
+      ]
+    },
+    {
+      "name": "Sidecar mesh",
+      "values": [
+        195,
+        372,
+        543
+      ]
+    },
+    {
+      "name": "Client TLS",
+      "values": [
+        183,
+        341,
+        513
+      ]
+    }
+  ],
+  "alt": "Bar chart: a sidecar mesh adds 31 ms at p99 to checkout; TLS in the clients adds 1 ms"
+}

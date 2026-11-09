@@ -1,0 +1,23 @@
+{
+  "type": "hbar",
+  "title": "30-day funnel query time by codec",
+  "subtitle": "Median of 20 cold-cache runs",
+  "category": "Codec",
+  "categories": [
+    "LZ4 everywhere",
+    "ZSTD(3) on properties",
+    "ZSTD(9) on properties"
+  ],
+  "unit": "s",
+  "series": [
+    {
+      "name": "Query time",
+      "values": [
+        1.9,
+        2.2,
+        2.6
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: the funnel query takes 1.9 s with LZ4, 2.2 s with ZSTD(3) and 2.6 s with ZSTD(9)"
+}

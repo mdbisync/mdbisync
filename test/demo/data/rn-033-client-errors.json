@@ -1,0 +1,39 @@
+{
+  "type": "line",
+  "title": "Client error rate by API version",
+  "subtitle": "Share of requests answered with 4xx, monthly",
+  "category": "Month",
+  "categories": [
+    "Nov 2025",
+    "Dec 2025",
+    "Jan 2026",
+    "Feb 2026",
+    "Mar 2026"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "v1",
+      "values": [
+        4.9,
+        5.1,
+        4.8,
+        5.0,
+        4.9
+      ]
+    },
+    {
+      "name": "v2",
+      "values": [
+        1.9,
+        1.6,
+        1.4,
+        1.3,
+        1.2
+      ]
+    }
+  ],
+  "alt": "Line chart: v1 client errors stay near 5 %; v2 falls from 1.9 % to 1.2 %",
+  "min": 0,
+  "max": 6
+}

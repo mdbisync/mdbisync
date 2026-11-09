@@ -1,0 +1,31 @@
+{
+  "type": "bar",
+  "title": "Partners still calling v1",
+  "subtitle": "Count at the start of each month",
+  "category": "Month",
+  "categories": [
+    "Jan 2026",
+    "Feb 2026",
+    "Mar 2026",
+    "Apr 2026",
+    "May 2026",
+    "Jun 2026",
+    "Jul 2026"
+  ],
+  "unit": "",
+  "series": [
+    {
+      "name": "Partners on v1",
+      "values": [
+        318,
+        251,
+        176,
+        104,
+        47,
+        12,
+        0
+      ]
+    }
+  ],
+  "alt": "Bar chart: partners on v1 fell from 318 in January to 12 in June and none in July 2026"
+}

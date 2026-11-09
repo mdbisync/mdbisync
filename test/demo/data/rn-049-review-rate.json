@@ -1,0 +1,27 @@
+{
+  "type": "bar",
+  "title": "Orders sent to manual fraud review",
+  "subtitle": "Share of all orders per month; new rules from 2 March 2026",
+  "category": "Month",
+  "categories": [
+    "Nov",
+    "Dec",
+    "Jan",
+    "Feb",
+    "Mar"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Sent to review",
+      "values": [
+        0.92,
+        1.14,
+        0.88,
+        0.85,
+        0.61
+      ]
+    }
+  ],
+  "alt": "Bar chart: 0.85 to 1.14 % of orders went to review each month before March, 0.61 % in March"
+}

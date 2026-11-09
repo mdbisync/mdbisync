@@ -1,0 +1,40 @@
+{
+  "type": "bar",
+  "title": "Log volume by service and level",
+  "subtitle": "Daily average, June 2026",
+  "category": "Service",
+  "categories": [
+    "api-gateway",
+    "search-svc",
+    "cart-svc",
+    "catalog-svc",
+    "checkout-svc",
+    "notify-svc"
+  ],
+  "unit": "GB",
+  "series": [
+    {
+      "name": "info",
+      "values": [
+        260,
+        205,
+        136,
+        180,
+        95,
+        60
+      ]
+    },
+    {
+      "name": "warn and error",
+      "values": [
+        15,
+        12,
+        4,
+        6,
+        9,
+        3
+      ]
+    }
+  ],
+  "alt": "Bar chart: info logs dominate volume; api-gateway, search-svc and cart-svc write the most"
+}

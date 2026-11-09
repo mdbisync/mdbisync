@@ -1,0 +1,17 @@
+{
+  "type": "bar",
+  "title": "Return reasons by category",
+  "subtitle": "Share of each category's return requests, December 2025 to May 2026",
+  "category": "Category",
+  "categories": ["Fashion", "Electronics", "Home", "Beauty"],
+  "unit": "%",
+  "min": 0,
+  "max": 70,
+  "series": [
+    { "name": "Wrong size or fit", "values": [54, 3, 8, 6] },
+    { "name": "Not as described", "values": [17, 19, 21, 22] },
+    { "name": "Damaged", "values": [4, 12, 12, 9] },
+    { "name": "Changed mind", "values": [25, 66, 59, 63] }
+  ],
+  "alt": "Grouped bar chart: wrong size or fit is 54 % of fashion returns; changed mind is the main reason in electronics, home and beauty"
+}

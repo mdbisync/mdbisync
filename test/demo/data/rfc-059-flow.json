@@ -1,0 +1,22 @@
+{
+  "type": "diagram",
+  "title": "Similar products from embeddings",
+  "subtitle": "Vectors are written on every listing change and queried from the product page",
+  "alt": "Diagram: product events feed the embedding pipeline, which writes vectors into the OpenSearch product index; the product page asks search-svc for neighbours",
+  "rows": ["Write path", "Index", "Read path"],
+  "nodes": [
+    { "id": "events", "label": "Product events", "detail": "catalog-svc, Kafka", "row": 0, "col": 0 },
+    { "id": "embed", "label": "Embedding pipeline", "detail": "Image and text model, CPU", "row": 0, "col": 1 },
+    { "id": "index", "label": "Product index", "detail": "knn_vector, HNSW, 512 dims", "row": 1, "col": 1 },
+    { "id": "page", "label": "Product page", "detail": "Web shop and app", "row": 2, "col": 0 },
+    { "id": "svc", "label": "search-svc", "detail": "k-NN, filters, blend", "row": 2, "col": 1 },
+    { "id": "copurch", "label": "Co-purchases", "detail": "reco-svc, first when present", "row": 2, "col": 2 }
+  ],
+  "edges": [
+    { "from": "events", "to": "embed" },
+    { "from": "embed", "to": "index", "label": "vectors" },
+    { "from": "page", "to": "svc" },
+    { "from": "svc", "to": "index", "label": "k = 50" },
+    { "from": "svc", "to": "copurch", "dashed": true }
+  ]
+}

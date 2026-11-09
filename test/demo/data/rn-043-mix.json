@@ -1,0 +1,57 @@
+{
+  "type": "bar",
+  "title": "Payment method share by market",
+  "subtitle": "Share of paid orders, Q2 2025, 1.9 million orders",
+  "category": "Market",
+  "categories": [
+    "DE",
+    "FR",
+    "NL",
+    "PL",
+    "ES"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Card",
+      "values": [
+        38,
+        61,
+        22,
+        34,
+        58
+      ]
+    },
+    {
+      "name": "Saved card",
+      "values": [
+        21,
+        24,
+        9,
+        12,
+        22
+      ]
+    },
+    {
+      "name": "Bank transfer",
+      "values": [
+        27,
+        4,
+        61,
+        41,
+        6
+      ]
+    },
+    {
+      "name": "Mobile wallet",
+      "values": [
+        14,
+        11,
+        8,
+        13,
+        14
+      ]
+    }
+  ],
+  "alt": "Grouped bar chart of payment methods by market: cards lead in FR and ES, bank transfer in NL and PL"
+}

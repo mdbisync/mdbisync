@@ -1,0 +1,31 @@
+{
+  "type": "hbar",
+  "title": "Share of API calls by endpoint group",
+  "subtitle": "All partners, 2026-01-05 to 2026-01-18, 412 million calls",
+  "category": "Endpoint group",
+  "categories": [
+    "GET products",
+    "GET orders",
+    "PATCH inventory",
+    "GET inventory",
+    "PATCH products",
+    "Order actions",
+    "Other"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Share of calls",
+      "values": [
+        31.4,
+        22.7,
+        17.9,
+        11.2,
+        8.6,
+        4.8,
+        3.4
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: product reads are 31.4 % of calls, order reads 22.7 %, inventory writes 17.9 %"
+}

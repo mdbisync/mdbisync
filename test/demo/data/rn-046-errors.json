@@ -1,0 +1,28 @@
+{
+  "type": "bar",
+  "title": "Address form with at least one validation error",
+  "subtitle": "Share of submitted address forms, four weeks before and after launch",
+  "category": "Platform",
+  "categories": [
+    "Web shop",
+    "App"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Before",
+      "values": [
+        29.4,
+        34.1
+      ]
+    },
+    {
+      "name": "After",
+      "values": [
+        11.2,
+        13.5
+      ]
+    }
+  ],
+  "alt": "Bar chart: address forms with a validation error drop from 29.4 % to 11.2 % on the web and from 34.1 % to 13.5 % on the app"
+}

@@ -1,0 +1,37 @@
+{
+  "type": "bar",
+  "title": "Sessions lost at each step, by device",
+  "subtitle": "Share of sessions entering the step that leave there, January 2025",
+  "category": "Step",
+  "categories": [
+    "Sign in",
+    "Address",
+    "Shipping",
+    "Payment",
+    "Review"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Web",
+      "values": [
+        18.9,
+        13.2,
+        5.8,
+        10.4,
+        15.6
+      ]
+    },
+    {
+      "name": "App",
+      "values": [
+        24.1,
+        18.7,
+        7.4,
+        13.9,
+        18.8
+      ]
+    }
+  ],
+  "alt": "Bar chart: the app loses more sessions than the web at every step, most at sign-in and address"
+}

@@ -1,0 +1,20 @@
+{
+  "type": "diagram",
+  "title": "Suggestions as you type",
+  "subtitle": "Candidates are rebuilt every 15 minutes; each keystroke is one fast prefix lookup",
+  "alt": "Diagram: analytics events feed a candidate job that rebuilds the suggestion index; the search box asks search-svc, which queries the completion suggester",
+  "rows": ["Build", "Serve"],
+  "nodes": [
+    { "id": "events", "label": "Search analytics", "detail": "ClickHouse, 90 days", "row": 0, "col": 0 },
+    { "id": "job", "label": "Candidate job", "detail": "Queries, categories, brands", "row": 0, "col": 1 },
+    { "id": "index", "label": "Suggestion index", "detail": "Completion suggester", "row": 0, "col": 2 },
+    { "id": "box", "label": "Search box", "detail": "Web shop and app, 80 ms debounce", "row": 1, "col": 0 },
+    { "id": "svc", "label": "search-svc", "detail": "/suggest, blocklist", "row": 1, "col": 1 }
+  ],
+  "edges": [
+    { "from": "events", "to": "job" },
+    { "from": "job", "to": "index", "label": "every 15 min" },
+    { "from": "box", "to": "svc", "label": "prefix" },
+    { "from": "svc", "to": "index" }
+  ]
+}

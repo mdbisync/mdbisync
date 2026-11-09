@@ -1,0 +1,25 @@
+{
+  "type": "bar",
+  "title": "Cart abandonment by device",
+  "subtitle": "Share of carts with at least one item that do not become an order within 7 days, November 2025",
+  "category": "Device",
+  "categories": [
+    "Phone (web)",
+    "Tablet (web)",
+    "Desktop (web)",
+    "App"
+  ],
+  "unit": "%",
+  "series": [
+    {
+      "name": "Abandoned",
+      "values": [
+        78.4,
+        69.2,
+        61.7,
+        58.3
+      ]
+    }
+  ],
+  "alt": "Bar chart: 78.4 % of phone web carts are abandoned, against 69.2 % on tablets, 61.7 % on desktops and 58.3 % in the app"
+}

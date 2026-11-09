@@ -1,0 +1,37 @@
+{
+  "type": "bar",
+  "title": "Cold and warm start time by device class",
+  "subtitle": "Median from launch to first product image, app 4.22, 14 days of field data",
+  "category": "Device class",
+  "categories": [
+    "Low-end Android",
+    "Mid-range Android",
+    "Recent Android",
+    "Older iPhone",
+    "Recent iPhone"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "Cold start",
+      "values": [
+        3420,
+        2180,
+        1240,
+        1510,
+        890
+      ]
+    },
+    {
+      "name": "Warm start",
+      "values": [
+        1310,
+        820,
+        460,
+        540,
+        310
+      ]
+    }
+  ],
+  "alt": "Bar chart: cold start ranges from 3,420 ms on low-end Android to 890 ms on a recent iPhone; warm starts are about a third of that"
+}

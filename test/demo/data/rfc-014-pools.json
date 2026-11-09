@@ -1,0 +1,68 @@
+{
+  "type": "diagram",
+  "title": "Node pools after the spot move",
+  "subtitle": "Services stay on on-demand nodes; interruptible work moves to spot",
+  "alt": "Diagram: services run on the general on-demand pool; CronJobs and reindexing on the batch spot pool; CI runners on the ci spot pool",
+  "rows": [
+    "Workloads",
+    "Node pools"
+  ],
+  "nodes": [
+    {
+      "id": "svc",
+      "label": "Services",
+      "detail": "Customer traffic",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "batch",
+      "label": "CronJobs",
+      "detail": "Exports, reindexing",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "ci",
+      "label": "CI runners",
+      "detail": "One pod per job",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "gen",
+      "label": "general",
+      "detail": "On-demand",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "bs",
+      "label": "batch-spot",
+      "detail": "Spot, 6 types",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "cip",
+      "label": "ci",
+      "detail": "Spot, 3 types",
+      "row": 1,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "svc",
+      "to": "gen"
+    },
+    {
+      "from": "batch",
+      "to": "bs"
+    },
+    {
+      "from": "ci",
+      "to": "cip"
+    }
+  ]
+}

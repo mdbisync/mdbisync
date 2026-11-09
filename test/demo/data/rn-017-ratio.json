@@ -1,0 +1,39 @@
+{
+  "type": "bar",
+  "title": "Compression ratio by codec (higher is smaller)",
+  "subtitle": "One month of analytics events, 610 million rows",
+  "category": "Column",
+  "categories": [
+    "properties",
+    "event_time",
+    "product_id"
+  ],
+  "unit": "",
+  "series": [
+    {
+      "name": "LZ4",
+      "values": [
+        4.2,
+        3.1,
+        5.6
+      ]
+    },
+    {
+      "name": "ZSTD(3)",
+      "values": [
+        7.9,
+        5.0,
+        6.1
+      ]
+    },
+    {
+      "name": "ZSTD(9)",
+      "values": [
+        8.6,
+        5.4,
+        6.3
+      ]
+    }
+  ],
+  "alt": "Bar chart of compression ratios: ZSTD(3) nearly doubles compression of properties over LZ4; ZSTD(9) adds little"
+}

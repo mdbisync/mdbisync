@@ -1,0 +1,80 @@
+{
+  "type": "diagram",
+  "title": "Backups for point-in-time recovery",
+  "subtitle": "WAL archived at least every 60 seconds; restore to any second of 14 days",
+  "alt": "Diagram: the PostgreSQL primary archives WAL and backups with pgBackRest to object storage in the same region, with a weekly copy to the second region and a monthly restore drill",
+  "rows": [
+    "Database",
+    "Backups",
+    "Checks"
+  ],
+  "nodes": [
+    {
+      "id": "pg",
+      "label": "PostgreSQL primary",
+      "detail": "WAL every 60 s",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "pgbr",
+      "label": "pgBackRest",
+      "detail": "Full daily, differential hourly",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "s3a",
+      "label": "Object storage",
+      "detail": "Same region, 14 days",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "s3b",
+      "label": "Object storage",
+      "detail": "Other region, 90 days",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "drill",
+      "label": "Restore drill",
+      "detail": "Monthly, random point",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "scratch",
+      "label": "Scratch cluster",
+      "detail": "Row counts, checksums",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "pg",
+      "to": "pgbr",
+      "label": "WAL"
+    },
+    {
+      "from": "pgbr",
+      "to": "s3a"
+    },
+    {
+      "from": "s3a",
+      "to": "s3b",
+      "label": "weekly"
+    },
+    {
+      "from": "s3a",
+      "to": "drill"
+    },
+    {
+      "from": "drill",
+      "to": "scratch",
+      "label": "restore"
+    }
+  ]
+}

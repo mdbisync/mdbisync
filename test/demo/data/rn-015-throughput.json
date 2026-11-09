@@ -1,0 +1,12 @@
+{
+  "type": "hbar",
+  "title": "Highest sustained throughput with p99 under 20 ms",
+  "subtitle": "Batches of 100 events, three nodes, one region",
+  "category": "Event log",
+  "categories": ["Kafka (managed)", "NATS JetStream", "Today's peak load"],
+  "unit": "events/s",
+  "series": [
+    { "name": "Throughput", "values": [48000, 31000, 9000] }
+  ],
+  "alt": "Horizontal bar chart: Kafka sustains 48,000 events per second, JetStream 31,000, against a peak load of 9,000"
+}

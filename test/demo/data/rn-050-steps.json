@@ -1,0 +1,31 @@
+{
+  "type": "bar",
+  "title": "Where the time goes, card refunds",
+  "subtitle": "Median hours per stage, before and with self-service",
+  "category": "Stage",
+  "categories": [
+    "Request to approval",
+    "Approval to refund sent",
+    "Refund sent to money returned"
+  ],
+  "unit": "h",
+  "series": [
+    {
+      "name": "Before",
+      "values": [
+        52,
+        19,
+        92
+      ]
+    },
+    {
+      "name": "With self-service",
+      "values": [
+        0.2,
+        1.1,
+        75
+      ]
+    }
+  ],
+  "alt": "Bar chart: self-service removes the 52 hours of waiting for approval; the card network still needs about 75 hours"
+}

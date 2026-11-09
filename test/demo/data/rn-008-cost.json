@@ -1,0 +1,29 @@
+{
+  "type": "hbar",
+  "title": "Cost per million requests by service",
+  "subtitle": "Compute, storage and a share of shared costs, November 2025",
+  "category": "Service",
+  "categories": [
+    "api-gateway",
+    "catalog-svc",
+    "cart-svc",
+    "search-svc",
+    "reco-svc",
+    "checkout-svc"
+  ],
+  "unit": "USD",
+  "series": [
+    {
+      "name": "Cost per million requests",
+      "values": [
+        0.9,
+        1.6,
+        2.1,
+        4.8,
+        7.3,
+        11.4
+      ]
+    }
+  ],
+  "alt": "Horizontal bar chart: checkout-svc costs 11.40 USD per million requests, api-gateway 0.90 USD"
+}

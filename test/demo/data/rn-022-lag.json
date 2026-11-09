@@ -1,0 +1,58 @@
+{
+  "type": "line",
+  "title": "Catalog replica replay lag on the sale day",
+  "subtitle": "Two-hour windows, 14 October 2026",
+  "category": "Time",
+  "categories": [
+    "00:00",
+    "02:00",
+    "04:00",
+    "06:00",
+    "08:00",
+    "10:00",
+    "12:00",
+    "14:00",
+    "16:00",
+    "18:00",
+    "20:00",
+    "22:00"
+  ],
+  "unit": "ms",
+  "series": [
+    {
+      "name": "p99",
+      "values": [
+        130,
+        120,
+        120,
+        150,
+        170,
+        180,
+        175,
+        170,
+        160,
+        1400,
+        1250,
+        180
+      ]
+    },
+    {
+      "name": "p50",
+      "values": [
+        40,
+        35,
+        35,
+        50,
+        70,
+        80,
+        90,
+        85,
+        95,
+        310,
+        280,
+        60
+      ]
+    }
+  ],
+  "alt": "Line chart: p99 replica lag stays under 180 ms except during the 18:00 to 22:00 peak, when it reaches 1,400 ms"
+}

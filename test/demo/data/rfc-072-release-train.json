@@ -1,0 +1,76 @@
+{
+  "type": "diagram",
+  "title": "Proposed weekly release train",
+  "subtitle": "One release a week, each build two weeks from branch cut to full rollout",
+  "alt": "Diagram: branch cut on Monday, internal testing and store review in week 1, then a staged rollout of 1, 10 to 50 and 100 percent in week 2",
+  "rows": [
+    "Week 1",
+    "Week 2"
+  ],
+  "nodes": [
+    {
+      "id": "cut",
+      "label": "Branch cut",
+      "detail": "Monday 10:00",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "qa",
+      "label": "Internal testing",
+      "detail": "Release checklist",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "store",
+      "label": "Store review",
+      "detail": "Thursday",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "r1",
+      "label": "Rollout 1 %",
+      "detail": "Monday",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "r10",
+      "label": "Rollout 10 to 50 %",
+      "detail": "If crash-free holds",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "r100",
+      "label": "Rollout 100 %",
+      "detail": "Friday",
+      "row": 1,
+      "col": 0
+    }
+  ],
+  "edges": [
+    {
+      "from": "cut",
+      "to": "qa"
+    },
+    {
+      "from": "qa",
+      "to": "store"
+    },
+    {
+      "from": "store",
+      "to": "r1"
+    },
+    {
+      "from": "r1",
+      "to": "r10"
+    },
+    {
+      "from": "r10",
+      "to": "r100"
+    }
+  ]
+}
