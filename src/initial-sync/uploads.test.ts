@@ -78,7 +78,7 @@ describe('uploads of linked files in an initial sync', () => {
   });
   afterEach(() => fixture.cleanup());
 
-  const run = async (world: FakeWorld) => {
+  const run = async (world: FakeWorld, fetchOverride?: typeof fetch) => {
     await rm(reportFile(), { force: true });
     await rm(summaryFile(), { force: true });
     const env = {
@@ -95,7 +95,7 @@ describe('uploads of linked files in an initial sync', () => {
       MDBISYNC_CONFIRM: 'true',
       GITHUB_STEP_SUMMARY: summaryFile(),
     };
-    const result = await runCli(['initial-sync'], { env, cwd, fetch: fakeFetch(world) });
+    const result = await runCli(['initial-sync'], { env, cwd, fetch: fetchOverride ?? fakeFetch(world) });
     assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     assert.ok(!summary.includes(CANARY), 'the job summary holds content');
@@ -278,6 +278,37 @@ describe('uploads of linked files in an initial sync', () => {
     assert.equal(document(world, 'b')?.content?.includes(uploadOf(world, PIXEL)[0]!.assetUrl), true);
     assert.equal(await show('refs/mdbisync/linear:eng/notes/b.md'), B_BODY);
   });
+
+  for (const failure of ['http', 'reset'] as const) {
+    it(`L5-11: a storage ${failure} partway through a batch preserves existing content and caches only complete uploads`, async () => {
+      const world = fakeWorld();
+      const before = '# Existing\n\nPrevious complete content.';
+      world.linear.documents.push({ id: 'existing-b', title: 'b', projectId: 'project-api', createdAt: '2026-01-01T00:00:00Z', content: before });
+      const base = fakeFetch(world);
+      const failingFetch: typeof fetch = async (input, init) => {
+        const match = /\/storage\/(\d+)$/.exec(String(input));
+        if (init?.method === 'PUT' && match !== null && world.linear.uploads[Number(match[1])]?.filename === 'pixel.png') {
+          if (failure === 'reset') throw new TypeError('connection reset');
+          return new Response('', { status: 503 });
+        }
+        return base(input, init);
+      };
+      const first = await run(world, failingFetch);
+      assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
+      assert.deepEqual(first.report.initialSync?.failed.map((entry) => entry.path), ['eng/notes/b.md']);
+      assert.equal(document(world, 'b')?.content, before);
+      assert.ok(document(world, 'a') !== undefined, 'an independent document was written');
+      const cache = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
+      assert.equal(cache[sha(PIXEL)], undefined, 'a signed URL with no bytes never enters the cache');
+      for (const url of Object.values(cache)) assert.ok(world.linear.uploads.some((upload) => upload.assetUrl === url && upload.bytes !== undefined));
+
+      const second = await run(world);
+      assert.equal(second.result.exitCode, 0, second.result.stderr);
+      assert.equal(document(world, 'b')?.id, 'existing-b');
+      assert.ok(document(world, 'b')?.content?.includes(uploadOf(world, PIXEL)[0]!.assetUrl));
+      assert.equal(await show('refs/mdbisync/linear:eng/notes/b.md'), B_BODY);
+    });
+  }
 
   it('L1-15: a resumed run maps the links of the documents it skipped back to the tracked text', async () => {
     const world = fakeWorld();

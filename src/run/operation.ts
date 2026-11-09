@@ -37,6 +37,7 @@ export interface OperationOutcome extends PreflightOutcome {
   reverse?: ReverseResult;
   /** What a sync run wrote and recorded. */
   sync?: CycleResult;
+  /** What a sync run's capture of Linear changes recorded. */
   captured?: CaptureResult;
 }
 
