@@ -86,23 +86,32 @@ export interface RunningEngine {
   kill(): void;
 }
 
+/** A clean environment for the engine: only what it needs, never the harness's own secrets. */
+export function engineEnv(call: EngineCall, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return {
+    PATH: env['PATH'],
+    HOME: env['HOME'],
+    LANG: 'C.UTF-8',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_LFS_SKIP_SMUDGE: '1',
+    [HOOKS_ENV]: '1',
+    [HOOKS_DIR_ENV]: call.hooksDir,
+    GITHUB_STEP_SUMMARY: call.summaryFile,
+    ...call.extraEnv,
+    ...engineInputs(call),
+  };
+}
+
+/** The action's `post` step (it revokes a run's Linear token, also after a killed run); MDBISYNC_ENGINE_POST overrides it. */
+export function postEntry(env: NodeJS.ProcessEnv = process.env): string {
+  return env['MDBISYNC_ENGINE_POST'] || join(REPO_ROOT, 'src/action/post.ts');
+}
+
 export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.env): RunningEngine {
   const started = Date.now();
   const child = spawn(process.execPath, [engineEntry(env), call.command], {
     cwd: call.cwd,
-    // A clean environment: only what the engine needs, never the harness's own secrets.
-    env: {
-      PATH: env['PATH'],
-      HOME: env['HOME'],
-      LANG: 'C.UTF-8',
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_LFS_SKIP_SMUDGE: '1',
-      [HOOKS_ENV]: '1',
-      [HOOKS_DIR_ENV]: call.hooksDir,
-      GITHUB_STEP_SUMMARY: call.summaryFile,
-      ...call.extraEnv,
-      ...engineInputs(call),
-    },
+    env: engineEnv(call, env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';

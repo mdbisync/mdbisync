@@ -164,8 +164,11 @@ export async function personCommit(
   names: RunNames,
   changes: ReadonlyMap<string, string | Buffer | null>,
   message: string,
-  options: { verify: boolean },
+  options: { verify: boolean; branch?: string },
 ): Promise<string> {
+  const binary = [...changes.values()].some((content) => Buffer.isBuffer(content));
+  // Binary files go through the LFS filters the repository's .gitattributes names, as on a person's machine.
+  if (binary) await git.run(['lfs', 'install', '--local', '--skip-smudge']);
   for (const [path, content] of changes) {
     const file = join(git.dir, path);
     if (content === null) {
@@ -177,6 +180,8 @@ export async function personCommit(
     }
   }
   await git.run(['commit', '--quiet', ...(options.verify ? [] : ['--no-verify']), '-m', message]);
-  await git.run(['push', '--quiet', ...(options.verify ? [] : ['--no-verify']), 'origin', `HEAD:refs/heads/${names.trackedBranch}`]);
+  // Objects first, so a pushed pointer never names an object the server lacks (a bypassed pre-push hook would skip it).
+  if (binary) await git.run(['lfs', 'push', 'origin', 'HEAD']);
+  await git.run(['push', '--quiet', ...(options.verify ? [] : ['--no-verify']), 'origin', `HEAD:refs/heads/${options.branch ?? names.trackedBranch}`]);
   return (await git.text(['rev-parse', 'HEAD'])).trim();
 }

@@ -22,6 +22,8 @@ export interface EditRecord {
   token: string;
   /** The edit was a removal: the token must be gone on both sides. */
   removal?: boolean;
+  /** A conflict resolution discarded this edit on purpose (it kept the other version): I2 does not expect it. */
+  retired?: boolean;
 }
 
 export interface LiveWorld {
@@ -46,6 +48,8 @@ export interface LiveWorld {
   engineApp: { clientId: string; clientSecret: string };
   /** Team-zone documents seeded by the harness, for cleanup. */
   seededDocuments: string[];
+  /** Downloads an upload URL as editor-a (uploads need an authenticated request). */
+  download(url: string): Promise<Buffer>;
 }
 
 export interface RunContext {
@@ -67,6 +71,10 @@ export interface RunContext {
     env: Record<string, string>;
     /** Credentials override set by a credentials fault. */
     badCredential?: 'linear' | 'github';
+    /** Something the harness does while the next run waits at a checkpoint (a fault in the middle of a run). */
+    trigger?: { checkpoint: Checkpoint; action: () => Promise<void> };
+    /** Undo steps of faults that changed the repository or Linear; `fault.clear` runs them. */
+    restores: Array<() => Promise<void>>;
   };
   edits: EditRecord[];
   /** Commits the scenario's own git steps pushed to the tracked branch (I3). */

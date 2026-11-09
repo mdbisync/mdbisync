@@ -8,9 +8,10 @@ import { join, posix } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
-import { annotatedFolders, owningFolder } from './corpus.ts';
+import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
 import { HarnessGapError, ProductError, type CheckOutcome } from './results.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
+import { refreshView, resolveSubject } from './subjects.ts';
 
 // --- pure helpers ----------------------------------------------------------
 
@@ -31,6 +32,34 @@ export function mapImageLinks(content: string, urlToPath: ReadonlyMap<string, st
   const base = posix.dirname(documentPath);
   for (const [url, path] of urlToPath) result = result.split(url).join(posix.relative(base, path) || path);
   return result;
+}
+
+/**
+ * A file's text as Linear should hold it: each relative link to a file whose
+ * bytes were uploaded becomes that upload's URL, link by link, so two links
+ * to equal bytes at different paths each keep their own place.
+ */
+export function linkUploads(text: string, documentPath: string, hashes: ReadonlyMap<string, string>, uploadsByHash: ReadonlyMap<string, string>): string {
+  const base = posix.dirname(documentPath);
+  return text.replace(/(\]\(\s*)(<[^>]*>|[^)\s]+)/g, (whole, open: string, target: string) => {
+    const written = target.startsWith('<') ? target.slice(1, -1) : target;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(written) || written.startsWith('#')) return whole;
+    let path: string;
+    try {
+      path = posix.normalize(posix.join(base, decodeURI(written.split('#')[0] as string)));
+    } catch {
+      return whole;
+    }
+    const hash = hashes.get(path);
+    const url = hash === undefined ? undefined : uploadsByHash.get(hash);
+    // Only the path becomes the URL: a destination in angle brackets keeps them, as Linear stores it.
+    return url === undefined ? whole : `${open}${target.startsWith('<') ? `<${url}>` : url}`;
+  });
+}
+
+/** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
+export function sameAsFile(text: string, content: string, path: string, sides: Pick<Sides, 'hashes' | 'uploadsByHash'>): boolean {
+  return linkUploads(stripFrontMatter(text), path, sides.hashes, sides.uploadsByHash) === content;
 }
 
 /**
@@ -93,9 +122,29 @@ export interface Sides {
   documents: Map<string, LinearDocument>;
   /** Every document in the run's projects and team-zone prefix. */
   allDocuments: LinearDocument[];
+  /** SHA-256 of a file → upload URL, as the uploads ref holds it. */
+  uploadsByHash: Map<string, string>;
+  /** Every tracked file's SHA-256 (an LFS pointer's object id for LFS files) by path. */
+  hashes: Map<string, string>;
+  /** The tracked branch's tip. */
+  tip: string;
+  /** Annotated folders of the tracked branch. */
+  folders: Folder[];
 }
 
-async function fetchRef(git: Git, ref: string): Promise<string | null> {
+/** A file's SHA-256: an LFS pointer's object id, else the hash of the bytes. */
+export function fileHash(bytes: Buffer): string {
+  const pointer = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:([0-9a-f]{64})\n/.exec(bytes.toString('latin1'));
+  return pointer?.[1] ?? createHash('sha256').update(bytes).digest('hex');
+}
+
+/** An LFS pointer's object size, or null for a file stored in git. */
+export function lfsSize(bytes: Buffer): number | null {
+  const match = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\n[\s\S]*?^size (\d+)$/m.exec(bytes.toString('latin1'));
+  return match === null ? null : Number(match[1]);
+}
+
+export async function fetchRef(git: Git, ref: string): Promise<string | null> {
   try {
     await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
     return (await git.text(['rev-parse', ref])).trim();
@@ -104,7 +153,8 @@ async function fetchRef(git: Git, ref: string): Promise<string | null> {
   }
 }
 
-export async function readSides(ctx: RunContext): Promise<Sides> {
+/** Reads both sides; without `allowNoIds`, a run with no ids state ref is a product error. */
+export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean } = {}): Promise<Sides> {
   const world = ctx.live;
   if (world === null) throw new Error('offline scenarios have no sides');
   const git = await ctx.person();
@@ -113,6 +163,7 @@ export async function readSides(ctx: RunContext): Promise<Sides> {
   const idsCommit = await fetchRef(git, stateRef(config, 'ids'));
   const uploadsCommit = await fetchRef(git, stateRef(config, 'uploads'));
   // No ids ref: the engine recorded nothing (a refusal, a check, a dry run). The mapping is empty, not an error.
+  void options;
   const ids: IdMap = idsCommit === null ? new Map() : await readIds(git, idsCommit);
   const uploadsByHash = await readUploads(git, uploadsCommit);
 
@@ -129,10 +180,12 @@ export async function readSides(ctx: RunContext): Promise<Sides> {
   }
   const files = new Map<string, string>();
   const hashToPath = new Map<string, string>();
+  const hashes = new Map<string, string>();
   for (const path of tracked) {
     const bytes = readFileSync(join(git.dir, path));
-    const pointer = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:([0-9a-f]{64})\n/.exec(bytes.toString('latin1'));
-    hashToPath.set(pointer?.[1] ?? createHash('sha256').update(bytes).digest('hex'), path);
+    const hash = fileHash(bytes);
+    hashToPath.set(hash, path);
+    hashes.set(path, hash);
     if (path.endsWith('.md') && owningFolder(path, folders) !== null && !unsynced.has(path)) files.set(path, bytes.toString('utf8'));
   }
   const uploads = new Map<string, string>();
@@ -152,7 +205,8 @@ export async function readSides(ctx: RunContext): Promise<Sides> {
   const documents = new Map(allDocuments.map((document) => [document.id, document]));
   const missing = [...ids.values()].map((entry) => entry.id).filter((id) => !documents.has(id));
   if (missing.length > 0) for (const document of await world.app.getDocuments(missing, { withContent: true })) documents.set(document.id, document);
-  return { files, ids, uploads, documents, allDocuments };
+  const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
+  return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders };
 }
 
 // --- invariants ---------------------------------------------------------------
@@ -173,21 +227,14 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
         differing.push(`${path} (no document)`);
         continue;
       }
-      if (stripFrontMatter(text) !== mapImageLinks(document.content ?? '', s.uploads, path)) differing.push(path);
+      if (!sameAsFile(text, document.content ?? '', path, s)) differing.push(path);
     }
     return differing.length === 0 ? ok('I1') : bad('I1', `${differing.length} files differ from their documents: ${differing.slice(0, 10).join(', ')}`);
   },
 
   async I2(ctx, sides) {
     if (ctx.edits.length === 0) return ok('I2');
-    const s = await sides();
-    const gitText = [...s.files.values()].join('\n');
-    const linearText = [...s.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n');
-    const lost = ctx.edits.filter((edit) => {
-      const inGit = gitText.includes(edit.token);
-      const inLinear = linearText.includes(edit.token);
-      return edit.removal === true ? inGit || inLinear : !(inGit && inLinear);
-    });
+    const lost = lostEdits(ctx, await sides());
     return lost.length === 0 ? ok('I2') : bad('I2', `${lost.length} edits are not on both sides: ${lost.map((edit) => `${edit.side} ${edit.token}`).join(', ')}`);
   },
 
@@ -223,36 +270,7 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   },
 
   async I5(ctx) {
-    const world = ctx.live;
-    const canaries = new Set<string>();
-    if (world !== null) {
-      const sources = new Set(world.tree.paths.values());
-      // Content canaries only: a canary in a file name (canary_in: name) shows wherever paths are listed, which is allowed.
-      for (const file of contentCanaries(world.manifest.files)) if (sources.has(file.path)) canaries.add(file.canary);
-    }
-    const texts = new Map<string, string>();
-    ctx.engine.results.forEach((result, index) => {
-      texts.set(`run ${index} stdout`, result.stdout);
-      texts.set(`run ${index} stderr`, result.stderr);
-      texts.set(`run ${index} summary`, result.summary);
-    });
-    if (world !== null) {
-      for (const pr of await world.rest.pullRequests(`t/${ctx.names.runId}/`)) texts.set(`pull request #${pr.number}`, `${pr.title}\n${pr.body ?? ''}`);
-      // Linear comments on the run's documents: project documents, and team-zone documents with the run's prefix.
-      for (const project of world.projects.values()) {
-        for (const document of await commentsOf(world.app, { project: { id: { eq: project.id } } })) {
-          texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
-        }
-      }
-      for (const team of world.tree.teamZones.keys()) {
-        const teamId = world.teams.get(team)?.id;
-        if (teamId === undefined) continue;
-        for (const document of await commentsOf(world.app, { team: { id: { eq: teamId } }, title: { startsWith: ctx.names.teamZonePrefix } })) {
-          if (!document.inProject) texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
-        }
-      }
-    }
-    const hits = scanCanaries(texts, canaries);
+    const hits = await canaryScan(ctx, { summariesOnly: false });
     return hits.length === 0 ? ok('I5') : bad('I5', `canary tokens found in: ${[...new Set(hits.map((hit) => hit.source))].join(', ')}`);
   },
 
@@ -321,6 +339,53 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   },
 };
 
+/** Edits that are not on both sides (or, for a removal, still on a side). */
+export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documents'>): RunContext['edits'] {
+  const gitText = [...sides.files.values()].join('\n');
+  const linearText = [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n');
+  return ctx.edits.filter((edit) => {
+    if (edit.retired === true) return false;
+    const inGit = gitText.includes(edit.token);
+    const inLinear = linearText.includes(edit.token);
+    return edit.removal === true ? inGit || inLinear : !(inGit && inLinear);
+  });
+}
+
+/** Canary tokens of the run's slice in run logs and summaries and, unless `summariesOnly`, in pull request texts and Linear comments. */
+export async function canaryScan(ctx: RunContext, options: { summariesOnly: boolean }): Promise<CanaryHit[]> {
+  const world = ctx.live;
+  const canaries = new Set<string>();
+  if (world !== null) {
+    const sources = new Set(world.tree.paths.values());
+    // Content canaries only: a canary in a file name (canary_in: name) shows wherever paths are listed, which is allowed.
+    for (const file of contentCanaries(world.manifest.files)) if (sources.has(file.path)) canaries.add(file.canary);
+  }
+  const texts = new Map<string, string>();
+  ctx.engine.results.forEach((result, index) => {
+    texts.set(`run ${index} summary`, result.summary);
+    if (options.summariesOnly) return;
+    texts.set(`run ${index} stdout`, result.stdout);
+    texts.set(`run ${index} stderr`, result.stderr);
+  });
+  if (world !== null && !options.summariesOnly) {
+    for (const pr of await world.rest.pullRequests(`t/${ctx.names.runId}/`)) texts.set(`pull request #${pr.number}`, `${pr.title}\n${pr.body ?? ''}`);
+    // Linear comments on the run's documents: project documents, and team-zone documents with the run's prefix.
+    for (const project of world.projects.values()) {
+      for (const document of await commentsOf(world.app, { project: { id: { eq: project.id } } })) {
+        texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
+      }
+    }
+    for (const team of world.tree.teamZones.keys()) {
+      const teamId = world.teams.get(team)?.id;
+      if (teamId === undefined) continue;
+      for (const document of await commentsOf(world.app, { team: { id: { eq: teamId } }, title: { startsWith: ctx.names.teamZonePrefix } })) {
+        if (!document.inProject) texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
+      }
+    }
+  }
+  return scanCanaries(texts, canaries);
+}
+
 async function trackedTip(ctx: RunContext): Promise<string | undefined> {
   const world = ctx.live;
   if (world === null) return undefined;
@@ -376,20 +441,13 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
 
 // --- assertions --------------------------------------------------------------
 
-/** Subjects the harness computes itself; others come from the engine's run report (`runs.N.*`). */
-const SUBJECTS: Record<string, (ctx: RunContext) => Promise<unknown>> = {
-  'pullRequests.created': async (ctx) => (ctx.live === null ? 0 : (await ctx.live.rest.pullRequests(ctx.names.syncBranch)).length),
-  'pullRequests.open': async (ctx) => (ctx.live === null ? 0 : (await ctx.live.rest.pullRequests(ctx.names.syncBranch, 'open')).length),
-};
-
-export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
-  if (ctx.observations.has(subject)) return { known: true, value: ctx.observations.get(subject) };
-  const compute = SUBJECTS[subject];
-  if (compute !== undefined) return { known: true, value: await compute(ctx) };
-  return { known: false };
-}
+// Assertion subjects resolve in subjects.ts: observed, from the engine's report, or computed by the harness.
+export { resolveSubject };
 
 export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
+  // The scenario's own runs and requests end here; I6's extra run is the check's, not the scenario's.
+  ctx.observations.set('scenario.runsEnd', ctx.engine.results.length);
+  ctx.observations.set('scenario.proxyEnd', ctx.proxy?.requests.length ?? 0);
   let cached: Promise<Sides> | undefined;
   const sides = () => (cached ??= readSides(ctx));
   const outcomes: CheckOutcome[] = [];
@@ -402,6 +460,8 @@ export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
       else throw error;
     }
   }
+  // I6 ran the sync once more: assertions read the world as it is now.
+  refreshView(ctx);
   for (const assertion of ctx.scenario.checks.assertions) {
     const actual = await resolveSubject(ctx, assertion.subject);
     if (!actual.known) throw new HarnessGapError(`assertion subject ${assertion.subject}`);
