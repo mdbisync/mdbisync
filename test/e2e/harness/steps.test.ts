@@ -266,7 +266,9 @@ describe('oracles', () => {
     const hashes = new Map([['eng/media/a.png', 'h1'], ['eng/media/copy-of-a.png', 'h1'], ['eng/notes.pdf', 'h2']]);
     const uploads = new Map([['h1', 'https://uploads.linear.app/x/one'], ['h2', 'https://uploads.linear.app/x/two']]);
     const text = '![a](media/a.png) and ![b](<media/copy-of-a.png>) and [pdf](notes.pdf) and [web](https://example.com/a.png) and [anchor](#top)';
-    assert.equal(linkUploads(text, 'eng/plan.md', hashes, uploads), '![a](https://uploads.linear.app/x/one) and ![b](https://uploads.linear.app/x/one) and [pdf](https://uploads.linear.app/x/two) and [web](https://example.com/a.png) and [anchor](#top)');
+    assert.equal(linkUploads(text, 'eng/plan.md', hashes, uploads), '![a](https://uploads.linear.app/x/one) and ![b](<https://uploads.linear.app/x/one>) and [pdf](https://uploads.linear.app/x/two) and [web](https://example.com/a.png) and [anchor](#top)');
+    // An attachment link as the fixer writes it keeps its angle brackets around the URL.
+    assert.equal(linkUploads('The [summary](<../assets/summary.pdf>)', 'eng/notes/plan.md', new Map([['eng/assets/summary.pdf', 'h2']]), uploads), 'The [summary](<https://uploads.linear.app/x/two>)');
     assert.ok(sameAsFile('---\na: 1\n---\n![a](media/a.png)\n', '![a](https://uploads.linear.app/x/one)\n', 'eng/plan.md', { hashes, uploadsByHash: uploads }));
   });
 

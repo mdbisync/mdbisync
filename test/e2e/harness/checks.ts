@@ -52,7 +52,8 @@ export function linkUploads(text: string, documentPath: string, hashes: Readonly
     }
     const hash = hashes.get(path);
     const url = hash === undefined ? undefined : uploadsByHash.get(hash);
-    return url === undefined ? whole : `${open}${url}`;
+    // Only the path becomes the URL: a destination in angle brackets keeps them, as Linear stores it.
+    return url === undefined ? whole : `${open}${target.startsWith('<') ? `<${url}>` : url}`;
   });
 }
 
