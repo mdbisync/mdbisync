@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { parse } from 'yaml';
 import { validateSha } from '../../../src/release/package.ts';
+import { CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
 import { CORPUS_DIR, SLICES_DIR, buildRunTree, parseManifest, parseSlice, type Manifest, type RunTree } from './corpus.ts';
@@ -92,7 +93,7 @@ export class Sandbox {
   }
 
   /** Builds the run's tree from a slice and pushes it as the run's tracked branch (a new root commit). */
-  async createTrackedBranch(slice: string, names: RunNames): Promise<{ tree: RunTree; commit: string }> {
+  async createTrackedBranch(slice: string, names: RunNames, options: { checks?: boolean } = {}): Promise<{ tree: RunTree; commit: string }> {
     const sliceText = await this.readMain(`${SLICES_DIR}/${slice}.json`);
     if (sliceText === null) throw new CorpusMissingError(`the sandbox's main has no ${SLICES_DIR}/${slice}.json (the corpus is not there yet)`);
     const list = parseSlice(sliceText, slice);
@@ -108,6 +109,9 @@ export class Sandbox {
       if (/(^|\/)README\.md$/.test(path)) readmes.set(path, (await this.readMain(`${CORPUS_DIR}/${path}`)) ?? '');
     }
     const tree = buildRunTree(list, readmes, names);
+    // Only check-fault scenarios opt into runner jobs. Other scenarios keep
+    // their workflow-free starting tree.
+    if (options.checks !== true) tree.paths.delete(CHECK_WORKFLOW_PATH);
     const lines: string[] = [];
     for (const [target, source] of tree.paths) {
       const entry = entries.get(source) as { mode: string; oid: string };

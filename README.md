@@ -5,11 +5,10 @@ run as a GitHub Action.
 
 **Status:** early development. `lint` and `fix` work on Markdown files
 ([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)).
-`check` checks a repository's setup. `initial-sync` from git to Linear
-works, as a dry run and confirmed. `sync` captures Linear changes into its state ref, then writes tracked-branch
-changes to Linear. Publishing captured changes through a sync pull request
-is under development.
-`initial-sync` from Linear to git still answers "not implemented".
+`check` checks a repository's setup. `initial-sync` works in both
+directions, as a dry run and confirmed. `sync` captures Linear changes into
+its state ref, then writes tracked-branch changes to Linear. Publishing
+captured changes through a sync pull request is under development.
 
 ## Folder mapping
 
@@ -91,6 +90,31 @@ document writes or state pushes and exits with code 5 (`container-cap`).
 Set the `document-cap` action input or `MDBISYNC_DOCUMENT_CAP` environment
 variable to a positive integer to override the default of 1,000.
 
+## Initial sync from Linear to git
+
+`initial-sync` with `direction: linear-to-git` makes the synchronized folders
+of the tracked branch equal to Linear through one pull request, and writes
+nothing to Linear. Without `confirm: true` it is a dry run: it lists by path
+the files it would overwrite, create and remove, and what it leaves out, and
+writes nothing. With `confirm: true`:
+
+- a file whose path a document's title names gets the document's text (its
+  front matter stays); a document without a file becomes a new file at the
+  path its title names; a synchronized file without a document is removed,
+  except a folder's annotation `README.md`;
+- document ids go to `refs/mdbisync/ids` as the run goes, and at the end one
+  push records `refs/mdbisync/linear` (one commit on top of the tracked
+  branch, with the synchronized folders as Linear holds them), `ids`,
+  `uploads` and the sync branch, which points at the same commit;
+- it opens a pull request from the sync branch to the tracked branch.
+
+**A person reviews and merges that pull request**, with a merge commit: it can
+remove files (they stay in the history). The sync never merges it, and `sync`
+refuses to run until it is merged. A title that is not a plain path as it is
+(for example one with `:` or `?`), or that would collide with another file,
+is left out and listed. A run that stops early exits with code 5; run it
+again with the same inputs to go on without duplicate files.
+
 ## Layout
 
 | Path | What |
@@ -101,6 +125,8 @@ variable to a positive integer to override the default of 1,000.
 | `src/mapping/` | Folder annotations and the mapping of files to documents |
 | `src/setup/` | The setup check and the refusal to sync without state |
 | `src/format/` | `lint` and `fix`: Markdown in Linear's form ([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)) |
+| `src/initial-sync/` | Initial sync in both directions: plan, dry run, confirmed run |
+| `src/pull-request/` | Pull requests through GitHub's REST API |
 | `src/linear/` | Linear client |
 | `src/state/` | The sync's state refs, trees and LFS reads |
 | `action.yml` | Action metadata (`node24`, bundled `main` and `post`) |

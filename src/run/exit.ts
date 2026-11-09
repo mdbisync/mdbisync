@@ -32,7 +32,8 @@ export function exitStatusOf(outcome: OperationOutcome): ExitStatus {
   if (partialCode(outcome) !== undefined) return 'warning';
   if (!outcome.ok || outcome.notImplemented) return 'failure';
   if (outcome.sync?.write?.code === 'container-cap') return 'failure';
-  if (outcome.confirmed !== undefined && !outcome.confirmed.complete) return 'failure';
+  const unfinished = outcome.confirmed ?? outcome.reverse;
+  if (unfinished !== undefined && !unfinished.complete) return 'failure';
   return 'success';
 }
 

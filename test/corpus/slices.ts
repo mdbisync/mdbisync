@@ -3,6 +3,7 @@
 // its documents, the files they embed or link, and the support files.
 
 import { posix } from "node:path";
+import { CHECK_WORKFLOW_PATH } from "./check-workflow.ts";
 import { BANK_UNSYNCED } from "./bank.ts";
 import { extension, isLfs, SHARED_IMAGE_USERS, type CorpusFile } from "./model.ts";
 import type { Rng } from "./rng.ts";
@@ -14,7 +15,7 @@ export type Slice = (typeof SLICES)[number];
 export const MINI_DOCUMENTS = 12;
 export const MID_DOCUMENTS = 200;
 
-const SUPPORT = [".gitattributes", ".pre-commit-config.yaml"];
+const SUPPORT = [".gitattributes", ".pre-commit-config.yaml", CHECK_WORKFLOW_PATH];
 
 function isDocument(file: CorpusFile): boolean {
   return file.synced && file.kind === "markdown";

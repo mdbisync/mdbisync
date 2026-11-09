@@ -4,7 +4,7 @@
 import { type ContainerCapacity } from './capacity.ts';
 import { writeFile } from 'node:fs/promises';
 import { type CaptureResult } from '../sync/capture.ts';
-import { type ConfirmedResult, type PlanReport, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
+import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type SyncRecord, type WriteResult } from '../sync/index.ts';
 import { type ExitStatus, exitStatusOf } from './exit.ts';
 import { type OperationOutcome } from './operation.ts';
@@ -61,8 +61,27 @@ export interface RunReport {
   stoppedEarly: boolean;
   /** Every document this run wrote has its id in the `ids` state ref. */
   progressRecorded: boolean;
-  /** The `linear` record this run made or confirmed; null when it recorded none. */
+  /** The `linear` record an initial sync from git to Linear made or confirmed; null otherwise (a run from Linear reports its record under `linearToGit`). */
   record: { kind: 'initial'; commit: string; moved: boolean; hasTrackedParent: boolean; reformattedCount: number } | null;
+  /** A confirmed initial sync from Linear: what it took and the pull request it left for a person; null for other runs. */
+  linearToGit: ReverseReport | null;
+}
+
+export interface ReverseReport {
+  complete: boolean;
+  overwritten: string[];
+  created: string[];
+  skippedCompleted: string[];
+  removed: string[];
+  leftOutAtRecord: Array<{ path: string; rule: string }>;
+  notAttempted: string[];
+  stopped: WriteStop | null;
+  progressPushes: number;
+  /** The record commit, which is also the pull request's head. */
+  record: { commit: string; moved: boolean; hasTrackedParent: boolean; changesTracked: boolean } | null;
+  pullRequest: { number: number; url: string; opened: boolean; updated: boolean } | null;
+  /** An earlier run's pull request this run closed, because the tracked branch already equals Linear. */
+  closedPullRequest: number | null;
 }
 
 /** A sync run's writes to Linear, by path. */
@@ -101,15 +120,20 @@ export interface ConfirmedReport {
 export function toRunReport(outcome: OperationOutcome): RunReport {
   if (outcome.sync?.write !== undefined) return toSyncRunReport(outcome, outcome.sync.write);
   const confirmed = outcome.confirmed;
+  const reverse = outcome.reverse;
   return {
     capacity: outcome.plan?.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? outcome.captured?.code ?? confirmed?.code ?? (outcome.stopped === undefined ? null : 'stopped'),
+    code: outcome.code ?? outcome.captured?.code ?? confirmed?.code ?? reverse?.code ?? (outcome.stopped === undefined ? null : 'stopped'),
     exitStatus: exitStatusOf(outcome),
-    stop: outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped ?? null,
-    complete: outcome.sync?.complete ?? confirmed?.complete ?? false,
-    changed: outcome.sync?.changed ?? (confirmed !== undefined && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true)),
+    stop: outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped ?? reverse?.stopped ?? null,
+    complete: outcome.sync?.complete ?? confirmed?.complete ?? reverse?.complete ?? false,
+    changed:
+      outcome.sync?.changed ??
+      ((confirmed !== undefined && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true)) ||
+        (reverse !== undefined &&
+          (reverse.record?.moved === true || reverse.progressPushes > 0 || reverse.pullRequest?.opened === true || reverse.pullRequest?.updated === true || reverse.closedPullRequest !== undefined))),
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
     securityHooks: outcome.setup?.securityHooks ?? null,
     notImplemented: outcome.notImplemented,
@@ -118,7 +142,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     capture: captureReport(outcome.captured),
     sync: null,
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
-    skippedCompletedCount: confirmed?.skippedCompleted.length ?? 0,
+    skippedCompletedCount: confirmed?.skippedCompleted.length ?? reverse?.skippedCompleted.length ?? 0,
     // A confirmed run finds them at the write; a dry run, before it, and lists them in its plan.
     oversizeFiles: [
       ...new Set(
@@ -127,11 +151,11 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
           : (outcome.plan?.leftOutFiles ?? []).filter((entry) => entry.rules.includes(UPLOAD_TOO_LARGE)).flatMap((entry) => entry.files ?? []),
       ),
     ].sort(),
-    resumed: confirmed?.resumed ?? false,
-    ...faultFacts(outcome, outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped, confirmed?.failed ?? [], [...(confirmed?.created ?? []), ...(confirmed?.overwritten ?? [])]),
-    stoppedEarly: confirmed?.stopped !== undefined || outcome.stopped !== undefined || outcome.captured?.stopped !== undefined,
+    resumed: confirmed?.resumed ?? reverse?.resumed ?? false,
+    ...faultFacts(outcome, outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped ?? reverse?.stopped, confirmed?.failed ?? [], [...(confirmed?.created ?? []), ...(confirmed?.overwritten ?? [])]),
+    stoppedEarly: confirmed?.stopped !== undefined || reverse?.stopped !== undefined || outcome.stopped !== undefined || outcome.captured?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
-    progressRecorded: confirmed?.progressRecorded ?? false,
+    progressRecorded: confirmed?.progressRecorded ?? (reverse !== undefined && reverse.code !== 'state-moved'),
     record:
       confirmed?.record == null
         ? null
@@ -142,6 +166,30 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
             hasTrackedParent: confirmed.record.hasTrackedParent,
             reformattedCount: confirmed.record.reformatted.length,
           },
+    linearToGit: reverse === undefined ? null : toReverseReport(reverse),
+  };
+}
+
+function toReverseReport(result: ReverseResult): ReverseReport {
+  return {
+    complete: result.complete,
+    overwritten: result.overwritten,
+    created: result.created,
+    skippedCompleted: result.skippedCompleted,
+    removed: result.removed,
+    leftOutAtRecord: result.leftOutAtRecord,
+    notAttempted: result.notAttempted,
+    stopped: result.stopped ?? null,
+    progressPushes: result.progressPushes,
+    record:
+      result.record === null
+        ? null
+        : { commit: result.record.linear, moved: result.record.moved, hasTrackedParent: result.record.hasTrackedParent, changesTracked: result.record.changesTracked },
+    pullRequest:
+      result.pullRequest === null
+        ? null
+        : { number: result.pullRequest.number, url: result.pullRequest.url, opened: result.pullRequest.opened, updated: result.pullRequest.updated },
+    closedPullRequest: result.closedPullRequest ?? null,
   };
 }
 
@@ -184,6 +232,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     stoppedEarly: write.stopped !== undefined,
     progressRecorded: write.code !== 'state-moved',
     record: null,
+    linearToGit: null,
   };
 }
 
@@ -222,6 +271,14 @@ function toConfirmedReport(result: ConfirmedResult): ConfirmedReport {
     progressPushes: result.progressPushes,
     reformatted: result.record?.reformatted ?? [],
   };
+}
+
+/** The one-line failure of an initial sync that did not finish: why, and what to do next. */
+export function unfinishedMessage(command: string, code: string | undefined): string {
+  if (code === 'sync-branch-changed') {
+    return `${command}: not finished (${code}); merge or close the pull request of the sync branch and delete the branch, then run it again`;
+  }
+  return `${command}: not finished (${code}); run it again with the same inputs`;
 }
 
 export async function writeRunReport(path: string, outcome: OperationOutcome): Promise<void> {
