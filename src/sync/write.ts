@@ -21,7 +21,7 @@
 // adopted by its title.
 
 import { randomUUID } from 'node:crypto';
-import { lintText, splitFile } from '../format/index.ts';
+import { splitFile } from '../format/index.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -47,7 +47,7 @@ import {
   stateRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
-import { type CreateChange, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, mergeLocally } from './merge.ts';
+import { type CreateChange, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
@@ -196,13 +196,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const nextReserved = new Map([...reserved].filter(([path]) => resultFiles.has(path)));
   /** Paths of the merge result whose changes were not made: the record keeps the `linear` tip's version. */
   const notDone: DocumentChange[] = [];
+  // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
+  // before any upload of this run (preparing may upload ahead of the writes), so this run's uploads never count as
+  // what Linear held.
+  const tipUploads = new Map(uploads);
 
   let written = 0;
   try {
-    // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
-    // before any upload of this run (preparing may upload ahead of the writes), so this run's uploads never count as
-    // what Linear held.
-    const tipUploads = new Map(uploads);
     const plan = transformPlan();
     for (const transform of transforms) await transform.prepare?.({ git, tracked: candidate, linear, plan, uploads, documentIds });
     for (const transform of tipTransforms) await transform.prepare?.({ git, tracked: linearTip, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads: tipUploads, documentIds });
@@ -365,51 +365,41 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   async function unchangedSinceCapture(document: LinearDocument, path: string): Promise<boolean> {
     if (document.trashed || document.archivedAt !== null) return false;
     const synchronized = merge.linear.get(path);
-    // A file the tip leaves out (a lint finding, a title collision): the tip records the git text, and Linear holds
-    // the text it was last given, which is checked below against the `linear` chain.
-    const file = synchronized ?? merge.linearMapped.get(path);
-    if (file === undefined) return false;
+    if (synchronized !== undefined) return holdsVersion(document, synchronized, textOf(synchronized), tipTransforms, true);
+    // The tip does not synchronize the file (a lint finding, a collision, not text): it records the git text, and
+    // Linear holds the version it was last given. Without one there is nothing to compare with, and the document is
+    // not written.
+    const baseline = await lastSynchronized(git, linearTip as Oid, path, linear.facts);
+    if (baseline === null) return false;
+    // That version's links resolve against its own tree: its images may have changed since.
+    const baselineTransforms = options.transforms?.() ?? [];
+    const plan: InitialSyncPlan = { create: [], overwrite: [], trash: [], leftOut: [] };
+    for (const transform of baselineTransforms) {
+      await transform.prepare?.({ git, tracked: baseline.commit, linear: withoutUploads(linear), plan, uploads: tipUploads, documentIds });
+    }
+    return holdsVersion(document, baseline.file, baseline.text, baselineTransforms, false);
+  }
+
+  /**
+   * Whether a document holds a version of its file: title, project or team,
+   * and text in Linear's form. When the text cannot be put in Linear's form
+   * (a file it links to is gone or not in the upload cache), `uncheckable`
+   * is the answer: the tip's own file lets the write go ahead, an older
+   * version that cannot be checked does not.
+   */
+  async function holdsVersion(document: LinearDocument, file: SideFile, text: string, through: readonly BodyTransform[], uncheckable: boolean): Promise<boolean> {
     if (document.title.normalize('NFC') !== file.title.normalize('NFC')) return false;
     // Moved to another project or team in Linear: that move is the capture's to take in. A place the setup no longer
     // resolves (an annotation now names another project) cannot be checked.
     if (resolves(file.place) && !inPlace(document, file.place)) return false;
-    const text = synchronized !== undefined ? textOf(synchronized) : await lastSynchronizedText(path);
-    // No version Linear could have been given: nothing to compare with, so the document is not written.
-    if (text === null) return false;
     let expected: string;
     try {
-      expected = await transformBody(tipTransforms, path, splitFile(text).body);
+      expected = await transformBody(through, file.path, splitFile(text).body);
     } catch (error) {
       if (!(error instanceof LeaveOutError) && !(error instanceof UploadRefusedError)) throw error;
-      // The tip's own file cannot be put in Linear's form (a file it links to is gone): the write goes ahead. An
-      // older text that cannot be checked is not enough to overwrite what Linear holds.
-      return synchronized !== undefined;
+      return uncheckable;
     }
     return (document.content ?? '') === expected;
-  }
-
-  /**
-   * The newest version of a file that Linear was given: walking only the
-   * `linear` chain's own commits (records and captures, first parents, never
-   * the tracked branch's), the first version the linter accepts. Null when
-   * none of the last 200 versions on the chain does.
-   */
-  async function lastSynchronizedText(path: string): Promise<string | null> {
-    const log = await git.text(['log', '--first-parent', '--format=%H', '-n', '200', linearTip as Oid, '--', path]);
-    const commits = log.split('\n').filter(Boolean);
-    if (commits.length === 0) return null;
-    // One process looks up every version's blob (a version without the file says "missing"); one more reads them.
-    const checked = await git.text(['cat-file', '--batch-check=%(objectname) %(objecttype)'], { input: commits.map((commit) => `${commit}:${path}\n`).join('') });
-    const oids = checked.split('\n').flatMap((line) => {
-      const [oid, type] = line.split(' ');
-      return type === 'blob' && oid !== undefined ? [oid] : [];
-    });
-    const blobs = await readBlobs(git, oids);
-    for (const oid of oids) {
-      const text = (blobs.get(oid) as Buffer).toString('utf8');
-      if (lintText(path, text).length === 0) return text;
-    }
-    return null;
   }
 
   function resolves(place: Place): boolean {

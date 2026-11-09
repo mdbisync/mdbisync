@@ -630,6 +630,65 @@ describe('sync: the tracked branch to Linear', () => {
     assert.match(document.content ?? '', /fixed in git/);
   });
 
+  /** Leaves a file out with one commit, syncs, fixes it with another, syncs; the fix must reach the untouched document. */
+  async function leftOutThenFixed(breaking: Record<string, string | null>, fixing: Record<string, string | null>, path: string) {
+    const document = await documentOf(path);
+    await commit(breaking);
+    assert.equal((await sync()).result.exitCode, 0);
+    await commit(fixing);
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.skipped, [], 'an untouched document was taken for a Linear edit');
+    assert.equal(report.complete, true);
+    return document;
+  }
+
+  it('a file left out for a title collision and then fixed reaches its untouched document', async () => {
+    const document = await leftOutThenFixed(
+      { 'eng/notes/review.md': `# Review\n\nAn edit made while colliding. ${CANARY}\n`, 'eng/notes/Review.md': `# Other\n\nSame title. ${CANARY}\n` },
+      { 'eng/notes/Review.md': null, 'eng/notes/review.md': `# Review\n\nAfter the collision. ${CANARY}\n` },
+      'eng/notes/review.md',
+    );
+    assert.match(document.content ?? '', /After the collision/);
+  });
+
+  it('a file left out in the commit that moves its folder to another project is moved and written once fixed', async () => {
+    const document = await leftOutThenFixed(
+      {
+        'eng/notes/README.md': `---\nlinear-project: Archive\n---\n\n# Field notes\n\n${CANARY}\n`,
+        'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n`,
+      },
+      { 'eng/notes/review.md': `# Review\n\nFindings, fixed. ${CANARY}\n` },
+      'eng/notes/review.md',
+    );
+    assert.equal(document.projectId, 'project-archive');
+    assert.match(document.content ?? '', /fixed/);
+  });
+
+  it('a file left out in the commit that changes its image is written with the new image once fixed', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    await leftOutThenFixed(
+      {
+        'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1'),
+        'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows.[^1] ${CANARY}\n\n[^1]: A note.\n`,
+      },
+      { 'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows, fixed. ${CANARY}\n` },
+      'eng/notes/figure.md',
+    );
+    const [after] = uploadUrls(figure.content);
+    assert.ok(after !== undefined && after !== before, 'the document kept the old image');
+  });
+
+  it('a file that stopped being text and became text again reaches its untouched document', async () => {
+    const document = await leftOutThenFixed(
+      { 'eng/notes/review.md': `# Review\n\nBroken\u0000bytes. ${CANARY}\n` },
+      { 'eng/notes/review.md': `# Review\n\nText again. ${CANARY}\n` },
+      'eng/notes/review.md',
+    );
+    assert.match(document.content ?? '', /Text again/);
+  });
+
   it('a move that makes a relative link point at another image writes the other image', async () => {
     await commit({ 'eng/notes/media/diagram.png': Buffer.from('a different diagram').toString('latin1') });
     assert.equal((await sync()).result.exitCode, 0);

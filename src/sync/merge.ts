@@ -54,8 +54,6 @@ export interface LocalMerge {
   conflicts: string[];
   /** Synchronized files of the `linear` tip, by path. */
   linear: Map<string, SideFile>;
-  /** Mapped files of the `linear` tip, left-out ones included, by path. */
-  linearMapped: Map<string, SideFile>;
   /** Synchronized files of the merge result, by path. */
   result: Map<string, SideFile>;
   /** Files of the merge result the sync leaves out (lint, title, collisions); their documents stay as they are. */
@@ -155,7 +153,6 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     tree,
     conflicts,
     linear: linearSide.files,
-    linearMapped: linearSide.mapped,
     result: resultSide.files,
     leftOut: resultSide.leftOut,
     changes,
@@ -179,8 +176,6 @@ interface Side {
   files: Map<string, SideFile>;
   leftOut: Array<{ path: string; rules: string[] }>;
   leftOutPaths: Set<string>;
-  /** Every mapped file, the left-out ones included: their titles and places. */
-  mapped: Map<string, SideFile>;
 }
 
 /**
@@ -203,8 +198,27 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
   for (const file of mapping.leftOut) leave(file.path, [file.rule]);
   for (const file of mapping.unsynced) if (file.place !== undefined) leave(file.path, [file.reason]);
   leftOut.sort((a, b) => compare(a.path, b.path));
-  const mapped = new Map([...mapping.documents, ...mapping.leftOut].map((document) => [document.path, toSideFile(document)]));
-  return { mapping, files, leftOut, leftOutPaths: new Set(leftOut.map((entry) => entry.path)), mapped };
+  return { mapping, files, leftOut, leftOutPaths: new Set(leftOut.map((entry) => entry.path)) };
+}
+
+/** Versions of the `linear` chain examined for a file's last synchronized version. */
+export const BASELINE_DEPTH = 20;
+
+/**
+ * The newest commit of the `linear` chain, walking its own commits only
+ * (first parents: records and captures, never the tracked branch's), in
+ * which a file was synchronized by the run's own rules (mapped, accepted by
+ * the linter, a title Linear takes, no collision). That version is what
+ * Linear was last given, with its title, place and linked files. Null when
+ * none of the last `BASELINE_DEPTH` versions on the chain was synchronized.
+ */
+export async function lastSynchronized(git: Git, linear: Oid, path: string, facts: LinearFacts = LINEAR_FACTS): Promise<{ commit: Oid; file: SideFile; text: string } | null> {
+  const log = await git.text(['log', '--first-parent', '--format=%H', '-n', String(BASELINE_DEPTH), linear, '--', path]);
+  for (const commit of log.split('\n').filter(Boolean)) {
+    const file = (await synchronizedFiles(git, commit, facts)).files.get(path);
+    if (file !== undefined) return { commit, file, text: ((await readBlobs(git, [file.oid])).get(file.oid) as Buffer).toString('utf8') };
+  }
+  return null;
 }
 
 function toSideFile(document: MappedDocument): SideFile {
