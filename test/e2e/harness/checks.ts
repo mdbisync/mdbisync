@@ -28,13 +28,6 @@ export function titleOf(path: string, folderOfPath: string): string {
   return relative.replace(/\.md$/, '');
 }
 
-/** Replaces upload URLs with the relative path of the file they hold, seen from `documentPath`. */
-export function mapImageLinks(content: string, urlToPath: ReadonlyMap<string, string>, documentPath: string): string {
-  let result = content;
-  const base = posix.dirname(documentPath);
-  for (const [url, path] of urlToPath) result = result.split(url).join(posix.relative(base, path) || path);
-  return result;
-}
 
 /**
  * The repository file a relative link destination points to, with its
