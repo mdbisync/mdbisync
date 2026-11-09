@@ -882,7 +882,7 @@ describe('marker-driven checks', () => {
     await assert.rejects(waitForCheck(rest, 'abc', 'passed', { signal: AbortSignal.abort() }), { name: 'AbortError' });
   });
 
-  it("counts a run's writes from its report, so L1R-03's expected-zero total fails on the two documents written live", async () => {
+  it("takes a run's writes from its report, so L1R-03's expected-zero total fails on the first sync's writes", async () => {
     const report = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, 'run-reports', `${name}.json`), 'utf8')) as Record<string, unknown>;
     const run = (name: string) => ({ command: 'sync' as const, exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: report(name) });
     const l1r03 = scenarios.find((item) => item.id === 'L1R-03')!;
@@ -901,7 +901,7 @@ describe('marker-driven checks', () => {
     // I6's own run (the quiet one) is not the scenario's last run.
     ctx.observations.set('scenario.runsEnd', ctx.engine.results.length);
     ctx.engine.results.push(run('quiet-sync'));
-    assert.deepEqual(await resolveSubject(ctx, 'runs.last.writes.total'), { known: true, value: 3 });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.last.writes.total'), { known: true, value: 4 });
     assert.deepEqual(await resolveSubject(ctx, 'runs.last.writes.linear'), { known: true, value: 2 });
     assert.deepEqual(await resolveSubject(ctx, 'runs.0.writes.pullRequests'), { known: true, value: 1 });
     assert.equal(await holds(ctx, total), false);
@@ -916,7 +916,7 @@ describe('marker-driven checks', () => {
     assert.equal(await holds(quiet, total), true);
     assert.equal(await holds(quiet, linear), true);
 
-    // A state ref moved with nothing else named is still a write.
+    // A run that moved one state ref and wrote nothing else still wrote.
     const moved = (await fakeRun()).ctx;
     moved.engine.results.push(run('state-ref-only-sync'));
     assert.equal(await holds(moved, total), false);

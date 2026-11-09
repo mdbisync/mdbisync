@@ -52,6 +52,8 @@ export interface PreflightOutcome {
   stopped?: StopReason;
   /** Writes the run tried after Linear stopped its client; each was refused without a request. */
   writesAfterStop?: number;
+  /** Writes Linear accepted from the run's client, by operation; absent when the run made no client. */
+  linearWrites?: ReadonlyMap<string, number>;
 }
 
 export interface PreflightOptions {
@@ -127,11 +129,11 @@ export async function runPreflight(
         const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
         setup = report;
         if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear });
-        return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop };
+        return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
       } catch (error) {
         // Linear stopped the client (a rate limit, a budget running low) outside the steps that record their progress.
         if (!(error instanceof LinearStoppedError)) throw error;
-        return { ...stoppedOutcome(operation, error.reason, setup), writesAfterStop: stats.writesAfterStop };
+        return { ...stoppedOutcome(operation, error.reason, setup), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
       }
     });
   } catch (error) {

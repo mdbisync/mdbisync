@@ -41,9 +41,35 @@ test('a notice creation with a lost response recovers by its remote id', async (
     return { reset: true };
   });
   assert.deepEqual(await linear.ensureDocumentComment('content-one', 'Resolve the conflicting text.', id), { id, created: false });
+  // The create whose answer was lost was applied: it is this run's write.
+  assert.equal(linear.stats.writes.get('CommentOnDocument'), 1);
   await linear.ensureDocumentComment('content-one', 'Resolve the conflicting text.', id);
   assert.equal(comments.size, 1);
   assert.equal(fake.received.filter((request) => request.operation === 'CommentOnDocument').length, 1);
+  assert.equal(linear.stats.writes.get('CommentOnDocument'), 1);
+});
+
+test('a notice another caller created first is found, and the refused create is not counted as a write', async (t) => {
+  const { fake, comments, linear } = await world(t);
+  // Both callers looked before either created; the other caller's create won, so Linear refuses this one.
+  fake.operations.set('CommentOnDocument', (request) => {
+    const input = request.variables?.input as { id: string; documentContentId: string };
+    comments.set(input.id, { id: input.id, documentContentId: input.documentContentId });
+    return { body: { errors: [{ message: 'ID already exists', extensions: { code: 'INPUT_ERROR' } }], data: null } };
+  });
+  assert.deepEqual(await linear.ensureDocumentComment('content-one', 'Resolve the conflicting text.', id), { id, created: false });
+  assert.equal(linear.stats.writes.get('CommentOnDocument'), undefined);
+});
+
+test('a create Linear answers with success: false is not counted when the other caller\'s notice is found', async (t) => {
+  const { fake, comments, linear } = await world(t);
+  fake.operations.set('CommentOnDocument', (request) => {
+    const input = request.variables?.input as { id: string; documentContentId: string };
+    comments.set(input.id, { id: input.id, documentContentId: input.documentContentId });
+    return { body: { data: { commentCreate: { success: false, comment: null } } } };
+  });
+  assert.deepEqual(await linear.ensureDocumentComment('content-one', 'Resolve the conflicting text.', id), { id, created: false });
+  assert.equal(linear.stats.writes.get('CommentOnDocument'), undefined);
 });
 
 test('an unconfirmed failed notice can be retried without losing its id', async (t) => {
