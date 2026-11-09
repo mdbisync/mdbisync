@@ -42,6 +42,7 @@ import {
   commitIds,
   initialSyncProgressMessage,
   readInitialSyncProgress,
+  readReservedIds,
   commitTree,
   commitUploads,
   pushAtomic,
@@ -217,8 +218,10 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   // stop stay right.
   const documentIds = new Map<string, string>();
   for (const entry of plan.overwrite) documentIds.set(entry.path, entry.documentId);
+  // A file left out while writing on an earlier run keeps the id reserved for it then.
+  const reserved = await readReservedIds(git, expected.ids);
   for (const entry of plan.create) {
-    const chosen = resumed ? previous.get(entry.path)?.id : undefined;
+    const chosen = (resumed ? previous.get(entry.path)?.id : undefined) ?? reserved.get(entry.path);
     documentIds.set(entry.path, chosen !== undefined && !sources.documents.has(chosen) ? chosen : newId());
     ids.set(entry.path, { id: documentIds.get(entry.path) as string });
   }
@@ -374,7 +377,13 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     let linearCommit = await commitTree(git, { parents: [tracked], base: tracked, changes, message: RECORD_MESSAGE, identity, skipIfUnchanged: false });
     if (expected.linear !== null && (await sameRecord(expected.linear, linearCommit))) linearCommit = expected.linear;
 
+    // New documents left out while writing keep their chosen ids, which other documents may link to.
+    const created = new Set(plan.create.map((entry) => entry.path));
+    const stillReserved = new Map(
+      result.leftOutAtWrite.filter(({ path }) => created.has(path)).map(({ path }) => [path, documentIds.get(path) as string]),
+    );
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
+      reserved: stillReserved,
       message: FINAL_IDS_MESSAGE,
       always: (await readInitialSyncProgress(git, expected.ids)) !== null,
     });
