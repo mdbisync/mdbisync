@@ -9,7 +9,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { WriteObserver } from './ownership.ts';
+import { observeAnswer, type WriteObserver } from './ownership.ts';
 
 export type Fault =
   /** Answer the n-th matching request after arming; GraphQL is the default target. */
@@ -254,7 +254,7 @@ export async function startFaultProxy(
       headers.set(name, Array.isArray(value) ? value.join(', ') : value);
     }
     // What the request may create is on record before Linear sees it; a failing record keeps it from Linear.
-    if (isGraphql) options.observer?.before(text);
+    if (isGraphql && kind === 'mutation') options.observer?.before(text);
     let upstreamResponse: Response;
     try {
       upstreamResponse = await forward(`${base}${request.url ?? '/'}`, {
@@ -283,7 +283,7 @@ export async function startFaultProxy(
       }
     }
     let payload: Buffer = Buffer.from(await upstreamResponse.arrayBuffer());
-    if (isGraphql) options.observer?.after(text, payload);
+    if (isGraphql && options.observer !== undefined && kind === 'mutation') observeAnswer(options.observer, text, payload);
     // A lost answer only for a write Linear applied: a refused one (GraphQL errors come with HTTP 200) is passed
     // on as it is, and the fault stays armed for the next write.
     if (dropAnswer !== undefined && upstreamResponse.ok && writeApplied(payload)) {

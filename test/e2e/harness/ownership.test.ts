@@ -153,8 +153,19 @@ class FakeLinear {
         return { status: 200, answer: { data: { documents: { nodes: [...this.documents.values()].filter((document) => ids.has(document.id)).map((document) => this.raw(document)) } } } };
       }
       case 'ListDocuments': {
-        // The sweeper's look for leftovers of runs without a record; none here are a run's by title.
-        return { status: 200, answer: { data: { documents: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } };
+        // A team's zone, as the sweeper reads it for leftovers by title.
+        const teamId = (variables.filter as { team?: { id?: { eq?: string } } } | undefined)?.team?.id?.eq;
+        const nodes = [...this.documents.values()]
+          .filter((document) => document.teamId === teamId && document.projectId === null && (variables.includeArchived === true || document.archivedAt === null))
+          .map((document) => this.raw(document));
+        return { status: 200, answer: { data: { documents: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } } };
+      }
+      case 'RestoreDocument': {
+        const document = this.documents.get(String(variables.id));
+        if (document === undefined) return { status: 200, answer: { data: null, errors: [{ message: 'Entity not found: Document' }] } };
+        document.trashed = false;
+        document.archivedAt = null;
+        return { status: 200, answer: { data: { documentUnarchive: { success: true } } } };
       }
       case 'UpdateDocument': {
         const document = this.documents.get(String(variables.id));
@@ -314,6 +325,38 @@ describe('ownership record', () => {
     assert.deepEqual(second.errors, []);
     assert.equal(linear.mutations.filter((mutation) => mutation.operation === 'DeleteProject').length, 1);
     assert.equal(existsSync(join(dir, 'runs', `${runId}.json`)), false);
+  });
+
+  it('archives the run\'s prefixed team-zone documents its record lacks (an engine that ran in Actions), and handles trashed and deleted ones', async () => {
+    const linear = await new FakeLinear().start();
+    const dir = stateDir();
+    const runId = 'ddd555';
+    const ledger = new OwnershipLedger(dir, runId);
+    ledger.scope(['team-eng']);
+    deadRun(dir, runId);
+    const world = new LinearWorld(editorClient('key', linear.url, ledger));
+    const kept = await world.createProject('Market study ddd555', ['team-eng']);
+    const gone = await world.createProject('River survey ddd555', ['team-eng']);
+    // A scenario trashed one document in each project, and deleted another for good.
+    const trashedKept = await world.client.createDocument({ projectId: kept.id }, { id: randomUUID(), title: 'kept', content: '' });
+    const trashedGone = await world.client.createDocument({ projectId: gone.id }, { id: randomUUID(), title: 'gone', content: '' });
+    const deleted = await world.client.createDocument({ projectId: kept.id }, { id: randomUUID(), title: 'deleted', content: '' });
+    for (const id of [trashedKept.id, trashedGone.id]) Object.assign(linear.documents.get(id) as FakeDocument, { trashed: true, archivedAt: new Date().toISOString() });
+    linear.documents.delete(deleted.id);
+    await world.deleteProject(gone, runId);
+    // Written by an engine outside the proxy: not on record, but titled with the run's prefix.
+    linear.documents.set('actions-doc', { id: 'actions-doc', title: 'ddd555/guides/start', content: '', projectId: null, teamId: 'team-eng', trashed: false, archivedAt: null });
+
+    const report = await sweep(targets(linear), dir);
+    assert.deepEqual(report.errors, []);
+    const [recovery] = report.recovered;
+    assert.equal(recovery?.archivedDocuments, 1);
+    assert.equal(recovery?.gone, 1);
+    assert.equal(recovery?.trashedInDeletedProjects, 1);
+    assert.ok(linear.documents.get('actions-doc')?.archivedAt !== null);
+    // Restored before its project went, so the deletion archived it.
+    assert.deepEqual([linear.documents.get(trashedKept.id)?.trashed, linear.documents.get(trashedKept.id)?.archivedAt !== null], [false, true]);
+    assert.equal(readOwnership(dir, runId), null);
   });
 
   it('reads a record whose last line was cut off when its writer died, and keeps what is written after it', () => {

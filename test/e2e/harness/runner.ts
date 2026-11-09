@@ -3,7 +3,7 @@
 // Workers run scenarios in parallel; the governor admits each one.
 
 import { collectCanaryEvidence } from './checks.ts';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts';
@@ -285,7 +285,7 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
     const team = folder.team === null ? undefined : live.teams.get(folder.team);
     const place = project !== undefined ? { projectId: project.id } : team !== undefined ? { teamId: team.id } : null;
     if (place === null) continue;
-    const document = await live.editors['editor-a'].createDocument(place, { title: titleOf(target, folder.folder), content: bodyOf(texts.get(target) ?? '') });
+    const document = await live.editors['editor-a'].createDocument(place, { id: randomUUID(), title: titleOf(target, folder.folder), content: bodyOf(texts.get(target) ?? '') });
     live.seededDocuments.push(document.id);
     seededPaths.set(target, document.id);
   }
@@ -311,7 +311,7 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
     if (first?.documentContentId) await editor.commentOnDocument(first.documentContentId, 'Please check the dates before Friday.');
     const project = [...live.projects.values()][0];
     if (project === undefined || first === undefined) throw new EnvBlockedError('the slice maps no project to seed');
-    const only = await editor.createDocument({ projectId: project.id }, { title: `notes/only-in-linear-${ctx.names.runId}`, content: 'Kept only here for now.\n' });
+    const only = await editor.createDocument({ projectId: project.id }, { id: randomUUID(), title: `notes/only-in-linear-${ctx.names.runId}`, content: 'Kept only here for now.\n' });
     live.seededDocuments.push(only.id);
     ctx.observations.set('setup.linearOnlyDocument', only.id);
     // Linear archives documents only with their project: a helper project holds
@@ -319,7 +319,7 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
     const team = [...live.teams.values()][0];
     if (team !== undefined) {
       const helper = await live.world.createProject(ctx.names.helperProject('archived-copy'), [team.id]);
-      const archived = await editor.createDocument({ projectId: helper.id }, { title: first.title, content: 'An older copy.\n' });
+      const archived = await editor.createDocument({ projectId: helper.id }, { id: randomUUID(), title: first.title, content: 'An older copy.\n' });
       await live.world.deleteProject(helper, ctx.names.runId);
       ctx.observations.set('setup.archivedDocument', archived.id);
     }
@@ -330,7 +330,7 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
     const project = [...live.projects.values()][0];
     if (project === undefined) throw new EnvBlockedError('the slice maps no project to seed');
     const upload = await editor.uploadFile({ filename: 'diagram.png', contentType: 'image/png', bytes: new Uint8Array(TINY_PNG) });
-    const document = await editor.createDocument({ projectId: project.id }, { title: `guides/diagram-${ctx.names.runId}`, content: `The flow at a glance.\n\n![diagram](${upload.assetUrl})\n` });
+    const document = await editor.createDocument({ projectId: project.id }, { id: randomUUID(), title: `guides/diagram-${ctx.names.runId}`, content: `The flow at a glance.\n\n![diagram](${upload.assetUrl})\n` });
     live.seededDocuments.push(document.id);
     // The bytes the pull request must hold, hashed here from what was uploaded.
     const folder = projectFolders(ctx).find((candidate) => candidate.project === project.name)?.folder;
@@ -345,7 +345,7 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
     const project = [...live.projects.values()][0];
     if (project === undefined) throw new EnvBlockedError('the slice maps no project to seed');
     for (const title of UNSAFE_TITLES) {
-      const document = await editor.createDocument({ projectId: project.id }, { title, content: 'Short note.\n' });
+      const document = await editor.createDocument({ projectId: project.id }, { id: randomUUID(), title, content: 'Short note.\n' });
       live.seededDocuments.push(document.id);
     }
   },

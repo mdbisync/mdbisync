@@ -14,7 +14,7 @@
 import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
-import { RUN_ID_PATTERN, runOfProject, runNames } from './isolation.ts';
+import { RUN_ID_PATTERN, runOfProject, runOfTeamTitle, runNames } from './isolation.ts';
 import type { LinearWorld, Project } from './linear-world.ts';
 
 export type OwnedEntry =
@@ -109,8 +109,9 @@ export class OwnershipLedger implements WriteObserver {
 
   /** A document or project create that carries its own id is the run's before Linear sees it. */
   before(requestBody: string): void {
+    if (!isMutation(requestBody)) return;
     const request = parse(requestBody);
-    if (typeof request?.query !== 'string' || !/^\s*mutation\b/.test(request.query)) return;
+    if (typeof request?.query !== 'string') return;
     const input = request.variables?.input;
     if (typeof input?.id !== 'string' || input.id === '') return;
     if (/\bdocumentCreate\s*\(/.test(request.query)) this.record({ kind: 'document', id: input.id, confirmed: false });
@@ -119,6 +120,7 @@ export class OwnershipLedger implements WriteObserver {
 
   /** Documents and projects Linear answered that it created, and projects it answered that it deleted. */
   after(requestBody: string, answer: Uint8Array): void {
+    if (!isMutation(requestBody)) return;
     const data = parse(Buffer.from(answer).toString('utf8'))?.data;
     const deleted = data?.projectDelete;
     const deletedId = (parse(requestBody)?.variables as { id?: unknown } | undefined)?.id;
@@ -130,14 +132,34 @@ export class OwnershipLedger implements WriteObserver {
   }
 }
 
-/** A fetch that shows every request with a body, and its answer, to `observer`. */
+/** Whether a GraphQL request body is a mutation: only mutations create or delete anything, so reads are not parsed further. */
+export function isMutation(requestBody: string): boolean {
+  if (!requestBody.includes('mutation')) return false;
+  const query = parse(requestBody)?.query;
+  return typeof query === 'string' && /^\s*mutation\b/.test(query);
+}
+
+/**
+ * Shows Linear's answer to a write to the observer. The write already happened, so a record that cannot be
+ * written does not turn the answer into a failure: a create carries its own id and was recorded before it was
+ * sent; what is lost is only the confirmation or a deletion's acknowledgement, which recovery reads back anyway.
+ */
+export function observeAnswer(observer: WriteObserver, requestBody: string, answer: Uint8Array): void {
+  try {
+    observer.after(requestBody, answer);
+  } catch {
+    // See above: nothing the write needs is lost.
+  }
+}
+
+/** A fetch that shows every mutation it sends, and Linear's answer, to `observer`. */
 export function observingFetch(base: typeof fetch, observer: WriteObserver | undefined): typeof fetch {
   if (observer === undefined) return base;
   return async (input, init) => {
-    const body = typeof init?.body === 'string' ? init.body : undefined;
+    const body = typeof init?.body === 'string' && isMutation(init.body) ? init.body : undefined;
     if (body !== undefined) observer.before(body);
     const response = await base(input, init);
-    if (body !== undefined) observer.after(body, new Uint8Array(await response.clone().arrayBuffer()));
+    if (body !== undefined) observeAnswer(observer, body, new Uint8Array(await response.clone().arrayBuffer()));
     return response;
   };
 }
@@ -176,8 +198,8 @@ export function forgetOwnership(stateDir: string, runId: string): void {
 export function ownedRuns(stateDir: string): string[] {
   try {
     return readdirSync(ownedDir(stateDir)).flatMap((name) => {
-      const runId = /^([0-9a-f]{6})\.jsonl$/.exec(name)?.[1];
-      return runId === undefined ? [] : [runId];
+      const runId = name.endsWith('.jsonl') ? name.slice(0, -'.jsonl'.length) : '';
+      return RUN_ID_PATTERN.test(runId) ? [runId] : [];
     });
   } catch {
     return [];
@@ -199,11 +221,18 @@ export interface Recovery {
   alreadyArchived: number;
   /** Created documents now archived and not trashed. */
   verifiedArchived: number;
+  /** Created documents Linear no longer has (deleted for good by a scenario): nothing left to clean up. */
+  gone: number;
+  /**
+   * Documents a scenario trashed in a run project that was already deleted: outside every team zone, so they do
+   * not count against a zone's cap, and Linear purges them; left as they are.
+   */
+  trashedInDeletedProjects: number;
   /** What recovery could not do or could not verify; the run is recovered only when this is empty. */
   problems: string[];
 }
 
-type Reader = Pick<LinearWorld, 'projects' | 'runProjects' | 'deleteProject' | 'archiveRunTeamDocuments'> & { client: Pick<LinearWorld['client'], 'getDocuments'> };
+type Reader = Pick<LinearWorld, 'projects' | 'deleteProject' | 'archiveRunTeamDocuments'> & { client: Pick<LinearWorld['client'], 'getDocuments' | 'restoreDocument'> };
 
 /**
  * Finishes a run's cleanup from its record alone, then checks the result.
@@ -211,16 +240,25 @@ type Reader = Pick<LinearWorld, 'projects' | 'runProjects' | 'deleteProject' | '
  * Before any change it reads every recorded document and project and refuses,
  * changing nothing, when one is not the run's: a project whose name is no
  * project of the run, or a live document outside the run's projects and team
- * zones. Then it deletes each recorded project that still exists, once, and
+ * zones. Then it restores the documents a scenario trashed in a recorded
+ * project that still exists, so the project's deletion archives them; deletes
+ * each recorded project that still exists, once; and
  * archives the recorded documents left live (or trashed) in a team zone
  * through a project of the run, which is recorded too. Last it reads again:
- * every created document must be archived and not trashed, and no project of
- * the run may be left. A project Linear once answered it deleted is never
+ * every created document must be archived and not trashed (or gone for good,
+ * or trashed in a project deleted before), and no project of the run may be
+ * left. A project Linear once answered it deleted is never
  * deleted again: a stale read that still lists it is reported, not hidden.
  */
-export async function recoverOwned(world: Reader, owned: Ownership, ledger: Pick<OwnershipLedger, 'project' | 'projectDeleted' | 'stateDir'>): Promise<Recovery> {
+export async function recoverOwned(
+  world: Reader,
+  owned: Ownership,
+  ledger: Pick<OwnershipLedger, 'project' | 'projectDeleted' | 'stateDir'>,
+  /** Live team-zone documents titled with the run's prefix that its record may lack; archived and checked too. */
+  named: ReadonlyArray<LinearDocument> = [],
+): Promise<Recovery> {
   const { runId } = owned;
-  const recovery: Recovery = { runId, deletedProjects: [], archivedDocuments: 0, alreadyArchived: 0, verifiedArchived: 0, problems: [] };
+  const recovery: Recovery = { runId, deletedProjects: [], archivedDocuments: 0, alreadyArchived: 0, verifiedArchived: 0, gone: 0, trashedInDeletedProjects: 0, problems: [] };
 
   for (const [id, name] of owned.projects) {
     if (runOfProject(name) !== runId) throw new OwnershipRefusal(`refusing to recover run ${runId}: project ${id} (${name}) is not a project of the run`);
@@ -232,15 +270,18 @@ export async function recoverOwned(world: Reader, owned: Ownership, ledger: Pick
   }
 
   const ids = [...owned.documents.keys()];
+  const byName = named.map((document) => document.id).filter((id) => !owned.documents.has(id));
   const before = await world.client.getDocuments(ids);
   const zone: LinearDocument[] = [];
+  const toRestore: LinearDocument[] = [];
   const foreign: string[] = [];
+  const live = new Set(existing.map((project) => project.id));
   for (const document of before) {
-    if (!owned.documents.has(document.id)) continue;
     if (document.archivedAt !== null && !document.trashed) {
       recovery.alreadyArchived += 1;
     } else if (document.projectId !== null) {
       if (!owned.projects.has(document.projectId)) foreign.push(`document ${document.id} is in project ${document.projectId}, which is not the run's`);
+      else if (document.trashed && live.has(document.projectId)) toRestore.push(document);
     } else if (document.teamId !== null && owned.teamIds.has(document.teamId)) {
       zone.push(document);
     } else {
@@ -248,7 +289,18 @@ export async function recoverOwned(world: Reader, owned: Ownership, ledger: Pick
     }
   }
   if (foreign.length > 0) throw new OwnershipRefusal(`refusing to recover run ${runId}: ${foreign.join('; ')}`);
+  for (const document of named) {
+    if (runOfTeamTitle(document.title) !== runId || document.projectId !== null) throw new OwnershipRefusal(`refusing to recover run ${runId}: document ${document.id} is not a team-zone document of the run`);
+    if (!zone.some((known) => known.id === document.id) && !owned.documents.has(document.id)) zone.push(document);
+  }
 
+  for (const document of toRestore) {
+    try {
+      await world.client.restoreDocument(document.id);
+    } catch (error) {
+      recovery.problems.push(`restoring document ${document.id}: ${(error as Error).message}`);
+    }
+  }
   for (const project of existing) {
     if (owned.deletedProjects.has(project.id)) {
       recovery.problems.push(`project ${project.name} is still listed after Linear answered that it deleted it; not deleted again`);
@@ -268,7 +320,7 @@ export async function recoverOwned(world: Reader, owned: Ownership, ledger: Pick
         zone,
         runId,
         runNames(runId).helperProject('archive'),
-        (document) => owned.documents.has(document.id),
+        (document) => owned.documents.has(document.id) || runOfTeamTitle(document.title) === runId,
         ledger,
       );
     } catch (error) {
@@ -277,12 +329,16 @@ export async function recoverOwned(world: Reader, owned: Ownership, ledger: Pick
   }
 
   // The proof: read everything again.
-  const after = new Map((await world.client.getDocuments(ids)).map((document) => [document.id, document]));
-  for (const [id, confirmed] of owned.documents) {
+  const after = new Map((await world.client.getDocuments([...ids, ...byName])).map((document) => [document.id, document]));
+  const projectsNow = await world.projects();
+  const listed = new Set(projectsNow.map((project) => project.id));
+  for (const [id, confirmed] of [...owned.documents, ...byName.map((id) => [id, true] as const)]) {
     const document = after.get(id);
     if (document === undefined) {
-      // Only asked for and never created: nothing to clean up.
-      if (confirmed) recovery.problems.push(`document ${id}: Linear no longer has it`);
+      // Never created (only asked for), or deleted for good by a scenario: nothing to clean up.
+      if (confirmed) recovery.gone += 1;
+    } else if (document.trashed && document.projectId !== null && !listed.has(document.projectId)) {
+      recovery.trashedInDeletedProjects += 1;
     } else if (document.trashed) {
       recovery.problems.push(`document ${id} is trashed`);
     } else if (document.archivedAt === null) {
@@ -294,7 +350,7 @@ export async function recoverOwned(world: Reader, owned: Ownership, ledger: Pick
   // The record is read again too: an archive project made just now is the run's. Recorded projects count by id,
   // others of the run by name.
   const now = readOwnership(ledger.stateDir, runId)?.projects ?? owned.projects;
-  const left = (await world.projects()).filter((project) => now.has(project.id) || runOfProject(project.name) === runId);
+  const left = projectsNow.filter((project) => now.has(project.id) || runOfProject(project.name) === runId);
   for (const project of left) {
     recovery.problems.push(now.has(project.id)
       ? `project ${project.name} is still there`
