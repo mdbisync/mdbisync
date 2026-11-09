@@ -9,7 +9,7 @@
 import { posix } from "node:path";
 import { fixText } from "../../src/format/index.ts";
 import type { AssetRef, Assets } from "./assets.ts";
-import { COMPANY, CUSTOMERS, DEPOTS, PEOPLE, PROFILES, SERVICES, TOPIC_KINDS, type Kind, type Profile, type Topic } from "./company.ts";
+import { COMPANY, CUSTOMERS, DEPOTS, FIXED_SERIES, PEOPLE, PROFILES, SERVICES, TOPIC_KINDS, type Kind, type Profile, type Topic } from "./company.ts";
 import { CONTENT_LIMIT, destination, idLine, markdownFile, relativeLink, type Canaries, type CorpusFile, type Group } from "./model.ts";
 import type { Rng } from "./rng.ts";
 import { asciiFiller, capitalize, EMOJI, EMOJI_SEQUENCES, isoDate, paragraph, person, SCRIPT_SAMPLES, sentence, team, title, word } from "./text.ts";
@@ -144,32 +144,49 @@ function isDot(ref: AssetRef): boolean {
   return ref.label.endsWith("status dot");
 }
 
+/** Work documents added in the projects and team DOCS only; no Linear container may pass about 800 documents. */
+const EXTRA_OUTSIDE_ENG_ZONE = 400;
+
 type Planned = { home: Home; kind: Kind; topic: Topic | null; index: number };
 
-function plan(total: number): Planned[] {
+/**
+ * The work documents: one per topic and topic kind, the fixed series
+ * (quarterly goals, newsletter, API changelog), then dated series dealt round
+ * by round over every home until `total`, then `extra` more dated series in
+ * the projects and team DOCS only, so team ENG's zone does not grow.
+ */
+function plan(total: number, extra: number): Planned[] {
   const out: Planned[] = [];
   for (const home of HOMES) {
     const profile = profileOf(home);
     for (const kind of profile.kinds.filter((k) => TOPIC_KINDS.includes(k))) {
       profile.topics.forEach((topic, index) => out.push({ home, kind, topic, index }));
     }
-  }
-  const series = HOMES.map((home) => ({ home, kinds: profileOf(home).kinds.filter((k) => !TOPIC_KINDS.includes(k)), next: new Map<Kind, number>() })).filter((s) => s.kinds.length > 0);
-  for (let round = 0; out.length < total; round++) {
-    for (const s of series) {
-      if (out.length >= total) break;
-      const kind = s.kinds[round % s.kinds.length] as Kind;
-      const index = s.next.get(kind) ?? 0;
-      s.next.set(kind, index + 1);
-      out.push({ home: s.home, kind, topic: null, index });
+    for (const kind of profile.kinds) {
+      for (let index = 0; index < (FIXED_SERIES[kind] ?? 0); index++) out.push({ home, kind, topic: null, index });
     }
   }
+  const dated = (k: Kind) => !TOPIC_KINDS.includes(k) && FIXED_SERIES[k] === undefined;
+  const series = HOMES.map((home) => ({ home, kinds: profileOf(home).kinds.filter(dated), turn: 0, next: new Map<Kind, number>() })).filter((s) => s.kinds.length > 0);
+  const deal = (from: typeof series, until: number) => {
+    while (out.length < until) {
+      for (const s of from) {
+        if (out.length >= until) break;
+        const kind = s.kinds[s.turn++ % s.kinds.length] as Kind;
+        const index = s.next.get(kind) ?? 0;
+        s.next.set(kind, index + 1);
+        out.push({ home: s.home, kind, topic: null, index });
+      }
+    }
+  };
+  deal(series, total);
+  deal(series.filter((s) => s.home.scope === "project" || s.home.team === "DOCS"), total + extra);
   return out;
 }
 
 function workDocuments(ctx: Context): void {
   const { rng } = ctx;
-  for (const item of plan(800)) {
+  for (const item of plan(800, EXTRA_OUTSIDE_ENG_ZONE)) {
     const media: Media[] = [];
     const refs: AssetRef[] = [];
     for (const kind of ["image", "image", "attachment"] as const) {

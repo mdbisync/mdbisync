@@ -6,7 +6,7 @@
 // Linear keeps as it is: no aligned tables, link titles, footnotes or HTML
 // with URLs.
 
-import { CUSTOMERS, DEPOTS, PEOPLE, REGIONS, SERVICES, type Kind, type Profile, type Topic } from "./company.ts";
+import { COMPANY, CUSTOMERS, DEPOTS, PEOPLE, PROFILES, REGIONS, SERVICES, type Kind, type Profile, type Topic } from "./company.ts";
 import type { Rng } from "./rng.ts";
 
 /** An image or link the caller placed for the document, already as Markdown. */
@@ -186,6 +186,10 @@ function rfc(input: WriteInput, topic: Topic, f: Figures): Draft {
     "",
     `${topic.problem} The ${service(topic)} service is where this starts, so that is where we want to fix it.`,
     "",
+    "## Background",
+    "",
+    `The ${topic.metric} has been on the ${input.profile.name.toLowerCase()} dashboard for a year. It sits at ${amount(topic.before, topic.unit)} today, and nothing we tried without changing ${service(topic)} moved it for long. ${rng.pick(["Two earlier attempts fixed the symptom in the client and drifted back within a month.", "Support has tagged the related tickets since spring, so we know how often customers notice.", "The last quarterly review named this as the team's top source of manual work."])}`,
+    "",
     "## Proposal",
     "",
     topic.change,
@@ -193,6 +197,20 @@ function rfc(input: WriteInput, topic: Topic, f: Figures): Draft {
     ...(rng.bool() ? sequence(topic, rng) : flowchart(input.profile, rng)),
     "",
     ...f.image(),
+    "### Detailed design",
+    "",
+    `The change stays inside ${service(topic)}. Callers see the same API; the new behavior sits behind a flag that the service reads at startup.`,
+    "",
+    "```ts",
+    `export async function handle(request: Request, flags: Flags): Promise<Response> {`,
+    `  if (!flags.enabled("${slugify(topic.title)}")) return legacy(request);`,
+    "  const current = await store.read(request.key);",
+    "  const next = apply(current, request);",
+    "  await store.write(request.key, next, { expectedVersion: current.version });",
+    "  return ok(next);",
+    "}",
+    "```",
+    "",
     "### Success measure",
     "",
     `We expect the ${topic.metric} to go from ${amount(topic.before, topic.unit)} to about ${amount(topic.after, topic.unit)} within a month of the full rollout.`,
@@ -200,6 +218,20 @@ function rfc(input: WriteInput, topic: Topic, f: Figures): Draft {
     "## Rollout",
     "",
     ...ROLLOUT.map((step, i) => `${i + 1}. ${step}`),
+    "",
+    "## Testing",
+    "",
+    "* Unit tests for the new path, including the version conflict.",
+    "* A replay of one week of production traffic against staging, compared with the old path.",
+    `* A load test at three times the peak of the ${rng.pick(DEPOTS)} depot.`,
+    "",
+    "## Security and privacy",
+    "",
+    `No new personal data is stored. ${rng.pick(["Access stays behind the existing service token.", "The new cache keys hold ids only, never names or addresses.", "Logs keep the same fields as today; we checked them with the privacy lead."])}`,
+    "",
+    "## Timeline",
+    "",
+    table(["Week", "Milestone"], [[weekDate(index * 2 + 30), "Review and sign-off"], [weekDate(index * 2 + 32), "Behind the flag in staging"], [weekDate(index * 2 + 34), "Harbor depot"], [weekDate(index * 2 + 37), "All depots"]]),
     "",
     "## Alternatives considered",
     "",
@@ -957,6 +989,197 @@ function retro(input: WriteInput, f: Figures): Draft {
   return { heading, folder: "retros", name: `sprint-${index + 1}`, body: body.join("\n") };
 }
 
+function spec(input: WriteInput, topic: Topic, f: Figures): Draft {
+  const { rng, profile } = input;
+  const [pm, designer, eng] = people(rng, 3) as [string, string, string];
+  const heading = `Product spec: ${topic.title}`;
+  const body = [
+    `# ${heading}`,
+    "",
+    table(["Role", "Name"], [["Product", pm], ["Design", designer], ["Engineering", eng]]),
+    "",
+    "## Problem",
+    "",
+    topic.problem,
+    "",
+    "## Who it is for",
+    "",
+    `* **Planners** at busy depots, who ${rng.pick(["work against the clock every morning", "handle most of the changes during the day", "answer to customers when things go wrong"])}.`,
+    `* **Drivers**, who see the result on the road.`,
+    `* **Support**, who explain it to customers of the ${profile.name.toLowerCase()}.`,
+    "",
+    "## User stories",
+    "",
+    `1. As a planner, I want the team to ${lower(noPeriod(topic.summary))}, so that the day starts on time.`,
+    `2. As a driver, I want the change to need no extra taps.`,
+    `3. As a support agent, I want to see when it happened, so that I can answer customers.`,
+    "",
+    "## Requirements",
+    "",
+    table(["Requirement", "Priority"], [
+      [noPeriod(topic.change.split(", ")[0] as string), "Must"],
+      [`Show the ${topic.metric} on the dashboard`, "Must"],
+      ["Work at every depot without extra setup", "Should"],
+      ["Let each depot switch it off", "Could"],
+    ]),
+    "",
+    ...f.image(),
+    "## Acceptance criteria",
+    "",
+    `* [ ] The ${topic.metric} reaches ${amount(topic.after, topic.unit)} at the pilot depot.`,
+    "* [ ] No new support ticket type in the first two weeks.",
+    "* [ ] The help center article is published on launch day.",
+    "",
+    "## Out of scope",
+    "",
+    `* ${topic.risk.replace(/ could | would | may /, " will not be solved here: it ")}`,
+    "",
+    ...f.rest(),
+  ];
+  return { heading, folder: "specs", name: slugify(topic.title), body: body.join("\n") };
+}
+
+function callnotes(input: WriteInput, f: Figures): Draft {
+  const { rng, index } = input;
+  const customer = rng.pick(CUSTOMERS);
+  const date = weekDate(index, rng.int(0, 4));
+  const [agent, ...others] = people(rng, 2) as [string, ...string[]];
+  const topics = seriesTopics(input, 2);
+  const heading = `Call with ${customer}, ${date}`;
+  const body = [
+    `# ${heading}`,
+    "",
+    `**From ${COMPANY}:** ${agent}, ${others.join(", ")} · **Customer:** the operations lead at ${customer} · **Length:** ${rng.int(15, 50)} minutes`,
+    "",
+    "## Why we talked",
+    "",
+    `${customer} ${rng.pick(["asked for a call after a late delivery last week.", "is renewing their contract next month.", "wanted to hear what is coming in the next release.", "reported a problem with their tracking links."])}`,
+    "",
+    "## What they said",
+    "",
+    ...topics.map((tp) => `> ${tp.problem}`).flatMap((q) => [q, ""]),
+    "## What we said",
+    "",
+    ...topics.map((tp) => `* ${tp.title}: ${lower(tp.summary)}`),
+    "",
+    ...f.image(),
+    "## Follow-ups",
+    "",
+    `* [ ] ${first(agent)}: send the release notes link by ${weekDate(index, 4)}`,
+    `* [ ] ${first(others[0] as string)}: check their last ${rng.int(20, 200)} deliveries for late stops`,
+    "* [x] Log the call in the customer record",
+    "",
+    ...f.rest(),
+  ];
+  return { heading, folder: `calls/${date.slice(0, 4)}`, name: `${date}-${slugify(customer)}`, body: body.join("\n") };
+}
+
+function okr(input: WriteInput, f: Figures): Draft {
+  const { rng, profile, index } = input;
+  const year = 2025 + Math.floor((index + 2) / 4);
+  const quarter = ((index + 2) % 4) + 1;
+  const topics = seriesTopics(input, 3);
+  const heading = `${profile.name} goals, Q${quarter} ${year}`;
+  const body = [
+    `# ${heading}`,
+    "",
+    `What the ${profile.name.toLowerCase()} team commits to this quarter. We score each key result from 0 to 1 at the end of the quarter; 0.7 is a good result.`,
+    "",
+    ...topics.flatMap((tp, i) => {
+      const score = (rng.int(2, 10) / 10).toFixed(1);
+      return [
+        `## Objective ${i + 1}: ${tp.title.toLowerCase()}`,
+        "",
+        tp.summary,
+        "",
+        table(["Key result", "Target", "Score"], [
+          [`${tp.metric.charAt(0).toUpperCase()}${tp.metric.slice(1)}`, amount(tp.after, tp.unit), score],
+          ["Rolled out to every depot", "100%", (rng.int(3, 10) / 10).toFixed(1)],
+        ]),
+        "",
+      ];
+    }),
+    ...f.image(),
+    "## Not this quarter",
+    "",
+    `* ${rng.pick(["A new reporting tool", "Moving to a new cloud region", "A redesign of the settings pages", "Rewriting the importer"])}: worth doing, but not now.`,
+    "",
+    ...f.rest(),
+  ];
+  return { heading, folder: "goals", name: `${year}-q${quarter}`, body: body.join("\n") };
+}
+
+function newsletter(input: WriteInput, f: Figures): Draft {
+  const { rng, index } = input;
+  const month = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][(index + 8) % 12] as string;
+  const year = 2025 + Math.floor((index + 8) / 12);
+  const pick = rng.shuffle(Object.values(PROFILES).flatMap((p) => p.topics)).slice(0, 3);
+  const joiners = people(rng, 2);
+  const heading = `${COMPANY} monthly, ${month} ${year}`;
+  const body = [
+    `# ${heading}`,
+    "",
+    `Hello everyone! Here is what happened at ${COMPANY} in ${month}.`,
+    "",
+    "## Highlights",
+    "",
+    ...pick.map((tp) => `* **${tp.title}.** ${tp.summary}`),
+    "",
+    ...f.image(),
+    "## Welcome",
+    "",
+    `Please say hello to ${joiners.join(" and ")}, who joined us this month.`,
+    "",
+    "## Numbers",
+    "",
+    table(["", "This month", "Last month"], [
+      ["Deliveries planned", (rng.int(180, 260) * 1000).toLocaleString("en-US"), (rng.int(170, 250) * 1000).toLocaleString("en-US")],
+      ["Depots live", String(rng.int(30, 60)), String(rng.int(28, 58))],
+      ["Customer satisfaction", `${rng.int(85, 96)}%`, `${rng.int(84, 95)}%`],
+    ]),
+    "",
+    "## Coming up",
+    "",
+    `* Team day on ${weekDate(index * 4 + 3, 4)}, with lunch at the Harbor depot.`,
+    "* The next all-hands is on the first Monday of the month.",
+    "",
+    ...f.rest(),
+  ];
+  return { heading, folder: "newsletter", name: `${year}-${String(((index + 8) % 12) + 1).padStart(2, "0")}-${month.toLowerCase()}`, body: body.join("\n") };
+}
+
+function apichangelog(input: WriteInput, f: Figures): Draft {
+  const { rng, index } = input;
+  const month = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][(index + 6) % 12] as string;
+  const year = 2025 + Math.floor((index + 6) / 12);
+  const resource = rng.pick(["orders", "routes", "stops", "events", "invoices"]);
+  const heading = `API changelog, ${month} ${year}`;
+  const body = [
+    `# ${heading}`,
+    "",
+    "Changes to the data API this month. Nothing here breaks existing clients unless it says **Breaking**.",
+    "",
+    "## Added",
+    "",
+    `* \`GET /v2/${resource}\` accepts \`updatedSince\`, so exports can fetch only what changed.`,
+    `* The \`${resource}\` table has a new \`depot_region\` column.`,
+    "",
+    "## Changed",
+    "",
+    `* Exports of more than ${rng.int(5, 50) * 1000} rows are split into pages of 10,000.`,
+    "",
+    ...(index % 3 === 2 ? ["## Breaking", "", `* The old \`/v1/${resource}\` endpoint stops on ${weekDate(index * 4 + 20)}. Move to \`/v2\` before then.`, ""] : []),
+    "## Example",
+    "",
+    "```sh",
+    `curl -H "Authorization: Bearer $TOKEN" "https://api.kitewing.example/v2/${resource}?updatedSince=${weekDate(index * 4)}"`,
+    "```",
+    "",
+    ...f.rest(),
+  ];
+  return { heading, folder: "changelog", name: `${year}-${String(((index + 6) % 12) + 1).padStart(2, "0")}`, body: body.join("\n") };
+}
+
 export function writeDocument(input: WriteInput): Draft {
   const f = new Figures(input.media);
   const { kind, topic } = input;
@@ -985,6 +1208,11 @@ export function writeDocument(input: WriteInput): Draft {
     case "handoff": draft = handoff(input, f); break;
     case "release": draft = release(input, f); break;
     case "retro": draft = retro(input, f); break;
+    case "spec": draft = spec(input, needTopic(), f); break;
+    case "callnotes": draft = callnotes(input, f); break;
+    case "okr": draft = okr(input, f); break;
+    case "newsletter": draft = newsletter(input, f); break;
+    case "apichangelog": draft = apichangelog(input, f); break;
   }
   return { ...draft, body: draft.body.replace(/\n{3,}/g, "\n\n").replace(/\n*$/, "\n") };
 }
