@@ -630,6 +630,19 @@ describe('sync: the tracked branch to Linear', () => {
     assert.match(document.content ?? '', /fixed in git/);
   });
 
+  it('a link to another synchronized document is written as its Linear URL; `linear` keeps the relative link', async () => {
+    const plan = await documentOf('eng/notes/plan.md');
+    await commit({ 'eng/notes/review.md': `# Review\n\nSee [the plan](plan.md). ${CANARY}\n` });
+    const { result, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    const review = await documentOf('eng/notes/review.md');
+    assert.ok((review.content ?? '').includes(plan.id) || (review.content ?? '').includes('linear.app'), 'the link was not written as a Linear URL');
+    assert.ok(!(review.content ?? '').includes('](plan.md)'), 'the relative link reached Linear');
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
+  });
+
   /** Leaves a file out with one commit, syncs, fixes it with another, syncs; the fix must reach the untouched document. */
   async function leftOutThenFixed(breaking: Record<string, string | null>, fixing: Record<string, string | null>, path: string) {
     const document = await documentOf(path);

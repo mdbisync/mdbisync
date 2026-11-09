@@ -50,7 +50,7 @@ export async function runOperation(
     options,
     operation === 'sync'
       ? async (context) => {
-          sync = await runSyncCycle(context, { config: inputs.state, transforms: () => [uploadsTransform({ config: inputs.state })] });
+          sync = await runSyncCycle(context, { config: inputs.state, transforms: () => [uploadsTransform({ config: inputs.state }), documentLinks()] });
           workSummary = renderSync(sync);
         }
       : gitToLinear === undefined
