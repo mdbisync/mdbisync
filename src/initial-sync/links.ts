@@ -300,7 +300,7 @@ export function documentLinks(): BodyTransform {
       // Linear kept the text: each link comes back exactly as the file had it. Linear reformatted it: the links
       // come back in Linear's form too, so the restored text is Linear's form of the file, not a mix of both. Spellings
       // matter here because Linear can change how many links there are; the initial sync then puts the whole restored
-      // text in Linear's form (`restoreStored`), which settles the spellings of every other transform too.
+      // text in Linear's form (`restoreBody`), which settles the spellings of every other transform too.
       return linksFromLinear(body, path, map, kept ? entry.asWritten : entry.inLinearForm);
     },
   };

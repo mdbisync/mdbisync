@@ -7,6 +7,7 @@
 // A transform may make requests of its own (an upload); it must not write the
 // document itself.
 
+import { fixText } from '../format/index.ts';
 import { type LinearClient } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap } from '../state/index.ts';
 import { type InitialSyncPlan } from './plan.ts';
@@ -24,7 +25,7 @@ export interface RestoreInput {
   body: string;
   /**
    * Linear stored exactly what was sent. When false, Linear reformatted the
-   * document, and the caller puts the whole restored text in Linear's form.
+   * document, and `restoreBody` puts the whole restored text in Linear's form.
    */
   kept: boolean;
 }
@@ -86,9 +87,18 @@ export async function transformBody(transforms: readonly BodyTransform[], path: 
   return current;
 }
 
-/** Runs the transforms' inverses in reverse order. */
-export function restoreBody(transforms: readonly BodyTransform[], path: string, content: string, kept: boolean): string {
+/**
+ * Linear's content in the file's form: the transforms' inverses, in reverse
+ * order, put back each link as the file spelled it. When Linear stored the
+ * body it was sent, that is the file as it was. When Linear reformatted it,
+ * the restored text is put in Linear's form as a whole, so the file's
+ * spellings, placed into reformatted text, become Linear's spellings too
+ * (`<a b.png>` as `a%20b.png`), and a later run finds the document holding
+ * the file.
+ */
+export function restoreBody(transforms: readonly BodyTransform[], path: string, content: string, sent: string): string {
+  const kept = content === sent;
   let current = content;
   for (const transform of [...transforms].reverse()) current = transform.restore({ path, body: current, kept });
-  return current;
+  return kept ? current : fixText(current);
 }

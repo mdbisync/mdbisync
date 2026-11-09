@@ -286,7 +286,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         // wrote (a link to an uploaded file is stored as a file), so the
         // content is also compared after the transforms' inverses, with the
         // file's own body.
-        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(restoreStored(transforms, path, document.content ?? '', body), source))) {
+        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(restoreBody(transforms, path, document.content ?? '', body), source))) {
           result.unchanged.push(path);
           remember(path, document);
           continue;
@@ -408,7 +408,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const reformatted: string[] = [];
     for (const path of [...synced].sort(compare)) {
       const text = texts.get(path) as string;
-      const file = splitFile(text).head + restoreStored(transforms, path, stored.get(path) ?? '', sent.get(path) as string);
+      const file = splitFile(text).head + restoreBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string);
       if (file !== text) {
         changes.set(path, file);
         reformatted.push(path);
@@ -451,20 +451,6 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
 
 function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
-}
-
-/**
- * Linear's content in the file's form: the transforms' inverses, which put
- * back each link as the file spelled it. When Linear stored the text it was
- * sent, that is the file as it was. When Linear reformatted it, the restored
- * text is put in Linear's form as a whole, so the file's spellings, placed
- * into reformatted text, become Linear's spellings too (`<a b.png>` as
- * `a%20b.png`), and the next run finds the document holding the file.
- */
-export function restoreStored(transforms: readonly BodyTransform[], path: string, content: string, sent: string): string {
-  const kept = content === sent;
-  const restored = restoreBody(transforms, path, content, kept);
-  return kept ? restored : fixText(restored);
 }
 
 /** Whether Linear's content is the body, or the body in the form Linear stores (as the format module writes it). */
