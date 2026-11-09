@@ -142,7 +142,7 @@ for (const file of process.argv.slice(2)) {
         response.writeHead(reply.status, { 'content-type': reply.headers.get('content-type') ?? 'application/json' });
         response.end(text);
       })().catch((error: unknown) => {
-        response.writeHead(500);
+        response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
         response.end(String(error));
       });
     });

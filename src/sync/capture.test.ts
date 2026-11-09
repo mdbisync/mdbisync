@@ -541,7 +541,7 @@ describe('capture from Linear', () => {
     Object.assign(world.linear.documents[0]!, {content:'[New](https://linear.app/example-team/document/blocked-new)\n',updatedAt:'2026-01-07T00:00:00Z'});
     const result = await capture(context,{config, state: context.fetched.state,security:{configured:true,check:async(files)=>files.has('docs/blocked-new.md')?[{hook:'secret-check',line:1}]:[]}});
     assert.equal(result.blocked.length,1);
-    assert.ok((await text('docs/plan.md')).includes('https://linear.app/example-team/document/blocked-new'));
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[New](https://linear.app/example-team/document/blocked-new)\n');
     assert.equal((await fixture.remote.run(['cat-file','-e',`${stateRef(config,'linear')}:docs/blocked-new.md`],{okCodes:[0,128]})).code,128);
   });
 
