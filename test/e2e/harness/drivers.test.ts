@@ -191,6 +191,49 @@ describe('fault proxy', () => {
     }
   });
 
+  it('counts only matching GraphQL requests after arming, including repeated faults and rearming', async () => {
+    const up = await upstream();
+    const proxy = await startFaultProxy(up.url);
+    try {
+      await post(proxy.url, 'query Target { a }');
+      const fault = { kind: 'http' as const, operation: 'Target', status: 500, requestNumber: 2, retryAfterSeconds: null, times: 2 };
+      proxy.setFaults([fault]);
+      assert.equal((await fetch(`${proxy.url}/oauth/token`, { method: 'POST' })).status, 200);
+      assert.equal((await post(proxy.url, 'query Other { a }')).status, 200);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 200);
+      proxy.resetCounters();
+      assert.equal((await fetch(`${proxy.url}/graphql-other`)).status, 200);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 500);
+      assert.equal((await fetch(`${proxy.url}/oauth/token`, { method: 'POST' })).status, 200);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 500);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 200);
+      proxy.setFaults([fault]);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 200);
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 500);
+      proxy.clearFaults();
+      assert.equal((await post(proxy.url, 'query Target { a }')).status, 200);
+    } finally {
+      await proxy.close();
+      await up.close();
+    }
+  });
+
+  it('faults OAuth only when explicitly targeted, without counting GraphQL or revocation', async () => {
+    const up = await upstream();
+    const proxy = await startFaultProxy(up.url);
+    try {
+      proxy.setFaults([{ kind: 'http', target: 'oauth', status: 429, requestNumber: 1, retryAfterSeconds: 1, times: 1 }]);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 200);
+      assert.equal((await fetch(`${proxy.url}/oauth/revoke`, { method: 'POST' })).status, 200);
+      assert.equal((await fetch(`${proxy.url}/oauth/token?test=1`, { method: 'POST' })).status, 429);
+      assert.equal((await fetch(`${proxy.url}/oauth/token`, { method: 'POST' })).status, 200);
+      assert.equal(up.calls(), 3);
+    } finally {
+      await proxy.close();
+      await up.close();
+    }
+  });
+
   it('resets the connection of a document write, reports low budget, rejects a named document and fails uploads', async () => {
     const up = await upstream();
     const proxy = await startFaultProxy(up.url);

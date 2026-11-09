@@ -1209,8 +1209,11 @@ const FAULT: Record<string, Executor> = {
     for (const restore of ctx.engine.restores.splice(0).reverse()) await restore();
   },
   'fault.http': async (ctx, args) => {
+    if (args.target !== undefined && args.target !== 'graphql' && args.target !== 'oauth') throw new Error('unknown HTTP fault target');
     http(ctx).setFaults([{
       kind: 'http',
+      target: args.target === 'oauth' ? 'oauth' : 'graphql',
+      ...(typeof args.operation === 'string' ? { operation: args.operation } : {}),
       status: Number(args.status),
       requestNumber: typeof args.requestNumber === 'number' ? args.requestNumber : 1,
       retryAfterSeconds: typeof args.retryAfterSeconds === 'number' ? args.retryAfterSeconds : null,
