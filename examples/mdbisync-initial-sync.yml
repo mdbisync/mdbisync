@@ -1,0 +1,64 @@
+# Copy to .github/workflows/mdbisync-initial-sync.yml in a synchronized
+# repository, next to the sync workflow (mdbisync.yml).
+#
+# Initial sync makes one side equal to the other before the first sync, and
+# restores the sync after its state is lost. Run it by hand from the Actions
+# tab. Without `confirm` it is a dry run: the job summary lists by path what
+# it would create, overwrite, move to Linear's trash and leave out, and
+# nothing is written.
+#
+# It is destructive to the target side:
+# - git-to-linear: Linear documents of the synchronized teams and projects
+#   that have no file are moved to Linear's trash (restorable there).
+# - linear-to-git: one pull request removes the synchronized files that have
+#   no document; a person reviews and merges it.
+#
+# Needs: the repository variable MDBISYNC_APP_CLIENT_ID and the secrets
+# MDBISYNC_APP_PRIVATE_KEY (the sync's GitHub App), MDBISYNC_LINEAR_CLIENT_ID
+# and MDBISYNC_LINEAR_CLIENT_SECRET (the Linear OAuth app).
+name: mdbisync initial sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      direction:
+        description: "git-to-linear (Linear is made equal to main) or linear-to-git (a pull request makes main equal to Linear)"
+        type: string
+        required: true
+      confirm:
+        description: "Write. Leave unchecked for a dry run that writes nothing."
+        type: boolean
+        default: false
+
+permissions: {}
+
+# The same group as the sync workflow: one run at a time, never cancelled.
+concurrency:
+  group: mdbisync
+  cancel-in-progress: false
+
+jobs:
+  initial-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Get the GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.MDBISYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MDBISYNC_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The action revokes its Linear token when it ends, and again in its
+      # post step after a failed or cancelled run.
+      - uses: mikhail-yaskou/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2
+        with:
+          operation: initial-sync
+          direction: ${{ inputs.direction }}
+          confirm: ${{ inputs.confirm }}
+          github-token: ${{ steps.app-token.outputs.token }}
+          linear-client-id: ${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}
+          linear-client-secret: ${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}

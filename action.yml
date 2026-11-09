@@ -61,3 +61,4 @@ runs:
   using: node24
   main: dist/action-main.js
   post: dist/action-post.js
+  post-if: always()

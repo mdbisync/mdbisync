@@ -71,6 +71,15 @@ export async function revokeToken(accessToken: string, options: TokenOptions = {
 }
 
 /**
+ * Lets a caller keep a minted token where a later process can revoke it
+ * (the action's `post` step), and forget it once this run revoked it.
+ */
+export interface TokenLifecycle {
+  minted(accessToken: string): void;
+  revoked(): void;
+}
+
+/**
  * Mints a token, runs `work` with it and revokes it afterwards, whether `work`
  * succeeded or not. A failed revocation never replaces the run's own outcome
  * (its result or its error): it goes to `onRevokeError`, which the caller
@@ -78,15 +87,17 @@ export async function revokeToken(accessToken: string, options: TokenOptions = {
  */
 export async function withRunToken<T>(
   credentials: AppCredentials,
-  options: TokenOptions & { onRevokeError: (error: unknown) => void },
+  options: TokenOptions & { onRevokeError: (error: unknown) => void; lifecycle?: TokenLifecycle },
   work: (token: RunToken) => Promise<T>,
 ): Promise<T> {
   const token = await mintAppToken(credentials, options);
+  options.lifecycle?.minted(token.accessToken);
   try {
     return await work(token);
   } finally {
     try {
       await revokeToken(token.accessToken, { ...options, auth: token.context });
+      options.lifecycle?.revoked();
     } catch (revokeError) {
       options.onRevokeError(revokeError);
     }

@@ -2,6 +2,12 @@
 // entry points: the recurring sync or the one-time initial sync. Both run
 // the preflight first (the sync's state and the setup check) and write
 // nothing when it fails.
+//
+// The checkout keeps no git credentials (`persist-credentials: false`), so
+// the engine's git calls get the GitHub App token through the environment
+// of each call, never through the repository's configuration. The run's
+// Linear token stays in the step's state until this run revokes it; the
+// `post` step revokes it when a killed or failed run left it behind.
 
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
@@ -10,6 +16,7 @@ import { unfinishedMessage, writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { runOperation } from "../run/operation.ts";
 import { Git } from "../state/index.ts";
+import { LINEAR_TOKEN_STATE } from "./state.ts";
 
 export const OPERATIONS = ["sync", "initial-sync"] as const;
 export type Operation = (typeof OPERATIONS)[number];
@@ -22,16 +29,46 @@ export function parseOperation(value: string): Operation {
   throw new Error(`unknown operation: ${operation} (expected one of: ${OPERATIONS.join(", ")})`);
 }
 
-export async function run(): Promise<void> {
+/**
+ * Environment for git calls that authenticates to the GitHub server with the
+ * App's installation token, as an HTTP header that applies to that server
+ * only. Nothing is written to the repository's configuration.
+ */
+export function gitAuthEnv(token: string, serverUrl: string): Record<string, string> {
+  const origin = new URL(serverUrl).origin;
+  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
+  return {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: `http.${origin}/.extraheader`,
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`,
+  };
+}
+
+export interface RunOptions {
+  /** For tests: the fake services. */
+  fetch?: typeof fetch;
+}
+
+export async function run(options: RunOptions = {}): Promise<void> {
   try {
     const operation = parseOperation(core.getInput("operation"));
     const get = (name: InputName) => core.getInput(name);
     const inputs = readInputs(get);
     const initialSync = operation === "initial-sync" ? readInitialSyncInputs(get) : undefined;
+    const serverUrl = process.env["GITHUB_SERVER_URL"] || "https://github.com";
     const outcome = await runOperation(operation, inputs, initialSync, {
-      git: new Git(process.env["GITHUB_WORKSPACE"] || process.cwd()),
+      git: new Git(process.env["GITHUB_WORKSPACE"] || process.cwd(), gitAuthEnv(inputs.github.token, serverUrl)),
       warn: (message) => core.warning(message),
       log: (entry) => core.info(JSON.stringify(entry)),
+      tokenLifecycle: {
+        minted: (token) => {
+          // Secrets and the App token are masked already; this token is new to the runner.
+          core.setSecret(token);
+          core.saveState(LINEAR_TOKEN_STATE, token);
+        },
+        revoked: () => core.saveState(LINEAR_TOKEN_STATE, ""),
+      },
+      ...(options.fetch ? { fetch: options.fetch } : {}),
     });
     if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(outcome.summary).write();
     else core.info(outcome.summary);

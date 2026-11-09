@@ -468,9 +468,10 @@ describe('sync: rate limits and transport faults', () => {
     const actionEnv = Object.fromEntries(INPUT_NAMES.map((name) => [`INPUT_${name.toUpperCase()}`, engineEnv[environmentName(name)] ?? '']));
     const summary = join(fixture.root, 'action-summary.md');
     await writeFile(summary, '');
+    await writeFile(join(fixture.root, 'action-state'), '');
     const child = spawnSync(process.execPath, ['--import', injection, fileURLToPath(new URL('../action/main.ts', import.meta.url))], {
       cwd,
-      env: { ...engineEnv, ...actionEnv, INPUT_OPERATION: 'sync', GITHUB_WORKSPACE: cwd, GITHUB_OUTPUT: '', GITHUB_STATE: '', GITHUB_STEP_SUMMARY: summary },
+      env: { ...engineEnv, ...actionEnv, INPUT_OPERATION: 'sync', GITHUB_WORKSPACE: cwd, GITHUB_OUTPUT: '', GITHUB_STATE: join(fixture.root, 'action-state'), GITHUB_STEP_SUMMARY: summary },
       encoding: 'utf8',
       timeout: 30_000,
     });
@@ -480,7 +481,9 @@ describe('sync: rate limits and transport faults', () => {
     const written = await readFile(summary, 'utf8');
     assert.match(written, /partial, will continue/);
     assert.ok(written.includes('| x-ratelimit-requests-limit | 5000 |'));
-    for (const secret of [CANARY, CLIENT_SECRET, 'fake-token', 'gh-token']) assert.ok(!`${child.stdout}${child.stderr}${written}`.includes(secret), secret);
+    // The runner consumes mask commands; it never logs them.
+    const logged = `${child.stdout.replace(/^::add-mask::.*$/gm, '')}${child.stderr}${written}`;
+    for (const secret of [CANARY, CLIENT_SECRET, 'fake-token', 'gh-token']) assert.ok(!logged.includes(secret), secret);
   });
 
   it('a 429 while capture reads Linear stops the run before any write; the next run converges', async () => {
