@@ -1,22 +1,21 @@
 // How a run ends, for the command line, the action and the run report.
 //
-// A sync run that Linear stopped (a rate limit, a budget running low), that
-// had a write fail or rejected, or that found a state ref moved under it is
-// partial: it recorded what it finished and the next run goes on from there.
-// It ends with a warning, not a failure, so a scheduled sync that meets one
-// of Linear's bad minutes does not fail its job.
+// A sync run is partial when Linear stopped it (a rate limit, a budget
+// running low), a write failed or was rejected, or a state ref moved under
+// it. It kept what it could record, and the next scheduled run goes on from
+// there, so it ends with a warning, not a failure: a sync that meets one of
+// Linear's bad minutes does not fail its job. Other operations have no next
+// run to go on, so a stop fails them.
 
-import { type WriteStop } from '../initial-sync/index.ts';
-import { describeStop } from '../linear/index.ts';
 import { type OperationOutcome } from './operation.ts';
+
+export { PARTIAL } from './stop.ts';
 
 export type ExitStatus = 'success' | 'warning' | 'failure';
 
-/** The words every partial run ends with, in its summary and its last message. */
-export const PARTIAL = 'partial, will continue';
-
-/** Why the run is partial, or undefined when it is not. */
+/** Why a sync run is partial, or undefined when it is not. */
 export function partialCode(outcome: OperationOutcome): string | undefined {
+  if (outcome.operation !== 'sync') return undefined;
   if (outcome.stopped !== undefined) return 'stopped';
   return outcome.sync?.write.code;
 }
@@ -28,24 +27,8 @@ export function exitStatusOf(outcome: OperationOutcome): ExitStatus {
   return 'success';
 }
 
-/**
- * Summary lines for a stop: why, and Linear's rate-limit headers of the
- * answer that stopped the run (the hourly and endpoint limits), which say
- * when the budget comes back. Header names and numbers only.
- */
-export function renderStop(stop: WriteStop): string[] {
-  const why = stop.kind === 'test-threshold' ? `the test threshold of ${stop.documents} documents` : describeStop(stop);
-  const lines = [`Stopped: ${why}.`, ''];
-  const limits = stop.kind === 'test-threshold' ? undefined : stop.limits;
-  if (limits !== undefined) {
-    lines.push("Linear's rate-limit headers at the stop:", '', '| Header | Value |', '| --- | --- |');
-    for (const name of Object.keys(limits).sort()) lines.push(`| ${name} | ${limits[name]} |`);
-    lines.push('');
-  }
-  return lines;
-}
-
-/** The summary of a run Linear stopped before it could write. */
-export function renderStoppedBeforeWriting(stop: WriteStop): string {
-  return ['## Linear stopped the run', '', `Stopped before any write; ${PARTIAL}: the next run starts again.`, '', ...renderStop(stop)].join('\n');
+/** The message of a run that is not a sync, stopped by Linear before any write. */
+export function stoppedMessage(outcome: OperationOutcome): string | undefined {
+  if (outcome.stopped === undefined || partialCode(outcome) !== undefined) return undefined;
+  return `${outcome.operation}: stopped by Linear before any write; run it again once the limit has reset`;
 }

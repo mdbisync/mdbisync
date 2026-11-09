@@ -21,7 +21,7 @@ import {
 import { type FetchedState, type Git, fetchState, readInitialSyncProgress } from '../state/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
-import { renderStoppedBeforeWriting } from './exit.ts';
+import { renderStoppedBeforeWriting } from './stop.ts';
 
 /** The operations that start with the preflight. */
 export type Operation = (typeof PREFLIGHT_COMMANDS)[number];
@@ -46,8 +46,8 @@ export interface PreflightOutcome {
   refusal?: StateRefusal;
   /**
    * Linear stopped the run's client before the run could write (a rate
-   * limit, a budget running low). The run is partial: nothing was written,
-   * and the next run starts again.
+   * limit, a budget running low). Nothing was written; a sync run is
+   * partial, and the next run starts again.
    */
   stopped?: StopReason;
 }
@@ -116,7 +116,7 @@ export async function runPreflight(
 }
 
 function stoppedOutcome(operation: Operation, stopped: StopReason, setup: SetupReport | undefined): PreflightOutcome {
-  const summary = renderStoppedBeforeWriting(stopped);
+  const summary = renderStoppedBeforeWriting(stopped, operation === 'sync');
   return {
     operation,
     ok: false,

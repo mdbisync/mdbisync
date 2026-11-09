@@ -17,6 +17,7 @@ import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { INPUT_NAMES, environmentName } from '../run/inputs.ts';
+import { renderStop } from '../run/stop.ts';
 import { Git } from '../state/index.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
@@ -465,6 +466,35 @@ describe('sync: rate limits and transport faults', () => {
     assert.deepEqual(run.report.sync?.notAttempted, ['combined/new.md']);
     assert.equal(await rev('refs/mdbisync/linear'), before);
     await assertNextRunConverges();
+  });
+
+  it('a 500 while looking for documents to adopt fails only the new documents; edits are written; the next run converges', async () => {
+    await editAll(1, 'Second text.', { 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    const at = await firstAfterSetup();
+    transport.arm({ http: { at, status: 500, times: 1 } });
+    const run = await sync();
+    assertPartial(run);
+    assert.equal(transport.exchanges.find((exchange) => exchange.injected)?.operation, 'ListDocuments');
+    assert.deepEqual(run.report.sync?.updated, [pathOf(0)]);
+    assert.deepEqual(run.report.sync?.failed.map((entry) => [entry.path, entry.operation]), [['combined/new.md', 'ListDocuments']]);
+    assert.equal(withNewPage().length, 0, 'nothing created without the listing');
+    await assertNextRunConverges();
+    assert.equal(withNewPage().length, 1);
+  });
+
+  it('a check that Linear stops fails: it has no next run to go on', async () => {
+    transport.arm({ http: { at: 1, status: 429, times: 1 } });
+    const run = await cli('check');
+    assert.equal(run.result.exitCode, INCOMPLETE_EXIT_CODE);
+    assert.equal(run.report.exitStatus, 'failure');
+    assert.equal(run.report.stop?.kind, 'rate-limited');
+    assert.match(run.result.stderr, /check: stopped by Linear before any write/);
+    assert.doesNotMatch(`${run.result.stderr}${run.summary}`, /partial/);
+  });
+
+  it('rate-limit headers are escaped in the summary table', () => {
+    const lines = renderStop({ kind: 'rate-limited', operation: 'GetDocuments', limits: { 'x-ratelimit-endpoint-name': 'a|b\n## c' } });
+    assert.ok(lines.includes('| x-ratelimit-endpoint-name | a\\|b ## c |'), lines.join('\n'));
   });
 
   it('a 500 on the read before writing leaves the batch unwritten and unrecorded; the next run converges', async () => {

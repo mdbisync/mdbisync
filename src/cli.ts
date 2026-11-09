@@ -15,7 +15,7 @@ import {
 } from "./commands.ts";
 import { type LogEntry } from "./linear/index.ts";
 import { runFix, runLint } from "./format/command.ts";
-import { PARTIAL, partialCode } from "./run/exit.ts";
+import { PARTIAL, partialCode, stoppedMessage } from "./run/exit.ts";
 import { writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
@@ -111,6 +111,8 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   if (partial !== undefined) {
     return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: ${PARTIAL} (${partial})\n` };
   }
+  const stopped = stoppedMessage(outcome);
+  if (stopped !== undefined) return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${stopped}\n` };
   if (!outcome.ok) {
     const exitCode = outcome.code === "initial-sync-required" ? NO_STATE_EXIT_CODE : SETUP_FAILED_EXIT_CODE;
     return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (${outcome.code})\n` };

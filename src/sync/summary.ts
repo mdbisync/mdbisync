@@ -1,7 +1,7 @@
 // The sync run's job summary: paths, rule names and reasons only, never
 // document content.
 
-import { PARTIAL, renderStop } from '../run/exit.ts';
+import { PARTIAL, cell, renderStop } from '../run/stop.ts';
 import { type CycleResult } from './cycle.ts';
 import { type SkipReason } from './write.ts';
 
@@ -36,7 +36,8 @@ export function renderSync(result: CycleResult): string {
       '',
     );
   }
-  if (write.code !== undefined) lines.push(`This run is ${PARTIAL}: it recorded what it finished, and the next run goes on from there.`, '');
+  if (write.code === 'state-moved') lines.push(`This run is ${PARTIAL}: the next run writes again what is still missing.`, '');
+  else if (write.code !== undefined) lines.push(`This run is ${PARTIAL}: it recorded what it finished, and the next run goes on from there.`, '');
   if (write.stopped !== undefined) {
     lines.push(...renderStop(write.stopped), `Not written yet: ${count(write.notAttempted.length, 'item')}.`, '');
   }
@@ -56,9 +57,4 @@ export function renderSync(result: CycleResult): string {
 
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
-}
-
-/** A table cell: pipes, backslashes and line breaks would break the row. */
-function cell(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
 }

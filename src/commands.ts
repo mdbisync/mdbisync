@@ -29,9 +29,11 @@ export const SETUP_FAILED_EXIT_CODE = 3;
 /** The sync has no state; nothing was written; run initial sync first. */
 export const NO_STATE_EXIT_CODE = 4;
 /**
- * A confirmed initial sync wrote part of its work and stopped, or a sync run
- * stopped writing (rate limit, low budget), had a write rejected, or found a
- * state ref moved; run it again with the same inputs.
+ * A confirmed initial sync wrote part of its work and stopped; a sync run is
+ * partial (Linear stopped it with a rate limit or a low budget, before or
+ * while writing, a write failed or was rejected, or a state ref moved) and
+ * the next run goes on; or Linear stopped another operation before any
+ * write. Run it again with the same inputs.
  */
 export const INCOMPLETE_EXIT_CODE = 5;
 
