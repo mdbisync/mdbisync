@@ -170,6 +170,17 @@ describe('sync: conflicts through the cycle (L3)', () => {
   /** The fake gives each document the content id `content-<id>`. */
   const comments = (document: FakeDocument) => [...world.linear.comments.values()].filter((comment) => comment.documentContentId === `content-${document.id}`);
 
+  /** Runs `change` right after the capture has read the documents' content, before the write step. */
+  const afterCapture = (change: () => void) => {
+    let read = false;
+    world.linear.beforeQuery = (operation, variables) => {
+      if (read) {
+        delete world.linear.beforeQuery;
+        change();
+      } else if (operation === 'GetDocuments' && variables.withContent === true) read = true;
+    };
+  };
+
   async function editInLinear(path: string, content: string) {
     const document = await documentOf(path);
     document.content = content;
@@ -450,6 +461,81 @@ describe('sync: conflicts through the cycle (L3)', () => {
     const fresh = await documentOf(DOC);
     assert.notEqual(fresh.id, document.id);
     await assertBothSides(DOC, edited);
+  });
+
+  it('L3-16: a document a person restores and edits after the capture is not overwritten; their edit survives', async () => {
+    const document = await documentOf(DOC);
+    document.trashed = true;
+    document.archivedAt = new Date().toISOString();
+    touch(document);
+    afterCapture(() => {
+      delete document.trashed;
+      delete document.archivedAt;
+      document.content = PLAN.replace('Alpha paragraph.', 'Alpha paragraph, restored and edited.');
+      touch(document);
+    });
+    await commitGit({ [DOC]: PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.') });
+    const first = await sync();
+    assert.deepEqual(first.report.sync?.skipped, [{ path: DOC, reason: 'edited-in-linear' }]);
+    assert.deepEqual(first.report.sync?.restored, []);
+    assert.deepEqual(first.report.sync?.decided, [], 'the summary reported a restore that did not happen');
+    await settle();
+    const text = await show(`refs/heads/main:${DOC}`);
+    assert.match(text, /restored and edited/);
+    assert.match(text, /Gamma paragraph, git\./);
+    assert.equal((await documentOf(DOC)).id, document.id);
+  });
+
+  it('L3-16: a removed document a person restores, moves out and edits after the capture is not moved back over their edit', async () => {
+    const document = await documentOf(DOC);
+    document.trashed = true;
+    document.archivedAt = new Date().toISOString();
+    touch(document);
+    afterCapture(() => {
+      delete document.trashed;
+      delete document.archivedAt;
+      document.projectId = 'project-elsewhere';
+      document.content = 'Kept elsewhere.\n';
+      touch(document);
+    });
+    await commitGit({ [DOC]: PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.') });
+    const first = await sync();
+    assert.deepEqual(first.report.sync?.skipped, [{ path: DOC, reason: 'edited-in-linear' }]);
+    assert.equal(document.content, 'Kept elsewhere.\n');
+    assert.equal(document.projectId, 'project-elsewhere');
+  });
+
+  it('a git rename onto a path Linear filled with another document keeps both documents', async () => {
+    const other = await documentOf('eng/notes/other.md');
+    world.linear.documents.push({ id: 'linear-new', title: 'summary', projectId: 'project-api', createdAt: '2026-01-03T00:00:00.000Z', content: `# Summary\n\nWritten in Linear. ${CANARY}\n` });
+    await commitGit({}, { from: 'eng/notes/other.md', to: `${NOTES}/summary.md` });
+    const first = await sync();
+    assert.deepEqual(first.report.sync?.conflicts, []);
+    assert.ok(first.report.sync?.skipped.some((entry) => entry.path === `${NOTES}/summary.md` && entry.reason === 'conflict'), JSON.stringify(first.report.sync?.skipped));
+    const added = world.linear.documents.find((d) => d.id === 'linear-new');
+    assert.match(added?.content ?? '', /Written in Linear/);
+    assert.ok(!other.trashed, 'the renamed document was trashed');
+    assert.match(other.content ?? '', /Untouched/);
+  });
+
+  it('L3-16: a run that recreated a gone document and lost its record does not create it twice', async () => {
+    const document = await documentOf(DOC);
+    document.trashed = true;
+    document.archivedAt = new Date().toISOString();
+    touch(document);
+    afterCapture(() => world.linear.documents.splice(world.linear.documents.indexOf(document), 1));
+    await commitGit({ [DOC]: PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.') });
+    const first = await sync();
+    assert.deepEqual(first.report.sync?.created, [DOC]);
+    // As if the record push had failed: the state refs go back to what the capture left.
+    const record = first.report.sync?.record;
+    assert.ok(record !== undefined && record !== null);
+    await fixture.remote.run(['update-ref', 'refs/mdbisync/linear', record.parents[0] as string]);
+    await fixture.remote.run(['update-ref', 'refs/mdbisync/ids', await rev('refs/mdbisync/ids^')]);
+    await settle();
+    const live = world.linear.documents.filter((d) => !d.trashed && d.title === document.title);
+    assert.equal(live.length, 1, 'the document was created twice');
+    await assertBothSides(DOC, PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.'));
   });
 
   it('L3-17: renamed in Linear and edited in git, both apply', async () => {

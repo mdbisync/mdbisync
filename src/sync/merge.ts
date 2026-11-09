@@ -44,7 +44,13 @@ export interface CreateChange {
    * restored with this id, so its comments stay, or created anew when Linear
    * no longer has it.
    */
-  restore?: { id: string; gone: StructuralSummary };
+  restore?: {
+    id: string;
+    /** The summary entry when Linear no longer has the document. */
+    gone: StructuralSummary;
+    /** Set when Linear no longer has it: the id the new document gets. */
+    recreate?: string;
+  };
 }
 
 /** A case the structural conflict rules decided, for the run summary. */
@@ -70,7 +76,7 @@ export interface LocalMerge {
    * structural rules.
    */
   tree: Oid;
-  /** Paths that could not be merged even so (not Markdown documents); neither side's version is written to Linear. */
+  /** Paths that could not be merged even so (files that are not mapped documents); neither side's version is written to Linear. */
   conflicts: string[];
   /** Documents of the merge result whose text holds conflict markers this merge wrote. */
   marked: string[];
@@ -308,14 +314,16 @@ interface Resolved {
  * Step 3's own merge of the documents git could not merge: per document,
  * the base, tracked and Linear versions go to the structural rules, which
  * merge the text with the conflict marker paragraphs and decide deletes
- * and renames. The result replaces git's
- * conflicted files in the tree. Files other than Markdown documents stay
- * unresolved.
+ * and renames. The result replaces git's conflicted files in the tree.
+ * Files that are not mapped documents stay unresolved.
  */
 async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolved> {
   const out: Resolved = { tree: input.tree, unresolved: [], moves: new Map(), comments: new Map(), restores: new Map(), marked: [], decided: [] };
   if (input.unmerged.length === 0) return out;
   const [baseFiles, gitFiles, linearFiles] = await Promise.all([filesOf(git, input.base), filesOf(git, input.tracked), filesOf(git, input.linear)]);
+  // Only documents the sync maps get marker paragraphs; other files (unmapped Markdown, images) stay unresolved.
+  const mapped = new Set<string>();
+  for (const side of [input.base, input.tracked, input.linear]) for (const document of (await loadMapping(git, side)).documents) mapped.add(document.path);
   const linearRenames = await renamesBetween(git, input.base, input.linear);
   const pathById = new Map([...input.ids].map(([path, entry]) => [entry.id, path]));
   const knownId = async (path: string) => input.knownId?.(path);
@@ -333,7 +341,7 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
     if (byId !== undefined && linearFiles.has(byId)) return byId;
     const renamed = linearRenames.get(basePath);
     if (renamed !== undefined && linearFiles.has(renamed)) return renamed;
-    return linearFiles.has(basePath) && (id === undefined || byId === basePath) ? basePath : null;
+    return linearFiles.has(basePath) ? basePath : null;
   };
 
   const groups: Array<{ basePath: string | null; gitPath: string | null; linearPath: string | null; involved: string[] }> = [];
@@ -345,8 +353,12 @@ async function resolveConflicts(git: Git, input: ConflictInput): Promise<Resolve
     const linearPath = basePath === null ? (linearFiles.has(path) ? path : null) : await linearPathOf(basePath);
     const involved = [...new Set([path, basePath, gitPath, linearPath].filter((entry): entry is string => entry !== null))];
     for (const entry of involved) seen.add(entry);
-    if (involved.every((entry) => entry.toLowerCase().endsWith('.md'))) groups.push({ basePath, gitPath, linearPath, involved });
-    else out.unresolved.push(...involved.filter((entry) => input.unmerged.includes(entry)));
+    // A path of the group that one side holds for another document (git renamed onto a file Linear added) is a
+    // collision of two documents: merging them would lose one, so it stays unresolved.
+    const collides = involved.some((entry) => (linearFiles.has(entry) && entry !== linearPath) || (gitFiles.has(entry) && entry !== gitPath));
+    if (!collides && involved.every((entry) => mapped.has(entry) || !input.unmerged.includes(entry))) groups.push({ basePath, gitPath, linearPath, involved });
+    // Every path of the group waits, so neither document is trashed or overwritten until a person sorts it out.
+    else out.unresolved.push(...involved);
   }
 
   const blobs = await readBlobs(git, groups.flatMap(({ basePath, gitPath, linearPath }) => [
