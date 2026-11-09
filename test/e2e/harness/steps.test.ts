@@ -99,6 +99,12 @@ describe('conflict markers', () => {
     const edited = editInsideMarkers(conflict('One.', 'Two.'), 'linear', 'abc123-001');
     assert.match(edited, /^Two\. The review moved to the next morning, note abc123-001\.$/m);
     assert.throws(() => editInsideMarkers('No markers.\n', 'git', 't'), ProductError);
+    // Lookalike markers in a code fence are text and survive a resolution.
+    const lookalikes = reviewDocument({ lookalikes: true });
+    const withConflict = lookalikes.replace('The first paragraph explains the plan for the week.', `${MARKERS.git}\n\nOurs.\n\n${MARKERS.linear}\n\nTheirs.\n\n${MARKERS.end}`);
+    const resolved = resolveKeeping(withConflict, 'git');
+    assert.equal(scanMarkers(resolved).markerLines, 0);
+    assert.ok(resolved.includes(`\`\`\`text\n${MARKERS.git}\none\n${MARKERS.linear}\ntwo\n${MARKERS.end}\n\`\`\``));
   });
 
   it('edit the n-th plain paragraph and nothing else', () => {
@@ -593,6 +599,11 @@ describe('subjects', () => {
     assert.deepEqual(await resolveSubject(ctx, 'runs.1.summary.code'), { known: true, value: 'merge-commits-required' });
     assert.deepEqual(await resolveSubject(ctx, 'summary.setupChecks'), { known: true, value: ['linear-credentials', 'security-hooks'] });
     assert.deepEqual(await resolveSubject(ctx, 'summary.securityHooksReported'), { known: true, value: true });
+    // The checks' own run (I6) is not the scenario's last run.
+    ctx.observations.set('scenario.runsEnd', ctx.engine.results.length);
+    ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { code: 'nothing-to-do' } });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.last.summary.code'), { known: true, value: 'merge-commits-required' });
+    assert.deepEqual(await resolveSubject(ctx, 'run.completed'), { known: true, value: false });
   });
 
   it('compute both sides of the target document from the world', async () => {

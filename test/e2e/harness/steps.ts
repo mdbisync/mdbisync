@@ -18,7 +18,7 @@ import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
-import { INVARIANT_CHECKS, readSides, snapshotRefs, stripFrontMatter } from './checks.ts';
+import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, stripFrontMatter } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
@@ -85,7 +85,7 @@ function settleResult(ctx: RunContext, result: EngineResult): void {
 }
 
 /** Starts the engine and waits at `checkpoint`; false (after recording the result) when the engine ended first. */
-async function startPaused(ctx: RunContext, call: EngineCall, checkpoint: Checkpoint): Promise<ReturnType<typeof startEngine> | null> {
+async function startPaused(ctx: RunContext, call: EngineCall, checkpoint: Checkpoint): Promise<ReturnType<typeof startEngine>> {
   const running = startEngine(call);
   ctx.engine.pending = running;
   const reached = await ctx.checkpoints.waitReached(checkpoint, { timeoutMs: CHECKPOINT_TIMEOUT_MS, exited: running.done });
@@ -162,7 +162,6 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
     delete ctx.engine.trigger;
     ctx.checkpoints.pause(trigger.checkpoint);
     const running = await startPaused(ctx, call, trigger.checkpoint);
-    if (running === null) return;
     await trigger.action();
     ctx.checkpoints.resume(trigger.checkpoint);
     delete ctx.engine.pending;
@@ -273,12 +272,15 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
         try {
           await pull(git, ctx);
           const changes = new Map<string, string>();
+          const edits: RunContext['edits'] = [];
           for (const path of paths) {
             const token = nextToken(ctx);
             changes.set(path, paragraphEdit(await readWorking(git, path), undefined, token));
-            ctx.edits.push({ side: 'git', path, token });
+            edits.push({ side: 'git', path, token });
           }
           await commitAsPerson(ctx, changes, 'Update the review date');
+          // Only an edit that reached the tracked branch counts for I2; a refused push's tokens never did.
+          ctx.edits.push(...edits);
           return;
         } catch (error) {
           // The sync may push to the tracked branch between the pull and the push: try again on top of it.
@@ -420,10 +422,10 @@ const RUN: Record<string, Executor> = {
       } else if (outcome === 'killed') {
         ctx.checkpoints.pause('before-write');
         const running = await startPaused(ctx, await engineCall(ctx, 'sync', {}), 'before-write');
-        running?.kill();
+        running.kill();
         ctx.checkpoints.resume('before-write');
         delete ctx.engine.pending;
-        if (running !== null && running !== undefined) ctx.engine.results.push(await running.done);
+        ctx.engine.results.push(await running.done);
       }
       byOutcome[outcome] = proxy.tokens().filter((token) => !known.has(token));
     }
@@ -449,7 +451,7 @@ const RUN: Record<string, Executor> = {
       ...loadDriver(ctx, sync),
       checkInvariants: async () => {
         const sides = await readSides(ctx);
-        const lost = (await INVARIANT_CHECKS.I2(ctx, async () => sides)).ok ? 0 : (await import('./checks.ts')).lostEdits(ctx, sides).length;
+        const lost = lostEdits(ctx, sides).length;
         const converged = await INVARIANT_CHECKS.I1(ctx, async () => sides);
         const checks = (ctx.observations.get('soak.checks') as Array<{ I1: boolean; lost: number }> | undefined) ?? [];
         ctx.observations.set('soak.checks', [...checks, { I1: converged.ok, lost }]);
@@ -745,8 +747,13 @@ const GIT: Record<string, Executor> = {
     const folder = projectFolders(ctx)[0]?.folder ?? '';
     const path = `${folder === '' ? '' : `${folder}/`}guides/format-check-${token}.md`;
     const text = args.fixture === 'fixable' ? `${fixableSample().text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n` : `# Format check\n\n${noteSentence(token)}\n`;
-    const commit = await personCommit(git, ctx.names, new Map([[path, text]]), 'Add the format check page', { verify: false, branch: ctx.names.syncBranch });
-    await git.run(['reset', '--quiet', '--hard', `origin/${ctx.names.trackedBranch}`], { okCodes: [0, 128] });
+    let commit: string;
+    try {
+      commit = await personCommit(git, ctx.names, new Map([[path, text]]), 'Add the format check page', { verify: false, branch: ctx.names.syncBranch });
+    } finally {
+      // The page belongs to the pull request's branch only: never leave it on the person's tracked branch.
+      await git.run(['reset', '--quiet', '--hard', `origin/${ctx.names.trackedBranch}`], { okCodes: [0, 128] });
+    }
     ctx.ownCommits.push(commit);
     const openedAt = Date.now();
     const pr = await world.rest.openPullRequest(ctx.names.syncBranch, ctx.names.trackedBranch, 'Add the format check page', 'A small page for the weekly review.');

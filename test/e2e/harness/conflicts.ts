@@ -99,8 +99,12 @@ export function resolveKeeping(text: string, side: 'git' | 'linear'): string {
   const all = lines(text);
   const out: string[] = [];
   let state: 'outside' | MarkerKind = 'outside';
+  let fence: string | null = null;
   for (const line of all) {
-    const kind = kindOf(line);
+    // Marker lines inside a code fence are text (lookalikes), as scanMarkers treats them.
+    const opener = /^(```+|~~~+)/.exec(line)?.[1];
+    if (opener !== undefined) fence = fence === null ? opener : line.startsWith(fence) ? null : fence;
+    const kind = fence !== null || opener !== undefined ? null : kindOf(line);
     if (kind !== null) {
       state = kind === 'end' ? 'outside' : kind;
       continue;

@@ -45,8 +45,8 @@ export interface View extends Sides {
 
 export const BEFORE_VIEW = 'view.before';
 
-export async function takeView(ctx: RunContext, withComments: boolean): Promise<View> {
-  const sides = await readSides(ctx);
+export async function takeView(ctx: RunContext, withComments: boolean, options: { allowNoIds?: boolean } = {}): Promise<View> {
+  const sides = await readSides(ctx, options);
   const view: View = { ...sides, comments: new Map() };
   if (withComments && ctx.live !== null) {
     const ids = new Set([...sides.ids.values()].map((entry) => entry.id));
@@ -56,11 +56,15 @@ export async function takeView(ctx: RunContext, withComments: boolean): Promise<
   return view;
 }
 
-/** Whether a scenario's assertions need the snapshot of the start, and whether with comments. */
-export function needsBeforeView(ctx: RunContext): { needed: boolean; comments: boolean } {
+/**
+ * The snapshot of the start, which every scenario takes: many subjects
+ * compare with it. Comments are read only when an assertion speaks of them
+ * (one request per document). A run that starts from Linear has no ids ref
+ * yet, and its snapshot has an empty ids map.
+ */
+export async function takeStartView(ctx: RunContext): Promise<View> {
   const names = ctx.scenario.checks.assertions.flatMap((assertion) => [assertion.subject, String(assertion.expected)]);
-  const needed = names.some((name) => name.startsWith('before.')) || ['documents.matchedIds', 'documents.matchedComments', 'documents.archived'].some((name) => names.includes(name));
-  return { needed, comments: needed && names.some((name) => /omments/.test(name)) };
+  return takeView(ctx, names.some((name) => /omment/i.test(name)), { allowNoIds: true });
 }
 
 interface Env {
@@ -94,7 +98,7 @@ async function commentsOf(env: Env, id: string | undefined): Promise<string[]> {
 /** Comments added to a document since the scenario's start. */
 async function newComments(env: Env, id: string | undefined): Promise<string[]> {
   if (id === undefined) return [];
-  const before = (env.ctx.observations.get(BEFORE_VIEW) as View | undefined)?.comments.get(id) ?? (env.ctx.observations.get('start.comments') as Map<string, string[]> | undefined)?.get(id) ?? [];
+  const before = (env.ctx.observations.get(BEFORE_VIEW) as View | undefined)?.comments.get(id) ?? [];
   const now = await commentsOf({ ...env, which: 'now' }, id);
   return now.slice(before.length);
 }
@@ -246,16 +250,29 @@ async function parents(git: Git, commit: string): Promise<string[]> {
   return (await git.text(['rev-list', '--parents', '-n', '1', commit])).trim().split(' ').slice(1);
 }
 
+/** Brings commits into the person's clone; returns the ones it has afterwards. */
+async function present(git: Git, commits: readonly string[]): Promise<string[]> {
+  const result: string[] = [];
+  for (const commit of new Set(commits)) {
+    if ((await git.run(['cat-file', '-e', `${commit}^{commit}`], { okCodes: [0, 1, 128] })).code !== 0) {
+      await git.run(['fetch', '--quiet', 'origin', commit], { okCodes: [0, 1, 128] });
+    }
+    if ((await git.run(['cat-file', '-e', `${commit}^{commit}`], { okCodes: [0, 1, 128] })).code === 0) result.push(commit);
+  }
+  return result;
+}
+
+/** Whether `ancestor` is an ancestor of `descendant`; a commit the server no longer has cannot be shown to be. */
 async function isAncestor(git: Git, ancestor: string, descendant: string | null): Promise<boolean> {
   if (descendant === null) return false;
-  await git.run(['fetch', '--quiet', 'origin', ancestor], { okCodes: [0, 1, 128] });
-  return (await git.run(['merge-base', '--is-ancestor', ancestor, descendant], { okCodes: [0, 1, 128] })).code === 0;
+  if ((await present(git, [ancestor, descendant])).length < 2) return false;
+  return (await git.run(['merge-base', '--is-ancestor', ancestor, descendant], { okCodes: [0, 1] })).code === 0;
 }
 
 /** Commits on `tip` that the scenario's start did not have. */
 async function newCommits(git: Git, tip: string | null, startTips: readonly string[]): Promise<string[]> {
   if (tip === null) return [];
-  const not = startTips.map((oid) => `^${oid}`);
+  const not = (await present(git, startTips)).map((oid) => `^${oid}`);
   return (await git.text(['rev-list', tip, ...not])).split('\n').filter(Boolean);
 }
 
@@ -265,8 +282,10 @@ function startTips(ctx: RunContext): string[] {
   return [...Object.values(refs), ...(tracked === undefined ? [] : [tracked])];
 }
 
+/** The scenario's own engine runs: after setup, before the checks' own run (I6). */
 function ownResults(ctx: RunContext) {
-  return ctx.engine.results.slice(ctx.engine.setupRuns);
+  const end = ctx.observations.get('scenario.runsEnd') as number | undefined;
+  return ctx.engine.results.slice(ctx.engine.setupRuns, end);
 }
 
 /** Relative link targets in Markdown (outside code), without anchors' titles. */
@@ -330,7 +349,8 @@ export function encodeTitlePath(title: string): string {
 
 function proxyRecordsSinceStart(ctx: RunContext) {
   const from = Number(ctx.observations.get('start.proxyIndex') ?? 0);
-  return (ctx.proxy?.requests ?? []).slice(from);
+  const end = ctx.observations.get('scenario.proxyEnd') as number | undefined;
+  return (ctx.proxy?.requests ?? []).slice(from, end);
 }
 
 function documentWrites(ctx: RunContext): number {
@@ -468,11 +488,19 @@ async function metrics(env: Env): Promise<Record<string, unknown>> {
   return values;
 }
 
+const linearBody: Compute = (env) => perTarget(env, (path, document, view) => documentBody(view, path, document));
+
+const linearRecords: Compute = async (env) => {
+  const tip = await stateTip(env.ctx, 'linear');
+  return (await newCommits(await person(env.ctx), tip, [(await env.view()).tip])).length;
+};
+
 export const SUBJECTS: Record<string, Compute> = {
   // --- documents in Linear --------------------------------------------------------------
-  'documents.body': (env) => perTarget(env, (path, document, view) => documentBody(view, path, document)),
-  'documents.content': (env) => perTarget(env, (path, document, view) => documentBody(view, path, document)),
-  'linear.body': (env) => perTarget(env, (path, document, view) => documentBody(view, path, document)),
+  // Three names the specs use for the same thing: the document's text in Linear, image links mapped.
+  'documents.body': linearBody,
+  'documents.content': linearBody,
+  'linear.body': linearBody,
   'documents.id': async (env) => (await target(env)).id ?? null,
   'ids.documentId': async (env) => (await target(env)).id ?? null,
   'documents.title': async (env) => (await target(env)).document?.title ?? null,
@@ -775,7 +803,9 @@ export const SUBJECTS: Record<string, Compute> = {
     for (let index = 1; index < history.length; index += 1) {
       for (const [ref, old] of Object.entries(history[index - 1] as Record<string, string>)) {
         const next = (history[index] as Record<string, string>)[ref];
-        if (next !== undefined && next !== old && !(await isAncestor(git, old, next))) count += 1;
+        if (next === undefined || next === old) continue;
+        // A rewritten ref's old tip may be gone from the server; both commits present and not in line is a force push.
+        if ((await present(git, [old, next])).length === 2 && !(await isAncestor(git, old, next))) count += 1;
       }
     }
     return count;
@@ -799,18 +829,13 @@ export const SUBJECTS: Record<string, Compute> = {
   'ids.rebuiltByTitle': async (env) => {
     const view = await env.view();
     const before = env.ctx.observations.get(BEFORE_VIEW) as View | undefined;
-    const original = before?.ids ?? (env.ctx.observations.get('start.ids') as Map<string, { id: string }> | undefined);
+    const original = before?.ids;
     if (original === undefined || (await stateTip(env.ctx, 'ids')) === null) return false;
     return [...original].every(([path, entry]) => view.ids.get(path)?.id === entry.id);
   },
-  'linear.commitCount': async (env) => {
-    const tip = await stateTip(env.ctx, 'linear');
-    return (await newCommits(await person(env.ctx), tip, [(await env.view()).tip])).length;
-  },
-  'linear.finalRecordCount': async (env) => {
-    const tip = await stateTip(env.ctx, 'linear');
-    return (await newCommits(await person(env.ctx), tip, [(await env.view()).tip])).length;
-  },
+  // Records on the linear ref that the tracked branch does not hold (L1-04 calls it the commit count, L1-15 the final record count).
+  'linear.commitCount': linearRecords,
+  'linear.finalRecordCount': linearRecords,
   'linear.parents': async (env) => {
     const tip = await stateTip(env.ctx, 'linear');
     return tip === null ? null : parents(await person(env.ctx), tip);
@@ -892,7 +917,7 @@ export const SUBJECTS: Record<string, Compute> = {
   'assets.allowedBytes': async (env) => assetHashes(env, 'attachment', 10 * 1024 * 1024),
   'uploads.newCount': async (env) => {
     const view = await env.view();
-    const before = (env.ctx.observations.get(BEFORE_VIEW) as View | undefined)?.uploadsByHash ?? (env.ctx.observations.get('start.uploads') as Map<string, string> | undefined) ?? new Map();
+    const before = (env.ctx.observations.get(BEFORE_VIEW) as View | undefined)?.uploadsByHash ?? new Map();
     return [...view.uploadsByHash.keys()].filter((hash) => !before.has(hash)).length;
   },
   'uploads.reuploadCount': async (env) => {
@@ -979,7 +1004,10 @@ export const SUBJECTS: Record<string, Compute> = {
     const view = await env.view();
     const files = await treeFiles(head.git, head.commit, (path) => path.endsWith('.md') && owningFolder(path, view.folders) !== null);
     const seen = new Map<string, number>();
-    for (const bytes of files.values()) seen.set(sha256(stripFrontMatter(bytes.toString('utf8'))), (seen.get(sha256(stripFrontMatter(bytes.toString('utf8')))) ?? 0) + 1);
+    for (const bytes of files.values()) {
+      const hash = sha256(stripFrontMatter(bytes.toString('utf8')));
+      seen.set(hash, (seen.get(hash) ?? 0) + 1);
+    }
     return [...seen.values()].reduce((sum, count) => sum + count - 1, 0);
   },
   'pullRequests.assetBytes': async (env) => sorted((await pullRequestAssets(env)).hashes.values()),
@@ -1094,11 +1122,11 @@ export const SUBJECTS: Record<string, Compute> = {
     const secret = observed(env.ctx, 'secret.value') as string;
     const git = await person(env.ctx);
     let count = 0;
-    const tips = [(await env.view()).tip, await syncTip(env.ctx), await stateTip(env.ctx, 'linear'), await stateTip(env.ctx, 'ids')].filter((tip): tip is string => tip !== null);
-    for (const tip of tips) {
-      const commits = (await git.text(['rev-list', tip])).split('\n').filter(Boolean);
-      for (const commit of commits) count += (await git.run(['grep', '-c', '-F', secret, commit], { okCodes: [0, 1] })).stdout.toString('utf8').split('\n').filter(Boolean).length;
-    }
+    // The secret was typed after the start, so only commits made since then can hold it; each is searched once.
+    const tips = [(await env.view()).tip, await syncTip(env.ctx), await stateTip(env.ctx, 'linear'), await stateTip(env.ctx, 'ids'), await stateTip(env.ctx, 'uploads')];
+    const commits = new Set<string>();
+    for (const tip of tips) for (const commit of await newCommits(git, tip, startTips(env.ctx))) commits.add(commit);
+    for (const commit of commits) count += (await git.run(['grep', '-c', '-F', secret, commit], { okCodes: [0, 1] })).stdout.toString('utf8').split('\n').filter(Boolean).length;
     for (const pr of (await env.ctx.live?.rest.pullRequests(`t/${env.ctx.names.runId}/`)) ?? []) if (`${pr.title}\n${pr.body ?? ''}`.includes(secret)) count += 1;
     for (const result of env.ctx.engine.results) if (`${result.stdout}${result.stderr}${result.summary}`.includes(secret)) count += 1;
     return count;
@@ -1271,7 +1299,7 @@ function setupChecksOf(report: Record<string, unknown> | null | undefined): Setu
 
 function beforeId(ctx: RunContext, path: string): string | undefined {
   const before = ctx.observations.get(BEFORE_VIEW) as View | undefined;
-  return before?.ids.get(path)?.id ?? (ctx.observations.get('start.ids') as Map<string, { id: string }> | undefined)?.get(path)?.id;
+  return before?.ids.get(path)?.id;
 }
 
 async function editsOnSide(env: Env, from: 'git' | 'linear', side: 'git' | 'linear'): Promise<number> {

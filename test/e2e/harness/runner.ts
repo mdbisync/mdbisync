@@ -22,7 +22,7 @@ import { CorpusMissingError, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
 import { prepareFixtures, UNSAFE_TITLES } from './fixtures.ts';
-import { BEFORE_VIEW, needsBeforeView, takeView } from './subjects.ts';
+import { BEFORE_VIEW, takeStartView } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
 
 export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
@@ -172,8 +172,7 @@ async function recordStart(ctx: RunContext, live: LiveWorld): Promise<void> {
   ctx.observations.set('start.refs', await snapshotRefs(ctx));
   ctx.observations.set('start.trackedTip', (await live.sandbox.runRefs()).find((ref) => ref.ref === `refs/heads/${ctx.names.trackedBranch}`)?.oid);
   ctx.observations.set('start.pullRequests', (await live.rest.pullRequests(ctx.names.syncBranch)).map((pr) => pr.number));
-  const before = needsBeforeView(ctx);
-  if (before.needed) ctx.observations.set(BEFORE_VIEW, await takeView(ctx, before.comments));
+  ctx.observations.set(BEFORE_VIEW, await takeStartView(ctx));
 }
 
 /** Documents in Linear whose titles are the slice's paths, as editor-a: the start of Linear → git scenarios. */

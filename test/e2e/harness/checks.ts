@@ -116,7 +116,8 @@ export async function fetchRef(git: Git, ref: string): Promise<string | null> {
   }
 }
 
-export async function readSides(ctx: RunContext): Promise<Sides> {
+/** Reads both sides; without `allowNoIds`, a run with no ids state ref is a product error. */
+export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean } = {}): Promise<Sides> {
   const world = ctx.live;
   if (world === null) throw new Error('offline scenarios have no sides');
   const git = await ctx.person();
@@ -124,7 +125,7 @@ export async function readSides(ctx: RunContext): Promise<Sides> {
   const config = resolveStateConfig({ trackedBranch: ctx.names.trackedBranch, syncBranch: ctx.names.syncBranch, refPrefix: ctx.names.refPrefix });
   const idsCommit = await fetchRef(git, stateRef(config, 'ids'));
   const uploadsCommit = await fetchRef(git, stateRef(config, 'uploads'));
-  if (idsCommit === null) throw new ProductError('the run has no ids state ref');
+  if (idsCommit === null && options.allowNoIds !== true) throw new ProductError('the run has no ids state ref');
   const ids = await readIds(git, idsCommit);
   const uploadsByHash = await readUploads(git, uploadsCommit);
 
@@ -375,6 +376,9 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
 export { resolveSubject };
 
 export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
+  // The scenario's own runs and requests end here; I6's extra run is the check's, not the scenario's.
+  ctx.observations.set('scenario.runsEnd', ctx.engine.results.length);
+  ctx.observations.set('scenario.proxyEnd', ctx.proxy?.requests.length ?? 0);
   let cached: Promise<Sides> | undefined;
   const sides = () => (cached ??= readSides(ctx));
   const outcomes: CheckOutcome[] = [];
