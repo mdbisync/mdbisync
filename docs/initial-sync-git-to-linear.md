@@ -62,15 +62,17 @@ action. Every input of the action, and what it means for this run:
 | `github-api-url` | empty | GitHub's REST API URL; leave it empty. |
 | `repository` | empty | The repository as `owner/name`; empty means the workflow's own. |
 | `tracked-branch` | `main` | The branch whose files Linear is made equal to. |
-| `sync-branch` | `mdbisync/linear` | Not used by this direction; the sync opens its pull request from it later. |
+| `sync-branch` | `mdbisync/linear` | A confirmed run checks it for an initial sync from Linear that waits to be merged ([a run that stops](#a-run-that-stops)); the sync opens its pull request from it later. |
 | `state-ref-prefix` | `refs/mdbisync` | Where the run records the state refs `ids`, `linear` and `uploads`. |
 | `document-cap` | `1000` | Documents a Linear team or project may hold, trash included ([capacity](#container-document-capacity)). |
 | `merge-grace-seconds` | `60` | Not used by the initial sync. |
 | `report-file` | empty | A path for the run's report as JSON ([the report](#the-report-file)). |
 | `security-step` | empty | `stage` or `apply` in the template's two steps. From git there is nothing for the security hooks to check, so the stage step stages nothing. |
 
-On the command line each input is an environment variable:
-`MDBISYNC_DIRECTION`, `MDBISYNC_CONFIRM`, `MDBISYNC_DOCUMENT_CAP`, and so on.
+On the command line the operation is the subcommand (`mdbisync
+initial-sync`), and the other inputs are environment variables:
+`MDBISYNC_DIRECTION`, `MDBISYNC_CONFIRM`, `MDBISYNC_DOCUMENT_CAP`, and so
+on. `cleanup-tokens` and `security-step` exist only in the action.
 
 ## How files and documents are matched
 
@@ -83,15 +85,17 @@ are ignored.
 
 - When several live documents share a title, the oldest is the match and the
   others go to trash.
-- A document that names a file the run leaves out stays as it is: it is
-  neither overwritten nor trashed.
+- The oldest live document that names a file the run leaves out stays as
+  it is: it is neither overwritten nor trashed. Newer documents with the
+  same title go to trash.
 
 ## Step 1: dry run
 
 Run the initial sync workflow from the Actions tab with `direction:
 git-to-linear` and **confirm** unchecked. It reads the tracked branch and
 Linear, uploads and writes nothing, and exits with code 0 (code 3 when the
-setup check fails). Its job summary, headed **Initial sync from git to
+setup check fails, code 2 when an input is missing or wrong, code 5 when
+Linear's rate limit stops it while it reads). Its job summary, headed **Initial sync from git to
 Linear: dry run**, starts with the setup check
 ([usage.md](usage.md#setup-check)), counts what a confirmed run would do,
 and lists it by path, never with document content:
@@ -141,7 +145,9 @@ A Linear team or project holds at most `document-cap` documents (1,000 by
 default). Live, trashed and archived documents all count, and moving a
 document to trash frees no space. The table **Container document capacity**
 appears from 90%. When the planned new documents would pass the cap, a
-confirmed run stops before any upload or write with `container-cap`
+confirmed run stops before any upload or write with `container-cap` and
+exit code 5. Running it again fails the same way until a person makes room
+or raises the cap
 ([troubleshooting.md](troubleshooting.md#container-cap)).
 
 ## Step 2: confirmed run
@@ -165,12 +171,11 @@ What it writes to Linear:
 
 What it records in git, under `state-ref-prefix`:
 
-- `ids`, which document each file is, pushed every 25 documents while the
-  run writes;
+- `ids`, which document each file is, and `uploads`, the Linear address of
+  each uploaded file, pushed every 25 documents while the run writes;
 - `linear`, one commit on top of the tracked branch holding each
-  synchronized file as Linear stored it, and `uploads`, the Linear address of
-  each uploaded file. Both are pushed once, when the run has written
-  everything.
+  synchronized file as Linear stored it, pushed once, when the run has
+  written everything.
 
 Nothing is pushed to the tracked branch. When Linear stores a file in a
 different form than the tracked branch, the summary counts those files and
@@ -212,8 +217,9 @@ by the GitHub App token's one-hour lifetime, ends one. When Linear fails or
 rejects a write, the run writes the rest but trashes nothing
 (`write-failed`). A state ref that another run moves under it ends it too
 (`state-moved`). Such a run exits with code 5 (a run the time limit ends
-just stops), keeps the documents it wrote in `ids`, and does not record
-`linear`.
+just stops) and does not record `linear`. The documents it wrote are in
+`ids` up to its last push; after `state-moved` or a cancelled job, the
+next run finds the rest by their titles.
 
 Run it again with the same inputs, after the reset time in the summary when
 it was rate limited. It plans again, skips the documents an earlier run
@@ -224,8 +230,10 @@ Until then every sync run writes nothing and stops with
 
 The other ends and what to do about each are in
 [troubleshooting.md](troubleshooting.md#initial-sync). A confirmed run also
-waits, with `initial-pull-request-pending` and exit code 4, while a pull
-request of an initial sync from Linear is open: merge or close it first
+waits, with `initial-pull-request-pending` and exit code 4, while the sync
+branch holds an initial sync from Linear that is not merged: merge its pull
+request, or close it **and delete its branch** (`mdbisync/linear` by
+default), first. Closing the pull request alone is not enough
 ([starting over](initial-sync-linear-to-git.md#starting-over-instead-of-merging)).
 
 ## After the initial sync
