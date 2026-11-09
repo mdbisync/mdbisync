@@ -5,7 +5,8 @@ the checks every run makes, the workflows, both directions of the initial
 sync, the sync pull request, and how to pin a release. The setup steps (the
 Linear OAuth app, the GitHub App, the secrets and the workflows) are on
 [mdbisync.com](https://mdbisync.com/#setup). How Markdown is kept in
-Linear's form is in [linear-format.md](linear-format.md).
+Linear's form is in [linear-format.md](linear-format.md), and conflicts, when
+both sides change one document, in [conflicts.md](conflicts.md).
 
 ## Generate repository files
 

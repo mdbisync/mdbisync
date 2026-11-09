@@ -65,7 +65,8 @@ What both commands leave alone:
   spaces.
 - **The sync's conflict markers.** A conflict the sync writes is ordinary
   bold paragraphs (`**Sync conflict: git version**` and so on) and passes
-  both commands unchanged. Git's own conflict markers do not: see
+  both commands unchanged ([conflicts](conflicts.md) shows them and how to
+  resolve them). Git's own conflict markers do not: see
   [`git-conflict-marker`](#git-conflict-marker).
 - **Constructs Linear keeps as they are**, though it may show some as plain
   text: raw HTML without URLs, HTML comments, `<details>`, `<u>`, `<sub>`,
