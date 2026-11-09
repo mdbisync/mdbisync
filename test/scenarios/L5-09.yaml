@@ -40,6 +40,41 @@
       "kind": "run",
       "action": "settle",
       "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "write-error",
+      "args": {
+        "variants": [
+          "reset-after-apply-on-update",
+          "reset-after-apply-on-create"
+        ]
+      }
+    },
+    {
+      "kind": "git",
+      "action": "edit",
+      "args": {}
+    },
+    {
+      "kind": "git",
+      "action": "add",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "clear",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {}
     }
   ],
   "checks": {
@@ -77,6 +112,14 @@
         "subject": "runs.0.failedWriteRecorded",
         "operator": "equal",
         "expected": false
+      },
+      {
+        "subject": "proxy.lostAnswers",
+        "operator": "contains-all",
+        "expected": [
+          "create",
+          "update"
+        ]
       }
     ]
   }

@@ -30,8 +30,9 @@ import { burst, realClock, soak, type LoadDriver } from './load.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { HARNESS, personCommit } from './sandbox.ts';
 import type { Step } from './spec.ts';
+import { writeError } from './fault-proxy.ts';
 import {
-  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readWorking, resolveDestination, setTarget, sibling, targetPath,
+  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import { jobSpans, maxOverlap, runResult, SCHEDULE_BLOCKED, waitForRun } from './workflows.ts';
 
@@ -1000,7 +1001,7 @@ const LINEAR: Record<string, Executor> = {
         // A run project that no folder names; cleanup deletes it with the run's projects.
         const team = [...world.teams.values()][0];
         if (team === undefined) throw new EnvBlockedError('the test workspace has no team');
-        const unmapped = await world.world.createProject(ctx.names.project(8), [team.id]);
+        const unmapped = await world.world.createProject(ctx.names.helperProject('unmapped'), [team.id]);
         world.projects.set('UNMAPPED', unmapped);
         await editor.updateDocument(id, { projectId: unmapped.id });
       } else if (variant === 'trash') {
@@ -1141,15 +1142,20 @@ const FAULT: Record<string, Executor> = {
   },
   'fault.write-error': async (ctx, args) => {
     const variants = Array.isArray(args.variants) ? (args.variants as string[]) : ['server-error'];
-    http(ctx).setFaults(variants.map((variant) => ({ kind: 'write-error' as const, variant: variant === 'reset' || variant === 'connection-reset' ? 'reset' as const : 'server-error' as const, times: 1 })));
+    http(ctx).setFaults(variants.map((variant) => writeError(variant)));
   },
   'fault.budget-headers': async (ctx, args) => {
     http(ctx).setFaults([{ kind: 'budget-headers', remaining: typeof args.remaining === 'number' ? args.remaining : 10, includeEndpointLimits: args.includeEndpointLimits === true }]);
   },
   'fault.reject-document': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
-    // The engine has not created the document yet: reject it by its title.
-    http(ctx).setFaults([{ kind: 'reject-document', target: path.replace(/\.md$/, '').split('/').pop() as string }]);
+    // A create names the document by its title; an update of an existing one may carry only its id.
+    const id = (await readRunIds(ctx))?.get(path)?.id;
+    if (id === undefined && ['converged', 'conflicted'].includes(ctx.scenario.setup.state)) {
+      throw new ProductError('the engine recorded no id for the document to reject, though the run started converged');
+    }
+    const name = path.replace(/\.md$/, '').split('/').pop() as string;
+    http(ctx).setFaults([{ kind: 'reject-document', ids: id === undefined ? [] : [id], titles: [name] }]);
   },
   'fault.upload-error': async (ctx) => {
     http(ctx).setFaults([{ kind: 'upload-error', times: 1 }]);

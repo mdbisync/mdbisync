@@ -10,6 +10,7 @@ import {
   type ReverseResult,
   confirmInitialSync,
   confirmLinearToGit,
+  documentLinks,
   planFromRepository,
   planLinearToGitFromRepository,
   renderConfirmed,
@@ -50,7 +51,9 @@ export async function runOperation(
 
   const gitToLinear = async (context: RunContext, confirm: boolean) => {
     if (confirm) {
-      const run = await confirmInitialSync(context, { config: inputs.state, transforms: [uploadsTransform({ config: inputs.state })] });
+      // Uploads rewrite links to files that are not Markdown; document links, links to synchronized documents.
+      const transforms = [uploadsTransform({ config: inputs.state }), documentLinks()];
+      const run = await confirmInitialSync(context, { config: inputs.state, transforms });
       plan = toPlanReport(run.plan, 'git-to-linear', true);
       confirmed = run.result;
       workSummary = renderConfirmed(run.plan, run.result);

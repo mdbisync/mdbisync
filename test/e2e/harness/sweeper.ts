@@ -5,7 +5,7 @@
 // hours and the run is not live. It never touches a live run, and it only
 // ever matches names of the run patterns, so it is safe to run at any time.
 
-import { RUN_ID_PATTERN } from './isolation.ts';
+import { RUN_ID_PATTERN, runNames } from './isolation.ts';
 import type { LinearWorld } from './linear-world.ts';
 import { deadLocalRuns, forgetRun, liveRuns } from './locks.ts';
 import type { SandboxRest } from './github.ts';
@@ -25,7 +25,7 @@ export interface SweepReport {
   removedRefs: string[];
   closedPullRequests: number[];
   deletedProjects: string[];
-  trashedDocuments: number;
+  archivedDocuments: number;
   keptLive: string[];
   errors: string[];
 }
@@ -39,7 +39,7 @@ export function shouldSweep(runId: string, createdAt: number | null, now: number
 export async function sweep(targets: SweepTargets, stateDir: string, now = Date.now()): Promise<SweepReport> {
   const live = liveRuns(stateDir, now);
   const dead = deadLocalRuns(stateDir, now);
-  const report: SweepReport = { removedRefs: [], closedPullRequests: [], deletedProjects: [], trashedDocuments: 0, keptLive: [...live].sort(), errors: [] };
+  const report: SweepReport = { removedRefs: [], closedPullRequests: [], deletedProjects: [], archivedDocuments: 0, keptLive: [...live].sort(), errors: [] };
   const attempt = async (what: string, action: () => Promise<void>) => {
     try {
       await action();
@@ -85,12 +85,17 @@ export async function sweep(targets: SweepTargets, stateDir: string, now = Date.
     }
   });
 
+  // Leftover team-zone documents are archived through a run project, never trashed: trashed documents count
+  // against a team zone's cap and cannot be purged.
   for (const teamId of targets.teamIds) {
     await attempt('team-zone documents', async () => {
+      const byRun = new Map<string, Awaited<ReturnType<typeof targets.world.runTeamDocuments>>>();
       for (const document of await targets.world.runTeamDocuments(teamId)) {
         if (!shouldSweep(document.runId, Date.parse(document.createdAt), now, live, dead)) continue;
-        await targets.world.trashRunDocument(document, document.runId);
-        report.trashedDocuments += 1;
+        byRun.set(document.runId, [...(byRun.get(document.runId) ?? []), document]);
+      }
+      for (const [runId, documents] of byRun) {
+        report.archivedDocuments += await targets.world.archiveRunTeamDocuments(documents, runId, runNames(runId).helperProject('archive'));
       }
     });
   }
