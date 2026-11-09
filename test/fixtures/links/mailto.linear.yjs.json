@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"Write to ","marks":{"attribution":"user"}},{"text":"the help desk","marks":{"attribution":"user","link":{"href":"mailto:help@example.com","noEmbed":null}}},{"text":" or ","marks":{"attribution":"user"}},{"text":"help@example.com","marks":{"attribution":"user","link":{"href":"mailto:help@example.com","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-fb512874","marks":{"attribution":"user"}}]}
-  ]
-}

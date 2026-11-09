@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"The ","marks":{"attribution":"user"}},{"text":"inventory","marks":{"attribution":"user","link":{"href":"../assets/inventory.csv","noEmbed":null}}},{"text":" is attached.","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-b113b8d7","marks":{"attribution":"user"}}]}
-  ]
-}

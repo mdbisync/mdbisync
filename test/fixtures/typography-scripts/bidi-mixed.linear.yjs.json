@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"Version 2 מוכן and التقرير 3.1 ready.","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-6460e61a","marks":{"attribution":"user"}}]}
-  ]
-}

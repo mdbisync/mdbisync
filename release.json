@@ -1,0 +1,17 @@
+{
+  "version": "v0.1.0-rc.3",
+  "source": "a2fdf5b6af80b90c6dd5b9f3d14358d79edc94ff",
+  "files": {
+    "action.yml": "181d5093ad75e4bd83465f783c7cd1b274cd86dc67f03ea3ffe382e9efb8b910",
+    ".pre-commit-hooks.yaml": "dbb790a7b1470d2b09a49587ff7741112b7120865e5226df3faca8ecc74bd60b",
+    "LICENSE": "a22e32a5583635ee055372e5ab613c3c15845f1c0ff79668bd1fd5068b23f6af",
+    "README.md": "37dabb0b0037b047a7208727d61684a84b479a45a3acaaa2204da11d3731b58b",
+    "dist/THIRD_PARTY_NOTICES.txt": "c952410014cf50a6dc2809ac4964cdb1746de097e17ca49228cd08d099721150",
+    "dist/action-main.js.LEGAL.txt": "da2a4ed932064e8eace052f31df1c34d8222a9241a38f8cbb97536a04a9936d9",
+    "dist/action-post.js.LEGAL.txt": "da2a4ed932064e8eace052f31df1c34d8222a9241a38f8cbb97536a04a9936d9",
+    "dist/action-main.js": "1ec88b6819ee3d3cd7cef58b9b0bc226d0a67bbdec60f00c6ddb7c674b159381",
+    "dist/action-post.js": "b50573ba3301518800ec02dcd87ddd333e30a7fcd0c1af772eeb71ac4bf9fc3b",
+    "dist/cli.js": "cfcc1c28be7e872a14258af14362680ab886af1b1987fbd997c2be49db60ef29",
+    "package.json": "e008c58d82452b9e3f61221f74866eb5a53f91fc9ca3af3a969654eb7a26029a"
+  }
+}
