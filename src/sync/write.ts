@@ -179,10 +179,14 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
 
   const creates = merge.changes.filter((change): change is CreateChange => change.kind === 'create');
   let adoptable = new Map<string, LinearDocument>();
+  /** Reserved ids that a document in Linear already has (archived, trashed or retitled since): Linear refuses to create a second one. */
+  const taken = new Set<string>();
   /** Why the documents to adopt could not be listed: creating would risk a duplicate, so no new document is created. */
   let unlisted: LinearError | undefined;
   try {
     adoptable = await adoptableDocuments(creates);
+    const saved = [...new Set(creates.flatMap((change) => (adoptable.has(change.path) ? [] : (reserved.get(change.path) ?? []))))];
+    if (saved.length > 0) for (const document of await linear.getDocuments(saved, { withContent: false })) taken.add(document.id);
   } catch (error) {
     if (error instanceof LinearStoppedError) {
       // Stopped before any write or upload: nothing to record, and the next run starts again.
@@ -197,8 +201,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const documentIds = new Map<string, string>();
   for (const [path, entry] of ids) documentIds.set(path, entry.id);
   for (const change of merge.changes) if (change.kind === 'keep') documentIds.set(change.to, change.id);
-  // A new document left out by an earlier run keeps the id it was given, since other documents may link to it.
-  for (const change of creates) documentIds.set(change.path, adoptable.get(change.path)?.id ?? reserved.get(change.path) ?? newId());
+  // A new document gets its id before any write, so documents written in this run can link to it. A new document an
+  // earlier run did not create (left out, failed, refused or stopped) keeps the id reserved for it then, since documents
+  // written then may link to it; an id Linear already gives another document is not reused.
+  for (const change of creates) {
+    const saved = reserved.get(change.path);
+    documentIds.set(change.path, adoptable.get(change.path)?.id ?? (saved !== undefined && !taken.has(saved) ? saved : newId()));
+  }
 
   /** What Linear stores now for each path whose document this run wrote. */
   const stored = new Map<string, string>();
@@ -210,8 +219,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     nextIds.delete(change.from);
     documentIds.set(change.to, change.id);
   }
-  // Reserved ids of files still in the tree; a file that is gone frees its id.
+  // Reserved ids of files still in the tree; a file that is gone frees its id. Every new document this run creates is
+  // reserved until its id is in the map, so each ids push, also one in the middle of the run, keeps the ids the written
+  // documents may link to. An adopted document is not reserved: its id is not ours to create with.
   const nextReserved = new Map([...reserved].filter(([path]) => resultFiles.has(path)));
+  for (const change of creates) if (!adoptable.has(change.path)) nextReserved.set(change.path, documentIds.get(change.path) as string);
   /** Paths of the merge result whose changes were not made: the record keeps the `linear` tip's version. */
   const notDone: DocumentChange[] = [];
   // The tip's side only computes what Linear should hold: it never uploads. It reads the cache as the run found it,
@@ -266,7 +278,6 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         } catch (error) {
           if (error instanceof LeaveOutError) {
             result.leftOutAtWrite.push(error.files.length > 0 ? { path, rule: error.rule, files: [...error.files] } : { path, rule: error.rule });
-            if (change.kind === 'create') nextReserved.set(path, documentIds.get(path) as string);
             notDone.push(change);
             continue;
           }
@@ -368,7 +379,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       const oldestFirst = [...listed].sort((a, b) => compare(a.createdAt, b.createdAt) || compare(a.id, b.id));
       for (const path of paths) {
         const title = (merge.result.get(path) as SideFile).title.normalize('NFC');
-        const document = oldestFirst.find((candidate) => !mapped.has(candidate.id) && candidate.title.normalize('NFC') === title);
+        const fits = (candidate: LinearDocument) => !mapped.has(candidate.id) && candidate.title.normalize('NFC') === title;
+        // The document with the reserved id first: an earlier run created it and lost the answer, and documents may link to it.
+        const document = oldestFirst.find((candidate) => candidate.id === reserved.get(path) && fits(candidate)) ?? oldestFirst.find(fits);
         if (document !== undefined) {
           mapped.add(document.id);
           found.set(path, document);
@@ -612,9 +625,6 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const parents = merged ? [linearTip as Oid, tracked] : [linearTip as Oid];
     const message = merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE;
     const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: true });
-    // A new document this run did not create (its create failed or was refused, the listing for adoption failed, or the
-    // run stopped first) keeps the id it was given: documents written in this run may already link to it.
-    for (const change of notDone) if (change.kind === 'create') nextReserved.set(change.path, documentIds.get(change.path) as string);
     for (const path of nextIds.keys()) nextReserved.delete(path);
     const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved });
     const uploadsCommit = expected.uploads === null && uploads.size === 0 ? null : await commitUploads(git, expected.uploads, uploads, identity);

@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
@@ -64,6 +64,8 @@ interface Faults {
    * (the answer is lost).
    */
   writeError?: 'server-error' | 'reset-before' | 'reset-after';
+  /** Only this write operation gets `writeError`; any document write when absent. */
+  writeErrorOn?: 'CreateDocument' | 'UpdateDocument';
   /** Refuse every write of this document id, as Linear does with an input it will not take. */
   rejectId?: string;
 }
@@ -89,7 +91,7 @@ function faultyFetch(world: FakeWorld) {
     const position = state.count - state.armedAt;
     const { operationName, variables } = JSON.parse(String(init?.body)) as { operationName: string; variables: Record<string, unknown> };
     const log = (status: Exchange['status'], injected: boolean) => state.exchanges.push({ operation: operationName, status, injected });
-    const { http, budget, writeError, rejectId } = state.faults;
+    const { http, budget, writeError, writeErrorOn, rejectId } = state.faults;
     const isWrite = operationName === 'CreateDocument' || operationName === 'UpdateDocument';
 
     if (http !== undefined && position >= http.at && http.times > 0) {
@@ -100,7 +102,7 @@ function faultyFetch(world: FakeWorld) {
       const code = http.status === 429 ? 'RATELIMITED' : 'INTERNAL_SERVER_ERROR';
       return new Response(JSON.stringify({ errors: [{ message: 'injected', extensions: { code } }] }), { status: http.status, headers });
     }
-    if (isWrite && writeError !== undefined) {
+    if (isWrite && writeError !== undefined && (writeErrorOn === undefined || writeErrorOn === operationName)) {
       delete state.faults.writeError;
       if (writeError === 'server-error') {
         log(500, true);
@@ -225,6 +227,14 @@ describe('sync: rate limits and transport faults', () => {
   const body = (text: string) => text.slice(text.indexOf('# '));
   const withNewPage = () => world.linear.documents.filter((d) => d.trashed !== true && d.content?.includes('A new page.') === true);
 
+  /** A body as Linear holds it: each relative link to a synchronized file becomes the URL of that file's document. */
+  function linearForm(path: string, text: string, map: Record<string, { id: string }>): string {
+    return text.replace(/\]\(([^()<>\s#]+\.md)(#[^()\s]*)?\)/g, (link, target: string, fragment: string | undefined) => {
+      const id = map[posix.join(posix.dirname(path), target)]?.id;
+      return id === undefined ? link : `](<https://linear.app/${world.linear.urlKey}/document/${id}${fragment ?? ''}>)`;
+    });
+  }
+
   /** I1, I7, I8: every mapped document holds its file's body; one live document per title in a place. */
   async function assertConverged() {
     const map = await ids();
@@ -232,8 +242,7 @@ describe('sync: rate limits and transport faults', () => {
     for (const [path, entry] of Object.entries(map)) {
       const document = world.linear.documents.find((d) => d.id === entry.id);
       assert.ok(document !== undefined && document.trashed !== true, `${path}: no live document`);
-      const text = await show(`${tracked}:${path}`);
-      if (!text.includes('.md)')) assert.equal(document.content, body(text), `${path}: content`);
+      assert.equal(document.content, linearForm(path, body(await show(`${tracked}:${path}`)), map), `${path}: content`);
     }
     const live = world.linear.documents.filter((d) => d.trashed !== true);
     const keys = live.map((d) => `${d.projectId ?? d.teamId}/${d.title}`);
@@ -519,10 +528,10 @@ describe('sync: rate limits and transport faults', () => {
 
   for (const [fault, arm] of [
     ['the adoption listing fails', async () => transport.arm({ http: { at: await firstAfterSetup(), status: 500, times: 1 } })],
-    ['the create fails', async () => transport.arm({ writeError: 'server-error' })],
+    ['the create fails', async () => transport.arm({ writeError: 'server-error', writeErrorOn: 'CreateDocument' })],
+    ["the create's answer is lost after Linear applied it", async () => transport.arm({ writeError: 'reset-after', writeErrorOn: 'CreateDocument' })],
   ] as const) {
     it(`when ${fault}, an edit that links to the new document keeps a link that the next run's document answers`, async () => {
-      // `new.md` sorts before `part-00.md`, so its create comes first and the edit that links to it after.
       await editAll(0, '', {
         [pathOf(0)]: textOf(0, 'See [the new page](new.md).'),
         'combined/new.md': `# New\n\nA new page. ${CANARY}\n`,
@@ -542,6 +551,46 @@ describe('sync: rate limits and transport faults', () => {
       assert.equal(withNewPage().length, 1);
     });
   }
+
+  /** Run 1: the create of `new.md` lands in Linear but its answer is lost, while `part-00.md` is written with a link to it. */
+  async function createWithLostAnswer(): Promise<string> {
+    await editAll(0, '', {
+      [pathOf(0)]: textOf(0, 'See [the new page](new.md).'),
+      'combined/new.md': `# New\n\nA new page. ${CANARY}\n`,
+    });
+    transport.arm({ writeError: 'reset-after', writeErrorOn: 'CreateDocument' });
+    assertPartial(await sync());
+    transport.clear();
+    const [created] = withNewPage();
+    assert.ok(created !== undefined);
+    assert.deepEqual(await linkedIds(pathOf(0)), [created.id]);
+    return created.id;
+  }
+
+  it('adoption prefers the document with the reserved id over an older one with the same title', async () => {
+    const created = await createWithLostAnswer();
+    const original = world.linear.documents.find((d) => d.id === created) as (typeof world.linear.documents)[number];
+    world.linear.documents.push({ ...original, id: 'older-same-title', content: 'An older page.', createdAt: '2025-01-01T00:00:00.000Z' });
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.deepEqual(next.report.sync?.adopted, ['combined/new.md']);
+    assert.equal(await idOf('combined/new.md'), created, 'the document the link names is adopted');
+    assert.deepEqual(await linkedIds(pathOf(0)), [created]);
+  });
+
+  it('a reserved id that Linear already gives a trashed document is not used again; the run is not stuck', async () => {
+    const created = await createWithLostAnswer();
+    (world.linear.documents.find((d) => d.id === created) as { trashed?: boolean }).trashed = true;
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.equal(next.report.complete, true);
+    const id = await idOf('combined/new.md');
+    assert.notEqual(id, created, 'a new id, since Linear refuses a second document with the trashed one');
+    assert.equal(withNewPage().length, 1);
+    // Known limit: the document written in the first run keeps its link to the trashed document. Rewriting it needs
+    // the sync to tell a link it wrote from a person's edit, which it cannot yet.
+    assert.deepEqual(await linkedIds(pathOf(0)), [created]);
+  });
 
   it('a 500 on the read before writing leaves the batch unwritten and unrecorded; the next run converges', async () => {
     await editAll(3, 'Second text.');
