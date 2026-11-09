@@ -4,13 +4,16 @@
 // Optional: LINEAR_TEST_TEAM_KEY (default: the first team),
 // LINEAR_BASE_URL (a proxy in front of Linear), LINEAR_CONTRACT_REPORT (a
 // path for the JSON report of requests per operation),
-// LINEAR_CONTRACT_PAUSE_MS (the pause before the one permitted delayed
-// trash read or cleanup verification, default 2000). Trash must be confirmed
+// LINEAR_CONTRACT_PAUSE_MS (the pause before the delayed trash read and
+// between cleanup verification reads, default 2000). Trash must be confirmed
 // by at most two reads with one pause; a stale/absent final read fails.
+// Cleanup archival gets at most 16 reads with 15 pauses (30 seconds by
+// default, plus request time); every document must be archived and not
+// trashed. All samples are reported, and project deletion is never repeated.
 //
 // Everything written is neutral work text in two short-lived projects, which
 // are removed at the end; their documents end archived, never in the
-// trash. About 30 API requests per run.
+// trash. About 30 API requests per run, up to 15 more for delayed archival.
 
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -110,7 +113,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     let cleanup: CleanupResult | undefined;
     if (linear) {
       const documentIds = [first, second].filter((document) => document !== undefined).map((document) => document.id);
-      cleanup = await cleanUpOwned(linear, { projectIds, documentIds, trashed }, { pauseMs });
+      cleanup = await cleanUpOwned(linear, { projectIds, documentIds, trashed }, { pauseMs, requests });
       cleanupErrors.push(...cleanup.errors);
     }
     if (token) {
@@ -138,6 +141,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
       restoredInCleanup: cleanup?.restored ?? [],
       unconfirmedRestoreFailures: (cleanup?.unconfirmedRestoreFailures ?? []).map(describeCleanup),
       finalDocuments: cleanup?.final ?? [],
+      archivalVerification: cleanup?.archivalVerification,
       ...(trashRead ? { trashRead } : {}),
     };
     console.log(JSON.stringify(report, null, 2));
