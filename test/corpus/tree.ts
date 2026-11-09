@@ -25,6 +25,9 @@ export const ENG_PROJECTS = [
   { folder: "eng/mobile app", placeholder: "PROJECT_ENG_2" },
   { folder: "eng/data.pipeline", placeholder: "PROJECT_ENG_3" },
   { folder: "eng/search (beta)", placeholder: "PROJECT_ENG_4" },
+  // Large areas are projects so that no container in Linear grows past its document cap.
+  { folder: "eng/edge-cases", placeholder: "PROJECT_ENG_5" },
+  { folder: "eng/localization", placeholder: "PROJECT_ENG_6" },
 ];
 export const DOCS_PROJECTS = [
   { folder: "docs/handbook", placeholder: "PROJECT_DOCS_1" },
@@ -38,11 +41,13 @@ export const COMBINED = { folder: "support", placeholder: "PROJECT_COMBINED", te
 export const BANK_HOME = "docs/reference";
 /** Files above every annotation. */
 export const LOOSE = "workspace";
-/** The team-zone area for edge cases. */
+/** The project for edge cases. */
 export const EDGE = "eng/edge-cases";
+/** Edge cases whose titles depend on the team zone: long titles and duplicate titles. */
+export const EDGE_ZONE = "eng/edge-cases (team zone)";
 /** Team-zone folder for the duplicate-title pairs. */
-export const COLLISIONS = `${EDGE}/collisions`;
-/** Team-zone area with documents in other languages and scripts. */
+export const COLLISIONS = `${EDGE_ZONE}/collisions`;
+/** The project with documents in other languages and scripts. */
 export const LOCALIZATION = "eng/localization";
 
 const PROJECT_FOLDERS = new Set([...ENG_PROJECTS, ...DOCS_PROJECTS].map((p) => p.folder));
@@ -75,7 +80,8 @@ function teamReadme(team: "eng" | "docs"): string {
       "",
       areaTable("eng/"),
       `| localization | Translations, glossaries and style notes for every language the driver app speaks. |`,
-      "| edge-cases | Formatting samples and unusual files: very long titles, large documents, odd file names and constructs that do not render everywhere. |",
+      "| edge-cases | Formatting samples and unusual files: large documents, odd file names and constructs that do not render everywhere. |",
+      "| edge-cases (team zone) | Edge cases about titles in the team zone: very long titles and names that collide. |",
       "",
       "## How we write",
       "",
@@ -101,6 +107,12 @@ function projectReadme(folder: string): string {
   if (folder === BANK_HOME) {
     return "# Markdown reference\n\nOne small page per Markdown construct: headings, lists, tables, code, links, images and more. Use it to check how a construct looks before you use it in a real document.\n";
   }
+  if (folder === EDGE) {
+    return "# Edge cases\n\nFormatting samples and unusual files: large documents, odd file names, construct combinations, lint errors and constructs that do not render everywhere. They live here, away from the everyday documents.\n";
+  }
+  if (folder === LOCALIZATION) {
+    return "# Localization\n\nTranslations, glossaries and style notes for every language the driver app speaks, one folder per language.\n";
+  }
   if (!profile) throw new Error(`no profile for ${folder}`);
   return [`# ${profile.name}`, "", profile.about, "", ...(profile.topics.length > 0 ? ["## Current work", "", ...profile.topics.map((tp) => `* **${tp.title}.** ${tp.summary}`), ""] : [])].join("\n");
 }
@@ -122,7 +134,7 @@ function rootReadme(links: string[]): string {
     `| ${link("support", `${COMBINED.folder}/README.md`)} | Documentation | The help center for customers and partners |`,
     `| ${LOOSE} | Everyone | Scripts, data exports and personal notes that are not published |`,
     "",
-    "Unusual files used to check formatting live in `eng/edge-cases`, away from the everyday documents.",
+    "Unusual files used to check formatting live in `eng/edge-cases` and `eng/edge-cases (team zone)`, away from the everyday documents.",
     "",
   ].join("\n");
 }

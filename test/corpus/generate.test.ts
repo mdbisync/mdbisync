@@ -15,7 +15,7 @@ import { CONTENT_LIMIT, gitattributes, SHARED_IMAGE_USERS } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
 import { fixText, lintText } from "../../src/format/index.ts";
-import { COLLISIONS, EDGE, LOOSE, preCommitConfig } from "./tree.ts";
+import { COLLISIONS, EDGE, EDGE_ZONE, LOOSE, preCommitConfig } from "./tree.ts";
 
 // The default corpus, built once for the tests that only read it.
 let defaultCorpus: ReturnType<typeof buildCorpus> | undefined;
@@ -316,7 +316,7 @@ test("the linter flags exactly the documents the manifest classes as lint errors
 test("edge cases stay in the edge-case area and the Markdown reference, away from the everyday documents", () => {
   const edgeGroups = new Set(["pairwise", "size-spectrum", "conflict-markers", "lint-errors"]);
   for (const file of corpus().files) {
-    if (file.kind !== "markdown" || [`${EDGE}/`, "docs/reference/", `${LOOSE}/`].some((p) => file.path.startsWith(p))) continue;
+    if (file.kind !== "markdown" || [`${EDGE}/`, `${EDGE_ZONE}/`, "docs/reference/", `${LOOSE}/`].some((p) => file.path.startsWith(p))) continue;
     assert.ok(!edgeGroups.has(file.group), `${file.path} (${file.group}) belongs in ${EDGE}`);
     assert.notEqual(file.expected, "lint-error", `${file.path} is a lint error outside ${EDGE}`);
   }

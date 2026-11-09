@@ -13,7 +13,7 @@ import { COMPANY, CUSTOMERS, DEPOTS, PEOPLE, PROFILES, SERVICES, TOPIC_KINDS, ty
 import { CONTENT_LIMIT, destination, idLine, markdownFile, relativeLink, type Canaries, type CorpusFile, type Group } from "./model.ts";
 import type { Rng } from "./rng.ts";
 import { asciiFiller, capitalize, EMOJI, EMOJI_SEQUENCES, isoDate, paragraph, person, SCRIPT_SAMPLES, sentence, team, title, word } from "./text.ts";
-import { BANK_HOME, EDGE, HOMES, LOCALIZATION, LOOSE, type Home } from "./tree.ts";
+import { BANK_HOME, EDGE, EDGE_ZONE, HOMES, LOCALIZATION, LOOSE, type Home } from "./tree.ts";
 import { amount, lower as lowerFirst, slugify, weekDate, writeDocument, type Media } from "./writing.ts";
 
 type Context = {
@@ -241,7 +241,7 @@ function workDocuments(ctx: Context): void {
 
 /** A title path of exactly the given length, in segments of at most 120 characters. */
 export function longTitle(length: number): string {
-  const prefix = `edge-cases/long-titles/t${length}`;
+  const prefix = `${EDGE_ZONE.slice("eng/".length)}/long-titles/t${length}`;
   let rest = length - prefix.length;
   const segments = [prefix];
   while (rest > 0) {
