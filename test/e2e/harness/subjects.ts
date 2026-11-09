@@ -502,11 +502,12 @@ function linearTree(ctx: RunContext, view: View): Map<string, string> {
 
 /**
  * The annotation READMEs of the tracked tree that no Linear document maps
- * to, with their text. The initial sync from Linear keeps them as they are:
- * a folder's mapping depends on its annotation. They are not actions of its
- * plan, and its pull request still holds them.
+ * to (`documents`: `linearTree`'s paths), with their whole text, body or
+ * none. The initial sync from Linear keeps them as they are: a folder's
+ * mapping depends on its annotation. They are not actions of its plan, and
+ * its pull request still holds them.
  */
-function keptAnnotationReadmes(view: View, documents: ReadonlyMap<string, string>): Map<string, string> {
+function keptAnnotationReadmes(view: View, documents: ReadonlyMap<string, string> = new Map()): Map<string, string> {
   const result = new Map<string, string>();
   for (const folder of view.folders) {
     const path = folder.folder === '' ? 'README.md' : `${folder.folder}/README.md`;
@@ -516,11 +517,21 @@ function keptAnnotationReadmes(view: View, documents: ReadonlyMap<string, string
   return result;
 }
 
-/** What the initial sync from Linear makes of the synchronized folders, by body: Linear's documents as files, and the annotation READMEs it keeps. */
+/** Linear's documents as files and the annotation READMEs the initial sync from Linear keeps beside them. */
+function reverseSides(ctx: RunContext, view: View): { documents: Map<string, string>; kept: Map<string, string> } {
+  const documents = linearTree(ctx, view);
+  return { documents, kept: keptAnnotationReadmes(view, documents) };
+}
+
+/**
+ * What the initial sync from Linear makes of the synchronized folders, by
+ * body: Linear's documents as files, and the annotation READMEs it keeps
+ * (the subject `expected.linearTree`).
+ */
 function reverseTree(ctx: RunContext, view: View): Map<string, string> {
-  const tree = linearTree(ctx, view);
-  for (const [path, text] of keptAnnotationReadmes(view, tree)) tree.set(path, bodyOf(text));
-  return tree;
+  const { documents, kept } = reverseSides(ctx, view);
+  for (const [path, text] of kept) documents.set(path, bodyOf(text));
+  return documents;
 }
 
 // --- the registry ----------------------------------------------------------------------------
@@ -1112,14 +1123,11 @@ export const SUBJECTS: Record<string, Compute> = {
     const head = await syncPullRequestHead(env.ctx);
     if (head === null) return null;
     const view = await env.view();
-    const kept = [...keptAnnotationReadmes(view, linearTree(env.ctx, view)).keys()];
-    const files = await treeFiles(head.git, head.commit, (path) => kept.includes(path));
-    return new Map(kept.map((path) => [path, files.get(path)?.toString('utf8') ?? null]));
+    const kept = new Set(reverseSides(env.ctx, view).kept.keys());
+    const files = await treeFiles(head.git, head.commit, (path) => kept.has(path));
+    return new Map([...kept].map((path) => [path, files.get(path)?.toString('utf8') ?? null]));
   },
-  'expected.keptAnnotationReadmes': async (env) => {
-    const view = await env.view();
-    return keptAnnotationReadmes(view, linearTree(env.ctx, view));
-  },
+  'expected.keptAnnotationReadmes': async (env) => reverseSides(env.ctx, await env.view()).kept,
   'files.duplicateCount': async (env) => {
     const head = await syncPullRequestHead(env.ctx);
     if (head === null) return null;
@@ -1382,8 +1390,7 @@ export const SUBJECTS: Record<string, Compute> = {
   // Every path the dry run acts on (overwrite, create, remove); the annotation READMEs it keeps are not actions.
   'expected.reversePlan.paths': async (env) => {
     const view = await env.view();
-    const documents = linearTree(env.ctx, view);
-    const kept = keptAnnotationReadmes(view, documents);
+    const { documents, kept } = reverseSides(env.ctx, view);
     return sorted(new Set([...view.files.keys(), ...documents.keys()].filter((path) => !kept.has(path))));
   },
   'expected.destinationPath': async (env) => symbolicPath(env.ctx, observed(env.ctx, 'expected.destinationPath') as string),

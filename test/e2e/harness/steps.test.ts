@@ -1740,7 +1740,7 @@ describe('subjects', () => {
 });
 
 describe('initial sync from Linear: kept annotation READMEs (L1R-01, L1R-02, L1R-06)', () => {
-  // Two folders whose README holds only the folder's annotation: no Linear document maps to them, and the sync keeps them.
+  // Two folders whose README holds the folder's annotation (and a body) but no Linear document maps to it: the sync keeps them.
   const KEPT = {
     'eng/README.md': '---\nlinear-team: ENG\n---\n\nEngineering notes live in the folders below.\n',
     'docs/README.md': '---\nlinear-team: DOCS\nowner: docs\n---\n\n# Docs\n\nThe handbook and its policies.\n',
@@ -1809,13 +1809,21 @@ describe('initial sync from Linear: kept annotation READMEs (L1R-01, L1R-02, L1R
     await git.run(['branch', '--quiet', '-D', 'sync-head']);
   }
 
-  /** Whether every assertion of the scenario holds, by its own subjects. */
+  // The assertions of each scenario these tests check; pull request counts, ids and writes need the engine's own run.
+  const CHECKED: Record<string, string[]> = {
+    'L1R-01': ['summary.plan.paths'],
+    'L1R-02': ['pullRequests.tree', 'pullRequests.keptAnnotationReadmes', 'pullRequests.gitOnlyPaths'],
+    'L1R-06': ['files.duplicateCount', 'pullRequests.tree', 'pullRequests.keptAnnotationReadmes'],
+  };
+
+  /** The checked assertions of the scenario that fail, by its own subjects. */
   async function failing(ctx: RunContext, id: string): Promise<string[]> {
     const scenario = scenarios.find((candidate) => candidate.id === id)!;
+    const checked = scenario.checks.assertions.filter((assertion) => CHECKED[id]?.includes(assertion.subject));
+    // A renamed or dropped assertion must not leave these tests checking nothing.
+    assert.deepEqual(checked.map((assertion) => assertion.subject), CHECKED[id], `${id} assertions`);
     const failed: string[] = [];
-    for (const assertion of scenario.checks.assertions) {
-      // The subjects of the expectations; pull request counts, ids and writes need the engine's own run.
-      if (!/^(summary\.|files\.|pullRequests\.(tree|gitOnlyPaths|keptAnnotationReadmes)$)/.test(assertion.subject)) continue;
+    for (const assertion of checked) {
       const { value } = await resolveSubject(ctx, assertion.subject);
       const expected = assertion.operator === 'same-as' ? (await resolveSubject(ctx, String(assertion.expected))).value : assertion.expected;
       if (!compare(assertion.operator, value, expected)) failed.push(assertion.subject);
@@ -1823,7 +1831,7 @@ describe('initial sync from Linear: kept annotation READMEs (L1R-01, L1R-02, L1R
     return failed;
   }
 
-  const dryRun = (paths: string[]): EngineResult => ({ command: 'initial-sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: { summary: { direction: 'linear-to-git', confirm: false, plan: { paths } } } });
+  const dryRun = (paths: string[]) => engineRun('initial-sync', { summary: { direction: 'linear-to-git', confirm: false, plan: { paths } } });
 
   it('expect the ten actions of the dry run, not the two kept READMEs (L1R-01)', async () => {
     const { ctx } = await miniCase();
