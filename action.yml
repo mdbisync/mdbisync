@@ -63,7 +63,7 @@ inputs:
     required: false
     default: ""
   security-step:
-    description: "Runs the repository's security hooks in a step of their own, which holds none of this action's secrets. `stage`: read Linear's changes and leave them in the runner's temporary directory for the hooks step, writing nothing to git or Linear; the outputs `node` and `hooks` give that step its command. `apply`: run the operation with the hooks step's findings; a change the hooks have not seen is not pushed this run. Empty runs the hooks inside this step."
+    description: "Runs the repository's security hooks in a step of their own, which holds none of this action's secrets. `stage`: read Linear's changes and leave them in the runner's temporary directory for the hooks step, writing nothing to git or Linear; the outputs `node` and `hooks` give that step its command. `apply`: run the operation with the hooks step's findings, taking Linear's changes from the stage step's reads instead of reading them again; a change the hooks have not seen is not pushed this run. Empty runs the hooks inside this step."
     required: false
     default: ""
 outputs:

@@ -2,16 +2,19 @@
 //
 // 1. `stage`: the action, with the Linear token and the App token, reads
 //    Linear's changes and writes each set of files the hooks must see to a
-//    folder in the runner's temporary directory. It writes nothing to git
-//    or Linear.
+//    folder in the runner's temporary directory, with Linear's answers to
+//    its reads. It writes nothing to git or Linear.
 // 2. The hooks step: a plain step that holds only the keys the deployer
 //    gives to hooks runs the repository's security hooks on every staged
 //    set and writes their findings (hook id and line, never the matched
 //    text) beside them.
-// 3. `apply`: the action runs the operation again and answers each set
-//    from those findings, by the content hash of every file in it. A set
-//    without an answer (Linear changed it after step 1, or step 2 did not
-//    run) is not pushed; the next run checks it.
+// 3. `apply`: the action runs the operation again. Its capture takes the
+//    stage step's answers instead of reading Linear again, so it sees what
+//    the hooks saw and a run reads Linear once (`src/linear/reads.ts`); the
+//    rest of the run, the checks before a write included, reads Linear
+//    itself. It answers each set from the findings, by the content hash of
+//    every file in it. A set without an answer (step 2 did not run, or the
+//    tracked branch moved) is not pushed; the next run checks it.
 //
 // The folder holds document content on the runner's disk only; it is never
 // uploaded, and the apply step removes it when its operation ends.
@@ -30,6 +33,7 @@ export type SecurityStep = (typeof SECURITY_STEPS)[number];
 export const STAGE_FOLDER = 'mdbisync-candidates';
 const MANIFEST = 'manifest.json';
 const ANSWERS = 'answers.json';
+const READS = 'linear-reads';
 const VERSION = 1;
 
 interface Manifest {
@@ -51,6 +55,9 @@ export function stageFolder(env: NodeJS.ProcessEnv = process.env): string {
   if (base === undefined || base === '') throw new Error('RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job');
   return join(base, STAGE_FOLDER);
 }
+
+/** Where the stage step keeps Linear's answers to its reads for the apply step. */
+export const readsFolder = (folder: string) => join(folder, READS);
 
 const sha256 = (content: Buffer | string) => createHash('sha256').update(content).digest('hex');
 
