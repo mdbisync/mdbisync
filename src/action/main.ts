@@ -40,6 +40,11 @@ export async function run(): Promise<void> {
       core.setFailed(`${operation}: stopped before any write (${outcome.code})`);
       return;
     }
+    if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write.code === 'container-cap') {
+      core.setOutput("code", "container-cap");
+      core.setFailed(`${operation}: stopped before any write (container-cap); reduce additions or check document-cap`);
+      return;
+    }
     if (outcome.confirmed !== undefined && !outcome.confirmed.complete) {
       core.setOutput("code", outcome.confirmed.code ?? "");
       core.setFailed(`${operation}: not finished (${outcome.confirmed.code}); run it again with the same inputs`);

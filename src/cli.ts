@@ -109,6 +109,9 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
     const exitCode = outcome.code === "initial-sync-required" ? NO_STATE_EXIT_CODE : SETUP_FAILED_EXIT_CODE;
     return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (${outcome.code})\n` };
   }
+  if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write.code === 'container-cap') {
+    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (container-cap); reduce additions or check document-cap\n` };
+  }
   if (outcome.confirmed !== undefined && !outcome.confirmed.complete) {
     return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${outcome.confirmed.code}); run it again with the same inputs\n` };
   }

@@ -3,6 +3,7 @@
 // title, and what a confirmed run would create, overwrite and move to trash.
 // Pure: the caller reads the files and lists the documents.
 
+import { type ContainerCapacity } from '../run/capacity.ts';
 import { lintText } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearDocument, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, type Zone } from '../mapping/index.ts';
@@ -43,13 +44,14 @@ export interface TrashEntry {
 }
 
 export interface InitialSyncPlan {
+  capacity?: ContainerCapacity[];
   create: CreateEntry[];
   overwrite: OverwriteEntry[];
   trash: TrashEntry[];
   leftOut: LeftOutEntry[];
 }
 
-/** One place's live documents (archived and trashed ones are not listed). */
+/** One place's documents; the planner ignores archived and trashed ones. */
 export interface PlaceDocuments {
   place: Place;
   documents: readonly LinearDocument[];

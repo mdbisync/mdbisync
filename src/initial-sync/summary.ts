@@ -1,8 +1,9 @@
+import { cell, placeLabel } from '../run/summary.ts';
 // The initial sync's job summary and its machine-readable form: paths,
 // places and rule names only, never document content.
 
+import { type ContainerCapacity, renderCapacity } from '../run/capacity.ts';
 import { describeStop } from '../linear/index.ts';
-import { type Place } from '../mapping/index.ts';
 import { type ConfirmedResult } from './confirm.ts';
 import { type InitialSyncPlan, type LeftOutEntry } from './plan.ts';
 
@@ -11,6 +12,7 @@ export type Direction = (typeof DIRECTIONS)[number];
 
 /** The plan in the run report; every path list is sorted. */
 export interface PlanReport {
+  capacity: ContainerCapacity[];
   direction: Direction;
   confirm: boolean;
   plan: {
@@ -30,6 +32,7 @@ export interface PlanReport {
 export function toPlanReport(plan: InitialSyncPlan, direction: Direction, confirm: boolean): PlanReport {
   const paths = (entries: Array<{ path: string }>) => entries.map((entry) => entry.path);
   return {
+    capacity: plan.capacity ?? [],
     direction,
     confirm,
     plan: {
@@ -76,13 +79,15 @@ export function renderDryRun(plan: InitialSyncPlan): string {
     ['Path', 'Rules', 'Lines', 'Collides with'],
     plan.leftOut.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? []).join(', ')]),
   );
-  return lines.join('\n');
+  return lines.join('\n') + renderCapacity(plan.capacity ?? []);
 }
 
 /** Markdown for the job summary of a confirmed run: counts, paths and rule names, never content. */
 export function renderConfirmed(plan: InitialSyncPlan, result: ConfirmedResult): string {
   const outcome = result.complete
     ? 'Linear now equals the tracked branch, and the sync state is recorded.'
+    : result.code === 'container-cap'
+      ? 'Nothing was written. Reduce planned additions or increase document-cap after checking the container limit.'
     : result.code === 'state-moved'
       ? 'A state ref moved while this run was writing, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done.'
       : 'The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already written are skipped.';
@@ -125,21 +130,16 @@ export function renderConfirmed(plan: InitialSyncPlan, result: ConfirmedResult):
       '',
     );
   }
-  return lines.join('\n');
+  return lines.join('\n') + renderCapacity(plan.capacity ?? []);
 }
 
-export function placeLabel(place: Place): string {
-  return place.kind === 'project' ? `project "${place.project}" of team "${place.team}"` : `team "${place.team}"`;
-}
+export { placeLabel };
 
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
-/** A table cell: pipes, backslashes and line breaks would break the row. */
-function cell(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
-}
+
 
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
