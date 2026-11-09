@@ -29,6 +29,8 @@ export const COMPLEXITY_PER_REQUEST = 400;
 export const RESERVE = { requests: 200, complexity: 100_000 };
 /** The most a scenario waits for before it starts; larger ones continue across windows. */
 export const MAX_ADMISSION = { requests: 3_000, complexity: 1_200_000 };
+/** How often a scenario held back only by other scenarios' reservations looks again. */
+export const RESERVATION_POLL_MS = 5_000;
 /** The longest wait for budget before a scenario is reported env-blocked. */
 export const MAX_BUDGET_WAIT_MS = 65 * 60_000;
 
@@ -194,6 +196,7 @@ export class Governor {
         }
       }
       held.push(slot.lock);
+      let loggedReservationWait = false;
       for (;;) {
         const budget = await slot.app.readBudget();
         const app = slot.app;
@@ -223,6 +226,19 @@ export class Governor {
               }).catch(() => {});
             },
           };
+        }
+        // Linear's own budget covers the scenario and only running scenarios' reservations stand in the way:
+        // those free up as the scenarios end, so look again soon instead of waiting for the window to refill.
+        const linearCovers =
+          budget.requestsRemaining - RESERVE.requests >= need.requests && budget.complexityRemaining - RESERVE.complexity >= need.complexity;
+        if (linearCovers) {
+          if (this.#now() + RESERVATION_POLL_MS > deadline) {
+            throw new BudgetBlockedError(`budget: app ${slot.app.name} stayed reserved by running scenarios for the longest wait`);
+          }
+          if (!loggedReservationWait) options.log?.(`budget: waiting for running scenarios on app ${slot.app.name} to end (their reservations hold the budget)`);
+          loggedReservationWait = true;
+          await this.#sleep(RESERVATION_POLL_MS);
+          continue;
         }
         const wake = Math.max(budget.resetAt + 1_000, this.#now() + 5_000);
         if (wake > deadline) {
