@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkCorpus, checkLinearForm, checkLintExpectations } from "./check.ts";
+import { SHARED_IMAGE_USERS } from "./model.ts";
 import { buildCorpus, writeCorpus, type Manifest } from "./generate.ts";
 
 const checker = fileURLToPath(new URL("./check.ts", import.meta.url));
@@ -208,11 +209,12 @@ test("a synced document that is not in Linear's form is reported under --lint, a
 });
 
 test("a mid slice that loses a user of the shared image is reported", () => {
-  const user = manifest.files.find((f) => f.synced && f.links.includes("docs/handbook/assets/shared-logo.png"))!;
+  const image = manifest.files.find((f) => f.role === "shared-image")!;
+  const user = manifest.files.find((f) => f.synced && f.links.includes(image.path))!;
   withChange("corpus-slices/mid.json", (b) => {
     const mid = JSON.parse(b.toString()) as { slice: string; paths: string[] };
     return Buffer.from(JSON.stringify({ ...mid, paths: mid.paths.filter((p) => p !== user.path) }));
   }, () => {
-    assert.ok(problems().includes("slice mid: the most-shared image is embedded by 39 documents, not 40"));
+    assert.ok(problems().includes(`slice mid: the shared image is embedded by ${SHARED_IMAGE_USERS - 1} documents, not ${SHARED_IMAGE_USERS}`));
   });
 });

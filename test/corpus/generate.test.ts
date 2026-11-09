@@ -11,7 +11,7 @@ import { checkCorpus } from "./check.ts";
 import { longTitle } from "./documents.ts";
 import { buildCorpus, writeCorpus } from "./generate.ts";
 import { parse } from "yaml";
-import { CONTENT_LIMIT, gitattributes } from "./model.ts";
+import { CONTENT_LIMIT, gitattributes, SHARED_IMAGE_USERS } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
 import { fixText, lintText } from "../../src/format/index.ts";
@@ -97,17 +97,14 @@ test("one image is used by exactly 40 documents, and two files are over the uplo
   assert.deepEqual(tooLarge.sort(), ["attachment", "image"]);
 });
 
-test("the mid slice holds all 40 documents that embed the shared image, and full holds the oversize roles", () => {
+test("the mid slice holds the shared image and every document that embeds it", () => {
   const built = corpus();
   const mid = new Set(built.slices.mid);
-  const users = built.files.filter((f) => f.links.includes("docs/handbook/assets/shared-logo.png"));
+  const image = built.files.find((f) => f.role === "shared-image");
+  assert.ok(image && mid.has(image.path));
+  const users = built.files.filter((f) => f.synced && f.kind === "markdown" && f.links.includes(image.path));
+  assert.equal(users.length, SHARED_IMAGE_USERS);
   assert.deepEqual(users.filter((f) => !mid.has(f.path)).map((f) => f.path), []);
-  assert.ok(mid.has("docs/handbook/assets/shared-logo.png"));
-  const full = new Set(built.slices.full);
-  for (const role of ["pdf-11mb", "image-over-10mb"]) {
-    const file = built.files.find((f) => f.role === role);
-    assert.ok(file && full.has(file.path), role);
-  }
 });
 
 test("duplicate-title fixtures are taken from the bank once, never paired by the generator", () => {

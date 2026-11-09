@@ -33,7 +33,7 @@ export type CorpusFile = {
 };
 
 /** Roles that exactly one corpus file has. */
-export const ROLES = ["pdf-11mb", "image-over-10mb"] as const;
+export const ROLES = ["pdf-11mb", "image-over-10mb", "shared-image"] as const;
 
 export const GROUPS = [
   "annotations",
@@ -80,6 +80,8 @@ export const MAX_LFS_BYTES = 300 * 1024 * 1024;
 export const MAX_NON_LFS_IMAGES = 50;
 /** Documents that embed the one image shared across the corpus, in the `mid` and `full` slices. */
 export const SHARED_IMAGE_USERS = 40;
+/** Slices that hold the shared image with all its users (L1-07 runs on `mid`). */
+export const SHARED_IMAGE_SLICES: readonly string[] = ["mid", "full"];
 /** Linear rejects documents over this many characters. */
 export const CONTENT_LIMIT = 250_000;
 /** Linear's upload limit on the free plan. */

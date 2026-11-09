@@ -17,7 +17,7 @@ import { parseArgs } from "node:util";
 import { duplicateTitles, fixText, lintText, type Finding } from "../../src/format/index.ts";
 import { findCyrillicLines } from "../../tools/check-no-cyrillic.ts";
 import type { Manifest, ManifestEntry } from "./generate.ts";
-import { gitattributes, GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, ROLES, SHARED_IMAGE_USERS, type Group } from "./model.ts";
+import { gitattributes, GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, ROLES, SHARED_IMAGE_SLICES, SHARED_IMAGE_USERS, type Group } from "./model.ts";
 import { SLICES } from "./slices.ts";
 
 export type CheckResult = {
@@ -186,16 +186,15 @@ export function checkCorpus(root: string, options: { git?: boolean; lint?: boole
     const sorted = [...new Set(paths)].sort();
     if (sorted.length !== paths.length || sorted.some((p, i) => p !== paths[i])) problems.push(`slice ${slice} is not sorted or has duplicates`);
     for (const path of paths) if (!entries.has(path)) problems.push(`slice ${slice} names a path the corpus does not have: ${path}`);
-    // The slices that sync the shared-image case hold one image that 40 of their documents embed.
-    if (slice === "mid" || slice === "full") {
-      const users = new Map<string, number>();
-      for (const path of paths) {
+    // The slices that sync the shared-image case hold the shared image and every document that embeds it.
+    const image = [...entries.values()].find((e) => e.role === "shared-image");
+    if (image !== undefined && SHARED_IMAGE_SLICES.includes(slice)) {
+      const inSlice = new Set(paths);
+      const users = paths.filter((path) => {
         const entry = entries.get(path);
-        if (!entry?.synced || entry.kind !== "markdown") continue;
-        for (const target of new Set(entry.links)) if (entries.get(target)?.kind === "image") users.set(target, (users.get(target) ?? 0) + 1);
-      }
-      const most = Math.max(0, ...users.values());
-      if (most !== SHARED_IMAGE_USERS) problems.push(`slice ${slice}: the most-shared image is embedded by ${most} documents, not ${SHARED_IMAGE_USERS}`);
+        return entry?.synced === true && entry.kind === "markdown" && entry.links.includes(image.path);
+      }).length;
+      if (!inSlice.has(image.path) || users !== SHARED_IMAGE_USERS) problems.push(`slice ${slice}: the shared image is embedded by ${users} documents, not ${SHARED_IMAGE_USERS}`);
     }
   }
 
