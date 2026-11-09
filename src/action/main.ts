@@ -45,6 +45,13 @@ export async function run(): Promise<void> {
       core.setFailed(`${operation}: not finished (${outcome.confirmed.code}); run it again with the same inputs`);
       return;
     }
+    // A sync that skipped documents succeeded (the next run takes them in); a stop, a refused push or a failed write did not.
+    const write = outcome.sync?.write;
+    if (write?.code !== undefined) {
+      core.setOutput("code", write.code);
+      core.setFailed(`${operation}: not finished (${write.code}); the next run goes on`);
+      return;
+    }
     if (outcome.notImplemented) core.setFailed(notImplementedMessage(operation));
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
