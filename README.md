@@ -51,7 +51,13 @@ and so on.
 `initial-sync` with `direction: git-to-linear` makes Linear equal to the
 tracked branch. Without `confirm: true` it is a dry run: it lists by path
 what it would create, overwrite and move to Linear's trash, and the files it
-leaves out, and writes nothing. With `confirm: true`:
+leaves out, and writes nothing. The files left out include documents that
+link a file over Linear's 10 MB upload limit (`upload-too-large`) or an LFS
+object stored with LFS extensions, which the run cannot read
+(`upload-unreadable`), each with the files that
+cause it; the dry run judges a file in LFS by its pointer, so it uploads and
+downloads nothing. An LFS object missing from the remote is found only by
+the confirmed run. With `confirm: true`:
 
 - a document whose title is a file's path keeps its id, comments and history
   and gets the file's text (front matter stays in git); a file without a
