@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { deflateRawSync } from 'node:zlib';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -1026,6 +1026,69 @@ describe('linear executors', () => {
     await runStep(ctx, { kind: 'linear', action: 'delete-permanently', args: {} });
     assert.equal(ctx.observations.get('fault.documentGone'), 'proxy');
     assert.deepEqual(faults, [{ kind: 'document-gone', id: ids['eng/platform/notes.md']?.id }]);
+  });
+});
+
+describe('I6 requires a completed no-change sync', () => {
+  const complete = { operation: 'sync', ok: true, complete: true, capture: { ok: true }, code: null, changed: false };
+  const cases = [
+    { name: 'a complete quiet run', report: complete, exitCode: 0, pass: true },
+    { name: 'a partial capture with a successful exit', report: { ...complete, complete: false, capture: { ok: false }, code: 'capture-failed' }, exitCode: 0, pass: false, reason: /capture.ok false.*capture-failed/ },
+    { name: 'a stopped run with a successful exit', report: { ...complete, complete: false, code: 'stopped' }, exitCode: 0, pass: false, reason: /complete false.*stopped/ },
+    { name: 'an unsuccessful run despite a complete report', report: complete, exitCode: 1, pass: false, reason: /exit 1/ },
+    { name: 'a failed report despite a successful exit', report: { ...complete, ok: false }, exitCode: 0, pass: false, reason: /ok false/ },
+    { name: 'a missing report', report: null, exitCode: 0, pass: false, reason: /lacks a successful completed report/ },
+    { name: 'a report without completion evidence', report: { operation: 'sync', ok: true }, exitCode: 0, pass: false, reason: /complete undefined/ },
+    { name: 'a report from another command', report: { ...complete, operation: 'initial-sync' }, exitCode: 0, pass: false, reason: /operation initial-sync/ },
+    { name: 'a signalled run', report: complete, signal: true, exitCode: 0, pass: false, reason: /signal SIGKILL/ },
+    { name: 'a complete run that writes', report: { ...complete, changed: true }, exitCode: 0, writes: 1, pass: false, reason: /wrote 1 mutations/ },
+  ];
+  for (const fixture of cases) it(fixture.name, async () => {
+    const { ctx } = await fakeRun();
+    const { INVARIANT_CHECKS, snapshotRefs } = await import('./checks.ts');
+    mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
+    ctx.observations.set('refHistory', [await snapshotRefs(ctx)]);
+    mkdirSync(await ctx.engineClone(), { recursive: true });
+    const driver = join(ctx.runDir, 'fixed-sync.mjs');
+    const mutation = join(ctx.runDir, 'mutation');
+    writeFileSync(driver, `
+      import { writeFileSync } from 'node:fs';
+      const report = ${JSON.stringify(fixture.report)};
+      if (report !== null) writeFileSync(process.env.MDBISYNC_REPORT_FILE, JSON.stringify(report));
+      ${fixture.writes === 1 ? `writeFileSync(${JSON.stringify(mutation)}, 'written');` : ''}
+      ${fixture.signal === true ? "process.kill(process.pid, 'SIGKILL');" : `process.exitCode = ${fixture.exitCode};`}
+    `);
+    ctx.proxy!.counts = () => ({ total: 0, queries: 0, mutations: existsSync(mutation) ? 1 : 0, injected: 0 });
+    // A prior successful run cannot stand in for the probe's own result.
+    ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: complete });
+    const previous = process.env['MDBISYNC_ENGINE'];
+    process.env['MDBISYNC_ENGINE'] = driver;
+    try {
+      const outcome = await INVARIANT_CHECKS.I6(ctx, () => assert.fail('I6 does not need document bodies'));
+      assert.equal(outcome.ok, fixture.pass, outcome.detail);
+      if (fixture.reason !== undefined) assert.match(outcome.detail ?? '', fixture.reason);
+      assert.equal(ctx.engine.results.length, 2);
+    } finally {
+      if (previous === undefined) delete process.env['MDBISYNC_ENGINE'];
+      else process.env['MDBISYNC_ENGINE'] = previous;
+    }
+  });
+
+  for (const resultCount of [0, 2]) it(`rejects a probe that records ${resultCount} results`, async () => {
+    const { ctx } = await fakeRun();
+    const { INVARIANT_CHECKS } = await import('./checks.ts');
+    mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
+    const prior = { command: 'sync' as const, exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: complete };
+    ctx.engine.results.push(prior);
+    const original = STEP_ACTIONS['run.sync'];
+    STEP_ACTIONS['run.sync'] = async () => { for (let index = 0; index < resultCount; index += 1) ctx.engine.results.push(prior); };
+    try {
+      const outcome = await INVARIANT_CHECKS.I6(ctx, () => assert.fail('I6 does not need document bodies'));
+      assert.equal(outcome.ok, false);
+      assert.match(outcome.detail ?? '', new RegExp(`expected one result.*recorded ${resultCount}`));
+    } finally {
+      STEP_ACTIONS['run.sync'] = original!;
+    }
   });
 });
 
