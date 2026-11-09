@@ -194,7 +194,7 @@ describe('uploads of linked files in an initial sync', () => {
     assert.ok(report.initialSync?.unchanged.includes('eng/notes/list.md'));
   });
 
-  it("L1-18: an image in angle brackets that Linear reformats is recorded in Linear's form, still an image, and not written again", async () => {
+  it("L1-18: an image in angle brackets that Linear stores without them is recorded as the file spells it and not written again", async () => {
     await fixture.seed({ 'eng/notes/spaced.md': `# Spaced\n\n![Pixel](<pixel copy.png>)\n\n${CANARY}`, 'eng/notes/pixel copy.png': PIXEL });
     const world = fakeWorld();
     // Like Linear: the stored text is in Linear's form, a link to an uploaded file stored as a file.
@@ -203,11 +203,10 @@ describe('uploads of linked files in an initial sync', () => {
     assert.equal(first.result.exitCode, 0, first.result.stderr);
     const pixel = uploadOf(world, PIXEL)[0] as FakeUpload;
     assert.equal(document(world, 'spaced')?.content, `# Spaced\n\n![Pixel](${pixel.assetUrl})\n\n${CANARY}`, 'Linear dropped the brackets');
-    // The record is Linear's form of the file: the image keeps a destination that still makes it an image.
+    // Linear's spelling of the same image is no reformat: the record keeps the file, brackets and all.
     const recorded = await show('refs/mdbisync/linear:eng/notes/spaced.md');
-    assert.equal(recorded, `# Spaced\n\n![Pixel](pixel%20copy.png)\n\n${CANARY}`);
-    assert.equal(recorded, fixText(`# Spaced\n\n![Pixel](<pixel copy.png>)\n\n${CANARY}`));
-    assert.ok(first.report.record?.reformattedCount !== undefined && first.report.record.reformattedCount > 0);
+    assert.equal(recorded, `# Spaced\n\n![Pixel](<pixel copy.png>)\n\n${CANARY}`);
+    assert.ok(!(first.report.initialSync?.reformatted ?? []).includes('eng/notes/spaced.md'));
 
     const writes = world.linear.writes.count;
     const second = await run(world);

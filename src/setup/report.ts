@@ -26,6 +26,7 @@ export type FailureCode =
   | 'linear-format-hook-required'
   | 'invalid-annotation'
   | 'no-annotations'
+  | 'linear-teams-not-visible'
   | 'annotation-target-not-found'
   | 'annotation-target-ambiguous'
   | 'annotation-target-shared'

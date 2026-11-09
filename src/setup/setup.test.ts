@@ -13,6 +13,7 @@ import {
   securityHooks,
 } from './index.ts';
 import { GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from './test-helpers.ts';
+import { resolveTargets } from './linear.ts';
 import { DEFAULT_STATE_CONFIG } from '../state/index.ts';
 
 const PRE_COMMIT = `repos:
@@ -208,6 +209,32 @@ describe('setup check', () => {
     assert.equal(report.ok, true, JSON.stringify(report.checks));
     assert.equal(targets?.teams.size, 130);
     assert.equal(world.requests.filter((request) => request.startsWith(`POST ${LINEAR_API}/graphql`)).length, 2);
+  });
+
+  it('asks again a token that saw no team, and tells no team access from a missing team', async () => {
+    const lookups = (world: ReturnType<typeof fakeWorld>) => world.requests.filter((request) => request.startsWith(`POST ${LINEAR_API}/graphql`)).length;
+    const resolve = (world: ReturnType<typeof fakeWorld>) =>
+      resolveTargets(new LinearClient({ token: 'fake-token', baseUrl: LINEAR_API, fetch: fakeFetch(world) }), MINI.zones.values(), 0);
+
+    const once = fakeWorld();
+    once.linear.teamsHidden = 1;
+    const recovered = await resolve(once);
+    assert.equal(recovered.result.state, 'passed', recovered.result.detail);
+    assert.equal(lookups(once), 2);
+
+    const never = fakeWorld();
+    never.linear.teamsHidden = Infinity;
+    const hidden = await resolve(never);
+    assert.equal(hidden.result.code, 'linear-teams-not-visible');
+    assert.match(hidden.result.detail, /saw no team in two lookups/);
+    assert.equal(hidden.targets, undefined);
+    assert.equal(lookups(never), 2);
+
+    const elsewhere = fakeWorld();
+    elsewhere.linear.teams = [{ id: 'team-other', key: 'OPS', name: 'Operations' }];
+    const missing = await resolve(elsewhere);
+    assert.equal(missing.result.code, 'annotation-target-not-found');
+    assert.equal(lookups(elsewhere), 1, 'a token that sees teams is asked once');
   });
 
   it('fails on refused Linear credentials or a token without write', async () => {

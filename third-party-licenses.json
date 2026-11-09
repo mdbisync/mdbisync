@@ -205,6 +205,11 @@
     "license": "MIT"
   },
   {
+    "name": "micromark-util-sanitize-uri",
+    "version": "2.0.1",
+    "license": "MIT"
+  },
+  {
     "name": "micromark-util-subtokenize",
     "version": "2.1.0",
     "license": "MIT"
