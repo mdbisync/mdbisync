@@ -223,11 +223,14 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.writes.length, writes);
     assert.equal(world.github.pullRequests[0]?.merged, false);
 
-    // After the merge the sync goes past its state check (the cycle itself is a stub here).
+    // L1R-03: after the merge the sync runs, and finds nothing to write to Linear (I6).
     await merge(world);
+    const mutationsBefore = linearMutations(world).length;
     const after = await run(world, {}, 'sync');
-    assert.equal(after.result.exitCode, COMMANDS.sync.notImplementedExitCode, after.result.stderr);
+    assert.equal(after.result.exitCode, 0, after.result.stderr);
     assert.equal(after.report.code, null);
+    assert.equal(after.report.writtenCount, 0);
+    assert.equal(linearMutations(world).length, mutationsBefore, 'the sync wrote to Linear after the merge');
     // Merged, the tracked branch holds Linear's state: the synchronized folders equal `linear`.
     assert.equal(await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']), await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']));
 
@@ -239,7 +242,8 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal((await refs())['refs/heads/mdbisync/linear'], syncBranch);
     assert.equal(world.github.pullRequests.length, 1);
     const afterRerun = await run(world, {}, 'sync');
-    assert.equal(afterRerun.result.exitCode, COMMANDS.sync.notImplementedExitCode, afterRerun.result.stderr);
+    assert.equal(afterRerun.result.exitCode, 0, afterRerun.result.stderr);
+    assert.equal(afterRerun.report.code, null);
   });
 
   it('runs again with nothing changed: refs stay, no second pull request', async () => {
@@ -392,7 +396,8 @@ describe('initial sync from Linear to the tracked branch', () => {
 
     await fixture.seed({ 'src/app.txt': 'unrelated work\n' });
     const sync = await run(world, {}, 'sync');
-    assert.equal(sync.result.exitCode, COMMANDS.sync.notImplementedExitCode, sync.result.stderr);
+    assert.equal(sync.result.exitCode, 0, sync.result.stderr);
+    assert.notEqual(sync.report.code, 'initial-pull-request-pending');
   });
 
   it('does not overwrite commits a person pushed to the open pull request', async () => {

@@ -113,6 +113,11 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   if (unfinished !== undefined && !unfinished.complete) {
     return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${unfinished.code}); run it again with the same inputs\n` };
   }
+  const write = outcome.sync?.write;
+  // Skipped documents are normal (the next run takes them in); a stop, a refused push or a failed write is not.
+  if (write?.code !== undefined) {
+    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${write.code}); run it again\n` };
+  }
   if (!outcome.notImplemented) return { exitCode: 0, stdout: outcome.summary, stderr };
   const stub = notImplemented(command);
   return { ...stub, stdout: outcome.summary, stderr: `${stderr}${stub.stderr}` };
