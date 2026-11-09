@@ -183,16 +183,19 @@ class Writer {
 
   private table(node: Table): string {
     const width = node.children[0]?.children.length ?? 0;
-    const row = (cells: TableRow): string => {
+    const row = (cells: TableRow, isHeader: boolean): string => {
       const texts = Array.from({ length: width }, (_, index) => {
         const cell = cells.children[index];
-        return cell ? this.inline(cell.children).trim() : '';
+        const text = cell ? this.inline(cell.children).trim() : '';
+        // Linear escapes a header cell containing only a hash. Apply this
+        // after inline rewrites, which drop an unnecessary hash escape.
+        return isHeader && text === '#' ? '\\#' : text;
       });
       return `| ${texts.join(' | ')} |`;
     };
     const [header, ...rows] = node.children;
     if (!header) return '';
-    return [row(header), `| ${Array.from({ length: width }, () => '--').join(' | ')} |`, ...rows.map(row)].join('\n');
+    return [row(header, true), `| ${Array.from({ length: width }, () => '--').join(' | ')} |`, ...rows.map((cells) => row(cells, false))].join('\n');
   }
 
   /**
