@@ -25,6 +25,7 @@ import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
 import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtures.ts';
+import { projectFolders } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
 
@@ -314,7 +315,11 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
     const document = await editor.createDocument({ projectId: project.id }, { title: `guides/diagram-${ctx.names.runId}`, content: `The flow at a glance.\n\n![diagram](${upload.assetUrl})\n` });
     live.seededDocuments.push(document.id);
     // The bytes the pull request must hold, hashed here from what was uploaded.
-    ctx.observations.set('linear.assets', [{ name: 'diagram.png', sha256: createHash('sha256').update(TINY_PNG).digest('hex') }]);
+    const folder = projectFolders(ctx).find((candidate) => candidate.project === project.name)?.folder;
+    if (folder === undefined) throw new EnvBlockedError('the image fixture project has no mapped folder');
+    const documentPath = `${folder === '' ? '' : `${folder}/`}${document.title}.md`;
+    const sha256 = createHash('sha256').update(TINY_PNG).digest('hex');
+    ctx.observations.set('linear.assets', [{ documentPath, path: `${documentPath.slice(0, documentPath.lastIndexOf('/') + 1)}${sha256}.png`, sha256, bytes: TINY_PNG }]);
   },
   // L1R-05: titles with characters a file name cannot hold as they are.
   async 'unsafe-titles'(_ctx, live) {

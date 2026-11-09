@@ -1098,8 +1098,23 @@ export const SUBJECTS: Record<string, Compute> = {
     }
     return [...seen.values()].reduce((sum, count) => sum + count - 1, 0);
   },
-  'pullRequests.assetBytes': async (env) => sorted((await pullRequestAssets(env)).hashes.values()),
-  'linear.assetBytes': async (env) => sorted(((observed(env.ctx, 'linear.assets') as Array<{ sha256: string }>).map((asset) => asset.sha256))),
+  'pullRequests.assetBytes': async (env) => (await pullRequestAssets(env)).hashes,
+  'linear.assetBytes': async (env) => new Map(reverseAssets(env.ctx).map((asset) => [asset.path, asset.sha256])),
+  'pullRequests.existingAssetsUnchanged': async (env) => {
+    const head = await syncPullRequestHead(env.ctx);
+    if (head === null) return false;
+    const before = observed(env.ctx, BEFORE_VIEW) as View;
+    const original = await treeFiles(head.git, before.tip);
+    const files = await treeFiles(head.git, head.commit);
+    for (const [path, bytes] of original) {
+      if (!path.endsWith('.md')) continue;
+      for (const asset of embeddedImages(path, bytes.toString('utf8'))) {
+        const blob = original.get(asset);
+        if (blob !== undefined && !files.get(asset)?.equals(blob)) return false;
+      }
+    }
+    return true;
+  },
   'pullRequests.assetStorage': async (env) => (await pullRequestAssets(env)).storage.actual,
   'pullRequests.assetLinksRelative': async (env) => {
     const { links } = await pullRequestAssets(env);
@@ -1578,20 +1593,39 @@ async function trackedImages(env: Env): Promise<{ actual: Map<string, string>; e
   return storageOf(await person(env.ctx), images, bytes);
 }
 
+interface ReverseAsset {
+  documentPath: string;
+  path: string;
+  sha256: string;
+  bytes: Buffer;
+}
+
+function reverseAssets(ctx: RunContext): ReverseAsset[] {
+  const assets = observed(ctx, 'linear.assets') as ReverseAsset[];
+  if (assets.length === 0) throw new ProductError('the reverse asset fixture has no expected downloads');
+  return assets;
+}
+
 async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string>; storage: { actual: Map<string, string>; expected: Map<string, string> }; links: string[] }> {
   const head = await syncPullRequestHead(env.ctx);
   if (head === null) throw new ProductError('the reverse initial sync opened no pull request');
   const files = await treeFiles(head.git, head.commit);
   const links: string[] = [];
-  const assets = new Set<string>();
-  for (const [path, bytes] of files) {
-    if (!path.endsWith('.md')) continue;
-    for (const link of imageLinks(bytes.toString('utf8'))) {
-      links.push(link);
-      if (!/^[a-z]+:/i.test(link)) assets.add(resolveLink(path, link));
+  const hashes = new Map<string, string>();
+  for (const asset of reverseAssets(env.ctx)) {
+    const document = files.get(asset.documentPath);
+    if (document === undefined) throw new ProductError('the reverse asset fixture document is missing');
+    const embedded = imageLinks(document.toString('utf8'));
+    links.push(...embedded);
+    if (!embedded.some((link) => !/^[a-z]+:/i.test(link) && resolveLink(asset.documentPath, link) === asset.path)) {
+      throw new ProductError('the reverse asset fixture has no link to its expected download path');
     }
+    const blob = files.get(asset.path);
+    if (blob === undefined) throw new ProductError('the reverse asset fixture download is missing');
+    const bytes = lfsSize(blob) === null ? blob : (await head.git.run(['lfs', 'smudge'], { input: blob, env: { GIT_LFS_SKIP_SMUDGE: undefined } })).stdout;
+    if (!bytes.equals(asset.bytes)) throw new ProductError('the reverse asset fixture download has different bytes');
+    hashes.set(asset.path, sha256(bytes));
   }
-  const hashes = new Map([...assets].filter((path) => files.has(path)).map((path) => [path, fileHash(files.get(path) as Buffer)]));
   return { hashes, storage: await storageOf(head.git, [...hashes.keys()], files), links };
 }
 
