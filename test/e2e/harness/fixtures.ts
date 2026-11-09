@@ -16,6 +16,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { editBlock, editParagraph, noteSentence, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
+import { CHECK_MARKER, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { EnvBlockedError } from './results.ts';
 import { commitAsPerson, documentId, documentPaths, projectFolders, targetPath } from './step-helpers.ts';
 import type { Step } from './spec.ts';
@@ -136,6 +137,23 @@ export const OWN_MARK = { icon: 'Bug', color: '#5e6ad2' } as const;
 
 export const SETUP_FIXTURES: Record<string, SetupFixture> = {
   ...Object.fromEntries([...DOCUMENT_FIXTURES].map((name) => [name, { beforeSync: addReviewDocument }])),
+  // Same-run merge scenarios: the check workflow every slice publishes is the
+  // "fast CI" case. These two change it before the initial sync, so the
+  // converged start already holds the change and no scenario push makes it.
+  // Both paths lie outside every annotated folder, so nothing syncs them.
+  'no-check-workflow': {
+    async beforeSync(ctx) {
+      await commitAsPerson(ctx, new Map([[CHECK_WORKFLOW_PATH, null]]), 'Remove the pull request check', true);
+      ctx.observations.set('fixture.checks', 'none');
+    },
+  },
+  'pending-check': {
+    async beforeSync(ctx) {
+      // The check workflow keeps a head with this marker pending; `fault.checks` with `passed` removes it.
+      await commitAsPerson(ctx, new Map([[CHECK_MARKER, 'pending\n']]), 'Hold the pull request check', true);
+      ctx.observations.set('fixture.checks', 'pending');
+    },
+  },
   'custom-icon-color': {
     async afterSync(ctx, live) {
       const path = targetPath(ctx);

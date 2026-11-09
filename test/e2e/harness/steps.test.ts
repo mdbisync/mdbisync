@@ -1463,3 +1463,108 @@ describe('subjects', () => {
     void readFileSync;
   });
 });
+
+describe('quiet runs through the harness', () => {
+  const QUIET_REPORT = {
+    operation: 'sync', ok: true, complete: true, changed: true,
+    capture: { ok: true, changed: [], removed: [] },
+    pullRequest: { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [] },
+    sync: { complete: true, updated: [], relocated: [], created: [], adopted: [], restored: [], trashed: [], record: null },
+    writtenCount: 0, writtenDocuments: 0,
+  };
+  const MERGED = { number: 30, state: 'closed', title: 'Changes from Linear', body: 'One document.', head: { ref: 't/aaaaaa/sync', sha: 'a'.repeat(40) }, base: { ref: 't/aaaaaa/main' }, merged_at: '2026-01-01T00:00:00Z', created_at: '2026-01-01T00:00:00Z' };
+
+  /**
+   * One watched sync whose fake engine moves the named refs of the bare
+   * remote; `pullRequests` is what GitHub lists before and after it, and
+   * `writes` the document writes the proxy sees during it.
+   */
+  async function watchedRun(options: { moves: Array<'state' | 'tracked-tree' | 'tracked-commit' | 'sync'>; report?: Record<string, unknown>; pullRequests?: [unknown[], unknown[]]; writes?: number; watch?: boolean }) {
+    const { ctx, remoteGit } = await fakeRun();
+    mkdirSync(await ctx.engineClone(), { recursive: true });
+    if (options.watch !== false) ctx.scenario = { ...ctx.scenario, checks: { ...ctx.scenario.checks, assertions: [{ subject: 'quiet.last', operator: 'equal', expected: [] }] } };
+    const lists = options.pullRequests ?? [[MERGED], [MERGED]];
+    let listed = 0;
+    Object.assign(ctx.live!, { rest: { pullRequests: async () => lists[Math.min(listed++, 1)] } });
+    const records = join(ctx.runDir, 'proxy-records.json');
+    Object.defineProperty(ctx.proxy!, 'requests', { get: () => (existsSync(records) ? JSON.parse(readFileSync(records, 'utf8')) : []) });
+    const names = ctx.names;
+    const driver = join(ctx.runDir, 'quiet-sync.mjs');
+    writeFileSync(driver, `
+      import { execFileSync } from 'node:child_process';
+      import { writeFileSync } from 'node:fs';
+      const env = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' };
+      const git = (...args) => execFileSync('git', ['--git-dir', ${JSON.stringify(remoteGit.dir)}, ...args], { env, encoding: 'utf8' }).trim();
+      const empty = git('hash-object', '-t', 'tree', '-w', '--stdin');
+      const tip = git('rev-parse', ${JSON.stringify(names.trackedBranch)});
+      for (const move of ${JSON.stringify(options.moves)}) {
+        if (move === 'state') git('update-ref', ${JSON.stringify(`${names.refPrefix}/linear`)}, git('commit-tree', empty, '-m', 'Record the merge'));
+        if (move === 'tracked-tree') git('update-ref', ${JSON.stringify(`refs/heads/${names.trackedBranch}`)}, git('commit-tree', empty, '-p', tip, '-m', 'Change content'));
+        if (move === 'tracked-commit') git('update-ref', ${JSON.stringify(`refs/heads/${names.trackedBranch}`)}, git('commit-tree', tip + '^{tree}', '-p', tip, '-m', 'Same content'));
+        if (move === 'sync') git('update-ref', ${JSON.stringify(`refs/heads/${names.syncBranch}`)}, git('commit-tree', empty, '-m', 'Sync branch'));
+      }
+      const writes = Array.from({ length: ${options.writes ?? 0} }, (_, n) => ({ n, at: 0, operation: 'documentUpdate', kind: 'mutation', status: 200, injected: false }));
+      writeFileSync(${JSON.stringify(records)}, JSON.stringify(writes));
+      writeFileSync(process.env.MDBISYNC_REPORT_FILE, JSON.stringify(${JSON.stringify({ ...QUIET_REPORT, ...options.report })}));
+    `);
+    const previous = process.env['MDBISYNC_ENGINE'];
+    process.env['MDBISYNC_ENGINE'] = driver;
+    try {
+      await runStep(ctx, { kind: 'run', action: 'sync', args: {} });
+    } finally {
+      if (previous === undefined) delete process.env['MDBISYNC_ENGINE'];
+      else process.env['MDBISYNC_ENGINE'] = previous;
+    }
+    return ctx;
+  }
+
+  it('is a harness subject', () => {
+    assert.equal(subjectSource('quiet.last'), 'harness');
+    assert.equal(subjectSource('quiet.0'), 'harness');
+    assert.equal(subjectSource('before.quiet.last'), null);
+  });
+
+  it('accepts a metadata-only merge record although the run reports changed=true', async () => {
+    const ctx = await watchedRun({ moves: ['state'] });
+    assert.deepEqual(await resolveSubject(ctx, 'runs.last.changed'), { known: true, value: true });
+    assert.deepEqual(await resolveSubject(ctx, 'quiet.last'), { known: true, value: [] });
+    assert.deepEqual(await resolveSubject(ctx, 'quiet.0'), { known: true, value: [] });
+  });
+
+  it('accepts a run that changed nothing', async () => {
+    const ctx = await watchedRun({ moves: [], report: { changed: false } });
+    assert.deepEqual(await resolveSubject(ctx, 'quiet.last'), { known: true, value: [] });
+  });
+
+  it('rejects document writes the proxy saw', async () => {
+    const ctx = await watchedRun({ moves: ['state'], writes: 2 });
+    assert.deepEqual(await resolveSubject(ctx, 'quiet.last'), { known: true, value: ['2 document writes reached Linear'] });
+  });
+
+  it('rejects a different tracked tree, and a moved tracked branch', async () => {
+    const tree = await watchedRun({ moves: ['state', 'tracked-tree'] });
+    assert.deepEqual(await resolveSubject(tree, 'quiet.last'), { known: true, value: ['the tracked content changed', 'the tracked branch moved'] });
+    const commit = await watchedRun({ moves: ['state', 'tracked-commit'] });
+    assert.deepEqual(await resolveSubject(commit, 'quiet.last'), { known: true, value: ['the tracked branch moved'] });
+  });
+
+  it('rejects repeated pull request activity: a new one, an update, a moved sync branch', async () => {
+    const opened = await watchedRun({ moves: ['state'], pullRequests: [[MERGED], [{ ...MERGED, number: 31, state: 'open', merged_at: null }, MERGED]] });
+    assert.deepEqual(await resolveSubject(opened, 'quiet.last'), { known: true, value: ['pull request #31 was opened'] });
+    const updated = await watchedRun({ moves: ['state'], pullRequests: [[MERGED], [{ ...MERGED, body: 'Two documents.' }]] });
+    assert.deepEqual(await resolveSubject(updated, 'quiet.last'), { known: true, value: ['pull request #30 was updated'] });
+    const moved = await watchedRun({ moves: ['state', 'sync'] });
+    assert.deepEqual(await resolveSubject(moved, 'quiet.last'), { known: true, value: ['the sync branch moved'] });
+  });
+
+  it('rejects changed=true that no state ref write explains', async () => {
+    const ctx = await watchedRun({ moves: [] });
+    assert.deepEqual(await resolveSubject(ctx, 'quiet.last'), { known: true, value: ['the run reports changed=true, but no state ref moved'] });
+  });
+
+  it('gives no verdict for a run it did not watch', async () => {
+    const ctx = await watchedRun({ moves: ['state'], watch: false });
+    await assert.rejects(resolveSubject(ctx, 'quiet.last'), /was not watched/);
+    await assert.rejects(resolveSubject(ctx, 'quiet.3'), ProductError);
+  });
+});

@@ -116,6 +116,24 @@ collections such as `uploads.perHash` apply to every member, not an average.
 Checks such as `documents.allEditsPreserved` must compare unique seeded edit
 markers against both sides rather than assume success from a clean exit.
 
+`quiet.<n|last>` lists why that run was not quiet, and a scenario asserts it
+equal to `[]`. Quiet means the run finished a complete sync with zero document
+writes (seen by the Linear proxy and counted in its report), captured nothing
+into git, opened or updated no pull request, did not move the sync branch and
+left the tracked branch and its tree unchanged. A run's `changed` flag also
+covers its own state-ref writes, so right after a sync pull request merged, the
+next run records that merge (a metadata-only merge record in the state refs)
+and reports `changed: true` while staying quiet. That internal catch-up is the
+only write a quiet run may make: `changed: true` with no state ref moved is not
+quiet. The harness snapshots the world before and after every run of a scenario
+that asserts `quiet`; an unwatched run gives no verdict.
+
+Same-run merge scenarios set a positive merge grace with
+`run.sync.args.mergeGraceSeconds` (0 to 120; the harness otherwise passes 0,
+deferring every merge). Every slice publishes the pull request check workflow;
+the `no-check-workflow` fixture removes it and the `pending-check` fixture
+holds its check pending, both before the initial sync.
+
 `proposedRule` records a testable proposed behavior. The concrete checks remain
 binding until the behavior and its specification are deliberately revised.
 The unsafe-title proposal preserves the original title. Its independent inputs

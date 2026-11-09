@@ -34,6 +34,7 @@ import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } f
 import { commitStaged, HARNESS, personCommit } from './sandbox.ts';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
+import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
 import {
   commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
@@ -69,6 +70,7 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
     names: ctx.names,
     ...(typeof args.direction === 'string' ? { direction: args.direction } : {}),
     ...(args.confirm === true ? { confirm: true } : {}),
+    ...(typeof args.mergeGraceSeconds === 'number' ? { mergeGraceSeconds: args.mergeGraceSeconds } : {}),
     cwd: await ctx.engineClone(),
     repository: world.repository,
     extraEnv: { ...ctx.engine.env },
@@ -171,19 +173,38 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
     ctx.observations.set('pause.reachedAt', Date.now());
     return;
   }
-  const trigger = ctx.engine.trigger;
-  if (trigger !== undefined) {
-    // A fault that happens in the middle of this run: pause, act, go on.
-    delete ctx.engine.trigger;
-    ctx.checkpoints.pause(trigger.checkpoint);
-    const running = await startPaused(ctx, call, trigger.checkpoint);
-    await trigger.action();
-    ctx.checkpoints.resume(trigger.checkpoint);
-    delete ctx.engine.pending;
-    settleResult(ctx, await running.done);
-    return;
-  }
-  settleResult(ctx, await runEngine(call));
+  await watchQuiet(ctx, async () => {
+    const trigger = ctx.engine.trigger;
+    if (trigger !== undefined) {
+      // A fault that happens in the middle of this run: pause, act, go on.
+      delete ctx.engine.trigger;
+      ctx.checkpoints.pause(trigger.checkpoint);
+      const running = await startPaused(ctx, call, trigger.checkpoint);
+      await trigger.action();
+      ctx.checkpoints.resume(trigger.checkpoint);
+      delete ctx.engine.pending;
+      settleResult(ctx, await running.done);
+      return;
+    }
+    settleResult(ctx, await runEngine(call));
+  });
+}
+
+/**
+ * Runs one engine invocation; in a scenario that asserts quiet, snapshots
+ * the world around it and records why the run was not quiet
+ * (`harness.quiet.<n>`, empty when it was), for the `quiet.<n|last>` subject.
+ */
+async function watchQuiet(ctx: RunContext, run: () => Promise<void>): Promise<void> {
+  if (!watchesQuiet(ctx)) return run();
+  const before = await snapshotWorld(ctx);
+  const count = ctx.engine.results.length;
+  await run();
+  const result = ctx.engine.results.at(-1);
+  if (ctx.engine.results.length !== count + 1 || result === undefined) throw new Error('a watched invocation recorded no single engine run');
+  const after = await snapshotWorld(ctx);
+  const n = ctx.engine.results.length - 1 - ctx.engine.setupRuns;
+  ctx.observations.set(`harness.quiet.${n}`, quietFailures({ exitCode: result.exitCode, report: result.report, before, after, documentWrites: writesBetween(ctx, before, after) }));
 }
 
 /** Runs the sync until a run changes nothing more (at most `limit` runs). */
@@ -269,11 +290,16 @@ async function trackedTipOnServer(ctx: RunContext): Promise<string> {
 
 /** Starts (dispatch) or finds (push, pull request) a workflow run, waits for it and records its result as an engine run. */
 async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Promise<void> {
-  const world = live(ctx);
+  live(ctx);
   const event = typeof args.event === 'string' ? args.event : 'workflow_dispatch';
   if (event === 'schedule') throw new EnvBlockedError(SCHEDULE_BLOCKED);
   const command = (typeof args.command === 'string' ? args.command : 'sync') as CommandName;
   await requireWorkflows(ctx, command);
+  await watchQuiet(ctx, () => startWorkflowRun(ctx, event, command, args));
+}
+
+async function startWorkflowRun(ctx: RunContext, event: string, command: CommandName, args: Record<string, unknown>): Promise<void> {
+  const world = live(ctx);
   let run;
   if (event === 'workflow_dispatch') {
     // The push that installed the workflow registers it (workflow-files.ts).

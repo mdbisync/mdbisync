@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "id": "L2-38",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a",
+        "target": "docs/handbook/briefs/equipment.md"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {
+        "mergeGraceSeconds": 60
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {
+        "mergeGraceSeconds": 60
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "pullRequests.created",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "pullRequests.merged",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "pullRequests.mergeKind",
+        "operator": "equal",
+        "expected": "merge"
+      },
+      {
+        "subject": "pullRequests.spuriousChanges",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "runs.0.pullRequest.checks.state",
+        "operator": "equal",
+        "expected": "passed"
+      },
+      {
+        "subject": "runs.0.pullRequest.checks.hasChecks",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "runs.0.pullRequest.merged",
+        "operator": "same-as",
+        "expected": "pullRequests.mergeCommit"
+      },
+      {
+        "subject": "pullRequests.ciPassed",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "quiet.last",
+        "operator": "equal",
+        "expected": []
+      }
+    ]
+  }
+}
