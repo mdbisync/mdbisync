@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { deflateRawSync } from 'node:zlib';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -744,6 +745,54 @@ describe('subjects', () => {
     ctx.live?.tree.paths.set('eng/platform/media/scan-11mb.pdf', 'eng/platform/media/scan-11mb.pdf');
     ctx.engine.results.push({ command: 'initial-sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: { summary: { oversizeFiles: ['eng/platform/media/scan-11mb.pdf', 'eng/platform/unknown.png'] } } });
     assert.deepEqual(await resolveSubject(ctx, 'summary.oversizeFiles'), { known: true, value: ['eng/platform/unknown.png', 'pdf-11mb'] });
+  });
+
+  it('evaluate every check when one fails because the engine lacks a command', async () => {
+    const { ctx } = await fakeRun();
+    const { INVARIANT_CHECKS, runChecks } = await import('./checks.ts');
+    const { NotImplementedError } = await import('./results.ts');
+    const invariants = Object.fromEntries(Object.keys(ctx.scenario.checks.invariants).map((id) => [id, { required: id === 'I6' || id === 'I8' }]));
+    ctx.scenario = { ...ctx.scenario, checks: { invariants: invariants as never, assertions: [{ subject: 'documents.duplicateCount', operator: 'equal', expected: 0 }, { subject: 'runs.0.summary.code', operator: 'equal', expected: 'x' }] } };
+    const original = INVARIANT_CHECKS.I6;
+    INVARIANT_CHECKS.I6 = async () => {
+      throw new NotImplementedError('sync');
+    };
+    try {
+      const outcomes = await runChecks(ctx);
+      assert.deepEqual(outcomes.map((outcome) => [outcome.name, outcome.ok]), [['I6', false], ['I8', true], ['documents.duplicateCount', true], ['runs.0.summary.code', false]]);
+      assert.match(outcomes[0]?.detail ?? '', /not implemented: sync/);
+    } finally {
+      INVARIANT_CHECKS.I6 = original;
+    }
+  });
+
+  it('check the upload cache only for documents the engine wrote, and read upload URLs in any link form', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const git = await ctx.person();
+    // An image in a document the engine left out (no id) and one in a written document.
+    writeFileSync(join(git.dir, 'eng/platform/left-out.md'), '![x](media/left.png)\n');
+    writeFileSync(join(git.dir, 'eng/platform/notes.md'), '# Notes\n\n![y](media/kept.png) and [the brief](<media/brief.pdf#page=2>)\n');
+    spawnSync('mkdir', ['-p', join(git.dir, 'eng/platform/media')]);
+    writeFileSync(join(git.dir, 'eng/platform/media/left.png'), 'left bytes');
+    writeFileSync(join(git.dir, 'eng/platform/media/kept.png'), 'kept bytes');
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '-m', 'Images']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    ctx.live?.tree.paths.set('eng/platform/left-out.md', 'eng/platform/left-out.md');
+    ctx.live?.manifest.files.push({ path: 'eng/platform/left-out.md', group: 'images', kind: 'markdown', synced: true, lfs: false, canary: null, class: null, rule: null });
+    refreshView(ctx);
+    // No uploads yet: the written document's image is missing from the cache.
+    assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: false });
+    // Once the written document's image is cached, the left-out document's image does not count.
+    const kept = createHash('sha256').update('kept bytes').digest('hex');
+    const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify({ [kept]: 'https://uploads.linear.app/x/kept' }) })).trim();
+    const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
+    const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
+    await git.run(['push', '--quiet', 'origin', `${commit}:${ctx.names.refPrefix}/uploads`]);
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'uploads.cacheComplete'), { known: true, value: true });
+    void linear;
+    void ids;
   });
 
   it('read conflict marks by the palette names specs use, from Linear\'s hex colors', async () => {

@@ -52,7 +52,7 @@ inputs:
     default: ""
 outputs:
   code:
-    description: "Why the run stopped before writing, for example `initial-sync-required`; empty when it did not stop."
+    description: "Why the run stopped before writing, for example `initial-sync-required`, or why a confirmed initial sync did not finish (`stopped`, `write-failed`, `state-moved`); empty when it finished."
 runs:
   using: node24
   main: dist/action-main.js

@@ -1,7 +1,9 @@
 // The initial sync's job summary and its machine-readable form: paths,
 // places and rule names only, never document content.
 
+import { describeStop } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
+import { type ConfirmedResult } from './confirm.ts';
 import { type InitialSyncPlan, type LeftOutEntry } from './plan.ts';
 
 export const DIRECTIONS = ['git-to-linear', 'linear-to-git'] as const;
@@ -74,6 +76,55 @@ export function renderDryRun(plan: InitialSyncPlan): string {
     ['Path', 'Rules', 'Lines', 'Collides with'],
     plan.leftOut.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? []).join(', ')]),
   );
+  return lines.join('\n');
+}
+
+/** Markdown for the job summary of a confirmed run: counts, paths and rule names, never content. */
+export function renderConfirmed(plan: InitialSyncPlan, result: ConfirmedResult): string {
+  const outcome = result.complete
+    ? 'Linear now equals the tracked branch, and the sync state is recorded.'
+    : result.code === 'state-moved'
+      ? 'A state ref moved while this run was writing, so it recorded nothing more. Another run may be working on this repository; run initial sync again when it is done.'
+      : 'The run stopped before it finished, so the sync state is not recorded yet. Run initial sync again with the same inputs to go on; documents already written are skipped.';
+  const lines = [
+    '## Initial sync from git to Linear',
+    '',
+    outcome,
+    '',
+    `- created ${count(result.created.length, 'document')};`,
+    `- overwrote ${count(result.overwritten.length, 'document')} with the file's text (same document, comments kept);`,
+    `- left ${count(result.unchanged.length, 'document')} as they were: they already held the file's text;`,
+    ...(result.resumed ? [`- skipped ${count(result.skippedCompleted.length, 'document')} written by the run this one continued;`] : []),
+    `- moved ${count(result.trashed.length, 'document')} without a file to Linear's trash, from which they can be restored;`,
+    `- left out ${count(plan.leftOut.length + result.leftOutAtWrite.length, 'file')}, which stay in git only until they are fixed.`,
+    '',
+  ];
+  if (result.stopped !== undefined) {
+    const why = result.stopped.kind === 'test-threshold' ? `the test threshold of ${result.stopped.documents} documents` : describeStop(result.stopped);
+    lines.push(`Stopped: ${why}. Not written yet: ${count(result.notAttempted.length, 'item')}.`, '');
+  }
+  const table = (title: string, head: string[], rows: string[][]) => {
+    if (rows.length === 0) return;
+    lines.push(`### ${title} (${rows.length})`, '', `| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`);
+    for (const row of rows) lines.push(`| ${row.map(cell).join(' | ')} |`);
+    lines.push('');
+  };
+  table('Failed', ['Path', 'Operation', 'Error'], result.failed.map((entry) => [entry.path, entry.operation, entry.error]));
+  table('Moved to trash', ['Path'], result.trashed.map((path) => [path]));
+  table(
+    'Left out',
+    ['Path', 'Rules', 'Lines', 'Collides with'],
+    [
+      ...plan.leftOut.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? []).join(', ')]),
+      ...result.leftOutAtWrite.map((entry) => [entry.path, entry.rule, '', '']),
+    ],
+  );
+  if (result.record !== null && result.record.reformatted.length > 0) {
+    lines.push(
+      `Linear stores ${count(result.record.reformatted.length, 'file')} in a different form than the tracked branch; the next sync proposes that form in its pull request.`,
+      '',
+    );
+  }
   return lines.join('\n');
 }
 

@@ -231,17 +231,102 @@ export async function readUploads(git: Git, commit: Oid | null): Promise<UploadM
   return map;
 }
 
-/** Commits the id map on top of `parent`. Returns `parent` when nothing changed. */
-export function commitIds(git: Git, parent: Oid | null, ids: IdMap, identity: CommitIdentity): Promise<Oid> {
+/**
+ * The subject of an `ids` commit made while an initial sync is still
+ * writing. Its body names the tracked commit the run writes from, as a
+ * `Tracked: <oid>` line. The sync does not run while `ids` is at such a
+ * commit: the map may hold only part of the documents.
+ */
+export const INITIAL_SYNC_PROGRESS = 'Initial sync in progress: document ids';
+
+export function initialSyncProgressMessage(tracked: Oid): string {
+  return `${INITIAL_SYNC_PROGRESS}\n\nTracked: ${tracked}\n`;
+}
+
+/** When `commit` is a progress commit of an unfinished initial sync, the tracked commit it names; otherwise null. */
+export async function readInitialSyncProgress(git: Git, commit: Oid | null): Promise<{ tracked: Oid | null } | null> {
+  if (commit === null) return null;
+  const message = (await git.run(['show', '-s', '--format=%B', commit])).stdout.toString('utf8');
+  const [subject] = message.split('\n');
+  if (subject !== INITIAL_SYNC_PROGRESS) return null;
+  return { tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message)?.[1] ?? null };
+}
+
+export interface CommitStateOptions {
+  /** The commit message; a reader can tell a run's progress commits from its final one by it. */
+  message?: string;
+  /** Commit even when the file is unchanged, so the new message is recorded. */
+  always?: boolean;
+}
+
+/**
+ * Ids chosen for documents not created yet, by path: a file left out while
+ * writing keeps the id other documents already link to, so the next run
+ * creates it under that id. Kept beside `ids.json`, never in it: every
+ * entry there is a synchronized path with a document.
+ */
+export const RESERVED_IDS_FILE = 'reserved-ids.json';
+export type ReservedIds = Map<string, string>;
+
+export async function readReservedIds(git: Git, commit: Oid | null): Promise<ReservedIds> {
+  if (commit === null) return new Map();
+  const read = await git.run(['cat-file', 'blob', `${commit}:${RESERVED_IDS_FILE}`], { okCodes: [0, 128] });
+  if (read.code !== 0) return new Map();
+  const data = await readJsonFile(git, commit, RESERVED_IDS_FILE);
+  const map: ReservedIds = new Map();
+  for (const [path, id] of Object.entries(data)) {
+    if (typeof id !== 'string' || id === '') throw new Error(`${RESERVED_IDS_FILE} has an invalid entry`);
+    map.set(path, id);
+  }
+  return map;
+}
+
+/**
+ * In a progress commit only: for each document the unfinished initial sync
+ * wrote, the SHA-256 (lowercase hex) of the text it sent. A resumed run
+ * skips a document whose text has the same hash, whatever form Linear
+ * stored it in.
+ */
+export const WRITTEN_FILE = 'written.json';
+
+export async function readWrittenHashes(git: Git, commit: Oid | null): Promise<Map<string, string>> {
+  if (commit === null) return new Map();
+  const read = await git.run(['cat-file', 'blob', `${commit}:${WRITTEN_FILE}`], { okCodes: [0, 128] });
+  if (read.code !== 0) return new Map();
+  const data = await readJsonFile(git, commit, WRITTEN_FILE);
+  const map = new Map<string, string>();
+  for (const [path, hash] of Object.entries(data)) {
+    if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) throw new Error(`${WRITTEN_FILE} has an invalid entry`);
+    map.set(path, hash);
+  }
+  return map;
+}
+
+/**
+ * Commits the id map (and, when there are any, the reserved ids and the
+ * written hashes) on top of `parent`. Returns `parent` when nothing
+ * changed, unless `always`.
+ */
+export function commitIds(
+  git: Git,
+  parent: Oid | null,
+  ids: IdMap,
+  identity: CommitIdentity,
+  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string> } = {},
+): Promise<Oid> {
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
   const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry.saved === undefined ? { id: entry.id } : { id: entry.id, saved: entry.saved }]));
-  return commitJsonFile(git, parent, IDS_FILE, data, 'Update document ids', identity);
+  const files = new Map<string, unknown>([[IDS_FILE, data]]);
+  const sorted = (map: ReadonlyMap<string, string>) => Object.fromEntries([...map.entries()].sort(([a], [b]) => compareStrings(a, b)));
+  if (options.reserved !== undefined && options.reserved.size > 0) files.set(RESERVED_IDS_FILE, sorted(options.reserved));
+  if (options.written !== undefined && options.written.size > 0) files.set(WRITTEN_FILE, sorted(options.written));
+  return commitJsonFiles(git, parent, files, options.message ?? 'Update document ids', identity, options.always === true);
 }
 
 /** Commits the upload cache on top of `parent`. Returns `parent` when nothing changed. */
 export function commitUploads(git: Git, parent: Oid | null, uploads: UploadMap, identity: CommitIdentity): Promise<Oid> {
   const data = Object.fromEntries([...uploads.entries()].sort(([a], [b]) => compareStrings(a, b)));
-  return commitJsonFile(git, parent, UPLOADS_FILE, data, 'Update upload cache', identity);
+  return commitJsonFiles(git, parent, new Map([[UPLOADS_FILE, data]]), 'Update upload cache', identity);
 }
 
 function compareStrings(a: string, b: string): number {
@@ -289,13 +374,22 @@ async function readJsonFile(git: Git, commit: Oid | null, file: string): Promise
   return data as Record<string, unknown>;
 }
 
-function commitJsonFile(git: Git, parent: Oid | null, file: string, data: unknown, message: string, identity: CommitIdentity): Promise<Oid> {
+/** Commits a tree of exactly these JSON files. */
+function commitJsonFiles(
+  git: Git,
+  parent: Oid | null,
+  files: ReadonlyMap<string, unknown>,
+  message: string,
+  identity: CommitIdentity,
+  always = false,
+): Promise<Oid> {
   return commitTree(git, {
     parents: parent === null ? [] : [parent],
     base: null,
-    changes: new Map([[file, `${JSON.stringify(data, null, 2)}\n`]]),
+    changes: new Map([...files].map(([file, data]) => [file, `${JSON.stringify(data, null, 2)}\n`])),
     message,
     identity,
+    skipIfUnchanged: !always,
   });
 }
 

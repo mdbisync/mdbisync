@@ -1,8 +1,7 @@
 // The commands of the command-line entry and their exit codes.
 // `sync`, `initial-sync` and `check` run the preflight (the sync's state and
 // the setup check). A command that is not built yet, and after a passed
-// preflight `sync` and every `initial-sync` but the dry run from git to
-// Linear, report "not implemented" and exit with their own code, so callers
+// preflight `sync` and an `initial-sync` from Linear to git, report "not implemented" and exit with their own code, so callers
 // and tests can tell the stubs apart.
 
 export interface CommandInfo {
@@ -29,6 +28,8 @@ export const USAGE_EXIT_CODE = 2;
 export const SETUP_FAILED_EXIT_CODE = 3;
 /** The sync has no state; nothing was written; run initial sync first. */
 export const NO_STATE_EXIT_CODE = 4;
+/** A confirmed initial sync wrote part of its work and stopped; run it again with the same inputs. */
+export const INCOMPLETE_EXIT_CODE = 5;
 
 export function isCommandName(value: string): value is CommandName {
   return Object.hasOwn(COMMANDS, value);
