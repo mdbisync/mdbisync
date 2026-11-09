@@ -38,7 +38,7 @@ import { REPO_ROOT, engineEntry } from './engine.ts';
 import { isAppBot } from './workflows.ts';
 import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
-import { documentPaths, projectFolders } from './step-helpers.ts';
+import { documentPaths, MOVE_SOURCE_FOLDER, projectFolders } from './step-helpers.ts';
 import { UNSAFE_TITLES } from './fixtures.ts';
 
 // --- views of the world ---------------------------------------------------------------
@@ -269,9 +269,14 @@ async function parents(git: Git, commit: string): Promise<string[]> {
 /**
  * A path as specs write it: a run's project folder becomes `project/`
  * (specs name destinations by role, since each run has its own folders).
+ * When a step moved the document out of its project, only that source
+ * folder becomes `project/`: a path in any other project keeps its real
+ * folder, so a document that stayed or went to the wrong project does not
+ * read the same as its destination.
  */
 export function symbolicPath(ctx: RunContext, path: string): string {
-  const folder = projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`));
+  const source = ctx.observations.get(MOVE_SOURCE_FOLDER) as string | undefined;
+  const folder = projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`) && (source === undefined || candidate.folder === source));
   return folder === undefined ? path : `project/${path.slice(folder.folder.length + 1)}`;
 }
 
@@ -595,6 +600,18 @@ const linearRecords: Compute = async (env) => {
   const tip = await stateTip(env.ctx, 'linear');
   return (await newCommits(await person(env.ctx), tip, [(await env.view()).tip])).length;
 };
+
+/**
+ * Subjects whose recorded observation is raw: the subject's own computation
+ * turns it into the form specs compare (a role path, a palette label), so
+ * the raw observation of the same name must not answer for it.
+ */
+const NORMALIZED_OBSERVATIONS = new Set<string>();
+
+function normalizedObservation(name: string, normalize: (raw: unknown, env: Env) => unknown): Compute {
+  NORMALIZED_OBSERVATIONS.add(name);
+  return async (env) => normalize(observed(env.ctx, name), env);
+}
 
 export const SUBJECTS: Record<string, Compute> = {
   // --- documents in Linear --------------------------------------------------------------
@@ -1278,7 +1295,7 @@ export const SUBJECTS: Record<string, Compute> = {
 
   // --- blocked documents (L2-35) ----------------------------------------------------------------
   'blocked.icon': async (env) => observed(env.ctx, 'blocked.icon'),
-  'blocked.color': async (env) => colorLabel(observed(env.ctx, 'blocked.color') as string | null),
+  'blocked.color': normalizedObservation('blocked.color', (color) => colorLabel(color as string | null)),
   'blocked.commentFields': async (env) => {
     const comments = observed(env.ctx, 'blocked.comments') as string[];
     const fields: string[] = [];
@@ -1435,7 +1452,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const { documents, kept } = reverseSides(env.ctx, view);
     return sorted(new Set([...view.files.keys(), ...documents.keys()].filter((path) => !kept.has(path))));
   },
-  'expected.destinationPath': async (env) => symbolicPath(env.ctx, observed(env.ctx, 'expected.destinationPath') as string),
+  'expected.destinationPath': normalizedObservation('expected.destinationPath', (path, env) => symbolicPath(env.ctx, path as string)),
   'setup.requiredChecks': async () => [...REQUIRED_SETUP_CHECKS],
   'fixture.rule': async (env) => observed(env.ctx, 'fixture.rule'),
   // Which Linear-format hook the scratch repository ran: `published` (the corpus's pinned release) or `source`.
@@ -1893,7 +1910,7 @@ function quietValue(ctx: RunContext, subject: string): string[] {
 }
 
 export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
-  if (ctx.observations.has(subject)) return { known: true, value: ctx.observations.get(subject) };
+  if (ctx.observations.has(subject) && !NORMALIZED_OBSERVATIONS.has(subject)) return { known: true, value: ctx.observations.get(subject) };
   if (QUIET_SUBJECT.test(subject)) return { known: true, value: quietValue(ctx, subject) };
   const before = subject.startsWith('before.');
   const name = before ? subject.slice('before.'.length) : subject;

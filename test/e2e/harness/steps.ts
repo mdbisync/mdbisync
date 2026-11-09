@@ -41,7 +41,7 @@ import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
 import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
 import {
-  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
+  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import type { WorkflowRun } from './github.ts';
 import { environmentBlocker, jobSpans, maxOverlap, runLogs, runResult, SCHEDULE_BLOCKED, waitForRegistration, waitForRun } from './workflows.ts';
@@ -1165,6 +1165,7 @@ const LINEAR: Record<string, Executor> = {
     const project = [...world.projects.values()].find((candidate) => candidate.name === other?.project);
     if (own === undefined || other === undefined || project === undefined) throw new EnvBlockedError('the slice needs a document in a project and a second project');
     await world.editors[editorOf(args)].updateDocument(id, { projectId: project.id });
+    ctx.observations.set(MOVE_SOURCE_FOLDER, own.folder);
     ctx.observations.set('expected.destinationPath', `${other.folder}${path.slice(own.folder.length)}`);
   },
   'linear.metadata': async (ctx, args) => {
