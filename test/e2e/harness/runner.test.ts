@@ -295,7 +295,7 @@ describe('sweeper', () => {
     const live = registerRun(stateDir, '222222');
     const sandbox = new Sandbox({ url: remote, token: 'unused', stateDir, runId: 'sweep0' });
     await sandbox.refreshCache();
-    const trashed: string[] = [];
+    const archived: string[] = [];
     const deleted: string[] = [];
     const report = await sweep({
       sandbox,
@@ -307,14 +307,19 @@ describe('sweeper', () => {
         ],
         deleteProject: async (project: { name: string }) => void deleted.push(project.name),
         runTeamDocuments: async () => [{ id: 'd1', title: '111111/guides/start', projectId: null, createdAt: new Date().toISOString(), runId: '111111' }],
-        trashRunDocument: async (document: { id: string }) => void trashed.push(document.id),
+        // Leftover team-zone documents are archived through a run project, never trashed.
+        archiveRunTeamDocuments: async (documents: Array<{ id: string }>, runId: string, projectName: string) => {
+          archived.push(...documents.map((document) => `${runId}:${projectName}:${document.id}`));
+          return documents.length;
+        },
       } as never,
       teamIds: ['team-1'],
     }, stateDir);
     assert.deepEqual(report.errors, []);
     assert.deepEqual(report.removedRefs.sort(), ['refs/heads/t/111111/main', 'refs/mdbisync-t/111111/ids']);
     assert.deepEqual(deleted, ['Field notes 111111']);
-    assert.deepEqual(trashed, ['d1']);
+    assert.deepEqual(archived, ['111111:Spare shelf 111111:d1']);
+    assert.equal(report.archivedDocuments, 1);
     const left = (await bare.text(['for-each-ref', '--format=%(refname)'])).split('\n').sort();
     assert.deepEqual(left, ['refs/heads/main', 'refs/heads/t/222222/main', 'refs/heads/t/333333/main']);
     live.done();
