@@ -67,8 +67,28 @@ export interface FakeWrites {
   reject?: (operation: string, variables: Record<string, unknown>) => boolean;
 }
 
+/** A pull request in the fake repository; tests merge or close it by changing `state`. */
+export interface FakePullRequest {
+  number: number;
+  title: string;
+  body: string;
+  head: string;
+  base: string;
+  state: 'open' | 'closed';
+  merged: boolean;
+}
+
 export interface FakeWorld {
-  github: { tokenValid: boolean; missing: Set<string>; allowMergeCommit: boolean; rateLimited: boolean; rateLimitedRepository: boolean };
+  github: {
+    tokenValid: boolean;
+    missing: Set<string>;
+    allowMergeCommit: boolean;
+    rateLimited: boolean;
+    rateLimitedRepository: boolean;
+    pullRequests: FakePullRequest[];
+    /** Answer 422 to every pull request a run tries to open. */
+    refusePullRequests?: boolean;
+  };
   /**
    * `unavailable`: the token endpoint answers 503, as in an outage.
    * `store`: what Linear stores for written content (the identity unless a test reformats).
@@ -101,7 +121,7 @@ export interface FakeWorld {
 
 export function fakeWorld(): FakeWorld {
   return {
-    github: { tokenValid: true, missing: new Set(), allowMergeCommit: true, rateLimited: false, rateLimitedRepository: false },
+    github: { tokenValid: true, missing: new Set(), allowMergeCommit: true, rateLimited: false, rateLimitedRepository: false, pullRequests: [] },
     linear: {
       credentialsValid: true,
       unavailable: false,
@@ -158,6 +178,8 @@ function github(world: FakeWorld, method: string, path: string, init: RequestIni
     const writable = !world.github.missing.has('contents:write');
     return json(200, { full_name: repo[0].slice(7), ...(writable ? { allow_merge_commit: world.github.allowMergeCommit } : {}) });
   }
+  const pulls = pullRequests(world, method, rest, init);
+  if (pulls !== undefined) return pulls;
   const probe = PERMISSION_PROBES.find((candidate) => candidate.method === method && rest === candidate.path(rest.split('/')[2] ?? ''));
   if (probe === undefined) return json(404, { message: 'Not Found' });
   if (world.github.rateLimited) return json(403, { message: 'You have exceeded a secondary rate limit.' });
@@ -171,6 +193,53 @@ function github(world: FakeWorld, method: string, path: string, init: RequestIni
     return json(201, {});
   }
   return json(422, { message: 'Invalid request.' });
+}
+
+/**
+ * Lists and opens pull requests; undefined for other requests, and for the
+ * setup check's empty-bodied probe, which the probes answer.
+ */
+function pullRequests(world: FakeWorld, method: string, rest: string, init: RequestInit | undefined): Response | undefined {
+  const [path = '', search = ''] = rest.split('?');
+  const store = world.github.pullRequests;
+  const one = /^\/pulls\/(\d+)$/.exec(path);
+  if (one !== null && method === 'PATCH') {
+    const pr = store.find((candidate) => candidate.number === Number(one[1]));
+    if (pr === undefined) return json(404, { message: 'Not Found' });
+    const body = JSON.parse(String(init?.body ?? '{}')) as { title?: string; body?: string; state?: 'open' | 'closed' };
+    if (body.title !== undefined) pr.title = body.title;
+    if (body.body !== undefined) pr.body = body.body;
+    if (body.state !== undefined) pr.state = body.state;
+    world.writes.push(`${method} ${path}`);
+    return json(200, pullRequestNode(pr));
+  }
+  if (path !== '/pulls') return undefined;
+  if (method === 'GET') {
+    const query = new URLSearchParams(search);
+    const state = query.get('state') ?? 'open';
+    const head = query.get('head');
+    const base = query.get('base');
+    const found = store.filter(
+      (pr) => (state === 'all' || pr.state === state) && (head === null || `owner:${pr.head}` === head) && (base === null || pr.base === base),
+    );
+    return json(200, found.map(pullRequestNode));
+  }
+  if (method !== 'POST') return undefined;
+  const body = JSON.parse(String(init?.body ?? '{}')) as { title?: string; head?: string; base?: string; body?: string };
+  if (body.head === undefined) return undefined;
+  if (world.github.missing.has('pull_requests:write')) return json(403, { message: 'Resource not accessible by integration' });
+  if (world.github.refusePullRequests) return json(422, { message: 'Validation Failed' });
+  if (store.some((pr) => pr.state === 'open' && pr.head === body.head && pr.base === body.base)) {
+    return json(422, { message: 'Validation Failed', errors: [{ message: 'A pull request already exists' }] });
+  }
+  world.writes.push(`${method} ${path}`);
+  const pr: FakePullRequest = { number: store.length + 1, title: body.title ?? '', body: body.body ?? '', head: body.head, base: body.base ?? '', state: 'open', merged: false };
+  store.push(pr);
+  return json(201, pullRequestNode(pr));
+}
+
+function pullRequestNode(pr: FakePullRequest) {
+  return { number: pr.number, html_url: `https://github.test/owner/repo/pull/${pr.number}`, state: pr.state, head: { ref: pr.head }, base: { ref: pr.base }, title: pr.title, body: pr.body };
 }
 
 async function linear(world: FakeWorld, path: string, init: RequestInit | undefined): Promise<Response> {

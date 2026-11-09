@@ -9,7 +9,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
-import { COMMANDS, SETUP_FAILED_EXIT_CODE, USAGE_EXIT_CODE } from '../commands.ts';
+import { SETUP_FAILED_EXIT_CODE, USAGE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Git } from '../state/index.ts';
@@ -110,6 +110,7 @@ describe('initial sync dry run', () => {
       create: ['combined/README.md', 'eng/README.md', 'eng/notes/README.md', 'eng/notes/plan.md'],
       overwrite: ['eng/backend/notes.md'],
       trash: ['eng/backend/retired.md'],
+      remove: [],
       paths: ['combined/README.md', 'eng/README.md', 'eng/backend/notes.md', 'eng/backend/retired.md', 'eng/notes/README.md', 'eng/notes/plan.md'],
     });
     assert.deepEqual(report.summary?.leftOut, ['combined/Guide.md', 'combined/guide.md', 'eng/notes/formula.md']);
@@ -187,17 +188,6 @@ describe('initial sync dry run', () => {
       await aliased.cleanup();
     }
   });
-
-  for (const [label, extra] of [['a run from Linear to git', { MDBISYNC_DIRECTION: 'linear-to-git' }]] as const) {
-    it(`${label} is not built yet: it says so after the preflight and writes nothing`, async () => {
-      const result = await run(fakeWorld(), extra);
-      assert.equal(result.exitCode, COMMANDS['initial-sync'].notImplementedExitCode);
-      assert.match(result.stderr, /initial-sync: not implemented/);
-      const report = await readReport();
-      assert.equal(report.notImplemented, true);
-      assert.equal(report.summary, null);
-    });
-  }
 });
 
 describe('initial sync dry run: documents the uploads would leave out', () => {

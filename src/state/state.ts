@@ -252,6 +252,34 @@ export async function readInitialSyncProgress(git: Git, commit: Oid | null): Pro
   return { tracked: /^Tracked: ([0-9a-f]{40,64})$/m.exec(message)?.[1] ?? null };
 }
 
+/**
+ * The subject of a `linear` record made by an initial sync from Linear. That
+ * record is the head of a pull request a person merges, since it can remove
+ * files; the sync does not run until it is merged.
+ */
+export const INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear's state";
+
+/**
+ * Whether the pull request of an initial sync from Linear waits for a
+ * person: `linear` is such a record, the sync branch (the pull request's
+ * head) holds it, at its tip or under review commits a person pushed, and
+ * the tracked branch has not merged it. A record that needed no pull request
+ * moves no sync branch, so it never waits.
+ */
+/** Whether `commit` is `of` or one of its ancestors. */
+export async function isAncestor(git: Git, commit: Oid, of: Oid): Promise<boolean> {
+  return (await git.run(['merge-base', '--is-ancestor', commit, of], { okCodes: [0, 1] })).code === 0;
+}
+
+export async function initialPullRequestPending(git: Git, state: { linear: Oid | null; sync: Oid | null; tracked: Oid }): Promise<boolean> {
+  const { linear, sync, tracked } = state;
+  if (linear === null || sync === null) return false;
+  const [subject] = (await git.text(['show', '-s', '--format=%s', linear])).split('\n');
+  if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
+  if (!(await isAncestor(git, linear, sync))) return false;
+  return !(await isAncestor(git, linear, tracked));
+}
+
 export interface CommitStateOptions {
   /** The commit message; a reader can tell a run's progress commits from its final one by it. */
   message?: string;
