@@ -602,6 +602,35 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
+  it('a left-out file fixed in git does not overwrite an edit made in Linear while it was left out', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
+    assert.deepEqual((await sync()).writes, []);
+    document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}\n`;
+    touch(document);
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'edited-in-linear' }]);
+    assert.match(document.content ?? '', /Typed in Linear meanwhile/);
+  });
+
+  it('a file renamed in the same commit that changes its image is written with the new image', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    await commit({ 'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1') }, [['eng/notes/figure.md', 'eng/notes/illustration.md']]);
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+    assert.equal(figure.title, 'illustration');
+    const [after] = uploadUrls(figure.content);
+    assert.ok(after !== undefined && after !== before, 'the renamed document kept the old image');
+    assert.equal(report.complete, true);
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
+  });
+
   /** What a capture does for an edit in Linear: the document's new text, committed onto `linear`. */
   async function captured(path: string, text: string) {
     const document = await documentOf(path);

@@ -54,6 +54,8 @@ export interface LocalMerge {
   conflicts: string[];
   /** Synchronized files of the `linear` tip, by path. */
   linear: Map<string, SideFile>;
+  /** Mapped files of the `linear` tip, left-out ones included, by path. */
+  linearMapped: Map<string, SideFile>;
   /** Synchronized files of the merge result, by path. */
   result: Map<string, SideFile>;
   /** Files of the merge result the sync leaves out (lint, title, collisions); their documents stay as they are. */
@@ -153,6 +155,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     tree,
     conflicts,
     linear: linearSide.files,
+    linearMapped: linearSide.mapped,
     result: resultSide.files,
     leftOut: resultSide.leftOut,
     changes,
@@ -176,6 +179,8 @@ interface Side {
   files: Map<string, SideFile>;
   leftOut: Array<{ path: string; rules: string[] }>;
   leftOutPaths: Set<string>;
+  /** Every mapped file, the left-out ones included: their titles and places. */
+  mapped: Map<string, SideFile>;
 }
 
 /**
@@ -198,7 +203,8 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
   for (const file of mapping.leftOut) leave(file.path, [file.rule]);
   for (const file of mapping.unsynced) if (file.place !== undefined) leave(file.path, [file.reason]);
   leftOut.sort((a, b) => compare(a.path, b.path));
-  return { mapping, files, leftOut, leftOutPaths: new Set(leftOut.map((entry) => entry.path)) };
+  const mapped = new Map(mapping.documents.map((document) => [document.path, toSideFile(document)]));
+  return { mapping, files, leftOut, leftOutPaths: new Set(leftOut.map((entry) => entry.path)), mapped };
 }
 
 function toSideFile(document: MappedDocument): SideFile {
