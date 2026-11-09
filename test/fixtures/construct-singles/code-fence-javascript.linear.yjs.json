@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"code_block","attrs":{"id":"<id>","language":"javascript"},"children":[{"text":"const total = items.reduce((sum, item) => sum + item.price, 0);","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-93619445","marks":{"attribution":"user"}}]}
-  ]
-}
