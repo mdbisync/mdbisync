@@ -12,7 +12,7 @@ const root = resolve(import.meta.dirname, '../..');
 
 test('CI and release install the same pinned pre-commit before tests', async () => {
   const versions: string[] = [];
-  for (const [file, job] of [['ci.yml', 'check'], ['release.yml', 'build']] as const) {
+  for (const [file, job] of [['ci.yml', 'test'], ['ci.yml', 'validate'], ['release.yml', 'build']] as const) {
     const workflow = parse(await readFile(join(root, '.github/workflows', file), 'utf8'));
     assert.ok(workflow.jobs?.[job], `${file} must contain the ${job} job`);
     const steps = workflow.jobs[job].steps as { run?: string }[];
@@ -21,12 +21,12 @@ test('CI and release install the same pinned pre-commit before tests', async () 
       return match ? [{ version: match[1]!, index }] : [];
     });
     assert.equal(installs.length, 1, `${file} must install exactly one pinned pre-commit`);
-    const tests = steps.flatMap((step, index) => /\bnpm test\b/.test(step.run ?? '') ? [index] : []);
+    const tests = steps.flatMap((step, index) => /\b(?:npm (?:test|run test:hooks)|node --test)\b/.test(step.run ?? '') ? [index] : []);
     assert.ok(tests.length > 0, `${file} must run tests`);
     assert.ok(tests.every(index => installs[0]!.index < index), `${file} must install pre-commit before tests`);
     versions.push(installs[0]!.version);
   }
-  assert.equal(versions[0], versions[1], 'CI and release pre-commit versions must match');
+  assert.equal(new Set(versions).size, 1, 'CI and release pre-commit versions must match');
 });
 
 test('action and hook metadata prohibit runtime installs', async () => {

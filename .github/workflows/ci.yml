@@ -13,9 +13,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check:
+  validate:
     runs-on: ubuntu-latest
-    # The test suite can take nearly 10 minutes; leave room for setup and hooks.
+    # Leave headroom for setup, builds, and hook integration.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,15 +44,61 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
-          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-      # Before the tests: the harness tests commit through pre-commit hooks.
+          key: pre-commit-validate-${{ hashFiles('.pre-commit-config.yaml') }}
       - name: Install pre-commit
         run: pipx install pre-commit==4.6.2
-      - name: Test
-        run: npm test
       - name: Published hook and CI example integration
         run: npm run test:hooks
       - name: Pre-commit hooks
         env:
           SKIP: no-cyrillic # already run above
         run: pre-commit run --all-files --show-diff-on-failure
+
+  test:
+    name: test (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    # Keep headroom as the suite grows, including hook setup in each shard.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install compatible npm
+        run: npm install --global --ignore-scripts npm@11.16.0
+      - name: Install dependencies (lock file only, no install scripts)
+        run: npm ci
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-test-${{ matrix.shard }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      # Bundle tests need the release entry points on this runner too.
+      - name: Build test bundles
+        run: npm run build
+      # The harness tests commit through pre-commit hooks.
+      - name: Install pre-commit
+        run: pipx install pre-commit==4.6.2
+      - name: Test
+        run: node --test --test-shard=${{ matrix.shard }}/4 "src/**/*.test.ts" "tools/**/*.test.ts" "test/**/*.test.ts" "test/**/*.test.mjs"
+
+  # Preserve the required check name while every shard and validation gates it.
+  check:
+    if: ${{ always() }}
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require validation and every test shard
+        env:
+          VALIDATION_RESULT: ${{ needs.validate.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          test "$VALIDATION_RESULT" = success
+          test "$TEST_RESULT" = success
