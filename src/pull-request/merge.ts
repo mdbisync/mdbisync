@@ -97,5 +97,7 @@ export async function mergePullRequest(target: GitHubRepository, number: number,
 function refusalReason(message: unknown): string {
   if (typeof message !== 'string') return '';
   const line = message.replace(/[`\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return line.length > REASON_LENGTH ? `${line.slice(0, REASON_LENGTH - 1)}…` : line;
+  // Cut by code points, so a character outside the BMP is never split.
+  const points = [...line];
+  return points.length > REASON_LENGTH ? `${points.slice(0, REASON_LENGTH - 1).join('')}…` : line;
 }

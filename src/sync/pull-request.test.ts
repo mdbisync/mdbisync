@@ -376,7 +376,7 @@ describe('sync: the sync pull request', () => {
     const refused = await sync();
     assert.equal(refused.result.exitCode, 0, refused.result.stderr);
     assert.equal(refused.report.pullRequest?.code, 'merge-refused');
-    assert.match(refused.summary, /GitHub did not merge the sync pull request \[#1\]\(.*\) \(HTTP 409: Pull Request is not mergeable\)/);
+    assert.match(refused.summary, /GitHub did not merge the sync pull request \[#1\]\(.*\) \(HTTP 409: `Pull Request is not mergeable`\)/);
     assert.deepEqual(refused.writes, ['PATCH /pulls/1'], 'the refusal is noted on the pull request');
     const again = await sync();
     assert.equal(again.result.exitCode, 0, again.result.stderr);
@@ -398,12 +398,12 @@ describe('sync: the sync pull request', () => {
     assert.equal(first.result.exitCode, 0, first.result.stderr);
     assert.equal(first.report.pullRequest?.code, 'merge-refused');
     assert.equal(first.report.pullRequest?.reason, RULE_TEXT);
-    assert.ok(first.summary.includes(`(HTTP 405: ${RULE_TEXT}); a later run tries again`), first.summary);
-    assert.ok(world.github.pullRequests[0]?.body.includes(`(HTTP 405: ${RULE_TEXT})`), 'the pull request names the refusal');
+    assert.ok(first.summary.includes(`(HTTP 405: \`${RULE_TEXT}\`); a later run tries again`), first.summary);
+    assert.ok(world.github.pullRequests[0]?.body.includes(`(HTTP 405: \`${RULE_TEXT}\`)`), 'the pull request names the refusal');
 
     const second = await sync();
     assert.equal(second.result.exitCode, SETUP_FAILED_EXIT_CODE, second.result.stderr);
-    assert.ok(second.result.stderr.includes(`setup error (merge-blocked): GitHub refuses again to merge the sync pull request (HTTP 405: ${RULE_TEXT})`), second.result.stderr);
+    assert.ok(second.result.stderr.includes(`setup error (merge-blocked): GitHub refuses again to merge the sync pull request (HTTP 405: \`${RULE_TEXT}\`)`), second.result.stderr);
     assert.equal(second.report.pullRequest?.code, 'merge-blocked');
     assert.equal(second.report.exitStatus, 'failure');
     assert.ok(second.summary.includes(`Setup error: GitHub refused again to merge the sync pull request [#1]`), second.summary);
@@ -412,7 +412,7 @@ describe('sync: the sync pull request', () => {
 
     const fromAction = await action();
     assert.equal(fromAction.exitCode, 1);
-    assert.ok(fromAction.output.includes(`::error::sync: setup error (merge-blocked): GitHub refuses again to merge the sync pull request (HTTP 405: ${RULE_TEXT})`), fromAction.output);
+    assert.ok(fromAction.output.includes(`::error::sync: setup error (merge-blocked): GitHub refuses again to merge the sync pull request (HTTP 405: \`${RULE_TEXT}\`)`), fromAction.output);
     assert.match(fromAction.output, /::set-output name=code::merge-blocked/);
 
     world.github.merge = mergeOnRemote;
@@ -449,6 +449,34 @@ describe('sync: the sync pull request', () => {
     const repeated = await sync();
     assert.equal(repeated.result.exitCode, SETUP_FAILED_EXIT_CODE, repeated.result.stderr);
     assert.equal(repeated.report.pullRequest?.code, 'merge-blocked');
+  });
+
+  it('a refusal noted in a description saved with CRLF line endings is still read back', async () => {
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nEdited on the web. ${CANARY}\n`);
+    await sync();
+    ruleBlocks();
+    assert.equal((await sync()).report.pullRequest?.code, 'merge-refused');
+    const pr = world.github.pullRequests[0];
+    assert.ok(pr !== undefined);
+    pr.body = pr.body.replaceAll('\n', '\r\n');
+    const repeated = await sync();
+    assert.equal(repeated.result.exitCode, SETUP_FAILED_EXIT_CODE, repeated.result.stderr);
+    assert.equal(repeated.report.pullRequest?.code, 'merge-blocked');
+  });
+
+  it('a refusal whose note cannot be written is still reported with its reason', async () => {
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nNote lost. ${CANARY}\n`);
+    await sync();
+    ruleBlocks();
+    world.github.reset = (request) => (request === 'PATCH /pulls/1' ? 'before' : undefined);
+    const refused = await sync();
+    assert.equal(refused.result.exitCode, 0, refused.result.stderr);
+    assert.equal(refused.report.pullRequest?.code, 'merge-refused');
+    assert.equal(refused.report.pullRequest?.reason, RULE_TEXT);
+    delete world.github.reset;
+    // Nothing was noted, so the next refusal is noted rather than reported as repeated.
+    assert.equal((await sync()).report.pullRequest?.code, 'merge-refused');
+    assert.equal((await sync()).report.pullRequest?.code, 'merge-blocked');
   });
 
   it('a different reason on the same head is a normal retry', async () => {

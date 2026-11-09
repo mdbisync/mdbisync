@@ -89,6 +89,21 @@ describe('mergePullRequest', () => {
     world.github.merge = async () => ({ status: 405, message: 'x'.repeat(1000) });
     const long = await mergePullRequest(repo, 1, SHA);
     assert.ok(!long.merged && long.reason.length === 300 && long.reason.endsWith('…'));
+    // A character outside the BMP at the cut stays whole.
+    world.github.merge = async () => ({ status: 405, message: `${'x'.repeat(298)}${'😀'.repeat(10)}` });
+    const astral = await mergePullRequest(repo, 1, SHA);
+    assert.ok(!astral.merged);
+    assert.equal(astral.reason, `${'x'.repeat(298)}😀…`);
+    assert.doesNotThrow(() => encodeURIComponent(astral.reason));
+  });
+
+  it('a request whose fake throws for another reason keeps that error', async () => {
+    const { world, repo } = target([]);
+    world.github.pullRequests.push({ number: 1, title: 't', body: 'b', head: 'sync', base: 'main', state: 'open', merged: false });
+    world.github.merge = async () => {
+      throw new Error('a bug in the test');
+    };
+    await assert.rejects(mergePullRequest(repo, 1, SHA), /a bug in the test/);
   });
 
   it('a request that gets no answer is a PullRequestError without a status', async () => {

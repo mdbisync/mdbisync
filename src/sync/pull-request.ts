@@ -191,7 +191,12 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       const refusal: MergeRefusal = { head, base: tracked, status: merge.status, reason: merge.reason };
       const refused = { ...result, status: merge.status, reason: merge.reason };
       if (earlier !== null && earlier.status === refusal.status && earlier.reason === refusal.reason) return { ...refused, code: 'merge-blocked' };
-      await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal) });
+      try {
+        await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal) });
+      } catch (error) {
+        // The refusal is what this run reports; an unrecorded note only means a later run notes it again.
+        if (!(error instanceof PullRequestError)) throw error;
+      }
       return { ...refused, code: 'merge-refused' };
     }
     result.merged = merge.sha;
@@ -276,7 +281,7 @@ function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null)
 }
 
 /** The hidden note a refused merge leaves; the reason is URI-encoded, so it cannot end the comment. */
-const REFUSAL_NOTE = /^<!-- merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->$/m;
+const REFUSAL_NOTE = /^<!-- merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m;
 
 /** The refusal noted in a pull request's description, or null. */
 function readRefusal(body: string): MergeRefusal | null {
@@ -291,9 +296,13 @@ function readRefusal(body: string): MergeRefusal | null {
   return { head: note[1] as Oid, base: note[2] as Oid, status: Number(note[3]), reason };
 }
 
-/** `HTTP 405: reason`, or the status alone when GitHub gave no reason. */
+/**
+ * `HTTP 405: reason`, or the status alone when GitHub gave no reason. The
+ * reason is quoted as code, so Markdown, HTML and mentions in it do not render.
+ */
 function refusalText(refusal: { status?: number | undefined; reason?: string | undefined }): string {
-  return `HTTP ${refusal.status ?? 0}${refusal.reason ? `: ${refusal.reason}` : ''}`;
+  const reason = refusal.reason?.replace(/[`\r\n]/g, ' ');
+  return `HTTP ${refusal.status ?? 0}${reason ? `: \`${reason}\`` : ''}`;
 }
 
 /** The job summary's section for step 2: names, numbers and states, no content. */
