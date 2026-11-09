@@ -61,6 +61,9 @@ jobs:
         with:
           operation: sync
           security-step: stage
+          # Requires a dedicated Linear app for these two serialized workflows.
+          # Enable only when no other repository or worker uses this app.
+          cleanup-tokens: false
           github-token: ${{ steps.app-token.outputs.token }}
           linear-client-id: ${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}
           linear-client-secret: ${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}
