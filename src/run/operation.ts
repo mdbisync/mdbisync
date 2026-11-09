@@ -67,7 +67,13 @@ export async function runOperation(
     return { operation, ok: true, notImplemented: false, summary: renderStaged(0), staged: { sets: 0 } };
   }
   try {
-    return await runWithSecurity(operation, inputs, initialSync, options, security);
+    const outcome = await runWithSecurity(operation, inputs, initialSync, options, security);
+    // The preflight passed without work to do (no annotated folder has a target): the hooks step still gets its command.
+    if (security?.step === 'stage' && outcome.ok && outcome.staged === undefined) {
+      await stageNothing(security.folder, null);
+      return { ...outcome, staged: { sets: 0 }, summary: `${outcome.summary.trimEnd()}\n\n${renderStaged(0)}` };
+    }
+    return outcome;
   } finally {
     // The folder holds document content; the apply step is its last reader.
     if (security?.step === 'apply') await rm(security.folder, { recursive: true, force: true });
@@ -108,9 +114,10 @@ async function runWithSecurity(
       const github = { ...inputs.github, ...(options.fetch ? { fetch: options.fetch } : {}) };
       if (security?.step === 'stage') {
         const gate = await stagingGate(context.git, context.fetched.tracked, security.folder);
-        if (gate.configured) await confirmLinearToGit(context, { config: inputs.state, github, security: gate, stageOnly: true });
+        const ended = gate.configured ? (await confirmLinearToGit(context, { config: inputs.state, github, security: gate, stageOnly: true })).result.code : undefined;
         staged = { sets: await gate.finish() };
-        workSummary = renderStaged(staged.sets);
+        // Stopped before the documents reached the hooks: the apply step meets the same reason and reports it.
+        workSummary = renderStaged(staged.sets) + (ended === undefined ? '' : `\n\nStaging stopped early (${ended}).`);
         return;
       }
       const gate = security?.step === 'apply' ? { security: await answeringGate(context.git, context.fetched.tracked, security.folder) } : {};

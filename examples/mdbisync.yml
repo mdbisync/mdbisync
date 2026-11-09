@@ -67,6 +67,8 @@ jobs:
       # The security hooks in a step of their own: it holds no Linear secret
       # or token and no App token. Give it only the keys your hooks need.
       - name: Run the security hooks
+        # A release without the staged steps gives no command and ran its hooks itself.
+        if: steps.stage.outputs.hooks != ''
         run: '"$MDBISYNC_NODE" "$MDBISYNC_HOOKS"'
         env:
           MDBISYNC_NODE: ${{ steps.stage.outputs.node }}

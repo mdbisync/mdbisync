@@ -83,8 +83,10 @@ mdbisync steps:
    after they ran or the hooks step did not run, is not pushed; the next
    run checks it.
 
-The hooks still run on the same runner as the other steps, so use only
-hooks you trust. Each workflow mints the GitHub App's installation token with
+This keeps the secrets out of what a hook can read. It does not contain a
+hook that attacks the runner: the hooks step shares the runner's disk with
+the other steps, and a hook that rewrites files there can reach a later
+step that holds the secrets. Use only hooks you trust. Each workflow mints the GitHub App's installation token with
 `actions/create-github-app-token`, checks out without stored credentials,
 and gives the App token and the Linear secrets to the mdbisync steps only.
 Without `security-step` (as from the command line), the hooks run in a

@@ -115,6 +115,8 @@ describe('workflow templates', () => {
         assert.deepEqual(order, ['stage', 'Run the security hooks', 'apply'], `${file}: step order`);
         const hooks = hooksStep(file);
         assert.equal(hooks.uses, undefined);
+        // Skipped only when the pinned release gives no command; the apply step then has no answers and pushes nothing unchecked.
+        assert.equal((hooks as Step & { if?: string }).if, "steps.stage.outputs.hooks != ''");
         assert.equal(hooks.run, '"$MDBISYNC_NODE" "$MDBISYNC_HOOKS"');
         // Hook keys the deployer adds go into this env; the template adds none.
         assert.deepEqual(hooks.env, { MDBISYNC_NODE: '${{ steps.stage.outputs.node }}', MDBISYNC_HOOKS: '${{ steps.stage.outputs.hooks }}' });

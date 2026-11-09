@@ -313,6 +313,32 @@ for (const file of process.argv.slice(2)) {
     assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nTaken from Linear.\n');
   });
 
+  it('a document that links to a blocked rename goes through in the same run, linking the accepted file', async () => {
+    const run = async (name: string) => {
+      const stage = await action(`${name}-stage`, { operation: 'sync', 'security-step': 'stage', 'report-file': '' });
+      assert.equal(stage.status, 0, stage.stdout);
+      assert.equal((await hooksStep(stage)).status, 0);
+      const apply = await action(`${name}-apply`, { operation: 'sync', 'security-step': 'apply' });
+      // The fake GitHub has no merge for the first run's pull request, so a later run ends at that step; the capture is what counts here.
+      assert.ok(apply.status === 0 || /not finished \(github-failed\)/.test(apply.stdout), apply.stdout);
+      return (await report(`${name}-apply`)).capture;
+    };
+    const target = { id: 'target', title: 'target', projectId: 'project-api', content: 'Target.\n', createdAt: '2026-01-04T00:00:00Z' };
+    world.linear.documents.push(target);
+    edit('[Target](https://linear.app/example-team/document/target)\n');
+    await run('first');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<target.md>)\n');
+    // The target is renamed and gets a finding; the linking document changes too.
+    Object.assign(target, { title: 'renamed', content: 'A private-canary value.\n' });
+    touch(target);
+    edit('[Target](https://linear.app/example-team/document/target)\n\nMore.\n');
+    const captured = await run('second');
+    assert.deepEqual(captured.blocked.map(({ id }) => id), ['target']);
+    assert.deepEqual(captured.leftOut, []);
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<target.md>)\n\nMore.\n');
+    assert.equal(await remoteHolds('A private-canary value'), false);
+  });
+
   it('a finding of the hooks step blocks the document', async () => {
     edit('A private-canary value.\n');
     const stage = await action('stage', { operation: 'sync', 'security-step': 'stage', 'report-file': '' });

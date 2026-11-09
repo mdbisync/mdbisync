@@ -42,13 +42,18 @@ export interface SecurityGateOptions {
   env?: Record<string, string | undefined>;
 }
 
-/** Uses the tracked branch's configuration and support files, never a Linear-supplied config. */
-export async function securityGate(git: Git, tracked: Oid, options: SecurityGateOptions = {}): Promise<SecurityGate> {
-  const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8' };
+/** The ids of the tracked commit's security hooks; none without a configuration. */
+export async function securityHookIds(git: Git, tracked: Oid): Promise<string[]> {
   const read = await git.run(['cat-file', 'blob', `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
   const config = readHookConfig(read.code === 0 ? read.stdout.toString('utf8') : null);
   if (config.invalid !== undefined) throw new Error('invalid security hook configuration');
-  const hooks = config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+}
+
+/** Uses the tracked branch's configuration and support files, never a Linear-supplied config. */
+export async function securityGate(git: Git, tracked: Oid, options: SecurityGateOptions = {}): Promise<SecurityGate> {
+  const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8' };
+  const hooks = await securityHookIds(git, tracked);
   if (hooks.length > 0 && (await runHooks(git.dir, ['--version'], env)).code !== 0) throw new Error('security hooks require pre-commit on PATH; install pre-commit before capture');
   let dir: string | undefined;
   let scratch: Git;

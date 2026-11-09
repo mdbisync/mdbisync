@@ -14,14 +14,14 @@
 //    run) is not pushed; the next run checks it.
 //
 // The folder holds document content on the runner's disk only; it is never
-// uploaded, and the apply step removes it.
+// uploaded, and the apply step removes it when its operation ends.
 
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Git, type Oid, checkRepoPath } from '../state/index.ts';
-import { PRE_COMMIT_CONFIG, SECURITY_ALIAS, readHookConfig, securityHooks } from '../setup/hooks.ts';
-import { type SecurityFinding, type SecurityGate, securityGate } from './security.ts';
+import { SECURITY_ALIAS } from '../setup/hooks.ts';
+import { type SecurityFinding, type SecurityGate, securityGate, securityHookIds } from './security.ts';
 
 export const SECURITY_STEPS = ['stage', 'apply'] as const;
 export type SecurityStep = (typeof SECURITY_STEPS)[number];
@@ -60,13 +60,6 @@ export function candidateKey(files: ReadonlyMap<string, Buffer | string>): strin
   return sha256(JSON.stringify(pairs));
 }
 
-async function hooksOf(git: Git, tracked: Oid): Promise<string[]> {
-  const read = await git.run(['cat-file', 'blob', `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
-  const config = readHookConfig(read.code === 0 ? read.stdout.toString('utf8') : null);
-  if (config.invalid !== undefined) throw new Error('invalid security hook configuration');
-  return securityHooks(config);
-}
-
 export interface StagingGate extends SecurityGate {
   /** Writes the manifest; the sets recorded so far are what the hooks step checks. */
   finish(): Promise<number>;
@@ -78,7 +71,7 @@ export interface StagingGate extends SecurityGate {
  * written anywhere but the folder.
  */
 export async function stagingGate(git: Git, tracked: Oid, folder: string): Promise<StagingGate> {
-  const configured = (await hooksOf(git, tracked)).length > 0;
+  const configured = (await securityHookIds(git, tracked)).length > 0;
   await rm(folder, { recursive: true, force: true });
   await mkdir(join(folder, 'files'), { recursive: true, mode: 0o700 });
   const sets = new Map<string, Manifest['sets'][number]>();
@@ -164,7 +157,7 @@ export async function checkStaged(git: Git, folder: string, env: Record<string, 
  * as none.
  */
 export async function answeringGate(git: Git, tracked: Oid, folder: string): Promise<SecurityGate> {
-  const hooks = new Set(await hooksOf(git, tracked));
+  const hooks = new Set(await securityHookIds(git, tracked));
   const configured = hooks.size > 0;
   let answers: Answers['answers'] = {};
   if (configured) {
@@ -182,6 +175,5 @@ export async function answeringGate(git: Git, tracked: Oid, folder: string): Pro
       // Only hook names the configuration gives reach Linear's comments.
       return found.map(({ hook, line }) => ({ hook: hooks.has(hook) ? hook : SECURITY_ALIAS, line: Number.isSafeInteger(line) && line > 0 ? line : 1 }));
     },
-    close: () => rm(folder, { recursive: true, force: true }),
   };
 }
