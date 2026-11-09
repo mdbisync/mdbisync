@@ -61,7 +61,8 @@ export function stoppedBeforeWritingMessage(command: string, outcome: OperationO
   const detail = outcome.setup?.detail ?? outcome.refusal?.message;
   const fix = fixUrl(outcome.code);
   // Names from README front matter may hold line breaks; one line keeps them from reading as further log lines.
-  return `${command}: stopped before any write (${outcome.code})${detail === undefined ? '' : `: ${detail.replace(/\s*[\r\n]+\s*/g, ' ')}`}${fix === undefined ? '' : `. How to fix it: ${fix}`}`;
+  const explained = `${command}: stopped before any write (${outcome.code})${detail === undefined ? '' : `: ${detail.replace(/\s*[\r\n]+\s*/g, ' ')}`}`;
+  return fix === undefined ? explained : `${explained.replace(/\.$/, '')}. How to fix it: ${fix}`;
 }
 
 /** The message of a run that is not a sync, stopped by Linear before any write. */

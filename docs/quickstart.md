@@ -52,9 +52,11 @@ GitHub App that you create and own. A repository admin creates it.
 the link opens GitHub's new-App form with these settings filled in. For an
 organization's App, replace `settings/apps/new` in the link with
 `organizations/<organization>/settings/apps/new`. Give the App a name and
-create it. The same settings, as a manifest for GitHub's
-create-App-from-manifest flow, are in
-[`github-app-manifest.json`](github-app-manifest.json).
+create it. The same settings are in
+[`github-app-manifest.json`](github-app-manifest.json), in the format of
+GitHub's create-App-from-manifest flow. That flow needs a page that posts
+the manifest to GitHub, so for a person the link above is the way; the
+file is for tools that automate App creation.
 
 | Setting | Value |
 | --- | --- |
@@ -93,6 +95,11 @@ The sync merges its pull request with a merge commit, so `main` keeps the
 commit the sync recorded. In the repository: Settings → General → Pull
 Requests → turn on **Allow merge commits**. Squash and rebase merging may
 stay on for other pull requests.
+
+When the message says GitHub did not show whether merge commits are
+allowed, the setting may be on already: the App's token could not read it.
+Check that the App has the permissions in [GitHub App](#github-app) and
+that its installation accepted them.
 
 ## Linear-format hook
 

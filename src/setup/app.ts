@@ -4,7 +4,7 @@
 // GitHub's create-App-from-manifest form) and a link with the same settings
 // as URL parameters, which a page or a terminal can show as a plain link.
 
-export const PROJECT_URL = 'https://github.com/mdbisync/mdbisync';
+import { PROJECT_URL } from '../version.ts';
 
 /** The repository permissions the App requests; GitHub adds metadata read on its own. */
 export const APP_PERMISSIONS = {

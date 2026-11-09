@@ -8,6 +8,7 @@ import { ANNOTATION_FILE, TEAM_KEY, PROJECT_KEY, resolveZones } from '../mapping
 import { collectAnnotations } from '../mapping/mapping.ts';
 import { appCreationUrl } from '../setup/app.ts';
 import { QUICKSTART_URL } from '../setup/fixes.ts';
+import { PROJECT_URL } from '../version.ts';
 import { LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
 import { findFrontMatter } from '../mapping/front-matter.ts';
 
@@ -110,10 +111,10 @@ function hookConfig(text: string | undefined, settings: Settings): string {
   const data = doc.toJS() as { repos: Array<{ repo?: string; rev?: string; hooks?: Array<{ id?: string; [key: string]: unknown }> }> };
   if (data.repos.some((repo) => repo === null || typeof repo !== 'object' || !Array.isArray(repo.hooks) || repo.hooks.some((hook) => hook === null || typeof hook !== 'object' || typeof hook.id !== 'string'))) throw new InitError('invalid pre-commit repository entry');
   const existing = data.repos.filter((repo) => repo.hooks?.some((hook) => hook.id === LINEAR_FORMAT_HOOK));
-  if (existing.some((repo) => repo.repo !== 'https://github.com/mdbisync/mdbisync' || repo.rev !== settings.sha)) throw new InitError('existing linear-format hook uses a different repository or release');
+  if (existing.some((repo) => repo.repo !== PROJECT_URL || repo.rev !== settings.sha)) throw new InitError('existing linear-format hook uses a different repository or release');
   let changed = text === undefined;
   if (!existing.length) {
-    repos.add(doc.createNode({ repo: 'https://github.com/mdbisync/mdbisync', rev: settings.sha, hooks: [{ id: LINEAR_FORMAT_HOOK }] }));
+    repos.add(doc.createNode({ repo: PROJECT_URL, rev: settings.sha, hooks: [{ id: LINEAR_FORMAT_HOOK }] }));
     changed = true;
   }
   if (settings.security) {

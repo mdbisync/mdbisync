@@ -3,7 +3,7 @@
 // content.
 
 import { cell } from '../run/summary.ts';
-import { fixUrl } from './fixes.ts';
+import { FIX_ANCHORS, QUICKSTART_URL, fixUrl } from './fixes.ts';
 import { type SetupReport } from './report.ts';
 import { type StateRefusal } from './state.ts';
 
@@ -28,5 +28,5 @@ export function renderSetupSummary(report: SetupReport): string {
 }
 
 export function renderStateRefusal(refusal: StateRefusal): string {
-  return ['## Sync', '', `Stopped before any write: \`${refusal.code}\`.`, '', refusal.message, '', `How to fix it: ${fixUrl(refusal.code)}`, ''].join('\n');
+  return ['## Sync', '', `Stopped before any write: \`${refusal.code}\`.`, '', refusal.message, '', `How to fix it: ${QUICKSTART_URL}#${FIX_ANCHORS[refusal.code]}`, ''].join('\n');
 }

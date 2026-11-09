@@ -2,10 +2,12 @@
 // quickstart. Every failure message carries its link, so a person reading a
 // failed job goes straight to the step that fixes it.
 
-import { PROJECT_URL } from './app.ts';
+import { PROJECT_URL } from '../version.ts';
 import { type FailureCode } from './report.ts';
 
 export const QUICKSTART_PATH = 'docs/quickstart.md';
+// The default branch, not the running release: a release commit carries
+// the action and hooks only, not the docs. The anchors stay stable.
 export const QUICKSTART_URL = `${PROJECT_URL}/blob/main/${QUICKSTART_PATH}`;
 
 /** The quickstart section (its heading's anchor) that fixes each failure. */

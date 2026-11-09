@@ -69,6 +69,14 @@ describe('the message of a run stopped before any write', () => {
     );
   });
 
+  it('ends a message that is a sentence with one period before its fix link', () => {
+    const refusal = { code: 'initial-sync-required' as const, message: 'refs/mdbisync/linear does not exist: run initial sync first. The sync wrote nothing.' };
+    assert.equal(
+      stoppedBeforeWritingMessage('sync', stopped({ code: refusal.code, refusal })),
+      'sync: stopped before any write (initial-sync-required): refs/mdbisync/linear does not exist: run initial sync first. The sync wrote nothing. How to fix it: https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#initial-sync',
+    );
+  });
+
   it('keeps a name with line breaks on one line', () => {
     const setup = buildReport([failed('annotation-targets', 'annotation-target-not-found', 'not found in Linear: team "A\r\n::notice::B"')], []);
     assert.equal(
