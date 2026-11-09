@@ -38,6 +38,7 @@ export interface OperationOutcome extends PreflightOutcome {
   reverse?: ReverseResult;
   /** What a sync run wrote and recorded. */
   sync?: CycleResult;
+  /** What a sync run's capture of Linear changes recorded. */
   captured?: CaptureResult;
   /** Pushes refused because a ref had moved under this run: another run got there first. */
   refusedPushes: readonly RefusedPush[];
