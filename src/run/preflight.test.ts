@@ -255,6 +255,10 @@ describe('preflight', () => {
         assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE);
         assert.equal(report.code, code);
         assert.ok(report.setupChecks.some((check) => check.state === 'failed' && named.test(check.detail)), JSON.stringify(report.setupChecks));
+        // The run's own error line names what failed too: the job summary is not always at hand.
+        const line = result.stderr.split('\n').find((text) => text.startsWith('sync: stopped before any write')) ?? '';
+        assert.ok(line.startsWith(`sync: stopped before any write (${code}): `), result.stderr);
+        assert.match(line, named);
         assert.equal(world.minted, world.revoked, 'a minted token was not revoked');
       });
     }
@@ -270,6 +274,7 @@ describe('preflight', () => {
         assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE);
         assert.equal(report.code, 'linear-format-hook-required');
         assert.ok(report.setupChecks.some((check) => check.name === 'linear-format-hook' && check.state === 'failed' && /no linear-format hook/.test(check.detail)));
+        assert.match(result.stderr, /sync: stopped before any write \(linear-format-hook-required\): .*no linear-format hook/);
         assert.deepEqual(world.writes, []);
       } finally {
         await fixture.seed({ '.pre-commit-config.yaml': PRE_COMMIT });

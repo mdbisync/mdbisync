@@ -58,7 +58,15 @@ inputs:
     description: "Initial sync only: `true` writes; anything else is a dry run that lists by path what would be created, overwritten, moved to Linear's trash (or, from Linear, removed from the tracked branch) and left out, and writes nothing."
     required: false
     default: ""
+  security-step:
+    description: "Runs the repository's security hooks in a step of their own, which holds none of this action's secrets. `stage`: read Linear's changes and leave them in the runner's temporary directory for the hooks step, writing nothing to git or Linear; the outputs `node` and `hooks` give that step its command. `apply`: run the operation with the hooks step's findings; a change the hooks have not seen is not pushed this run. Empty runs the hooks inside this step."
+    required: false
+    default: ""
 outputs:
+  node:
+    description: "`security-step: stage` only: the Node.js the hooks step runs `hooks` with."
+  hooks:
+    description: "`security-step: stage` only: the script of the hooks step."
   code:
     description: "Why the run stopped before writing, for example `initial-sync-required`, or why a confirmed initial sync did not finish (`stopped`, `write-failed`, `state-moved`, `pull-request-failed`, `sync-branch-changed`), or why a sync's pull request step failed it (`check-failed` or `merge-blocked`, setup errors; `initial-pull-request-pending`; `state-moved` or `github-failed`, which a later run retries); empty when it finished."
 runs:

@@ -10,14 +10,18 @@ import { readHookConfig, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hook
 export interface SecurityFinding { hook: string; line: number }
 export interface SecurityGate {
   readonly configured: boolean;
-  check(files: ReadonlyMap<string, Buffer | string>): Promise<SecurityFinding[]>;
+  /**
+   * The findings, none when the files pass; null when the gate has no answer
+   * for these files (the staged steps): they are not pushed this run.
+   */
+  check(files: ReadonlyMap<string, Buffer | string>): Promise<SecurityFinding[] | null>;
   close?(): Promise<void>;
 }
 
 /** Neither errors nor returned findings contain raw hook output. */
-function runHooks(dir: string, args: string[]): Promise<{ code: number; output: string }> {
+function runHooks(dir: string, args: string[], env: Record<string, string | undefined>): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
-    const child = spawn('pre-commit', args, { cwd: dir, env: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8', PRE_COMMIT_COLOR: 'never', GIT_TERMINAL_PROMPT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('pre-commit', args, { cwd: dir, env: { ...env, PRE_COMMIT_COLOR: 'never', GIT_TERMINAL_PROMPT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     const collect = (chunk: Buffer) => { if (output.length < 2_000_000) output += chunk.toString('utf8'); };
     child.stdout.on('data', collect);
@@ -28,13 +32,29 @@ function runHooks(dir: string, args: string[]): Promise<{ code: number; output: 
   });
 }
 
-/** Uses the tracked branch's configuration and support files, never a Linear-supplied config. */
-export async function securityGate(git: Git, tracked: Oid): Promise<SecurityGate> {
+export interface SecurityGateOptions {
+  /**
+   * The hooks' whole environment. By default only `PATH`, `HOME` and `LANG`,
+   * for hooks run inside the operation's own process. The staged hooks step
+   * gives them its own environment, which holds only the keys the deployer
+   * gives to hooks.
+   */
+  env?: Record<string, string | undefined>;
+}
+
+/** The ids of the tracked commit's security hooks; none without a configuration. */
+export async function securityHookIds(git: Git, tracked: Oid): Promise<string[]> {
   const read = await git.run(['cat-file', 'blob', `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
   const config = readHookConfig(read.code === 0 ? read.stdout.toString('utf8') : null);
   if (config.invalid !== undefined) throw new Error('invalid security hook configuration');
-  const hooks = config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
-  if (hooks.length > 0 && (await runHooks(git.dir, ['--version'])).code !== 0) throw new Error('security hooks require pre-commit on PATH; install pre-commit before capture');
+  return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
+}
+
+/** Uses the tracked branch's configuration and support files, never a Linear-supplied config. */
+export async function securityGate(git: Git, tracked: Oid, options: SecurityGateOptions = {}): Promise<SecurityGate> {
+  const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8' };
+  const hooks = await securityHookIds(git, tracked);
+  if (hooks.length > 0 && (await runHooks(git.dir, ['--version'], env)).code !== 0) throw new Error('security hooks require pre-commit on PATH; install pre-commit before capture');
   let dir: string | undefined;
   let scratch: Git;
   let baseline: string;
@@ -80,7 +100,7 @@ export async function securityGate(git: Git, tracked: Oid): Promise<SecurityGate
         const findings: SecurityFinding[] = [];
         let ran = false;
         for (const stage of ['pre-commit', 'pre-push']) {
-          const result = await runHooks(dir, ['run', SECURITY_ALIAS, '--hook-stage', stage, '--files', ...files.keys()]);
+          const result = await runHooks(dir, ['run', SECURITY_ALIAS, '--hook-stage', stage, '--files', ...files.keys()], env);
           if (result.code !== 0 && result.output.trim() === `No hook with id \`security\` in stage \`${stage}\``) continue;
           ran = true;
           if (result.code !== 0) {

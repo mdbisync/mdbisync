@@ -20,6 +20,7 @@ type BankEntry = {
   synced?: boolean;
   name_as?: string;
   macos_unsafe?: boolean;
+  corpus?: boolean;
 };
 
 type BankIndex = { assets?: BankEntry[]; fixtures: BankEntry[] };
@@ -106,10 +107,17 @@ export function copyBank(bankDir: string, canaries: Canaries): BankCopy {
       excluded.push({ file: entry.file, reason: "duplicate-title fixture without name_as: not a collision when only .md is synced" });
       return false;
     }
+    // A probe question waits for Linear's recorded form; leaving it out keeps the slices as they are.
+    if (entry.corpus === false) {
+      if (entry.canary !== undefined) canaries.reserve(entry.canary);
+      excluded.push({ file: entry.file, reason: "kept out of the corpus (corpus: false)" });
+      return false;
+    }
     return true;
   });
+  const assets = (index.assets ?? []).filter((asset) => asset.corpus !== false);
   const placed = new Map<string, string>(); // bank file -> corpus path
-  for (const entry of [...entries, ...(index.assets ?? [])]) placed.set(entry.file, corpusPath(entry));
+  for (const entry of [...entries, ...assets]) placed.set(entry.file, corpusPath(entry));
 
   const files: CorpusFile[] = [];
   for (const entry of entries) {
@@ -153,7 +161,7 @@ export function copyBank(bankDir: string, canaries: Canaries): BankCopy {
       note,
     });
   }
-  for (const asset of index.assets ?? []) {
+  for (const asset of assets) {
     const path = placed.get(asset.file) as string;
     files.push({
       path,

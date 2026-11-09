@@ -213,6 +213,11 @@ export interface ReverseOptions {
   progressBatch?: number;
   /** The repository's security hooks; read from the tracked branch by default. */
   security?: SecurityGate;
+  /**
+   * The first of the staged security steps: take the documents and ask the
+   * gate about them, then stop before the record. Nothing is written.
+   */
+  stageOnly?: boolean;
   /** Downloads files from Linear's upload host; the Linear client's authenticated request by default. */
   fetch?: typeof fetch;
   /** Stop after this many documents, as if the budget ran low; the test hook's value by default. */
@@ -305,6 +310,11 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
 
   let unpushed = 0;
   const pushProgress = async (): Promise<boolean> => {
+    // Staging writes nothing; the apply step takes the same documents again.
+    if (options.stageOnly === true) {
+      unpushed = 0;
+      return true;
+    }
     const next = await commitIds(git, expected.ids, ids, identity, { message: initialSyncProgressMessage(fetched.tracked), always: true });
     const pushed = await pushAtomic(git, options.config, [{ ref: stateRef(options.config, 'ids'), expected: expected.ids, next }]);
     if (!pushed.ok) return false;
@@ -357,6 +367,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
   }
 
   const recorded = await record();
+  if (recorded === 'staged') return { plan, result };
   if (recorded === 'sync-branch-changed') {
     result.code = 'sync-branch-changed';
     return { plan, result };
@@ -400,7 +411,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
    * when the record changes the tracked branch, the sync branch. Null when a
    * ref moved.
    */
-  async function record(): Promise<ReverseRecord | null | 'sync-branch-changed'> {
+  async function record(): Promise<ReverseRecord | null | 'sync-branch-changed' | 'staged'> {
     // Each document's body once its embedded files are downloaded, the files, and their upload URLs by content hash.
     const bodies = new Map<string, { body: string; files: Map<string, Buffer>; uploads: UploadMap }>();
     // A link to another synchronized document's URL becomes a relative link to its file, as the capture does:
@@ -492,17 +503,23 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     try {
       if (gate.configured) {
         const blocked: string[] = [];
+        const unchecked: string[] = [];
         for (const entry of entries) {
           const { files } = bodies.get(entry.path) as { files: Map<string, Buffer> };
           const text = textOf(entry);
           if (files.size === 0 && text === input.texts.get(entry.path)) continue;
-          if ((await gate.check(new Map<string, Buffer | string>([[entry.path, text], ...files]))).length > 0) blocked.push(entry.path);
+          const findings = await gate.check(new Map<string, Buffer | string>([[entry.path, text], ...files]));
+          // No answer: the hooks have not seen this text (it changed in Linear after they ran).
+          if (findings === null) unchecked.push(entry.path);
+          else if (findings.length > 0) blocked.push(entry.path);
         }
         keepTracked(blocked, 'security-hook');
+        keepTracked(unchecked, 'security-unchecked');
       }
     } finally {
       await gate.close?.();
     }
+    if (options.stageOnly === true) return 'staged';
     let lfsObjects: string[] = [];
     // What `.gitattributes` makes of each changed path, by the content it was given: a later build
     // reuses it only for the same bytes (a link can change when a document is left out).

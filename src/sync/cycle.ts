@@ -13,6 +13,7 @@ import { type BodyTransform } from '../initial-sync/transform.ts';
 import { type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { type StateConfig } from '../state/index.ts';
+import { type SecurityGate } from './security.ts';
 import { type PullRequestResult, syncPullRequest } from './pull-request.ts';
 import { type WriteResult, writeTrackedToLinear } from './write.ts';
 
@@ -25,6 +26,8 @@ export interface CycleOptions {
   fetch?: typeof fetch;
   /** Makes the body transforms (uploads, links); see `WriteOptions.transforms`. */
   transforms?: () => readonly BodyTransform[];
+  /** The capture's security gate; the tracked branch's hooks, run in this process, by default. */
+  security?: SecurityGate;
 }
 
 export interface CycleResult {
@@ -44,7 +47,7 @@ export interface CycleResult {
 export async function runSyncCycle(context: RunContext, options: CycleOptions): Promise<CycleResult> {
   const state = { ...context.fetched.state };
   const trackedTip = context.fetched.tracked;
-  const captured = await capture(context, {config:options.config, state, ...(options.fetch ? {fetch:options.fetch} : {})});
+  const captured = await capture(context, {config:options.config, state, ...(options.security ? {security:options.security} : {}), ...(options.fetch ? {fetch:options.fetch} : {})});
   const changed = captured.changed.length > 0 || captured.removed.length > 0 || captured.blocked.length > 0;
   if (!captured.ok) return {complete:false, changed, trackedTip, capture:captured};
   await checkpoint('after-capture-push-before-pr');

@@ -43,6 +43,7 @@ Each fixture entry has:
 | `missing_target` | `true` when a broken relative link is the point of the fixture |
 | `name_as` | the colliding name a test writes the fixture under (see below) |
 | `macos_unsafe` | `true` together with `name_as` |
+| `corpus` | `false` keeps the fixture or asset out of the test corpus, so a probe question waiting for Linear's recorded form does not move the corpus slices; the probe still writes it |
 | `note` | free text |
 
 Every rule in `rules` needs at least one fixture. Only `.md` files are

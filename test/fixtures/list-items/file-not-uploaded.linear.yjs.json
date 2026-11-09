@@ -1,0 +1,19 @@
+{
+  "roots": [
+    "prosemirror"
+  ],
+  "content": [
+    {
+      "type": "bullet_list",
+      "children": [
+        {
+          "type": "list_item",
+          "children": [
+            {"type":"paragraph","children":[{"text":"Summary","marks":{"attribution":"user","link":{"href":"../media/summary.pdf","noEmbed":null}}}]}
+          ]
+        }
+      ]
+    },
+    {"type":"paragraph","children":[{"text":"Ref kx-c4a90667","marks":{"attribution":"user"}}]}
+  ]
+}

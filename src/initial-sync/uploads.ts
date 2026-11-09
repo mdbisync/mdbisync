@@ -17,7 +17,7 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Nodes } from 'mdast';
-import { end, parse, splitFile, start, visit } from '../format/markdown.ts';
+import { end, parse, resolveTarget, splitFile, start, visit } from '../format/markdown.ts';
 import { LinearError, LinearStoppedError } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
 import {
@@ -34,6 +34,8 @@ import {
 } from '../state/index.ts';
 import { type InitialSyncPlan } from './plan.ts';
 import { type BodyTransform, LeaveOutError, type TransformContext } from './transform.ts';
+
+export { resolveTarget };
 
 /** Linear's upload limit on the free plan: 10 MB. A larger file leaves its document out. */
 export const DEFAULT_UPLOAD_LIMIT = 10 * 1024 * 1024;
@@ -462,21 +464,6 @@ function replaceRanges(text: string, replacements: ReadonlyArray<{ from: number;
   return result;
 }
 
-/** The repository path a relative destination points to, or null for anything else. */
-export function resolveTarget(documentPath: string, url: string): string | null {
-  if (url === '' || url.startsWith('#') || url.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(url)) return null;
-  const cut = url.search(/[?#]/);
-  let path = cut === -1 ? url : url.slice(0, cut);
-  try {
-    path = decodeURIComponent(path);
-  } catch {
-    // Not percent-encoded: the destination names the file as it is.
-  }
-  if (path === '') return null;
-  const joined = posix.normalize(posix.join(posix.dirname(documentPath), path));
-  if (joined === '.' || joined === '..' || joined.startsWith('../') || joined.endsWith('/')) return null;
-  return joined;
-}
 
 /**
  * Where the destination's text is in a link, image or definition node,

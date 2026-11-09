@@ -11,7 +11,7 @@ import { parseArgs } from "node:util";
 import { makeAssets } from "./assets.ts";
 import { copyBank } from "./bank.ts";
 import { documents } from "./documents.ts";
-import { fixText } from "../../src/format/index.ts";
+import { fixText, linkedFileCheck } from "../../src/format/index.ts";
 import { Canaries, isLfs, type CorpusFile } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { makeSlices, SLICES, type Slice } from "./slices.ts";
@@ -65,10 +65,12 @@ export type Corpus = {
  * only when the rewritten text is the form the probe recorded from Linear.
  */
 export function inLinearForm(files: CorpusFile[], bankDir: string): void {
+  const paths = new Set(files.map((file) => file.path));
   for (const file of files) {
     if (!file.synced || file.kind !== "markdown" || file.expected === "lint-error") continue;
     const text = file.content.toString("utf8");
-    const fixed = fixText(text);
+    // As the fix command does: a link to a file the corpus does not have is not uploaded.
+    const fixed = fixText(text, { linkedFileExists: linkedFileCheck(file.path, (path) => paths.has(path)) });
     if (fixed === text) continue;
     file.content = Buffer.from(fixed, "utf8");
     const rewritten = fixed === "" ? "written empty, as in Linear's form" : "written in Linear's form";

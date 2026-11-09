@@ -30,8 +30,16 @@ describe('workflow templates rendered for a run', () => {
     assert.match(text, /secrets\.LINEAR_TEST_APP_CLIENT_SECRET/);
     const [job] = jobsOf(text);
     assert.deepEqual(job?.['runs-on'], SANDBOX_RUNNER);
-    const index = job!.steps.findIndex((step) => step.uses?.startsWith(`${ACTION_REPOSITORY}@`));
+    // The stage step gets the run's branches and refs too, and leaves the report to the apply step.
+    const stage = job!.steps.find((step) => step.uses?.startsWith(`${ACTION_REPOSITORY}@`))!;
+    assert.equal(stage.with?.['security-step'], 'stage');
+    assert.equal(stage.uses, `${ACTION_REPOSITORY}@${SHA}`);
+    assert.equal(stage.with?.['tracked-branch'], RUN.trackedBranch);
+    assert.equal(stage.with?.['report-file'], undefined);
+    const index = job!.steps.findLastIndex((step) => step.uses?.startsWith(`${ACTION_REPOSITORY}@`));
     const action = job!.steps[index]!;
+    assert.equal(action.with?.['security-step'], 'apply');
+    assert.equal(job!.steps.filter((step) => step.uses?.startsWith('actions/upload-artifact@')).length, 1);
     assert.equal(action.uses, `${ACTION_REPOSITORY}@${SHA}`);
     assert.equal(action.with?.['tracked-branch'], RUN.trackedBranch);
     assert.equal(action.with?.['sync-branch'], RUN.syncBranch);

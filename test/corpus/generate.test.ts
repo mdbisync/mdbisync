@@ -14,7 +14,7 @@ import { parse } from "yaml";
 import { CONTENT_LIMIT, gitattributes, SHARED_IMAGE_USERS } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
-import { fixText, lintText } from "../../src/format/index.ts";
+import { fixText, linkedFileCheck, lintText } from "../../src/format/index.ts";
 import { COLLISIONS, EDGE, EDGE_ZONE, LOOSE, preCommitConfig } from "./tree.ts";
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from "./check-workflow.ts";
 
@@ -160,6 +160,16 @@ test("duplicate-title fixtures are taken from the bank once, never paired by the
   }
 });
 
+test("bank fixtures and assets marked corpus: false stay out of the corpus", () => {
+  const built = corpus();
+  const index = parse(readFileSync("test/fixtures/index.yaml", "utf8")) as { fixtures: { file: string; corpus?: boolean }[]; assets: { file: string; corpus?: boolean }[] };
+  const left = [...index.fixtures, ...index.assets].filter((entry) => entry.corpus === false).map((entry) => entry.file);
+  assert.ok(left.length > 0);
+  for (const file of left) assert.ok(!built.files.some((f) => f.path === `docs/reference/${file}`), file);
+  const fixtures = index.fixtures.filter((entry) => entry.corpus === false).map((entry) => entry.file);
+  assert.deepEqual(built.manifest.excluded.filter((e) => e.reason.includes("corpus: false")).map((e) => e.file).sort(), fixtures.sort());
+});
+
 test("reference definitions count as links; footnote definitions do not", () => {
   const found = linkTargets("![Banner][banner]\n\n[banner]: ../assets/banner.png\n\nText[^1]\n\n[^1]: a note\n\n[site]: https://www.example.com\n");
   assert.deepEqual(found, [{ written: "../assets/banner.png", form: "definition" }]);
@@ -196,11 +206,14 @@ test("bank fixtures whose links still reach their files are copied unchanged, th
 });
 
 test("every synced document outside the lint-error set is already in Linear's form", () => {
-  const files = corpus().files.filter((f) => f.synced && f.kind === "markdown");
+  const built = corpus();
+  const paths = new Set(built.files.map((f) => f.path));
+  const files = built.files.filter((f) => f.synced && f.kind === "markdown");
   for (const file of files) {
     const text = file.content.toString("utf8");
     if (file.expected === "lint-error") continue;
-    assert.equal(fixText(text), text, `${file.path} is not in Linear's form`);
+    // A link to a file the corpus does not have is not uploaded, so Linear keeps it as a link.
+    assert.equal(fixText(text, { linkedFileExists: linkedFileCheck(file.path, (path) => paths.has(path)) }), text, `${file.path} is not in Linear's form`);
     assert.notEqual(file.expected, "fixable", `${file.path} is still classed fixable`);
   }
   // The lint-error files are written as generated: fix never touches them.

@@ -1,7 +1,8 @@
 // Contract tests on the workflow templates a deployer copies from
 // `examples/`: every action pinned by commit, the shared concurrency group,
-// the GitHub App token, a checkout that keeps no credentials, and the Linear
-// secrets given to the sync's own step only.
+// the GitHub App token, a checkout that keeps no credentials, the Linear
+// secrets given to the action's steps only, and the security hooks in a
+// step of their own that holds none of them.
 
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -35,9 +36,16 @@ interface Workflow {
 
 const workflow = (file: string) => parse(read(file)) as Workflow;
 const steps = (file: string) => Object.values(workflow(file).jobs).flatMap((job) => job.steps);
-const actionStep = (file: string) => {
+/** The action's two steps around the hooks step: `stage`, then `apply`. */
+const actionSteps = (file: string) => {
   const found = steps(file).filter((step) => step.uses?.startsWith(ACTION));
-  assert.equal(found.length, 1, `${file}: one mdbisync step`);
+  assert.deepEqual(found.map((step) => step.with?.['security-step']), ['stage', 'apply'], `${file}: the stage and apply steps`);
+  assert.equal(found[0]?.id, 'stage');
+  return found as [Step, Step];
+};
+const hooksStep = (file: string) => {
+  const found = steps(file).filter((step) => step.name === 'Run the security hooks');
+  assert.equal(found.length, 1, `${file}: one hooks step`);
   return found[0] as Step;
 };
 
@@ -83,17 +91,36 @@ describe('workflow templates', () => {
       });
 
       it('gives the App token to checkout and mdbisync, and the Linear secrets to mdbisync only', () => {
-        const action = actionStep(file);
-        assert.equal(action.with?.['github-token'], '${{ steps.app-token.outputs.token }}');
-        assert.equal(action.with?.['linear-client-id'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}');
-        assert.equal(action.with?.['linear-client-secret'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}');
+        const actions = actionSteps(file);
+        for (const action of actions) {
+          assert.equal(action.with?.['github-token'], '${{ steps.app-token.outputs.token }}');
+          assert.equal(action.with?.['linear-client-id'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}');
+          assert.equal(action.with?.['linear-client-secret'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}');
+          // The same inputs in both steps, so the apply step runs the operation the stage step staged.
+          const { 'security-step': _stage, ...same } = actions[0].with ?? {};
+          const { 'security-step': _apply, ...other } = action.with ?? {};
+          assert.deepEqual(other, same);
+        }
         for (const step of steps(file)) {
-          if (step.uses === action.uses) continue;
+          if (step.uses?.startsWith(ACTION)) continue;
           const text = JSON.stringify(step);
           const label = step.name ?? step.uses ?? 'a step';
           assert.ok(!/secrets\.MDBISYNC_LINEAR/.test(text), `${file}: ${label} sees the Linear secrets`);
           if (step.uses !== CHECKOUT) assert.ok(!/steps\.app-token/.test(text), `${file}: ${label} sees the App token`);
         }
+      });
+
+      it('runs the security hooks between stage and apply, in a step that gets only the stage step\'s command', () => {
+        const order = steps(file).map((step) => (step.uses?.startsWith(ACTION) ? step.with?.['security-step'] : step.name)).filter((name) => ['stage', 'Run the security hooks', 'apply'].includes(String(name)));
+        assert.deepEqual(order, ['stage', 'Run the security hooks', 'apply'], `${file}: step order`);
+        const hooks = hooksStep(file);
+        assert.equal(hooks.uses, undefined);
+        // Skipped only when the pinned release gives no command; the apply step then has no answers and pushes nothing unchecked.
+        assert.equal((hooks as Step & { if?: string }).if, "steps.stage.outputs.hooks != ''");
+        assert.equal(hooks.run, '"$MDBISYNC_NODE" "$MDBISYNC_HOOKS"');
+        // Hook keys the deployer adds go into this env; the template adds none.
+        assert.deepEqual(hooks.env, { MDBISYNC_NODE: '${{ steps.stage.outputs.node }}', MDBISYNC_HOOKS: '${{ steps.stage.outputs.hooks }}' });
+        assert.ok(!/secrets\.|github\.token|steps\.app-token/.test(JSON.stringify(hooks)), `${file}: the hooks step sees a secret`);
       });
 
       it('installs a pinned pre-commit before mdbisync, for the security hooks on content from Linear', () => {
@@ -119,9 +146,10 @@ describe('workflow templates', () => {
     });
 
     it('runs the sync entry point', () => {
-      const action = actionStep(file);
-      assert.equal(action.with?.['operation'], 'sync');
-      assert.equal(action.with?.['direction'], undefined);
+      for (const action of actionSteps(file)) {
+        assert.equal(action.with?.['operation'], 'sync');
+        assert.equal(action.with?.['direction'], undefined);
+      }
     });
   });
 
@@ -145,10 +173,11 @@ describe('workflow templates', () => {
     });
 
     it('runs the initial sync entry point with the dispatch inputs', () => {
-      const action = actionStep(file);
-      assert.equal(action.with?.['operation'], 'initial-sync');
-      assert.equal(action.with?.['direction'], '${{ inputs.direction }}');
-      assert.equal(action.with?.['confirm'], '${{ inputs.confirm }}');
+      for (const action of actionSteps(file)) {
+        assert.equal(action.with?.['operation'], 'initial-sync');
+        assert.equal(action.with?.['direction'], '${{ inputs.direction }}');
+        assert.equal(action.with?.['confirm'], '${{ inputs.confirm }}');
+      }
     });
   });
 });
