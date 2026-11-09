@@ -76,10 +76,11 @@ export interface FakeWorld {
     beforeQuery?: (operation: string, variables: Record<string, unknown>) => void;
     writes: FakeWrites;
     store: (content: string) => string;
+    /** The workspace's URL key, in its document URLs. */
+    urlKey: string;
     uploads: FakeUpload[];
     /** Comments on documents, by comment id. */
     comments: Map<string, { documentContentId: string; body: string }>;
-    urlKey: string;
   };
   /** `METHOD url` of every request. */
   requests: string[];
@@ -108,9 +109,9 @@ export function fakeWorld(): FakeWorld {
       documents: [],
       writes: { count: 0 },
       store: (content) => content,
+      urlKey: 'example-team',
       uploads: [],
       comments: new Map(),
-      urlKey: 'example-team',
     },
     requests: [],
     writes: [],

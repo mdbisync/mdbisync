@@ -17,8 +17,10 @@
 // that are not synchronized documents, external links, anchors within the
 // document, images and code are left as they are.
 
+import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Definition, Link, Nodes } from 'mdast';
+import { fixText } from '../format/index.ts';
 import { parse, visit } from '../format/markdown.ts';
 import { type LinearClient } from '../linear/index.ts';
 import { type BodyTransform, type TransformContext } from './transform.ts';
@@ -98,7 +100,8 @@ function destinationUrl(raw: string): string | undefined {
 
 /** Percent-encodes what a fragment cannot hold as it is in a link destination (the parser has resolved escapes and entities). */
 function encodeFragment(fragment: string): string {
-  return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/g, (char) => encodeURIComponent(char));
+  // By code point (`u`): a character outside the Basic Multilingual Plane is one match, not two lone surrogates.
+  return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/gu, (char) => encodeURIComponent(char));
 }
 
 /** Replaces destinations by offset; `replace` returns the new raw destination, or undefined to keep it. */
@@ -245,6 +248,10 @@ function destinationSpan(body: string, node: Link | Definition): { from: number;
   return to > at ? { from: at, to } : undefined;
 }
 
+function sha256(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
 /** Reads the workspace's URL key; one request. */
 export async function workspaceUrlKey(linear: LinearClient): Promise<string> {
   const data = await linear.request<{ organization: { urlKey: string } }>('WorkspaceUrlKey', 'query', 'query WorkspaceUrlKey { organization { urlKey } }');
@@ -260,8 +267,12 @@ export async function workspaceUrlKey(linear: LinearClient): Promise<string> {
 export function documentLinks(): BodyTransform {
   let context: TransformContext | undefined;
   let map: LinkMap | undefined;
-  /** By document path, for the documents rewritten: the destinations the file had for each document URL. */
-  const seen = new Map<string, LinkSpellings>();
+  /**
+   * By document path, for the documents rewritten: what the transform wrote,
+   * and for each document URL the destinations the file had, as written and
+   * in Linear's form.
+   */
+  const rewritten = new Map<string, { writtenHash: string; asWritten: LinkSpellings; inLinearForm: LinkSpellings }>();
   return {
     name: 'document-links',
     async prepare(run: TransformContext) {
@@ -273,16 +284,26 @@ export function documentLinks(): BodyTransform {
         if (!hasDocumentLinks(body, path, context.documentIds)) return body;
         map = { base: documentUrlBase(await workspaceUrlKey(context.linear)), ids: context.documentIds };
       }
-      const urls: LinkSpellings = new Map();
-      const written = linksToLinear(body, path, map, urls);
-      if (written !== body) seen.set(path, urls);
-      else seen.delete(path);
+      const asWritten: LinkSpellings = new Map();
+      const written = linksToLinear(body, path, map, asWritten);
+      if (written === body) {
+        rewritten.delete(path);
+        return body;
+      }
+      // Spellings in Linear's form come from Linear's form of the whole body: it can expand a reference into
+      // several inline links, which changes how many links there are and in what order.
+      const inLinearForm: LinkSpellings = new Map();
+      linksToLinear(fixText(body), path, map, inLinearForm);
+      rewritten.set(path, { writtenHash: sha256(written), asWritten, inLinearForm });
       return written;
     },
     restore({ path, body }) {
       // In an initial sync only what this transform wrote comes back; a document it did not rewrite stays as it is.
-      const urls = seen.get(path);
-      return map === undefined || urls === undefined ? body : linksFromLinear(body, path, map, urls);
+      const entry = rewritten.get(path);
+      if (map === undefined || entry === undefined) return body;
+      // Linear kept the text: each link comes back exactly as the file had it. Linear reformatted it: the links
+      // come back in Linear's form too, so the restored text is Linear's form of the file, not a mix of both.
+      return linksFromLinear(body, path, map, sha256(body) === entry.writtenHash ? entry.asWritten : entry.inLinearForm);
     },
   };
 }

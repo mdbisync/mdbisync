@@ -615,6 +615,135 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
+  it('a left-out file fixed in git does not overwrite an edit made in Linear after capture', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
+    assert.deepEqual((await sync()).writes, []);
+    afterCapture(() => { document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}\n`; touch(document); });
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'edited-in-linear' }]);
+    assert.match(document.content ?? '', /Typed in Linear meanwhile/);
+  });
+
+  it('a left-out file is compared with what Linear was given, not with a git version it never received', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    // Two git commits between runs: a clean version Linear never receives, then one the linter leaves out.
+    await commit({ 'eng/notes/review.md': `# Review\n\nA version Linear never sees. ${CANARY}\n` });
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
+    assert.deepEqual((await sync()).writes, []);
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.match(document.content ?? '', /fixed in git/);
+  });
+
+  it('a link to another synchronized document is written as its Linear URL; `linear` keeps the relative link', async () => {
+    const plan = await documentOf('eng/notes/plan.md');
+    await commit({ 'eng/notes/review.md': `# Review\n\nSee [the plan](plan.md). ${CANARY}\n` });
+    const { result, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    const review = await documentOf('eng/notes/review.md');
+    assert.ok((review.content ?? '').includes(plan.id) || (review.content ?? '').includes('linear.app'), 'the link was not written as a Linear URL');
+    assert.ok(!(review.content ?? '').includes('](plan.md)'), 'the relative link reached Linear');
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
+  });
+
+  /** Leaves a file out with one commit, syncs, fixes it with another, syncs; the fix must reach the untouched document. */
+  async function leftOutThenFixed(breaking: Record<string, string | null>, fixing: Record<string, string | null>, path: string) {
+    const document = await documentOf(path);
+    await commit(breaking);
+    assert.equal((await sync()).result.exitCode, 0);
+    await commit(fixing);
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.skipped, [], 'an untouched document was taken for a Linear edit');
+    assert.equal(report.complete, true);
+    return document;
+  }
+
+  it('a file left out for a title collision and then fixed reaches its untouched document', async () => {
+    const document = await leftOutThenFixed(
+      { 'eng/notes/review.md': `# Review\n\nAn edit made while colliding. ${CANARY}\n`, 'eng/notes/Review.md': `# Other\n\nSame title. ${CANARY}\n` },
+      { 'eng/notes/Review.md': null, 'eng/notes/review.md': `# Review\n\nAfter the collision. ${CANARY}\n` },
+      'eng/notes/review.md',
+    );
+    assert.match(document.content ?? '', /After the collision/);
+  });
+
+  it('a file left out in the commit that moves its folder to another project is moved and written once fixed', async () => {
+    const document = await leftOutThenFixed(
+      {
+        'eng/notes/README.md': `---\nlinear-project: Archive\n---\n\n# Field notes\n\n${CANARY}\n`,
+        'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n`,
+      },
+      { 'eng/notes/review.md': `# Review\n\nFindings, fixed. ${CANARY}\n` },
+      'eng/notes/review.md',
+    );
+    assert.equal(document.projectId, 'project-archive');
+    assert.match(document.content ?? '', /fixed/);
+  });
+
+  it('a file left out in the commit that changes its image is written with the new image once fixed', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    await leftOutThenFixed(
+      {
+        'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1'),
+        'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows.[^1] ${CANARY}\n\n[^1]: A note.\n`,
+      },
+      { 'eng/notes/figure.md': `# Figure\n\n![Diagram](../media/diagram.png)\n\nWhat it shows, fixed. ${CANARY}\n` },
+      'eng/notes/figure.md',
+    );
+    const [after] = uploadUrls(figure.content);
+    assert.ok(after !== undefined && after !== before, 'the document kept the old image');
+  });
+
+  it('a file that stopped being text and became text again reaches its untouched document', async () => {
+    const document = await leftOutThenFixed(
+      { 'eng/notes/review.md': `# Review\n\nBroken\u0000bytes. ${CANARY}\n` },
+      { 'eng/notes/review.md': `# Review\n\nText again. ${CANARY}\n` },
+      'eng/notes/review.md',
+    );
+    assert.match(document.content ?? '', /Text again/);
+  });
+
+  it('a move that makes a relative link point at another image writes the other image', async () => {
+    await commit({ 'eng/notes/media/diagram.png': Buffer.from('a different diagram').toString('latin1') });
+    assert.equal((await sync()).result.exitCode, 0);
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    // From eng/notes/sub/, `../media/diagram.png` is eng/notes/media/diagram.png.
+    await commit({}, [['eng/notes/figure.md', 'eng/notes/sub/figure.md']]);
+    const { result, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+    const [after] = uploadUrls(figure.content);
+    assert.ok(after !== undefined && after !== before, 'the moved document kept the old image');
+    assert.equal(figure.title, 'sub/figure');
+  });
+
+  it('a file renamed in the same commit that changes its image is written with the new image', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const [before] = uploadUrls(figure.content);
+    await commit({ 'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1') }, [['eng/notes/figure.md', 'eng/notes/illustration.md']]);
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+    assert.equal(figure.title, 'illustration');
+    const [after] = uploadUrls(figure.content);
+    assert.ok(after !== undefined && after !== before, 'the renamed document kept the old image');
+    assert.equal(report.complete, true);
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
+  });
+
   /** What a capture does for an edit in Linear: the document's new text, committed onto `linear`. */
   async function captured(path: string, text: string) {
     const document = await documentOf(path);

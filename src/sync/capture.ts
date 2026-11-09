@@ -16,6 +16,8 @@ import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
 import { documentPath } from './paths.ts';
+import { lastSynchronized } from './merge.ts';
+import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, type CapturedAssets } from './assets.ts';
 
 export interface CaptureOptions {
@@ -101,8 +103,34 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Looking up known ids also finds trash, project moves and moves out of scope.
     const missing = [...byId.keys()].filter((id) => !listed.has(id));
     for (const document of await linear.getDocuments(missing)) listed.set(document.id, document);
+    // Git-only exclusions keep their last accepted identity and place. A
+    // collision or an annotation recorded for other files is not a Linear move.
+    const baselines = new Map<string, Awaited<ReturnType<typeof lastSynchronized>>>();
+    const excludedPath = (path: string) => {
+      const mapped = recorded.documents.find((document) => document.path === path);
+      const prior = previous.get(path);
+      return mapped === undefined || (prior !== undefined && lintText(path, prior.toString('utf8')).length > 0)
+        || lengthRefusal({title: mapped.title}, linear.facts) !== undefined;
+    };
+    const retained = new Map<string, string>();
+    for (const [id, old] of byId) {
+      if (!excludedPath(old.path)) continue;
+      const baseline = await lastSynchronized(git, base, old.path, linear.facts);
+      baselines.set(old.path, baseline);
+      const doc = listed.get(id);
+      if (baseline === null || doc === undefined || doc.title.normalize('NFC') !== baseline.file.title.normalize('NFC')) continue;
+      let resolved;
+      try { resolved = placeId(targets, baseline.file.place); }
+      catch {
+        const place = baseline.file.place;
+        const lookup = await resolveTargets(linear, [{team:place.team, teamFolder:'', ...(place.kind === 'project' ? {project:place.project, projectFolder:''} : {})}]);
+        if (lookup.targets === undefined) continue;
+        resolved = placeId(lookup.targets, place);
+      }
+      if ('projectId' in resolved ? resolved.projectId === doc.projectId : doc.projectId === null && resolved.teamId === doc.teamId) retained.set(id, old.path);
+    }
     const folderFor = (doc: LinearDocument) => folders.get(doc.projectId !== null ? `project:${doc.projectId}` : `team:${doc.teamId}`);
-    const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && folderFor(doc) !== undefined;
+    const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && (folderFor(doc) !== undefined || retained.has(doc.id));
     const normalizedTime = (doc: LinearDocument) => {
       const time = new Date(doc.updatedAt);
       if (!Number.isFinite(time.getTime())) throw new Error('a document has an invalid update time');
@@ -117,6 +145,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       return 'projectId' in target ? target.projectId !== doc.projectId : doc.projectId !== null || target.teamId !== doc.teamId;
     };
     const destination = (doc: LinearDocument, occupied: ReadonlySet<string>) => {
+      if (retained.has(doc.id)) return retained.get(doc.id)!;
       const old = byId.get(doc.id);
       const available = new Set(occupied);
       if (old !== undefined) available.delete(old.path);
@@ -231,15 +260,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       ids.set(candidate.path, old?.entry ?? {id});
       for (const [path, content] of candidate.files) {
-        // A git-only lint finding can be recorded without writing its body to
-        // Linear. An unchanged remote body must not undo that excluded file.
+        // A record can retain a git-only excluded file without sending it to
+        // Linear. Compare against the last accepted state, not an intervening
+        // record that also retained the excluded bytes.
         const prior = previous.get(path);
-        if (path === candidate.path && old?.path === path && prior !== undefined && lintText(path, prior.toString('utf8')).length > 0) {
-          const changedAt = await git.text(['log', '--first-parent', '-1', '--format=%H', base, '--', path]);
-          if (changedAt !== '') {
-            const before = await git.run(['cat-file', 'blob', `${changedAt}^:${path}`], {okCodes:[0,128]});
-            if (before.code === 0 && splitFile(before.stdout.toString('utf8')).body === splitFile(String(content)).body) continue;
-          }
+        if (path === candidate.path && old?.path === path && prior !== undefined && excludedPath(path)) {
+          const baseline = baselines.get(path);
+          if (baseline != null && splitFile(baseline.text).body === splitFile(String(content)).body) continue;
         }
         if (previous.get(path)?.equals(Buffer.from(content)) !== true) {
           changes.set(path, content);
