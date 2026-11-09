@@ -282,8 +282,20 @@ export class LinearClient {
     return succeeded('CommentOnDocument', data.commentCreate).comment;
   }
 
+  /** Update a previously posted notice without adding another comment. */
+  async updateDocumentComment(id: string, body: string): Promise<{ id: string }> {
+    const data = await this.request<{ commentUpdate: { success: boolean; comment: { id: string } } }>(
+      'UpdateDocumentComment', 'mutation',
+      `mutation UpdateDocumentComment($id: String!, $input: CommentUpdateInput!) {
+        commentUpdate(id: $id, input: $input) { success comment { id } }
+      }`,
+      { id, input: { body } },
+    );
+    return succeeded('UpdateDocumentComment', data.commentUpdate).comment;
+  }
+
   /** Ensure one notice exists, including recovery after a lost create response. */
-  async ensureDocumentComment(documentContentId: string, body: string, id: string): Promise<{ id: string; created: boolean }> {
+  async ensureDocumentComment(documentContentId: string, body: string, id: string, updateExisting = false): Promise<{ id: string; created: boolean }> {
     const find = async (): Promise<boolean> => {
       const data = await this.request<{ comments: { nodes: Array<{ id: string; documentContentId: string | null }> } }>(
         'FindDocumentComment', 'query',
@@ -299,23 +311,31 @@ export class LinearClient {
       }
       return true;
     };
-    if (await find()) return { id, created: false };
+    const existing = async () => {
+      if (updateExisting) {
+        const comment = await this.updateDocumentComment(id, body);
+        if (comment.id !== id) throw new LinearError('UpdateDocumentComment', 'Updated comment identity does not match');
+      }
+      return { id, created: false };
+    };
+    if (await find()) return existing();
+    let comment: { id: string };
     try {
-      const comment = await this.commentOnDocument(documentContentId, body, id);
-      if (comment.id !== id) throw new LinearError('CommentOnDocument', 'Created comment identity does not match');
-      return { id, created: true };
+      comment = await this.commentOnDocument(documentContentId, body, id);
     } catch (error) {
       // A mutation may succeed before a network failure, or a concurrent
       // caller may create the same id. Read it back before reporting failure.
       if (error instanceof LinearError && this.stopped === undefined) {
-        try {
-          if (await find()) return { id, created: false };
-        } catch {
-          // Keep the original mutation failure when recovery cannot read.
-        }
+        let found = false;
+        try { found = await find(); } catch { /* Preserve the original mutation failure. */ }
+        if (found) return existing();
       }
       throw error;
     }
+    // A successful response with the wrong identity is a protocol failure,
+    // not an ambiguous mutation to recover by looking up another comment.
+    if (comment.id !== id) throw new LinearError('CommentOnDocument', 'Created comment identity does not match');
+    return { id, created: true };
   }
 
   /**

@@ -51,8 +51,8 @@ test('L3-14: save the original decoration before showing the orange Alert and co
   const world = new World();
   const result = await world.reconcile();
   assert.equal(result.state, 'conflict');
-  assert.deepEqual(world.events, ['save', 'update', 'comment']);
-  assert.deepEqual(world.entry.saved, { icon: ':fire:', color: '#123456' });
+  assert.deepEqual(world.events, ['save', 'update', 'comment', 'save']);
+  assert.deepEqual({ icon: world.entry.saved?.icon, color: world.entry.saved?.color }, { icon: ':fire:', color: '#123456' });
   assert.equal(world.document.icon, MARKS.conflict.icon);
   assert.equal(world.document.color, MARKS.conflict.color);
   assert.deepEqual([...world.comments.values()], [CONFLICT_COMMENT]);
@@ -63,10 +63,11 @@ test('L3-14: save the original decoration before showing the orange Alert and co
 });
 
 for (const side of ['Linear', 'Git']) {
-  test(`L3-09/10: resolving the text in ${side} restores the exact original icon and color`, async () => {
+  test(`L3-09/10 module hook: observed resolution after a ${side} edit restores the original`, async () => {
     const world = new World();
     await world.reconcile();
-    world.document.content = 'Resolved text.\n';
+    if (side === 'Git') await world.updateDocument(world.document.id, { content: 'Resolved text.\n' });
+    else world.document.content = 'Resolved text.\n';
     world.events = [];
     const result = await world.reconcile();
     assert.equal(result.state, 'clear');
@@ -87,7 +88,7 @@ test('L3-11: edits inside open markers retain the mark and do not duplicate the 
   await world.reconcile();
   assert.equal(world.document.icon, 'Alert');
   assert.equal(world.comments.size, 1);
-  assert.deepEqual(world.entry.saved, { icon: ':fire:', color: '#123456' });
+  assert.deepEqual({ icon: world.entry.saved?.icon, color: world.entry.saved?.color }, { icon: ':fire:', color: '#123456' });
 });
 
 test('L3-13: each remaining marker keeps the conflict mark', async () => {
@@ -106,7 +107,7 @@ test('null icons and colors, including originals equal to a mark, restore exactl
     const world = new World();
     Object.assign(world.document, original);
     await world.reconcile();
-    assert.deepEqual(world.entry.saved, original);
+    assert.deepEqual({ icon: world.entry.saved?.icon, color: world.entry.saved?.color }, original);
     world.document.content = '';
     await world.reconcile();
     assert.equal(world.document.icon, original.icon);
@@ -121,11 +122,11 @@ test('blocked status takes precedence and shares the original decoration with th
   await world.reconcile([{ hook: 'check-secret', line: 12 }]);
   assert.equal(world.document.icon, 'Cross');
   assert.equal(world.document.color, MARKS.blocked.color);
-  assert.deepEqual(world.entry.saved, { icon: ':fire:', color: '#123456' });
+  assert.deepEqual({ icon: world.entry.saved?.icon, color: world.entry.saved?.color }, { icon: ':fire:', color: '#123456' });
   assert.ok([...world.comments.values()].some((body) => body.includes('check-secret') && body.includes('12')));
   await world.reconcile();
   assert.equal(world.document.icon, 'Alert');
-  assert.equal(world.comments.size, 2);
+  assert.equal(world.comments.size, 3);
   world.document.content = 'Resolved.\n';
   await world.reconcile();
   assert.equal(world.document.icon, ':fire:');
@@ -144,14 +145,14 @@ test('failed mark and failed comment can resume without losing the original', as
   const world = new World();
   world.failUpdate = true;
   await assert.rejects(world.reconcile(), /update unavailable/);
-  assert.deepEqual(world.entry.saved, { icon: ':fire:', color: '#123456' });
+  assert.deepEqual({ icon: world.entry.saved?.icon, color: world.entry.saved?.color }, { icon: ':fire:', color: '#123456' });
   world.failUpdate = false;
   world.failComment = true;
   await assert.rejects(world.reconcile(), /comment unavailable/);
   world.failComment = false;
   await world.reconcile();
   assert.equal(world.comments.size, 1);
-  assert.deepEqual(world.entry.saved, { icon: ':fire:', color: '#123456' });
+  assert.deepEqual({ icon: world.entry.saved?.icon, color: world.entry.saved?.color }, { icon: ':fire:', color: '#123456' });
 });
 
 test('failed restore retains the original decoration for the next attempt', async () => {
@@ -236,4 +237,92 @@ test('trashed or archived documents are left unchanged', async () => {
     await world.reconcile();
     assert.deepEqual(world.events, []);
   }
+});
+
+test('a new conflict episode gets a new notice after resolution', async () => {
+  const world = new World();
+  await world.reconcile();
+  world.document.content = 'Resolved.\n';
+  await world.reconcile();
+  world.document.content = conflicted;
+  await world.reconcile();
+  assert.equal(world.comments.size, 2);
+});
+
+test('settled marks need no comment lookup or ids write on repeated runs', async () => {
+  const world = new World();
+  await world.reconcile();
+  world.events = [];
+  await world.reconcile();
+  assert.deepEqual(world.events, []);
+});
+
+test('blocked line shifts update one notice instead of creating stale duplicate notices', async () => {
+  const world = new World();
+  await world.reconcile([{ hook: 'check-key', line: 12 }]);
+  await world.reconcile([{ hook: 'check-key', line: 13 }]);
+  assert.equal(world.comments.size, 1);
+  assert.ok([...world.comments.values()][0]?.includes('line 13'));
+});
+
+test('a deleted settled notice does not make the document fail reconciliation', async () => {
+  const world = new World();
+  await world.reconcile();
+  world.comments.clear();
+  world.failComment = true;
+  world.events = [];
+  await world.reconcile();
+  assert.deepEqual(world.events, []);
+  assert.equal(world.document.icon, 'Alert');
+});
+
+test('a failed posted-receipt save retries the same notice id without duplication', async () => {
+  const world = new World();
+  const save = world.save.bind(world);
+  let writes = 0;
+  world.save = async (entry) => {
+    if (++writes === 2) throw new Error('receipt unavailable');
+    await save(entry);
+  };
+  await assert.rejects(world.reconcile(), /receipt unavailable/);
+  const pendingId = world.entry.saved?.notice?.id;
+  assert.ok(pendingId);
+  assert.equal(world.entry.saved?.notice?.posted, false);
+  assert.equal(world.comments.size, 1);
+  await world.reconcile();
+  assert.equal(world.entry.saved?.notice?.id, pendingId);
+  assert.equal(world.entry.saved?.notice?.posted, true);
+  assert.equal(world.comments.size, 1);
+});
+
+test('a fetched null body is empty content and clears the mark', async () => {
+  const world = new World();
+  await world.reconcile();
+  world.document.content = null;
+  await world.reconcile();
+  assert.equal(world.document.icon, ':fire:');
+  assert.equal(world.entry.saved, undefined);
+});
+
+test('restoration uses the exact saved original decoration', async () => {
+  const world = new World();
+  await world.reconcile();
+  world.document.icon = ':rocket:';
+  world.document.color = '#654321';
+  world.document.content = 'Resolved.\n';
+  await world.reconcile();
+  assert.equal(world.document.icon, ':fire:');
+  assert.equal(world.document.color, '#123456');
+});
+
+test('resolving one of several regions keeps the document marked without another notice', async () => {
+  const world = new World();
+  world.document.content = `${conflicted}\n${conflicted}`;
+  await world.reconcile();
+  world.document.content = `Resolved first region.\n\n${conflicted}`;
+  world.events = [];
+  await world.reconcile();
+  assert.equal(world.document.icon, 'Alert');
+  assert.equal(world.comments.size, 1);
+  assert.deepEqual(world.events, []);
 });

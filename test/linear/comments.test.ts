@@ -62,3 +62,25 @@ test('existing comment ids belonging to another document are rejected before wri
   await assert.rejects(linear.ensureDocumentComment('content-one', 'Resolve the conflicting text.', id), /identity does not match/);
   assert.equal(fake.received.filter((request) => request.operation === 'CommentOnDocument').length, 0);
 });
+
+test('a mismatched creation response is not hidden by a later lookup', async (t) => {
+  const { fake, comments, linear } = await world(t);
+  fake.operations.set('CommentOnDocument', () => {
+    comments.set(id, { id, documentContentId: 'content-one' });
+    return { body: { data: { commentCreate: { success: true, comment: { id: 'other-id' } } } } };
+  });
+  await assert.rejects(linear.ensureDocumentComment('content-one', 'Resolve the conflicting text.', id), /identity does not match/);
+});
+
+test('changed notice text updates the existing comment instead of creating another', async (t) => {
+  const { fake, linear } = await world(t);
+  fake.operations.set('UpdateDocumentComment', (request) => {
+    assert.equal(request.variables?.id, id);
+    assert.deepEqual(request.variables?.input, { body: 'Hook check-key, line 13.' });
+    return { body: { data: { commentUpdate: { success: true, comment: { id } } } } };
+  });
+  await linear.ensureDocumentComment('content-one', 'Hook check-key, line 12.', id);
+  assert.deepEqual(await linear.ensureDocumentComment('content-one', 'Hook check-key, line 13.', id, true), { id, created: false });
+  assert.equal(fake.received.filter((request) => request.operation === 'CommentOnDocument').length, 1);
+  assert.equal(fake.received.filter((request) => request.operation === 'UpdateDocumentComment').length, 1);
+});

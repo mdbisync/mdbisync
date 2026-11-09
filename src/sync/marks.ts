@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { detectConflicts } from '../merge/index.ts';
 import type { LinearClient, LinearDocument } from '../linear/index.ts';
 import type { IdEntry } from '../state/index.ts';
@@ -8,7 +8,7 @@ export const MARKS = {
   blocked: { icon: 'Cross', color: '#EB5757' },
 } as const;
 
-export const CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and remove all three conflict marker paragraphs. The alert clears after the next sync.';
+export const CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and remove every conflict marker paragraph throughout the document. The alert clears after the next sync.';
 
 export interface SecurityFinding {
   hook: string;
@@ -47,15 +47,6 @@ function blockedComment(findings: readonly SecurityFinding[]): string {
   return `Security checks rejected this document. Fix the listed findings and sync again.\n\n${locations.join('\n')}`;
 }
 
-/** A stable UUID v4-shaped identifier makes the same notice retryable. */
-function noticeId(documentContentId: string, body: string): string {
-  const bytes = createHash('sha256').update('document-status-notice/v1\0').update(documentContentId).update('\0').update(body).digest().subarray(0, 16);
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = bytes.toString('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
 /**
  * Reconcile one document's visible status from its current text and security
  * findings. Alert and Cross share exactly one saved original decoration.
@@ -84,8 +75,15 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   }
 
   if (!document.documentContentId) throw new Error('A marked document requires a comment target');
-  if (entry.saved === undefined) {
-    entry = { ...entry, saved: { icon: document.icon, color: document.color } };
+  const body = state === 'conflict' ? CONFLICT_COMMENT : blockedComment(blocked);
+  const bodyHash = createHash('sha256').update(body).digest('hex');
+  const saved = entry.saved ?? { icon: document.icon, color: document.color };
+  const previous = saved.notice;
+  const notice = previous?.kind === state
+    ? { ...previous, bodyHash, posted: previous.posted && previous.bodyHash === bodyHash }
+    : { id: randomUUID(), kind: state, bodyHash, posted: false };
+  if (entry.saved === undefined || previous?.kind !== state || previous.bodyHash !== bodyHash) {
+    entry = { ...entry, saved: { ...saved, notice } };
     await persistEntry(entry);
     result.entry = entry;
   }
@@ -94,10 +92,13 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
     await linear.updateDocument(document.id, mark);
     result.updated = true;
   }
-  const body = state === 'conflict' ? CONFLICT_COMMENT : blockedComment(blocked);
-  // Check even when the icon already matches: a previous run may have stopped
-  // between marking and commenting. The stable remote id prevents duplicates.
-  const comment = await linear.ensureDocumentComment(document.documentContentId, body, noticeId(document.documentContentId, body));
+  if (notice.posted) return result;
+  // The pending id is durable before the mutation. Lost responses and failed
+  // receipt saves can safely resume; changed blocked locations update this id.
+  const comment = await linear.ensureDocumentComment(document.documentContentId, body, notice.id, true);
+  const posted = { ...entry, saved: { ...saved, notice: { ...notice, posted: true } } };
+  await persistEntry(posted);
+  result.entry = posted;
   result.commented = comment.created;
   return result;
 }
