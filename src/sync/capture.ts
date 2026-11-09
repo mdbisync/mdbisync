@@ -14,7 +14,7 @@ import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type 
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
-import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads } from '../state/index.ts';
+import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
@@ -22,6 +22,7 @@ import { documentPath } from './paths.ts';
 import { lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, type CapturedAssets } from './assets.ts';
+import { rebuildIds } from './rebuild.ts';
 
 export interface CaptureOptions {
   config: StateConfig;
@@ -47,6 +48,8 @@ export interface CaptureResult {
   changed: string[];
   removed: string[];
   leftOut: Array<{ id: string; rule: string }>;
+  /** The `ids` ref was lost: how many of the recorded files got their document back by title, of how many. */
+  rebuiltIds?: { matched: number; files: number };
   /** Captured content that exceeds Linear's write limit; paths and counts only. */
   writeBackWarnings: Array<{ path: string; code: 'linear-content-too-large-to-write-back'; length: number; limit: number }>;
   summary: string;
@@ -99,6 +102,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (resolved.targets === undefined) throw new Error('the previously recorded document places could not be resolved');
       targets = resolved.targets;
     }
+    if (state.ids === null) {
+      // The map is lost (initial sync always records it): match the recorded files to their documents by title.
+      const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
+      const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
+      for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents })) ids.set(path, entry);
+      result.rebuiltIds = { matched: ids.size, files: recorded.documents.length };
+    }
     const cursor = await readCursor(context, state);
     const entries = await listTree(git, base);
     const textEntries = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
@@ -130,6 +140,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Looking up known ids also finds trash, project moves and moves out of scope.
     const missing = [...byId.keys()].filter((id) => !listed.has(id));
     for (const document of await linear.getDocuments(missing)) listed.set(document.id, document);
+    // A known id that neither answer has: `document(id:)` tells a document Linear no longer has (removed from the
+    // trash for good) from one a list left out. A document gone for good is a deletion.
+    const gone = new Set<string>();
+    for (const id of missing.filter((id) => !listed.has(id))) {
+      const document = await linear.getDocument(id);
+      if (document === null) gone.add(id);
+      else listed.set(id, document);
+    }
     // Git-only exclusions keep their last accepted identity and place. A
     // collision or an annotation recorded for other files is not a Linear move.
     const baselines = new Map<string, Awaited<ReturnType<typeof lastSynchronized>>>();
@@ -182,7 +200,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     };
     // An unchanged source may link a renamed, moved or removed target.
     // Re-read bodies when a path changes so those inbound links are translated too.
-    if ([...listed.values()].some((doc) => {
+    if (gone.size > 0 || [...listed.values()].some((doc) => {
       const old = byId.get(doc.id);
       return old !== undefined && (!live(doc) || destination(doc, occupied) !== old.path);
     })) selected = [...listed.values()];
@@ -199,6 +217,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const documentIds = new Map([...ids].filter(([path]) => previous.has(path)).map(([path, entry]) => [path, entry.id]));
     // A reserved id names its path too: a link written to a new document that is not created yet stays relative.
     for (const [id, path] of reservedById) if (!documentIds.has(path)) documentIds.set(path, id);
+    for (const id of gone) {
+      const old = byId.get(id)!;
+      removeBody(old.path);
+      ids.delete(old.path);
+      documentIds.delete(old.path);
+      result.removed.push(old.path);
+    }
     const paths = new Map<string, string>();
     const reservations = new Set(occupied);
     const allocated = new Map<string, string>();
@@ -314,7 +339,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const through = result.leftOut.length > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
     const message = through === null ? 'Capture document ids' : `Capture document ids\n\nCapture-through: ${through}`;
     const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always: through !== cursor, reserved });
-    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity);
+    // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
+    const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes', identity });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.
@@ -394,6 +420,9 @@ function relocatedHead(head: string): string {
 
 function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
+  if (result.rebuiltIds !== undefined) {
+    summary += `\nThe document id map was lost: rebuilt by matching titles to paths, ${result.rebuiltIds.matched} of ${result.rebuiltIds.files} files matched. A document renamed in Linear since the last run comes back as a new file next to its old one.`;
+  }
   if (result.stopped !== undefined) summary += `\nCapture partial, will continue.\n\n${renderStop(result.stopped).join('\n')}`;
   if (result.failure !== undefined) summary += `\nCapture partial, will continue: Linear failed ${result.failure.operation} (${result.failure.error}).`;
   if (!configured) summary += '\nContent is pushed unchecked: no security hooks are configured.';
