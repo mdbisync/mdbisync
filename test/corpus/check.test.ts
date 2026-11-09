@@ -16,7 +16,7 @@ let manifest: Manifest;
 
 before(() => {
   root = mkdtempSync(join(tmpdir(), "corpus-check-"));
-  writeCorpus(buildCorpus(), root, false);
+  writeCorpus(buildCorpus(undefined, undefined, "a".repeat(40)), root, false);
   manifest = JSON.parse(readFileSync(join(root, "corpus-slices", "manifest.json"), "utf8")) as Manifest;
 });
 

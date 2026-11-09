@@ -44,7 +44,11 @@ jobs:
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Install pre-commit
+        run: pipx install pre-commit==4.6.2
+      - name: Published hook and CI example integration
+        run: npm run test:hooks
       - name: Pre-commit hooks
         env:
           SKIP: no-cyrillic # already run above
-        run: pipx run pre-commit==4.6.2 run --all-files --show-diff-on-failure
+        run: pre-commit run --all-files --show-diff-on-failure

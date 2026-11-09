@@ -1,0 +1,70 @@
+# Copy to .github/workflows/pre-commit.yml in a synchronized repository.
+# Install Node 24 and pre-commit locally too. Hook revs must pin release
+# commits containing dist/cli.js and a dependency-free package.json.
+name: Pre-commit
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pre-commit-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # Fork pull requests retain a read-only token.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Install pre-commit
+        run: pipx install pre-commit==4.6.2
+      - name: Run all hooks and collect fixes
+        id: hooks
+        shell: bash
+        run: |
+          # A formatter exits 1 when it edits a file. The final pass below
+          # decides whether the configuration is now clean.
+          status=0
+          pre-commit run --all-files --show-diff-on-failure || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+      - name: Commit fixes or show the fork patch
+        env:
+          SAME_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          git add --all
+          if ! git diff --cached --quiet; then
+            if [[ "$SAME_REPOSITORY" != true ]]; then
+              echo 'Apply this patch to the pull request branch, then push again:'
+              git diff --cached --binary
+              exit 1
+            fi
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                -c core.hooksPath=/dev/null commit -m 'Apply pre-commit fixes'
+            # Credentials are supplied only to this push, never stored for hooks.
+            authorization=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $authorization" \
+                push origin "HEAD:refs/heads/$HEAD_BRANCH"
+          fi
+      - name: Check the fixed tree in the same job
+        # A GITHUB_TOKEN push does not start another workflow run.
+        if: ${{ !cancelled() && steps.hooks.outcome == 'success' }}
+        run: |
+          pre-commit run --all-files --show-diff-on-failure
+          git diff --exit-code
+          git diff --cached --exit-code

@@ -69,6 +69,7 @@ npm ci                  # exact versions from package-lock.json, install scripts
 npm run typecheck       # tsc --noEmit
 npm run build           # esbuild bundles into dist/, checks bundled licenses
 npm test                # node --test
+npm run test:hooks       # requires pre-commit; offline scratch hook and CI checks
 pre-commit run --all-files
 ```
 
@@ -105,8 +106,37 @@ repos:
 ```
 
 The action runs its checked-in JavaScript bundles without installation.
-The hook needs Node 24.15.0, which pre-commit provisions when creating its
-environment; its package has no registry dependencies. Enable Dependabot's
+The hooks use Node 24 and npm already installed on your machine
+(`language_version: system`); no Node toolchain or registry dependencies are
+downloaded when installing or running them. Use npm 11.16.0 or newer: npm
+11.12.1 rejects pre-commit's local Git package installation. The release
+package contains only bundled code and has no install scripts.
+
+`linear-format` fixes Markdown and exits 1 when it changes a file; a second
+run passes. `linear-format-check` reports changes without writing them.
+Both refuse unsupported constructs with a file, line and rule, leaving the
+file unchanged. The hooks run serially so duplicate titles are checked
+together. Keep `linear-format` enabled for synchronization; optionally add
+`linear-format-check` after it.
+
+Copy [examples/pre-commit.yml](examples/pre-commit.yml) to
+`.github/workflows/pre-commit.yml` in your synchronized repository. It runs
+the entire pre-commit configuration on pull requests, commits fixes to
+same-repository branches, and reruns checks in that job. Fork pull requests
+that need fixes fail with a ready-to-apply patch. The workflow checks out
+the exact pull request head; if the branch moves before its push, the push
+fails without overwriting newer work.
+
+To generate the test corpus with the same pin, run:
+
+```sh
+node test/corpus/generate.ts --hook-rev <40-character-release-sha>
+```
+
+The generator requires an explicit release commit SHA and preserves the
+`corpus/` and `corpus-slices/` layout.
+
+Enable Dependabot's
 `github-actions` ecosystem in your repository to propose action SHA updates,
 then copy the proposed release SHA into the hook's `rev` in the same change.
 To update to a specific pre-release, resolve its annotated tag and use the
