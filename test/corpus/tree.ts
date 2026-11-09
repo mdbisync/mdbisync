@@ -162,6 +162,9 @@ export function treeFiles(_rng: Rng, canaries: Canaries, hookRevision: string): 
   return files;
 }
 
+/** The repository the released Linear-format hook comes from. */
+export const HOOK_REPOSITORY = "https://github.com/mdbisync/mdbisync";
+
 /**
  * The corpus's pre-commit configuration: the Linear-format hook, whose
  * release commit the caller supplies, and a test security hook that rejects a
@@ -171,7 +174,7 @@ export function preCommitConfig(hookRevision: string): string {
   validateSha(hookRevision);
   return [
     "repos:",
-    "  - repo: https://github.com/mdbisync/mdbisync",
+    `  - repo: ${HOOK_REPOSITORY}`,
     `    rev: ${hookRevision}`,
     "    hooks:",
     "      - id: linear-format",
