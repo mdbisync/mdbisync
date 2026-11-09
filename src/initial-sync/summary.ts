@@ -1,9 +1,9 @@
+import { cell, placeLabel } from '../run/summary.ts';
 // The initial sync's job summary and its machine-readable form: paths,
 // places and rule names only, never document content.
 
 import { type ContainerCapacity, renderCapacity } from '../run/capacity.ts';
 import { describeStop } from '../linear/index.ts';
-import { type Place } from '../mapping/index.ts';
 import { type ConfirmedResult } from './confirm.ts';
 import { type InitialSyncPlan, type LeftOutEntry } from './plan.ts';
 
@@ -133,18 +133,13 @@ export function renderConfirmed(plan: InitialSyncPlan, result: ConfirmedResult):
   return lines.join('\n') + renderCapacity(plan.capacity ?? []);
 }
 
-export function placeLabel(place: Place): string {
-  return place.kind === 'project' ? `project "${place.project}" of team "${place.team}"` : `team "${place.team}"`;
-}
+export { placeLabel };
 
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
-/** A table cell: pipes, backslashes and line breaks would break the row. */
-function cell(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
-}
+
 
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;

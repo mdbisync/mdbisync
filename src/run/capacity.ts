@@ -2,7 +2,7 @@
 import { type LinearDocument } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
-import { placeLabel } from '../initial-sync/summary.ts';
+import { cell, placeLabel } from './summary.ts';
 import { type RunContext } from './preflight.ts';
 
 export const DEFAULT_DOCUMENT_CAP = 1000;
@@ -66,7 +66,6 @@ export function capacityBlocked(capacity: readonly ContainerCapacity[]): boolean
 export function renderCapacity(capacity: readonly ContainerCapacity[]): string {
   const reported = capacity.filter((container) => container.status !== 'ok');
   if (reported.length === 0) return '';
-  const cell = (value: string) => value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
   return [
     '### Container document capacity', '',
     capacityBlocked(capacity) ? 'Stopped before any write: a container would exceed its document cap.' : 'Warning: a container is within 10% of its document cap. The run may proceed.', '',

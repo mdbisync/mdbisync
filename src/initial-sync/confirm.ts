@@ -20,7 +20,7 @@
 // like any other. Run again after the state is lost and the refs are
 // rebuilt, without duplicates.
 
-import { assessCapacity, capacityBlocked, containerKey } from '../run/capacity.ts';
+import { assessCapacity, capacityBlocked } from '../run/capacity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { fixText, splitFile } from '../format/index.ts';
 import {
@@ -159,7 +159,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
 
   const sources = await readPlanSources(context, { withContent: true });
   const plan = planInitialSync(sources.input);
-  plan.capacity = assessCapacity(context, new Map(sources.input.places.map(({ place, documents }) => [containerKey(context, place), documents])), plan.create, options.documentCap);
+  plan.capacity = assessCapacity(context, sources.containers, plan.create, options.documentCap);
   const texts = sources.input.texts;
 
   const expected: StateSnapshot = { ...fetched.state };
@@ -246,9 +246,8 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const chosen = (resumed ? previous.get(entry.path)?.id : undefined) ?? reserved.get(entry.path);
     if (chosen !== undefined && !sources.documents.has(chosen)) saved.set(entry.path, chosen);
   }
-  // A saved id may belong to a document that was archived or trashed since:
-  // Linear refuses to create a
-  // second document with an existing id. Such an id is not reused.
+  // An id absent from the listed containers may still exist elsewhere in
+  // Linear. Check before reusing it: create refuses an existing id.
   const taken = new Set<string>();
   if (saved.size > 0) for (const document of await linear.getDocuments([...new Set(saved.values())])) taken.add(document.id);
   for (const entry of plan.create) {

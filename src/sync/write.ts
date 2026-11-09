@@ -152,7 +152,27 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     record: null,
     state: { ...expected },
   };
+  let containers: Map<string, LinearDocument[]>;
+  try {
+    containers = await readContainerDocuments(context);
+  } catch (error) {
+    if (!(error instanceof LinearError)) throw error;
+    result.notAttempted = context.mapping.documents.map((document) => document.path).sort();
+    if (error instanceof LinearStoppedError) {
+      result.code = 'stopped';
+      result.stopped = error.reason;
+    } else {
+      result.code = 'write-failed';
+      result.failed = result.notAttempted.map((path) => ({ path, operation: error.operation, error: describeError(error) }));
+    }
+    return result;
+  }
   if (await alreadyMerged(git, linearTip, tracked)) {
+    result.capacity = assessCapacity(context, containers, [], options.documentCap);
+    if (capacityBlocked(result.capacity)) {
+      result.code = 'container-cap';
+      return result;
+    }
     result.complete = true;
     return result;
   }
@@ -178,11 +198,15 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   });
 
   const creates = merge.changes.filter((change): change is CreateChange => change.kind === 'create');
-  const containers = await readContainerDocuments(context);
   const adoptable = await adoptableDocuments(creates);
   const additions = creates.filter((change) => !adoptable.has(change.path)).map((change) => merge.result.get(change.path) as SideFile);
   // Moves consume destination capacity too; do not subtract departures, since writes may arrive first.
-  for (const change of merge.changes) if (change.kind === 'keep' && change.place) additions.push(merge.result.get(change.to) as SideFile);
+  for (const change of merge.changes) {
+    if (change.kind !== 'keep' || !change.place) continue;
+    const destination = merge.result.get(change.to) as SideFile;
+    const present = containers.get(containerKey(context, destination.place))?.some((document) => document.id === change.id);
+    if (!present) additions.push(destination);
+  }
   result.capacity = assessCapacity(context, containers, additions, options.documentCap);
   if (capacityBlocked(result.capacity)) {
     result.code = 'container-cap';
@@ -342,7 +366,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const byPlace = new Map<string, { place: Place; paths: string[] }>();
     for (const change of changes) {
       const file = merge.result.get(change.path) as SideFile;
-      const key = JSON.stringify(placeId(targets, file.place));
+      const key = containerKey(context, file.place);
       const group = byPlace.get(key) ?? { place: file.place, paths: [] };
       group.paths.push(change.path);
       byPlace.set(key, group);

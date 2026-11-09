@@ -32,9 +32,9 @@ describe('container document capacity', () => {
   });
   afterEach(() => fixture.cleanup());
   const refs = () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
-  async function run(command = 'initial-sync', confirm = false, cap = '10') {
+  async function run(command = 'initial-sync', confirm = false, cap = '10', fetchOverride?: typeof fetch) {
     const reportFile = join(fixture.root, 'report.json');
-    const result = await runCli([command], { cwd, fetch: fakeFetch(world), env: {
+    const result = await runCli([command], { cwd, fetch: fetchOverride ?? fakeFetch(world), env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '',
       MDBISYNC_LINEAR_CLIENT_ID: 'client-id', MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
       MDBISYNC_LINEAR_API_URL: LINEAR_API, MDBISYNC_GITHUB_TOKEN: 'gh-token',
@@ -118,6 +118,58 @@ describe('container document capacity', () => {
         assert.equal(result.report.writtenCount, 2);
         assert.equal(result.report.complete, true);
       }
+    });
+  }
+  it('reports capacity even when the tracked branch has no new changes', async () => {
+    assert.equal((await run('initial-sync', true)).exitCode, 0);
+    populate(8);
+    const warning = await run('sync');
+    assert.equal(warning.exitCode, 0, warning.stderr);
+    assert.match(warning.stdout, /Warning: a container is within 10%/);
+    assert.equal(warning.report.changed, false);
+    assert.ok(warning.report.capacity.every((c) => c.total === 9 && c.planned === 0));
+    world.linear.documents.push({ id: 'extra-a', teamId: 'team-eng', title: 'Extra A', trashed: true, createdAt: '2026-01-01T00:00:00Z' },
+      { id: 'extra-b', teamId: 'team-eng', title: 'Extra B', trashed: true, createdAt: '2026-01-01T00:00:00Z' });
+    const writesBefore = world.writes.length;
+    const blocked = await run('sync');
+    assert.equal(blocked.exitCode, INCOMPLETE_EXIT_CODE, blocked.stderr);
+    assert.equal(blocked.report.code, 'container-cap');
+    assert.equal(world.writes.length, writesBefore);
+  });
+  it('a previously left-out document already at the destination is not counted as an addition', async () => {
+    assert.equal((await run('initial-sync', true)).exitCode, 0);
+    await fixture.seed({ 'eng/README.md': '---\nlinear-team: ENG\n---\n\nA note.[^1]\n\n[^1]: Source.\n' });
+    assert.equal((await run('sync', false, '1')).exitCode, 0);
+    await fixture.seed({ 'eng/README.md': '---\nlinear-team: ENG\n---\n\n# Engineering\n\nUpdated.\n' });
+    const result = await run('sync', false, '1');
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.report.capacity.find((c) => c.place.kind === 'team')?.planned, 0);
+    assert.deepEqual(result.report.sync?.updated, ['eng/README.md']);
+    assert.equal(result.report.complete, true);
+  });
+  for (const rateLimited of [true, false]) {
+    it(`a failed capacity read ${rateLimited ? 'reports a rate-limit stop' : 'reports an API failure'} before writing`, async () => {
+      assert.equal((await run('initial-sync', true)).exitCode, 0);
+      await fixture.seed({ 'eng/new.md': '# New\n' });
+      const before = await refs();
+      const writesBefore = world.writes.length;
+      const normal = fakeFetch(world);
+      const failedRead: typeof fetch = async (url, init) => {
+        if (String(url).endsWith('/graphql') && String(init?.body).includes('ListDocuments')) {
+          return new Response(JSON.stringify({ errors: [{ message: 'Request refused', extensions: { code: rateLimited ? 'RATELIMITED' : 'FORBIDDEN' } }] }), {
+            status: rateLimited ? 429 : 400, headers: { 'content-type': 'application/json', 'retry-after': '60' },
+          });
+        }
+        return normal(url, init);
+      };
+      const result = await run('sync', false, '10', failedRead);
+      assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE, result.stderr);
+      assert.equal(result.report.code, rateLimited ? 'stopped' : 'write-failed');
+      assert.equal(result.report.changed, false);
+      assert.equal(result.report.complete, false);
+      assert.equal(world.writes.length, writesBefore);
+      assert.equal(await refs(), before);
+      assert.equal(world.revoked, 2);
     });
   }
   it('does not count an adopted document as an additional create', async () => {

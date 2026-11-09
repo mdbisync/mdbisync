@@ -76,6 +76,14 @@ the documents it already wrote, and a document created just before a crash
 is found by its title, not created twice. When the state refs are lost, a
 new confirmed run rebuilds them without duplicating documents.
 
+Before creating documents, the dry run and sync report containers at or above
+90% of their document cap. Counts include live, trashed and archived documents
+returned by Linear, plus planned additions; trashing documents frees no space.
+Above the cap, a confirmed initial sync or `sync` stops before uploads,
+document writes or state pushes and exits with code 5 (`container-cap`).
+Set the `document-cap` action input or `MDBISYNC_DOCUMENT_CAP` environment
+variable to a positive integer to override the default of 1,000.
+
 ## Layout
 
 | Path | What |
@@ -185,11 +193,3 @@ to report a vulnerability.
 MIT, see [LICENSE](LICENSE). The bundles include third-party packages under
 their own licenses; every release commit ships their license texts and notices
 in `dist/THIRD_PARTY_NOTICES.txt`.
-
-Before creating documents, the dry run and sync report containers at or above
-90% of their document cap. Counts include live, trashed and archived documents
-returned by Linear, plus planned additions; trashing documents frees no space.
-Above the cap, a confirmed initial sync or `sync` stops before uploads,
-document writes or state pushes and exits with code 5 (`container-cap`).
-Set the `document-cap` action input or `MDBISYNC_DOCUMENT_CAP` environment
-variable to a positive integer to override the default of 1,000.

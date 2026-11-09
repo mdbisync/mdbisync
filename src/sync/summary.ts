@@ -1,3 +1,4 @@
+import { cell } from '../run/summary.ts';
 // The sync run's job summary: paths, rule names and reasons only, never
 // document content.
 
@@ -20,7 +21,9 @@ export function renderSync(result: CycleResult): string {
     lines.push('Linear already holds the tracked branch: nothing to write.', '');
   } else {
     const outcome =
-      write.code === 'state-moved'
+      write.code === 'container-cap'
+        ? 'Nothing was written. Reduce planned additions or increase document-cap after checking the container limit.'
+        : write.code === 'state-moved'
         ? 'A state ref moved while this run was writing, so it recorded nothing. Another run may be working on this repository; the next run writes again what is still missing.'
         : write.complete
           ? 'Linear now holds the tracked branch.'
@@ -57,9 +60,4 @@ export function renderSync(result: CycleResult): string {
 
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
-}
-
-/** A table cell: pipes, backslashes and line breaks would break the row. */
-function cell(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
 }
