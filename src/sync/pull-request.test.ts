@@ -455,15 +455,16 @@ describe('sync: the sync pull request', () => {
     }
   }
 
-  it('a record left on the sync branch by a closed pull request is not carried into the next sync pull request', async () => {
+  for (const reviewed of [false, true]) it(`a record left on the sync branch by a closed pull request is not carried into the next sync pull request (reviewed: ${reviewed})`, async () => {
     const main = await rev('refs/heads/main');
     const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: `# Guide\n\nAbandoned text. ${CANARY}\n` });
     const changed = await commitFile(main, 'combined/guide.md', blob);
     const record = await fixture.remote.text(['commit-tree', `${changed}^{tree}`, '-p', main, '-m', INITIAL_SYNC_FROM_LINEAR_RECORD], {
       env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' },
     });
-    await fixture.remote.run(['update-ref', SYNC_BRANCH, record]);
-    syncValues.push(record);
+    const review = reviewed ? await fixture.remote.text(['commit-tree', `${record}^{tree}`, '-p', record, '-m', 'Review the snapshot']) : record;
+    await fixture.remote.run(['update-ref', SYNC_BRANCH, review]);
+    syncValues.push(review);
     world.github.pullRequests.push({ number: 1, title: 'Initial sync from Linear', body: '', head: 'mdbisync/linear', base: 'main', state: 'closed', merged: false });
     await editInLinear('eng/notes/plan.md', `# Plan\n\nCarried. ${CANARY}\n`);
 
@@ -500,6 +501,54 @@ describe('sync: the sync pull request', () => {
     const failed = await sync();
     assert.equal(failed.result.exitCode, SETUP_FAILED_EXIT_CODE, failed.result.stderr);
     assert.deepEqual(failed.report.pullRequest?.checks?.failed, ['ci/external']);
+  });
+
+  async function editRef(ref: string, path: string, text: string): Promise<string> {
+    const base = await rev(ref);
+    const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: text });
+    const commit = await commitFile(base, path, blob);
+    await fixture.remote.run(['update-ref', ref, commit, base]);
+    if (ref === SYNC_BRANCH) syncValues.push(commit);
+    else start = commit;
+    return commit;
+  }
+
+  it('a revert on a closed sync branch reaches Linear through a history-only merge', async () => {
+    const path = 'eng/notes/plan.md';
+    const original = await show(`refs/heads/main:${path}`);
+    await editInLinear(path, `# Plan\n\nChanged in Linear. ${CANARY}\n`);
+    await sync();
+    const commit = await editRef(SYNC_BRANCH, path, original);
+    const first = world.github.pullRequests[0];
+    assert.ok(first);
+    first.state = 'closed';
+    const opened = await sync();
+    assert.equal(opened.report.pullRequest?.pullRequest?.opened, true);
+    assert.deepEqual(opened.report.pullRequest?.paths, []);
+    await sync();
+    await sync();
+    const quiet = await sync();
+    assert.equal(quiet.report.changed, false);
+    assert.equal((await documentOf(path)).content, original.slice(original.indexOf('# ')));
+    assert.equal((await fixture.remote.run(['merge-base', '--is-ancestor', commit, 'refs/heads/main'], { okCodes: [0, 1] })).code, 0);
+  });
+
+  for (const side of ['tracked', 'linear']) it(`a closed sync branch conflicting with ${side} is preserved and reports a conflict`, async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, `# Plan\n\nChanged in Linear. ${CANARY}\n`);
+    await sync();
+    const commit = await editRef(SYNC_BRANCH, path, `# Plan\n\nReviewed on the branch. ${CANARY}\n`);
+    const first = world.github.pullRequests[0];
+    assert.ok(first);
+    first.state = 'closed';
+    if (side === 'tracked') await editRef('refs/heads/main', path, `# Plan\n\nEdited on the tracked branch. ${CANARY}\n`);
+    else await editInLinear(path, `# Plan\n\nEdited again in Linear. ${CANARY}\n`);
+    const run = await sync();
+    assert.equal(run.report.pullRequest?.code, 'conflict');
+    assert.equal(run.report.pullRequest?.pullRequest, null);
+    assert.equal(world.github.pullRequests.length, 1);
+    assert.equal(await rev(SYNC_BRANCH), commit);
+    assert.match(run.summary, /resolve the conflicts there/);
   });
 
   it('git edits alone open no pull request, run after run (L2-01)', async () => {
@@ -717,7 +766,7 @@ describe('sync: the sync pull request', () => {
     assert.match(await show('refs/heads/main:combined/page-2.md'), /Changed for the description\./);
   });
 
-  it('never reuses a sync branch that holds an unmerged initial sync from Linear', async () => {
+  for (const reviewed of [false, true]) it(`never reuses a sync branch that holds an unmerged initial sync from Linear (reviewed: ${reviewed})`, async () => {
     // The sync branch holds such a record, which changes the tracked branch and
     // which a person has not merged, while `linear` has moved on.
     const main = await rev('refs/heads/main');
@@ -726,7 +775,8 @@ describe('sync: the sync pull request', () => {
     const record = await fixture.remote.text(['commit-tree', `${changed}^{tree}`, '-p', main, '-m', INITIAL_SYNC_FROM_LINEAR_RECORD], {
       env: { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' },
     });
-    await fixture.remote.run(['update-ref', SYNC_BRANCH, record]);
+    const head = reviewed ? await fixture.remote.text(['commit-tree', `${record}^{tree}`, '-p', record, '-m', 'Review the snapshot']) : record;
+    await fixture.remote.run(['update-ref', SYNC_BRANCH, head]);
     world.github.pullRequests.push({ number: 1, title: 'Initial sync from Linear', body: '', head: 'mdbisync/linear', base: 'main', state: 'open', merged: false });
     await editInLinear('eng/notes/plan.md', `# Plan\n\nNot yet. ${CANARY}\n`);
     const linearWrites = world.linear.writes.count;
@@ -734,7 +784,7 @@ describe('sync: the sync pull request', () => {
     const run = await sync();
     assert.equal(run.result.exitCode, NO_STATE_EXIT_CODE, run.result.stderr);
     assert.equal(run.report.pullRequest?.code, 'initial-pull-request-pending');
-    assert.equal(await rev(SYNC_BRANCH), record);
+    assert.equal(await rev(SYNC_BRANCH), head);
     assert.deepEqual(run.writes, []);
     assert.equal(world.linear.writes.count, linearWrites);
     assert.match(run.summary, /a person has not merged yet/);

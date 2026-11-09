@@ -2,9 +2,9 @@
 // the one sync pull request.
 //
 // The sync branch follows `linear` by fast-forwards and merge commits, never
-// by a force push. When no pull request is open, the new head holds exactly
-// the tracked branch with `linear` merged in, so nothing a closed pull request
-// left on the branch is carried on. It moves only when `linear` brings the tracked branch
+// by a force push. An ordinary unmerged branch keeps its pending edits even
+// when its pull request is closed. A merged branch or an abandoned initial
+// snapshot starts again from Linear. It moves only when `linear` brings the tracked branch
 // something the branch does not bring yet: `linear` gains a merge of the
 // tracked branch on every run that writes to Linear (step 5), and moving the
 // branch for those would restart the checks on every run. A new head or pull
@@ -74,7 +74,7 @@ export interface PullRequestResult {
    * Why the step did not do all it could this run. Waiting for checks is not
    * one: a later run merges.
    * - `check-failed`: a check on the head failed; a setup error, the repository's checks must pass Linear's form. The tracked-to-Linear write step is paused until they pass.
-   * - `conflict`: `linear` and the tracked branch, or `linear` and the sync branch, change the same lines; steps 3 to 5 merge them, and a later run takes the result.
+   * - `conflict`: the histories change the same lines. The write step reconciles tracked/Linear edits; pending sync-branch edits may need a person to merge the branch.
    * - `merge-refused`: GitHub would not merge (the head moved, or the pull request cannot be merged now); a later run tries again.
    * - `merge-blocked`: GitHub refused the merge for the same reason as an earlier run, on the same head and tracked branch; a setup error, a person must change what blocks it.
    * - `initial-pull-request-pending`: the sync branch holds the record of an initial sync from Linear that a person has not merged.
@@ -150,11 +150,11 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   try {
     const open = sync === null ? null : await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
     // That record can remove files from the tracked branch: a person merges its pull request, and nothing else may ride along.
-    if (open !== null && pending && (await holdsInitialRecord(git, sync as Oid))) return { ...result, code: 'initial-pull-request-pending' };
+    if (open !== null && pending && (await holdsInitialRecord(git, sync as Oid, tracked))) return { ...result, code: 'initial-pull-request-pending' };
 
     const identity = options.identity ?? SYNC_IDENTITY;
     let head: Oid | null = sync;
-    if (open === null && (!pending || (await holdsInitialRecord(git, sync as Oid)))) {
+    if (open === null && (!pending || (await holdsInitialRecord(git, sync as Oid, tracked)))) {
       // A merged branch can start again from Linear. An abandoned initial
       // sync record is also left out: its destructive snapshot needs a
       // person's approval. Ordinary unmerged changes stay on the branch,
@@ -175,7 +175,8 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 
     const headTree = await mergedTree(git, tracked, head);
     // State records can be unmerged ancestors without adding any content.
-    if (open === null && headTree === trackedTree) return result;
+    if (headTree === null) return { ...result, code: 'conflict' };
+    if (open === null && !result.needed && headTree === trackedTree) return result;
 
     if (head !== sync) {
       const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: sync, next: head }]);
@@ -229,17 +230,28 @@ async function isInitialRecord(git: Git, commit: Oid): Promise<boolean> {
 }
 
 /**
- * Whether the sync branch's head is an initial sync's record from Linear that
- * changes the tracked branch: the head of the pull request a person merges.
- * A record that changed nothing needed no pull request. Once no pull request
- * carries the record, a later head leaves it behind (see `restart`).
+ * Whether pending history still carries an initial snapshot that changes
+ * tracked files. Review commits do not approve it; a sync merge ends the
+ * search because `restart` has already selected a replacement tree.
  */
-async function holdsInitialRecord(git: Git, sync: Oid): Promise<boolean> {
-  const [subject] = (await git.text(['show', '-s', '--format=%s', sync])).split('\n');
-  if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
-  const parent = await git.run(['rev-parse', '--verify', '--quiet', `${sync}^1`], { okCodes: [0, 1] });
+async function holdsInitialRecord(git: Git, sync: Oid, tracked: Oid): Promise<boolean> {
+  // Review commits on an initial snapshot do not approve it. Follow the
+  // first-parent history until a sync merge, which already chose its tree.
+  const commits = (await git.text(['log', '--first-parent', '--format=%H %s', `${tracked}..${sync}`])).split('\n');
+  let record: Oid | undefined;
+  for (const line of commits) {
+    const separator = line.indexOf(' ');
+    const subject = line.slice(separator + 1);
+    if (subject === SYNC_BRANCH_MERGE_MESSAGE) break;
+    if (subject === INITIAL_SYNC_FROM_LINEAR_RECORD) {
+      record = line.slice(0, separator);
+      break;
+    }
+  }
+  if (record === undefined) return false;
+  const parent = await git.run(['rev-parse', '--verify', '--quiet', `${record}^1`], { okCodes: [0, 1] });
   if (parent.code !== 0) return true;
-  return (await git.run(['diff', '--quiet', parent.stdout.toString('utf8').trim(), sync], { okCodes: [0, 1] })).code === 1;
+  return (await git.run(['diff', '--quiet', parent.stdout.toString('utf8').trim(), record], { okCodes: [0, 1] })).code === 1;
 }
 
 /** The tree of `into` with `from` merged in; null on a conflict. */
@@ -254,7 +266,7 @@ async function isAncestor(git: Git, ancestor: Oid, descendant: Oid): Promise<boo
 }
 
 /**
- * A new head for a sync branch no pull request carries: `linear` when the
+ * Restart a merged branch or an abandoned initial snapshot: `linear` when the
  * branch is new or `linear` descends from it; otherwise a merge commit of the
  * branch and `linear` whose tree is `wanted`, the tracked branch with
  * `linear` merged in, so nothing else the branch held is carried on.
@@ -339,7 +351,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       );
       break;
     case 'conflict':
-      lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is; this run merges the tracked branch into Linear's state, and a later run takes the result to the sync pull request.");
+      lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is; this run merges the tracked branch into Linear's state. If pending edits on the sync branch still conflict on a later run, merge the tracked branch and Linear's state ref into that branch and resolve the conflicts there; the sync keeps those commits.");
       break;
     case 'merge-refused':
       lines.push(`GitHub did not merge the sync pull request ${link} (${refusalText(result)}); a later run tries again.`);

@@ -234,9 +234,14 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   request.
 - While the open pull request of an initial sync from Linear waits for a
   person, `sync` adds nothing to its branch and writes nothing to Linear. A
-  pull request closed without a merge leaves its content behind: the next
-  sync pull request carries only the tracked branch with Linear's state
-  merged in.
+  closed initial-sync pull request leaves its snapshot behind, including
+  review commits on top of it. The next sync pull request carries the tracked
+  branch with Linear's state merged in.
+- Closing an ordinary sync pull request opens a replacement from the same
+  branch on the next run. Pending person edits and CI fixes are kept and new
+  captures are merged into them, without force pushes. If those pending edits
+  conflict with later changes, resolve the conflict on the sync branch; the
+  run summary explains which histories need merging.
 
 ## Pre-release builds and pins
 
