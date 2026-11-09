@@ -146,7 +146,7 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
 describe('confirmed initial sync from Linear over the generated corpus (offline)', () => {
   let corpus: Corpus;
   before(() => {
-    corpus = buildCorpus();
+    corpus = buildCorpus("a".repeat(40));
   });
 
   for (const slice of ['mini', 'mid'] as const) {
