@@ -63,8 +63,9 @@ export interface WriteOptions {
   documentCap?: number | undefined;
   /**
    * The containers' documents as this run's capture listed them, by
-   * `containerKey`. Used only when there is nothing to write; a write
-   * always lists the containers again.
+   * `containerKey`. Used only for the capacity report of a run whose
+   * tracked branch already holds `linear` (it returns before any write);
+   * every other run lists the containers again.
    */
   containers?: Map<string, LinearDocument[]> | undefined;
   config: StateConfig;
@@ -195,9 +196,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const ids = await readIds(git, expected.ids);
   const reserved = await readReservedIds(git, expected.ids);
   const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts);
-  // A write lists afresh: a document created since capture listed (a create whose answer was lost) is adopted, not duplicated.
-  const containerListing = merge.changes.length === 0 && options.containers !== undefined ? options.containers : await readContainers();
+  // Anything from here may write (linked-file changes are found later too): capacity, adoption and
+  // reserved ids are decided on the containers as Linear lists them now, not as capture saw them.
+  const containerListing = await readContainers();
   if (containerListing === undefined) return result;
+  // A separate const: the hoisted `adoptableDocuments` below does not see the narrowing above.
   const containers: Map<string, LinearDocument[]> = containerListing;
   result.leftOut = merge.leftOut;
   for (const path of merge.conflicts) if (merge.result.has(path) || merge.linear.has(path) || ids.has(path)) result.skipped.push({ path, reason: 'conflict' });

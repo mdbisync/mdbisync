@@ -93,13 +93,9 @@ export async function resolveTargets(
       const data = await client.request<{ teams: { nodes: LinearTeam[] }; projects?: { nodes: typeof projectNodes; pageInfo: { hasNextPage: boolean } } }>(
         'SetupTargets',
         'query',
-        withProjects
-          ? `query SetupTargets($refs: [String!]!, $first: Int!, $names: [String!]!) {
+        `query SetupTargets($refs: [String!]!, $first: Int!${withProjects ? ', $names: [String!]!' : ''}) {
           teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
-          projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: 50) { nodes { id } } } pageInfo { hasNextPage } }
-        }`
-          : `query SetupTargets($refs: [String!]!, $first: Int!) {
-          teams(first: $first, filter: { or: [{ key: { in: $refs } }, { name: { in: $refs } }] }) { nodes { id key name } }
+          ${withProjects ? 'projects(first: 250, filter: { name: { in: $names } }) { nodes { id name teams(first: 50) { nodes { id } } } pageInfo { hasNextPage } }' : ''}
         }`,
         withProjects ? { refs: batch, first: batch.length * 2, names } : { refs: batch, first: batch.length * 2 },
       );

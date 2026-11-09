@@ -19,7 +19,12 @@ export interface ContainerCapacity {
 }
 
 export function containerKey(context: RunContext, place: Place): string {
-  return JSON.stringify(placeId(context.targets, place));
+  return documentPlaceKey(placeId(context.targets, place));
+}
+
+/** The key of a container by its Linear ids; `containerKey` of the place it resolves from. */
+function documentPlaceKey(place: { projectId: string } | { teamId: string }): string {
+  return JSON.stringify('projectId' in place ? { projectId: place.projectId } : { teamId: place.teamId });
 }
 
 /** Every annotated container's documents, trash included, listed together (one request per page). */
@@ -37,8 +42,8 @@ export function containersOf(context: RunContext, listed: readonly LinearDocumen
   const documents = new Map<string, LinearDocument[]>();
   for (const { place } of annotatedPlaces(context.mapping.zones)) documents.set(containerKey(context, place), []);
   for (const document of listed) {
-    const key = JSON.stringify(document.projectId !== null ? { projectId: document.projectId } : { teamId: document.teamId });
-    documents.get(key)?.push(document);
+    const place = document.projectId !== null ? { projectId: document.projectId } : document.teamId !== null ? { teamId: document.teamId } : undefined;
+    if (place !== undefined) documents.get(documentPlaceKey(place))?.push(document);
   }
   return documents;
 }

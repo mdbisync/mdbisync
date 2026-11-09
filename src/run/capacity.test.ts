@@ -40,7 +40,8 @@ describe('container document capacity', () => {
     const request: typeof fetch = async (url, init) => {
       if (command === 'sync' && refsBeforeWrite === undefined && String(url).endsWith('/graphql')) {
         const query = JSON.parse(String(init?.body)) as {operationName?:string};
-        // Capture lists the containers first; a run with something to write lists them again before writing.
+        // Capture lists the containers first (one page here: fewer than 250 documents); a run with
+        // something to write lists them again before writing.
         if (query.operationName === 'ListDocuments' && ++listings === 2) {
           refsBeforeWrite = await refs();
           beforeCapacity?.();
@@ -193,6 +194,17 @@ describe('container document capacity', () => {
       assert.equal(world.revoked, 2);
     });
   }
+  it('an image-only change lists the containers again and stops above the cap before writing', async () => {
+    await fixture.seed({ 'eng/media/diagram.png': 'first diagram bytes', 'eng/figure.md': '# Figure\n\n![Diagram](media/diagram.png)\n' });
+    assert.equal((await run('initial-sync', true)).exitCode, 0);
+    // Only the image changes: no Markdown file differs, yet the document linking it is updated.
+    await fixture.seed({ 'eng/media/diagram.png': 'second diagram bytes' });
+    const writesBefore = world.writes.length;
+    const result = await run('sync', false, '4', undefined, () => populate(3));
+    assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE, result.stderr);
+    assert.equal(result.report.code, 'container-cap');
+    assert.deepEqual(world.writes.slice(writesBefore).filter((write) => !write.endsWith(' /pulls')), []);
+  });
   it('does not count an adopted document as an additional create', async () => {
     assert.equal((await run('initial-sync', true)).exitCode, 0);
     populate(8);
