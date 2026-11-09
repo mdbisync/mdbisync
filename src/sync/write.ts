@@ -40,6 +40,7 @@ import {
   pushAtomic,
   readBlobs,
   readIds,
+  readReservedIds,
   readUploads,
   stateRef,
 } from '../state/index.ts';
@@ -142,6 +143,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
 
   // Step 3.
   const ids = await readIds(git, expected.ids);
+  const reserved = await readReservedIds(git, expected.ids);
   const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts);
   result.leftOut = merge.leftOut;
   for (const path of merge.conflicts) if (merge.result.has(path) || merge.linear.has(path) || ids.has(path)) result.skipped.push({ path, reason: 'conflict' });
@@ -163,11 +165,14 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const documentIds = new Map<string, string>();
   for (const [path, entry] of ids) documentIds.set(path, entry.id);
   for (const change of merge.changes) if (change.kind === 'keep') documentIds.set(change.to, change.id);
-  for (const change of creates) documentIds.set(change.path, adoptable.get(change.path)?.id ?? newId());
+  // A new document left out by an earlier run keeps the id it was given, since other documents may link to it.
+  for (const change of creates) documentIds.set(change.path, adoptable.get(change.path)?.id ?? reserved.get(change.path) ?? newId());
 
   /** What Linear stores now for each path whose document this run wrote. */
   const stored = new Map<string, string>();
   const nextIds: IdMap = new Map(ids);
+  // Reserved ids of files still in the tree; a file that is gone frees its id.
+  const nextReserved = new Map([...reserved].filter(([path]) => resultFiles.has(path)));
   /** Paths of the merge result whose changes were not made: the record keeps the `linear` tip's version. */
   const notDone: DocumentChange[] = [];
 
@@ -200,6 +205,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         } catch (error) {
           if (error instanceof LeaveOutError) {
             result.leftOutAtWrite.push({ path, rule: error.rule });
+            if (change.kind === 'create') nextReserved.set(path, documentIds.get(path) as string);
             notDone.push(change);
             continue;
           }
@@ -396,7 +402,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const parents = merged ? [linearTip as Oid, tracked] : [linearTip as Oid];
     const message = merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE;
     const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: true });
-    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE });
+    for (const path of nextIds.keys()) nextReserved.delete(path);
+    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved });
     const uploadsCommit = expected.uploads === null && uploads.size === 0 ? null : await commitUploads(git, expected.uploads, uploads, identity);
 
     const updates: RefUpdate[] = [

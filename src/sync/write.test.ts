@@ -4,6 +4,7 @@
 // to Linear and records it on `linear`.
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -112,7 +113,8 @@ describe('sync: the tracked branch to Linear', () => {
     await person.run(['push', '--quiet', 'origin', 'HEAD:main']);
   }
 
-  const show = (spec: string) => fixture.remote.text(['show', spec]);
+  /** A file's exact bytes, final newline included. */
+  const show = async (spec: string) => (await fixture.remote.run(['show', spec])).stdout.toString('utf8');
   const rev = (spec: string) => fixture.remote.text(['rev-parse', spec]);
   const ids = async () => JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, { id: string }>;
   const live = () => world.linear.documents.filter((d) => d.trashed !== true);
@@ -366,7 +368,15 @@ describe('sync: the tracked branch to Linear', () => {
     const files = Array.from({ length: 6 }, (_, index) => `combined/part-${index}.md`);
     await commit(Object.fromEntries(files.map((path, index) => [path, `# Part ${index}\n\nPart ${index}. ${CANARY}\n`])));
     const previous = await rev('refs/mdbisync/linear');
-    const first = await sync({ MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '4' });
+    // The engine reads its test hooks from its own process environment.
+    const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '4' };
+    Object.assign(process.env, hooks);
+    let first;
+    try {
+      first = await sync();
+    } finally {
+      for (const name of Object.keys(hooks)) delete process.env[name];
+    }
     assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE);
     assert.equal(first.report.complete, false);
     assert.equal(first.report.sync?.created.length, 4);
@@ -386,13 +396,55 @@ describe('sync: the tracked branch to Linear', () => {
 
   it('a document created by a run that died before recording its id is adopted by its title, not created twice', async () => {
     await commit({ 'combined/faq.md': `# FAQ\n\nAnswers. ${CANARY}\n` });
-    world.linear.documents.push({ id: 'orphan', title: 'faq', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# FAQ\n\nAnswers. ${CANARY}` });
+    world.linear.documents.push({ id: 'orphan', title: 'faq', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# FAQ\n\nAnswers. ${CANARY}\n` });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(writes, []);
     assert.deepEqual(report.sync?.adopted, ['combined/faq.md']);
     assert.equal((await ids())['combined/faq.md']?.id, 'orphan');
     await assertConverged();
+  });
+
+  /** What a capture does for an edit in Linear: the document's new text, committed onto `linear`. */
+  async function captured(path: string, text: string) {
+    const document = await documentOf(path);
+    document.content = body(path, text);
+    touch(document);
+    await person.run(['fetch', '--quiet', 'origin', '+refs/mdbisync/linear:refs/captured']);
+    await person.run(['checkout', '--quiet', '--detach', 'refs/captured']);
+    await writeFile(join(personDir, path), text);
+    await person.run(['commit', '--quiet', '-am', 'Captured']);
+    await person.run(['push', '--quiet', 'origin', 'HEAD:refs/mdbisync/linear']);
+    await person.run(['checkout', '--quiet', 'main']);
+  }
+
+  it('edits of different paragraphs on both sides merge, and the merged text is written', async () => {
+    await captured('eng/backend/notes.md', `# Notes\n\nFirst paragraph.\n\nSecond paragraph, edited in Linear. ${CANARY}\n`);
+    const previous = await rev('refs/mdbisync/linear');
+    await commit({ 'eng/backend/notes.md': `# Notes\n\nFirst paragraph, edited in git.\n\nSecond paragraph. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.equal((await documentOf('eng/backend/notes.md')).content, `# Notes\n\nFirst paragraph, edited in git.\n\nSecond paragraph, edited in Linear. ${CANARY}\n`);
+    assert.equal(report.complete, true);
+    await assertMergeRecord(previous);
+  });
+
+  it('edits of the same paragraph on both sides are not written; the record is an ordinary commit', async () => {
+    const linearText = `# Notes\n\nFirst paragraph, Linear's way.\n\nSecond paragraph. ${CANARY}\n`;
+    await captured('eng/backend/notes.md', linearText);
+    await commit({
+      'eng/backend/notes.md': `# Notes\n\nFirst paragraph, git's way.\n\nSecond paragraph. ${CANARY}\n`,
+      'eng/notes/review.md': `# Review\n\nAnother edit. ${CANARY}\n`,
+    });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, ['UpdateDocument']);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/backend/notes.md', reason: 'conflict' }]);
+    assert.equal((await documentOf('eng/backend/notes.md')).content, body('', linearText));
+    assert.equal(report.sync?.record?.kind, 'ordinary');
+    assert.equal(await show('refs/mdbisync/linear:eng/backend/notes.md'), linearText);
+    assert.match(await show('refs/mdbisync/linear:eng/notes/review.md'), /Another edit/);
   });
 
   it('a document trashed in Linear since the capture is not written; the run says so', async () => {
@@ -410,11 +462,14 @@ describe('sync: the tracked branch to Linear', () => {
     await commit({ 'eng/backend/notes.md': `# Notes\n\nEdited. ${CANARY}\n` });
     world.linear.writes.reject = () => {
       // Another run records first, between this run's write and its record.
-      void fixture.remote.run(['update-ref', 'refs/mdbisync/ids', 'refs/mdbisync/linear']);
+      execFileSync('git', ['update-ref', 'refs/mdbisync/ids', 'refs/mdbisync/linear'], { cwd: fixture.remote.dir });
       return false;
     };
+    const linearBefore = await rev('refs/mdbisync/linear');
     const { result, report } = await sync();
     assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE);
     assert.equal(report.code, 'state-moved');
+    assert.equal(report.complete, false);
+    assert.equal(await rev('refs/mdbisync/linear'), linearBefore, 'linear moved although the push was refused');
   });
 });
