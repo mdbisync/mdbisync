@@ -1,7 +1,9 @@
+import { cell } from '../run/summary.ts';
 // The sync run's job summary: paths, rule names and reasons only, never
 // document content.
 
-import { PARTIAL, cell, renderStop } from '../run/stop.ts';
+import { renderCapacity } from '../run/capacity.ts';
+import { PARTIAL, renderStop } from '../run/stop.ts';
 import { type CycleResult } from './cycle.ts';
 import { type SkipReason } from './write.ts';
 
@@ -14,12 +16,16 @@ const REASONS: Record<SkipReason, string> = {
 
 export function renderSync(result: CycleResult): string {
   const write = result.write;
-  const lines = ['## Sync', '', '### Tracked branch to Linear', ''];
+  const lines = ['## Sync', '', result.capture.summary, ''];
+  if (write === undefined) { lines.push('Capture did not finish; no tracked-branch changes were written.', ''); return lines.join('\n'); }
+  lines.push('### Tracked branch to Linear', '');
   if (write.complete && write.record === null && !write.changed) {
     lines.push('Linear already holds the tracked branch: nothing to write.', '');
   } else {
     const outcome =
-      write.code === 'state-moved'
+      write.code === 'container-cap'
+        ? 'Nothing was written. Reduce planned additions or increase document-cap after checking the container limit.'
+        : write.code === 'state-moved'
         ? 'A state ref moved while this run was writing, so it recorded nothing. Another run may be working on this repository; the next run writes again what is still missing.'
         : write.complete
           ? 'Linear now holds the tracked branch.'
@@ -52,7 +58,7 @@ export function renderSync(result: CycleResult): string {
   table('Renamed or moved', ['From', 'To'], write.relocated.map((entry) => [entry.from, entry.to]));
   table('Moved to trash', ['Path'], write.trashed.map((path) => [path]));
   table('Left out', ['Path', 'Rules'], [...write.leftOut.map((entry) => [entry.path, entry.rules.join(', ')]), ...write.leftOutAtWrite.map((entry) => [entry.path, entry.rule])]);
-  return lines.join('\n');
+  return lines.join('\n') + renderCapacity(write.capacity ?? []);
 }
 
 function count(n: number, noun: string): string {

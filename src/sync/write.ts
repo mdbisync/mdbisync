@@ -20,7 +20,9 @@
 // tracked branch, and a document created without its id recorded is
 // adopted by its title.
 
+import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
 import { randomUUID } from 'node:crypto';
+import { documentPath } from './paths.ts';
 import { splitFile } from '../format/index.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
@@ -58,6 +60,7 @@ export const IDS_MESSAGE = 'Sync: document ids';
 export const REREAD_BATCH = 50;
 
 export interface WriteOptions {
+  documentCap?: number | undefined;
   config: StateConfig;
   /** The state refs after capture: the expected old values of this step's push. */
   state: StateSnapshot;
@@ -81,13 +84,14 @@ export interface WriteOptions {
 export type SkipReason = 'edited-in-linear' | 'missing-in-linear' | 'conflict' | 'renamed-to-unwritable';
 
 export interface WriteResult {
+  capacity?: ContainerCapacity[];
   /** Every change was made and recorded with a merge commit, or there was nothing to take in. */
   complete: boolean;
   /** Something was written to Linear or a state ref moved. */
   changed: boolean;
   /** The run went on from a partial record that an earlier run left on `linear`. */
   resumed: boolean;
-  code?: 'stopped' | 'write-failed' | 'state-moved';
+  code?: 'stopped' | 'write-failed' | 'state-moved' | 'container-cap';
   /** Content written to existing documents (a rename or move may come with it). */
   updated: string[];
   /** Documents renamed (new title) or moved to another project or team: from → to. */
@@ -152,7 +156,27 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     record: null,
     state: { ...expected },
   };
+  let containers: Map<string, LinearDocument[]>;
+  try {
+    containers = await readContainerDocuments(context);
+  } catch (error) {
+    if (!(error instanceof LinearError)) throw error;
+    result.notAttempted = context.mapping.documents.map((document) => document.path).sort();
+    if (error instanceof LinearStoppedError) {
+      result.code = 'stopped';
+      result.stopped = error.reason;
+    } else {
+      result.code = 'write-failed';
+      result.failed = result.notAttempted.map((path) => ({ path, operation: error.operation, error: describeError(error) }));
+    }
+    return result;
+  }
   if (await alreadyMerged(git, linearTip, tracked)) {
+    result.capacity = assessCapacity(context, containers, [], options.documentCap);
+    if (capacityBlocked(result.capacity)) {
+      result.code = 'container-cap';
+      return result;
+    }
     result.complete = true;
     return result;
   }
@@ -178,13 +202,26 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   });
 
   const creates = merge.changes.filter((change): change is CreateChange => change.kind === 'create');
-  let adoptable = new Map<string, LinearDocument>();
+  const adoptable = await adoptableDocuments(creates);
+  const additions = creates.filter((change) => !adoptable.has(change.path)).map((change) => merge.result.get(change.path) as SideFile);
+  // Moves consume destination capacity too; do not subtract departures, since writes may arrive first.
+  for (const change of merge.changes) {
+    if (change.kind !== 'keep' || !change.place) continue;
+    const destination = merge.result.get(change.to) as SideFile;
+    const present = containers.get(containerKey(context, destination.place))?.some((document) => document.id === change.id);
+    if (!present) additions.push(destination);
+  }
+  result.capacity = assessCapacity(context, containers, additions, options.documentCap);
+  if (capacityBlocked(result.capacity)) {
+    result.code = 'container-cap';
+    result.notAttempted = merge.changes.map(changePath);
+    return result;
+  }
   /** Reserved ids that a document in Linear already has (archived, trashed or retitled since): Linear refuses to create a second one. */
   const taken = new Set<string>();
-  /** Why the documents to adopt could not be listed: creating would risk a duplicate, so no new document is created. */
-  let unlisted: LinearError | undefined;
+  /** Why the reserved ids could not be checked: creating with one could be refused or collide, so no new document is created. */
+  let unchecked: LinearError | undefined;
   try {
-    adoptable = await adoptableDocuments(creates);
     const saved = [...new Set(creates.flatMap((change) => (adoptable.has(change.path) ? [] : (reserved.get(change.path) ?? []))))];
     if (saved.length > 0) for (const document of await linear.getDocuments(saved, { withContent: false })) taken.add(document.id);
   } catch (error) {
@@ -196,7 +233,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       return result;
     }
     if (!(error instanceof LinearError)) throw error;
-    unlisted = error;
+    unchecked = error;
   }
   const documentIds = new Map<string, string>();
   for (const [path, entry] of ids) documentIds.set(path, entry.id);
@@ -209,8 +246,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     documentIds.set(change.path, adoptable.get(change.path)?.id ?? (saved !== undefined && !taken.has(saved) ? saved : newId()));
   }
 
-  /** What Linear stores now for each path whose document this run wrote. */
-  const stored = new Map<string, string>();
+  /** What Linear stores now for each path whose document this run wrote, with the body sent for it. */
+  const stored = new Map<string, { content: string; sent: string }>();
   const nextIds: IdMap = new Map(ids);
   // A file that moved and kept its title, place and text (a renamed project folder): Linear needs nothing, the id map follows the file.
   for (const change of merge.unchanged) {
@@ -266,8 +303,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         const stop = linear.stopped ?? (stopAfter !== undefined && written >= stopAfter ? { kind: 'test-threshold' as const, documents: stopAfter } : undefined);
         if (stop !== undefined) stopAt(start + index, stop);
         const path = changePath(change);
-        if (change.kind === 'create' && unlisted !== undefined) {
-          result.failed.push({ path, operation: unlisted.operation, error: describeError(unlisted) });
+        if (change.kind === 'create' && unchecked !== undefined) {
+          result.failed.push({ path, operation: unchecked.operation, error: describeError(unchecked) });
           notDone.push(change);
           continue;
         }
@@ -369,13 +406,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const byPlace = new Map<string, { place: Place; paths: string[] }>();
     for (const change of changes) {
       const file = merge.result.get(change.path) as SideFile;
-      const key = JSON.stringify(placeId(targets, file.place));
+      const key = containerKey(context, file.place);
       const group = byPlace.get(key) ?? { place: file.place, paths: [] };
       group.paths.push(change.path);
       byPlace.set(key, group);
     }
     for (const { place, paths } of byPlace.values()) {
-      const listed = await linear.listDocuments(placeId(targets, place), { withContent: false });
+      const listed = (containers.get(containerKey(context, place)) ?? []).filter((document) => !document.trashed && document.archivedAt === null);
       const oldestFirst = [...listed].sort((a, b) => compare(a.createdAt, b.createdAt) || compare(a.id, b.id));
       for (const path of paths) {
         const title = (merge.result.get(path) as SideFile).title.normalize('NFC');
@@ -430,7 +467,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    * version that cannot be checked does not.
    */
   async function holdsVersion(document: LinearDocument, file: SideFile, text: string, through: readonly BodyTransform[], uncheckable: boolean): Promise<boolean> {
-    if (document.title.normalize('NFC') !== file.title.normalize('NFC')) return false;
+    // Capture can encode a title or assign a stable collision suffix.
+    const folder = file.path.slice(0, -(file.title.length + '.md'.length)).replace(/\/$/, '');
+    const occupied = new Set([...linearFiles.keys()].filter((path) => path !== file.path));
+    if (document.title.normalize('NFC') !== file.title.normalize('NFC')
+      && documentPath(folder, document.title, document.id, occupied, file.path) !== file.path) return false;
     // Moved to another project or team in Linear: that move is the capture's to take in. A place the setup no longer
     // resolves (an annotation now names another project) cannot be checked.
     if (resolves(file.place) && !inPlace(document, file.place)) return false;
@@ -493,7 +534,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     if (holds) {
       // Linear already holds the change: written by a run that stopped before recording it, or kept back by a partial record.
       if (patch.content !== undefined) {
-        stored.set(change.to, document.content ?? '');
+        stored.set(change.to, { content: document.content ?? '', sent: patch.content });
         readBack = document;
       }
     } else {
@@ -502,7 +543,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       const updated = await linear.updateDocument(change.id, patch);
       // Without a content write the merge result's file stands: Linear holds its body already.
       if (patch.content !== undefined) {
-        stored.set(change.to, updated.content ?? '');
+        stored.set(change.to, { content: updated.content ?? '', sent: patch.content });
         readBack = updated;
       }
     }
@@ -530,7 +571,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });
       await checkpoint('document-created-before-ids-push');
     }
-    stored.set(change.path, document.content ?? '');
+    stored.set(change.path, { content: document.content ?? '', sent: body });
     nextIds.set(change.path, { id: document.id });
     result.created.push(change.path);
     await reconcileMark(change.path, document);
@@ -598,9 +639,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const keepTip = (path: string) => fromTip.add(path);
 
     // Written documents: the merge result's front matter and what Linear stored.
-    for (const [path, content] of stored) {
+    for (const [path, { content, sent }] of stored) {
       const file = merge.result.get(path) as SideFile;
-      const text = splitFile(textOf(file)).head + restoreBody(transforms, path, content);
+      const text = splitFile(textOf(file)).head + restoreBody(transforms, path, content, sent);
       if (resultFiles.get(path) !== undefined && text === textOf(file)) continue;
       changes.set(path, text);
     }

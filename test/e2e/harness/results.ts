@@ -75,7 +75,10 @@ export interface ScenarioResult {
   durationMs: number;
   /** Requests the engine made through the proxy, and the documents it wrote, for I9. */
   engineRequests: number;
+  /** Requests of the harness's editors (personal API keys). */
   harnessRequests: number;
+  /** The harness's own requests through the OAuth app (reads of both sides, budget checks), retries included. */
+  harnessAppRequests: number;
   budgetWaitMs: number;
   checks: CheckOutcome[];
   cleanup: { ok: boolean; detail?: string };

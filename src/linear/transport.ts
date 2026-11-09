@@ -119,6 +119,15 @@ export class GraphQLTransport {
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
+  /** Authenticated storage GET, restricted to Linear's documented upload host. */
+  async fetchUpload(url: string, init: RequestInit = {}): Promise<Response> {
+    const target = new URL(url);
+    if (target.protocol !== 'https:' || target.hostname !== 'uploads.linear.app' || target.username !== '' || target.password !== '' || target.port !== '') {
+      throw new Error('upload destination is not allowed');
+    }
+    return this.fetch(url, { ...init, method: 'GET', redirect: 'manual', headers: { authorization: `Bearer ${this.#token}` } });
+  }
+
   /** Why the client stopped, or undefined while it is running. */
   get stopped(): StopReason | undefined {
     return this.#stopped;

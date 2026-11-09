@@ -6,12 +6,15 @@
 // stays within its budget (I9), and no canary leaves the run (I5).
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { documentUrlBase, linksFromLinear, linksToLinear, type LinkSpellings } from '../../src/initial-sync/links.ts';
+import { findFileLinks, restoreFileLinks } from '../../src/initial-sync/uploads.ts';
+import { readReservedIds, readUploads } from '../../src/state/index.ts';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { runCli } from '../../src/cli.ts';
 import { fixText, splitFile } from '../../src/format/index.ts';
-import { documentUrlBase, findFileLinks, linksToLinear } from '../../src/initial-sync/index.ts';
 import { collectAnnotations } from '../../src/mapping/index.ts';
 import { type RunReport } from '../../src/run/finish.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../../src/setup/test-helpers.ts';
@@ -138,19 +141,28 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
         assert.deepEqual(canaries.filter((canary) => output.includes(canary)), [], 'a canary left the run (I5)');
 
         const ids = JSON.parse(await fixture.remote.text(['show', 'refs/mdbisync/ids:ids.json'])) as Record<string, { id: string }>;
+        const idsTip = await fixture.remote.text(['rev-parse', 'refs/mdbisync/ids']);
+        const uploadsTip = await fixture.remote.text(['rev-parse', 'refs/mdbisync/uploads']);
+        const uploads = await readUploads(fixture.remote, uploadsTip);
+        const documentIds = new Map([...Object.entries(ids).map(([path, entry]) => [path, entry.id] as const), ...await readReservedIds(fixture.remote, idsTip)]);
+        const linkMap = {base: documentUrlBase(world.linear.urlKey), ids: documentIds};
         const live = world.linear.documents.filter((d) => d.trashed !== true);
         assert.ok(Object.keys(ids).length > 0, 'nothing was synchronized');
-        // I1 with links mapped: a link to another synchronized document is that document's URL by its recorded id.
-        // A new document left out while writing keeps the id it was linked by (reserved-ids.json).
-        const reservedFile = await fixture.remote.run(['show', 'refs/mdbisync/ids:reserved-ids.json'], { okCodes: [0, 128] });
-        const reserved = (reservedFile.code === 0 ? JSON.parse(reservedFile.stdout.toString('utf8')) : {}) as Record<string, string>;
-        const linkIds = new Map([...Object.entries(reserved), ...Object.entries(ids).map(([path, entry]): [string, string] => [path, entry.id])]);
-        const links = { base: documentUrlBase(world.linear.urlKey), ids: linkIds };
         for (const [path, entry] of Object.entries(ids)) {
           const document = live.find((d) => d.id === entry.id);
           assert.ok(document !== undefined, `${path} has no document (I7)`);
-          const body = splitFile((files.get(path) as Buffer).toString('utf8')).body;
-          assert.equal(document.content, withUploadUrls(path, fixText(linksToLinear(body, path, links))), `${path} differs (I1, in Linear's form)`);
+          const source = files.get(path) as Buffer;
+          const { head, body } = splitFile(source.toString('utf8'));
+          // Compare in git's form: uploads and document links have URLs in Linear.
+          const spellings: LinkSpellings = new Map();
+          linksToLinear(body, path, linkMap, spellings);
+          const restoredLinks = linksFromLinear(document.content ?? '', path, linkMap, spellings);
+          const linkedFiles = findFileLinks(path, body, target => !target.endsWith('.md') && files.has(target));
+          const written = linkedFiles.map(link => ({written:link.written, suffix:link.suffix, hash:createHash('sha256').update(files.get(link.target)!).digest('hex')}));
+          assert.equal(document.content, withUploadUrls(path, fixText(linksToLinear(body, path, linkMap))), `${path} differs (I1, in Linear's form)`);
+          const restored = restoreFileLinks(restoredLinks, written, uploads);
+          const recorded = await fixture.remote.run(['show', `refs/mdbisync/linear:${path}`]);
+          assert.deepEqual(recorded.stdout, Buffer.from(head + (document.content === linksToLinear(withUploadUrls(path, body), path, linkMap) ? restored : fixText(restored))), `${path}: recorded git bytes differ (I1)`);
         }
         assert.equal(live.length, Object.keys(ids).length, 'documents without a path, or duplicates (I8)');
         const keys = live.map((d) => `${d.projectId ?? d.teamId}\0${d.title}`);

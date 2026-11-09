@@ -6,9 +6,10 @@ run as a GitHub Action.
 **Status:** early development. `lint` and `fix` work on Markdown files
 ([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)).
 `check` checks a repository's setup. `initial-sync` from git to Linear
-works, as a dry run and confirmed; `sync` and `initial-sync` from Linear to
-git run the same check (and `sync` refuses to run without its state) and
-then answer "not implemented".
+works, as a dry run and confirmed. `sync` captures Linear changes into its state ref, then writes tracked-branch
+changes to Linear. Publishing captured changes through a sync pull request
+is under development.
+`initial-sync` from Linear to git still answers "not implemented".
 
 ## Folder mapping
 
@@ -52,7 +53,13 @@ and so on.
 `initial-sync` with `direction: git-to-linear` makes Linear equal to the
 tracked branch. Without `confirm: true` it is a dry run: it lists by path
 what it would create, overwrite and move to Linear's trash, and the files it
-leaves out, and writes nothing. With `confirm: true`:
+leaves out, and writes nothing. The files left out include documents that
+link a file over Linear's 10 MB upload limit (`upload-too-large`) or an LFS
+object stored with LFS extensions, which the run cannot read
+(`upload-unreadable`), each with the files that
+cause it; the dry run judges a file in LFS by its pointer, so it uploads and
+downloads nothing. An LFS object missing from the remote is found only by
+the confirmed run. With `confirm: true`:
 
 - a document whose title is a file's path keeps its id, comments and history
   and gets the file's text (front matter stays in git); a file without a
@@ -76,6 +83,14 @@ the documents it already wrote, and a document created just before a crash
 is found by its title, not created twice. When the state refs are lost, a
 new confirmed run rebuilds them without duplicating documents.
 
+Before creating documents, the dry run and sync report containers at or above
+90% of their document cap. Counts include live, trashed and archived documents
+returned by Linear, plus planned additions; trashing documents frees no space.
+Above the cap, a confirmed initial sync or `sync` stops before uploads,
+document writes or state pushes and exits with code 5 (`container-cap`).
+Set the `document-cap` action input or `MDBISYNC_DOCUMENT_CAP` environment
+variable to a positive integer to override the default of 1,000.
+
 ## Layout
 
 | Path | What |
@@ -94,7 +109,11 @@ new confirmed run rebuilds them without duplicating documents.
 
 ## Development
 
-Requires Node 24.
+Requires Node 24 and pre-commit (install the hook runner before `npm test`).
+Capture with security hooks also requires pre-commit on the runner PATH;
+install it before invoking the action, for example with
+`pipx install pre-commit==4.6.2`. Missing tooling stops the run without
+marking documents as security failures.
 
 ```sh
 npm ci                  # exact versions from package-lock.json, install scripts off

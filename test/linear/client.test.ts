@@ -21,6 +21,7 @@ import {
   type LinearFacts,
   type LogEntry,
 } from '../../src/linear/index.ts';
+import { fakeFetch, fakeWorld, LINEAR_API, type FakeWorld } from '../../src/setup/test-helpers.ts';
 import { FakeLinear, fakeDocument, rateLimited } from './fake-linear.ts';
 
 const SECRET_TEXT = 'kx-canary-4f1a9c2e';
@@ -590,5 +591,36 @@ describe('Linear facts', () => {
     assert.equal(lengthRefusal({ title: 'Plan', content: '\u{1F600}'.repeat(125_001) }), undefined);
     assert.deepEqual(lengthRefusal({ content: '\u{1F600}'.repeat(250_001) }), { field: 'content', length: 250_001, limit: 250_000 });
     assert.deepEqual(lengthRefusal({ title: 'x'.repeat(513), content: 'a'.repeat(250_001) }), { field: 'title', length: 513, limit: 512 });
+  });
+});
+
+describe('Linear trash as the fake world models it', () => {
+  const client = (world: FakeWorld) => new LinearClient({ token: 'fake-token', baseUrl: LINEAR_API, fetch: fakeFetch(world) });
+  const place = { teamId: 'team-eng', createdAt: '2026-02-01T00:00:00.000Z' };
+
+  it('moves a document to the trash on delete, and still reads it by id and in lists with includeArchived', async () => {
+    const world = fakeWorld();
+    world.linear.documents.push({ id: 'doc-1', title: 'Plan', ...place });
+    const linear = client(world);
+    await linear.trashDocument('doc-1');
+    const read = await linear.getDocument('doc-1');
+    assert.equal(read?.trashed, true);
+    assert.notEqual(read?.archivedAt, null);
+    assert.deepEqual((await linear.getDocuments(['doc-1'])).map((d) => d.trashed), [true]);
+    assert.deepEqual(await linear.listDocuments({ teamId: 'team-eng' }), []);
+    assert.deepEqual((await linear.listDocuments({ teamId: 'team-eng' }, { includeArchived: true })).map((d) => d.id), ['doc-1']);
+    await linear.restoreDocument('doc-1');
+    const restored = await linear.getDocument('doc-1');
+    assert.deepEqual([restored?.trashed, restored?.archivedAt], [false, null]);
+  });
+
+  it('reads an unlisted document by id alone, and answers null for an id Linear no longer has', async () => {
+    const world = fakeWorld();
+    world.linear.documents.push({ id: 'doc-1', title: 'Plan', ...place, trashed: true, archivedAt: '2026-02-02T00:00:00.000Z', unlisted: true });
+    const linear = client(world);
+    assert.deepEqual(await linear.listDocuments({ teamId: 'team-eng' }, { includeArchived: true }), []);
+    assert.deepEqual(await linear.getDocuments(['doc-1']), []);
+    assert.equal((await linear.getDocument('doc-1'))?.trashed, true);
+    assert.equal(await linear.getDocument('doc-gone'), null);
   });
 });

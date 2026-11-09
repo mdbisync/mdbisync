@@ -3,6 +3,7 @@
 
 import { type WriteStop } from '../initial-sync/index.ts';
 import { describeStop } from '../linear/index.ts';
+import { cell } from './summary.ts';
 
 /** The words every partial sync run ends with, in its summary and its last message. */
 export const PARTIAL = 'partial, will continue';
@@ -32,9 +33,4 @@ export function renderStop(stop: WriteStop): string[] {
 export function renderStoppedBeforeWriting(stop: WriteStop, partial: boolean): string {
   const outcome = partial ? `Stopped before any write; ${PARTIAL}: the next run starts again.` : 'Stopped before any write: run it again once the limit has reset.';
   return ['## Linear stopped the run', '', outcome, '', ...renderStop(stop)].join('\n');
-}
-
-/** A Markdown table cell: pipes, backslashes and line breaks would break the row. */
-export function cell(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
 }

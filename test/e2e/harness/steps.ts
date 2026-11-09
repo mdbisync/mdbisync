@@ -28,7 +28,7 @@ import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, linearPart, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { burst, realClock, soak, type LoadDriver } from './load.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
-import { HARNESS, personCommit } from './sandbox.ts';
+import { commitStaged, HARNESS, personCommit } from './sandbox.ts';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
 import {
@@ -577,7 +577,8 @@ const GIT: Record<string, Executor> = {
     if (cleanTokens.length > 0) ctx.observations.set('edits.clean', cleanTokens);
     if (args.fixture === 'adjacent-paragraphs') ctx.observations.set('fixture.base', stripFrontMatter(text));
     await commitAsPerson(ctx, changes, 'Update the review date');
-    ctx.observations.set('edited.gitBody', stripFrontMatter(next));
+    // The text as committed: the hooks may have fixed it.
+    ctx.observations.set('edited.gitBody', stripFrontMatter(await readWorking(git, path)));
   },
   'git.edit-many': async (ctx, args) => {
     const count = typeof args.documents === 'number' ? args.documents : 10;
@@ -618,11 +619,12 @@ const GIT: Record<string, Executor> = {
     const path = targetPath(ctx, args.target);
     setTarget(ctx, path);
     const git = await ctx.person();
+    await ctx.personHooks();
     await pull(git, ctx);
     const destination = typeof args.destination === 'string' ? resolveDestination(ctx, path, args.destination) : sibling(path, `moved-${nextToken(ctx)}.md`);
     mkdirSync(join(git.dir, destination.split('/').slice(0, -1).join('/')), { recursive: true });
     await git.run(['mv', path, destination]);
-    await git.run(['commit', '--quiet', '-m', 'Move a page']);
+    await commitStaged(git, [path, destination], 'Move a page', true);
     await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
     ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
     ctx.observations.set('git.moved', { from: path, to: destination });
@@ -684,10 +686,11 @@ const GIT: Record<string, Executor> = {
     const folder = ctx.observations.get('fixture.folder') as { path: string; documents: string[] } | undefined;
     if (folder === undefined) throw new Error('git.move-folder needs the folder its setup prepares');
     const git = await ctx.person();
+    await ctx.personHooks();
     await pull(git, ctx);
     const renamed = `${folder.path}-archive`;
     await git.run(['mv', folder.path, renamed]);
-    await git.run(['commit', '--quiet', '-m', 'Rename a folder']);
+    await commitStaged(git, [folder.path, renamed], 'Rename a folder', true);
     await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
     ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
     ctx.observations.set('git.movedFolder', folder.documents.map((path) => ({ from: path, to: `${renamed}${path.slice(folder.path.length)}` })));
@@ -817,8 +820,10 @@ const GIT: Record<string, Executor> = {
     const resolved = resolveKeeping(text, 'git');
     if (resolved === text) throw new ProductError('the tracked branch holds no conflict markers to resolve');
     await commitAsPerson(ctx, new Map([[path, resolved]]), 'Resolve the conflict');
-    retireDiscarded(ctx, text, resolved);
-    ctx.observations.set('resolved.body', stripFrontMatter(resolved));
+    // The text as committed: the hooks may have fixed it.
+    const committed = await readWorking(git, path);
+    retireDiscarded(ctx, text, committed);
+    ctx.observations.set('resolved.body', stripFrontMatter(committed));
   },
   'git.conflict-again': async (ctx) => {
     const path = targetPath(ctx);

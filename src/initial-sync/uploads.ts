@@ -11,7 +11,8 @@
 // A linked file is any regular file of the tracked tree that is not a
 // Markdown file; links to Markdown files, to missing files, to folders and
 // to other sites are left as they are. A file over the upload limit, or one
-// whose LFS object cannot be read, leaves its document out.
+// whose LFS object cannot be read, leaves its document out; the dry run
+// lists those documents without uploading anything.
 
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
@@ -21,6 +22,7 @@ import { LinearError, LinearStoppedError } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
 import {
   type Git,
+  type Oid,
   type StateConfig,
   type TreeEntry,
   type UploadMap,
@@ -30,6 +32,7 @@ import {
   type LfsRead,
   lfsReader,
 } from '../state/index.ts';
+import { type InitialSyncPlan } from './plan.ts';
 import { type BodyTransform, LeaveOutError, type TransformContext } from './transform.ts';
 
 /** Linear's upload limit on the free plan: 10 MB. A larger file leaves its document out. */
@@ -59,8 +62,8 @@ export interface FileLink {
   /** Where the destination's text starts and ends in the body, without angle brackets. */
   from: number;
   to: number;
-  /** The destination as written. */
-  raw: string;
+  /** The destination as written, with its angle brackets when it has them: what the restore puts back. */
+  written: string;
   /** The linked file's path in the repository. */
   target: string;
   /** The destination's query and fragment (`#page=3`), kept after the upload URL. */
@@ -69,7 +72,8 @@ export interface FileLink {
 
 /** What a document's link to a file was before the upload: restored in place of `url + suffix`. */
 export interface WrittenLink {
-  raw: string;
+  /** The destination as the file wrote it, angle brackets included, so it stays a destination wherever it lands. */
+  written: string;
   hash: string;
   suffix: string;
 }
@@ -78,6 +82,147 @@ interface LinkedFile {
   /** SHA-256 of the content, lowercase hex. */
   hash: string;
   size: number;
+  /** An LFS pointer that names LFS extensions: its object cannot be read. */
+  extensions: boolean;
+}
+
+/** A document the uploads would leave out, found before anything is uploaded. */
+export interface UploadLeaveOut {
+  path: string;
+  rule: string;
+  /** The linked files that cause it, in the order the document first links them. */
+  files: string[];
+}
+
+/**
+ * The documents of the plan that the uploads would leave out, for the dry
+ * run, judged as the write judges them (`judgeLinkedFiles`) and in its
+ * order, by path: a linked file over the upload limit (`upload-too-large`),
+ * or an LFS object with LFS extensions (`upload-unreadable`) whose content
+ * is neither in the upload cache nor uploaded by an earlier document.
+ * Nothing is uploaded or downloaded: a file in LFS is judged by its pointer,
+ * which gives its size and hash. An LFS object missing from the remote is
+ * found only when the run reads it.
+ *
+ * @param texts the text of each planned document, by path
+ * @param uploads the upload cache the run starts from
+ */
+export async function predictUploadLeaveOuts(
+  git: Git,
+  tracked: Oid,
+  plan: InitialSyncPlan,
+  texts: ReadonlyMap<string, string>,
+  uploads: UploadMap,
+  options: { limit?: number } = {},
+): Promise<UploadLeaveOut[]> {
+  const limit = options.limit ?? DEFAULT_UPLOAD_LIMIT;
+  const { files } = await treeFiles(git, tracked);
+  const planned = plannedLinks(plan, files, texts);
+  // Each file once: several documents may link it.
+  const targets = [...new Set([...planned.values()].flat())];
+  const linked = new Map<string, LinkedFile>();
+  // Only a blob small enough to be a pointer is read: every other file's size is in the tree.
+  await hashLinkedFiles(git, files, linked, targets, MAX_POINTER_SIZE);
+  const uploaded = new Set(uploads.keys());
+  const file = (target: string) => linked.get(target) as LinkedFile;
+  if (targets.some((target) => file(target).extensions && !uploaded.has(file(target).hash))) {
+    // Whether an earlier document uploads the same content needs the hash of every file the run would upload.
+    for (const target of targets) if (file(target).hash === '' && file(target).size <= limit) linked.delete(target);
+    await hashLinkedFiles(git, files, linked, targets, Math.max(limit, MAX_POINTER_SIZE));
+  }
+  const result: UploadLeaveOut[] = [];
+  for (const path of [...planned.keys()].sort(compare)) {
+    const own = planned.get(path) as string[];
+    const leaveOut = judgeLinkedFiles(own, linked, limit, uploaded);
+    if (leaveOut !== null) result.push({ path, rule: leaveOut.rule, files: leaveOut.files });
+    else for (const target of own) uploaded.add(file(target).hash);
+  }
+  return result;
+}
+
+/**
+ * Why the write leaves out a document that links `targets` (each once, in
+ * link order), or null: every file's size is checked first, so a file over
+ * the limit is reported before one that cannot be read; then an LFS object
+ * with LFS extensions whose content neither the upload cache holds nor
+ * another file of the document provides (the upload sends that file).
+ */
+function judgeLinkedFiles(
+  targets: readonly string[],
+  linked: ReadonlyMap<string, LinkedFile>,
+  limit: number,
+  uploaded: { has(hash: string): boolean },
+): { rule: string; files: string[]; message: string } | null {
+  const file = (target: string) => linked.get(target) as LinkedFile;
+  const oversize = targets.filter((target) => file(target).size > limit);
+  if (oversize.length > 0) return { rule: UPLOAD_TOO_LARGE, files: oversize, message: `${oversize.join(', ')}: over the upload limit of ${limit} bytes` };
+  const readable = new Set(targets.filter((target) => !file(target).extensions).map((target) => file(target).hash));
+  const unreadable = targets.filter((target) => file(target).extensions && !uploaded.has(file(target).hash) && !readable.has(file(target).hash));
+  if (unreadable.length > 0) {
+    return { rule: UPLOAD_UNREADABLE, files: unreadable, message: `${unreadable.join(', ')}: stored with LFS extensions, which are not supported` };
+  }
+  return null;
+}
+
+/** The tracked tree's regular files, by path: Markdown files, and the others, which documents may link. */
+async function treeFiles(git: Git, tracked: Oid): Promise<{ files: Map<string, TreeEntry>; markdown: Map<string, TreeEntry> }> {
+  const files = new Map<string, TreeEntry>();
+  const markdown = new Map<string, TreeEntry>();
+  for (const entry of await listTree(git, tracked)) {
+    if (entry.type !== 'blob' || entry.mode === '120000') continue;
+    if (entry.path.endsWith(MARKDOWN_EXTENSION)) markdown.set(entry.path, entry);
+    else files.set(entry.path, entry);
+  }
+  return { files, markdown };
+}
+
+/** The files each document the plan creates or overwrites links (each once, in link order), from its text; documents without text or links are absent. */
+function plannedLinks(plan: InitialSyncPlan, files: ReadonlyMap<string, TreeEntry>, texts: ReadonlyMap<string, string>): Map<string, string[]> {
+  const isFile = (path: string) => files.has(path);
+  const planned = new Map<string, string[]>();
+  for (const { path } of [...plan.create, ...plan.overwrite]) {
+    const text = texts.get(path);
+    if (text === undefined) continue;
+    const targets = [...new Set(findFileLinks(path, splitFile(text).body, isFile).map((link) => link.target))];
+    if (targets.length > 0) planned.set(path, targets);
+  }
+  return planned;
+}
+
+/**
+ * Hashes linked files into `linked`: an LFS file by its pointer, without
+ * downloading it; another by its bytes. A blob over `readUpTo` bytes is not
+ * read: only its size is known, and its hash is empty.
+ */
+async function hashLinkedFiles(git: Git, files: ReadonlyMap<string, TreeEntry>, linked: Map<string, LinkedFile>, paths: readonly string[], readUpTo: number): Promise<void> {
+  const toRead: TreeEntry[] = [];
+  for (const path of new Set(paths)) {
+    if (linked.has(path)) continue;
+    const entry = files.get(path) as TreeEntry;
+    if (entry.size !== null && entry.size > readUpTo) linked.set(path, { hash: '', size: entry.size, extensions: false });
+    else toRead.push(entry);
+  }
+  let index = 0;
+  while (index < toRead.length) {
+    // Batches bounded by bytes, so many large files are never held at once.
+    const batch: TreeEntry[] = [];
+    let bytes = 0;
+    while (index < toRead.length && (batch.length === 0 || bytes + ((toRead[index] as TreeEntry).size ?? 0) <= HASH_BATCH_BYTES)) {
+      const entry = toRead[index] as TreeEntry;
+      batch.push(entry);
+      bytes += entry.size ?? 0;
+      index += 1;
+    }
+    const blobs = await readBlobs(git, batch.map((entry) => entry.oid));
+    for (const entry of batch) {
+      const blob = blobs.get(entry.oid) as Buffer;
+      const pointer = parseLfsPointer(blob);
+      linked.set(
+        entry.path,
+        pointer !== null ? { hash: pointer.oid, size: pointer.size, extensions: pointer.extensions } : { hash: sha256(blob), size: blob.length, extensions: false },
+      );
+    }
+  }
 }
 
 /** The transform that uploads linked files and writes their URLs into the document. */
@@ -96,47 +241,18 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
   let lfs: LfsRead | undefined;
 
   const isFile = (path: string) => files.has(path);
+  // A blob over the limit is too large to be a pointer and is never read: only its size matters, since its document is left out.
+  const hashFiles = (git: Git, paths: readonly string[]) => hashLinkedFiles(git, files, linked, paths, Math.max(limit, MAX_POINTER_SIZE));
 
-  /**
-   * Hashes linked files: an LFS file by its pointer, without downloading it;
-   * another by its bytes. A blob over the limit is too large to be a pointer
-   * and is never read: only its size matters, since its document is left out.
-   */
-  const hashFiles = async (git: Git, paths: readonly string[]) => {
-    const toRead: TreeEntry[] = [];
-    for (const path of new Set(paths)) {
-      if (linked.has(path)) continue;
-      const entry = files.get(path) as TreeEntry;
-      if (entry.size !== null && entry.size > Math.max(limit, MAX_POINTER_SIZE)) linked.set(path, { hash: '', size: entry.size });
-      else toRead.push(entry);
-    }
-    let index = 0;
-    while (index < toRead.length) {
-      // Batches bounded by bytes, so many large files are never held at once.
-      const batch: TreeEntry[] = [];
-      let bytes = 0;
-      while (index < toRead.length && (batch.length === 0 || bytes + ((toRead[index] as TreeEntry).size ?? 0) <= HASH_BATCH_BYTES)) {
-        const entry = toRead[index] as TreeEntry;
-        batch.push(entry);
-        bytes += entry.size ?? 0;
-        index += 1;
-      }
-      const blobs = await readBlobs(git, batch.map((entry) => entry.oid));
-      for (const entry of batch) {
-        const blob = blobs.get(entry.oid) as Buffer;
-        const pointer = parseLfsPointer(blob);
-        linked.set(entry.path, pointer !== null ? { hash: pointer.oid, size: pointer.size } : { hash: sha256(blob), size: blob.length });
-      }
-    }
-  };
-
-  /** The files of `targets` not in the cache, one path per content hash. */
+  /** The files of `targets` not in the cache, one path per content hash: a readable one when the content has one. */
   const missing = (targets: Iterable<string>): Map<string, string> => {
     const { uploads } = context as TransformContext;
     const byHash = new Map<string, string>();
     for (const target of targets) {
       const { hash } = linked.get(target) as LinkedFile;
-      if (!uploads.has(hash) && !byHash.has(hash)) byHash.set(hash, target);
+      if (uploads.has(hash)) continue;
+      const chosen = byHash.get(hash);
+      if (chosen === undefined || ((linked.get(chosen) as LinkedFile).extensions && !(linked.get(target) as LinkedFile).extensions)) byHash.set(hash, target);
     }
     return byHash;
   };
@@ -237,39 +353,35 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
 
     async prepare(ctx) {
       context = ctx;
-      const markdown = new Map<string, TreeEntry>();
-      for (const entry of await listTree(ctx.git, ctx.tracked)) {
-        if (entry.type !== 'blob' || entry.mode === '120000') continue;
-        if (entry.path.endsWith(MARKDOWN_EXTENSION)) markdown.set(entry.path, entry);
-        else files.set(entry.path, entry);
+      const tree = await treeFiles(ctx.git, ctx.tracked);
+      for (const [path, entry] of tree.files) files.set(path, entry);
+      const paths = [...ctx.plan.create, ...ctx.plan.overwrite].map((entry) => entry.path).filter((path) => tree.markdown.has(path));
+      const blobs = await readBlobs(ctx.git, paths.map((path) => (tree.markdown.get(path) as TreeEntry).oid));
+      const texts = new Map<string, string>();
+      for (const path of paths) {
+        const blob = blobs.get((tree.markdown.get(path) as TreeEntry).oid) as Buffer;
+        // A Markdown file stored in LFS links nothing.
+        if (parseLfsPointer(blob) === null) texts.set(path, blob.toString('utf8'));
       }
       // The files each document to be written links, in the run's write order (by path), for the look-ahead batches.
-      const paths = [...ctx.plan.create, ...ctx.plan.overwrite].map((entry) => entry.path).filter((path) => markdown.has(path));
-      const texts = await readBlobs(ctx.git, paths.map((path) => (markdown.get(path) as TreeEntry).oid));
-      for (const path of paths) {
-        const blob = texts.get((markdown.get(path) as TreeEntry).oid) as Buffer;
-        if (parseLfsPointer(blob) !== null) continue;
-        const targets = [...new Set(findFileLinks(path, splitFile(blob.toString('utf8')).body, isFile).map((link) => link.target))];
-        if (targets.length > 0) planned.set(path, targets);
-      }
-      order.push(...[...planned.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+      for (const [path, targets] of plannedLinks(ctx.plan, files, texts)) planned.set(path, targets);
+      order.push(...[...planned.keys()].sort(compare));
     },
 
     async apply({ path, body }) {
       if (context === undefined) throw new Error('the uploads transform was not prepared');
       const fileLinks = findFileLinks(path, body, isFile);
       if (fileLinks.length === 0) return body;
-      await hashFiles(context.git, fileLinks.map((link) => link.target));
+      const targets = [...new Set(fileLinks.map((link) => link.target))];
+      await hashFiles(context.git, targets);
 
       // Check every file first, so a document left out uploads nothing.
-      const oversize = [...new Set(fileLinks.map((link) => link.target))].filter((target) => (linked.get(target) as LinkedFile).size > limit);
-      if (oversize.length > 0) {
-        throw new LeaveOutError(UPLOAD_TOO_LARGE, `${oversize.join(', ')}: over the upload limit of ${limit} bytes`, oversize);
-      }
-      await uploadMissing(path, [...new Set(fileLinks.map((link) => link.target))]);
+      const leaveOut = judgeLinkedFiles(targets, linked, limit, context.uploads);
+      if (leaveOut !== null) throw new LeaveOutError(leaveOut.rule, leaveOut.message, leaveOut.files);
+      await uploadMissing(path, targets);
       const { uploads } = context;
       const urls = fileLinks.map((link) => uploads.get((linked.get(link.target) as LinkedFile).hash) as string);
-      links.set(path, fileLinks.map((link) => ({ raw: link.raw, hash: (linked.get(link.target) as LinkedFile).hash, suffix: link.suffix })));
+      links.set(path, fileLinks.map((link) => ({ written: link.written, hash: (linked.get(link.target) as LinkedFile).hash, suffix: link.suffix })));
       return replaceRanges(body, fileLinks.map((link, index) => ({ from: link.from, to: link.to, text: (urls[index] as string) + link.suffix })));
     },
 
@@ -286,7 +398,9 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
  * link, image and definition destinations equal to an upload URL (with the
  * link's query and fragment) are touched; the same URL in code or prose
  * stays. The n-th such destination of a file gets the n-th spelling written
- * for it, so two spellings of one link come back as they were.
+ * for it, so two spellings of one link come back as they were. The whole
+ * destination is replaced, angle brackets included, so a spelling that needs
+ * them (a space) keeps them when Linear dropped them around the URL.
  */
 export function restoreFileLinks(body: string, written: readonly WrittenLink[], uploads: UploadMap): string {
   const raws = new Map<string, string[]>();
@@ -294,17 +408,17 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
     const url = uploads.get(link.hash);
     if (url === undefined) continue;
     const key = url + link.suffix;
-    raws.set(key, [...(raws.get(key) ?? []), link.raw]);
+    raws.set(key, [...(raws.get(key) ?? []), link.written]);
   }
   if (raws.size === 0) return body;
   const seen = new Map<string, number>();
   const replacements: Array<{ from: number; to: number; text: string }> = [];
-  for (const { node, range } of destinations(body)) {
+  for (const { node, outer } of destinations(body)) {
     const list = raws.get(node.url);
     if (list === undefined) continue;
     const index = seen.get(node.url) ?? 0;
     seen.set(node.url, index + 1);
-    replacements.push({ ...range, text: list[Math.min(index, list.length - 1)] as string });
+    replacements.push({ ...outer, text: list[Math.min(index, list.length - 1)] as string });
   }
   return replaceRanges(body, replacements);
 }
@@ -312,24 +426,29 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
 /** Links, images and link definitions in `body` whose destination is a file of the repository. */
 export function findFileLinks(documentPath: string, body: string, isFile: (path: string) => boolean): FileLink[] {
   const result: FileLink[] = [];
-  for (const { node, range } of destinations(body)) {
+  for (const { node, range, outer } of destinations(body)) {
     const target = resolveTarget(documentPath, node.url);
     if (target === null || !isFile(target)) continue;
     const cut = node.url.search(/[?#]/);
-    result.push({ ...range, raw: body.slice(range.from, range.to), target, suffix: cut === -1 ? '' : node.url.slice(cut) });
+    result.push({ ...range, written: body.slice(outer.from, outer.to), target, suffix: cut === -1 ? '' : node.url.slice(cut) });
   }
   return result;
 }
 
 type DestinationNode = Extract<Nodes, { type: 'link' | 'image' | 'definition' }>;
 
-/** Every link, image and definition with the place of its destination's text, in document order. */
-function destinations(body: string): Array<{ node: DestinationNode; range: { from: number; to: number } }> {
-  const result: Array<{ node: DestinationNode; range: { from: number; to: number } }> = [];
+type Range = { from: number; to: number };
+
+/**
+ * Every link, image and definition with the place of its destination's text,
+ * without (`range`) and with (`outer`) its angle brackets, in document order.
+ */
+export function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range }> {
+  const result: Array<{ node: DestinationNode; range: Range; outer: Range }> = [];
   visit(parse(body), (node) => {
     if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;
-    const range = destinationRange(body, node);
-    if (range !== null) result.push({ node, range });
+    const found = destinationRange(body, node);
+    if (found !== null) result.push({ node, range: { from: found.from, to: found.to }, outer: { from: found.outerFrom, to: found.outerTo } });
   });
   return result.sort((a, b) => a.range.from - b.range.from);
 }
@@ -361,23 +480,23 @@ export function resolveTarget(documentPath: string, url: string): string | null 
 
 /**
  * Where the destination's text is in a link, image or definition node,
- * without angle brackets. Each `](` (or `]:`) in the node is tried in turn,
+ * without and with its angle brackets. Each `](` (or `]:`) in the node is tried in turn,
  * and a candidate counts only when the parser reads it as the node's own
  * destination, escapes and character references included; so brackets in
  * the link text or alt text cannot misplace it. Null when none matches
  * (a reference link, whose destination is in its definition).
  */
-function destinationRange(body: string, node: DestinationNode): { from: number; to: number } | null {
+function destinationRange(body: string, node: DestinationNode): { from: number; to: number; outerFrom: number; outerTo: number } | null {
   const nodeEnd = end(node);
   const opener = node.type === 'definition' ? ']:' : '](';
-  let found: { from: number; to: number } | null = null;
+  let found: { from: number; to: number; outerFrom: number; outerTo: number } | null = null;
   for (let at = body.indexOf(opener, start(node)); at !== -1 && at < nodeEnd; at = body.indexOf(opener, at + 1)) {
     const range = destinationAt(body, at + 2, nodeEnd);
     if (range === null || parsedDestination(body.slice(range.outerFrom, range.outerTo)) !== node.url) continue;
     // A definition's label holds no `]:`, so its first match is its destination. A link's or
     // image's text comes before its destination and may hold a link to the same file, so the
     // last match is the node's own.
-    found = { from: range.from, to: range.to };
+    found = range;
     if (node.type === 'definition') break;
   }
   return found;
@@ -457,4 +576,8 @@ export function contentTypeOf(path: string): string {
 
 function sha256(content: Buffer): string {
   return createHash('sha256').update(content).digest('hex');
+}
+
+function compare(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }

@@ -6,8 +6,9 @@ Report security problems privately as described in [SECURITY.md](SECURITY.md).
 
 ## Set up and run the tests
 
-You need Node 24 and Git; [pre-commit](https://pre-commit.com/) runs the
-same hooks as CI.
+You need Node 24, Git and [pre-commit](https://pre-commit.com/): it runs
+the same hooks as CI, and the scenario harness tests commit through
+pre-commit hooks of a local hook repository.
 
 ```sh
 npm ci                     # exact versions from package-lock.json, no install scripts
@@ -17,7 +18,10 @@ npm test
 pre-commit run --all-files
 ```
 
-`npm test` needs no network or accounts: tests that talk to Linear or GitHub
+`npm test` needs no network or accounts. In the live scenario runs, a
+person's commit goes through the test repository's released hooks, which
+need npm 11.16.0 or newer; with an older npm those runs are reported as
+blocked by the environment. Tests that talk to Linear or GitHub
 are skipped unless you set the variables below.
 
 ## Live tests with your own Linear workspace

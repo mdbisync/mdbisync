@@ -5,9 +5,9 @@ import { deflateRawSync } from 'node:zlib';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, describe, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 import type { LinearDocument } from '../../../src/linear/index.ts';
-import { Git } from '../../../src/state/index.ts';
+import { Git, GitError } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
@@ -19,10 +19,12 @@ import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
-import { Sandbox } from './sandbox.ts';
+import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, installHooks, PERSON, personCommit, Sandbox } from './sandbox.ts';
+import { engineEntry } from './engine.ts';
+import { preCommitConfig } from '../../corpus/tree.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
-import { readRunIds } from './step-helpers.ts';
+import { commitAsPerson, readRunIds } from './step-helpers.ts';
 import { documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
 import { maxOverlap, unzip, waitForRun } from './workflows.ts';
 
@@ -416,12 +418,24 @@ class FakeLinear {
     return document;
   }
 
-  async listDocuments(place: { projectId?: string; teamId?: string }) {
-    return [...this.documents.values()].filter((document) => (place.projectId !== undefined ? document.projectId === place.projectId : document.teamId === place.teamId)).map((document) => ({ ...document }));
+  /** Ids left out of every `documents(...)` query while `document(id:)` still answers: an opt-in, not Linear's measured behaviour. */
+  unlisted = new Set<string>();
+
+  /** Lists a place's documents; trashed and archived ones only with `includeArchived`, as Linear does. */
+  async listDocuments(place: { projectId?: string; teamId?: string }, options: { includeArchived?: boolean } = {}) {
+    return [...this.documents.values()]
+      .filter((document) => (place.projectId !== undefined ? document.projectId === place.projectId : document.teamId === place.teamId))
+      .filter((document) => !this.unlisted.has(document.id) && (options.includeArchived === true || (!document.trashed && document.archivedAt === null)))
+      .map((document) => ({ ...document }));
   }
 
   async getDocuments(ids: readonly string[]) {
-    return ids.flatMap((id) => (this.documents.has(id) ? [{ ...(this.documents.get(id) as LinearDocument) }] : []));
+    return ids.flatMap((id) => (this.documents.has(id) && !this.unlisted.has(id) ? [{ ...(this.documents.get(id) as LinearDocument) }] : []));
+  }
+
+  async getDocument(id: string) {
+    const document = this.documents.get(id);
+    return document === undefined ? null : { ...document };
   }
 
   async createDocument(place: { projectId?: string; teamId?: string }, input: { title: string; content?: string }) {
@@ -434,12 +448,13 @@ class FakeLinear {
     return { ...document };
   }
 
+  /** `documentDelete`: only to the trash, with `archivedAt` set. */
   async trashDocument(id: string) {
-    (this.documents.get(id) as LinearDocument).trashed = true;
+    Object.assign(this.documents.get(id) as LinearDocument, { trashed: true, archivedAt: new Date().toISOString() });
   }
 
   async restoreDocument(id: string) {
-    (this.documents.get(id) as LinearDocument).trashed = false;
+    Object.assign(this.documents.get(id) as LinearDocument, { trashed: false, archivedAt: null });
   }
 
   async commentOnDocument(documentContentId: string, body: string) {
@@ -465,21 +480,44 @@ class FakeLinear {
 const PROJECT = { id: 'project-1', name: 'Field notes aaaaaa', createdAt: '' };
 const OTHER = { id: 'project-2', name: 'Garden plans aaaaaa', createdAt: '' };
 
-/** A converged run world: a tracked branch with two project folders and three documents, their ids ref, and Linear holding the same texts. */
-async function fakeRun(options: { review?: string } = {}) {
+/**
+ * A local hook repository standing in for the released hook: its
+ * `linear-format` runs this checkout's fixer and leaves the environment it
+ * saw in `<root>/hook-env`. Returns the corpus's own pre-commit configuration
+ * pinned to that repository's commit.
+ */
+async function localHookConfig(root: string): Promise<string> {
+  const repo = join(root, 'hooks');
+  const git = new Git(repo, IDENTITY);
+  await new Git(root, IDENTITY).run(['init', '--quiet', '--initial-branch=main', repo]);
+  writeFileSync(join(repo, '.pre-commit-hooks.yaml'), '- id: linear-format\n  name: Format Markdown for Linear\n  entry: ./fix.sh\n  language: script\n  types: [markdown]\n  require_serial: true\n');
+  writeFileSync(join(repo, 'fix.sh'), `#!/bin/sh\nenv > ${JSON.stringify(join(root, 'hook-env'))}\nexec node ${JSON.stringify(engineEntry())} fix "$@"\n`, { mode: 0o755 });
+  await git.run(['add', '--all']);
+  await git.run(['commit', '--quiet', '-m', 'Hook']);
+  const revision = (await git.text(['rev-parse', 'HEAD'])).trim();
+  return preCommitConfig(revision).replace('https://github.com/mikhail-yaskou/mdbisync', repo);
+}
+
+/**
+ * A converged run world: a tracked branch with two project folders and three
+ * documents, their ids ref, and Linear holding the same texts. With `hooks`,
+ * the person's commits go through the corpus's hooks from a local hook repository.
+ */
+async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
   const names = runNames('aaaaaa');
   await new Git(root, IDENTITY).run(['init', '--quiet', '--bare', '--initial-branch=main', remote]);
   const seed = new Git(join(root, 'seed'), IDENTITY);
   await new Git(root, IDENTITY).run(['init', '--quiet', '--initial-branch=main', join(root, 'seed')]);
+  const hookConfig = options.hooks === true ? await localHookConfig(root) : 'repos:\n  - repo: https://github.com/example/hooks\n    rev: v1\n    hooks:\n      - id: linear-format\n  - repo: local\n    hooks:\n      - id: test-secret\n        alias: security\n';
   const files: Record<string, string> = {
     'eng/platform/README.md': `---\nlinear-project: ${PROJECT.name}\n---\n`,
     'docs/handbook/README.md': `---\nlinear-project: ${OTHER.name}\n---\n`,
     'eng/platform/plan.md': '# Plan\n\nThe first paragraph.\n\nThe second paragraph.\n',
     'eng/platform/notes.md': '# Notes\n\nKept short.\n',
     'docs/handbook/start.md': '# Start\n\nWelcome.\n',
-    '.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/hooks\n    rev: v1\n    hooks:\n      - id: linear-format\n  - repo: local\n    hooks:\n      - id: test-secret\n        alias: security\n',
+    '.pre-commit-config.yaml': hookConfig,
     ...(options.review === undefined ? {} : { 'eng/platform/guides/weekly-plan.md': options.review }),
   };
   for (const [path, text] of Object.entries(files)) {
@@ -555,14 +593,170 @@ async function fakeRun(options: { review?: string } = {}) {
       person ??= await sandbox.clone(names, join(root, 'run', 'person'));
       return person;
     },
+    async personHooks() {
+      // Without a hook repository, these runs commit as before: the clone has no hooks installed.
+      if (options.hooks === true) await installHooks(await ctx.person());
+    },
     async engineClone() {
       return join(root, 'run', 'engine');
     },
   };
   const remoteGit = new Git(remote, IDENTITY);
   const remoteFile = async (path: string, ref = names.trackedBranch) => remoteGit.text(['show', `${ref}:${path}`]);
-  return { ctx, linear, ids, remoteGit, remoteFile, faults, created, docs };
+  // The file's exact bytes, final newline included.
+  const rawFile = async (path: string) => (await remoteGit.run(['show', `${names.trackedBranch}:${path}`])).stdout.toString('utf8');
+  return { ctx, linear, ids, remoteGit, remoteFile, rawFile, faults, created, docs };
 }
+
+describe('person commits through the repository hooks', () => {
+  // Hook environments of these tests stay in a folder of their own; later tests see the variable as it was.
+  const saved = process.env.PRE_COMMIT_HOME;
+  before(() => {
+    process.env.PRE_COMMIT_HOME = fresh('pre-commit-');
+  });
+  after(() => {
+    if (saved === undefined) delete process.env.PRE_COMMIT_HOME;
+    else process.env.PRE_COMMIT_HOME = saved;
+  });
+
+  it('commits the text the Linear-format hook fixed', async () => {
+    const { ctx, rawFile } = await fakeRun({ hooks: true });
+    // Linear's form has no final newline: the hook fixes it away.
+    const commit = await commitAsPerson(ctx, new Map([['eng/platform/fixable.md', '# Plan\n\n*one*\n']]), 'Add a page');
+    assert.equal(await rawFile('eng/platform/fixable.md'), '# Plan\n\n*one*');
+    assert.deepEqual(ctx.ownCommits, [commit]);
+    assert.equal((await (await ctx.person()).text(['status', '--porcelain'])).trim(), '');
+    // A git step commits through the same hooks.
+    await runStep(ctx, { kind: 'git', action: 'add', args: {} });
+    const added = await rawFile(ctx.observations.get('git.added') as string);
+    assert.ok(added.startsWith('# Notes\n\n') && !added.endsWith('\n'), added);
+  });
+
+  it('moves through the hooks and records the text as committed', async () => {
+    const { ctx, rawFile } = await fakeRun({ hooks: true });
+    let installs = 0;
+    const install = ctx.personHooks.bind(ctx);
+    ctx.personHooks = async () => {
+      installs += 1;
+      await install();
+    };
+    await runStep(ctx, { kind: 'git', action: 'move', args: { target: 'eng/platform/notes.md' } });
+    const moved = (ctx.observations.get('git.moved') as { to: string }).to;
+    // The moved file is fixed into Linear's form on the way in.
+    assert.equal(await rawFile(moved), '# Notes\n\nKept short.');
+    assert.equal(installs, 1);
+    await runStep(ctx, { kind: 'git', action: 'edit', args: { target: 'eng/platform/plan.md' } });
+    assert.equal(ctx.observations.get('edited.gitBody'), await rawFile('eng/platform/plan.md'));
+    assert.equal((await (await ctx.person()).text(['status', '--porcelain'])).trim(), '');
+  });
+
+  it('fails a commit the hook refuses and commits it when the step bypasses the hook', async () => {
+    const { ctx, remoteGit, rawFile } = await fakeRun({ hooks: true });
+    const head = async () => (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
+    const before = await head();
+    const refused = await runStep(ctx, { kind: 'git', action: 'add-footnote', args: {} }).then(() => null, (error: unknown) => error);
+    assert.ok(refused instanceof HookRejectedError, String(refused));
+    assert.deepEqual(refused.hooks, ['linear-format']);
+    assert.equal(await head(), before);
+    assert.equal((await (await ctx.person()).text(['status', '--porcelain'])).trim(), '');
+    // L2-13: the footnote goes in past the hook.
+    await runStep(ctx, { kind: 'git', action: 'add-footnote', args: { bypassHook: true } });
+    assert.notEqual(await head(), before);
+    assert.match(await rawFile(ctx.observations.get('target.path') as string), /\[\^1\]: Added later\.\n$/);
+  });
+
+  it('never lets the test secret reach the repository', async () => {
+    const { ctx, remoteGit } = await fakeRun({ hooks: true });
+    const secret = `TESTKEY-${'0123456789abcdef01234567'}`;
+    await assert.rejects(
+      commitAsPerson(ctx, new Map([['eng/platform/notes.md', `# Notes\n\nAccess key ${secret}.`]]), 'Update notes'),
+      (error: unknown) => error instanceof HookRejectedError && error.hooks.join() === 'test-secret' && !error.message.includes(secret),
+    );
+    assert.doesNotMatch(await remoteGit.text(['log', '-p', '--all']), new RegExp(secret));
+  });
+
+  it('reports a failure no hook caused as git\'s own error', async () => {
+    const { ctx } = await fakeRun({ hooks: true });
+    await installHooks(await ctx.person());
+    // Nothing staged: git refuses the commit before any hook fails.
+    await assert.rejects(commitStaged(await ctx.person(), [], 'Nothing', true), (error: unknown) => error instanceof GitError && !(error instanceof HookRejectedError));
+  });
+
+  // Values the harness can hold in its environment (test/e2e/harness/config.ts) and the sandbox's credential header.
+  const SECRETS = {
+    LINEAR_TEST_APP_CLIENT_SECRET: 'app-secret-value',
+    LINEAR_TEST_ALICE_API_KEY: 'editor-key-value',
+    SYNC_APP_PRIVATE_KEY: 'private-key-value',
+    GIT_CONFIG_VALUE_1: 'AUTHORIZATION: basic other-header-value',
+    GITHUB_TOKEN: 'github-token-value',
+  };
+  // What may reach hook code besides the allowlist: the identity, git's base settings, what git sets for its hooks and what the shell sets itself.
+  const ALLOWED = new Set([...HOOK_ENV_KEYS, 'GIT_TERMINAL_PROMPT', 'GIT_LFS_SKIP_SMUDGE', 'GIT_EDITOR', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_EXEC_PATH', 'PWD', 'SHLVL', '_', 'OLDPWD']);
+  /** The inherited variables (the process's, the secrets, the sandbox's git settings) that reached a recorded environment. */
+  const leaked = (recorded: string, inherited: Record<string, string | undefined>) => {
+    const names = new Set(recorded.split('\n').map((line) => line.split('=')[0] as string));
+    return Object.keys(inherited).filter((name) => names.has(name) && !ALLOWED.has(name));
+  };
+
+  it('installs the hooks with no secret in the installer\'s environment', async () => {
+    const { ctx } = await fakeRun({ hooks: true });
+    // A stand-in pre-commit first on PATH records the environment it was given.
+    const bin = fresh('fake-pre-commit-');
+    const seen = join(bin, 'env');
+    writeFileSync(join(bin, 'pre-commit'), `#!/bin/sh\nenv > ${JSON.stringify(seen)}\n`, { mode: 0o755 });
+    const from = { ...process.env, ...SECRETS, GIT_CONFIG_COUNT: '2', PATH: `${bin}:${process.env.PATH ?? ''}` };
+    await installHooks(await ctx.person(), { from });
+    const env = readFileSync(seen, 'utf8');
+    assert.deepEqual(leaked(env, from), []);
+    for (const value of Object.values(SECRETS)) assert.ok(!env.includes(value));
+    assert.match(env, /^PATH=/m);
+    assert.match(env, /^GIT_TERMINAL_PROMPT=0$/m);
+  });
+
+  it('runs the hooks of a commit with no secret in their environment', async () => {
+    const saved = Object.fromEntries(Object.keys(SECRETS).map((name) => [name, process.env[name]]));
+    Object.assign(process.env, SECRETS);
+    try {
+      const { ctx, rawFile } = await fakeRun({ hooks: true });
+      await commitAsPerson(ctx, new Map([['eng/platform/fixable.md', '# Plan\n\n*one*\n']]), 'Add a page');
+      const env = readFileSync(join(ctx.runDir, '..', 'hook-env'), 'utf8');
+      // The sandbox's own git settings (its credential header) count as inherited too.
+      const inherited = { ...process.env, ...ctx.live!.sandbox.env(PERSON) };
+      assert.deepEqual(leaked(env, inherited).filter((name) => !/^GIT_(AUTHOR|COMMITTER)_/.test(name)), []);
+      for (const value of Object.values(SECRETS)) assert.ok(!env.includes(value));
+      assert.ok(!env.includes('AUTHORIZATION'), 'the sandbox credential header reached the hook');
+      assert.match(env, /^GIT_AUTHOR_NAME=Test Editor$/m);
+      assert.equal(await rawFile('eng/platform/fixable.md'), '# Plan\n\n*one*');
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
+  it('tells a network failure while installing from a defect of the released hook', () => {
+    for (const code of ['EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'E503', 'E429', 'ENOSPC', 'SELF_SIGNED_CERT_IN_CHAIN', 'EALLOWGIT']) {
+      assert.ok(installFailure(`npm error code ${code}\n`) instanceof EnvBlockedError, code);
+    }
+    assert.ok(installFailure('An unexpected error has occurred\n') instanceof EnvBlockedError);
+    const defect = installFailure('npm error code EJSONPARSE\n');
+    assert.ok(defect instanceof ProductError && !(defect instanceof EnvBlockedError));
+    assert.match(defect.message, /npm EJSONPARSE/);
+  });
+
+  it('refuses to install hooks pinned to anything but a released commit', async () => {
+    const { ctx } = await fakeRun();
+    await assert.rejects(installHooks(await ctx.person()), (error: unknown) => error instanceof EnvBlockedError && /"v1", not a released commit SHA/.test(error.message));
+  });
+
+  it('commits without the hooks only when asked to', async () => {
+    const { ctx, rawFile } = await fakeRun({ hooks: true });
+    await installHooks(await ctx.person());
+    await personCommit(await ctx.person(), ctx.names, new Map([['eng/platform/raw.md', '# Raw\n\n*one*\n']]), 'Add raw notes', { verify: false });
+    assert.equal(await rawFile('eng/platform/raw.md'), '# Raw\n\n*one*\n');
+  });
+});
 
 describe('git executors', () => {
   it('edit the target paragraph and record the edit for I2', async () => {
@@ -937,6 +1131,34 @@ describe('subjects', () => {
     assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
     refreshView(ctx);
     assert.equal(((await resolveSubject(ctx, 'corpus.validPaths')).value as string[]).includes('eng/platform/footnotes.md'), false);
+  });
+
+  it('tell a trashed document from an archived or missing one in I7, reading unlisted ids one by one', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const i7 = async () => INVARIANT_CHECKS.I7(ctx, async () => readSides(ctx));
+    assert.deepEqual(await i7(), { name: 'I7', ok: true });
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    const notes = ids['eng/platform/notes.md']?.id as string;
+    const start = ids['docs/handbook/start.md']?.id as string;
+    // Trashed and read back by the batch read by id, as Linear answers.
+    await linear.trashDocument(plan);
+    assert.match((await i7()).detail ?? '', /^1 problems: eng\/platform\/plan\.md: its document is in Linear's trash$/);
+    // Trashed, archived and deleted, none returned by any list: each read on its own.
+    for (const id of [plan, notes, start]) linear.unlisted.add(id);
+    (linear.documents.get(notes) as LinearDocument).archivedAt = new Date().toISOString();
+    linear.documents.delete(start);
+    const reads: string[] = [];
+    const getDocument = linear.getDocument.bind(linear);
+    linear.getDocument = async (id: string) => {
+      reads.push(id);
+      return getDocument(id);
+    };
+    const detail = (await i7()).detail ?? '';
+    assert.match(detail, /eng\/platform\/plan\.md: its document is in Linear's trash/);
+    assert.match(detail, /eng\/platform\/notes\.md: its document is archived/);
+    assert.match(detail, /docs\/handbook\/start\.md: its document is not in Linear/);
+    assert.deepEqual(reads.sort(), [plan, notes, start].sort());
   });
 
   it('count the engine\'s commits as git writes and not the scenario\'s own', async () => {

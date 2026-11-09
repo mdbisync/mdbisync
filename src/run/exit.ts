@@ -13,16 +13,25 @@ export { PARTIAL } from './stop.ts';
 
 export type ExitStatus = 'success' | 'warning' | 'failure';
 
-/** Why a sync run is partial, or undefined when it is not. */
+/**
+ * Why a sync run is partial, or undefined when it is not: Linear stopped it
+ * (in the setup check, the capture or the write step), failed a request
+ * while capturing, failed or rejected a write, or a state ref moved. A container at its document cap is not
+ * partial: the next run cannot go on until a person makes room.
+ */
 export function partialCode(outcome: OperationOutcome): string | undefined {
   if (outcome.operation !== 'sync') return undefined;
   if (outcome.stopped !== undefined) return 'stopped';
-  return outcome.sync?.write.code;
+  // Every way a capture ends unfinished (a stop, a failed request, a moved ref) leaves its state for the next run.
+  if (outcome.captured !== undefined && !outcome.captured.ok) return outcome.captured.code ?? 'stopped';
+  const code = outcome.sync?.write?.code;
+  return code === 'container-cap' ? undefined : code;
 }
 
 export function exitStatusOf(outcome: OperationOutcome): ExitStatus {
   if (partialCode(outcome) !== undefined) return 'warning';
   if (!outcome.ok || outcome.notImplemented) return 'failure';
+  if (outcome.sync?.write?.code === 'container-cap') return 'failure';
   if (outcome.confirmed !== undefined && !outcome.confirmed.complete) return 'failure';
   return 'success';
 }

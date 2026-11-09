@@ -4,6 +4,7 @@
 import {
   DocumentTooLongError,
   LinearError,
+  LinearGraphQLError,
   LinearReadBackError,
   LinearStoppedError,
   LinearUploadError,
@@ -181,6 +182,14 @@ export class LinearClient {
     return documents.filter((d) => d.projectId === null);
   }
 
+  /** Lists mapped places together, using the same pagination and document parser. */
+  async listDocumentsInPlaces(places: readonly DocumentPlace[], options: ListOptions = {}): Promise<LinearDocument[]> {
+    if (places.length === 0) return [];
+    const filters = places.map((place) => place.projectId !== undefined ? {project:{id:{eq:place.projectId}}} : {team:{id:{eq:place.teamId}}});
+    const documents = await this.#pagedDocuments('ListDocuments', {or:filters}, options);
+    return documents.filter((doc) => places.some((place) => place.projectId !== undefined ? doc.projectId === place.projectId : doc.projectId === null && doc.teamId === place.teamId));
+  }
+
   /**
    * Reads documents by id, one request per page of ids (one request for up
    * to `pageSize` ids). Trashed documents are included; ids that no longer
@@ -204,6 +213,27 @@ export class LinearClient {
       result.push(...data.documents.nodes.map(toDocument));
     }
     return result;
+  }
+
+  /**
+   * Reads one document by id with `document(id:)`, which answers for trashed
+   * and archived documents too; null when Linear no longer has the id.
+   */
+  async getDocument(id: string): Promise<LinearDocument | null> {
+    try {
+      const data = await this.request<{ document: RawDocument | null }>(
+        'GetDocument',
+        'query',
+        `query GetDocument($id: String!, $withContent: Boolean!) {
+          document(id: $id) { ${DOCUMENT_FIELDS} }
+        }`,
+        { id, withContent: false },
+      );
+      return data.document === null ? null : toDocument(data.document);
+    } catch (error) {
+      if (error instanceof LinearGraphQLError && error.notFound) return null;
+      throw error;
+    }
   }
 
   /**

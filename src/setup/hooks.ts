@@ -9,7 +9,7 @@ export const PRE_COMMIT_CONFIG = '.pre-commit-config.yaml';
 export const SECURITY_ALIAS = 'security';
 export const LINEAR_FORMAT_HOOK = 'linear-format';
 /** pre-commit's names for hooks defined in the repository itself or by pre-commit. */
-const LOCAL_REPOS: ReadonlySet<string> = new Set(['local', 'meta']);
+export const LOCAL_REPOS: ReadonlySet<string> = new Set(['local', 'meta']);
 
 export interface HookConfig {
   /** Every hook with the `repo` it comes from. */

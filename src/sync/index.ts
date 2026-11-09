@@ -14,3 +14,4 @@ export {
   type WriteResult,
   writeTrackedToLinear,
 } from './write.ts';
+export {capture, type CaptureOptions, type CaptureResult} from './capture.ts';

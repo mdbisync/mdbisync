@@ -20,6 +20,7 @@
 // like any other. Run again after the state is lost and the refs are
 // rebuilt, without duplicates.
 
+import { assessCapacity, capacityBlocked } from '../run/capacity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { fixText, splitFile } from '../format/index.ts';
 import {
@@ -69,6 +70,7 @@ export const SYNC_IDENTITY: CommitIdentity = Object.freeze({ name: 'mdbisync', e
 export const PROGRESS_BATCH = 25;
 
 export interface ConfirmOptions {
+  documentCap?: number | undefined;
   config: StateConfig;
   transforms?: readonly BodyTransform[];
   identity?: CommitIdentity;
@@ -101,7 +103,7 @@ export interface ConfirmedResult {
   /** Every document written, every extra one trashed and the state recorded. */
   complete: boolean;
   /** Why not complete. */
-  code?: 'stopped' | 'write-failed' | 'state-moved';
+  code?: 'stopped' | 'write-failed' | 'state-moved' | 'container-cap';
   /** The run continued an unfinished one: documents it had recorded were skipped. */
   resumed: boolean;
   created: string[];
@@ -157,6 +159,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
 
   const sources = await readPlanSources(context, { withContent: true });
   const plan = planInitialSync(sources.input);
+  plan.capacity = assessCapacity(context, sources.containers, plan.create, options.documentCap);
   const texts = sources.input.texts;
 
   const expected: StateSnapshot = { ...fetched.state };
@@ -168,8 +171,9 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   const ids: IdMap = resumed ? new Map(previous) : new Map();
   const uploads = await readUploads(git, expected.uploads);
   const uploadsAtStart = uploads.size;
-  /** What Linear stores for each synchronized path. */
+  /** What Linear stores for each synchronized path, and the text this run sent or would send for it. */
   const stored = new Map<string, string>();
+  const sent = new Map<string, string>();
 
   const result: ConfirmedResult = {
     complete: false,
@@ -186,6 +190,12 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     progressRecorded: true,
     record: null,
   };
+
+  if (capacityBlocked(plan.capacity)) {
+    result.code = 'container-cap';
+    result.notAttempted = [...plan.create, ...plan.overwrite, ...plan.trash].map((entry) => entry.path).sort();
+    return { plan, result };
+  }
 
   const remember = (path: string, document: LinearDocument) => {
     const before = previous.get(path);
@@ -236,9 +246,8 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const chosen = (resumed ? previous.get(entry.path)?.id : undefined) ?? reserved.get(entry.path);
     if (chosen !== undefined && !sources.documents.has(chosen)) saved.set(entry.path, chosen);
   }
-  // A saved id may belong to a document that was archived or trashed since:
-  // the listing shows live documents only, and Linear refuses to create a
-  // second document with an existing id. Such an id is not reused.
+  // An id absent from the listed containers may still exist elsewhere in
+  // Linear. Check before reusing it: create refuses an existing id.
   const taken = new Set<string>();
   if (saved.size > 0) for (const document of await linear.getDocuments([...new Set(saved.values())])) taken.add(document.id);
   for (const entry of plan.create) {
@@ -269,6 +278,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         const source = splitFile(texts.get(path) as string).body;
         const body = await transformBody(transforms, path, source);
         const hash = sha256(body);
+        sent.set(path, body);
         // A resumed run skips what the stopped run wrote, as long as the text
         // to send is the same; a file changed since is written again.
         if (document !== undefined && resumed && previous.get(path)?.id === document.id && writtenBefore.get(path) === hash) {
@@ -283,8 +293,9 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         // document's history. Linear's form can depend on what a transform
         // wrote (a link to an uploaded file is stored as a file), so the
         // content is also compared after the transforms' inverses, with the
-        // file's own body.
-        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(restoreBody(transforms, path, document.content ?? ''), source))) {
+        // file's own body. Normalize the restored text too: restoring document
+        // links can put back their original spelling in otherwise formatted text.
+        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body)), source))) {
           result.unchanged.push(path);
           remember(path, document);
           continue;
@@ -406,7 +417,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const reformatted: string[] = [];
     for (const path of [...synced].sort(compare)) {
       const text = texts.get(path) as string;
-      const file = splitFile(text).head + restoreBody(transforms, path, stored.get(path) ?? '');
+      const file = splitFile(text).head + restoreBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string);
       if (file !== text) {
         changes.set(path, file);
         reformatted.push(path);

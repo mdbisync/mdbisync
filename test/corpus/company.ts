@@ -39,10 +39,14 @@ export type Topic = {
 
 export type Kind =
   | "rfc" | "design" | "adr" | "runbook" | "postmortem" | "api" | "howto" | "experiment" | "launch" | "policy"
-  | "article" | "onboarding" | "faq" | "roadmap" | "meeting" | "status" | "handoff" | "release" | "retro";
+  | "article" | "onboarding" | "faq" | "roadmap" | "meeting" | "status" | "handoff" | "release" | "retro"
+  | "spec" | "callnotes" | "okr" | "newsletter" | "apichangelog";
 
-/** Kinds written once per topic; the others are dated series that mention several topics. */
-export const TOPIC_KINDS: readonly Kind[] = ["rfc", "design", "adr", "runbook", "postmortem", "api", "howto", "experiment", "launch", "policy", "article", "onboarding", "faq", "roadmap"];
+/** Kinds written once per topic. Kinds in FIXED_SERIES have a fixed length; every other kind is a dated series. */
+export const TOPIC_KINDS: readonly Kind[] = ["rfc", "design", "adr", "runbook", "postmortem", "api", "howto", "experiment", "launch", "policy", "article", "onboarding", "faq", "roadmap", "spec"];
+
+/** Series with a fixed length: quarterly goals, a monthly newsletter, a monthly API changelog. */
+export const FIXED_SERIES: Partial<Record<Kind, number>> = { okr: 6, newsletter: 10, apichangelog: 8 };
 
 export type Profile = {
   /** The human name of the area or project. */
@@ -251,7 +255,7 @@ export const PROFILES: Record<string, Profile> = {
   "eng/platform": {
     name: "Routing platform",
     about: "The routing platform turns a day's orders into routes: it clusters stops, sequences them and keeps routes up to date during the day.",
-    kinds: ["rfc", "design", "adr", "runbook", "roadmap", "status", "meeting"],
+    kinds: ["rfc", "design", "adr", "runbook", "roadmap", "okr", "status", "meeting"],
     screens: ["ROUTE PLANNER", "PLAN RUNS", "SOLVER STATS"],
     labels: ["ORDERS", "CLUSTER", "SEQUENCE", "BALANCE", "PUBLISH"],
     charts: ["PLAN TIME SECONDS", "STOPS PER ROUTE", "ON-TIME RATE %"],
@@ -291,7 +295,7 @@ export const PROFILES: Record<string, Profile> = {
   "eng/mobile app": {
     name: "Driver app",
     about: "The driver app shows each driver their route, guides them stop by stop and records every delivery.",
-    kinds: ["release", "howto", "design", "meeting", "status", "retro"],
+    kinds: ["release", "howto", "design", "spec", "okr", "meeting", "status", "retro"],
     screens: ["TODAY'S ROUTE", "NEXT STOP", "DELIVERED"],
     labels: ["ROUTE", "STOPS", "SCAN", "PROFILE"],
     charts: ["CRASH-FREE SESSIONS %", "APP STARTS", "BATTERY USE PER SHIFT"],
@@ -326,7 +330,7 @@ export const PROFILES: Record<string, Profile> = {
   "eng/data.pipeline": {
     name: "Data pipeline",
     about: "The data pipeline collects events from every service and turns them into the tables behind reports, billing and planning.",
-    kinds: ["design", "runbook", "postmortem", "api", "adr", "status"],
+    kinds: ["design", "runbook", "postmortem", "api", "adr", "okr", "apichangelog", "status", "meeting", "retro"],
     screens: ["PIPELINE RUNS", "TABLE FRESHNESS", "DATA QUALITY"],
     labels: ["EVENTS", "INGEST", "CLEAN", "MODEL", "REPORTS"],
     charts: ["ROWS PER DAY", "PIPELINE DELAY MIN", "FAILED CHECKS"],
@@ -361,7 +365,7 @@ export const PROFILES: Record<string, Profile> = {
   "eng/search (beta)": {
     name: "Shipment search",
     about: "Search lets planners and support find any order, stop or parcel by number, address or customer in under a second.",
-    kinds: ["rfc", "experiment", "design", "status", "meeting"],
+    kinds: ["rfc", "experiment", "design", "spec", "okr", "status", "meeting", "retro"],
     screens: ["SEARCH", "RESULTS", "RELEVANCE"],
     labels: ["QUERY", "PARSE", "RETRIEVE", "RANK", "RESULTS"],
     charts: ["QUERY LATENCY MS", "CLICK-THROUGH %", "ZERO RESULTS %"],
@@ -391,7 +395,7 @@ export const PROFILES: Record<string, Profile> = {
   "docs/handbook": {
     name: "Company handbook",
     about: "How we work at Kitewing: our values, policies, tools and the practical things everyone needs to know.",
-    kinds: ["policy", "onboarding", "howto", "faq"],
+    kinds: ["policy", "onboarding", "howto", "faq", "newsletter"],
     screens: ["PEOPLE DIRECTORY", "TIME OFF", "EXPENSES"],
     labels: ["APPLY", "REVIEW", "APPROVE", "PAY"],
     charts: ["TEAM SIZE BY QUARTER", "OFFICE ATTENDANCE", "SURVEY SCORES"],
@@ -440,7 +444,7 @@ export const PROFILES: Record<string, Profile> = {
   "support": {
     name: "Help center",
     about: "Answers for customers and partners: tracking parcels, changing deliveries, connecting to the API and billing.",
-    kinds: ["article", "faq", "howto", "release"],
+    kinds: ["article", "faq", "howto", "callnotes", "release"],
     screens: ["TRACKING PAGE", "HELP CENTER", "ACCOUNT"],
     labels: ["TRACK", "CHANGE", "CONTACT", "BILLING"],
     charts: ["TICKETS BY TOPIC", "FIRST RESPONSE HOURS", "SATISFACTION"],
