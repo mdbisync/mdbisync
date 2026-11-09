@@ -19,7 +19,9 @@ workflow and uses Actions again while settling. Before running it, configure
 the harness as `MDBISYNC_TEST_HOOK_KEY`. The harness does not change repository
 settings. Its hook records environment names and own-run secret match flags
 in the report artifact; it never records secret values or unrelated process
-data. It requires a Linux runner with readable `/proc`.
+data. A stage-only Node preload records digests of the actual minted Linear
+token for comparison, without changing the released action. The fixture
+workflow runs jobs only on dispatch; pushes only register it. It requires a Linux runner with readable `/proc`.
 
 ## Setup and execution
 

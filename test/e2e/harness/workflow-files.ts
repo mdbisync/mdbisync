@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMap, isSeq, parseDocument, type Document, type YAMLMap } from 'yaml';
-import { CANARY_KEY, CANARY_PREPARE } from './security-canary.ts';
+import { CANARY_TOKEN_OBSERVER_FILE, CANARY_ENABLED, CANARY_HOOK_STEP, CANARY_KEY, CANARY_PREPARE, CANARY_PREPARE_STEP } from './security-canary.ts';
 import type { CommandName } from '../../../src/commands.ts';
 import { PREREQUISITE_STEPS, REPORT_ARTIFACT } from './workflows.ts';
 
@@ -91,6 +91,11 @@ export function renderForRun(template: string, options: RunWorkflowOptions): str
   // gets a group of its own, so it never replaces a pending dispatch of the
   // run's group. The default branch and the repository's settings stay as
   // they are.
+  if (options.securityCanary && isMap(on) && isMap(doc.getIn(['jobs', 'sync']))) {
+    // This canary observes dispatched runs only; pushes register the workflow with no job.
+    on.delete('push');
+    on.delete('schedule');
+  }
   const register = isMap(on) && on.has('workflow_dispatch') && !on.has('push') && !on.has('pull_request');
   if (register) {
     on.set('push', { branches: [options.trackedBranch] });
@@ -129,15 +134,17 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
     return typeof uses === 'string' && uses.startsWith(`${ACTION_REPOSITORY}@`);
   };
   if (options.securityCanary && steps.items.some(isAction)) {
-    const hooks = steps.items.find(item => (item as YAMLMap).get('name') === 'Run the security hooks') as YAMLMap | undefined;
+    const hooks = steps.items.find(item => (item as YAMLMap).get('name') === CANARY_HOOK_STEP) as YAMLMap | undefined;
     if (hooks === undefined) throw new Error('Security canary needs a separate hooks step');
+    hooks.setIn(['env', CANARY_ENABLED], '1');
     hooks.setIn(['env', CANARY_KEY], '${{ secrets.CANARY_HOOK_KEY }}');
     const stage = steps.items.findIndex(isAction);
+    (steps.items[stage] as YAMLMap).setIn(['env', 'NODE_OPTIONS'], `--import \"\${{ github.workspace }}/${CANARY_TOKEN_OBSERVER_FILE}\"`);
     steps.items.splice(stage, 0, doc.createNode({
-      name: 'Prepare own-run canary comparisons',
+      name: CANARY_PREPARE_STEP,
       run: CANARY_PREPARE,
       env: {
-        CANARY_LINEAR_SECRET: '${{ secrets.LINEAR_TEST_APP_CLIENT_SECRET }}',
+        CANARY_LINEAR_SECRET: `\${{ ${SANDBOX_NAMES['secrets.MDBISYNC_LINEAR_CLIENT_SECRET']} }}`,
         CANARY_APP_TOKEN: '${{ steps.app-token.outputs.token }}',
       },
     }));

@@ -9,7 +9,7 @@
 //   document with its own icon and color, a trashed document, a blocked one.
 // - Slice fixtures only name content the slice already has; they need no setup.
 
-import { CANARY_FILE, CANARY_FIXTURE, CANARY_KEY_ENV, canaryScript } from './security-canary.ts';
+import { CANARY_FILE, CANARY_TOKEN_OBSERVER_FILE, CANARY_TOKEN_OBSERVER, CANARY_FIXTURE, CANARY_KEY_ENV, canaryScript } from './security-canary.ts';
 import { parse, stringify } from 'yaml';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -156,6 +156,7 @@ export const SETUP_FIXTURES: Record<string, SetupFixture> = {
       config.repos.push({ repo: 'local', hooks: [{ id: 'security-canary', alias: 'security', name: 'Security canary', entry: `node ${CANARY_FILE}`, language: 'system', stages: ['pre-commit'], always_run: true, pass_filenames: false, verbose: true }] });
       await commitAsPerson(ctx, new Map([
         [CANARY_FILE, canaryScript(sha256(key))],
+        [CANARY_TOKEN_OBSERVER_FILE, CANARY_TOKEN_OBSERVER],
         ['.pre-commit-config.yaml', stringify(config)],
       ]), 'Add the security canary', true);
     },

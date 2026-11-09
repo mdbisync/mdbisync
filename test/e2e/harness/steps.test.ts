@@ -343,7 +343,7 @@ describe('workflows', () => {
 
   it('settles an Actions scenario with dispatches instead of local sync processes', async () => {
     const { ctx, remoteGit } = await fakeRun();
-    ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+    ctx.scenario = { ...ctx.scenario, mode: 'actions', setup: { ...ctx.scenario.setup, fixtures: ['actions-security-canary'] } };
     const { dispatched } = fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml' });
     await STEP_ACTIONS['run.settle']!(ctx, {});
     assert.deepEqual(dispatched, [99, 99, 99, 99], 'without a changed=false report, settle keeps dispatching to its limit');

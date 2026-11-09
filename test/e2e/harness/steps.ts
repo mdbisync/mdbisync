@@ -219,7 +219,7 @@ async function watchQuiet(ctx: RunContext, options: { throughProxy: boolean }, r
 /** Runs the sync until a run changes nothing more (at most `limit` runs). */
 async function settle(ctx: RunContext, limit = 4): Promise<void> {
   for (let attempt = 0; attempt < limit; attempt += 1) {
-    if (ctx.scenario.mode === 'actions') await workflowRun(ctx, { event: 'workflow_dispatch' });
+    if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) await workflowRun(ctx, { event: 'workflow_dispatch' });
     else await runCommand(ctx, 'sync', {});
     const last = ctx.engine.results.at(-1);
     if (last?.report?.['changed'] === false) return;

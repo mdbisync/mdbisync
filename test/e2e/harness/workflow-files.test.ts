@@ -120,7 +120,13 @@ describe('workflow templates rendered for a run', () => {
       const [job] = jobsOf(renderForRun(readTemplate(file), { ...RUN, securityCanary: true }));
       const steps = job!.steps;
       assert.deepEqual(steps.filter(step => step.uses?.startsWith(ACTION_REPOSITORY)).map(step => step.with?.['security-step']), ['stage', 'apply']);
+      assert.deepEqual((parse(renderForRun(readTemplate(file), { ...RUN, securityCanary: true })) as { on: Record<string, unknown> }).on['push'], { branches: [RUN.trackedBranch] });
+      assert.equal((job as { if?: string }).if, DISPATCH_GUARD);
+      const stage = steps.find(step => step.with?.['security-step'] === 'stage')!;
+      assert.ok(stage.env?.['NODE_OPTIONS']?.includes('security-token-observer.mjs'));
       const hook = steps.find(step => step.name === 'Run the security hooks')!;
+      assert.equal(hook.env?.['NODE_OPTIONS'], undefined);
+      assert.equal(steps.find(step => step.with?.['security-step'] === 'apply')?.env?.['NODE_OPTIONS'], undefined);
       assert.equal(hook.env?.['CANARY_HOOK_KEY'], '${{ secrets.CANARY_HOOK_KEY }}');
       assert.ok(Object.values(hook.env!).every(value => !/LINEAR|app-token/.test(value)));
       const prepare = steps.findIndex(step => step.name === 'Prepare own-run canary comparisons');

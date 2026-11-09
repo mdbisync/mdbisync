@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { CANARY_EVIDENCE, CANARY_FILE, canaryScript, canaryFacts } from '../e2e/harness/security-canary.ts';
+import { CANARY_TOKEN_OBSERVER, CANARY_TOKEN_OBSERVER_FILE, CANARY_EVIDENCE, CANARY_FILE, CANARY_HOOK_STEP, CANARY_PREPARE_STEP, canaryScript, canaryFacts, canaryIsolated } from '../e2e/harness/security-canary.ts';
 import { renderForRun } from '../e2e/harness/workflow-files.ts';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -27,7 +27,7 @@ import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-help
 
 const EXAMPLES = new URL('../../examples/', import.meta.url);
 const ACTION = 'mdbisync/mdbisync@';
-const HOOKS_STEP = 'Run the security hooks';
+const HOOKS_STEP = CANARY_HOOK_STEP;
 /** The hooks step's `run:`, which the smoke runs as the command it names. */
 const HOOKS_RUN = '"$MDBISYNC_NODE" "$MDBISYNC_HOOKS"';
 
@@ -49,7 +49,7 @@ async function templateSteps(template: string, canary = false): Promise<[Step, S
   const steps = Object.values(workflow.jobs).flatMap((job) => job.steps)
     .filter((step) => step.uses?.startsWith(ACTION) || step.name === HOOKS_STEP);
   assert.deepEqual(steps.map((step) => step.with?.['security-step'] ?? step.name), ['stage', HOOKS_STEP, 'apply'], template);
-  return [steps[0]!, steps[1]!, steps[2]!, Object.values(workflow.jobs).flatMap(job => job.steps).find(step => step.name === 'Prepare own-run canary comparisons')] as [Step, Step, Step, Step?];
+  return [steps[0]!, steps[1]!, steps[2]!, Object.values(workflow.jobs).flatMap(job => job.steps).find(step => step.name === CANARY_PREPARE_STEP)] as [Step, Step, Step, Step?];
 }
 
 /** Replaces each `${{ name }}` with its value; an expression the smoke does not know fails it. */
@@ -135,7 +135,7 @@ async function prepareJob(synced: boolean, canary = false): Promise<Job> {
     await fixture.seed({
       'docs/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n\n# Notes\n',
       'docs/plan.md': '---\ncategory: work\n---\n\nOriginal.\n',
-      ...(canary ? { [CANARY_FILE]: canaryScript(createHash('sha256').update('offline-hook-key').digest('hex')) } : {}),
+      ...(canary ? { [CANARY_TOKEN_OBSERVER_FILE]: CANARY_TOKEN_OBSERVER, [CANARY_FILE]: canaryScript(createHash('sha256').update('offline-hook-key').digest('hex')) } : {}),
       '.pre-commit-config.yaml': `repos:
   - repo: ${hooksRepo}
     rev: ${await hooks.text(['rev-parse', 'HEAD'])}
@@ -187,13 +187,16 @@ async function runTemplate(release: string, template: string, inputs: Record<str
   const defaults = (action as { inputs: Record<string, { default?: string }> }).inputs;
   // One folder per run of the template: its checkout, the runner's files, its home and its temporary directory.
   const run = await mkdtemp(join(job.fixture.root, 'run-'));
-  const workspace = (await job.fixture.clone(join(basename(run), 'workspace'))).dir;
+  const checkout = await job.fixture.clone(join(basename(run), 'workspace'));
+  await checkout.run(['checkout', '--quiet', 'main']);
+  const workspace = checkout.dir;
   const home = join(run, 'home');
   const runnerTemp = join(run, 'temp');
   await mkdir(home);
   await mkdir(runnerTemp);
   const context: Record<string, string> = {
     'runner.temp': runnerTemp,
+    'github.workspace': workspace,
     'secrets.MDBISYNC_LINEAR_CLIENT_ID': 'client',
     'secrets.MDBISYNC_LINEAR_CLIENT_SECRET': 'client-secret',
     'steps.app-token.outputs.token': 'app-token',
@@ -229,7 +232,7 @@ async function runTemplate(release: string, template: string, inputs: Record<str
     const ran: Array<{ name: string; step: Step; state: string }> = [];
     const runAction = async (name: string, step: Step) => {
       const runner = await runnerEnv(name);
-      const result = await runProcess(process.execPath, [join(release, main!)], workspace, { ...runner, ...actionInputs(step) });
+      const result = await runProcess(process.execPath, [join(release, main!)], workspace, { ...runner, ...actionInputs(step), ...Object.fromEntries(Object.entries(step.env ?? {}).map(([key, value]) => [key, expand(value, context)])) });
       assert.equal(result.status, 0, `${template} ${name}:\n${result.output}`);
       ran.push({ name, step, state: runner.GITHUB_STATE as string });
       return fileCommands(runner.GITHUB_OUTPUT as string);
@@ -252,13 +255,7 @@ async function runTemplate(release: string, template: string, inputs: Record<str
         const evidence = await readFile(join(runnerTemp, 'mdbisync-report', CANARY_EVIDENCE), 'utf8');
         const facts = canaryFacts(evidence);
         assert.ok(facts.length > 0, 'the separate hooks step did not run the canary');
-        for (const fact of facts) {
-          assert.equal(fact.hookKeyMatches, true);
-          assert.equal(fact.linearSecretMatches, false);
-          assert.equal(fact.appTokenMatches, false);
-          assert.equal(fact.linearTokenMatches, false);
-          assert.ok(!fact.environmentNames.some(name => name.startsWith('INPUT_') || name.startsWith('ACTIONS_') || name === 'CANARY_LINEAR_SECRET' || name === 'CANARY_APP_TOKEN'));
-        }
+        assert.ok(facts.every(canaryIsolated), 'the separate hooks step exposed a credential or missed its key');
         assert.ok(!evidence.includes('offline-hook-key') && !evidence.includes('client-secret') && !evidence.includes('app-token'), 'canary leaked a value');
       }
     }
