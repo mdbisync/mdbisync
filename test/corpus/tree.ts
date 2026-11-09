@@ -8,6 +8,7 @@
 // eng/edge-cases (team zone), so a reader can open the tidy part first.
 
 import { validateSha } from "../../src/release/package.ts";
+import { CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from "./check-workflow.ts";
 import { COMPANY, PROFILE_PATHS, PROFILES } from "./company.ts";
 import { gitattributes, idLine, markdownFile, relativeLink, type Canaries, type CorpusFile } from "./model.ts";
 import type { Rng } from "./rng.ts";
@@ -154,6 +155,7 @@ export function treeFiles(_rng: Rng, canaries: Canaries, hookRevision: string): 
     files.push(annotated(`${folder}/README.md`, [`linear-project: ${placeholder}`], projectReadme(folder), canaries.take()));
   }
   files.push(
+    markdownFile({ path: CHECK_WORKFLOW_PATH, content: Buffer.from(CHECK_WORKFLOW), group: "support", kind: "other", synced: false }),
     markdownFile({ path: ".gitattributes", content: Buffer.from(gitattributes()), group: "support", kind: "other", synced: false }),
     markdownFile({ path: ".pre-commit-config.yaml", content: Buffer.from(preCommitConfig(hookRevision)), group: "support", kind: "other", synced: false }),
   );

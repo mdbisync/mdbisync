@@ -12,6 +12,7 @@
 // titles start with the run id.
 
 import { runNames, type RunNames } from './isolation.ts';
+import { CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 
 export const CORPUS_DIR = 'corpus';
 export const SLICES_DIR = 'corpus-slices';
@@ -151,7 +152,7 @@ export function buildRunTree(slice: SliceList, readmes: ReadonlyMap<string, stri
   for (const folder of folders) if (folder.team !== null) teams.add(folder.team);
 
   for (const source of slice.paths) {
-    if (source.startsWith('.github/')) continue; // pushes must start no workflows
+    if (source.startsWith('.github/') && source !== CHECK_WORKFLOW_PATH) continue;
     let target = source;
     const owner = owningFolder(source, folders);
     if (owner !== null && zones.includes(owner) && source !== `${owner.folder}/README.md` && source !== 'README.md') {
