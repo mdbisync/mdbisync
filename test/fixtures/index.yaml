@@ -29,6 +29,8 @@ groups:
     title: "Images"
   - id: attachments
     title: "Attachments"
+  - id: list-items
+    title: "Links, images and tasks in list and table items"
   - id: unsynced
     title: "Unsynced files"
 rules:
@@ -602,6 +604,15 @@ assets:
     kind: txt
   - file: "assets/bundle.zip"
     kind: zip
+  - file: "assets/clip.mp4"
+    kind: mp4
+    corpus: false
+  - file: "assets/clip.mov"
+    kind: mov
+    corpus: false
+  - file: "assets/clip.webm"
+    kind: webm
+    corpus: false
 fixtures:
   - file: "construct-singles/heading-atx-h1.md"
     group: construct-singles
@@ -2310,6 +2321,100 @@ fixtures:
     class: fixable
     basis: known
     canary: kx-e1618e6f
+  - file: "list-items/video-mp4.md"
+    group: list-items
+    construct: video-in-item
+    class: unchanged
+    basis: assumed
+    canary: kx-444c259e
+    corpus: false
+    note: "a list item holding only an uploaded video link"
+  - file: "list-items/video-mov.md"
+    group: list-items
+    construct: video-in-item-mov
+    class: unchanged
+    basis: assumed
+    canary: kx-51bc20a5
+    corpus: false
+    note: "a list item holding only an uploaded QuickTime link"
+  - file: "list-items/video-webm.md"
+    group: list-items
+    construct: video-in-item-webm
+    class: unchanged
+    basis: assumed
+    canary: kx-bfe9777b
+    corpus: false
+    note: "a list item holding only an uploaded WebM link"
+  - file: "list-items/video-not-uploaded.md"
+    group: list-items
+    construct: video-in-item-relative
+    class: unchanged
+    basis: assumed
+    canary: kx-38b45170
+    corpus: false
+    missing_target: true
+    note: "sent with its relative link, as a sync without uploads sends it"
+  - file: "list-items/file-not-uploaded.md"
+    group: list-items
+    construct: attachment-in-item-relative
+    class: unchanged
+    basis: assumed
+    canary: kx-c4a90667
+    corpus: false
+    missing_target: true
+    note: "sent with its relative link, as a sync without uploads sends it"
+  - file: "list-items/image-not-uploaded.md"
+    group: list-items
+    construct: image-after-text-in-item-relative
+    class: unchanged
+    basis: assumed
+    canary: kx-1b3d6545
+    corpus: false
+    missing_target: true
+    note: "sent with its relative image, as a sync without uploads sends it"
+  - file: "list-items/image-not-uploaded-in-cell.md"
+    group: list-items
+    construct: image-in-cell-relative
+    class: unchanged
+    basis: assumed
+    canary: kx-7a154a39
+    corpus: false
+    missing_target: true
+    note: "sent with its relative image, as a sync without uploads sends it"
+  - file: "list-items/tasks-then-bullets.md"
+    group: list-items
+    construct: task-list-then-bullet-list
+    class: unchanged
+    basis: assumed
+    canary: kx-b2c987d6
+    corpus: false
+    note: "fix form of one list mixing task and plain items"
+  - file: "list-items/release-notes.md"
+    group: list-items
+    construct: corpus-release-notes
+    class: unchanged
+    basis: assumed
+    canary: kx-7b8ded8f
+    corpus: false
+    missing_target: true
+    note: "a corpus release note with a video attachment, as the sync sent it before uploads"
+  - file: "list-items/task-code.md"
+    group: list-items
+    construct: corpus-task-code
+    class: unchanged
+    basis: assumed
+    canary: kx-750b1a3b
+    corpus: false
+    missing_target: true
+    note: "a corpus edge case with tasks, an image in a list item and in a table cell, as the sync sent it before uploads"
+  - file: "list-items/task-code-uploaded.md"
+    group: list-items
+    construct: corpus-task-code-uploaded
+    class: unchanged
+    basis: assumed
+    canary: kx-734631d7
+    corpus: false
+    note: "the corpus edge case with its images uploaded"
   - file: "unsynced/script.py"
     group: unsynced
     construct: unsynced-code

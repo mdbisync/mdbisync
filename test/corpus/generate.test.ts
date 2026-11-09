@@ -160,6 +160,16 @@ test("duplicate-title fixtures are taken from the bank once, never paired by the
   }
 });
 
+test("bank fixtures and assets marked corpus: false stay out of the corpus", () => {
+  const built = corpus();
+  const index = parse(readFileSync("test/fixtures/index.yaml", "utf8")) as { fixtures: { file: string; corpus?: boolean }[]; assets: { file: string; corpus?: boolean }[] };
+  const left = [...index.fixtures, ...index.assets].filter((entry) => entry.corpus === false).map((entry) => entry.file);
+  assert.ok(left.length > 0);
+  for (const file of left) assert.ok(!built.files.some((f) => f.path === `docs/reference/${file}`), file);
+  const fixtures = index.fixtures.filter((entry) => entry.corpus === false).map((entry) => entry.file);
+  assert.deepEqual(built.manifest.excluded.filter((e) => e.reason.includes("corpus: false")).map((e) => e.file).sort(), fixtures.sort());
+});
+
 test("reference definitions count as links; footnote definitions do not", () => {
   const found = linkTargets("![Banner][banner]\n\n[banner]: ../assets/banner.png\n\nText[^1]\n\n[^1]: a note\n\n[site]: https://www.example.com\n");
   assert.deepEqual(found, [{ written: "../assets/banner.png", form: "definition" }]);
