@@ -14,7 +14,7 @@ import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, 
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
-import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
+import { type CommitIdentity, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
@@ -74,6 +74,22 @@ export interface CaptureResult {
 }
 
 const CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
+
+/**
+ * The trailer of an `ids` commit that sets the capture cursor: the next
+ * capture reads again only the documents Linear changed at or after `through`
+ * (and every document without an id).
+ */
+export function captureCursorTrailer(through: string): string {
+  return `Capture-through: ${through}`;
+}
+
+/** A document's update time in the cursor's form, so cursor times compare as text. */
+export function cursorTime(document: LinearDocument): string {
+  const time = new Date(document.updatedAt);
+  if (!Number.isFinite(time.getTime())) throw new Error('a document has an invalid update time');
+  return time.toISOString();
+}
 const HELD = /^Removal-held: (\S+)$/gm;
 
 /** The ids whose removal the last capture held, from its ids commit. */
@@ -84,9 +100,9 @@ async function readHeld(context: RunContext, state: StateSnapshot): Promise<Set<
 }
 
 /** Cursor is in ids history, so ordinary id commits by later steps cannot erase it. */
-async function readCursor(context: RunContext, state: StateSnapshot): Promise<string | null> {
-  if (state.ids === null) return null;
-  const log = await context.git.text(['log', '--format=%B', '--grep=^Capture-through:', '-1', state.ids]);
+export async function readCaptureCursor(git: Git, ids: Oid | null): Promise<string | null> {
+  if (ids === null) return null;
+  const log = await git.text(['log', '--format=%B', '--grep=^Capture-through:', '-1', ids]);
   return CURSOR.exec(log)?.[1] ?? null;
 }
 
@@ -129,7 +145,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents })) ids.set(path, entry);
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length };
     }
-    const cursor = await readCursor(context, state);
+    const cursor = await readCaptureCursor(git, state.ids);
     const entries = await listTree(git, base);
     const textEntries = entries.filter((entry) => entry.type === 'blob' && ids.has(entry.path));
     const blobs = await readBlobs(git, textEntries.map((entry) => entry.oid));
@@ -216,11 +232,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     const folderFor = (doc: LinearDocument) => folders.get(placeKeyOf(doc));
     const live = (doc: LinearDocument) => !doc.trashed && doc.archivedAt === null && (folderFor(doc) !== undefined || retained.has(doc.id));
-    const normalizedTime = (doc: LinearDocument) => {
-      const time = new Date(doc.updatedAt);
-      if (!Number.isFinite(time.getTime())) throw new Error('a document has an invalid update time');
-      return time.toISOString();
-    };
+    const normalizedTime = cursorTime;
     let selected = [...listed.values()].filter((doc) => !byId.has(doc.id) || byId.get(doc.id)?.entry.saved !== undefined || cursor === null || normalizedTime(doc) >= cursor);
     const invalidZone = (doc: LinearDocument, path: string) => {
       const zone = nearestZone(mapping.zones, folderOf(path));
@@ -433,7 +445,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // so documents sharing a timestamp or edited during pagination are not lost.
     // A place that listed nothing may have left out changes too: the cursor holds while a removal is held.
     const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
-    const trailers = [...(through === null ? [] : [`Capture-through: ${through}`]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
+    const trailers = [...(through === null ? [] : [captureCursorTrailer(through)]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
     const message = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
     // Record a held removal, and a cleared one, so the next capture reads what this one held.
     const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always: through !== cursor || held.size > 0 || heldBefore.size > 0, reserved });

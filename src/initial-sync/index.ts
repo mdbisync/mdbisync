@@ -49,6 +49,8 @@ export {
   type WriteStop,
   FINAL_IDS_MESSAGE,
   PROGRESS_BATCH,
+  keptAnnotationTrailer,
+  readKeptAnnotations,
   PROGRESS_MESSAGE,
   RECORD_MESSAGE,
   SYNC_IDENTITY,

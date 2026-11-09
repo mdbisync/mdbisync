@@ -28,7 +28,7 @@ import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
-import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, SYNC_IDENTITY, type WriteStop, placeId } from '../initial-sync/index.ts';
+import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, SYNC_IDENTITY, type WriteStop, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from '../initial-sync/transform.ts';
 import {
   type CommitIdentity,
@@ -52,7 +52,7 @@ import {
   branchRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
-import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
+import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
@@ -213,7 +213,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // The upload cache was lost (or never recorded): each document that links a file is written again with fresh
   // uploads, run after run, until one run has done them all and marks the cache complete.
   const cacheLost = await uploadsRebuilding(git, expected.uploads);
-  const nothingNew = await alreadyMerged(git, linearTip, tracked);
+  // Nothing new either right after a person merged an initial sync from Linear unchanged: recording that merge
+  // would move `linear` with nothing written (I6). A sync branch GitHub deleted on that merge comes back with the
+  // next record, as a branch a person deleted does.
+  const nothingNew = (await alreadyMerged(git, linearTip, tracked)) || (await mergedInitialRecord(git, linearTip, tracked));
   if (nothingNew && !cacheLost) {
     // Nothing to write: the capacity report can use this run's earlier listing.
     const containers = options.containers ?? await readContainers();
@@ -249,7 +252,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     }
     return undefined;
   };
-  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId });
+  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations: await readKeptAnnotations(git, expected.ids) });
   // The tracked branch has nothing new: only the documents the cache rebuild relinks are written.
   if (nothingNew) merge.changes.length = 0;
   // Anything from here may write (linked-file changes are found later too): capacity, adoption and
