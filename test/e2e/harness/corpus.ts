@@ -29,6 +29,11 @@ export interface ManifestFile {
   rule: string | null;
   basis?: 'known' | 'assumed' | null;
   macos_unsafe?: boolean;
+  /**
+   * A stable name for a file a scenario speaks of by role (for example
+   * `pdf-11mb`, `image-over-10mb`), so specs do not depend on corpus paths.
+   */
+  role?: string | null;
 }
 
 export interface Manifest {
