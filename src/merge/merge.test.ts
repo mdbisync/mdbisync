@@ -221,6 +221,19 @@ for (const [open, close] of [['<!--', '-->'], ['<pre>', '</pre>'], ['<script>', 
   });
 }
 
+for (const [name, block, added] of [
+  ['a longer closing fence with trailing spaces', '```\ndraft\n`````  ', ''],
+  ['a quoted tilde fence', '> ~~~\n> draft\n> ~~~', ''],
+  ['a shorter closing fence', '````\ndraft\n```', '\n````'],
+  ['a fence of the other character', '```\ndraft\n~~~', '\n```'],
+  ['a closing fence with text after it', '```\ndraft\n``` x', '\n```'],
+] as const) {
+  test(`EOF-terminated code: ${name}`, async () => {
+    const result = await mergeMarkdown('old\n', `${block}\n`, 'Linear\n');
+    assert.equal(result.text, conflict(`${block}${added}`, 'Linear'));
+  });
+}
+
 test('a comment that ends with --!> stays open to the parser and is closed before the framing', async () => {
   const result = await mergeMarkdown('old\n', '<!-- draft --!>\n', 'Linear\n');
   assert.equal(result.text, conflict('<!-- draft --!>\n-->', 'Linear'));

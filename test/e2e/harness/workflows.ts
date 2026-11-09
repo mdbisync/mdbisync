@@ -9,12 +9,19 @@
 // Scheduled workflows run only on the repository's default branch, and a
 // run's branches never are, so a step that needs the schedule is
 // env-blocked with that reason.
+//
+// A failed run is an environment blocker only when it is proven: its first
+// failed step installs a tool the runner must provide, and that step's own
+// log shows the shell could not find a command (exit 127) or one of the
+// errors the template's step reports for a missing prerequisite. The
+// scenario then stops at that run. Any other failure stays the run's result
+// for the scenario's checks.
 
 import { inflateRawSync } from 'node:zlib';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { CommandName } from '../../../src/commands.ts';
 import type { EngineResult } from './engine.ts';
-import { GitHubError, type SandboxRest, type WorkflowRun } from './github.ts';
+import { GitHubError, type SandboxRest, type WorkflowJob, type WorkflowRun } from './github.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 
 export const REPORT_ARTIFACT = 'mdbisync-report';
@@ -64,6 +71,8 @@ export interface WaitOptions {
   exclude?: ReadonlySet<number>;
   /** Only the run for this commit (a push run). */
   headSha?: string;
+  /** Only runs of this `.github/workflows/` file: another workflow can run on the same push. */
+  workflow?: string;
   timeoutMs?: number;
   appearMs?: number;
   pollMs?: number;
@@ -79,6 +88,7 @@ export async function waitForRun(rest: SandboxRest, options: WaitOptions): Promi
     const run = (await rest.workflowRuns(options.branch))
       .filter((candidate) => candidate.event === options.event && Date.parse(candidate.created_at) >= options.after - 5_000 && !(options.exclude?.has(candidate.id) ?? false))
       .filter((candidate) => options.headSha === undefined || candidate.head_sha === options.headSha)
+      .filter((candidate) => options.workflow === undefined || candidate.path?.split('@')[0] === `.github/workflows/${options.workflow}`)
       .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))[0];
     if (run?.status === 'completed') return run;
     seen ||= run !== undefined;
@@ -89,8 +99,77 @@ export async function waitForRun(rest: SandboxRest, options: WaitOptions): Promi
   }
 }
 
+/** Waits until a `.github/workflows/` file is in the repository's Actions registry and returns its id. */
+export async function waitForRegistration(rest: SandboxRest, file: string, options: { timeoutMs?: number; pollMs?: number } = {}): Promise<number> {
+  const started = Date.now();
+  for (;;) {
+    const id = await rest.workflowId(file);
+    if (id !== undefined) return id;
+    if (Date.now() - started > (options.timeoutMs ?? RUN_APPEAR_MS)) {
+      // Not an environment block: the registering push run should have registered it.
+      throw new Error(`${file} is not in the repository's Actions registry after its push to the run's branch; a dispatch would answer 404`);
+    }
+    await sleep(options.pollMs ?? POLL_MS);
+  }
+}
+
+/** A run's log files by name (`<job>/<number>_<step>.txt`), or none when GitHub has no logs for it. */
+export async function runLogs(rest: SandboxRest, run: WorkflowRun): Promise<Map<string, string>> {
+  try {
+    return new Map([...unzip(await rest.download(`/actions/runs/${run.id}/logs`))].map(([name, file]) => [name, file.toString('utf8')]));
+  } catch (error) {
+    if (!(error instanceof GitHubError)) throw error;
+    return new Map();
+  }
+}
+
+/** Template steps that install a tool the runner must provide before the engine starts. */
+export const PREREQUISITE_STEPS: ReadonlySet<string> = new Set(['Install pre-commit', 'Install compatible npm']);
+
+export interface RunBlocker {
+  runId: number;
+  job: string;
+  step: string;
+  /** What the runner lacked: the missing command, or the step's own prerequisite error. */
+  cause: string;
+  /** The step's log file in the run's logs. */
+  logFile: string;
+  reason: string;
+}
+
+/**
+ * A failed run's proven environment blocker, or undefined. Proven means: the
+ * run's first failed step is a prerequisite step, and its own log shows a
+ * command that was not found with exit code 127, or one of `knownErrors`
+ * (the template's prerequisite errors, as log lines). A failure anywhere
+ * else, or without that log, is not proven.
+ */
+export function environmentBlocker(run: WorkflowRun, jobs: readonly WorkflowJob[], logs: ReadonlyMap<string, string>, knownErrors: readonly string[] = []): RunBlocker | undefined {
+  if (run.conclusion !== 'failure') return undefined;
+  for (const job of jobs) {
+    const failed = [...(job.steps ?? [])].sort((a, b) => a.number - b.number).find((step) => step.conclusion === 'failure');
+    if (failed === undefined) continue;
+    if (!PREREQUISITE_STEPS.has(failed.name)) return undefined;
+    const logFile = `${job.name}/${failed.number}_${failed.name}.txt`;
+    const log = logs.get(logFile);
+    if (log === undefined) return undefined;
+    const missing = /##\[error\]Process completed with exit code 127\./.test(log) ? /: ([\w.+-]+): command not found\s*$/m.exec(log)?.[1] : undefined;
+    const cause = missing === undefined ? knownErrors.find((error) => log.includes(error))?.replace('##[error]', '') : `${missing}: command not found (exit 127)`;
+    if (cause === undefined) return undefined;
+    return {
+      runId: run.id,
+      job: job.name,
+      step: failed.name,
+      cause,
+      logFile,
+      reason: `the sandbox runner cannot run "${failed.name}": ${cause} (${run.event} run ${run.id})`,
+    };
+  }
+  return undefined;
+}
+
 /** What a finished workflow run reported, in the shape of a local engine result. */
-export async function runResult(rest: SandboxRest, run: WorkflowRun, command: CommandName): Promise<EngineResult> {
+export async function runResult(rest: SandboxRest, run: WorkflowRun, command: CommandName, logFiles?: ReadonlyMap<string, string>): Promise<EngineResult> {
   let report: Record<string, unknown> | null = null;
   let summary = '';
   const artifacts = await rest.request<{ artifacts: Array<{ id: number; name: string; expired: boolean }> }>('GET', `/actions/runs/${run.id}/artifacts`);
@@ -107,12 +186,7 @@ export async function runResult(rest: SandboxRest, run: WorkflowRun, command: Co
     }
     summary = files.get('summary.md')?.toString('utf8') ?? '';
   }
-  let logs = '';
-  try {
-    logs = [...unzip(await rest.download(`/actions/runs/${run.id}/logs`)).values()].map((file) => file.toString('utf8')).join('\n');
-  } catch (error) {
-    if (!(error instanceof GitHubError)) throw error;
-  }
+  const logs = [...(logFiles ?? await runLogs(rest, run)).values()].join('\n');
   const started = Date.parse(run.run_started_at ?? run.created_at);
   return {
     command,
@@ -138,8 +212,7 @@ export interface JobSpan {
 export async function jobSpans(rest: SandboxRest, runs: readonly WorkflowRun[]): Promise<JobSpan[]> {
   const spans: JobSpan[] = [];
   for (const run of runs) {
-    const data = await rest.request<{ jobs: Array<{ started_at: string | null; completed_at: string | null }> }>('GET', `/actions/runs/${run.id}/jobs`);
-    for (const job of data.jobs) {
+    for (const job of await rest.runJobs(run.id)) {
       if (job.started_at === null) continue;
       spans.push({ runId: run.id, started: Date.parse(job.started_at), completed: job.completed_at === null ? Date.now() : Date.parse(job.completed_at) });
     }
