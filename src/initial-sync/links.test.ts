@@ -119,7 +119,7 @@ describe('document links', () => {
     assert.equal(await transform.apply({ path: 'eng/plan.md', body: '[g](guide.md)' }), `[g](<${BASE}/id-guide>)`);
     assert.equal(await transform.apply({ path: 'eng/guide.md', body: '[p](plan.md)' }), `[p](<${BASE}/id-plan>)`);
     assert.equal(requests, 1);
-    assert.equal(transform.restore({ path: 'eng/plan.md', body: `[g](<${BASE}/id-guide>)` }), '[g](guide.md)');
+    assert.equal(transform.restore({ path: 'eng/plan.md', body: `[g](<${BASE}/id-guide>)`, kept: true }), '[g](guide.md)');
   });
 
   it("restores links in Linear's form when Linear reformatted the document, exactly as written when it kept the text", async () => {
@@ -128,10 +128,10 @@ describe('document links', () => {
     const transform = documentLinks();
     await transform.prepare?.(context);
     const written = await transform.apply({ path: 'eng/plan.md', body: '* [g](guide.md)\n* [h](./guide.md#a)' });
-    assert.equal(transform.restore({ path: 'eng/plan.md', body: written }), '* [g](guide.md)\n* [h](./guide.md#a)');
+    assert.equal(transform.restore({ path: 'eng/plan.md', body: written, kept: true }), '* [g](guide.md)\n* [h](./guide.md#a)');
     // Linear changed something else in the document: the restored text is Linear's form of the file throughout.
     const reformatted = written.replace('* ', '- ');
-    assert.equal(transform.restore({ path: 'eng/plan.md', body: reformatted }), '- [g](<guide.md>)\n* [h](<./guide.md#a>)');
+    assert.equal(transform.restore({ path: 'eng/plan.md', body: reformatted, kept: false }), '- [g](<guide.md>)\n* [h](<./guide.md#a>)');
   });
 
   it("follows Linear's form when it expands references into inline links, in their order and number", async () => {
@@ -144,7 +144,7 @@ describe('document links', () => {
     // Linear stores references as inline links and drops the definition.
     const stored = fixText(written);
     assert.equal(stored, `[web](<${BASE}/id-guide>), [again](<${BASE}/id-guide>) and [file](<${BASE}/id-guide>)`);
-    assert.equal(transform.restore({ path: 'eng/plan.md', body: stored }), fixText(body));
+    assert.equal(transform.restore({ path: 'eng/plan.md', body: stored, kept: false }), fixText(body));
   });
 
   it('round-trips every bank fixture exactly, with every bank document synchronized', () => {
