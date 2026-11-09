@@ -108,6 +108,9 @@ sides ([conflicts.md](conflicts.md)).
   description lists the files it changes, by path.
 - **Merge commits** on the tracked branch, made by the App, one for each
   merged sync pull request. The repository must allow merge commits.
+- The commits the sync makes itself, on the sync branch and its refs, have
+  the author `mdbisync` and fixed messages such as `Capture Linear changes`.
+  They name no person and quote no content.
 - The branch `mdbisync/linear` is never force-pushed. Commits a person or a
   CI job adds to it are kept and go to the tracked branch with the pull
   request; closing the pull request does not drop them, and the next run
@@ -190,8 +193,10 @@ The first line counts what step 1 took from Linear:
 > Captured 3 files; removed 1; blocked 0; left out 0.
 
 *Captured* files were changed, created, renamed, moved or restored in
-Linear; *removed* files were trashed in Linear or moved out of the
-synchronized projects; *blocked* documents got the
+Linear; *removed* paths are files whose documents were trashed in Linear or
+moved out of the synchronized projects, and the old paths of documents
+renamed or moved in Linear (a rename counts once as captured and once as
+removed); *blocked* documents got the
 [blocked mark](#the-blocked-mark); *left out* documents were not taken this
 run (`capture-translation` or `security-unchecked`,
 [files left out](troubleshooting.md#files-left-out)). Lines that follow
@@ -204,7 +209,7 @@ only when they apply:
 | Capture partial, will continue | [`stopped` and `linear-failed`](troubleshooting.md#partial-sync-runs) |
 | Content is pushed unchecked | [The blocked mark](#the-blocked-mark) and the `security-hooks` warning of the [setup check](troubleshooting.md#setup-check) |
 | `linear-content-too-large-to-write-back` | [Other summary lines](troubleshooting.md#other-summary-lines) |
-| Capture did not finish; no tracked-branch changes were written. | The run stopped in step 1; the lines above say why. |
+| Capture did not finish; no tracked-branch changes were written. | The run stopped in step 1. Either Linear stopped it or failed a request (the lines above say so), or another run moved the state refs while this one captured ([`state-moved`](troubleshooting.md#partial-sync-runs)). |
 
 ### Linear to the tracked branch
 
@@ -260,11 +265,15 @@ document cap or more ([`container-cap`](troubleshooting.md#container-cap)).
 
 ### How the run ends
 
-A finished run succeeds. A partial run (Linear stopped it, a request or a
-write failed, a state ref moved, a removal is held) ends with a warning,
-`sync: partial, will continue (<code>)`: it kept what it could record, and
-the next run goes on from there. Anything that needs a person (a failed
-check on the sync pull request, an initial sync waiting to be merged, the
-setup check, a full container) fails the run.
+A finished run succeeds. A partial run ends with a warning,
+`sync: partial, will continue (<code>)`: Linear stopped it, a request to
+Linear or a write failed, a state ref moved while it captured or wrote, or
+a removal is held. It kept what it could record, and the next run goes on
+from there. A run fails when it needs a person (the setup check, a failed
+check on the sync pull request, a merge GitHub refuses again, an initial
+sync waiting to be merged, a full container), and also when only the sync
+pull request step did not finish (`sync: not finished (<code>); run it
+again`, for `state-moved` or `github-failed` there): the next run tries
+again.
 [Last lines](troubleshooting.md#last-lines) gives every last line and exit
 code.

@@ -23,7 +23,9 @@ const flatSource = (path: string) => read(path).replace(/\s+/g, ' ');
 function codes(path: string, member: RegExp): string[] {
   const line = read(path).split('\n').find((text) => member.test(text));
   assert.ok(line !== undefined, `${path}: ${member}`);
-  return [...line.matchAll(/'([a-z-]+)'/g)].map((match) => match[1]!);
+  const found = [...line.matchAll(/'([a-z-]+)'/g)].map((match) => match[1]!);
+  assert.ok(found.length > 0, `${path}: no code literals on the line of ${member}`);
+  return found;
 }
 
 /** GitHub's anchors for the headings outside code fences: lowercase, punctuation dropped, spaces as hyphens. */
@@ -50,6 +52,15 @@ describe('the sync cycle page', () => {
   it('names the run steps in the order the code runs them', () => {
     const steps = [...page.matchAll(/^\d\. \*\*([^*]+)\*\*/gm)].map((match) => match[1]);
     assert.deepEqual(steps, ['Setup check.', 'Capture.', 'Linear to git.', 'Git to Linear, computed.', 'Write.', 'Record.']);
+    // The cycle calls its steps in that order: capture, the sync pull request, then steps 3 to 5.
+    const cycle = read('src/sync/cycle.ts');
+    const calls = ['await capture(', 'await syncPullRequest(', 'await writeTrackedToLinear('].map((call) => cycle.indexOf(call));
+    assert.ok(calls.every((at) => at >= 0), 'the cycle calls every step');
+    assert.deepEqual([...calls].sort((a, b) => a - b), calls, 'the cycle calls the steps in the page order');
+    // Steps 3 to 5 in the write step, in the same order: merge locally, write, record.
+    const write = read('src/sync/write.ts');
+    const inner = ['mergeLocally(', 'MERGE_RECORD_MESSAGE'].map((name) => write.indexOf(name, write.indexOf('export async function writeTrackedToLinear')));
+    assert.ok(inner.every((at) => at >= 0) && inner[0]! < inner[1]!, 'the write step merges before it records');
   });
 
   it('names the sync pull request and the blocked mark as the code makes them', () => {
@@ -98,28 +109,25 @@ describe('the sync cycle page', () => {
     assert.ok(read('src/run/capacity.ts').includes("'### Container document capacity'"));
   });
 
-  it('leaves the skip reasons and partial codes to troubleshooting.md, which spells them as the code does', () => {
+  it('leaves the skip reasons to troubleshooting.md, which words them as the summary does', () => {
+    // That page's own test checks that every code is there; this checks the words the "Skipped" table uses.
     const troubleshooting = read('docs/troubleshooting.md');
     for (const [reason, text] of Object.entries(SKIP_REASONS)) {
       assert.ok(troubleshooting.includes(`| \`${reason}\` | ${text[0]!.toUpperCase()}${text.slice(1)}. |`), `the reason ${reason}`);
     }
     assert.ok(flat.includes(`\`sync: ${PARTIAL} (<code>)\``), 'the partial message');
-    const partial = [...codes('src/sync/capture.ts', /^ {2}code\?: 'state-moved'/), ...codes('src/sync/write.ts', /^ {2}code\?: 'stopped'/), 'removal-held'];
-    for (const code of new Set(partial)) assert.match(troubleshooting, new RegExp(`^\\| \`${code}\` \\|`, 'm'), code);
   });
 
   it('is linked from the README, usage.md and conflicts.md, and its links land on headings', () => {
     assert.ok(read('README.md').includes(`](${PAGE})`), 'README');
     assert.ok(read('docs/usage.md').includes('](sync-cycle.md)'), 'usage.md');
     assert.ok(read('docs/conflicts.md').includes('](sync-cycle.md#the-run-summary)'), 'conflicts.md');
-    const targets: Record<string, Set<string>> = {
-      '': anchors(page),
-      'usage.md': anchors(read('docs/usage.md')),
-      'conflicts.md': anchors(read('docs/conflicts.md')),
-      'troubleshooting.md': anchors(read('docs/troubleshooting.md')),
-    };
-    const links = [...page.matchAll(/\]\(((?:usage|conflicts|troubleshooting)\.md)?#([^)]+)\)/g)];
+    // Every relative link: to a page next to this one, with or without an anchor, or to a heading of this page.
+    const links = [...page.matchAll(/\]\(([a-z0-9-]+\.md)?(?:#([^)]+))?\)/g)].filter(([, file, anchor]) => file !== undefined || anchor !== undefined);
     assert.ok(links.length > 10);
-    for (const [, file, anchor] of links) assert.ok(targets[file ?? '']!.has(anchor!), `${file}#${anchor}`);
+    for (const [, file, anchor] of links) {
+      const target = file === undefined ? page : read(`docs/${file}`);
+      if (anchor !== undefined) assert.ok(anchors(target).has(anchor), `${file ?? ''}#${anchor}`);
+    }
   });
 });
