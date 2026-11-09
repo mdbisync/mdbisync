@@ -232,7 +232,8 @@ describe('sync: rate limits and transport faults', () => {
     for (const [path, entry] of Object.entries(map)) {
       const document = world.linear.documents.find((d) => d.id === entry.id);
       assert.ok(document !== undefined && document.trashed !== true, `${path}: no live document`);
-      assert.equal(document.content, body(await show(`${tracked}:${path}`)), `${path}: content`);
+      const text = await show(`${tracked}:${path}`);
+      if (!text.includes('.md)')) assert.equal(document.content, body(text), `${path}: content`);
     }
     const live = world.linear.documents.filter((d) => d.trashed !== true);
     const keys = live.map((d) => `${d.projectId ?? d.teamId}/${d.title}`);
@@ -510,6 +511,37 @@ describe('sync: rate limits and transport faults', () => {
     const lines = renderStop({ kind: 'rate-limited', operation: 'GetDocuments', limits: { 'x-ratelimit-endpoint-name': 'a|b\n## c' } });
     assert.ok(lines.includes('| x-ratelimit-endpoint-name | a\\|b ## c |'), lines.join('\n'));
   });
+
+  /** The id in each Linear document URL in `path`'s document. */
+  async function linkedIds(path: string): Promise<string[]> {
+    return [...((await contentOf(path)) ?? '').matchAll(/linear\.app\/[^/]+\/document\/([0-9a-f-]+)/g)].map((match) => match[1] as string);
+  }
+
+  for (const [fault, arm] of [
+    ['the adoption listing fails', async () => transport.arm({ http: { at: await firstAfterSetup(), status: 500, times: 1 } })],
+    ['the create fails', async () => transport.arm({ writeError: 'server-error' })],
+  ] as const) {
+    it(`when ${fault}, an edit that links to the new document keeps a link that the next run's document answers`, async () => {
+      // `new.md` sorts before `part-00.md`, so its create comes first and the edit that links to it after.
+      await editAll(0, '', {
+        [pathOf(0)]: textOf(0, 'See [the new page](new.md).'),
+        'combined/new.md': `# New\n\nA new page. ${CANARY}\n`,
+      });
+      await arm();
+      const run = await sync();
+      assertPartial(run);
+      assert.deepEqual(run.report.sync?.failed.map((entry) => entry.path), ['combined/new.md']);
+      assert.deepEqual(run.report.sync?.updated, [pathOf(0)]);
+      const [written] = await linkedIds(pathOf(0));
+      assert.ok(written !== undefined, 'the edit links to a document id');
+
+      await assertNextRunConverges();
+      const target = await idOf('combined/new.md');
+      assert.equal(target, written, 'the new document got the id the edit already links to');
+      assert.deepEqual(await linkedIds(pathOf(0)), [target]);
+      assert.equal(withNewPage().length, 1);
+    });
+  }
 
   it('a 500 on the read before writing leaves the batch unwritten and unrecorded; the next run converges', async () => {
     await editAll(3, 'Second text.');

@@ -612,6 +612,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const parents = merged ? [linearTip as Oid, tracked] : [linearTip as Oid];
     const message = merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE;
     const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: true });
+    // A new document this run did not create (its create failed or was refused, the listing for adoption failed, or the
+    // run stopped first) keeps the id it was given: documents written in this run may already link to it.
+    for (const change of notDone) if (change.kind === 'create') nextReserved.set(change.path, documentIds.get(change.path) as string);
     for (const path of nextIds.keys()) nextReserved.delete(path);
     const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved });
     const uploadsCommit = expected.uploads === null && uploads.size === 0 ? null : await commitUploads(git, expected.uploads, uploads, identity);
