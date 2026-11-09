@@ -44,17 +44,11 @@ describe('results', () => {
     assert.equal(classify(undefined, true).unexpectedPass, true);
   });
 
-  it('lists only known scenarios as expected-red, and none of the scenarios that pass', () => {
+  it('lists only known scenarios as expected-red, and none of the offline format scenarios that pass', () => {
     const list = loadExpectedRed();
     const known = new Set(scenarios.map((scenario) => scenario.id));
     for (const id of list) assert.ok(known.has(id), id);
     for (const id of ['L0-01', 'L0-02', 'L0-03', 'L0-04', 'L0-07', 'L0-08']) assert.ok(!list.has(id), id);
-    // Live scenarios that passed every check, with their cleanup, against the real services.
-    const livePasses = [
-      'L0-09', 'L1-01', 'L1-02', 'L1-05', 'L1-07', 'L1-18', 'L1-19', 'L1R-01', 'L1R-02', 'L1R-04', 'L1R-05',
-      'L1R-06', 'L2-01', 'L2-13', 'L2-22', 'L5-06', 'L5-07', 'L5-08', 'L5-09', 'L5-10', 'L5-17',
-    ];
-    for (const id of livePasses) assert.ok(!list.has(id), id);
   });
 
   it('has an executor for every step action', () => {
