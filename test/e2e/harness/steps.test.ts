@@ -17,13 +17,14 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { assertionHolds, bodyOf, compare, differingPaths, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
-import { offlineInput } from './offline.ts';
+import { bodyOf, compare, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
+import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
 import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, installHooks, PERSON, personCommit, Sandbox } from './sandbox.ts';
-import { engineEntry, type EngineResult } from './engine.ts';
+import { engineEntry, REPO_ROOT, type EngineResult } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { waitForCheck } from './check-fault.ts';
@@ -395,10 +396,26 @@ describe('oracles', () => {
       const input = offlineInput(name);
       const bom = [...input.files].find(([path]) => path.endsWith('typography-scripts/bom.md'));
       assert.ok(bom !== undefined, `the ${name} input has the byte order mark fixture`);
-      assert.ok(bom[1].startsWith('﻿'), `the ${name} input keeps the mark in the file`);
-      assert.equal(input.golden.get(bom[0]), bodyOf(bom[1]), `the ${name} oracle is the file's body, as fix.output is`);
-      assert.ok(!input.golden.get(bom[0])?.startsWith('﻿'), `the ${name} oracle has no mark`);
+      const [path, text] = bom;
+      assert.ok(text.startsWith('\uFEFF'), `the ${name} input keeps the mark in the file`);
+      assert.ok(!input.golden.get(path)?.startsWith('\uFEFF'), `the ${name} oracle has no mark`);
+      // What L0-02 and L0-07 compare: the fixed file's body, as the engine sends it, against the oracle.
+      const dir = fresh('mds-bom-');
+      writeInput(dir, new Map([[path, text]]));
+      assert.ok([0, 1].includes(runFormatCommand('fix', dir).status ?? -1));
+      assert.equal(bodyOf(readInput(dir, [path]).get(path) ?? ''), input.golden.get(path), `the ${name} oracle is what fix gives`);
     }
+    // The live oracle reads the same form: the recorded one keeps the mark the probe sent.
+    const bank = loadBank(join(REPO_ROOT, BANK_DIR));
+    const fixture = bank.fixtures.find((candidate) => candidate.file === 'typography-scripts/bom.md');
+    assert.ok(fixture !== undefined);
+    assert.equal(engineForm(bank, fixture, readFixture(bank, fixture)), bodyOf(readFixture(bank, fixture)));
+  });
+
+  it('name the paths a failed comparison of path maps differs at in the check\'s reason', async () => {
+    const ctx = { observations: new Map<string, unknown>([['fix.output', new Map([['b.md', 'kept'], ['a.md', 'private text']])], ['golden.linearForm', new Map([['b.md', 'kept'], ['a.md', 'other']])]]) } as unknown as RunContext;
+    assert.deepEqual(await evaluateAssertion(ctx, { subject: 'fix.output', operator: 'same-as', expected: 'golden.linearForm' }), { holds: false, reason: 'same-as did not hold: differs at a.md' });
+    assert.deepEqual(await evaluateAssertion(ctx, { subject: 'fix.output', operator: 'equal', expected: 3 }), { holds: false, reason: 'equal did not hold' });
   });
 
   it('name the paths a failed same-as differs at, a few at most and never their content', () => {
@@ -1363,7 +1380,7 @@ describe('linear executors', () => {
     const held = new Map<string, boolean>();
     for (const assertion of scenario.checks.assertions) {
       if (subjects !== undefined && !subjects.includes(assertion.subject)) continue;
-      held.set(assertion.subject, await assertionHolds(ctx, assertion));
+      held.set(assertion.subject, (await evaluateAssertion(ctx, assertion)).holds);
     }
     return held;
   }

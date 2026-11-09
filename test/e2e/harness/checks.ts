@@ -268,14 +268,10 @@ export function budgetHolds(requests: number, documentsWritten: number, runs: nu
   return requests <= 1.5 * documentsWritten + 5 * runs;
 }
 
-/** Whether a spec assertion holds now; `same-as` compares with the subject its `expected` names. */
-export async function assertionHolds(ctx: RunContext, assertion: Assertion): Promise<boolean> {
-  return (await evaluateAssertion(ctx, assertion)).holds;
-}
-
 /**
- * Evaluates a spec assertion: whether it holds and, when it does not, the
- * reason. A failed `same-as` over two path maps names the differing paths.
+ * Whether a spec assertion holds now and, when it does not, the reason;
+ * `same-as` compares with the subject its `expected` names. A failed
+ * comparison of two path maps names the differing paths.
  */
 export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): Promise<{ holds: true } | { holds: false; reason: string }> {
   const actual = await resolveSubject(ctx, assertion.subject);
@@ -287,20 +283,20 @@ export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): 
     expected = other.value;
   }
   if (compare(assertion.operator, actual.value, expected)) return { holds: true };
-  const paths = assertion.operator === 'same-as' ? differingPaths(actual.value, expected) : undefined;
+  const paths = differingPaths(actual.value, expected);
   return { holds: false, reason: `${assertion.operator} did not hold${paths === undefined ? '' : `: ${paths}`}` };
 }
 
 /**
  * The keys at which two path maps differ (on one side only, or with other
- * values), sorted: the first few and how many more. Keys only, never values,
- * so a report names paths and no document content (I5). Undefined unless
- * both sides are maps that differ.
+ * values), in the order `compare` sees them: the first few and how many
+ * more. Keys only, never values, so a report names paths and no document
+ * content (I5). Undefined unless both sides are maps that differ.
  */
 export function differingPaths(actual: unknown, expected: unknown, shown = 5): string | undefined {
   if (!(actual instanceof Map) || !(expected instanceof Map)) return undefined;
   const same = (key: unknown) => actual.has(key) && expected.has(key) && JSON.stringify(normalize(actual.get(key))) === JSON.stringify(normalize(expected.get(key)));
-  const differing = [...new Set([...actual.keys(), ...expected.keys()])].filter((key) => !same(key)).map(String).sort();
+  const differing = [...new Set([...actual.keys(), ...expected.keys()])].filter((key) => !same(key)).map(String).sort((a, b) => a.localeCompare(b));
   if (differing.length === 0) return undefined;
   const more = differing.length - shown;
   return `differs at ${differing.slice(0, shown).join(', ')}${more > 0 ? ` and ${more} more` : ''}`;

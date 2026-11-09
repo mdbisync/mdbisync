@@ -29,7 +29,7 @@ import type { LinearDocument } from '../../../src/linear/index.ts';
 import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, type Git } from '../../../src/state/index.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
-import { BANK_DIR, goldenMarkdownPath, loadBank, readFixture, readOptional } from '../../probe/bank.ts';
+import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
 import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
@@ -716,8 +716,8 @@ export const SUBJECTS: Record<string, Compute> = {
     return linearForms(new Map(groupPaths(env.ctx, 'typography-scripts').map((path) => [path, fileBody(view, path) ?? ''])));
   },
   'golden.linearForm': async (env) => {
-    // The form Linear keeps of every synchronized file: a bank fixture's recorded form while the
-    // file is the fixture's own text, else what the normalizer makes of it, without front matter.
+    // The form Linear keeps of every synchronized file: a bank fixture's form as the engine sends it
+    // while the file is the fixture's own text, else what the normalizer makes of it, without front matter.
     const view = await env.view();
     const bank = loadBank(join(REPO_ROOT, BANK_DIR));
     const fixtures = new Map(bank.fixtures.map((fixture) => [fixture.file, fixture]));
@@ -725,7 +725,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const result = new Map<string, string>();
     for (const [path, text] of view.files) {
       const fixture = path.startsWith(`${BANK_HOME}/`) ? fixtures.get(path.slice(BANK_HOME.length + 1)) : undefined;
-      const recorded = fixture !== undefined && readFixture(bank, fixture) === text ? readOptional(join(bank.dir, goldenMarkdownPath(fixture.file))) : undefined;
+      const recorded = fixture !== undefined && readFixture(bank, fixture) === text ? engineForm(bank, fixture, text) : undefined;
       result.set(path, recorded ?? bodyOf(fixed.get(path) ?? text));
     }
     return result;

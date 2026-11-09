@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
+import { splitFile } from '../../src/format/markdown.ts';
 
 export const BANK_DIR = 'test/fixtures';
 /** The probe's record of the last accepted run: fixed points and refusals per fixture. */
@@ -62,6 +63,18 @@ export function readFixture(bank: Bank, fixture: BankFixture): string {
 
 /** The text the sync writes to Linear for a file: without its front matter. */
 export { sentForm } from '../fixtures/check-index.mjs';
+
+/**
+ * The form Linear keeps of a fixture's text as the engine sends it: an
+ * unchanged fixture's body by the engine's rule (no byte order mark, no front
+ * matter), else the fixture's recorded form, if the probe recorded one. A
+ * recorded form holds what the probe sent, byte order mark included, and the
+ * engine never sends the mark. The bank's own check keeps an unchanged
+ * fixture's recorded form equal to its sent text.
+ */
+export function engineForm(bank: Bank, fixture: BankFixture, text: string): string | undefined {
+  return fixture.class === 'unchanged' ? splitFile(text).body : readOptional(join(bank.dir, goldenMarkdownPath(fixture.file)));
+}
 
 export function readOptional(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
