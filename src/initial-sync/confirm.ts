@@ -55,6 +55,7 @@ import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments }
 import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from './transform.ts';
+import { withRecorded } from '../sync/recorded.ts';
 
 /** The subject of an `ids` commit made while an initial sync is still writing. */
 export const PROGRESS_MESSAGE = INITIAL_SYNC_PROGRESS;
@@ -196,10 +197,13 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     return { plan, result };
   }
 
+  /** Each remembered document's id and update time, as Linear returned it or listed it. */
+  const updatedAt = new Map<string, { id: string; time: string }>();
   const remember = (path: string, document: LinearDocument) => {
     const before = previous.get(path);
     ids.set(path, before !== undefined && before.id === document.id && before.saved !== undefined ? { id: document.id, saved: before.saved } : { id: document.id });
     stored.set(path, document.content ?? '');
+    updatedAt.set(path, { id: document.id, time: document.updatedAt });
   };
 
   let unpushed = 0;
@@ -431,9 +435,17 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const stillReserved = new Map(
       result.leftOutAtWrite.filter(({ path }) => created.has(path)).map(({ path }) => [path, documentIds.get(path) as string]),
     );
+    // The record holds what Linear returned for each document written or found holding its body: the first
+    // capture need not read those again. One a resumed run skipped was not read, so it is read again.
+    const recorded = new Map(
+      [...result.created, ...result.overwritten, ...result.unchanged].flatMap((path) => {
+        const seen = updatedAt.get(path);
+        return seen === undefined ? [] : [[seen.id, seen.time] as const];
+      }),
+    );
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
       reserved: stillReserved,
-      message: FINAL_IDS_MESSAGE,
+      message: withRecorded(FINAL_IDS_MESSAGE, recorded),
       always: (await readInitialSyncProgress(git, expected.ids)) !== null,
     });
     const uploadsCommit = await commitUploads(git, expected.uploads, uploads, identity);

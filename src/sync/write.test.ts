@@ -97,12 +97,15 @@ describe('sync: the tracked branch to Linear', () => {
     return { result, report, summary, graphql, writes: world.writes.slice(writesBefore) };
   }
 
-  // Mutate after capture's content read, before the next Linear request in write.
+  // Mutate after the capture, before the next Linear request in write. The capture lists the documents, then reads
+  // the content of those that changed since the record, if any: a run whose record holds them all reads none.
   const afterCapture = (change: () => void) => {
+    let listed = false;
     let read = false;
     world.linear.beforeQuery = (operation, variables) => {
-      if (read) { delete world.linear.beforeQuery; change(); }
-      else if (operation === 'GetDocuments' && variables.withContent === true) read = true;
+      if (!listed) listed = operation === 'ListDocuments';
+      else if (!read && operation === 'GetDocuments' && variables.withContent === true) read = true;
+      else { delete world.linear.beforeQuery; change(); }
     };
   };
 
@@ -692,10 +695,13 @@ describe('sync: the tracked branch to Linear', () => {
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.sync?.skipped, []);
-    assert.deepEqual(kinds(writes), ['UpdateDocument']);
-    assert.equal(world.linear.uploads.length, uploadsBefore, 'capture recovered the cached bytes without another upload');
-    assert.deepEqual(uploadUrls((await documentOf('eng/notes/figure.md')).content), [previousUrl]);
-    assert.ok((await show('refs/mdbisync/uploads:uploads.json')).includes(previousUrl));
+    // The capture does not read the figure again: the record holds it as Linear does. Its image is not in the
+    // cache, so it is uploaded once more, and the cache records the new upload.
+    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+    assert.equal(world.linear.uploads.length, uploadsBefore + 1);
+    const [url] = uploadUrls((await documentOf('eng/notes/figure.md')).content);
+    assert.ok(url !== undefined && url !== previousUrl, 'the figure does not link the new upload');
+    assert.ok((await show('refs/mdbisync/uploads:uploads.json')).includes(url));
     assert.ok((await show('refs/mdbisync/linear:eng/notes/figure.md')).includes('../media/diagram.png'));
   });
 

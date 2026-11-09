@@ -54,6 +54,7 @@ import {
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
+import { withRecorded } from './recorded.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
 export const PARTIAL_RECORD_MESSAGE = "Sync: Linear's state, part of the tracked branch taken in";
@@ -336,7 +337,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   }
 
   /** What Linear stores now for each path whose document this run wrote, with the body sent for it. */
-  const stored = new Map<string, { content: string; sent: string }>();
+  const stored = new Map<string, { content: string; sent: string; id: string; updatedAt: string }>();
   const nextIds: IdMap = new Map(ids);
   // A file that moved and kept its title, place and text (a renamed project folder): Linear needs nothing, the id map follows the file.
   for (const change of merge.unchanged) {
@@ -680,7 +681,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     if (holds) {
       // Linear already holds the change: written by a run that stopped before recording it, or kept back by a partial record.
       if (patch.content !== undefined) {
-        stored.set(change.to, { content: document.content ?? '', sent: patch.content });
+        stored.set(change.to, { content: document.content ?? '', sent: patch.content, id: document.id, updatedAt: document.updatedAt });
         readBack = document;
       }
     } else {
@@ -688,7 +689,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       const updated = await timed(() => linear.updateDocument(change.id, patch));
       // Without a content write the merge result's file stands: Linear holds its body already.
       if (patch.content !== undefined) {
-        stored.set(change.to, { content: updated.content ?? '', sent: patch.content });
+        stored.set(change.to, { content: updated.content ?? '', sent: patch.content, id: updated.id, updatedAt: updated.updatedAt });
         readBack = updated;
       }
     }
@@ -725,7 +726,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });
       await checkpoint('document-created-before-ids-push');
     }
-    stored.set(change.path, { content: document.content ?? '', sent: body });
+    stored.set(change.path, { content: document.content ?? '', sent: body, id: document.id, updatedAt: document.updatedAt });
     nextIds.set(change.path, { id: document.id });
     result.created.push(change.path);
     await reconcileMark(change.path, document);
@@ -752,7 +753,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       return linear.updateDocument(removed.id, { content: body, title: file.title.normalize('NFC'), ...placePatch(file.place) });
     });
     result.restored.push(change.path);
-    stored.set(change.path, { content: document.content ?? '', sent: body });
+    stored.set(change.path, { content: document.content ?? '', sent: body, id: document.id, updatedAt: document.updatedAt });
     nextIds.set(change.path, { id: document.id });
     await reconcileMark(change.path, document);
     return true;
@@ -875,7 +876,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const message = merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE;
     const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: true });
     for (const path of nextIds.keys()) nextReserved.delete(path);
-    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved });
+    // The record holds each written document as Linear returned it: the next capture need not read it again.
+    const asWritten = new Map([...stored.values()].map(({ id, updatedAt }) => [id, updatedAt]));
+    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: withRecorded(IDS_MESSAGE, asWritten), reserved: nextReserved, always: asWritten.size > 0 });
     // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the
     // documents to relink, before they are changes) leaves the rest to the next run.
     const rebuilt = cacheLost && merged && result.stopped === undefined ? { message: UPLOADS_REBUILT, always: true } : {};
