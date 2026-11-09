@@ -162,3 +162,5 @@ Commit only the IDs, never the source catalog itself. Schema validation rejects
 unknown fields, actions, kinds, modes, slices, missing invariants, empty steps
 or assertions, and the absence of any required proposed rule. Coverage validation
 rejects missing, extra, duplicate and misnamed specs and duplicate catalog IDs.
+
+HTTP faults default to GraphQL. `fault.http` accepts `operation` to select an exact operation name; `requestNumber` counts only matching requests after arming. Use `target: "oauth"` explicitly to fault the token exchange instead.

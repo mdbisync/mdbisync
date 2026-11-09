@@ -18,7 +18,9 @@ import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
-import { withoutDocuments } from './fault-proxy.ts';
+import { GraphQLTransport } from '../../../src/linear/transport.ts';
+import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
+import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
 import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, installHooks, PERSON, personCommit, Sandbox } from './sandbox.ts';
 import { engineEntry } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
@@ -1343,6 +1345,64 @@ describe('I6 requires a completed no-change sync', () => {
       assert.match(outcome.detail ?? '', new RegExp(`expected one result.*recorded ${resultCount}`));
     } finally {
       STEP_ACTIONS['run.sync'] = original!;
+    }
+  });
+});
+
+describe('GraphQL HTTP fault scenario', () => {
+  it('runs L5-07 OAuth setup and injects ListDocuments with exactly one real transport retry', async () => {
+    const { ctx } = await fakeRun();
+    const forwarded: string[] = [];
+    const proxy = await startFaultProxy('https://api.example.test', { fetch: async (input) => {
+      const path = new URL(String(input)).pathname;
+      forwarded.push(path);
+      return Response.json(path === '/oauth/token'
+        ? { access_token: 'test-access-token', expires_in: 3600, scope: 'read,write' }
+        : path === '/oauth/revoke' ? { success: true } : { data: { ok: true } });
+    } });
+    ctx.proxy = proxy;
+    const query = 'query ListDocuments { documents { nodes { id } } }';
+    try {
+      const scenario = scenarios.find((item) => item.id === 'L5-07')!;
+      const setup = new GraphQLTransport({ baseUrl: proxy.url, token: 'setup-token' });
+      await setup.request('ListDocuments', 'query', query);
+      ctx.observations.set('start.proxyIndex', proxy.requests.length);
+      await runStep(ctx, scenario.steps[0]!);
+      const token = await mintAppToken({ clientId: 'test-id', clientSecret: 'test-secret' }, { baseUrl: proxy.url });
+      const attempts: number[] = [];
+      const sleeps: number[] = [];
+      const transport = new GraphQLTransport({
+        baseUrl: proxy.url, token: token.accessToken,
+        hooks: { beforeRequest: (info) => { attempts.push(info.attempt); } },
+        sleep: async (ms) => { sleeps.push(ms); },
+      });
+      assert.deepEqual(await transport.request('ListDocuments', 'query', query), { ok: true });
+      await revokeToken(token.accessToken, { baseUrl: proxy.url });
+      ctx.observations.set('scenario.proxyEnd', proxy.requests.length);
+      assert.deepEqual(attempts, [1, 2]);
+      assert.deepEqual(sleeps, [1000]);
+      assert.deepEqual(proxy.requests.slice(1).map(({ operation, status, injected }) => ({ operation, status, injected })), [
+        { operation: 'http /oauth/token', status: 200, injected: false },
+        { operation: 'ListDocuments', status: 429, injected: true },
+        { operation: 'ListDocuments', status: 200, injected: false },
+        { operation: 'http /oauth/revoke', status: 200, injected: false },
+      ]);
+      assert.deepEqual(forwarded, ['/graphql', '/oauth/token', '/graphql', '/oauth/revoke']);
+      for (const assertion of scenario.checks.assertions.filter((item) => item.subject.startsWith('http.') || item.subject === 'proxy.injectedOperations')) {
+        assert.deepEqual(await resolveSubject(ctx, assertion.subject), { known: true, value: assertion.expected });
+      }
+      // An invariant's later normal run cannot turn a missing retry into a pass.
+      proxy.setFaults([{ kind: 'http', status: 429, requestNumber: 1, retryAfterSeconds: 1, times: 1 }]);
+      await transport.request('ListDocuments', 'query', query);
+      assert.deepEqual(await resolveSubject(ctx, 'http.retryCount'), { known: true, value: 1 });
+      ctx.observations.set('scenario.proxyEnd', 3);
+      assert.deepEqual(await resolveSubject(ctx, 'http.retryCount'), { known: true, value: 0 });
+      await assert.rejects(runStep(ctx, { kind: 'fault', action: 'http', args: { status: 429, target: 'unknown' } }), /unknown HTTP fault target/);
+      await assert.rejects(runStep(ctx, { kind: 'fault', action: 'http', args: { status: 500, target: 'oauth', operation: 'oauth.token' } }), /OAuth faults cannot select/);
+      await runStep(ctx, { kind: 'fault', action: 'http', args: { status: 500, target: 'oauth' } });
+      await assert.rejects(mintAppToken({ clientId: 'test-id', clientSecret: 'test-secret' }, { baseUrl: proxy.url }), /HTTP 500/);
+    } finally {
+      await proxy.close();
     }
   });
 });

@@ -504,10 +504,11 @@ const RUN: Record<string, Executor> = {
       if (outcome === 'success') {
         await runCommand(ctx, 'sync', {});
       } else if (outcome === 'failure') {
-        // A run that fails after it has its token: every request after the third answers 500.
-        proxy.setFaults([{ kind: 'http', status: 500, requestNumber: 3, retryAfterSeconds: null, times: 10_000 }]);
+        // Fail document listing after token setup, leaving revocation available.
+        proxy.setFaults([{ kind: 'http', operation: 'ListDocuments', status: 500, requestNumber: 1, retryAfterSeconds: null, times: 10_000 }]);
         try {
           await runCommand(ctx, 'sync', {});
+          if (ctx.engine.results.at(-1)?.exitCode === 0) throw new Error('the token failure run unexpectedly succeeded');
         } finally {
           proxy.clearFaults();
         }
@@ -1295,8 +1296,12 @@ const FAULT: Record<string, Executor> = {
     for (const restore of ctx.engine.restores.splice(0).reverse()) await restore();
   },
   'fault.http': async (ctx, args) => {
+    if (args.target !== undefined && args.target !== 'graphql' && args.target !== 'oauth') throw new Error('unknown HTTP fault target');
+    if (args.target === 'oauth' && args.operation !== undefined) throw new Error('OAuth faults cannot select a GraphQL operation');
     http(ctx).setFaults([{
       kind: 'http',
+      target: args.target === 'oauth' ? 'oauth' : 'graphql',
+      ...(typeof args.operation === 'string' ? { operation: args.operation } : {}),
       status: Number(args.status),
       requestNumber: typeof args.requestNumber === 'number' ? args.requestNumber : 1,
       retryAfterSeconds: typeof args.retryAfterSeconds === 'number' ? args.retryAfterSeconds : null,
