@@ -33,7 +33,6 @@ import { REPO_ROOT, engineEntry } from './engine.ts';
 import { isAppBot } from './workflows.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { documentPaths, projectFolders } from './step-helpers.ts';
-import { linearPart } from './offline.ts';
 import { UNSAFE_TITLES } from './fixtures.ts';
 
 // --- views of the world ---------------------------------------------------------------
@@ -636,7 +635,7 @@ export const SUBJECTS: Record<string, Compute> = {
     for (const [path, text] of view.files) {
       const fixture = path.startsWith(`${BANK_HOME}/`) ? fixtures.get(path.slice(BANK_HOME.length + 1)) : undefined;
       const recorded = fixture !== undefined && readFixture(bank, fixture) === text ? readOptional(join(bank.dir, goldenMarkdownPath(fixture.file))) : undefined;
-      result.set(path, recorded ?? linearPart(fixed.get(path) ?? text));
+      result.set(path, recorded ?? stripFrontMatter(fixed.get(path) ?? text));
     }
     return result;
   },

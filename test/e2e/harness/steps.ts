@@ -26,7 +26,7 @@ import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, postEntry, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
-import { fixableSample, hashes, linearPart, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
+import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { burst, realClock, soak, type LoadDriver } from './load.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { commitStaged, HARNESS, personCommit } from './sandbox.ts';
@@ -130,7 +130,7 @@ async function offlineFormat(ctx: RunContext, command: 'lint' | 'fix', args: Rec
     const output = readInput(dir, input.files.keys());
     if (pass === 0) {
       // Compared with Linear's recorded form, a file counts without its front matter, which stays in git.
-      const reaching = new Map([...output].filter(([path]) => input.golden.has(path)).map(([path, text]) => [path, linearPart(text)]));
+      const reaching = new Map([...output].filter(([path]) => input.golden.has(path)).map(([path, text]) => [path, stripFrontMatter(text)]));
       ctx.observations.set('fix.output', args.input === 'lint-errors' ? only(output) : reaching);
       ctx.observations.set('fix.validOutput', reaching);
       ctx.observations.set('fix.first.bytes', hashes(output));
