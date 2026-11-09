@@ -196,9 +196,12 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
 - After opening the pull request or moving its branch, a run waits up to
   `merge-grace-seconds` (default `60`, range `0`–`120`) for the head's check
   runs and commit statuses. When every check has finished and passed, it
-  merges with a merge commit in the same run. With no checks, it waits for
-  15 seconds of continuously absent checks to allow CI to register first.
+  merges with a merge commit in the same run after at least 15 seconds for
+  CI registration. With no checks, it waits for 15 seconds of continuously
+  absent checks to allow CI to register first.
   Checks still running at the deadline leave the merge to a later run.
+  Grace periods of 15 seconds or less defer merging because they leave no
+  time for a check observation after registration settles.
   Set `merge-grace-seconds: 0` to always defer a new head's merge to a later
   run. The CLI uses `MDBISYNC_MERGE_GRACE_SECONDS`. Later runs read an
   unchanged head's checks once, without waiting. A moved head cannot merge

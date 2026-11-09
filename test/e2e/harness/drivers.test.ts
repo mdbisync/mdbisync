@@ -98,6 +98,7 @@ describe('engine driver', () => {
     assert.equal(env['MDBISYNC_LINEAR_API_URL'], 'http://127.0.0.1:1');
     assert.equal(env['MDBISYNC_DIRECTION'], 'git-to-linear');
     assert.equal(env['MDBISYNC_CONFIRM'], 'true');
+    assert.equal(env['MDBISYNC_MERGE_GRACE_SECONDS'], '0');
   });
 
   it('recognizes a command that answers "not implemented", and only that', async () => {

@@ -14,7 +14,7 @@ import { type RunReport } from '../run/finish.ts';
 import { type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
-import { SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
+import { DEFAULT_MERGE_GRACE_SECONDS, SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
 import { CHECK_NAME } from '../../test/corpus/check-workflow.ts';
 
 const CANARY = 'kx-3c9d1e72';
@@ -153,6 +153,11 @@ describe('sync: the sync pull request', () => {
   const checksOn = (sha: string, checks: FakeCheck[]) => world.github.checks?.set(sha, checks);
   const openPullRequests = () => world.github.pullRequests.filter((pr) => pr.state === 'open');
 
+  it('keeps action and CLI merge-grace defaults aligned', async () => {
+    const action = await readFile('action.yml', 'utf8');
+    assert.match(action, new RegExp(`merge-grace-seconds:[\\s\\S]*?default: \"${DEFAULT_MERGE_GRACE_SECONDS}\"`));
+  });
+
   it('merges a new pull request in the same run after checks pass', async () => {
     await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
     const transport = fakeFetch(world);
@@ -163,7 +168,7 @@ describe('sync: the sync pull request', () => {
       }
       return transport(input, init);
     };
-    const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '10' });
+    const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '25' });
     assert.equal(run.result.exitCode, 0, run.result.stderr);
     assert.deepEqual(run.writes, ['POST /pulls', 'PUT /pulls/1/merge']);
     assert.ok(run.report.pullRequest?.merged);
@@ -184,7 +189,7 @@ describe('sync: the sync pull request', () => {
       }
       return transport(input, init);
     };
-    const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '1' });
+    const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '25' });
     assert.equal(run.result.exitCode, 0, run.result.stderr);
     assert.equal(run.report.pullRequest?.branchMoved, true);
     assert.ok(run.report.pullRequest?.merged);
@@ -205,6 +210,7 @@ describe('sync: the sync pull request', () => {
       assert.equal(run.report.pullRequest?.merged, null);
       assert.equal(await rev('refs/heads/main'), start);
       if (failed) assert.equal(run.report.pullRequest?.code, 'check-failed');
+      else assert.match(run.summary, /Waiting for `ci`/);
     }
   });
 
@@ -235,7 +241,7 @@ describe('sync: the sync pull request', () => {
       }
       return transport(input, init);
     };
-    const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '10' });
+    const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '25' });
     assert.equal(run.report.pullRequest?.merged, null);
     assert.equal(run.report.pullRequest?.code, 'merge-refused');
     assert.equal(await rev('refs/heads/main'), start);

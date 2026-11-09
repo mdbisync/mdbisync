@@ -75,7 +75,8 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
 
 /**
  * A new head gets a bounded wait for CI, polling every five seconds. No
- * checks must hold for fifteen seconds to allow CI registration.
+ * checks must hold for fifteen seconds to allow CI registration. Registered
+ * checks also get at least fifteen seconds before green can permit a merge.
  * The deadline also bounds HTTP requests; expiration always leaves the PR open.
  */
 export async function waitForChecks(
@@ -84,7 +85,8 @@ export async function waitForChecks(
   seconds: number,
   clock = { now: () => performance.now(), sleep: (ms: number) => sleep(ms) },
 ): Promise<CheckState> {
-  const deadline = clock.now() + seconds * 1000;
+  const started = clock.now();
+  const deadline = started + seconds * 1000;
   const signal = AbortSignal.any([AbortSignal.timeout(seconds * 1000), ...(target.signal ? [target.signal] : [])]);
   let emptySince: number | null = null;
   let last: CheckState = { state: 'pending', failed: [], pending: [], hasChecks: false };
@@ -94,7 +96,7 @@ export async function waitForChecks(
     try {
       last = await readChecks({ ...target, signal }, sha);
     } catch (error) {
-      if (signal.aborted && error instanceof PullRequestError) break;
+      if (signal.aborted && !target.signal?.aborted && error instanceof PullRequestError) break;
       throw error;
     }
     const now = clock.now();
@@ -102,7 +104,7 @@ export async function waitForChecks(
     if (now >= deadline) break;
     if (last.hasChecks) emptySince = null;
     else emptySince ??= now;
-    if (last.state === 'passed' && (last.hasChecks || (emptySince !== null && now - emptySince >= 15_000))) return last;
+    if (now - started >= 15_000 && last.state === 'passed' && (last.hasChecks || (emptySince !== null && now - emptySince >= 15_000))) return last;
     await clock.sleep(Math.min(5000, deadline - now));
   }
   return { ...last, state: 'pending' };

@@ -127,10 +127,22 @@ describe('waitForChecks', () => {
     const result = await waitForChecks(repo, SHA, seconds, clock);
     return { result, elapsed, world };
   }
-  it('merges eligibility as soon as a registered check passes within the grace', async () => {
+  it('allows green checks to merge only after the registration minimum', async () => {
     const { result, elapsed } = await scenario(ms => ms < 10_000 ? [{ name: 'ci', status: 'in_progress' }] : [passing]);
     assert.equal(result.state, 'passed');
-    assert.equal(elapsed, 10_000);
+    assert.equal(elapsed, 15_000);
+  });
+  it('waits for a later workflow when an early check is already green', async () => {
+    const { result, elapsed } = await scenario(ms => [passing, ...(ms >= 10_000 ? [{ name: 'tests', status: ms < 20_000 ? 'queued' as const : 'completed' as const, conclusion: 'success' }] : [])]);
+    assert.equal(result.state, 'passed');
+    assert.equal(elapsed, 20_000);
+    assert.equal((await scenario(() => [passing], 10)).result.state, 'pending');
+  });
+  it('propagates caller cancellation instead of treating it as the grace deadline', async () => {
+    const { repo } = target([]);
+    const controller = new AbortController();
+    const fetcher: typeof fetch = async () => { controller.abort(); throw new DOMException('cancelled', 'AbortError'); };
+    await assert.rejects(waitForChecks({ ...repo, fetch: fetcher, signal: controller.signal }, SHA, 60), PullRequestError);
   });
   it('bounds a pending check and its request count, including when the grace is shorter than a poll', async () => {
     for (const seconds of [1, 60, 120]) {

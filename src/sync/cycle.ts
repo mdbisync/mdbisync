@@ -48,8 +48,8 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   const changed = captured.changed.length > 0 || captured.removed.length > 0 || captured.blocked.length > 0;
   if (!captured.ok) return {complete:false, changed, trackedTip, capture:captured};
   await checkpoint('after-capture-push-before-pr');
-  // Pending checks do not hold up steps 3 to 5. A failed check needs a
-  // configuration fix first, so leave Linear untouched by the write step.
+  // After the bounded grace, pending checks still allow steps 3 to 5. A
+  // failed check needs a configuration fix first, so leave Linear untouched.
   const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds });
   // Writing Linear from the tracked branch while that pull request waits would leave it to be merged over the new state.
   if (pullRequest.code === 'initial-pull-request-pending' || pullRequest.code === 'check-failed') return { complete: false, changed, trackedTip, capture: captured, pullRequest };

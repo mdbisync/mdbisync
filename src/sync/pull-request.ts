@@ -40,6 +40,8 @@ import {
   pushAtomic,
 } from '../state/index.ts';
 
+export const DEFAULT_MERGE_GRACE_SECONDS = 60;
+
 export const SYNC_PULL_REQUEST_TITLE = 'Changes from Linear';
 /** The message of a merge of `linear` into the sync branch. */
 export const SYNC_BRANCH_MERGE_MESSAGE = "Merge Linear's latest changes";
@@ -182,7 +184,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     });
     result.pullRequest = { number: pullRequest.number, url: pullRequest.url, opened };
     const fresh = result.branchMoved || opened;
-    const grace = options.mergeGraceSeconds ?? 60;
+    const grace = options.mergeGraceSeconds ?? DEFAULT_MERGE_GRACE_SECONDS;
     if (fresh && grace === 0) return result;
     result.checks = fresh ? await waitForChecks(github, head, grace) : await readChecks(github, head);
     if (result.checks.state === 'failed') return { ...result, code: 'check-failed' };
@@ -347,8 +349,8 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     default:
       if (result.merged !== null) lines.push('Merged the sync pull request with a merge commit: every check on its head passed.');
       else if (pr === null) lines.push('The tracked branch already holds every change from Linear: no pull request is needed.');
-      else if (pr.opened) lines.push(`Opened the sync pull request ${link}. A later run merges it when every check on its head has passed.`);
-      else if (result.branchMoved) lines.push(`Added new Linear changes to the sync pull request ${link}. A later run merges it when every check on its head has passed.`);
+      else if (pr.opened) lines.push(`Opened the sync pull request ${link}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : 'A later run merges it when every check on its head has passed.'}`);
+      else if (result.branchMoved) lines.push(`Added new Linear changes to the sync pull request ${link}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : 'A later run merges it when every check on its head has passed.'}`);
       else lines.push(`The sync pull request ${link} waits for ${names(result.checks?.pending) || 'its checks'}; a later run merges it.`);
   }
   if (result.paths.length > 0) lines.push('', `Files it changes on the tracked branch: ${result.paths.length}.`);
