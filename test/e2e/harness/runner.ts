@@ -2,6 +2,7 @@
 // starting state, the steps, the checks, and cleanup in a `finally` step.
 // Workers run scenarios in parallel; the governor admits each one.
 
+import { collectCanaryEvidence } from './checks.ts';
 import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -411,7 +412,11 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   mkdirSync(runDir, { recursive: true });
   const registration = registerRun(deps.stateDir, runId);
   const heartbeat = setInterval(() => registration.heartbeat(), 60_000);
-  const log = (line: string) => deps.log(`${scenario.id} ${runId}: ${line}`);
+  const logLines: string[] = [];
+  const log = (line: string) => {
+    logLines.push(line);
+    deps.log(`${scenario.id} ${runId}: ${line}`);
+  };
   let person: Git | undefined;
   let hooksInstalled = false;
   let engineDir: string | undefined;
@@ -512,6 +517,16 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   } catch (caught) {
     error = caught;
   } finally {
+    // Capture output before cleanup removes remote pull requests and comments,
+    // even when a step or assertion failed. Persist collection errors as errors.
+    {
+      try {
+        const evidence = await collectCanaryEvidence(ctx, { summariesOnly: false });
+        writeFileSync(join(runDir, 'canary-evidence.json'), JSON.stringify(evidence));
+      } catch {
+        writeFileSync(join(runDir, 'canary-evidence.json'), JSON.stringify({ canaries: [], texts: {}, error: 'could not collect remote output' }));
+      }
+    }
     if (heldForUi) {
       registration.hold(Date.now() + UI_HOLD_MS);
       cleanupOutcome = { ok: true, detail: 'kept for the UI session; the sweeper removes it after the hold' };
@@ -547,6 +562,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   }
   const outcome = classify(error, deps.expectedRed.has(scenario.id));
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
+  writeFileSync(join(runDir, 'harness.log'), logLines.join('\n'));
   return {
     id: scenario.id,
     level: levelOf(scenario.id),

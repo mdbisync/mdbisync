@@ -536,7 +536,7 @@ export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documen
 }
 
 /** Canary tokens of the run's slice in run logs and summaries and, unless `summariesOnly`, in pull request texts and Linear comments. */
-export async function canaryScan(ctx: RunContext, options: { summariesOnly: boolean }): Promise<CanaryHit[]> {
+export async function collectCanaryEvidence(ctx: RunContext, options: { summariesOnly: boolean }) {
   const world = ctx.live;
   const canaries = new Set<string>();
   if (world !== null) {
@@ -545,6 +545,8 @@ export async function canaryScan(ctx: RunContext, options: { summariesOnly: bool
     for (const file of contentCanaries(world.manifest.files)) if (sources.has(file.path)) canaries.add(file.canary);
   }
   const texts = new Map<string, string>();
+  const cleanupLog = ctx.observations.get('cleanup.output');
+  if (!options.summariesOnly && typeof cleanupLog === 'string') texts.set('cleanup stdout/stderr', cleanupLog);
   ctx.engine.results.forEach((result, index) => {
     texts.set(`run ${index} summary`, result.summary);
     if (options.summariesOnly) return;
@@ -567,7 +569,12 @@ export async function canaryScan(ctx: RunContext, options: { summariesOnly: bool
       }
     }
   }
-  return scanCanaries(texts, canaries);
+  return { canaries: [...canaries], texts: Object.fromEntries(texts) };
+}
+
+export async function canaryScan(ctx: RunContext, options: { summariesOnly: boolean }): Promise<CanaryHit[]> {
+  const evidence = await collectCanaryEvidence(ctx, options);
+  return scanCanaries(new Map(Object.entries(evidence.texts)), evidence.canaries);
 }
 
 async function trackedTip(ctx: RunContext): Promise<string | undefined> {
@@ -593,7 +600,7 @@ export async function commentsOf(
   for (;;) {
     const data: {
       documents: {
-        nodes: Array<{ id: string; project: { id: string } | null; comments: { nodes: Array<{ body: string }> } }>;
+        nodes: Array<{ id: string; project: { id: string } | null; comments: { nodes: Array<{ body: string }>; pageInfo?: { hasNextPage: boolean; endCursor: string | null } } }>;
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
       };
     } = await client.request(
@@ -601,14 +608,28 @@ export async function commentsOf(
       'query',
       `query RunComments($filter: DocumentFilter, $after: String) {
         documents(first: ${COMMENT_DOCUMENTS_PER_PAGE}, after: $after, filter: $filter) {
-          nodes { id project { id } comments(first: ${COMMENTS_PER_DOCUMENT}) { nodes { body } } }
+          nodes { id project { id } comments(first: ${COMMENTS_PER_DOCUMENT}) { nodes { body } pageInfo { hasNextPage endCursor } } }
           pageInfo { hasNextPage endCursor }
         }
       }`,
       { filter, after },
     );
     for (const document of data.documents.nodes) {
-      result.push({ id: document.id, inProject: document.project !== null, bodies: document.comments.nodes.map((comment) => comment.body) });
+      const bodies = document.comments.nodes.map((comment) => comment.body);
+      let page = document.comments.pageInfo;
+      while (page?.hasNextPage) {
+        if (!page.endCursor) throw new Error('comment pagination has no cursor');
+        const more = await client.request<{
+          document: { comments: { nodes: Array<{ body: string }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } };
+        }>('RunCommentPage', 'query', `query RunCommentPage($id: String!, $after: String!) {
+          document(id: $id) { comments(first: ${COMMENTS_PER_DOCUMENT}, after: $after) {
+            nodes { body } pageInfo { hasNextPage endCursor }
+          } }
+        }`, { id: document.id, after: page.endCursor });
+        bodies.push(...more.document.comments.nodes.map((comment) => comment.body));
+        page = more.document.comments.pageInfo;
+      }
+      result.push({ id: document.id, inProject: document.project !== null, bodies });
     }
     if (!data.documents.pageInfo.hasNextPage) return result;
     after = data.documents.pageInfo.endCursor;

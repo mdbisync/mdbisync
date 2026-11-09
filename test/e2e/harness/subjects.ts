@@ -16,6 +16,7 @@
 // A subject that none of these knows is a harness gap; the scenario-set
 // test keeps that list empty.
 
+import { scanNight } from './night-scan.ts';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -1279,7 +1280,13 @@ export const SUBJECTS: Record<string, Compute> = {
     const report = ownResults(env.ctx).at(-1)?.report;
     return reportField(report, 'securityHooks') !== undefined && setupChecksOf(report).some((check) => check.name === 'security-hooks');
   },
-  'scan.canaryMatches': async (env) => sorted(new Set((await canaryScan(env.ctx, { summariesOnly: false })).map((hit) => hit.source))),
+  'scan.canaryMatches': async (env) => {
+    const root = process.env['MDBISYNC_CANARY_EVIDENCE_ROOT'];
+    if (!root) throw new Error('all-run-evidence scan needs MDBISYNC_CANARY_EVIDENCE_ROOT');
+    const previous = scanNight(root);
+    const current = await canaryScan(env.ctx, { summariesOnly: false });
+    return sorted(new Set([...previous.matches, ...current].map((hit) => hit.source)));
+  },
   'hook.fixes': async (env) => {
     const { path } = await target(env);
     const view = await env.view();
@@ -1330,6 +1337,7 @@ export const SUBJECTS: Record<string, Compute> = {
     'probe.firstReadback', 'probe.secondReadback', 'probe.drift',
     // run.workflow-parallel (L4-10)
     'workflows.maxActiveInGroup',
+    'tokens.activeBeforeCleanup', 'tokens.activeAfterCleanup',
   ].map((name): [string, Compute] => [name, async (env) => observed(env.ctx, name)])),
 
   // --- after the UI session's steps (L6) -----------------------------------------------------
