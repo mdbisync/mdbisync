@@ -3,6 +3,7 @@
 // The result says, per synchronized path, what Linear must change so that
 // it holds the merge result: a write, a rename or move, a create or a trash.
 
+import { readAnnotation } from '../mapping/index.ts';
 import { lintText, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
@@ -144,7 +145,17 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     else unchanged.push(change);
   }
   for (const path of resultSide.files.keys()) {
-    if (!claimed.has(path) && !conflicted.has(path)) changes.push({ kind: 'create', path });
+    if (!claimed.has(path) && !conflicted.has(path)) {
+      const file = resultSide.files.get(path)!;
+      const previous = linearSide.files.get(path);
+      // Capture keeps an annotation-only carrier after its document leaves.
+      // It is repository configuration, not a request to recreate that document.
+      if ((path === 'README.md' || path.endsWith('/README.md')) && previous !== undefined && body(previous.oid) === '' && body(file.oid) === '') {
+        const annotation = readAnnotation(path, (blobs.get(file.oid) as Buffer).toString('utf8'));
+        if ('annotation' in annotation && annotation.annotation !== null) continue;
+      }
+      changes.push({ kind: 'create', path });
+    }
   }
   changes.sort((a, b) => compare(changePath(a), changePath(b)));
 

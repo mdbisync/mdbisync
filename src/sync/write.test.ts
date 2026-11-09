@@ -95,6 +95,15 @@ describe('sync: the tracked branch to Linear', () => {
     return { result, report, summary, graphql, writes: world.writes.slice(writesBefore) };
   }
 
+  // Mutate after capture's content read, before the next Linear request in write.
+  const afterCapture = (change: () => void) => {
+    let read = false;
+    world.linear.beforeQuery = (operation, variables) => {
+      if (read) { delete world.linear.beforeQuery; change(); }
+      else if (operation === 'GetDocuments' && variables.withContent === true) read = true;
+    };
+  };
+
   const sync = (extra: Record<string, string> = {}) => cli('sync', extra);
 
   /** Commits as a person: files to write (null removes) and moves, then pushes to the tracked branch. */
@@ -349,8 +358,7 @@ describe('sync: the tracked branch to Linear', () => {
 
   it('a document edited in Linear since the capture is not overwritten; the record is an ordinary commit', async () => {
     const document = await documentOf('eng/notes/review.md');
-    document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}`;
-    touch(document);
+    afterCapture(() => { document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}`; touch(document); });
     const previous = await rev('refs/mdbisync/linear');
     await commit({
       'eng/notes/review.md': `# Review\n\nEdited in git. ${CANARY}\n`,
@@ -402,7 +410,7 @@ describe('sync: the tracked branch to Linear', () => {
 
   it('a document created by a run that died before recording its id is adopted by its title, not created twice', async () => {
     await commit({ 'combined/faq.md': `# FAQ\n\nAnswers. ${CANARY}\n` });
-    world.linear.documents.push({ id: 'orphan', title: 'faq', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# FAQ\n\nAnswers. ${CANARY}\n` });
+    afterCapture(() => world.linear.documents.push({ id: 'orphan', title: 'faq', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# FAQ\n\nAnswers. ${CANARY}\n` }));
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(writes, []);
@@ -411,7 +419,7 @@ describe('sync: the tracked branch to Linear', () => {
     await assertConverged();
   });
 
-  const uploadUrls = (text: string | null | undefined) => [...(text ?? '').matchAll(/https:\/\/uploads\.linear\.test\/[^)\s]+/g)].map((match) => match[0]);
+  const uploadUrls = (text: string | null | undefined) => [...(text ?? '').matchAll(/https:\/\/uploads\.linear\.app\/[^)\s]+/g)].map((match) => match[0]);
   /** Upload requests, single or batched, whatever the operation is called. */
   const isUpload = (write: string) => /^FileUpload/.test(write);
   const kinds = (writes: string[]) => writes.map((write) => (isUpload(write) ? 'upload' : write));
@@ -527,6 +535,8 @@ describe('sync: the tracked branch to Linear', () => {
   });
 
   it('with the upload cache lost, an edited document with an image is written, not taken for a Linear edit', async () => {
+    const previousUrl = uploadUrls((await documentOf('eng/notes/figure.md')).content)[0]!;
+    const uploadsBefore = world.linear.uploads.length;
     const empty = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: '{}\n' });
     const tree = await fixture.remote.text(['mktree'], { input: `100644 blob ${empty}\tuploads.json\n` });
     const lost = await fixture.remote.text(['commit-tree', tree, '-p', 'refs/mdbisync/uploads', '-m', 'Cache lost'], {
@@ -537,7 +547,11 @@ describe('sync: the tracked branch to Linear', () => {
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.sync?.skipped, []);
-    assert.deepEqual(kinds(writes), ['upload', 'UpdateDocument']);
+    assert.deepEqual(kinds(writes), ['UpdateDocument']);
+    assert.equal(world.linear.uploads.length, uploadsBefore, 'capture recovered the cached bytes without another upload');
+    assert.deepEqual(uploadUrls((await documentOf('eng/notes/figure.md')).content), [previousUrl]);
+    assert.ok((await show('refs/mdbisync/uploads:uploads.json')).includes(previousUrl));
+    assert.ok((await show('refs/mdbisync/linear:eng/notes/figure.md')).includes('../media/diagram.png'));
   });
 
   it('a write Linear rejects is listed, and the run exits to be run again', async () => {
@@ -572,8 +586,7 @@ describe('sync: the tracked branch to Linear', () => {
 
   it('a document moved to another project in Linear since the capture is not moved or trashed by git', async () => {
     const document = await documentOf('eng/notes/review.md');
-    document.projectId = 'project-archive';
-    touch(document);
+    afterCapture(() => { document.projectId = 'project-archive'; touch(document); });
     await commit({ 'eng/notes/review.md': null });
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
@@ -621,7 +634,20 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
-  it('a left-out file fixed in git does not overwrite an edit made in Linear while it was left out', async () => {
+  it('a left-out file fixed in git does not overwrite an edit made in Linear after capture', async () => {
+    const document = await documentOf('eng/notes/review.md');
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
+    assert.deepEqual((await sync()).writes, []);
+    afterCapture(() => { document.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}\n`; touch(document); });
+    await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed in git. ${CANARY}\n` });
+    const { result, report, writes } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'edited-in-linear' }]);
+    assert.match(document.content ?? '', /Typed in Linear meanwhile/);
+  });
+
+  it('an edit of an excluded file made before capture is recorded and conflicts with a different git fix', async () => {
     const document = await documentOf('eng/notes/review.md');
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings.[^1] ${CANARY}\n\n[^1]: A note.\n` });
     assert.deepEqual((await sync()).writes, []);
@@ -631,7 +657,9 @@ describe('sync: the tracked branch to Linear', () => {
     const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(writes, []);
-    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'edited-in-linear' }]);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'conflict' }]);
+    assert.ok(report.capture?.changed.includes('eng/notes/review.md'));
+    assert.match(await show('refs/mdbisync/linear:eng/notes/review.md'), /Typed in Linear meanwhile/);
     assert.match(document.content ?? '', /Typed in Linear meanwhile/);
   });
 
@@ -795,7 +823,7 @@ describe('sync: the tracked branch to Linear', () => {
 
   it('a document trashed in Linear since the capture is not written; the run says so', async () => {
     const document = await documentOf('eng/notes/review.md');
-    document.trashed = true;
+    afterCapture(() => { document.trashed = true; touch(document); });
     await commit({ 'eng/notes/review.md': `# Review\n\nEdited in git. ${CANARY}\n` });
     const { result, report, writes, summary } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);

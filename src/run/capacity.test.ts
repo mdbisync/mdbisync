@@ -32,9 +32,22 @@ describe('container document capacity', () => {
   });
   afterEach(() => fixture.cleanup());
   const refs = () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
-  async function run(command = 'initial-sync', confirm = false, cap = '10', fetchOverride?: typeof fetch) {
+  async function run(command = 'initial-sync', confirm = false, cap = '10', fetchOverride?: typeof fetch, beforeCapacity?: () => void) {
     const reportFile = join(fixture.root, 'report.json');
-    const result = await runCli([command], { cwd, fetch: fetchOverride ?? fakeFetch(world), env: {
+    let refsBeforeWrite: string | undefined;
+    const normal = fetchOverride ?? fakeFetch(world);
+    const request: typeof fetch = async (url, init) => {
+      if (command === 'sync' && refsBeforeWrite === undefined && String(url).endsWith('/graphql')) {
+        const query = JSON.parse(String(init?.body)) as {operationName?:string; variables?:{filter?:{or?:unknown}}};
+        // Capture lists all places together; the writer then reads each container.
+        if (query.operationName === 'ListDocuments' && query.variables?.filter?.or === undefined) {
+          refsBeforeWrite = await refs();
+          beforeCapacity?.();
+        }
+      }
+      return normal(url, init);
+    };
+    const result = await runCli([command], { cwd, fetch: request, env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '',
       MDBISYNC_LINEAR_CLIENT_ID: 'client-id', MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
       MDBISYNC_LINEAR_API_URL: LINEAR_API, MDBISYNC_GITHUB_TOKEN: 'gh-token',
@@ -42,7 +55,7 @@ describe('container document capacity', () => {
       MDBISYNC_REPORT_FILE: reportFile, MDBISYNC_DOCUMENT_CAP: cap,
       MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: String(confirm),
     } });
-    return { ...result, report: JSON.parse(await readFile(reportFile, 'utf8')) as RunReport };
+    return { ...result, refsBeforeWrite, report: JSON.parse(await readFile(reportFile, 'utf8')) as RunReport };
   }
   function populate(count: number) {
     for (const place of [{ teamId: 'team-eng' }, { projectId: 'project-api' }]) {
@@ -102,7 +115,6 @@ describe('container document capacity', () => {
       assert.equal((await run('initial-sync', true)).exitCode, 0);
       populate(count);
       await fixture.seed({ 'eng/new.md': '# New\n', 'eng/notes/new.md': '# New\n' });
-      const before = await refs();
       const writesBefore = world.writes.length;
       const result = await run('sync');
       assert.equal(result.exitCode, blocked ? INCOMPLETE_EXIT_CODE : 0, result.stderr);
@@ -111,8 +123,10 @@ describe('container document capacity', () => {
       if (blocked) {
         assert.equal(result.report.code, 'container-cap');
         assert.deepEqual(world.writes.slice(writesBefore), []);
-        assert.equal(await refs(), before);
-        assert.equal(result.report.changed, false);
+        assert.equal(await refs(), result.refsBeforeWrite, 'the capacity stop must leave the captured state untouched');
+        assert.equal(result.report.changed, true, 'capture records the newly observed live documents');
+        assert.equal(result.report.capture?.changed.length, 2);
+        assert.equal(result.report.sync?.record, null);
       } else {
         assert.match(result.stdout, /Warning: a container is within 10%/);
         assert.equal(result.report.writtenCount, 2);
@@ -126,7 +140,10 @@ describe('container document capacity', () => {
     const warning = await run('sync');
     assert.equal(warning.exitCode, 0, warning.stderr);
     assert.match(warning.stdout, /Warning: a container is within 10%/);
-    assert.equal(warning.report.changed, false);
+    assert.equal(warning.report.changed, true, 'the new live documents were captured');
+    assert.equal(warning.report.capture?.changed.length, 2);
+    assert.equal(warning.report.writtenCount, 0);
+    assert.equal(warning.report.sync?.record, null);
     assert.ok(warning.report.capacity.every((c) => c.total === 9 && c.planned === 0));
     world.linear.documents.push({ id: 'extra-a', teamId: 'team-eng', title: 'Extra A', trashed: true, createdAt: '2026-01-01T00:00:00Z' },
       { id: 'extra-b', teamId: 'team-eng', title: 'Extra B', trashed: true, createdAt: '2026-01-01T00:00:00Z' });
@@ -151,11 +168,11 @@ describe('container document capacity', () => {
     it(`a failed capacity read ${rateLimited ? 'reports a rate-limit stop' : 'reports an API failure'} before writing`, async () => {
       assert.equal((await run('initial-sync', true)).exitCode, 0);
       await fixture.seed({ 'eng/new.md': '# New\n' });
-      const before = await refs();
       const writesBefore = world.writes.length;
       const normal = fakeFetch(world);
       const failedRead: typeof fetch = async (url, init) => {
-        if (String(url).endsWith('/graphql') && String(init?.body).includes('ListDocuments')) {
+        const query = String(url).endsWith('/graphql') ? JSON.parse(String(init?.body)) : undefined;
+        if (query?.operationName === 'ListDocuments' && query.variables?.filter?.or === undefined) {
           return new Response(JSON.stringify({ errors: [{ message: 'Request refused', extensions: { code: rateLimited ? 'RATELIMITED' : 'FORBIDDEN' } }] }), {
             status: rateLimited ? 429 : 400, headers: { 'content-type': 'application/json', 'retry-after': '60' },
           });
@@ -168,16 +185,17 @@ describe('container document capacity', () => {
       assert.equal(result.report.changed, false);
       assert.equal(result.report.complete, false);
       assert.equal(world.writes.length, writesBefore);
-      assert.equal(await refs(), before);
+      assert.equal(await refs(), result.refsBeforeWrite, 'a failed capacity read must not publish writer state');
       assert.equal(world.revoked, 2);
     });
   }
   it('does not count an adopted document as an additional create', async () => {
     assert.equal((await run('initial-sync', true)).exitCode, 0);
     populate(8);
-    world.linear.documents.push({ id: 'unrecorded', teamId: 'team-eng', title: 'new', content: '# New\n', createdAt: '2026-01-01T00:00:00Z' });
     await fixture.seed({ 'eng/new.md': '# New\n' });
-    const result = await run('sync');
+    const result = await run('sync', false, '10', undefined, () => {
+      world.linear.documents.push({ id: 'unrecorded', teamId: 'team-eng', title: 'new', content: '# New\n', createdAt: '2026-01-01T00:00:00Z' });
+    });
     assert.equal(result.exitCode, 0, result.stderr);
     const team = result.report.capacity.find((c) => c.place.kind === 'team');
     assert.equal(team?.planned, 0);

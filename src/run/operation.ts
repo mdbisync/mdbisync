@@ -4,6 +4,7 @@
 // the state; from Linear it records the state and opens the pull request a
 // person merges. `sync` runs one sync cycle.
 
+import { type CaptureResult } from '../sync/capture.ts';
 import {
   type ConfirmedResult,
   type PlanReport,
@@ -36,6 +37,7 @@ export interface OperationOutcome extends PreflightOutcome {
   reverse?: ReverseResult;
   /** What a sync run wrote and recorded. */
   sync?: CycleResult;
+  captured?: CaptureResult;
 }
 
 export async function runOperation(
@@ -82,7 +84,7 @@ export async function runOperation(
     }
   };
   const syncCycle = async (context: RunContext) => {
-    sync = await runSyncCycle(context, { config: inputs.state, documentCap: inputs.documentCap, transforms });
+    sync = await runSyncCycle(context, { config: inputs.state, documentCap: inputs.documentCap, transforms, ...(options.fetch ? { fetch: options.fetch } : {}) });
     workSummary = renderSync(sync);
   };
 
@@ -103,6 +105,9 @@ export async function runOperation(
   if (workSummary !== '') outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;
   if (confirmed !== undefined) outcome.confirmed = confirmed;
   if (reverse !== undefined) outcome.reverse = reverse;
-  if (sync !== undefined) outcome.sync = sync;
+  if (sync !== undefined) {
+    outcome.sync = sync;
+    outcome.captured = sync.capture;
+  }
   return outcome;
 }

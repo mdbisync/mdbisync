@@ -55,7 +55,7 @@ export interface FakeUpload {
 }
 
 /** Where the fake's asset URLs point. */
-export const UPLOADS_HOST = 'https://uploads.linear.test';
+export const UPLOADS_HOST = 'https://uploads.linear.app';
 
 /** How the fake answers document writes. */
 export interface FakeWrites {
@@ -100,6 +100,8 @@ export interface FakeWorld {
     teams: FakeTeam[];
     projects: FakeProject[];
     documents: FakeDocument[];
+    /** Optional deterministic query-boundary edits by a test user. */
+    beforeQuery?: (operation: string, variables: Record<string, unknown>) => void;
     writes: FakeWrites;
     store: (content: string) => string;
     /** The workspace's URL key, in its document URLs. */
@@ -151,6 +153,10 @@ export function fakeFetch(world: FakeWorld): typeof fetch {
     const url = String(input);
     const method = init?.method ?? 'GET';
     world.requests.push(`${method} ${url}`);
+    if (method === 'GET' && url.startsWith(`${UPLOADS_HOST}/`)) {
+      const upload = world.linear.uploads.find((entry) => entry.assetUrl === url);
+      return upload?.bytes === undefined ? new Response(null, {status:404}) : new Response(upload.bytes, {headers:{'content-type':upload.contentType}});
+    }
     if (url.startsWith(GITHUB_API)) return github(world, method, url.slice(GITHUB_API.length), init);
     if (url.startsWith(LINEAR_API)) return linear(world, url.slice(LINEAR_API.length), init);
     throw new Error(`unexpected request to ${url}`);
@@ -271,6 +277,7 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     }
     return json(200, { data: documentMutation(world, operationName, variables) ?? {} });
   }
+  world.linear.beforeQuery?.(operationName, variables);
   if (operationName === 'SetupTeams') {
     const refs = variables.refs as string[];
     return json(200, { data: { teams: { nodes: world.linear.teams.filter((team) => refs.includes(team.key) || refs.includes(team.name)) } } });
@@ -425,11 +432,11 @@ function documentNode(d: FakeDocument, withContent: boolean) {
 
 /** One project's or team zone's documents, oldest first, in pages of `first` after the cursor (an index). */
 function listDocuments(world: FakeWorld, variables: Record<string, unknown>) {
-  const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } } };
-  const projectId = filter.project?.id.eq;
-  const teamId = filter.team?.id.eq;
+  type Filter = {project?:{id:{eq:string}}; team?:{id:{eq:string}}; or?:Filter[]};
+  const filter = variables.filter as Filter;
+  const matches = (doc: FakeDocument, rule: Filter): boolean => rule.or !== undefined ? rule.or.some((nested) => matches(doc, nested)) : rule.project !== undefined ? doc.projectId === rule.project.id.eq : rule.team !== undefined && doc.teamId === rule.team.id.eq && doc.projectId === undefined;
   const matching = world.linear.documents
-    .filter((d) => (projectId !== undefined ? d.projectId === projectId : d.teamId === teamId && d.projectId === undefined))
+    .filter((d) => matches(d, filter))
     .filter((d) => d.unlisted !== true)
     .filter((d) => variables.includeArchived === true || (d.trashed !== true && d.archivedAt === undefined))
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));

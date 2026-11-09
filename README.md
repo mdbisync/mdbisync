@@ -6,8 +6,9 @@ run as a GitHub Action.
 **Status:** early development. `lint` and `fix` work on Markdown files
 ([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)).
 `check` checks a repository's setup. `initial-sync` works in both
-directions, as a dry run and confirmed; `sync` runs the same check, refuses
-to run without its state, and then answers "not implemented".
+directions, as a dry run and confirmed. `sync` captures Linear changes into
+its state ref, then writes tracked-branch changes to Linear. Publishing
+captured changes through a sync pull request is under development.
 
 ## Folder mapping
 
@@ -134,7 +135,11 @@ again with the same inputs to go on without duplicate files.
 
 ## Development
 
-Requires Node 24.
+Requires Node 24 and pre-commit (install the hook runner before `npm test`).
+Capture with security hooks also requires pre-commit on the runner PATH;
+install it before invoking the action, for example with
+`pipx install pre-commit==4.6.2`. Missing tooling stops the run without
+marking documents as security failures.
 
 ```sh
 npm ci                  # exact versions from package-lock.json, install scripts off

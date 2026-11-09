@@ -109,12 +109,18 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
     const exitCode = outcome.code === "initial-sync-required" || outcome.code === "initial-pull-request-pending" ? NO_STATE_EXIT_CODE : SETUP_FAILED_EXIT_CODE;
     return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (${outcome.code})\n` };
   }
-  if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write.code === 'container-cap') {
+  if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write?.code === 'container-cap') {
     return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (container-cap); reduce additions or check document-cap\n` };
   }
   const unfinished = outcome.confirmed ?? outcome.reverse;
   if (unfinished !== undefined && !unfinished.complete) {
     return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${unfinishedMessage(command, unfinished.code)}\n` };
+  }
+  if (outcome.captured?.stopped !== undefined) {
+    return {exitCode:0, stdout:outcome.summary, stderr:`${stderr}warning: ${command}: partial, will continue (${outcome.captured.code})\n`};
+  }
+  if (outcome.captured !== undefined && !outcome.captured.ok) {
+    return {exitCode:INCOMPLETE_EXIT_CODE, stdout:outcome.summary, stderr:`${stderr}${command}: capture did not finish (${outcome.captured.code})\n`};
   }
   const write = outcome.sync?.write;
   // Skipped documents are normal (the next run takes them in); a stop, a refused push or a failed write is not.
