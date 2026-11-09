@@ -128,7 +128,10 @@ pull request that makes git equal to Linear. The first run is a dry run that
 lists what would change; run it again with `confirm` to write.
 Before you take documents from Linear, read
 [initial sync from Linear to git](docs/initial-sync-linear-to-git.md): its
-pull request can remove files, and a person merges it.
+pull request can remove files, and a person merges it. Before you take
+files to Linear, read
+[initial sync from git to Linear](docs/initial-sync-git-to-linear.md): it
+overwrites documents and moves those without a file to Linear's trash.
 
 ### 4. Start ongoing sync
 
@@ -140,8 +143,10 @@ minutes, in both directions.
 ## Documentation
 
 How folders map to Linear, the checks every run makes, the sync pull request
-and how to pin a release: [docs/usage.md](docs/usage.md). The initial sync
-from Linear to git, step by step:
+and how to pin a release: [docs/usage.md](docs/usage.md). The initial sync,
+step by step, from git to Linear:
+[docs/initial-sync-git-to-linear.md](docs/initial-sync-git-to-linear.md),
+and from Linear to git:
 [docs/initial-sync-linear-to-git.md](docs/initial-sync-linear-to-git.md). How
 Markdown is kept in Linear's form: [docs/linear-format.md](docs/linear-format.md).
 What happens when both sides change one document, and how to resolve a

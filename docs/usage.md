@@ -1,8 +1,9 @@
 # Using mdbisync
 
 How to set up and run mdbisync in a repository: how folders map to Linear,
-the checks every run makes, the workflows, both directions of the initial
-sync ([Linear to git](initial-sync-linear-to-git.md) has its own page), the sync pull request, and how to pin a release. The setup steps (the
+the checks every run makes, the workflows, both directions of the initial sync (each has its own
+page: [git to Linear](initial-sync-git-to-linear.md) and
+[Linear to git](initial-sync-linear-to-git.md)), the sync pull request, and how to pin a release. The setup steps (the
 Linear OAuth app, the GitHub App, the secrets and the workflows) are on
 [mdbisync.com](https://mdbisync.com/#setup). How Markdown is kept in
 Linear's form is in [linear-format.md](linear-format.md), and conflicts, when
@@ -140,37 +141,22 @@ variable `MDBISYNC_APP_CLIENT_ID` and the secrets `MDBISYNC_APP_PRIVATE_KEY`,
 ## Initial sync from git to Linear
 
 `initial-sync` with `direction: git-to-linear` makes Linear equal to the
-tracked branch. Without `confirm: true` it is a dry run: it lists by path
-what it would create, overwrite and move to Linear's trash, and the files it
-leaves out, and writes nothing. The files left out include documents that
-link a file over Linear's 10 MB upload limit (`upload-too-large`) or an LFS
-object stored with LFS extensions, which the run cannot read
-(`upload-unreadable`), each with the files that
-cause it; the dry run judges a file in LFS by its pointer, so it uploads and
-downloads nothing. An LFS object missing from the remote is found only by
-the confirmed run. With `confirm: true`:
+tracked branch and records the sync's state. Without `confirm: true` it is a
+dry run that lists by path what it would create, overwrite and move to
+Linear's trash, and the files it leaves out, and writes nothing. With
+`confirm: true`:
 
 - a document whose title is a file's path keeps its id, comments and history
   and gets the file's text (front matter stays in git); a file without a
-  document gets a new one; a document that already holds the text is not
-  written;
+  document gets a new one; linked files are uploaded and links between
+  synchronized documents point to Linear;
 - the documents of the annotated projects and team zones that match no file
   are moved to Linear's trash, from which they can be restored;
-- a relative link to another synchronized document, such as
-  `[setup](../guide.md#setup)`, becomes a link to that document in Linear
-  (`https://linear.app/<workspace>/document/<id>#setup`), also when the
-  document is created in the same run; the recorded file keeps the link as
-  it was written. Links to files that are not synchronized documents stay as
-  they are;
-- document ids go to `refs/mdbisync/ids` as the run goes, and at the end
-  one push records `refs/mdbisync/linear` (the tracked branch with each
-  synchronized file as Linear stores it), `ids` and `uploads`.
+- a run that stops early exits with code 5; run it again with the same
+  inputs and it goes on without duplicates.
 
-A run that stops early (Linear's rate limit, a rejected write) records no
-`linear` and exits with code 5. Run it again with the same inputs: it skips
-the documents it already wrote, and a document created just before a crash
-is found by its title, not created twice. When the state refs are lost, a
-new confirmed run rebuilds them without duplicating documents.
+Every input, each table of the job summary, what is left out, resume and
+recovery are in [initial-sync-git-to-linear.md](initial-sync-git-to-linear.md).
 
 Before creating documents, the dry run and sync report containers at or above
 90% of their document cap. Counts include live, trashed and archived documents
