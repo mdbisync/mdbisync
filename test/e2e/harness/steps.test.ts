@@ -19,7 +19,7 @@ import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
-import { commitStaged, HookRejectedError, installFailure, installHooks, personCommit, Sandbox } from './sandbox.ts';
+import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, installHooks, PERSON, personCommit, Sandbox } from './sandbox.ts';
 import { engineEntry } from './engine.ts';
 import { preCommitConfig } from '../../corpus/tree.ts';
 import { loadScenarios } from './spec.ts';
@@ -674,7 +674,15 @@ describe('person commits through the repository hooks', () => {
     LINEAR_TEST_APP_CLIENT_SECRET: 'app-secret-value',
     LINEAR_TEST_ALICE_API_KEY: 'editor-key-value',
     SYNC_APP_PRIVATE_KEY: 'private-key-value',
-    GIT_CONFIG_VALUE_0: 'AUTHORIZATION: basic header-value',
+    GIT_CONFIG_VALUE_1: 'AUTHORIZATION: basic other-header-value',
+    GITHUB_TOKEN: 'github-token-value',
+  };
+  // What may reach hook code besides the allowlist: the identity, git's base settings, what git sets for its hooks and what the shell sets itself.
+  const ALLOWED = new Set([...HOOK_ENV_KEYS, 'GIT_TERMINAL_PROMPT', 'GIT_LFS_SKIP_SMUDGE', 'GIT_EDITOR', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_EXEC_PATH', 'PWD', 'SHLVL', '_', 'OLDPWD']);
+  /** The inherited variables (the process's, the secrets, the sandbox's git settings) that reached a recorded environment. */
+  const leaked = (recorded: string, inherited: Record<string, string | undefined>) => {
+    const names = new Set(recorded.split('\n').map((line) => line.split('=')[0] as string));
+    return Object.keys(inherited).filter((name) => names.has(name) && !ALLOWED.has(name));
   };
 
   it('installs the hooks with no secret in the installer\'s environment', async () => {
@@ -683,12 +691,13 @@ describe('person commits through the repository hooks', () => {
     const bin = fresh('fake-pre-commit-');
     const seen = join(bin, 'env');
     writeFileSync(join(bin, 'pre-commit'), `#!/bin/sh\nenv > ${JSON.stringify(seen)}\n`, { mode: 0o755 });
-    await installHooks(await ctx.person(), { env: { ...process.env, ...SECRETS, PATH: `${bin}:${process.env.PATH ?? ''}` } });
+    const from = { ...process.env, ...SECRETS, GIT_CONFIG_COUNT: '2', PATH: `${bin}:${process.env.PATH ?? ''}` };
+    await installHooks(await ctx.person(), { from });
     const env = readFileSync(seen, 'utf8');
-    for (const [name, value] of Object.entries(SECRETS)) {
-      assert.ok(!env.includes(name) && !env.includes(value), `${name} reached the installer`);
-    }
+    assert.deepEqual(leaked(env, from), []);
+    for (const value of Object.values(SECRETS)) assert.ok(!env.includes(value));
     assert.match(env, /^PATH=/m);
+    assert.match(env, /^GIT_TERMINAL_PROMPT=0$/m);
   });
 
   it('runs the hooks of a commit with no secret in their environment', async () => {
@@ -698,11 +707,12 @@ describe('person commits through the repository hooks', () => {
       const { ctx, rawFile } = await fakeRun({ hooks: true });
       await commitAsPerson(ctx, new Map([['eng/platform/fixable.md', '# Plan\n\n*one*\n']]), 'Add a page');
       const env = readFileSync(join(ctx.runDir, '..', 'hook-env'), 'utf8');
-      for (const [name, value] of Object.entries(SECRETS)) {
-        assert.ok(!env.includes(name) && !env.includes(value), `${name} reached the hook`);
-      }
+      // The sandbox's own git settings (its credential header) count as inherited too.
+      const inherited = { ...process.env, ...ctx.live!.sandbox.env(PERSON) };
+      assert.deepEqual(leaked(env, inherited).filter((name) => !/^GIT_(AUTHOR|COMMITTER)_/.test(name)), []);
+      for (const value of Object.values(SECRETS)) assert.ok(!env.includes(value));
       assert.ok(!env.includes('AUTHORIZATION'), 'the sandbox credential header reached the hook');
-      assert.match(env, /^GIT_AUTHOR_NAME=/m);
+      assert.match(env, /^GIT_AUTHOR_NAME=Test Editor$/m);
       assert.equal(await rawFile('eng/platform/fixable.md'), '# Plan\n\n*one*');
     } finally {
       for (const [name, value] of Object.entries(saved)) {
@@ -713,7 +723,7 @@ describe('person commits through the repository hooks', () => {
   });
 
   it('tells a network failure while installing from a defect of the released hook', () => {
-    for (const code of ['EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'E503', 'EALLOWGIT']) {
+    for (const code of ['EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'E503', 'E429', 'ENOSPC', 'SELF_SIGNED_CERT_IN_CHAIN', 'EALLOWGIT']) {
       assert.ok(installFailure(`npm error code ${code}\n`) instanceof EnvBlockedError, code);
     }
     assert.ok(installFailure('An unexpected error has occurred\n') instanceof EnvBlockedError);
