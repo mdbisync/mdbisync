@@ -2,7 +2,8 @@
 // for tests and tooling. Names, paths and states only, no content.
 
 import { type ContainerCapacity } from './capacity.ts';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
@@ -41,7 +42,7 @@ export interface RunReport {
   sync: SyncReport | null;
   /** A sync run's step 2, the sync pull request; null for other runs and when capture stopped before it. */
   pullRequest: PullRequestResult | null;
-  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'stopped' | 'rebuiltIds'> | null;
+  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'writeBackWarnings' | 'stopped' | 'rebuiltIds'> | null;
   /** Documents created or overwritten in Linear by this run. */
   writtenCount: number;
   /** Documents an unfinished earlier run had written, skipped by this one. */
@@ -98,7 +99,12 @@ export interface SyncReport {
   relocated: WriteResult['relocated'];
   created: string[];
   adopted: string[];
+  restored: string[];
   trashed: string[];
+  /** Documents whose merged text holds conflict marker paragraphs. */
+  conflicts: string[];
+  /** Cases the structural conflict rules decided: paths, rule codes and summary lines, never content. */
+  decided: WriteResult['decided'];
   skipped: WriteResult['skipped'];
   leftOut: WriteResult['leftOut'];
   leftOutAtWrite: WriteResult['leftOutAtWrite'];
@@ -225,7 +231,10 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
       relocated: write.relocated,
       created: write.created,
       adopted: write.adopted,
+      restored: write.restored,
       trashed: write.trashed,
+      conflicts: write.conflicts,
+      decided: write.decided,
       skipped: write.skipped,
       leftOut: write.leftOut,
       leftOutAtWrite: write.leftOutAtWrite,
@@ -234,7 +243,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
       stopped: write.stopped ?? null,
       record: write.record,
     },
-    writtenCount: new Set([...write.updated, ...write.created, ...write.relocated.map((entry) => entry.to)]).size,
+    writtenCount: new Set([...write.updated, ...write.created, ...write.restored, ...write.relocated.map((entry) => entry.to)]).size,
     skippedCompletedCount: 0,
     oversizeFiles: [...new Set(write.leftOutAtWrite.filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
     resumed: write.resumed,
@@ -296,6 +305,7 @@ export function unfinishedMessage(command: string, code: string | undefined): st
 }
 
 export async function writeRunReport(path: string, outcome: OperationOutcome): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(toRunReport(outcome), null, 2)}\n`);
 }
 
@@ -309,5 +319,5 @@ function leaseFacts(outcome: OperationOutcome): Pick<RunReport, 'atomicPushRefus
 }
 
 function captureReport(captured: CaptureResult | undefined): RunReport['capture'] {
-  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, blocked:captured.blocked, leftOut:captured.leftOut, ...(captured.stopped ? {stopped:captured.stopped} : {}), ...(captured.rebuiltIds ? {rebuiltIds:captured.rebuiltIds} : {})};
+  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, blocked:captured.blocked, leftOut:captured.leftOut, writeBackWarnings:captured.writeBackWarnings, ...(captured.stopped ? {stopped:captured.stopped} : {}), ...(captured.rebuiltIds ? {rebuiltIds:captured.rebuiltIds} : {})};
 }

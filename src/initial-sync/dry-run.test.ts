@@ -130,9 +130,9 @@ describe('initial sync dry run', () => {
     assert.match(summary, /^\| eng\/backend\/retired\.md \| team "ENG" \| doc-retired \|$/m);
     assert.match(summary, /^\| combined\/Guide\.md \| duplicate-title \|  \| combined\/guide\.md \|$/m);
 
-    // Mint, two setup reads, one list per place (three), revoke; nothing else.
+    // Mint, one setup read, one list of the three places together, revoke; nothing else.
     const graphql = world.requests.filter((request) => request === `POST ${LINEAR_API}/graphql`);
-    assert.equal(graphql.length, 5);
+    assert.equal(graphql.length, 2);
     assert.equal(world.minted, 1);
     assert.equal(world.revoked, 1);
   });

@@ -16,6 +16,8 @@ test("action.yml runs the bundled main and post steps on node24", () => {
   assert.match(actionYml, /^\s+using: node24$/m);
   assert.match(actionYml, /^\s+main: dist\/action-main\.js$/m);
   assert.match(actionYml, /^\s+post: dist\/action-post\.js$/m);
+  // The post step revokes a token left behind by a failed or cancelled run.
+  assert.match(actionYml, /^\s+post-if: always\(\)$/m);
 });
 
 const required = process.env["CI"] === "true";
@@ -24,7 +26,7 @@ for (const entry of [
   { label: "source", main: "src/action/main.ts", post: "src/action/post.ts", required: true },
   { label: "bundle", main: "dist/action-main.js", post: "dist/action-post.js", required },
 ]) {
-  test(`the ${entry.label} action steps need their inputs, and post has nothing to clean up`, (t) => {
+  test(`the ${entry.label} action steps need their inputs, and post has no token to revoke`, (t) => {
     if (!entry.required && !existsSync(entry.main)) {
       t.skip("not built; run `npm run build` first");
       return;
@@ -38,6 +40,6 @@ for (const entry of [
     }
     const post = spawnSync(process.execPath, [entry.post], { encoding: "utf8", env: baseEnv });
     assert.equal(post.status, 0);
-    assert.match(post.stdout, /post: not implemented/);
+    assert.match(post.stdout, /post: no Linear token left to revoke/);
   });
 }

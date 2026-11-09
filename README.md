@@ -47,6 +47,37 @@ The command line reads the action's inputs (see `action.yml`) from
 environment variables: `MDBISYNC_LINEAR_CLIENT_ID` for `linear-client-id`,
 and so on.
 
+## Workflows
+
+Copy the workflow templates from
+[examples/](https://github.com/mikhail-yaskou/mdbisync/blob/main/examples)
+into `.github/workflows/`:
+
+- `mdbisync-initial-sync.yml` runs the initial sync by hand from the Actions
+  tab, with a `direction` and a `confirm` box (unchecked: a dry run).
+- `mdbisync.yml` runs the sync on every push to `main`, every five minutes
+  and by hand. GitHub runs schedules only on the default branch, may start
+  them late, and turns them off in a public repository after 60 days
+  without activity. Until the initial sync has run, each sync run writes
+  nothing and fails with `initial-sync-required`.
+
+Both share the concurrency group `mdbisync`, so runs of one repository never
+overlap. GitHub keeps one pending run per group and a newer one replaces it,
+so a sync queued behind a running one can replace a pending initial sync:
+disable the sync workflow before you start an initial sync, and enable it
+when the initial sync has finished.
+
+Both install `pre-commit`, which the repository's security hooks need on
+content from Linear. The hooks run in a child process of the mdbisync step
+whose environment holds no credentials; they still run on the runner that
+holds them, so use only hooks you trust. Each mints the GitHub App's installation token with
+`actions/create-github-app-token`, checks out without stored credentials,
+and gives the App token and the Linear secrets to the mdbisync step only.
+The action revokes the run's Linear token when it ends, and its post step
+revokes it again after a failed or cancelled run. A repository needs the
+variable `MDBISYNC_APP_CLIENT_ID` and the secrets `MDBISYNC_APP_PRIVATE_KEY`,
+`MDBISYNC_LINEAR_CLIENT_ID` and `MDBISYNC_LINEAR_CLIENT_SECRET`.
+
 ## Initial sync from git to Linear
 
 `initial-sync` with `direction: git-to-linear` makes Linear equal to the
@@ -169,7 +200,10 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   merge to a later run, after the checks have started.
 - A check that fails is a setup error: the run summary names it, the run
   exits with code 3, and the pull request stays open until the repository's
-  checks pass Linear's form.
+  checks pass Linear's form. Tracked-branch changes are not written to Linear
+  until then. Fix the check configuration or rerun the failed check on the
+  sync pull request; changing a file on the tracked branch alone does not
+  rerun that check.
 - After the merge, the next run finds nothing to write and opens no pull
   request.
 - While the open pull request of an initial sync from Linear waits for a

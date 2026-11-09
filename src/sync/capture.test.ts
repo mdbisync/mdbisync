@@ -78,6 +78,24 @@ describe('capture from Linear', () => {
     assert.equal((await run()).state.linear, tip);
   });
 
+  for (const [name, content, warns] of [
+    ['at the content limit', 'a'.repeat(250_000), false],
+    ['emoji below the code-point limit', '\u{1F600}'.repeat(125_001), false],
+    ['emoji above the code-point limit', '\u{1F600}'.repeat(250_001), true],
+  ] as const) {
+    it(`captures ${name} and reports write-back limits in code points`, async () => {
+      world.linear.documents[0]!.content = content;
+      const result = await run();
+      assert.equal(result.ok, true);
+      assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n' + content);
+      assert.deepEqual(result.leftOut, []);
+      assert.deepEqual(result.writeBackWarnings, warns ? [{path:'docs/plan.md', code:'linear-content-too-large-to-write-back', length:250_001, limit:250_000}] : []);
+      assert.equal(result.summary.includes('linear-content-too-large-to-write-back'), warns);
+      assert.ok(!result.summary.includes(content));
+      assert.deepEqual(world.writes, []);
+    });
+  }
+
   it('uses the supplied snapshot between steps without changing the run context', async () => {
     const initial = { ...context.fetched.state };
     world.linear.documents[0]!.content = 'First edit.\n';

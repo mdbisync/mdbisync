@@ -389,7 +389,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     // GitHub refused, timed out or could not be reached. The state is recorded;
     // running again with the same inputs changes no ref and finishes the pull request step.
     result.code = 'pull-request-failed';
-    if (error instanceof PullRequestError) result.pullRequestStatus = error.status;
+    if (error instanceof PullRequestError && error.status !== undefined) result.pullRequestStatus = error.status;
     return { plan, result };
   }
   result.complete = true;

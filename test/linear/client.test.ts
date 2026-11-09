@@ -534,6 +534,18 @@ describe('run tokens against a fake Linear', () => {
     assert.deepEqual(fake.received.map((r) => r.path), ['/oauth/token', '/oauth/revoke']);
   });
 
+  it('hands the token over while it lives, and revokes it even when the handover fails', async () => {
+    const seen: string[] = [];
+    const lifecycle = { minted: (token: string) => seen.push(`minted ${token.length}`), revoked: () => seen.push('revoked') };
+    await withRunToken(credentials, { baseUrl: fake.url, onRevokeError: () => assert.fail('revoked'), lifecycle }, async () => seen.push('work'));
+    assert.deepEqual(seen, ['minted 10', 'work', 'revoked']);
+
+    fake.received.length = 0;
+    const broken = { minted: () => { throw new Error('state file missing'); }, revoked: () => { throw new Error('state file missing'); } };
+    await assert.rejects(withRunToken(credentials, { baseUrl: fake.url, onRevokeError: () => assert.fail('revoked'), lifecycle: broken }, async () => 'never'), /state file missing/);
+    assert.deepEqual(fake.received.map((r) => r.path), ['/oauth/token', '/oauth/revoke']);
+  });
+
   it('revokes the token when the run succeeds', async () => {
     const result = await withRunToken(credentials, { baseUrl: fake.url, onRevokeError: () => assert.fail('revoked') }, async (token) => token.accessToken.length);
     assert.equal(result, 10);
