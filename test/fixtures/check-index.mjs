@@ -267,6 +267,7 @@ export function checkBank(bankDir) {
     }
   }
   const assetIndex = new Set(index.assets.map((a) => a.file));
+  for (const a of index.assets) if (a.corpus !== undefined && a.corpus !== false) err(`${a.file}: corpus is either false or left out`);
   for (const f of assetFiles) if (!assetIndex.has(f)) err(`${f}: asset not in index.yaml`);
   for (const f of assetIndex) if (!assetFiles.includes(f)) err(`${f}: indexed asset missing`);
 
@@ -284,6 +285,7 @@ export function checkBank(bankDir) {
     if (!BASES.includes(f.basis)) err(`${at}: basis must be one of ${BASES.join(', ')}`);
     if (f.class === 'lint-error' && !rules.has(f.rule)) err(`${at}: lint-error needs a known rule`);
     if (f.class !== 'lint-error' && f.rule !== undefined) err(`${at}: only lint-error fixtures have a rule`);
+    if (f.corpus !== undefined && f.corpus !== false) err(`${at}: corpus is either false or left out`);
 
     // Canary: well formed, unique, carried by the file (or its name when it cannot hold text).
     if (!CANARY.test(String(f.canary))) {

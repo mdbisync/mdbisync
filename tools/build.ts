@@ -26,6 +26,7 @@ export const ENTRY_POINTS = {
   cli: "src/cli.ts",
   "action-main": "src/action/main.ts",
   "action-post": "src/action/post.ts",
+  "action-hooks": "src/action/hooks.ts",
 } as const;
 
 export function findDevPackagesInBundle(metafile: Metafile, packages: readonly LockedPackage[]): string[] {

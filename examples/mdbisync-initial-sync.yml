@@ -62,11 +62,38 @@ jobs:
       # Linear's documents before anything is pushed; they run with pre-commit.
       - name: Install pre-commit
         run: command -v pre-commit || pipx install pre-commit==4.6.2
-      # The action revokes its Linear token when it ends, and again in its
-      # post step after a failed or cancelled run.
-      - uses: mikhail-yaskou/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2
+      # A confirmed run from Linear reads Linear's documents into the
+      # runner's temporary directory for the hooks; any other run has nothing
+      # to stage. It writes nothing. The action revokes its Linear token when
+      # it ends, and again in its post step after a failed or cancelled run.
+      - name: Stage Linear's documents
+        id: stage
+        uses: mikhail-yaskou/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2
         with:
           operation: initial-sync
+          security-step: stage
+          direction: ${{ inputs.direction }}
+          confirm: ${{ inputs.confirm }}
+          github-token: ${{ steps.app-token.outputs.token }}
+          linear-client-id: ${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}
+          linear-client-secret: ${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}
+      # The security hooks in a step of their own: it holds no Linear secret
+      # or token and no App token. Give it only the keys your hooks need.
+      - name: Run the security hooks
+        # A release without the staged steps gives no command and ran its hooks itself.
+        if: steps.stage.outputs.hooks != ''
+        run: '"$MDBISYNC_NODE" "$MDBISYNC_HOOKS"'
+        env:
+          MDBISYNC_NODE: ${{ steps.stage.outputs.node }}
+          MDBISYNC_HOOKS: ${{ steps.stage.outputs.hooks }}
+          # SCANNER_API_KEY: ${{ secrets.SCANNER_API_KEY }}
+      # A document the hooks have not seen (it changed after they ran) keeps
+      # the tracked branch's version and is listed as left out.
+      - name: Initial sync
+        uses: mikhail-yaskou/mdbisync@79db9969462ae7f1f00c88e95b311e61db3c455e # v0.1.0-rc.2
+        with:
+          operation: initial-sync
+          security-step: apply
           direction: ${{ inputs.direction }}
           confirm: ${{ inputs.confirm }}
           github-token: ${{ steps.app-token.outputs.token }}

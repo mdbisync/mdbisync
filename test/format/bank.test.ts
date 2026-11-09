@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { duplicateTitles, fixText, lintText, splitFile } from '../../src/format/index.ts';
+import { duplicateTitles, fixText, linkedFileResolver, lintText, splitFile } from '../../src/format/index.ts';
 import { goldenMarkdownPath, loadBank, readOptional, sentForm, type BankFixture } from '../probe/bank.ts';
 
 const bank = loadBank();
@@ -20,8 +20,10 @@ describe('fix on the fixture bank', () => {
   for (const fixture of markdown) {
     it(`${fixture.file} (${fixture.class})`, () => {
       const source = read(fixture);
-      const fixed = fixText(source);
-      assert.equal(fixText(fixed), fixed, 'L0-01: a second fix changes nothing');
+      // Like the fix command: a link to a file that is not there is not uploaded.
+      const options = { linkedFileExists: linkedFileResolver(fixture.file, bank.dir) };
+      const fixed = fixText(source, options);
+      assert.equal(fixText(fixed, options), fixed, 'L0-01: a second fix changes nothing');
       if (fixture.class === 'fixable') {
         const form = golden(fixture);
         assert.ok(form !== undefined, 'a fixable fixture has its recorded Linear form');

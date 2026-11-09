@@ -216,6 +216,37 @@ describe('uploads of linked files in an initial sync', () => {
     assert.equal(await show('refs/mdbisync/linear:eng/notes/spaced.md'), recorded);
   });
 
+  it("L1-15: list items holding only a file link are recorded in the form Linear stores, and a second run writes nothing", async () => {
+    const source = `# Release\n\n## Attachments\n\n* \n  [Screen recording of the walkthrough](../media/walkthrough.mp4)\n* \n  [Summary](../media/gone.pdf)\n\n${CANARY}`;
+    await fixture.seed({ 'eng/notes/release.md': source, 'eng/media/walkthrough.mp4': Buffer.from('video bytes') }, { lfs: LFS });
+    const world = fakeWorld();
+    // Like Linear, as the format probe recorded it (fixtures list-items/*): a
+    // list item holding only a link to an uploaded video becomes a video on
+    // the item's line, one to another uploaded file a file block, and one to
+    // a relative path that was not uploaded stays a link in angle brackets.
+    world.linear.store = (content) =>
+      content.replace(/^\* (?:\n {2})?\[([^\]\n]*)\]\(<?([^)>\n]*)>?\)$/gm, (_all, label: string, url: string) => {
+        if (!url.startsWith(UPLOADS_HOST)) return `* [${label}](<${url}>)`;
+        return /\.(?:mp4|mov|webm)$/i.test(url) ? `* [${label}](${url})` : `* \n  [${label}](${url})`;
+      });
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    const video = world.linear.uploads.find((upload) => upload.filename === 'walkthrough.mp4');
+    assert.ok(video, 'the video is uploaded; the missing file is not');
+    assert.equal(world.linear.uploads.some((upload) => upload.filename === 'gone.pdf'), false);
+    const linearForm = `# Release\n\n## Attachments\n\n* [Screen recording of the walkthrough](../media/walkthrough.mp4)\n* [Summary](<../media/gone.pdf>)\n\n${CANARY}`;
+    assert.equal(document(world, 'release')?.content, linearForm.replace('../media/walkthrough.mp4', video.assetUrl));
+    // The record is what Linear holds, mapped back, and what `fix` makes of the file.
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/release.md'), linearForm);
+    assert.equal(fixText(source, { linkedFileExists: (url) => url !== '../media/gone.pdf' }), linearForm);
+
+    const writes = world.linear.writes.count;
+    const second = await run(world);
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.equal(world.linear.writes.count, writes, 'the second run wrote again');
+    assert.ok(second.report.initialSync?.unchanged.includes('eng/notes/release.md'));
+  });
+
   it('a stop right after a batch records the new uploads even when no document was written since the last push', async () => {
     const world = fakeWorld();
     // First run: the two README documents, then a stop; their ids are pushed.

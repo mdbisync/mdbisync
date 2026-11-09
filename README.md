@@ -68,11 +68,30 @@ disable the sync workflow before you start an initial sync, and enable it
 when the initial sync has finished.
 
 Both install `pre-commit`, which the repository's security hooks need on
-content from Linear. The hooks run in a child process of the mdbisync step
-whose environment holds no credentials; they still run on the runner that
-holds them, so use only hooks you trust. Each mints the GitHub App's installation token with
+content from Linear, and run the hooks in a step of their own, between two
+mdbisync steps:
+
+1. `security-step: stage` reads Linear's changes into the runner's
+   temporary directory and writes nothing to git or Linear;
+2. "Run the security hooks" runs the hooks marked `alias: security` on them
+   and records their findings (hook and line, never the matched text). It
+   holds no Linear secret or token and no App token, so a hook cannot read
+   them, not even from another process's environment. Give this step only
+   the keys your hooks need, in its `env:`;
+3. `security-step: apply` runs the sync (or the initial sync) with those
+   findings. A change the hooks have not seen, because it changed in Linear
+   after they ran or the hooks step did not run, is not pushed; the next
+   run checks it.
+
+This keeps the secrets out of what a hook can read. It does not contain a
+hook that attacks the runner: the hooks step shares the runner's disk with
+the other steps, and a hook that rewrites files there can reach a later
+step that holds the secrets. Use only hooks you trust. Each workflow mints the GitHub App's installation token with
 `actions/create-github-app-token`, checks out without stored credentials,
-and gives the App token and the Linear secrets to the mdbisync step only.
+and gives the App token and the Linear secrets to the mdbisync steps only.
+Without `security-step` (as from the command line), the hooks run in a
+child process of the mdbisync step whose environment holds only `PATH`,
+`HOME` and `LANG`.
 The action revokes the run's Linear token when it ends, and its post step
 revokes it again after a failed or cancelled run. A repository needs the
 variable `MDBISYNC_APP_CLIENT_ID` and the secrets `MDBISYNC_APP_PRIVATE_KEY`,

@@ -7,6 +7,7 @@ import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { gfm } from 'micromark-extension-gfm';
 import { normalizeUri } from 'micromark-util-sanitize-uri';
+import { posix } from 'node:path';
 
 /** A file split into the part that never goes to Linear and the body that does. */
 export interface SplitFile {
@@ -94,4 +95,20 @@ export function visit(node: Nodes, enter: (node: Nodes, ancestors: readonly Node
     for (const child of node.children) visit(child, enter, ancestors);
     ancestors.pop();
   }
+}
+
+/** The repository path a relative destination points to, or null for anything else. */
+export function resolveTarget(documentPath: string, url: string): string | null {
+  if (url === '' || url.startsWith('#') || url.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(url)) return null;
+  const cut = url.search(/[?#]/);
+  let path = cut === -1 ? url : url.slice(0, cut);
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    // Not percent-encoded: the destination names the file as it is.
+  }
+  if (path === '') return null;
+  const joined = posix.normalize(posix.join(posix.dirname(documentPath), path));
+  if (joined === '.' || joined === '..' || joined.startsWith('../') || joined.endsWith('/')) return null;
+  return joined;
 }

@@ -4,7 +4,8 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { exitStatusOf, partialCode, pullRequestEnding } from './exit.ts';
+import { buildReport, failed } from '../setup/report.ts';
+import { exitStatusOf, partialCode, pullRequestEnding, stoppedBeforeWritingMessage } from './exit.ts';
 import { type OperationOutcome } from './operation.ts';
 
 /** A sync outcome with only the fields the ending reads. */
@@ -43,4 +44,40 @@ describe('the ending of a sync run', () => {
       assert.equal(pullRequestEnding(outcome)?.code, ending);
     });
   }
+});
+
+describe('the message of a run stopped before any write', () => {
+  const stopped = (fields: Record<string, unknown>): OperationOutcome =>
+    ({ operation: 'sync', ok: false, summary: '', notImplemented: false, refusedPushes: [], ...fields }) as OperationOutcome;
+
+  it('names the failed setup check, the first failure as the report records it', () => {
+    const setup = buildReport([
+      failed('annotation-targets', 'annotation-target-not-found', 'not found in Linear: project "Platform" of team "Engineering"'),
+      failed('left-out-files', 'invalid-annotation', 'a later failure'),
+    ], []);
+    assert.equal(
+      stoppedBeforeWritingMessage('sync', stopped({ code: setup.code, setup })),
+      'sync: stopped before any write (annotation-target-not-found): not found in Linear: project "Platform" of team "Engineering"',
+    );
+  });
+
+  it('gives a state refusal its message', () => {
+    const refusal = { code: 'initial-sync-required' as const, message: 'the sync has no recorded state: run the initial sync first' };
+    assert.equal(
+      stoppedBeforeWritingMessage('sync', stopped({ code: refusal.code, refusal })),
+      'sync: stopped before any write (initial-sync-required): the sync has no recorded state: run the initial sync first',
+    );
+  });
+
+  it('keeps a name with line breaks on one line', () => {
+    const setup = buildReport([failed('annotation-targets', 'annotation-target-not-found', 'not found in Linear: team "A\r\n::notice::B"')], []);
+    assert.equal(
+      stoppedBeforeWritingMessage('sync', stopped({ code: setup.code, setup })),
+      'sync: stopped before any write (annotation-target-not-found): not found in Linear: team "A ::notice::B"',
+    );
+  });
+
+  it('is the code alone when nothing explains it', () => {
+    assert.equal(stoppedBeforeWritingMessage('check', stopped({ operation: 'check', code: 'no-annotations' })), 'check: stopped before any write (no-annotations)');
+  });
 });

@@ -14,7 +14,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { duplicateTitles, fixText, lintText, type Finding } from "../../src/format/index.ts";
+import { duplicateTitles, fixText, linkedFileCheck, lintText, type Finding } from "../../src/format/index.ts";
 import { findCyrillicLines } from "../../tools/check-no-cyrillic.ts";
 import type { Manifest, ManifestEntry } from "./generate.ts";
 import { gitattributes, GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, ROLES, SHARED_IMAGE_SLICES, SHARED_IMAGE_USERS, type Group } from "./model.ts";
@@ -91,12 +91,14 @@ export function checkLinearForm(
   manifest: Manifest = JSON.parse(readFileSync(join(root, "corpus-slices", "manifest.json"), "utf8")) as Manifest,
 ): string[] {
   const problems: string[] = [];
+  const paths = new Set(manifest.files.map((file) => file.path));
   for (const file of manifest.files) {
     if (!file.synced || file.kind !== "markdown" || file.class === "lint-error") continue;
     const path = join(root, "corpus", file.path);
     if (!existsSync(path)) continue; // reported by the tree check
     const text = readFileSync(path, "utf8");
-    if (fixText(text) !== text) problems.push(`not in Linear's form: ${file.path}`);
+    // A link to a file the corpus does not have is not uploaded, as in the generator.
+    if (fixText(text, { linkedFileExists: linkedFileCheck(file.path, (target) => paths.has(target)) }) !== text) problems.push(`not in Linear's form: ${file.path}`);
   }
   return problems;
 }
