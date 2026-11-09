@@ -23,7 +23,8 @@ jobs:
   build:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The full test suite needs headroom alongside setup, bundling and release smoke tests.
+    timeout-minutes: 20
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       SOURCE_SHA: ${{ inputs.source-sha }}
