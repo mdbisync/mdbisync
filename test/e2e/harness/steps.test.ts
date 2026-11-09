@@ -8,7 +8,7 @@ import { after, describe, it } from 'node:test';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { Git } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { bothVersionsComplete, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
+import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import type { RunTree } from './corpus.ts';
 import { FIXTURE_PREPARATION } from './runner.ts';
@@ -20,7 +20,7 @@ import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios } from './spec.ts';
-import { editInsideMarkers, HARNESS_GAPS, runStep, STEP_ACTIONS } from './steps.ts';
+import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
 import { documentLinks, encodeTitlePath, refreshView, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
 import { maxOverlap, unzip, waitForRun } from './workflows.ts';
 
@@ -724,6 +724,59 @@ describe('subjects', () => {
     ctx.live?.tree.paths.set('eng/platform/media/scan-11mb.pdf', 'eng/platform/media/scan-11mb.pdf');
     ctx.engine.results.push({ command: 'initial-sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: { summary: { oversizeFiles: ['eng/platform/media/scan-11mb.pdf', 'eng/platform/unknown.png'] } } });
     assert.deepEqual(await resolveSubject(ctx, 'summary.oversizeFiles'), { known: true, value: ['eng/platform/unknown.png', 'pdf-11mb'] });
+  });
+
+  it('read conflict marks by the palette names specs use, from Linear\'s hex colors', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const id = ids['docs/handbook/start.md']?.id as string;
+    Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Alert', color: '#F2994A' });
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'conflicts.markCount'), { known: true, value: 1 });
+    assert.deepEqual(await resolveSubject(ctx, 'conflicts.color'), { known: true, value: 'orange' });
+    assert.equal(colorLabel('#eb5757'), 'red');
+    assert.equal(colorLabel('#123456'), '#123456');
+  });
+
+  it('retire the edits a resolution discards on purpose, so I2 does not count them as lost', async () => {
+    const { ctx } = await fakeRun();
+    ctx.edits.push({ side: 'git', path: 'a.md', token: 'aaaaaa-001' }, { side: 'linear', path: 'a.md', token: 'aaaaaa-002' });
+    const conflicted = `${MARKERS.git}\n\nOurs aaaaaa-001.\n\n${MARKERS.linear}\n\nTheirs aaaaaa-002.\n\n${MARKERS.end}\n`;
+    retireDiscarded(ctx, conflicted, resolveKeeping(conflicted, 'linear'));
+    assert.deepEqual(ctx.edits.map((edit) => edit.retired === true), [true, false]);
+    const { lostEdits } = await import('./checks.ts');
+    assert.deepEqual(lostEdits(ctx, { files: new Map([['a.md', 'Theirs aaaaaa-002.\n']]), documents: new Map([['d', { content: 'Theirs aaaaaa-002.\n', trashed: false } as LinearDocument]]) }), []);
+  });
+
+  it('count uploads per content from the requests that succeeded, not from the final cache', async () => {
+    const { ctx } = await fakeRun();
+    const upload = { n: 1, operation: 'FileUpload', kind: 'mutation' as const, status: 200, injected: false, at: 0 };
+    (ctx.proxy as unknown as { requests: unknown[] }).requests.push(upload, { ...upload, n: 2 }, { ...upload, n: 3 });
+    // Three uploads for one hash in the cache: the cache entry was overwritten twice.
+    const git = await ctx.person();
+    const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify({ ['a'.repeat(64)]: 'https://uploads.linear.app/x/one' }) })).trim();
+    const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tuploads.json\n` })).trim();
+    const commit = (await git.text(['commit-tree', tree, '-m', 'uploads'])).trim();
+    await git.run(['push', '--quiet', 'origin', `${commit}:${ctx.names.refPrefix}/uploads`]);
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'uploads.perHash'), { known: true, value: 3 });
+  });
+
+  it('compare only the valid files: a lint-error file stays in git with no document and no difference', async () => {
+    const { ctx } = await fakeRun();
+    // A file the corpus marks as a lint error, in git as it is, with no document in Linear.
+    const git = await ctx.person();
+    writeFileSync(join(git.dir, 'eng/platform/footnotes.md'), '# Notes\n\nSee this.[^1]\n\n[^1]: A footnote Linear would drop.\n');
+    await git.run(['add', '--', 'eng/platform/footnotes.md']);
+    await git.run(['commit', '--quiet', '-m', 'Add footnotes']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    ctx.live?.tree.paths.set('eng/platform/footnotes.md', 'eng/platform/footnotes.md');
+    ctx.live?.manifest.files.push({ path: 'eng/platform/footnotes.md', group: 'lint-errors', kind: 'markdown', synced: true, lfs: false, canary: null, class: 'lint-error', rule: 'footnote' });
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const sides = await readSides(ctx);
+    assert.equal(sides.files.has('eng/platform/footnotes.md'), false);
+    assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
+    refreshView(ctx);
+    assert.equal(((await resolveSubject(ctx, 'corpus.validPaths')).value as string[]).includes('eng/platform/footnotes.md'), false);
   });
 
   it('count the engine\'s commits as git writes and not the scenario\'s own', async () => {

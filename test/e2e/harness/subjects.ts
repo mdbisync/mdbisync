@@ -26,7 +26,7 @@ import { listTree, readBlobs, readIds, readUploads, type Git } from '../../../sr
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readFixture, readOptional } from '../../probe/bank.ts';
 import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, snapshotRefs, stripFrontMatter, titleOf, type Sides } from './checks.ts';
-import { bothVersionsComplete, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
+import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { owningFolder, type Folder } from './corpus.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
@@ -498,7 +498,7 @@ function agreed<T>(git: T, linear: T): T | { git: T; linear: T } {
 }
 
 function markRetained(document: LinearDocument | undefined): boolean {
-  return document?.icon === CONFLICT_MARK.icon && document.color === CONFLICT_MARK.color;
+  return document?.icon === CONFLICT_MARK.icon && colorLabel(document.color) === CONFLICT_MARK.color;
 }
 
 async function metrics(env: Env): Promise<Record<string, unknown>> {
@@ -927,16 +927,17 @@ export const SUBJECTS: Record<string, Compute> = {
   },
 
   // --- uploads -----------------------------------------------------------------------------------
+  // Uploads per distinct content: the upload requests that succeeded (counted at the proxy, whatever the cache
+  // keeps) over the hashes the uploads ref records. Each hash needs at least one upload, so 1 means none twice;
+  // a hash uploaded again shows as more than 1, even when its cache entry was overwritten.
   'uploads.perHash': async (env) => {
     const view = await env.view();
-    const urls = new Set([...view.documents.values()].flatMap((document) => [...(document.content ?? '').matchAll(/\]\((https?:[^)\s]+)\)/g)].map((match) => match[1] as string)));
-    const perPath = new Map<string, number>();
-    for (const url of urls) {
-      const path = view.uploads.get(url);
-      if (path !== undefined) perPath.set(path, (perPath.get(path) ?? 0) + 1);
-    }
-    return Math.max(0, ...perPath.values());
+    const uploaded = proxyRecordsSinceStart(env.ctx).filter((record) => /fileUpload|FileUpload/.test(record.operation) && record.status === 200 && !record.injected).length;
+    const hashes = view.uploadsByHash.size;
+    return hashes === 0 ? uploaded : Math.ceil(uploaded / hashes);
   },
+  // The upload URLs the documents use for the image most documents embed, read link by link from each
+  // document beside its file, so a URL the cache no longer holds is still counted.
   'uploads.sharedImageCount': async (env) => {
     const view = await env.view();
     const uses = new Map<string, number>();
@@ -944,7 +945,18 @@ export const SUBJECTS: Record<string, Compute> = {
     const shared = [...uses].sort((a, b) => b[1] - a[1])[0]?.[0];
     if (shared === undefined) return 0;
     const urls = new Set<string>();
-    for (const document of view.documents.values()) for (const [url, path] of view.uploads) if (path === shared && (document.content ?? '').includes(url)) urls.add(url);
+    for (const [path, text] of view.files) {
+      const id = view.ids.get(path)?.id;
+      const content = id === undefined ? undefined : view.documents.get(id)?.content;
+      if (content === undefined || content === null) continue;
+      // Every image link, external ones too, so the two lists line up position by position.
+      const fileImages = imageLinks(stripFrontMatter(text)).map((link) => (/^[a-z]+:/i.test(link) ? null : resolveLink(path, link)));
+      const documentImages = imageLinks(content);
+      if (fileImages.length !== documentImages.length) continue; // not converged; I1 reports it
+      fileImages.forEach((image, index) => {
+        if (image === shared) urls.add(documentImages[index] as string);
+      });
+    }
     return urls.size;
   },
   'uploads.cacheComplete': async (env) => {
@@ -1127,7 +1139,7 @@ export const SUBJECTS: Record<string, Compute> = {
   'conflicts.markCount': async (env) => [...(await env.view()).documents.values()].filter(markRetained).length,
   'conflicts.markRetained': async (env) => markRetained((await target(env)).document),
   'conflicts.icon': async (env) => (await target(env)).document?.icon ?? null,
-  'conflicts.color': async (env) => (await target(env)).document?.color ?? null,
+  'conflicts.color': async (env) => colorLabel((await target(env)).document?.color),
   'conflicts.resolutionCommentPresent': async (env) => (await newComments(env, (await target(env)).id)).length > 0,
   'conflicts.imageLinksWorking': async (env) => {
     const view = await env.view();
@@ -1151,7 +1163,7 @@ export const SUBJECTS: Record<string, Compute> = {
 
   // --- blocked documents (L2-35) ----------------------------------------------------------------
   'blocked.icon': async (env) => observed(env.ctx, 'blocked.icon'),
-  'blocked.color': async (env) => observed(env.ctx, 'blocked.color'),
+  'blocked.color': async (env) => colorLabel(observed(env.ctx, 'blocked.color') as string | null),
   'blocked.commentFields': async (env) => {
     const comments = observed(env.ctx, 'blocked.comments') as string[];
     const fields: string[] = [];
@@ -1600,4 +1612,3 @@ export async function resolveSubject(ctx: RunContext, subject: string): Promise<
   if (!before && ENGINE_FAMILIES.some((pattern) => pattern.test(name))) return { known: true, value: engineValue(ctx, name) };
   return { known: false };
 }
-

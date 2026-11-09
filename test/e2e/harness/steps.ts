@@ -816,6 +816,7 @@ const GIT: Record<string, Executor> = {
     const resolved = resolveKeeping(text, 'git');
     if (resolved === text) throw new ProductError('the tracked branch holds no conflict markers to resolve');
     await commitAsPerson(ctx, new Map([[path, resolved]]), 'Resolve the conflict');
+    retireDiscarded(ctx, text, resolved);
     ctx.observations.set('resolved.body', stripFrontMatter(resolved));
   },
   'git.conflict-again': async (ctx) => {
@@ -864,6 +865,17 @@ export function editInsideMarkers(text: string, version: 'git' | 'linear', token
   if (line < 0 || Object.values(MARKERS).includes(lines[line] as never)) throw new ProductError('the conflict has an empty version');
   lines[line] = `${(lines[line] as string).replace(/\s+$/, '')} ${noteSentence(token)}`;
   return lines.join('\n');
+}
+
+/**
+ * Marks the edits a resolution discarded on purpose: their tokens were in
+ * the conflicted text and are not in the version kept. I2 then no longer
+ * expects them on either side.
+ */
+export function retireDiscarded(ctx: RunContext, conflicted: string, resolved: string): void {
+  for (const edit of ctx.edits) {
+    if (!edit.removal && conflicted.includes(edit.token) && !resolved.includes(edit.token)) edit.retired = true;
+  }
 }
 
 /** A tracked document's current content in Linear, read as an editor. */
@@ -1044,6 +1056,7 @@ const LINEAR: Record<string, Executor> = {
       const resolved = resolveKeeping(text, 'linear');
       if (resolved === text) throw new ProductError('the document holds no conflict markers to resolve');
       ctx.observations.set('resolved.body', resolved);
+      retireDiscarded(ctx, text, resolved);
       return resolved;
     });
   },
