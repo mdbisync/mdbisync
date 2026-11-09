@@ -26,7 +26,8 @@ import {
   listTree,
   parseLfsPointer,
   readBlobs,
-  readFiles,
+  type LfsRead,
+  lfsReader,
 } from '../state/index.ts';
 import { type BodyTransform, LeaveOutError, type TransformContext } from './transform.ts';
 
@@ -38,8 +39,10 @@ export const UPLOAD_TOO_LARGE = 'upload-too-large';
 /** Rule of a document left out because a file it links cannot be read (an LFS object that is missing). */
 export const UPLOAD_UNREADABLE = 'upload-unreadable';
 
-/** Blobs read per git process while hashing linked files. */
-const HASH_BATCH = 100;
+/** Bytes of blobs read per git process while hashing linked files. */
+const HASH_BATCH_BYTES = 64 * 1024 * 1024;
+/** An LFS pointer file is smaller than this (Git LFS spec v1). */
+const MAX_POINTER_SIZE = 1024;
 
 export interface UploadsOptions {
   config: StateConfig;
@@ -56,6 +59,15 @@ export interface FileLink {
   raw: string;
   /** The linked file's path in the repository. */
   target: string;
+  /** The destination's query and fragment (`#page=3`), kept after the upload URL. */
+  suffix: string;
+}
+
+/** What a document's link to a file was before the upload: restored in place of `url + suffix`. */
+export interface WrittenLink {
+  raw: string;
+  hash: string;
+  suffix: string;
 }
 
 interface LinkedFile {
@@ -72,40 +84,72 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
   const files = new Map<string, TreeEntry>();
   const linked = new Map<string, LinkedFile>();
   /** For each document, its file links in order: what each destination said and the file's hash. */
-  const links = new Map<string, Array<{ raw: string; hash: string }>>();
+  const links = new Map<string, WrittenLink[]>();
+  /** Reads LFS objects; made on the first one needed. */
+  let lfs: LfsRead | undefined;
 
   const isFile = (path: string) => files.has(path);
 
-  /** Hashes linked files: an LFS file by its pointer, without downloading it; another by its bytes. */
+  /**
+   * Hashes linked files: an LFS file by its pointer, without downloading it;
+   * another by its bytes. A blob over the limit is too large to be a pointer
+   * and is never read: only its size matters, since its document is left out.
+   */
   const hashFiles = async (git: Git, paths: readonly string[]) => {
-    const wanted = paths.filter((path) => !linked.has(path));
-    for (let index = 0; index < wanted.length; index += HASH_BATCH) {
-      const batch = wanted.slice(index, index + HASH_BATCH);
-      const blobs = await readBlobs(git, batch.map((path) => (files.get(path) as TreeEntry).oid));
-      for (const path of batch) {
-        const blob = blobs.get((files.get(path) as TreeEntry).oid) as Buffer;
+    const toRead: TreeEntry[] = [];
+    for (const path of new Set(paths)) {
+      if (linked.has(path)) continue;
+      const entry = files.get(path) as TreeEntry;
+      if (entry.size !== null && entry.size > Math.max(limit, MAX_POINTER_SIZE)) linked.set(path, { hash: '', size: entry.size });
+      else toRead.push(entry);
+    }
+    let index = 0;
+    while (index < toRead.length) {
+      // Batches bounded by bytes, so many large files are never held at once.
+      const batch: TreeEntry[] = [];
+      let bytes = 0;
+      while (index < toRead.length && (batch.length === 0 || bytes + ((toRead[index] as TreeEntry).size ?? 0) <= HASH_BATCH_BYTES)) {
+        const entry = toRead[index] as TreeEntry;
+        batch.push(entry);
+        bytes += entry.size ?? 0;
+        index += 1;
+      }
+      const blobs = await readBlobs(git, batch.map((entry) => entry.oid));
+      for (const entry of batch) {
+        const blob = blobs.get(entry.oid) as Buffer;
         const pointer = parseLfsPointer(blob);
-        linked.set(path, pointer !== null ? { hash: pointer.oid, size: pointer.size } : { hash: sha256(blob), size: blob.length });
+        linked.set(entry.path, pointer !== null ? { hash: pointer.oid, size: pointer.size } : { hash: sha256(blob), size: blob.length });
       }
     }
   };
 
   /** Uploads the files not in the cache, read together; an unreadable one leaves the document out before any upload. */
   const uploadMissing = async (targets: readonly string[]) => {
-    const { git, tracked, linear, uploads } = context as TransformContext;
+    const { git, linear, uploads } = context as TransformContext;
     const byHash = new Map<string, string>();
     for (const target of targets) {
       const { hash } = linked.get(target) as LinkedFile;
       if (!uploads.has(hash) && !byHash.has(hash)) byHash.set(hash, target);
     }
     if (byHash.size === 0) return;
-    const reads = await readFiles(git, options.config, tracked, [...byHash.values()]);
-    for (const [target, read] of reads) {
+    const blobs = await readBlobs(git, [...byHash.values()].map((target) => (files.get(target) as TreeEntry).oid));
+    const contents = new Map<string, Buffer>();
+    for (const [hash, target] of byHash) {
+      const blob = blobs.get((files.get(target) as TreeEntry).oid) as Buffer;
+      const pointer = parseLfsPointer(blob);
+      if (pointer === null) {
+        contents.set(hash, blob);
+        continue;
+      }
+      lfs ??= await lfsReader(git, options.config.remote);
+      const read = await lfs(pointer, target);
       if (!read.ok) throw new LeaveOutError(UPLOAD_UNREADABLE, `${target} cannot be read: ${read.reason}`);
+      contents.set(hash, read.content);
     }
     for (const [hash, target] of byHash) {
-      const read = reads.get(target) as { ok: true; content: Buffer };
-      const { assetUrl } = await linear.uploadFile({ filename: posix.basename(target), contentType: contentTypeOf(target), bytes: new Uint8Array(read.content) });
+      // A copy, so the bytes sent are a whole ArrayBuffer of their own, as the client's type requires.
+      const bytes = new Uint8Array(contents.get(hash) as Buffer);
+      const { assetUrl } = await linear.uploadFile({ filename: posix.basename(target), contentType: contentTypeOf(target), bytes });
       uploads.set(hash, assetUrl);
     }
   };
@@ -136,14 +180,8 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       await uploadMissing(fileLinks.map((link) => link.target));
       const { uploads } = context;
       const urls = fileLinks.map((link) => uploads.get((linked.get(link.target) as LinkedFile).hash) as string);
-      links.set(path, fileLinks.map((link) => ({ raw: link.raw, hash: (linked.get(link.target) as LinkedFile).hash })));
-
-      let result = body;
-      for (let index = fileLinks.length - 1; index >= 0; index -= 1) {
-        const link = fileLinks[index] as FileLink;
-        result = result.slice(0, link.from) + (urls[index] as string) + result.slice(link.to);
-      }
-      return result;
+      links.set(path, fileLinks.map((link) => ({ raw: link.raw, hash: (linked.get(link.target) as LinkedFile).hash, suffix: link.suffix })));
+      return replaceRanges(body, fileLinks.map((link, index) => ({ from: link.from, to: link.to, text: (urls[index] as string) + link.suffix })));
     },
 
     restore({ path, body }) {
@@ -155,46 +193,65 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
 }
 
 /**
- * Replaces each upload URL with the destination its link had in the tracked
- * file. The n-th occurrence of a URL gets the n-th destination written for
- * that file, so two spellings of one link come back as they were.
+ * Puts back the destination each written link had in the tracked file. Only
+ * link, image and definition destinations equal to an upload URL (with the
+ * link's query and fragment) are touched; the same URL in code or prose
+ * stays. The n-th such destination of a file gets the n-th spelling written
+ * for it, so two spellings of one link come back as they were.
  */
-export function restoreFileLinks(body: string, fileLinks: ReadonlyArray<{ raw: string; hash: string }>, uploads: UploadMap): string {
+export function restoreFileLinks(body: string, written: readonly WrittenLink[], uploads: UploadMap): string {
   const raws = new Map<string, string[]>();
-  for (const link of fileLinks) {
+  for (const link of written) {
     const url = uploads.get(link.hash);
     if (url === undefined) continue;
-    const list = raws.get(url) ?? [];
-    list.push(link.raw);
-    raws.set(url, list);
+    const key = url + link.suffix;
+    raws.set(key, [...(raws.get(key) ?? []), link.raw]);
   }
   if (raws.size === 0) return body;
-  // Longest first, so a URL that is a prefix of another does not match inside it.
-  const pattern = new RegExp([...raws.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|'), 'g');
   const seen = new Map<string, number>();
-  return body.replace(pattern, (url) => {
-    const list = raws.get(url) as string[];
-    const index = seen.get(url) ?? 0;
-    seen.set(url, index + 1);
-    return list[Math.min(index, list.length - 1)] as string;
-  });
+  const replacements: Array<{ from: number; to: number; text: string }> = [];
+  for (const { node, range } of destinations(body)) {
+    const list = raws.get(node.url);
+    if (list === undefined) continue;
+    const index = seen.get(node.url) ?? 0;
+    seen.set(node.url, index + 1);
+    replacements.push({ ...range, text: list[Math.min(index, list.length - 1)] as string });
+  }
+  return replaceRanges(body, replacements);
 }
 
 /** Links, images and link definitions in `body` whose destination is a file of the repository. */
 export function findFileLinks(documentPath: string, body: string, isFile: (path: string) => boolean): FileLink[] {
   const result: FileLink[] = [];
+  for (const { node, range } of destinations(body)) {
+    const target = resolveTarget(documentPath, node.url);
+    if (target === null || !isFile(target)) continue;
+    const cut = node.url.search(/[?#]/);
+    result.push({ ...range, raw: body.slice(range.from, range.to), target, suffix: cut === -1 ? '' : node.url.slice(cut) });
+  }
+  return result;
+}
+
+type DestinationNode = Extract<Nodes, { type: 'link' | 'image' | 'definition' }>;
+
+/** Every link, image and definition with the place of its destination's text, in document order. */
+function destinations(body: string): Array<{ node: DestinationNode; range: { from: number; to: number } }> {
+  const result: Array<{ node: DestinationNode; range: { from: number; to: number } }> = [];
   visit(parse(body), (node) => {
     if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;
-    const target = resolveTarget(documentPath, node.url);
-    if (target === null || !isFile(target)) return;
     const range = destinationRange(body, node);
-    if (range === null) return;
-    const raw = body.slice(range.from, range.to);
-    // Only a destination whose text names the same file is rewritten.
-    if (resolveTarget(documentPath, unescapeDestination(raw)) !== target) return;
-    result.push({ ...range, raw, target });
+    if (range !== null) result.push({ node, range });
   });
-  return result.sort((a, b) => a.from - b.from);
+  return result.sort((a, b) => a.range.from - b.range.from);
+}
+
+/** Replaces non-overlapping ranges of `text`. */
+function replaceRanges(text: string, replacements: ReadonlyArray<{ from: number; to: number; text: string }>): string {
+  let result = text;
+  for (const replacement of [...replacements].sort((a, b) => b.from - a.from)) {
+    result = result.slice(0, replacement.from) + replacement.text + result.slice(replacement.to);
+  }
+  return result;
 }
 
 /** The repository path a relative destination points to, or null for anything else. */
@@ -213,28 +270,34 @@ export function resolveTarget(documentPath: string, url: string): string | null 
   return joined;
 }
 
-/** Where the destination's text is in a link, image or definition node, without angle brackets. */
-function destinationRange(body: string, node: Nodes): { from: number; to: number } | null {
+/**
+ * Where the destination's text is in a link, image or definition node,
+ * without angle brackets. Each `](` (or `]:`) in the node is tried in turn,
+ * and a candidate counts only when the parser reads it as the node's own
+ * destination, escapes and character references included; so brackets in
+ * the link text or alt text cannot misplace it. Null when none matches
+ * (a reference link, whose destination is in its definition).
+ */
+function destinationRange(body: string, node: DestinationNode): { from: number; to: number } | null {
   const nodeEnd = end(node);
-  let opener: number;
-  if (node.type === 'definition') {
-    opener = body.indexOf(']:', start(node));
-  } else if (node.type === 'link') {
-    const last = node.children.at(-1);
-    opener = body.indexOf('](', last !== undefined ? end(last) : start(node) + 1);
-  } else {
-    opener = body.indexOf('](', start(node) + 2);
+  const opener = node.type === 'definition' ? ']:' : '](';
+  for (let at = body.indexOf(opener, start(node)); at !== -1 && at < nodeEnd; at = body.indexOf(opener, at + 1)) {
+    const range = destinationAt(body, at + 2, nodeEnd);
+    if (range !== null && parsedDestination(body.slice(range.outerFrom, range.outerTo)) === node.url) return { from: range.from, to: range.to };
   }
-  if (opener === -1 || opener >= nodeEnd) return null;
-  let position = opener + 2;
-  while (position < nodeEnd && /[ \t\r\n]/.test(body[position] as string)) position += 1;
+  return null;
+}
+
+/** The destination text starting at `position` (after optional spaces), with and without angle brackets. */
+function destinationAt(body: string, position: number, limit: number): { from: number; to: number; outerFrom: number; outerTo: number } | null {
+  while (position < limit && /[ \t\r\n]/.test(body[position] as string)) position += 1;
   if (body[position] === '<') {
     const close = body.indexOf('>', position + 1);
-    return close === -1 || close > nodeEnd ? null : { from: position + 1, to: close };
+    return close === -1 || close > limit ? null : { from: position + 1, to: close, outerFrom: position, outerTo: close + 1 };
   }
   const from = position;
   let depth = 0;
-  while (position < nodeEnd) {
+  while (position < limit) {
     const char = body[position] as string;
     if (char === '\\') {
       position += 2;
@@ -248,12 +311,15 @@ function destinationRange(body: string, node: Nodes): { from: number; to: number
     }
     position += 1;
   }
-  return position > from ? { from, to: Math.min(position, nodeEnd) } : null;
+  const to = Math.min(position, limit);
+  return to > from ? { from, to, outerFrom: from, outerTo: to } : null;
 }
 
-/** A destination's text with Markdown's backslash escapes removed, as the parser reads it. */
-function unescapeDestination(raw: string): string {
-  return raw.replace(/\\([!-/:-@[-`{-~])/g, '$1');
+/** The URL the parser reads from a destination's text. */
+function parsedDestination(destination: string): string | undefined {
+  const paragraph = parse(`[x](${destination})`).children[0];
+  const link = paragraph?.type === 'paragraph' ? paragraph.children[0] : undefined;
+  return link?.type === 'link' ? link.url : undefined;
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -296,8 +362,4 @@ export function contentTypeOf(path: string): string {
 
 function sha256(content: Buffer): string {
   return createHash('sha256').update(content).digest('hex');
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

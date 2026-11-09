@@ -36,7 +36,7 @@ const A_BODY = [
   '',
   `![Diagram](../media/diagram.png) ${CANARY}`,
   '',
-  'The [report](<files/report 2026.pdf>) and [the same](files/report%202026.pdf).',
+  'The [report](<files/report 2026.pdf>), [the same](files/report%202026.pdf) and [its page](files/report%202026.pdf#page=2).',
   '',
   '[Other](b.md), [site](https://example.com/x.png), [missing](gone.png) and [section](#a).',
 ].join('\n');
@@ -125,7 +125,7 @@ describe('uploads of linked files in an initial sync', () => {
 
     assert.equal(
       document(world, 'a')?.content,
-      A_BODY.replace('../media/diagram.png', diagram.assetUrl).replace('<files/report 2026.pdf>', `<${report2026.assetUrl}>`).replace('(files/report%202026.pdf)', `(${report2026.assetUrl})`),
+      A_BODY.replace('../media/diagram.png', diagram.assetUrl).replace('<files/report 2026.pdf>', `<${report2026.assetUrl}>`).replace('(files/report%202026.pdf)', `(${report2026.assetUrl})`).replace('(files/report%202026.pdf#page=2)', `(${report2026.assetUrl}#page=2)`),
       'links to other documents, other sites, missing files and anchors stay as they are',
     );
     assert.equal(document(world, 'b')?.content, B_BODY.replace('../media/diagram.png', diagram.assetUrl).replace('./pixel.png', pixel.assetUrl));
@@ -223,7 +223,7 @@ describe('uploads of linked files in an initial sync', () => {
 });
 
 describe('file links in a document', () => {
-  const files = new Set(['docs/img/a.png', 'docs/files/a b.pdf', 'docs/x(1).png', 'top.zip']);
+  const files = new Set(['docs/img/a.png', 'docs/files/a b.pdf', 'docs/x(1).png', 'top.zip', 'docs/guide/a&b.png']);
   const isFile = (path: string) => files.has(path);
   const targets = (body: string) => findFileLinks('docs/guide/page.md', body, isFile).map((link) => [link.raw, link.target]);
 
@@ -237,6 +237,15 @@ describe('file links in a document', () => {
     assert.deepEqual(targets('![a][r]\n\n[r]: ../img/a.png'), [['../img/a.png', 'docs/img/a.png']]);
     assert.deepEqual(targets('| x |\n| -- |\n| ![a](../img/a.png) |'), [['../img/a.png', 'docs/img/a.png']]);
     assert.deepEqual(targets('[**bold** text](../img/a.png)'), [['../img/a.png', 'docs/img/a.png']]);
+    assert.deepEqual(targets('![x](a&amp;b.png)'), [['a&amp;b.png', 'docs/guide/a&b.png']], 'character references');
+    assert.deepEqual(targets('![see [x](y) here](../img/a.png)'), [['../img/a.png', 'docs/img/a.png']], 'brackets in the alt text');
+    assert.deepEqual(targets('[a](../img/a.png "Title")'), [['../img/a.png', 'docs/img/a.png']]);
+  });
+
+  it('keeps the query and fragment to write after the upload URL', () => {
+    const [link] = findFileLinks('docs/guide/page.md', '[spec](../files/a%20b.pdf#page=3)', isFile);
+    assert.equal(link?.suffix, '#page=3');
+    assert.equal(link?.target, 'docs/files/a b.pdf');
   });
 
   it('leaves other links alone', () => {
@@ -270,11 +279,18 @@ describe('file links in a document', () => {
       ['2'.repeat(64), 'https://uploads.example.test/12'],
     ]);
     const links = [
-      { raw: 'a.png', hash: '1'.repeat(64) },
-      { raw: './a.png', hash: '1'.repeat(64) },
-      { raw: 'b.png', hash: '2'.repeat(64) },
+      { raw: 'a.png', hash: '1'.repeat(64), suffix: '' },
+      { raw: './a.png', hash: '1'.repeat(64), suffix: '' },
+      { raw: 'b.png#p', hash: '2'.repeat(64), suffix: '#p' },
     ];
-    const stored = '![x](https://uploads.example.test/1) ![y](https://uploads.example.test/1) ![z](https://uploads.example.test/12)';
-    assert.equal(restoreFileLinks(stored, links, uploads), '![x](a.png) ![y](./a.png) ![z](b.png)');
+    const stored = [
+      'Pasted: `https://uploads.example.test/1` and ![old](https://uploads.example.test/1?v=2)',
+      '![x](https://uploads.example.test/1) ![y](https://uploads.example.test/1) [z](<https://uploads.example.test/12#p>)',
+    ].join('\n\n');
+    assert.equal(
+      restoreFileLinks(stored, links, uploads),
+      'Pasted: `https://uploads.example.test/1` and ![old](https://uploads.example.test/1?v=2)\n\n![x](a.png) ![y](./a.png) [z](<b.png#p>)',
+      'only the written destinations are mapped back',
+    );
   });
 });
