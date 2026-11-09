@@ -222,16 +222,15 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     return { documentUpdate: { success: true, document: documentNode(document, variables.withContent === true) } };
   }
   if (operation === 'FileUpload') {
-    const index = world.linear.uploads.length;
-    const filename = String(variables.filename);
-    const upload: FakeUpload = {
-      filename,
-      contentType: String(variables.contentType),
-      size: Number(variables.size),
-      assetUrl: `${UPLOADS_HOST}/${index}/${encodeURIComponent(filename)}`,
-    };
-    world.linear.uploads.push(upload);
-    return { fileUpload: { success: true, uploadFile: { uploadUrl: `${LINEAR_API}/storage/${index}`, assetUrl: upload.assetUrl, headers: [] } } };
+    return { fileUpload: fileUpload(world, String(variables.filename), String(variables.contentType), Number(variables.size)) };
+  }
+  if (operation === 'FileUploads') {
+    // One aliased `fileUpload` per file: f0, f1, … with variables filename0, filename1, …
+    const payload: Record<string, unknown> = {};
+    for (let index = 0; variables[`filename${index}`] !== undefined; index += 1) {
+      payload[`f${index}`] = fileUpload(world, String(variables[`filename${index}`]), String(variables[`contentType${index}`]), Number(variables[`size${index}`]));
+    }
+    return payload;
   }
   if (operation === 'TrashDocument') {
     const document = documents.find((d) => d.id === variables.id);
@@ -239,6 +238,14 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     return { documentDelete: { success: document !== undefined } };
   }
   return undefined;
+}
+
+/** Issues an upload target; the storage PUT to it fills in the bytes. */
+function fileUpload(world: FakeWorld, filename: string, contentType: string, size: number) {
+  const index = world.linear.uploads.length;
+  const upload: FakeUpload = { filename, contentType, size, assetUrl: `${UPLOADS_HOST}/${index}/${encodeURIComponent(filename)}` };
+  world.linear.uploads.push(upload);
+  return { success: true, uploadFile: { uploadUrl: `${LINEAR_API}/storage/${index}`, assetUrl: upload.assetUrl, headers: [] } };
 }
 
 function documentNode(d: FakeDocument, withContent: boolean) {
