@@ -2,13 +2,26 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { OPERATIONS, parseOperation } from "./main.ts";
+import { OPERATIONS, hooksScript, parseOperation, parseSecurityStep } from "./main.ts";
 
 test("the operation input defaults to sync and accepts both entry points", () => {
   assert.equal(parseOperation(""), "sync");
   assert.equal(parseOperation("  initial-sync "), "initial-sync");
   assert.deepEqual(OPERATIONS, ["sync", "initial-sync"]);
   assert.throws(() => parseOperation("lint"), /unknown operation: lint/);
+});
+
+test("the security-step input is empty, stage or apply, and the hooks step's script sits beside main", () => {
+  assert.equal(parseSecurityStep(""), undefined);
+  assert.equal(parseSecurityStep(" stage "), "stage");
+  assert.equal(parseSecurityStep("apply"), "apply");
+  assert.throws(() => parseSecurityStep("hooks"), /unknown security-step: hooks/);
+  assert.ok(existsSync(hooksScript()), hooksScript());
+  // The bundle resolves its own neighbour, which the build writes.
+  if (existsSync("dist/action-main.js")) {
+    assert.match(readFileSync("dist/action-main.js", "utf8"), /\.\/action-hooks\.js/);
+    assert.ok(existsSync("dist/action-hooks.js"));
+  }
 });
 
 test("action.yml runs the bundled main and post steps on node24", () => {

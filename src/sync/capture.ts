@@ -28,6 +28,11 @@ export interface CaptureOptions {
   state: StateSnapshot;
   identity?: CommitIdentity;
   security?: SecurityGate;
+  /**
+   * The first of the staged security steps: read Linear's changes and ask
+   * the gate about them, then stop. Nothing is written to git or Linear.
+   */
+  stageOnly?: boolean;
   fetch?: typeof fetch;
 }
 
@@ -212,7 +217,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(doc.id);
       if (!live(doc)) {
         if (old !== undefined) {
-          if (old.entry.saved !== undefined) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
+          if (old.entry.saved !== undefined && options.stageOnly !== true) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
           removeBody(old.path);
           ids.delete(old.path);
           documentIds.delete(old.path);
@@ -255,13 +260,23 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         candidate.files.set(path, text);
         if (candidate.checked === text) continue;
         const unchanged = old?.path === path && previous.get(path)?.equals(Buffer.from(text)) === true && assets.files.size === 0 && assets.uploads.size === 0;
-        let findings: SecurityFinding[] = [];
+        let findings: SecurityFinding[] | null = [];
         if (!unchanged || old?.entry.saved !== undefined) {
           // Upload URLs also enter the cache ref. Scan the original text so
           // localization cannot hide a secret embedded in a URL or its query.
           const original = head + (doc.content ?? '');
           if (original !== text) findings = await gate.check(new Map<string, Buffer | string>([[path, original], ...assets.files]));
-          if (findings.length === 0) findings = await gate.check(candidate.files);
+          if (findings?.length === 0) findings = await gate.check(candidate.files);
+        }
+        if (findings === null) {
+          // The hooks have not seen this text (it changed in Linear after
+          // they ran): it stays out of this run, and the cursor holds, so
+          // the next run checks it.
+          result.leftOut.push({id, rule: 'security-unchecked'});
+          candidates.delete(id);
+          resetTarget(id);
+          again = true;
+          break;
         }
         if (findings.length > 0) {
           const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
@@ -274,6 +289,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         }
         candidate.checked = text;
       }
+    }
+    if (options.stageOnly === true) {
+      result.summary = `Staged ${candidates.size} changed documents for the security hooks.`;
+      return result;
     }
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);
