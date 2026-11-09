@@ -13,7 +13,7 @@ import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from
 import { type RunReport } from '../run/finish.ts';
 import { type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
-import { type Fixture, createFixture } from '../state/test-helpers.ts';
+import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
 import { DEFAULT_MERGE_GRACE_SECONDS, SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
 import { CHECK_NAME } from '../../test/corpus/check-workflow.ts';
 
@@ -235,7 +235,9 @@ describe('sync: the sync pull request', () => {
         checksOn(head, [{ name: 'ci', status: ++observations === 1 ? 'queued' : 'completed', conclusion: 'success' }]);
         if (observations === 2) {
           const tree = await rev(`${head}^{tree}`);
-          const next = await fixture.remote.text(['commit-tree', tree, '-p', head, '-m', 'Concurrent edit']);
+          const next = await fixture.remote.text(['commit-tree', tree, '-p', head, '-m', 'Concurrent edit'], {
+            env: { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email },
+          });
           await fixture.remote.run(['update-ref', SYNC_BRANCH, next, head]);
         }
       }
