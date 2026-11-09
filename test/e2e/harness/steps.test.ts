@@ -21,7 +21,7 @@ import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
 import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, installHooks, PERSON, personCommit, Sandbox } from './sandbox.ts';
 import { engineEntry, type EngineResult } from './engine.ts';
-import { preCommitConfig } from '../../corpus/tree.ts';
+import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { waitForCheck } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
@@ -727,6 +727,9 @@ async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
     async engineClone() {
       return join(root, 'run', 'engine');
     },
+    async corpusFile() {
+      return null;
+    },
   };
   const remoteGit = new Git(remote, IDENTITY);
   const remoteFile = async (path: string, ref = names.trackedBranch) => remoteGit.text(['show', `${ref}:${path}`]);
@@ -985,6 +988,102 @@ describe('person commits through the repository hooks', () => {
     await installHooks(await ctx.person());
     await personCommit(await ctx.person(), ctx.names, new Map([['eng/platform/raw.md', '# Raw\n\n*one*\n']]), 'Add raw notes', { verify: false });
     assert.equal(await rawFile('eng/platform/raw.md'), '# Raw\n\n*one*\n');
+  });
+});
+
+describe('the scratch-hook scenario (L0-08)', () => {
+  const L0_08 = scenarios.find((scenario) => scenario.id === 'L0-08')!;
+  // Values the harness can hold in its environment; none may reach the hook or its installer.
+  const SECRETS = { LINEAR_TEST_APP_CLIENT_SECRET: 'app-secret-value', SYNC_APP_PRIVATE_KEY: 'private-key-value', GITHUB_TOKEN: 'github-token-value' };
+
+  /** An offline run of L0-08 whose corpus holds `config` as its pre-commit configuration. */
+  async function offlineRun(config: string | null) {
+    const { ctx } = await fakeRun();
+    const run: RunContext = { ...ctx, scenario: L0_08, live: null, runDir: fresh('scratch-run-'), observations: new Map(), corpusFile: async (path) => (path === '.pre-commit-config.yaml' ? config : null) };
+    return run;
+  }
+
+  async function assertionsHold(ctx: RunContext): Promise<void> {
+    for (const assertion of L0_08.checks.assertions) {
+      const { value } = await resolveSubject(ctx, assertion.subject);
+      const expected = assertion.operator === 'same-as' ? (await resolveSubject(ctx, String(assertion.expected))).value : assertion.expected;
+      assert.deepEqual(value, expected, `${assertion.subject} ${assertion.operator} ${JSON.stringify(assertion.expected)}`);
+    }
+  }
+
+  /** Sets `vars` in this process's environment for `body`, then restores what was there. */
+  async function withEnv<T>(vars: Record<string, string>, body: () => Promise<T>): Promise<T> {
+    const saved = Object.fromEntries(Object.keys(vars).map((name) => [name, process.env[name]]));
+    Object.assign(process.env, vars);
+    try {
+      return await body();
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  }
+
+  it('installs the corpus\'s pinned hook through pre-commit and fixes, settles and refuses through it', async () => {
+    const root = fresh('released-hook-');
+    // The released hook's repository, served from a local stand-in: git fetches the corpus's URL from it.
+    const rev = /rev: ([0-9a-f]{40})/.exec(await localHookConfig(root))?.[1] as string;
+    const home = join(root, 'home');
+    mkdirSync(home);
+    writeFileSync(join(home, '.gitconfig'), `[url "${join(root, 'hooks')}"]\n\tinsteadOf = ${HOOK_REPOSITORY}\n`);
+    // The corpus generator's own configuration, as the sandbox's corpus holds it.
+    const config = preCommitConfig(rev);
+    const ctx = await offlineRun(config);
+    await withEnv({ ...SECRETS, HOME: home, PRE_COMMIT_HOME: join(root, 'pre-commit') }, async () => {
+      for (const step of L0_08.steps) await runStep(ctx, step);
+    });
+    const scratch = join(ctx.runDir, 'scratch');
+    // The corpus's configuration as it is, installed by pre-commit, and nothing of this checkout's command line.
+    assert.equal(readFileSync(join(scratch, '.pre-commit-config.yaml'), 'utf8'), config);
+    assert.ok(!config.includes(engineEntry()));
+    assert.ok(existsSync(join(scratch, '.git', 'hooks', 'pre-commit')));
+    assert.equal(ctx.observations.get('hook.source'), 'published');
+    // The pinned hook is what ran: it left its environment behind, without a secret.
+    const env = readFileSync(join(root, 'hook-env'), 'utf8');
+    for (const value of Object.values(SECRETS)) assert.ok(!env.includes(value), 'a harness secret reached the hook');
+    await assertionsHold(ctx);
+  });
+
+  it('refuses a published request whose corpus has no released hook, instead of running a local one', async () => {
+    // This checkout's command line as a local system hook: what source mode writes.
+    const sourceRun = await offlineRun(null);
+    await runStep(sourceRun, { kind: 'git', action: 'scratch-hook', args: { source: 'source' } });
+    const local = readFileSync(join(sourceRun.runDir, 'scratch', '.pre-commit-config.yaml'), 'utf8');
+    const released = preCommitConfig('a'.repeat(40));
+    const cases: Array<[string | null, RegExp]> = [
+      [local, /local hook, not the released one/],
+      [released.replace(`rev: ${'a'.repeat(40)}`, 'rev: v0.1.0'), /not a released commit SHA/],
+      [preCommitConfig('0'.repeat(40)), /not a released commit SHA/],
+      [released.replace(HOOK_REPOSITORY, 'https://github.com/example/fork'), /not from https:\/\/github.com\/mdbisync\/mdbisync/],
+      [`${released}  - repo: local\n    hooks:\n      - id: linear-format\n        name: Linear format\n        entry: "true"\n        language: system\n`, /2 times/],
+      [null, /corpus has no/],
+    ];
+    for (const [config, reason] of cases) {
+      const ctx = await offlineRun(config);
+      await assert.rejects(runStep(ctx, L0_08.steps[0]!), (error: Error) => error instanceof EnvBlockedError && reason.test(error.message));
+      assert.ok(!existsSync(join(ctx.runDir, 'scratch', '.pre-commit-config.yaml')), 'a hook configuration was written anyway');
+      assert.ok(!ctx.observations.has('hook.source'));
+    }
+  });
+
+  it('runs this checkout\'s command line only when the scenario asks for source, and needs a source', async () => {
+    const ctx = await offlineRun(null);
+    await runStep(ctx, { kind: 'git', action: 'scratch-hook', args: { source: 'source' } });
+    assert.match(readFileSync(join(ctx.runDir, 'scratch', '.pre-commit-config.yaml'), 'utf8'), /repo: local[\s\S]*language: system/);
+    // L0-08's assertion on hook.source fails for such a run.
+    assert.equal(ctx.observations.get('hook.source'), 'source');
+    const unnamed = await offlineRun(null);
+    await assert.rejects(runStep(unnamed, { kind: 'git', action: 'scratch-hook', args: {} }), /needs source "published" or "source"/);
+  });
+
+  it('asks for the published hook in L0-08', () => {
+    assert.equal(L0_08.steps[0]?.args.source, 'published');
   });
 });
 

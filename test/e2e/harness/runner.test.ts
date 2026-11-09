@@ -287,6 +287,12 @@ describe('runner', () => {
     assert.match(result?.reason ?? '', /no Linear app is configured/);
   });
 
+  it('blocks the published-hook scenario without the sandbox\'s corpus, instead of testing a local hook', async () => {
+    const result = await runScenario(byId('L0-08'), deps());
+    assert.equal(result.result, 'env-blocked');
+    assert.match(result.reason ?? '', /corpus is on the sandbox repository/);
+  });
+
   it('reports a UI scenario env-blocked when the configuration is missing', async () => {
     const result = await runScenario(byId('L6-01'), deps());
     assert.equal(result.result, 'env-blocked');
