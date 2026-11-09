@@ -76,6 +76,13 @@ export interface FakePullRequest {
   base: string;
   state: 'open' | 'closed';
   merged: boolean;
+  /**
+   * Its head branch was deleted. GitHub then closes the pull request itself,
+   * a little later, and answers 422 to any change of its state.
+   */
+  headDeleted?: boolean;
+  /** With `headDeleted`: reads that still show it open before GitHub's own close lands; none when undefined. */
+  openReadsLeft?: number;
 }
 
 /** A check run or commit status on a commit in the fake repository. */
@@ -262,10 +269,15 @@ function pullRequests(world: FakeWorld, method: string, rest: string, init: Requ
   const [path = '', search = ''] = rest.split('?');
   const store = world.github.pullRequests;
   const one = /^\/pulls\/(\d+)$/.exec(path);
+  if (one !== null && method === 'GET') {
+    const pr = store.find((candidate) => candidate.number === Number(one[1]));
+    return pr === undefined ? json(404, { message: 'Not Found' }) : json(200, pullRequestNode(read(pr)));
+  }
   if (one !== null && method === 'PATCH') {
     const pr = store.find((candidate) => candidate.number === Number(one[1]));
     if (pr === undefined) return json(404, { message: 'Not Found' });
     const body = JSON.parse(String(init?.body ?? '{}')) as { title?: string; body?: string; state?: 'open' | 'closed' };
+    if (body.state !== undefined && pr.headDeleted === true) return json(422, { message: 'Validation Failed', errors: [{ message: 'state cannot be changed. The head branch was deleted.' }] });
     if (body.title !== undefined) pr.title = body.title;
     if (body.body !== undefined) pr.body = body.body;
     if (body.state !== undefined) pr.state = body.state;
@@ -278,9 +290,10 @@ function pullRequests(world: FakeWorld, method: string, rest: string, init: Requ
     const state = query.get('state') ?? 'open';
     const head = query.get('head');
     const base = query.get('base');
-    const found = store.filter(
-      (pr) => (state === 'all' || pr.state === state) && (head === null || `owner:${pr.head}` === head) && (base === null || pr.base === base),
-    );
+    const found = store
+      .filter((pr) => (head === null || `owner:${pr.head}` === head) && (base === null || pr.base === base))
+      .map(read)
+      .filter((pr) => state === 'all' || pr.state === state);
     return json(200, found.map(pullRequestNode));
   }
   if (method !== 'POST') return undefined;
@@ -333,6 +346,14 @@ function commitChecks(world: FakeWorld, method: string, rest: string): Response 
   const size = Number(new URLSearchParams(match[3] ?? '').get('per_page') ?? '30');
   const slice = runs.slice((page - 1) * size, page * size);
   return json(200, { total_count: runs.length, check_runs: slice.map((check) => ({ name: check.name, status: check.status, conclusion: check.conclusion ?? null })) });
+}
+
+/** A read of a pull request: GitHub's own close of one whose head branch was deleted lands after its open reads run out. */
+function read(pr: FakePullRequest): FakePullRequest {
+  if (pr.headDeleted !== true || pr.state === 'closed') return pr;
+  if ((pr.openReadsLeft ?? 0) > 0) pr.openReadsLeft = (pr.openReadsLeft ?? 0) - 1;
+  else pr.state = 'closed';
+  return pr;
 }
 
 function pullRequestNode(pr: FakePullRequest) {

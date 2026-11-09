@@ -4,17 +4,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { LinearClient } from '../../../src/linear/index.ts';
-import { fakeFetch, fakeWorld, LINEAR_API } from '../../../src/setup/test-helpers.ts';
+import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
 import { Git } from '../../../src/state/index.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
 import { budgetHolds, compare, gitLinks, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
 import { parseEnvFile, parseRepoUrl } from './config.ts';
-import { appJwt } from './github.ts';
+import { appJwt, SandboxRest } from './github.ts';
 import { registerRun } from './locks.ts';
 import { evidenceSummary, mergeLatest, readLatest, renderRunMarkdown, renderStatusPage, updateStatusPage, type HarnessReport } from './report.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, classify, loadExpectedRed, type ScenarioResult } from './results.ts';
-import { runScenario, runScenarios } from './runner.ts';
+import { removeRunRefsAndPullRequests, runScenario, runScenarios } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios } from './spec.ts';
 import { HARNESS_GAPS } from './steps.ts';
@@ -362,6 +362,105 @@ describe('sweeper', () => {
     live.done();
   });
 
+});
+
+describe('run cleanup on GitHub', () => {
+  const identity = { GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' };
+
+  /**
+   * A sandbox remote with run 444444's sync branch and store ref, its open
+   * pull request, and another run's open pull request. REST goes to the fake
+   * world, where deleting a head branch makes GitHub close its pull request
+   * after `openReads` more reads and refuse the close meanwhile, as the live
+   * sandbox did.
+   */
+  const setup = async (openReads: number) => {
+    const root = fresh('cleanup-');
+    const remote = join(root, 'sandbox.git');
+    await new Git(root, identity).run(['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+    const bare = new Git(remote, identity);
+    const tree = (await bare.text(['hash-object', '-t', 'tree', '-w', '--stdin'], { input: '' })).trim();
+    const commit = (await bare.text(['commit-tree', tree, '-m', 'x'])).trim();
+    for (const ref of ['refs/heads/main', 'refs/heads/t/444444/sync', 'refs/mdbisync-t/444444/ids', 'refs/heads/t/555555/sync']) await bare.run(['update-ref', ref, commit]);
+    const world: FakeWorld = fakeWorld();
+    world.github.pullRequests.push(
+      { number: 1, title: 'Sync', body: '', head: 't/444444/sync', base: 'main', state: 'open', merged: false },
+      { number: 2, title: 'Sync', body: '', head: 't/555555/sync', base: 'main', state: 'open', merged: false },
+    );
+    const fake = fakeFetch(world);
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const heads = new Set((await bare.text(['for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads'])).split('\n'));
+      for (const pr of world.github.pullRequests) {
+        if (pr.headDeleted !== true && !heads.has(pr.head)) Object.assign(pr, { headDeleted: true, openReadsLeft: openReads });
+      }
+      return fake(String(input).replace('https://api.github.com', GITHUB_API), init);
+    };
+    const sandbox = new Sandbox({ url: remote, token: 'unused', stateDir: join(root, 'state'), runId: '444444' });
+    await sandbox.refreshCache();
+    const rest = new SandboxRest({ owner: 'owner', repo: 'repo' }, 'token', fetchImpl);
+    const refs = async () => (await bare.text(['for-each-ref', '--format=%(refname)'])).split('\n').filter((ref) => ref !== '').sort();
+    return { world, sandbox, rest, refs };
+  };
+
+  it('closes the run\'s pull requests while their head branches exist, then deletes its refs', async () => {
+    const { world, sandbox, rest, refs } = await setup(1);
+    assert.deepEqual(await removeRunRefsAndPullRequests('444444', sandbox, rest), []);
+    assert.deepEqual(world.github.pullRequests.map((pr) => [pr.number, pr.state, pr.headDeleted]), [[1, 'closed', undefined], [2, 'open', undefined]]);
+    assert.deepEqual(await refs(), ['refs/heads/main', 'refs/heads/t/555555/sync']);
+  });
+
+  it('counts GitHub\'s own close after a step deleted the head branch, and stays clean when repeated', async () => {
+    // The open listing still shows the pull request, the close answers 422, and it then reads back closed.
+    const { world, sandbox, rest, refs } = await setup(1);
+    await sandbox.deleteRunRefs('444444', ['refs/heads/t/444444/sync']);
+    assert.deepEqual(await removeRunRefsAndPullRequests('444444', sandbox, rest), []);
+    assert.ok(world.requests.some((request) => request.startsWith('PATCH ') && request.endsWith('/pulls/1')));
+    assert.deepEqual(await refs(), ['refs/heads/main', 'refs/heads/t/555555/sync']);
+    assert.deepEqual(world.github.pullRequests.map((pr) => [pr.number, pr.state]), [[1, 'closed'], [2, 'open']]);
+    world.requests.length = 0;
+    assert.deepEqual(await removeRunRefsAndPullRequests('444444', sandbox, rest), []);
+    assert.equal(world.requests.some((request) => request.startsWith('PATCH ')), false);
+    assert.deepEqual(await refs(), ['refs/heads/main', 'refs/heads/t/555555/sync']);
+  });
+
+  it('closes a pull request whose head branch is still there', async () => {
+    const { world, rest } = await setup(0);
+    assert.deepEqual(await rest.closeOpenPullRequests('t/555555/'), [2]);
+    assert.equal(world.github.pullRequests[1]?.state, 'closed');
+  });
+
+  it('keeps a refused close visible while the pull request still reads open', async () => {
+    const { world, sandbox, rest } = await setup(Infinity);
+    await sandbox.deleteRunRefs('444444', ['refs/heads/t/444444/sync']);
+    await assert.rejects(rest.closePullRequest(1, 0), /pull request 1 is still open \(PATCH \/repos\/owner\/repo\/pulls\/1: HTTP 422\)/);
+    assert.equal(world.github.pullRequests[0]?.state, 'open');
+  });
+
+  it('closes the other pull requests when one close fails', async () => {
+    const { world, sandbox, rest } = await setup(Infinity);
+    await sandbox.deleteRunRefs('444444', ['refs/heads/t/444444/sync']);
+    await assert.rejects(rest.closeOpenPullRequests('t/', 0), /^Error: pull request 1 is still open \(PATCH [^)]*: HTTP 422\)$/);
+    assert.equal(world.github.pullRequests[1]?.state, 'closed');
+  });
+
+  it('reads a pull request again when a read fails while GitHub closes it', async () => {
+    const { world, sandbox, rest } = await setup(0);
+    await sandbox.deleteRunRefs('444444', ['refs/heads/t/444444/sync']);
+    let broken = 0;
+    world.github.reset = (request) => (request === 'GET /pulls/1' && broken++ === 0 ? 'before' : undefined);
+    await rest.closePullRequest(1, 5_000, 10);
+    assert.equal(broken, 2);
+    assert.equal(world.github.pullRequests[0]?.state, 'closed');
+  });
+
+  it('reports a cleanup that fails, and run refs that stay', async () => {
+    const { world, sandbox, rest } = await setup(0);
+    world.github.reset = (request) => (request.startsWith('PATCH ') ? 'before' : undefined);
+    const problems = await removeRunRefsAndPullRequests('444444', { runRefs: () => sandbox.runRefs(), deleteRunRefs: async () => {} }, rest);
+    assert.equal(problems.length, 2);
+    assert.match(problems[0] ?? '', /^pull requests: fetch failed$/);
+    assert.match(problems[1] ?? '', /^refs: still on the sandbox: refs\/heads\/t\/444444\/sync, refs\/mdbisync-t\/444444\/ids$/);
+  });
 });
 
 describe('setup deadline', () => {
