@@ -25,6 +25,7 @@ import {
 import { rm } from 'node:fs/promises';
 import { type CycleResult, capture, renderSync, runSyncCycle } from '../sync/index.ts';
 import { type SecurityStep, answeringGate, stageNothing, stagingGate } from '../sync/staged.ts';
+import { type RefusedPush, refusedPushes } from '../state/index.ts';
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
 import { type Operation, type PreflightOptions, type PreflightOutcome, type RunContext, runPreflight } from './preflight.ts';
 
@@ -41,6 +42,8 @@ export interface OperationOutcome extends PreflightOutcome {
   sync?: CycleResult;
   /** What a sync run's capture of Linear changes recorded. */
   captured?: CaptureResult;
+  /** Pushes refused because a ref had moved under this run: another run got there first. */
+  refusedPushes: readonly RefusedPush[];
   /** The staged security steps' first step: how many sets of files it staged for the hooks. */
   staged?: { sets: number };
 }
@@ -64,7 +67,7 @@ export async function runOperation(
   // Only a sync and a confirmed initial sync from Linear take Linear's text; nothing else has a set for the hooks.
   if (security?.step === 'stage' && operation === 'initial-sync' && !(initialSync?.direction === 'linear-to-git' && initialSync.confirm)) {
     await stageNothing(security.folder, null);
-    return { operation, ok: true, notImplemented: false, summary: renderStaged(0), staged: { sets: 0 } };
+    return { operation, ok: true, notImplemented: false, refusedPushes: [], summary: renderStaged(0), staged: { sets: 0 } };
   }
   try {
     const outcome = await runWithSecurity(operation, inputs, initialSync, options, security);
@@ -166,8 +169,9 @@ async function runWithSecurity(
         ? undefined
         : (context) => (initialSync.direction === 'git-to-linear' ? gitToLinear : linearToGit)(context, initialSync.confirm),
   );
-  if (!preflight.ok) return { ...preflight, notImplemented: false };
-  const outcome: OperationOutcome = { ...preflight, notImplemented: false };
+  const refused = refusedPushes(options.git);
+  if (!preflight.ok) return { ...preflight, notImplemented: false, refusedPushes: refused };
+  const outcome: OperationOutcome = { ...preflight, notImplemented: false, refusedPushes: refused };
   if (plan !== undefined) outcome.plan = plan;
   if (workSummary !== '') outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;
   if (confirmed !== undefined) outcome.confirmed = confirmed;

@@ -126,6 +126,14 @@ export interface WriteResult {
   failed: FailedWrite[];
   notAttempted: string[];
   stopped?: WriteStop;
+  /**
+   * The longest time, in milliseconds, between a document's re-read and the
+   * answer to its write (an upper bound: the write lands inside it, after
+   * any retry); an edit made in Linear inside it can be overwritten (Linear
+   * takes writes without a version). Null when no document that was read
+   * again was written.
+   */
+  rereadWindowMs: number | null;
   record: SyncRecord | null;
   /** The state refs after this step. */
   state: StateSnapshot;
@@ -173,6 +181,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     leftOutAtWrite: [],
     failed: [],
     notAttempted: [],
+    rereadWindowMs: null,
     record: null,
     state: { ...expected },
   };
@@ -335,6 +344,21 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const tipUploads = new Map(uploads);
 
   let written = 0;
+  /** When the current batch's re-read answered. */
+  let rereadAt = 0;
+  /**
+   * Sends a write to a document that was read again, and records how long
+   * Linear was unwatched for it: from the re-read to the write's answer, so
+   * a retry after a rate limit counts too. The write lands somewhere inside
+   * that time, so this is the window's upper bound. A write that fails
+   * records nothing.
+   */
+  const timed = async <T>(write: () => Promise<T>): Promise<T> => {
+    const done = await write();
+    const window = Math.round((performance.now() - rereadAt) * 10) / 10;
+    result.rereadWindowMs = Math.max(result.rereadWindowMs ?? 0, window);
+    return done;
+  };
   try {
     const plan = transformPlan();
     for (const transform of transforms) await transform.prepare?.({ git, tracked: candidate, linear, plan, uploads, documentIds });
@@ -350,11 +374,14 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       notDone.push(...rest);
       throw new StopWriting();
     };
+    // Before the first re-read: an edit made in Linear while the run waits here is seen by the re-read and skipped.
+    if (changes.length > 0) await checkpoint('before-write');
     for (let start = 0; start < changes.length; start += rereadBatch) {
       const batch = changes.slice(start, start + rereadBatch);
       let current: Map<string, LinearDocument>;
       try {
         current = await reread(batch);
+        rereadAt = performance.now();
       } catch (error) {
         if (error instanceof LinearStoppedError) stopAt(start, error.reason);
         if (!(error instanceof LinearError)) throw error;
@@ -590,7 +617,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       return true;
     }
     if (!(await unchangedSinceCapture(document, change.path))) return skip(change.path, 'edited-in-linear');
-    await linear.trashDocument(change.id);
+    await timed(() => linear.trashDocument(change.id));
     nextIds.delete(change.path);
     result.trashed.push(change.path);
     return true;
@@ -618,8 +645,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       }
     } else {
       if (!(await unchangedSinceCapture(document, change.from))) return skip(change.to, 'edited-in-linear');
-      if (written === 0) await checkpoint('before-write');
-      const updated = await linear.updateDocument(change.id, patch);
+      const updated = await timed(() => linear.updateDocument(change.id, patch));
       // Without a content write the merge result's file stands: Linear holds its body already.
       if (patch.content !== undefined) {
         stored.set(change.to, { content: updated.content ?? '', sent: patch.content });
@@ -645,14 +671,15 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const body = await transformBody(transforms, change.path, splitFile(textOf(file)).body);
     const id = documentIds.get(change.path) as string;
     if (change.restore !== undefined && change.restore.recreate === undefined) return restore(change, file, body, current);
-    if (written === 0) await checkpoint('before-write');
     // Created again under its derived id by a run that stopped before recording it.
     const recreated = change.restore?.recreate === undefined ? undefined : current.get(change.restore.recreate);
     const adopted = adoptable.get(change.path) ?? recreated;
     let document: LinearDocument;
     if (adopted !== undefined) {
       const live = current.get(adopted.id);
-      document = live !== undefined && live.content === body ? live : await linear.updateDocument(adopted.id, { content: body });
+      const write = () => linear.updateDocument(adopted.id, { content: body });
+      // Only a document the re-read returned has a window.
+      document = live === undefined ? await write() : live.content === body ? live : await timed(write);
       if (recreated === undefined) result.adopted.push(change.path);
     } else {
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });
@@ -680,9 +707,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       ? !removed.trashed && removed.archivedAt === null
       : seen.updatedAt !== removed.updatedAt || seen.trashed !== removed.trashed || seen.projectId !== removed.projectId || seen.teamId !== removed.teamId;
     if (changed) return skip(change.path, 'edited-in-linear');
-    if (written === 0) await checkpoint('before-write');
-    if (removed.trashed || removed.archivedAt !== null) await linear.restoreDocument(removed.id);
-    const document = await linear.updateDocument(removed.id, { content: body, title: file.title.normalize('NFC'), ...placePatch(file.place) });
+    const document = await timed(async () => {
+      if (removed.trashed || removed.archivedAt !== null) await linear.restoreDocument(removed.id);
+      return linear.updateDocument(removed.id, { content: body, title: file.title.normalize('NFC'), ...placePatch(file.place) });
+    });
     result.restored.push(change.path);
     stored.set(change.path, { content: document.content ?? '', sent: body });
     nextIds.set(change.path, { id: document.id });
