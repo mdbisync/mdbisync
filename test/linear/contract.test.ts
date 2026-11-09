@@ -4,8 +4,9 @@
 // Optional: LINEAR_TEST_TEAM_KEY (default: the first team),
 // LINEAR_BASE_URL (a proxy in front of Linear), LINEAR_CONTRACT_REPORT (a
 // path for the JSON report of requests per operation),
-// LINEAR_CONTRACT_PAUSE_MS (the pause before a diagnostic or verifying
-// read again, default 2000).
+// LINEAR_CONTRACT_PAUSE_MS (the pause before the one permitted delayed
+// trash read or cleanup verification, default 2000). Trash must be confirmed
+// by at most two reads with one pause; a stale/absent final read fails.
 //
 // Everything written is neutral work text in two short-lived projects, which
 // are removed at the end; their documents end archived, never in the
@@ -249,9 +250,12 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     trashed.add(second.id);
     await measured('trashDocument', () => linear.trashDocument(second.id));
     const [read] = await linear.getDocuments([second.id]);
-    assert.ok(read, 'a trashed document is still read by id');
-    if (read.trashed !== true) trashRead = await diagnoseTrashRead(linear, requests, read, pauseMs);
-    assert.equal(read.trashed, true);
+    let finalRead: { trashed: boolean } | undefined = read;
+    if (read?.trashed !== true) {
+      trashRead = await diagnoseTrashRead(linear, requests, second.id, read, pauseMs);
+      finalRead = 'trashed' in trashRead.delayed ? trashRead.delayed : undefined;
+    }
+    assert.equal(finalRead?.trashed, true, `trash must be confirmed within two reads and one ${pauseMs}ms pause: ${JSON.stringify(trashRead)}`);
     await measured('restoreDocument', () => linear.restoreDocument(second.id));
     trashed.delete(second.id);
     const [restored] = await linear.getDocuments([second.id]);
