@@ -11,7 +11,7 @@
 // never came back (a network error) is still the run's. Only ids and project
 // names are kept, never titles or content.
 
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { RUN_ID_PATTERN, runOfProject, runNames } from './isolation.ts';
@@ -82,9 +82,13 @@ export class OwnershipLedger implements WriteObserver {
   }
 
   record(entry: OwnedEntry): void {
-    const fd = openSync(this.#file, 'a');
+    const fd = openSync(this.#file, 'a+');
     try {
-      writeSync(fd, `${JSON.stringify(entry)}\n`);
+      // A writer that died mid-line left a torn tail: start on a new line, so this entry is not lost with it.
+      const size = fstatSync(fd).size;
+      const last = Buffer.alloc(1);
+      const torn = size > 0 && readSync(fd, last, 0, 1, size - 1) === 1 && last[0] !== 0x0a;
+      writeSync(fd, `${torn ? '\n' : ''}${JSON.stringify(entry)}\n`);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -199,7 +203,7 @@ export interface Recovery {
   problems: string[];
 }
 
-type Reader = Pick<LinearWorld, 'runProjects' | 'deleteProject' | 'archiveRunTeamDocuments'> & { client: Pick<LinearWorld['client'], 'getDocuments'> };
+type Reader = Pick<LinearWorld, 'projects' | 'runProjects' | 'deleteProject' | 'archiveRunTeamDocuments'> & { client: Pick<LinearWorld['client'], 'getDocuments'> };
 
 /**
  * Finishes a run's cleanup from its record alone, then checks the result.
@@ -214,15 +218,15 @@ type Reader = Pick<LinearWorld, 'runProjects' | 'deleteProject' | 'archiveRunTea
  * the run may be left. A project Linear once answered it deleted is never
  * deleted again: a stale read that still lists it is reported, not hidden.
  */
-export async function recoverOwned(world: Reader, owned: Ownership, ledger: Pick<OwnershipLedger, 'project' | 'projectDeleted'>): Promise<Recovery> {
+export async function recoverOwned(world: Reader, owned: Ownership, ledger: Pick<OwnershipLedger, 'project' | 'projectDeleted' | 'stateDir'>): Promise<Recovery> {
   const { runId } = owned;
   const recovery: Recovery = { runId, deletedProjects: [], archivedDocuments: 0, alreadyArchived: 0, verifiedArchived: 0, problems: [] };
 
   for (const [id, name] of owned.projects) {
     if (runOfProject(name) !== runId) throw new OwnershipRefusal(`refusing to recover run ${runId}: project ${id} (${name}) is not a project of the run`);
   }
-  const ownedProjects = (projects: Awaited<ReturnType<Reader['runProjects']>>) => projects.filter((project) => owned.projects.has(project.id));
-  const existing = ownedProjects(await world.runProjects());
+  // Recorded projects are found by id, whatever they are called now: a renamed one is refused, not missed.
+  const existing = (await world.projects()).filter((project) => owned.projects.has(project.id));
   for (const project of existing) {
     if (project.name !== owned.projects.get(project.id)) throw new OwnershipRefusal(`refusing to recover run ${runId}: project ${project.id} is named ${project.name}, recorded as ${owned.projects.get(project.id)}`);
   }
@@ -287,10 +291,12 @@ export async function recoverOwned(world: Reader, owned: Ownership, ledger: Pick
       recovery.verifiedArchived += 1;
     }
   }
-  // The record is read again too: an archive project made just now is the run's.
-  const left = (await world.runProjects()).filter((project) => project.runId === runId);
+  // The record is read again too: an archive project made just now is the run's. Recorded projects count by id,
+  // others of the run by name.
+  const now = readOwnership(ledger.stateDir, runId)?.projects ?? owned.projects;
+  const left = (await world.projects()).filter((project) => now.has(project.id) || runOfProject(project.name) === runId);
   for (const project of left) {
-    recovery.problems.push(owned.projects.has(project.id) || project.name === runNames(runId).helperProject('archive')
+    recovery.problems.push(now.has(project.id)
       ? `project ${project.name} is still there`
       : `project ${project.name} (${project.id}) of the run is not in its record; left as it is`);
   }

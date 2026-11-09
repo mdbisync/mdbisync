@@ -68,6 +68,8 @@ class FakeLinear {
   /** Creates of these titles are answered 503 and not applied. */
   refused503 = new Set<string>();
   failNext = new Map<string, number>();
+  /** Creates of projects with these names are applied and then answered 503. */
+  projectAppliedThen503 = new Set<string>();
   staleListed = new Set<string>();
   server: Server;
   url = '';
@@ -132,6 +134,7 @@ class FakeLinear {
       case 'CreateProject': {
         const project: FakeProject = { id: typeof input.id === 'string' ? input.id : randomUUID(), name: String(input.name), teamIds: input.teamIds as string[], deleted: false };
         this.projects.set(project.id, project);
+        if (this.projectAppliedThen503.delete(project.name)) return this.unavailable();
         return { status: 200, answer: { data: { projectCreate: { success: true, project: { id: project.id, name: project.name, createdAt: new Date().toISOString() } } } } };
       }
       case 'DeleteProject': {
@@ -313,7 +316,7 @@ describe('ownership record', () => {
     assert.equal(existsSync(join(dir, 'runs', `${runId}.json`)), false);
   });
 
-  it('reads a record whose last line was cut off when its writer died', () => {
+  it('reads a record whose last line was cut off when its writer died, and keeps what is written after it', () => {
     const dir = stateDir();
     const ledger = new OwnershipLedger(dir, 'bbb222');
     ledger.record({ kind: 'document', id: 'd1', confirmed: false });
@@ -321,5 +324,53 @@ describe('ownership record', () => {
     ledger.record({ kind: 'document', id: 'd2', confirmed: true });
     appendFileSync(join(dir, 'owned', 'bbb222.jsonl'), '{"kind":"document","id":"d3"');
     assert.deepEqual(Object.fromEntries(readOwnership(dir, 'bbb222')?.documents ?? []), { d1: true, d2: true });
+    new OwnershipLedger(dir, 'bbb222').projectDeleted('p1');
+    assert.deepEqual([...(readOwnership(dir, 'bbb222')?.deletedProjects ?? [])], ['p1']);
+  });
+
+  it('refuses a recorded project that was renamed, rather than taking it for gone', async () => {
+    const linear = await new FakeLinear().start();
+    const dir = stateDir();
+    const runId = 'ccc444';
+    const ledger = new OwnershipLedger(dir, runId);
+    ledger.scope(['team-eng']);
+    deadRun(dir, runId);
+    const world = new LinearWorld(editorClient('key', linear.url, ledger));
+    const project = await world.createProject('Harbor log ccc444', ['team-eng']);
+    (linear.projects.get(project.id) as FakeProject).name = 'Quarterly budget';
+    const report = await sweep(targets(linear), dir);
+    assert.match(report.errors.join('\n'), /project [0-9a-f-]+ is named Quarterly budget, recorded as Harbor log ccc444/);
+    assert.equal(linear.mutations.filter((mutation) => mutation.operation === 'DeleteProject').length, 0);
+    assert.ok(readOwnership(dir, runId) !== null);
+  });
+
+  it('records the project that archives a team zone before creating it, so a lost answer leaves nothing stranded', async () => {
+    const linear = await new FakeLinear().start();
+    const dir = stateDir();
+    const runId = 'ccc333';
+    const ledger = new OwnershipLedger(dir, runId);
+    ledger.scope(['team-eng']);
+    deadRun(dir, runId);
+    const proxy = await startFaultProxy(linear.url, { observer: ledger });
+    const engine = new LinearClient({ token: 'engine', baseUrl: proxy.url });
+    const readme = randomUUID();
+    await engine.createDocument({ teamId: 'team-eng' }, { id: readme, title: 'README', content: 'Team notes.\n' });
+    await proxy.close();
+
+    // Recovery's archive project is created but its answer is a 503.
+    linear.projectAppliedThen503.add('Spare shelf ccc333');
+    const first = await sweep(targets(linear), dir);
+    assert.notDeepEqual(first.errors, []);
+    const helper = [...linear.projects.values()].find((project) => project.name === 'Spare shelf ccc333');
+    assert.ok(helper !== undefined && !helper.deleted);
+    assert.equal(readOwnership(dir, runId)?.projects.get(helper.id), 'Spare shelf ccc333');
+
+    // The next sweep deletes it from the record and archives the README.
+    const second = await sweep(targets(linear), dir);
+    assert.deepEqual(second.errors, []);
+    assert.equal(helper.deleted, true);
+    assert.ok(linear.documents.get(readme)?.archivedAt !== null);
+    assert.equal([...linear.projects.values()].filter((project) => !project.deleted).length, 0);
+    assert.equal(readOwnership(dir, runId), null);
   });
 });

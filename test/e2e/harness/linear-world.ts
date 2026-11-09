@@ -65,13 +65,16 @@ export class LinearWorld {
    * chosen here, so a run's record holds the project before Linear sees the
    * request, even when its answer is lost.
    */
-  async createProject(name: string, teamIds: readonly string[]): Promise<Project> {
+  async createProject(name: string, teamIds: readonly string[], record?: Pick<OwnershipLedger, 'project'>): Promise<Project> {
     if (runOfProject(name) === null) throw new RunWorldError(`refusing to create a project that is no run's: ${name}`);
+    const id = randomUUID();
+    // On record before Linear sees the request, for a client that does not record its writes itself.
+    record?.project({ id, name });
     const data = await this.client.request<{ projectCreate: { success: boolean; project: Project } }>(
       'CreateProject',
       'mutation',
       'mutation CreateProject($input: ProjectCreateInput!) { projectCreate(input: $input) { success project { id name createdAt } } }',
-      { input: { id: randomUUID(), name, teamIds } },
+      { input: { id, name, teamIds } },
     );
     if (!data.projectCreate.success) throw new RunWorldError(`Linear did not create project ${name}`);
     return data.projectCreate.project;
@@ -79,7 +82,15 @@ export class LinearWorld {
 
   /** Every project whose name is a run project's, with the run id. */
   async runProjects(): Promise<Array<Project & { runId: string }>> {
-    const result: Array<Project & { runId: string }> = [];
+    return (await this.projects()).flatMap((project) => {
+      const runId = runOfProject(project.name);
+      return runId === null ? [] : [{ ...project, runId }];
+    });
+  }
+
+  /** Every project of the workspace, whatever its name. */
+  async projects(): Promise<Project[]> {
+    const result: Project[] = [];
     let after: string | null = null;
     for (;;) {
       const data: { projects: { nodes: Project[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await this.client.request(
@@ -88,10 +99,7 @@ export class LinearWorld {
         'query RunProjects($after: String) { projects(first: 100, after: $after) { nodes { id name createdAt } pageInfo { hasNextPage endCursor } } }',
         { after },
       );
-      for (const project of data.projects.nodes) {
-        const runId = runOfProject(project.name);
-        if (runId !== null) result.push({ ...project, runId });
-      }
+      result.push(...data.projects.nodes);
       if (!data.projects.pageInfo.hasNextPage) return result;
       after = data.projects.pageInfo.endCursor;
     }
@@ -156,8 +164,7 @@ export class LinearWorld {
     for (const [teamId, teamDocuments] of byTeam) {
       let project: Project;
       try {
-        project = await this.createProject(projectName, [teamId]);
-        record?.project(project);
+        project = await this.createProject(projectName, [teamId], record);
       } catch (error) {
         problems.push(`team ${teamId}: ${(error as Error).message}`);
         continue;
