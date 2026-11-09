@@ -456,7 +456,7 @@ describe('sync: the tracked branch to Linear', () => {
     // The record keeps an image: Linear's form of the file, not the file's spelling without its brackets.
     assert.match(await show('refs/mdbisync/linear:eng/notes/spaced.md'), /!\[Chart\]\(\.\.\/media\/chart%20copy\.png\)/);
     // Linear's form differs from the file: the next run's sync pull request
-    // carries it to the tracked branch (ADR-010), and once it is merged a run
+    // carries it to the tracked branch, and once it is merged a run
     // writes nothing.
     world.github.merge = async (pr, sha) => {
       const base = await rev(`refs/heads/${pr.base}`);
