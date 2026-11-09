@@ -65,8 +65,11 @@ function lintTree(tree: Root, body: string, report: (rule: LintRule, line: numbe
         // Linear reads heading syntax that starts a body cell as a heading:
         // a lone `#` becomes an empty one. The header row keeps it as text.
         const [row, table] = ancestors.slice(-2).reverse();
-        const [first] = node.children;
-        const heading = first?.type === 'text' && ATX_HEADING.test(body.slice(start(first), end(first)));
+        // Test the whole cell text: a first text node of only `#` may be
+        // followed by markup (`#**tag**`), which is no heading.
+        const first = node.children[0];
+        const last = node.children.at(-1);
+        const heading = first?.type === 'text' && last !== undefined && ATX_HEADING.test(body.slice(start(first), end(last)));
         if (heading && table?.type === 'table' && table.children[0] !== row) {
           report('table-hash-cell', line(node));
         }

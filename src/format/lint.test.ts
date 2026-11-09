@@ -42,6 +42,12 @@ describe('lint rules', () => {
     assert.deepEqual(lintText('doc.md', text), []);
   });
 
+  it('table-hash-cell spares a hash followed by markup in the same cell', () => {
+    for (const cell of ['#**tag**', '#[label](https://example.com)']) {
+      assert.deepEqual(lintText('doc.md', `| A |\n| -- |\n| ${cell} |`), [], cell);
+    }
+  });
+
   for (const [rule, text, line] of cases) {
     it(`${rule}: ${JSON.stringify(text).slice(0, 40)}`, () => {
       const findings = lintText('doc.md', text);
