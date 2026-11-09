@@ -11,7 +11,7 @@ import { checkpoint, CHECKPOINTS, HOOKS_DIR_ENV, HOOKS_ENV, hooksDir, testStopAf
 import { CheckpointControl } from './checkpoints.ts';
 import { annotatedFolders, buildRunTree, readAnnotation } from './corpus.ts';
 import { engineInputs, inputEnv, runEngine, startEngine } from './engine.ts';
-import { operationOf, startFaultProxy, writeError, writeFields } from './fault-proxy.ts';
+import { operationOf, startFaultProxy, writeApplied, writeError, writeFields } from './fault-proxy.ts';
 import { runNames } from './isolation.ts';
 import { Sandbox } from './sandbox.ts';
 
@@ -269,6 +269,32 @@ describe('fault proxy', () => {
       await proxy2.close();
       await up2.close();
     }
+  });
+
+  it('keeps a lost-answer fault armed while Linear refuses the write', async () => {
+    let refuse = true;
+    const proxy = await startFaultProxy('http://upstream.invalid', {
+      fetch: async () => {
+        // GraphQL refuses with HTTP 200 and errors; then a write that Linear applies.
+        const body = refuse ? { data: null, errors: [{ message: 'refused', extensions: { code: 'INPUT_ERROR' } }] } : { data: { documentUpdate: { success: true } } };
+        refuse = false;
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    try {
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset-after-apply', times: 1 }]);
+      // The refusal reaches the engine as it is, and is no lost answer.
+      const refused = await post(proxy.url, 'mutation UpdateDocument { a }');
+      assert.match(await refused.text(), /refused/);
+      assert.equal(proxy.requests.at(-1)?.answerDropped, undefined);
+      // The next write is applied, and its answer is the one lost.
+      await assert.rejects(post(proxy.url, 'mutation UpdateDocument { a }'));
+      assert.equal(proxy.requests.at(-1)?.answerDropped, true);
+    } finally {
+      await proxy.close();
+    }
+    assert.equal(writeApplied(Buffer.from(JSON.stringify({ data: { documentCreate: { success: false } } }))), false);
+    assert.equal(writeApplied(Buffer.from('not json')), false);
   });
 
   it('keeps a lost-answer fault armed when the write never reached Linear', async () => {

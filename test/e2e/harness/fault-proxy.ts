@@ -59,6 +59,21 @@ export function writeError(variant: string): Fault {
   throw new Error(`unknown write-error variant ${variant}`);
 }
 
+/**
+ * Whether a GraphQL answer to a write says the write happened: data and no
+ * errors, and no mutation payload with `success: false`.
+ */
+export function writeApplied(payload: Buffer): boolean {
+  let answer: { data?: unknown; errors?: unknown[] };
+  try {
+    answer = JSON.parse(payload.toString('utf8')) as { data?: unknown; errors?: unknown[] };
+  } catch {
+    return false;
+  }
+  if ((answer.errors?.length ?? 0) > 0 || answer.data === null || typeof answer.data !== 'object') return false;
+  return Object.values(answer.data as Record<string, unknown>).every((result) => result !== null && (typeof result !== 'object' || (result as { success?: unknown }).success !== false));
+}
+
 /** Every `id` and `title` value in a GraphQL request's variables. */
 export function writeFields(body: string): { ids: string[]; titles: string[] } {
   const ids: string[] = [];
@@ -243,7 +258,9 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
       }
     }
     let payload: Buffer = Buffer.from(await upstreamResponse.arrayBuffer());
-    if (dropAnswer !== undefined) {
+    // A lost answer only for a write Linear applied: a refused one (GraphQL errors come with HTTP 200) is passed
+    // on as it is, and the fault stays armed for the next write.
+    if (dropAnswer !== undefined && upstreamResponse.ok && writeApplied(payload)) {
       // Linear has the write and answered; the engine never hears it. The record keeps Linear's status, so the
       // write counts as written for I9 and the writes subjects, and marks the lost answer.
       dropAnswer.used = (dropAnswer.used ?? 0) + 1;
