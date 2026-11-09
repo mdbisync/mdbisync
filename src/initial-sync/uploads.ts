@@ -387,6 +387,10 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       return replaceRanges(body, fileLinks.map((link, index) => ({ from: link.from, to: link.to, text: (urls[index] as string) + link.suffix })));
     },
 
+    needsRewrite({ path, body }) {
+      return findFileLinks(path, body, isFile).length > 0;
+    },
+
     restore({ path, body }) {
       const fileLinks = links.get(path);
       if (fileLinks === undefined || context === undefined) return body;

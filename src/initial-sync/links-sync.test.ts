@@ -72,7 +72,7 @@ describe('links between synchronized documents in a confirmed initial sync', () 
     assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const graphql = world.requests.slice(requestsBefore).filter((request) => request === `POST ${LINEAR_API}/graphql`).length;
-    return { result, report, graphql };
+    return { result, report, graphql, env };
   };
 
   const show = (spec: string) => fixture.remote.text(['show', spec]);
@@ -91,6 +91,32 @@ describe('links between synchronized documents in a confirmed initial sync', () 
     assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']), tracked, 'the recorded files differ from the tracked ones');
     assert.equal(await show('refs/mdbisync/linear:eng/notes/guide.md'), TREE['eng/notes/guide.md']);
   };
+
+  it('resolves document links in a matching seed, keeping its identity and comments', async () => {
+    const world = fakeWorld();
+    const seeded = { id: 'seed-guide', title: 'guide', projectId: 'project-api', createdAt: '2026-01-01T00:00:00Z', content: TREE['eng/notes/guide.md'] as string };
+    world.linear.documents.push(seeded);
+    world.linear.comments.set('discussion', { documentContentId: seeded.id, body: 'Keep this discussion.' });
+    const comments = structuredClone(world.linear.comments);
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.deepEqual(first.report.initialSync?.overwritten, ['eng/notes/guide.md']);
+    assert.equal((await readIds())['eng/notes/guide.md']?.id, seeded.id);
+    assert.equal(world.linear.documents.find((entry) => entry.id === seeded.id), seeded);
+    assert.equal(seeded.createdAt, '2026-01-01T00:00:00Z');
+    assert.deepEqual(world.linear.comments, comments);
+    await assertLinked(world);
+
+    const writes = world.linear.writes.count;
+    const again = await run(world);
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    assert.equal(world.linear.writes.count, writes);
+    assert.deepEqual(again.report.initialSync?.unchanged, SYNCED_PATHS);
+    const sync = await runCli(['sync'], { env: { ...first.env, MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }, cwd, fetch: fakeFetch(world) });
+    assert.equal(sync.exitCode, 0, sync.stderr);
+    assert.equal(world.linear.writes.count, writes);
+    assert.deepEqual(world.github.pullRequests, [], 'the later sync opened a pull request');
+  });
 
   it('L1-12: writes links to documents, also ones created later in the run, as their URLs and records the files as they were', async () => {
     const world = fakeWorld();

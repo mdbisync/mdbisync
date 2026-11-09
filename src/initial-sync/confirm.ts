@@ -317,7 +317,12 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         // content is also compared after the transforms' inverses, with the
         // file's own body. Normalize the restored text too: restoring document
         // links can put back their original spelling in otherwise formatted text.
-        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body)), source))) {
+        // That inverse comparison alone also accepts seeded relative links:
+        // require their destinations to be resolved before using it.
+        if (document !== undefined && (holdsBody(document.content ?? '', body) || (
+          !transforms.some((transform) => transform.needsRewrite?.({ path, body: document.content ?? '' }) === true)
+          && holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body)), source)
+        ))) {
           result.unchanged.push(path);
           remember(path, document);
           continue;

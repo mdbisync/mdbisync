@@ -52,6 +52,12 @@ export interface BodyTransform {
   /** Returns the new body; throws `LeaveOutError` to leave this document out. */
   apply(input: TransformInput): Promise<string>;
   /**
+   * Whether stored content still needs destination rewrites. Called after
+   * apply, without requests or changes to the transform's restore state.
+   * Restoring such content can resemble the source before links are resolved.
+   */
+  needsRewrite?(input: TransformInput): boolean;
+  /**
    * The inverse, for what Linear stores: maps the content back to the
    * file's form (an asset URL back to its relative path), so the recorded
    * file equals the tracked one when Linear kept the text. Makes no requests.

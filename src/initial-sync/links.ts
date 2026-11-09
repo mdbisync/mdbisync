@@ -313,6 +313,10 @@ export function documentLinks(): BodyTransform {
       rewritten.set(path, { asWritten, inLinearForm });
       return written;
     },
+    needsRewrite({ path, body }) {
+      if (context === undefined) throw new Error('document-links: needsRewrite before prepare');
+      return hasDocumentLinks(body, path, context.documentIds);
+    },
     restore({ path, body, kept }) {
       // In an initial sync only what this transform wrote comes back; a document it did not rewrite stays as it is.
       const entry = rewritten.get(path);
