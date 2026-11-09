@@ -3,7 +3,8 @@
 Two-way sync between Markdown files in a Git repository and Linear documents,
 run as a GitHub Action.
 
-**Status:** early development. `lint` and `fix` work on Markdown files.
+**Status:** early development. `lint` and `fix` work on Markdown files
+([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)).
 `check` checks a repository's setup. `initial-sync` from git to Linear
 works, as a dry run and confirmed; `sync` and `initial-sync` from Linear to
 git run the same check (and `sync` refuses to run without its state) and
@@ -59,6 +60,12 @@ leaves out, and writes nothing. With `confirm: true`:
   written;
 - the documents of the annotated projects and team zones that match no file
   are moved to Linear's trash, from which they can be restored;
+- a relative link to another synchronized document, such as
+  `[setup](../guide.md#setup)`, becomes a link to that document in Linear
+  (`https://linear.app/<workspace>/document/<id>#setup`), also when the
+  document is created in the same run; the recorded file keeps the link as
+  it was written. Links to files that are not synchronized documents stay as
+  they are;
 - document ids go to `refs/mdbisync/ids` as the run goes, and at the end
   one push records `refs/mdbisync/linear` (the tracked branch with each
   synchronized file as Linear stores it), `ids` and `uploads`.
@@ -78,6 +85,7 @@ new confirmed run rebuilds them without duplicating documents.
 | `src/run/` | Inputs and the preflight every run starts with |
 | `src/mapping/` | Folder annotations and the mapping of files to documents |
 | `src/setup/` | The setup check and the refusal to sync without state |
+| `src/format/` | `lint` and `fix`: Markdown in Linear's form ([docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md)) |
 | `src/linear/` | Linear client |
 | `src/state/` | The sync's state refs, trees and LFS reads |
 | `action.yml` | Action metadata (`node24`, bundled `main` and `post`) |
@@ -136,25 +144,12 @@ downloaded when installing or running them. Use npm 11.16.0 or newer: npm
 11.12.1 rejects pre-commit's local Git package installation. The release
 package contains only bundled code and has no install scripts.
 
-`linear-format` fixes Markdown and exits 1 when it changes a file; a second
-run passes. `linear-format-check` reports changes without writing them.
-Both refuse unsupported constructs with a file, line and rule, leaving the
-file unchanged. The hooks avoid running multiple formatter processes at once.
-Checks see the files selected by pre-commit; use `--all-files` to check
-the repository, including existing files. Keep `linear-format` enabled for
-synchronization; optionally add `linear-format-check` after it.
-
-Copy [examples/pre-commit.yml](https://github.com/mikhail-yaskou/mdbisync/blob/main/examples/pre-commit.yml) to
-`.github/workflows/pre-commit.yml` in your synchronized repository. It runs
-the entire pre-commit configuration on pull requests, commits tracked-file
-fixes to same-repository branches, and reruns checks in that job. Fork pull requests
-that need fixes fail with a ready-to-apply patch. The workflow checks out
-the exact pull request head; if the branch moves before its push, the push
-fails without overwriting newer work. The workflow publishes the
-`pre-commit` check on a new fixing commit too; require this check in branch
-rules. Forks without fixes use the original job check. Other required CI
-must also run on the fixed tree or explicitly report its result on that SHA, since the token
-push does not trigger more workflows.
+`linear-format` fixes Markdown into Linear's form and exits 1 when it changes
+a file; a second run passes. `linear-format-check` reports changes without
+writing them. Both refuse constructs Linear would lose, with a file, line and
+rule, leaving the file unchanged. Every rule, what `fix` changes, and the CI
+workflow that commits the fixes to pull requests ([examples/pre-commit.yml](https://github.com/mikhail-yaskou/mdbisync/blob/main/examples/pre-commit.yml))
+are described in [docs/linear-format.md](https://github.com/mikhail-yaskou/mdbisync/blob/main/docs/linear-format.md).
 
 To generate the test corpus with the same pin, run:
 

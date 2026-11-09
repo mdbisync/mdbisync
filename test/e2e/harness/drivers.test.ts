@@ -11,7 +11,7 @@ import { checkpoint, CHECKPOINTS, HOOKS_DIR_ENV, HOOKS_ENV, hooksDir, testStopAf
 import { CheckpointControl } from './checkpoints.ts';
 import { annotatedFolders, buildRunTree, readAnnotation } from './corpus.ts';
 import { engineInputs, inputEnv, runEngine, startEngine } from './engine.ts';
-import { operationOf, startFaultProxy } from './fault-proxy.ts';
+import { operationOf, startFaultProxy, writeApplied, writeError, writeFields } from './fault-proxy.ts';
 import { runNames } from './isolation.ts';
 import { Sandbox } from './sandbox.ts';
 
@@ -204,9 +204,12 @@ describe('fault proxy', () => {
       // A forwarded request with rewritten headers is still a real request (I9 counts it).
       assert.equal(proxy.requests.at(-1)?.injected, false);
 
-      proxy.setFaults([{ kind: 'reject-document', target: 'weekly-plan' }]);
+      proxy.setFaults([{ kind: 'reject-document', ids: ['doc-7f3a'], titles: ['weekly-plan'] }]);
       const rejected = await fetch(`${proxy.url}/graphql`, { method: 'POST', body: JSON.stringify({ query: 'mutation CreateDocument { a }', operationName: 'CreateDocument', variables: { input: { title: 'notes/weekly-plan' } } }) });
       assert.match(await rejected.text(), /INPUT_ERROR/);
+      // An update that carries only the document's id is refused too.
+      const update = await fetch(`${proxy.url}/graphql`, { method: 'POST', body: JSON.stringify({ query: 'mutation UpdateDocument { a }', operationName: 'UpdateDocument', variables: { id: 'doc-7f3a', input: { content: 'New text.' } } }) });
+      assert.match(await update.text(), /INPUT_ERROR/);
       assert.equal((await post(proxy.url, 'mutation CreateDocument { other }')).status, 200);
 
       proxy.setFaults([{ kind: 'upload-error', times: 1 }]);
@@ -216,6 +219,112 @@ describe('fault proxy', () => {
       await proxy.close();
       await up.close();
     }
+  });
+
+  it('drops the answer of a write Linear has applied, only for the write it names', async () => {
+    const up = await upstream();
+    const proxy = await startFaultProxy(up.url);
+    try {
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset-after-apply', operation: 'create', times: 1 }]);
+      // An update passes: the fault names creates.
+      assert.equal((await post(proxy.url, 'mutation UpdateDocument { a }')).status, 200);
+      const before = up.calls();
+      // The create reaches Linear, then the connection drops before its answer.
+      await assert.rejects(post(proxy.url, 'mutation CreateDocument { a }'));
+      assert.equal(up.calls(), before + 1);
+      // Linear answered 200; the answer was dropped and the record says so.
+      assert.equal(proxy.requests.at(-1)?.status, 200);
+      assert.equal(proxy.requests.at(-1)?.answerDropped, true);
+      // It was a real request, counted for I9.
+      assert.equal(proxy.requests.at(-1)?.injected, false);
+      // Once only.
+      assert.equal((await post(proxy.url, 'mutation CreateDocument { a }')).status, 200);
+      // A plain reset drops the write before Linear sees it.
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset', times: 1 }]);
+      const calls = up.calls();
+      await assert.rejects(post(proxy.url, 'mutation UpdateDocument { a }'));
+      assert.equal(up.calls(), calls);
+    } finally {
+      await proxy.close();
+      await up.close();
+    }
+  });
+
+  it('rejects a document by its write fields only, before a lost-answer fault, and keeps that fault for a write that reaches Linear', async () => {
+    assert.deepEqual(writeFields(JSON.stringify({ query: 'mutation UpdateDocument { a }', variables: { id: 'doc-1', input: { title: 'guides/plan', content: 'See weekly-plan.' } } })), { ids: ['doc-1'], titles: ['guides/plan'] });
+    const up2 = await upstream();
+    const proxy2 = await startFaultProxy(up2.url);
+    const send2 = (variables: unknown, name = 'UpdateDocument') => fetch(`${proxy2.url}/graphql`, { method: 'POST', body: JSON.stringify({ query: `mutation ${name} { a }`, operationName: name, variables }) });
+    try {
+      proxy2.setFaults([{ kind: 'write-error', variant: 'reset-after-apply', times: 1 }, { kind: 'reject-document', ids: ['doc-1'], titles: ['weekly-plan'] }]);
+      // The rejected document is refused even though a lost-answer fault comes first in the list; that fault stays armed.
+      assert.match(await (await send2({ id: 'doc-1', input: { content: 'New text.' } })).text(), /INPUT_ERROR/);
+      assert.match(await (await send2({ input: { title: 'notes/weekly-plan' } }, 'CreateDocument')).text(), /INPUT_ERROR/);
+      // The next other write, whose content only mentions the name, is not rejected: it reaches Linear and loses its answer.
+      await assert.rejects(send2({ id: 'doc-2', input: { content: 'Read weekly-plan first.' } }));
+      assert.equal(proxy2.requests.at(-1)?.answerDropped, true);
+      // Spent once: the next write is answered.
+      assert.equal((await send2({ id: 'doc-2', input: { content: 'Again.' } })).status, 200);
+    } finally {
+      await proxy2.close();
+      await up2.close();
+    }
+  });
+
+  it('keeps a lost-answer fault armed while Linear refuses the write', async () => {
+    let refuse = true;
+    const proxy = await startFaultProxy('http://upstream.invalid', {
+      fetch: async () => {
+        // GraphQL refuses with HTTP 200 and errors; then a write that Linear applies.
+        const body = refuse ? { data: null, errors: [{ message: 'refused', extensions: { code: 'INPUT_ERROR' } }] } : { data: { documentUpdate: { success: true } } };
+        refuse = false;
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    try {
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset-after-apply', times: 1 }]);
+      // The refusal reaches the engine as it is, and is no lost answer.
+      const refused = await post(proxy.url, 'mutation UpdateDocument { a }');
+      assert.match(await refused.text(), /refused/);
+      assert.equal(proxy.requests.at(-1)?.answerDropped, undefined);
+      // The next write is applied, and its answer is the one lost.
+      await assert.rejects(post(proxy.url, 'mutation UpdateDocument { a }'));
+      assert.equal(proxy.requests.at(-1)?.answerDropped, true);
+    } finally {
+      await proxy.close();
+    }
+    assert.equal(writeApplied(Buffer.from(JSON.stringify({ data: { documentCreate: { success: false } } }))), false);
+    assert.equal(writeApplied(Buffer.from('not json')), false);
+  });
+
+  it('keeps a lost-answer fault armed when the write never reached Linear', async () => {
+    let fail = true;
+    const proxy = await startFaultProxy('http://upstream.invalid', {
+      fetch: async () => {
+        if (fail) {
+          fail = false;
+          throw new Error('network down');
+        }
+        return new Response(JSON.stringify({ data: { ok: true } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    try {
+      proxy.setFaults([{ kind: 'write-error', variant: 'reset-after-apply', times: 1 }]);
+      assert.equal((await post(proxy.url, 'mutation UpdateDocument { a }')).status, 502);
+      await assert.rejects(post(proxy.url, 'mutation UpdateDocument { a }'));
+      assert.equal(proxy.requests.at(-1)?.answerDropped, true);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it('names write-error variants the way specs write them', async () => {
+    // writeError lives next to the proxy's faults.
+    assert.deepEqual(writeError('http-500'), { kind: 'write-error', variant: 'server-error', times: 1 });
+    assert.deepEqual(writeError('connection-reset'), { kind: 'write-error', variant: 'reset', times: 1 });
+    assert.deepEqual(writeError('reset-after-apply'), { kind: 'write-error', variant: 'reset-after-apply', times: 1 });
+    assert.deepEqual(writeError('reset-after-apply-on-update'), { kind: 'write-error', variant: 'reset-after-apply', operation: 'update', times: 1 });
+    assert.throws(() => writeError('surprise'), /unknown write-error variant/);
   });
 });
 

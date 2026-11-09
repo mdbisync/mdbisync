@@ -327,7 +327,7 @@ export function makeAssets(rng: Rng): Assets {
   }
 
   // The image that 40 documents share, and a small status icon; documents ask for them.
-  const sharedFile = asset("docs/handbook/assets/shared-logo.png", encodePng(logo(150, 40)), "images", "embedded by 40 documents");
+  const sharedFile: CorpusFile = { ...asset("docs/handbook/assets/shared-logo.png", encodePng(logo(150, 40)), "images", "embedded by 40 documents"), role: "shared-image" };
   files.push(sharedFile);
   const shared: AssetRef = { path: sharedFile.path, kind: "image", label: `${COMPANY} logo`, tooLarge: false };
   const secondaryFile = asset("eng/platform/assets/status-icon.png", encodePng(statusIcon()), "images", "embedded by tables, pairwise and lint documents");

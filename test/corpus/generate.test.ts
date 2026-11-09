@@ -11,7 +11,7 @@ import { checkCorpus } from "./check.ts";
 import { longTitle } from "./documents.ts";
 import { buildCorpus, writeCorpus } from "./generate.ts";
 import { parse } from "yaml";
-import { CONTENT_LIMIT, gitattributes } from "./model.ts";
+import { CONTENT_LIMIT, gitattributes, SHARED_IMAGE_USERS } from "./model.ts";
 import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
 import { fixText, lintText } from "../../src/format/index.ts";
@@ -95,6 +95,16 @@ test("one image is used by exactly 40 documents, and two files are over the uplo
   assert.equal(users.length, 40);
   const tooLarge = corpus().files.filter((f) => f.kind !== "markdown" && f.rule === "upload-too-large").map((f) => f.kind);
   assert.deepEqual(tooLarge.sort(), ["attachment", "image"]);
+});
+
+test("the mid slice holds the shared image and every document that embeds it", () => {
+  const built = corpus();
+  const mid = new Set(built.slices.mid);
+  const image = built.files.find((f) => f.role === "shared-image");
+  assert.ok(image && mid.has(image.path));
+  const users = built.files.filter((f) => f.synced && f.kind === "markdown" && f.links.includes(image.path));
+  assert.equal(users.length, SHARED_IMAGE_USERS);
+  assert.deepEqual(users.filter((f) => !mid.has(f.path)).map((f) => f.path), []);
 });
 
 test("duplicate-title fixtures are taken from the bank once, never paired by the generator", () => {

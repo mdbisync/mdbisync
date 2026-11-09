@@ -81,6 +81,8 @@ export interface ScenarioResult {
   cleanup: { ok: boolean; detail?: string };
   /** Measurements the scenario records for the report (durations, budget, race windows); never content. */
   metrics?: Record<string, unknown>;
+  /** Trashed documents per team zone the run used, before it and after its cleanup; a run should leave them unchanged. */
+  teamZoneTrash?: Record<string, { before: number; after?: number }>;
 }
 
 export const EXPECTED_RED_FILE = fileURLToPath(new URL('../expected-red.json', import.meta.url));

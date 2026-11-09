@@ -325,6 +325,68 @@ describe('oracles', () => {
   });
 });
 
+describe('team-zone cleanup', () => {
+  it('names helper projects so cleanup finds them and no annotation ever maps one', async () => {
+    const { RUN_PROJECT_PATTERN, runOfProject } = await import('./isolation.ts');
+    const { PROJECT_PLACEHOLDERS } = await import('./corpus.ts');
+    const names = runNames('aaaaaa');
+    const placeholderProjects = PROJECT_PLACEHOLDERS.map((_, index) => names.project(index));
+    const helpers = (['archive', 'unmapped', 'archived-copy'] as const).map((purpose) => names.helperProject(purpose));
+    // One name per purpose, so a run never holds two live projects with one name.
+    assert.equal(new Set(helpers).size, helpers.length);
+    for (const helper of helpers) {
+      assert.match(helper, RUN_PROJECT_PATTERN);
+      assert.equal(runOfProject(helper), 'aaaaaa');
+      assert.ok(!placeholderProjects.includes(helper));
+    }
+  });
+
+  it('archives a run\'s team-zone documents through a run project of their team, restoring trashed ones first', async () => {
+    const { LinearWorld } = await import('./linear-world.ts');
+    const calls: string[] = [];
+    const client = {
+      request: async (operation: string, _kind: string, _query: string, variables: { input?: { name: string; teamIds: string[] }; id?: string }) => {
+        calls.push(`${operation} ${variables.input?.name ?? variables.id ?? ''} ${variables.input?.teamIds?.join(',') ?? ''}`.trim());
+        if (operation === 'CreateProject') return { projectCreate: { success: true, project: { id: `project-${variables.input?.teamIds?.[0]}`, name: variables.input?.name, createdAt: '' } } };
+        return { projectDelete: { success: true } };
+      },
+      restoreDocument: async (id: string) => void calls.push(`restore ${id}`),
+      updateDocument: async (id: string, patch: { projectId?: string }) => void calls.push(`move ${id} ${patch.projectId}`),
+    };
+    const world = new LinearWorld(client as never);
+    const archived = await world.archiveRunTeamDocuments([
+      { id: 'd1', title: 'aaaaaa/guides/start', projectId: null, teamId: 'team-eng', trashed: false },
+      { id: 'd2', title: 'aaaaaa/guides/old', projectId: null, teamId: 'team-eng', trashed: true },
+      { id: 'd3', title: 'aaaaaa/notes', projectId: null, teamId: 'team-docs', trashed: false },
+      { id: 'd4', title: 'in a project already', projectId: 'p', teamId: 'team-eng', trashed: false },
+    ], 'aaaaaa', 'Spare shelf aaaaaa');
+    assert.equal(archived, 3);
+    assert.deepEqual(calls, [
+      'CreateProject Spare shelf aaaaaa team-eng', 'move d1 project-team-eng', 'restore d2', 'move d2 project-team-eng', 'DeleteProject project-team-eng',
+      'CreateProject Spare shelf aaaaaa team-docs', 'move d3 project-team-docs', 'DeleteProject project-team-docs',
+    ]);
+    // A move that fails puts a restored document back in the trash, the other team is still archived, and the
+    // failures come back together.
+    calls.length = 0;
+    const failing = new LinearWorld({
+      ...client,
+      updateDocument: async (id: string, patch: { projectId?: string }) => {
+        if (id === 'd2') throw new Error('quota');
+        calls.push(`move ${id} ${patch.projectId}`);
+      },
+      trashDocument: async (id: string) => void calls.push(`trash ${id}`),
+    } as never);
+    await assert.rejects(failing.archiveRunTeamDocuments([
+      { id: 'd2', title: 'aaaaaa/guides/old', projectId: null, teamId: 'team-eng', trashed: true },
+      { id: 'd3', title: 'aaaaaa/notes', projectId: null, teamId: 'team-docs', trashed: false },
+      { id: 'd5', title: 'aaaaaa/loose', projectId: null, teamId: null, trashed: false },
+    ], 'aaaaaa', 'Spare shelf aaaaaa'), /archived 1; not archived: document d5 has neither a project nor a team; document d2: quota/);
+    assert.deepEqual(calls.filter((call) => /^(restore|trash|move)/.test(call)), ['restore d2', 'trash d2', 'move d3 project-team-docs']);
+    // Never another run's document.
+    await assert.rejects(world.archiveRunTeamDocuments([{ id: 'x', title: 'bbbbbb/notes', projectId: null, teamId: 'team-eng', trashed: false }], 'aaaaaa', 'Spare shelf aaaaaa'), /not a team-zone document of run aaaaaa/);
+  });
+});
+
 describe('titles that are not paths', () => {
   it('follow the proposed percent-encoding rule', () => {
     assert.equal(encodeTitlePath('Notes: draft?*'), 'Notes%3A draft%3F%2A');
@@ -626,7 +688,7 @@ describe('linear executors', () => {
     assert.equal(ctx.observations.get('expected.destinationPath'), 'docs/handbook/plan.md');
     ctx.observations.delete('target.paths');
     await runStep(ctx, { kind: 'linear', action: 'out-of-scope', args: { variants: ['unmapped-project', 'trash'] } });
-    assert.deepEqual(created, ['Workshop agenda aaaaaa']);
+    assert.deepEqual(created, ['Spare drawer aaaaaa']);
     assert.equal((ctx.observations.get('target.paths') as string[]).length, 2);
     assert.ok([...linear.documents.values()].some((document) => document.trashed));
   });
@@ -643,6 +705,18 @@ describe('linear executors', () => {
     assert.equal(ctx.observations.get('blocked.icon'), 'Cross');
     assert.ok(!(linear.documents.get(id)?.content ?? '').includes(secret));
     assert.deepEqual(await resolveSubject(ctx, 'blocked.commentFields'), { known: true, value: ['hook', 'line'] });
+  });
+
+  it('reject a document by its recorded id and its name, without taking over the scenario\'s target', async () => {
+    const { ctx, ids, faults, remoteGit } = await fakeRun();
+    await runStep(ctx, { kind: 'fault', action: 'reject-document', args: { target: 'eng/platform/notes.md' } });
+    assert.deepEqual(faults, [{ kind: 'reject-document', ids: [ids['eng/platform/notes.md']?.id], titles: ['notes'] }]);
+    assert.equal(ctx.observations.has('target.path'), false);
+    // A converged run whose ids ref is gone is the engine's gap, not a quiet fall back to the name.
+    await remoteGit.run(['update-ref', '-d', `${ctx.names.refPrefix}/ids`]);
+    const git = await ctx.person();
+    await git.run(['update-ref', '-d', `${ctx.names.refPrefix}/ids`], { okCodes: [0, 1] });
+    await assert.rejects(runStep(ctx, { kind: 'fault', action: 'reject-document', args: { target: 'eng/platform/notes.md' } }), ProductError);
   });
 
   it('tells the engine a document is gone for good when Linear cannot delete one', async () => {
