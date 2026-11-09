@@ -402,7 +402,7 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
   return { ...result, harnessAppRequests: requests };
 }
 
-async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: string): Promise<ScenarioResult> {
+async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: string): Promise<Omit<ScenarioResult, 'harnessAppRequests'>> {
   const names: RunNames = runNames(runId);
   const started = Date.now();
   const runDir = join(deps.outDir, 'runs', `${scenario.id}-${runId}`);
@@ -548,7 +548,6 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     durationMs: Date.now() - started,
     engineRequests: ctx.proxy?.requests.filter((record) => !record.injected).length ?? 0,
     harnessRequests: ctx.live === null ? 0 : [...Object.values(ctx.live.editors)].reduce((sum, client) => sum + client.stats.total, 0),
-    harnessAppRequests: 0,
     budgetWaitMs: grant?.waitedMs ?? 0,
     checks,
     cleanup: cleanupOutcome,

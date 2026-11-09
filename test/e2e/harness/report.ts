@@ -52,7 +52,7 @@ export function renderRunMarkdown(report: HarnessReport): string {
     '| --- | --- | --- | --- | --- | --- | --- | --- |',
   ];
   for (const result of report.results) {
-    lines.push(`| ${result.id} | ${result.runId} | ${result.result}${result.unexpectedPass ? ' (expected red)' : ''} | ${cell(result.reason ?? '')} | ${result.engineRequests} | ${result.harnessAppRequests ?? 0} | ${Math.round(result.durationMs / 1000)} | ${result.cleanup.ok ? 'ok' : cell(result.cleanup.detail ?? 'failed')} |`);
+    lines.push(`| ${result.id} | ${result.runId} | ${result.result}${result.unexpectedPass ? ' (expected red)' : ''} | ${cell(result.reason ?? '')} | ${result.engineRequests} | ${result.harnessAppRequests} | ${Math.round(result.durationMs / 1000)} | ${result.cleanup.ok ? 'ok' : cell(result.cleanup.detail ?? 'failed')} |`);
   }
   const passing = report.results.filter((result) => result.unexpectedPass);
   if (passing.length > 0) lines.push('', `Passing while on the expected-red list (remove them from the list): ${passing.map((result) => result.id).join(', ')}.`);
@@ -157,7 +157,7 @@ export function evidenceSummary(report: HarnessReport): string {
   const counts = countByResult(report.results);
   const engine = report.results.reduce((sum, result) => sum + result.engineRequests, 0);
   const harness = report.results.reduce((sum, result) => sum + result.harnessRequests, 0);
-  const appReads = report.results.reduce((sum, result) => sum + (result.harnessAppRequests ?? 0), 0);
+  const appReads = report.results.reduce((sum, result) => sum + result.harnessAppRequests, 0);
   const waited = report.results.reduce((sum, result) => sum + result.budgetWaitMs, 0);
   const cleanupFailures = report.results.filter((result) => !result.cleanup.ok).map((result) => result.id);
   const lines = [
@@ -170,7 +170,7 @@ export function evidenceSummary(report: HarnessReport): string {
     '',
     '| Scenario | Result | Harness app reads | Reason |',
     '| --- | --- | --- | --- |',
-    ...report.results.map((result) => `| ${result.id} | ${result.result} | ${result.harnessAppRequests ?? 0} | ${cell(result.reason ?? '')} |`),
+    ...report.results.map((result) => `| ${result.id} | ${result.result} | ${result.harnessAppRequests} | ${cell(result.reason ?? '')} |`),
   ];
   return `${lines.join('\n')}\n`;
 }
