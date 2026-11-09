@@ -56,6 +56,8 @@ export const PROJECT_PLACEHOLDERS = [
   'PROJECT_DOCS_2',
   'PROJECT_DOCS_3',
   'PROJECT_COMBINED',
+  'PROJECT_ENG_5',
+  'PROJECT_ENG_6',
 ] as const;
 
 export function parseManifest(text: string): Manifest {
