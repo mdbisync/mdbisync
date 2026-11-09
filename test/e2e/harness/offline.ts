@@ -8,14 +8,19 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { buildCorpus } from '../../corpus/generate.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
-import { BANK_DIR, goldenMarkdownPath, loadBank, readFixture, readOptional } from '../../probe/bank.ts';
+import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
+import { bodyOf } from './checks.ts';
 import { MARKERS } from './conflicts.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
 
 export interface OfflineInput {
   /** Path → text. */
   files: Map<string, string>;
-  /** Path → the form Linear keeps, for the files whose form is recorded (null: not recorded). */
+  /**
+   * Path → the form Linear keeps, for the files whose form is known: an
+   * unchanged file's body by the engine's rule (`bodyOf`: no byte order mark,
+   * no front matter), else a bank fixture's recorded form.
+   */
   golden: Map<string, string>;
   /** Files the linter must leave out. */
   lintErrors: string[];
@@ -30,9 +35,8 @@ function bankInput(filter: (fixture: { class: string; construct: string }, text:
     if (!filter(fixture, text)) continue;
     input.files.set(fixture.file, text);
     if (fixture.class === 'lint-error') input.lintErrors.push(fixture.file);
-    const golden = readOptional(join(bank.dir, goldenMarkdownPath(fixture.file)));
+    const golden = engineForm(bank, fixture, text);
     if (golden !== undefined) input.golden.set(fixture.file, golden);
-    else if (fixture.class === 'unchanged') input.golden.set(fixture.file, text);
   }
   input.lintErrors.sort();
   return input;
@@ -42,9 +46,13 @@ function corpusInput(): OfflineInput {
   // The hook revision only fills the corpus's .pre-commit-config.yaml, which the format scenarios do not read.
   const corpus = buildCorpus('0'.repeat(40));
   const bank = loadBank(join(REPO_ROOT, BANK_DIR));
-  // A bank fixture's recorded form holds for its corpus copy only while the copy is the same text
-  // (copying rewrites links that lead out of the bank, and the form recorded for the old link no longer applies).
-  const bankGolden = new Map(bank.fixtures.map((fixture) => [fixture.file, { text: readFixture(bank, fixture), golden: readOptional(join(bank.dir, goldenMarkdownPath(fixture.file))) }]));
+  // A recorded form holds for a corpus copy only while the copy is the same text (copying rewrites links
+  // that lead out of the bank, and the form recorded for the old link no longer applies). An unchanged
+  // fixture's form is its body, so its copy's form is the copy's own body, rewritten or not.
+  const recorded = new Map(bank.fixtures.map((fixture) => {
+    const text = readFixture(bank, fixture);
+    return [fixture.file, { text, form: fixture.class === 'unchanged' ? undefined : engineForm(bank, fixture, text) }];
+  }));
   const input: OfflineInput = { files: new Map(), golden: new Map(), lintErrors: [] };
   for (const file of corpus.files) {
     if (file.kind !== 'markdown' || !file.synced) continue;
@@ -55,11 +63,11 @@ function corpusInput(): OfflineInput {
       input.lintErrors.push(file.path);
       continue;
     }
-    // A copied bank fixture has its recorded Linear form; an unchanged document is its own form.
-    const fromBank = file.path.startsWith(`${BANK_HOME}/`) ? bankGolden.get(file.path.slice(BANK_HOME.length + 1)) : undefined;
-    if (fromBank?.golden !== undefined) {
-      if (fromBank.text === text) input.golden.set(file.path, fromBank.golden);
-    } else if (file.expected === 'unchanged') input.golden.set(file.path, text);
+    // A copied bank fixture has its recorded Linear form; an unchanged document's form is its own body.
+    const fromBank = file.path.startsWith(`${BANK_HOME}/`) ? recorded.get(file.path.slice(BANK_HOME.length + 1)) : undefined;
+    if (fromBank?.form !== undefined) {
+      if (fromBank.text === text) input.golden.set(file.path, fromBank.form);
+    } else if (file.expected === 'unchanged') input.golden.set(file.path, bodyOf(text));
   }
   input.lintErrors.sort();
   return input;

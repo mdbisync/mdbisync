@@ -17,12 +17,14 @@ import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow
 import { runNames } from './isolation.ts';
 import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { assertionHolds, compare, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { bodyOf, compare, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
+import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
 import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, installHooks, PERSON, personCommit, Sandbox } from './sandbox.ts';
-import { engineEntry, type EngineResult } from './engine.ts';
+import { engineEntry, REPO_ROOT, type EngineResult } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { waitForCheck } from './check-fault.ts';
@@ -389,6 +391,45 @@ describe('load', () => {
 });
 
 describe('oracles', () => {
+  it('give an unchanged file its body by the engine\'s rule as its form, in the bank and the corpus alike', () => {
+    for (const name of ['bank', 'full'] as const) {
+      const input = offlineInput(name);
+      const bom = [...input.files].find(([path]) => path.endsWith('typography-scripts/bom.md'));
+      assert.ok(bom !== undefined, `the ${name} input has the byte order mark fixture`);
+      const [path, text] = bom;
+      assert.ok(text.startsWith('\uFEFF'), `the ${name} input keeps the mark in the file`);
+      assert.ok(!input.golden.get(path)?.startsWith('\uFEFF'), `the ${name} oracle has no mark`);
+      // What L0-02 and L0-07 compare: the fixed file's body, as the engine sends it, against the oracle.
+      const dir = fresh('mds-bom-');
+      writeInput(dir, new Map([[path, text]]));
+      assert.ok([0, 1].includes(runFormatCommand('fix', dir).status ?? -1));
+      assert.equal(bodyOf(readInput(dir, [path]).get(path) ?? ''), input.golden.get(path), `the ${name} oracle is what fix gives`);
+    }
+    // The live oracle reads the same form: the recorded one keeps the mark the probe sent.
+    const bank = loadBank(join(REPO_ROOT, BANK_DIR));
+    const fixture = bank.fixtures.find((candidate) => candidate.file === 'typography-scripts/bom.md');
+    assert.ok(fixture !== undefined);
+    assert.equal(engineForm(bank, fixture, readFixture(bank, fixture)), bodyOf(readFixture(bank, fixture)));
+  });
+
+  it('name the paths a failed comparison of path maps differs at in the check\'s reason', async () => {
+    const ctx = { observations: new Map<string, unknown>([['fix.output', new Map([['b.md', 'kept'], ['a.md', 'private text']])], ['golden.linearForm', new Map([['b.md', 'kept'], ['a.md', 'other']])]]) } as unknown as RunContext;
+    assert.deepEqual(await evaluateAssertion(ctx, { subject: 'fix.output', operator: 'same-as', expected: 'golden.linearForm' }), { holds: false, reason: 'same-as did not hold: differs at a.md' });
+    assert.deepEqual(await evaluateAssertion(ctx, { subject: 'fix.output', operator: 'equal', expected: 3 }), { holds: false, reason: 'equal did not hold' });
+  });
+
+  it('name the paths a failed same-as differs at, a few at most and never their content', () => {
+    const actual = new Map([['a.md', 'secret one'], ['b.md', 'same'], ['c.md', 'x']]);
+    assert.equal(differingPaths(actual, new Map([['b.md', 'same'], ['c.md', 'y'], ['d.md', 'z']])), 'differs at a.md, c.md, d.md');
+    assert.equal(differingPaths(actual, new Map(actual)), undefined);
+    assert.equal(differingPaths(['a.md'], ['b.md']), undefined, 'only path maps name paths');
+    assert.ok(!differingPaths(actual, new Map())?.includes('secret'));
+    const many = new Map(Array.from({ length: 8 }, (_, i) => [`f${i}.md`, 'one']));
+    assert.equal(differingPaths(many, new Map([...many].map(([path]) => [path, 'two']))), 'differs at f0.md, f1.md, f2.md, f3.md, f4.md and 3 more');
+    // Values compare as compare() does: sets in sorted form.
+    assert.equal(differingPaths(new Map([['a.md', new Set(['x', 'y'])]]), new Map([['a.md', new Set(['y', 'x'])]])), undefined);
+  });
+
   it('map links to uploads link by link, so equal bytes at two paths keep their own links', () => {
     const hashes = new Map([['eng/media/a.png', 'h1'], ['eng/media/copy-of-a.png', 'h1'], ['eng/notes.pdf', 'h2']]);
     const uploads = new Map([['h1', 'https://uploads.linear.app/x/one'], ['h2', 'https://uploads.linear.app/x/two']]);
@@ -1339,7 +1380,7 @@ describe('linear executors', () => {
     const held = new Map<string, boolean>();
     for (const assertion of scenario.checks.assertions) {
       if (subjects !== undefined && !subjects.includes(assertion.subject)) continue;
-      held.set(assertion.subject, await assertionHolds(ctx, assertion));
+      held.set(assertion.subject, (await evaluateAssertion(ctx, assertion)).holds);
     }
     return held;
   }

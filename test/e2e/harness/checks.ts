@@ -268,9 +268,12 @@ export function budgetHolds(requests: number, documentsWritten: number, runs: nu
   return requests <= 1.5 * documentsWritten + 5 * runs;
 }
 
-/** Evaluates one assertion operator. */
-/** Whether a spec assertion holds now; `same-as` compares with the subject its `expected` names. */
-export async function assertionHolds(ctx: RunContext, assertion: Assertion): Promise<boolean> {
+/**
+ * Whether a spec assertion holds now and, when it does not, the reason;
+ * `same-as` compares with the subject its `expected` names. A failed
+ * comparison of two path maps names the differing paths.
+ */
+export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): Promise<{ holds: true } | { holds: false; reason: string }> {
   const actual = await resolveSubject(ctx, assertion.subject);
   if (!actual.known) throw new HarnessGapError(`assertion subject ${assertion.subject}`);
   let expected = assertion.expected;
@@ -279,7 +282,24 @@ export async function assertionHolds(ctx: RunContext, assertion: Assertion): Pro
     if (!other.known) throw new HarnessGapError(`assertion subject ${String(assertion.expected)}`);
     expected = other.value;
   }
-  return compare(assertion.operator, actual.value, expected);
+  if (compare(assertion.operator, actual.value, expected)) return { holds: true };
+  const paths = differingPaths(actual.value, expected);
+  return { holds: false, reason: `${assertion.operator} did not hold${paths === undefined ? '' : `: ${paths}`}` };
+}
+
+/**
+ * The keys at which two path maps differ (on one side only, or with other
+ * values), in the order `compare` sees them: the first few and how many
+ * more. Keys only, never values, so a report names paths and no document
+ * content (I5). Undefined unless both sides are maps that differ.
+ */
+export function differingPaths(actual: unknown, expected: unknown, shown = 5): string | undefined {
+  if (!(actual instanceof Map) || !(expected instanceof Map)) return undefined;
+  const same = (key: unknown) => actual.has(key) && expected.has(key) && JSON.stringify(normalize(actual.get(key))) === JSON.stringify(normalize(expected.get(key)));
+  const differing = [...new Set([...actual.keys(), ...expected.keys()])].filter((key) => !same(key)).map(String).sort((a, b) => a.localeCompare(b));
+  if (differing.length === 0) return undefined;
+  const more = differing.length - shown;
+  return `differs at ${differing.slice(0, shown).join(', ')}${more > 0 ? ` and ${more} more` : ''}`;
 }
 
 export function compare(operator: Assertion['operator'], actual: unknown, expected: unknown): boolean {
@@ -784,7 +804,8 @@ export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
   refreshView(ctx);
   for (const assertion of ctx.scenario.checks.assertions) {
     try {
-      outcomes.push(await assertionHolds(ctx, assertion) ? ok(assertion.subject) : bad(assertion.subject, `${assertion.operator} did not hold`));
+      const result = await evaluateAssertion(ctx, assertion);
+      outcomes.push(result.holds ? ok(assertion.subject) : bad(assertion.subject, result.reason));
     } catch (error) {
       if (productFailure(error)) outcomes.push(bad(assertion.subject, (error as Error).message));
       else throw error;
