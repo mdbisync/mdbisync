@@ -1,0 +1,83 @@
+{
+  "capacity": [],
+  "operation": "sync",
+  "ok": true,
+  "code": null,
+  "exitStatus": "success",
+  "stop": null,
+  "complete": true,
+  "changed": false,
+  "setupChecks": [
+    {
+      "name": "linear-credentials",
+      "state": "passed",
+      "detail": ""
+    },
+    {
+      "name": "security-hooks",
+      "state": "passed",
+      "detail": ""
+    }
+  ],
+  "securityHooks": [],
+  "notImplemented": false,
+  "summary": null,
+  "initialSync": null,
+  "sync": {
+    "complete": true,
+    "updated": [],
+    "relocated": [],
+    "created": [],
+    "adopted": [],
+    "restored": [],
+    "trashed": [],
+    "conflicts": [],
+    "decided": [],
+    "skipped": [],
+    "leftOut": [],
+    "leftOutAtWrite": [],
+    "failed": [],
+    "notAttempted": [],
+    "stopped": null,
+    "record": null
+  },
+  "pullRequest": {
+    "needed": false,
+    "pullRequest": null,
+    "branchMoved": false,
+    "checks": null,
+    "merged": null,
+    "paths": []
+  },
+  "capture": {
+    "ok": true,
+    "changed": [],
+    "removed": [],
+    "heldRemovals": [],
+    "blocked": [],
+    "leftOut": [],
+    "writeBackWarnings": []
+  },
+  "writtenCount": 0,
+  "skippedCompletedCount": 0,
+  "oversizeFiles": [],
+  "leftOutRules": [],
+  "paths": {
+    "rule": "percent-encode-unsafe-segments"
+  },
+  "resumed": false,
+  "writtenDocuments": 0,
+  "writesAfterLimit": 0,
+  "failedWriteRecorded": false,
+  "endpointLimitHeadersPresent": false,
+  "rejectedDocumentNamed": false,
+  "stoppedEarly": false,
+  "progressRecorded": true,
+  "record": null,
+  "atomicPushRefused": false,
+  "partialRefUpdates": 0,
+  "skippedConcurrentDocument": false,
+  "capturedTrackedTip": "c0e66191259920baa3abdfa6f88abac44bfb65db",
+  "rereadWindowMs": null,
+  "linearToGit": null
+}
