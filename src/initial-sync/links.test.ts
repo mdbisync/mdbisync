@@ -6,7 +6,7 @@ import { join, relative } from 'node:path';
 import { describe, it } from 'node:test';
 import { fixText } from '../format/index.ts';
 import { type LinearClient } from '../linear/index.ts';
-import { type LinkSpellings, documentLinks, documentUrlBase, linkDestinations, linksFromLinear, linksToLinear, relativeLink, resolveRelative } from './links.ts';
+import { type LinkSpellings, documentLinks, documentUrlBase, linkDestinations, linksFromLinear, linksLinearDocuments, linksToLinear, relativeLink, resolveRelative } from './links.ts';
 import { type TransformContext } from './transform.ts';
 
 const BASE = documentUrlBase('example-team');
@@ -171,5 +171,45 @@ describe('document links', () => {
       }
     }
     assert.ok(linked >= 10, `only ${linked} fixtures had document links`);
+  });
+});
+
+describe('finding Linear document links', () => {
+  it('finds a document link by its parsed host and path', () => {
+    assert.equal(linksLinearDocuments(`See [the guide](${BASE}/abc#setup).`), true);
+    assert.equal(linksLinearDocuments(`[guide]: ${BASE}/abc\n\nSee [guide].`), true);
+    // The parser resolves an entity in the destination; the link is still a document link.
+    assert.equal(linksLinearDocuments('See [the guide](https://linear&#46;app/example-team/document/abc).'), true);
+  });
+
+  it('does not take a URL on another host that only contains the Linear URL', () => {
+    for (const url of [
+      'https://other.example/https://linear.app/example-team/document/abc',
+      'https://linear.app.other.example/example-team/document/abc',
+      'https://other.example/?next=https://linear.app/example-team/document/abc',
+      'http://linear.app/example-team/document/abc',
+    ]) {
+      assert.equal(linksLinearDocuments(`See [x](${url}).`), false, url);
+    }
+  });
+
+  it('ignores a Linear URL outside a link destination, and links that are not documents', () => {
+    assert.equal(linksLinearDocuments(`Inline \`[x](${BASE}/abc)\` code.`), false);
+    assert.equal(linksLinearDocuments(`\`\`\`\n[x](${BASE}/abc)\n\`\`\``), false);
+    assert.equal(linksLinearDocuments('[issue](https://linear.app/example-team/issue/ABC-1)'), false);
+  });
+
+  it('skips only content the mapping back would leave unchanged', () => {
+    const map = ids({ 'docs/guide.md': 'abc' });
+    for (const content of [
+      `[x](https://other.example/?u=${BASE}/abc)`,
+      `Inline \`[x](${BASE}/abc)\` code.`,
+    ]) {
+      assert.equal(linksLinearDocuments(content), false, content);
+      assert.equal(linksFromLinear(content, 'docs/a.md', map), content);
+    }
+    const linked = `[x](${BASE}/abc)`;
+    assert.equal(linksLinearDocuments(linked), true);
+    assert.notEqual(linksFromLinear(linked, 'docs/a.md', map), linked);
   });
 });

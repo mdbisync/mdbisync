@@ -24,6 +24,7 @@ export function renderStateRefusal(refusal: StateRefusal): string {
   return ['## Sync', '', `Stopped before any write: \`${refusal.code}\`.`, '', refusal.message, ''].join('\n');
 }
 
+/** A table cell: backslashes first, so a `\` before a `|` cannot undo the pipe's escape. */
 function escapeCell(text: string): string {
-  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
