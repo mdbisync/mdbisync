@@ -9,7 +9,7 @@ import { type LinearDocument } from '../linear/index.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
-import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readUploads } from '../state/index.ts';
+import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { documentPath } from './paths.ts';
@@ -55,6 +55,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   const identity = options.identity ?? SYNC_IDENTITY;
   const ids = await readIds(git, state.ids);
   const uploads = await readUploads(git, state.uploads);
+  const reserved = await readReservedIds(git, state.ids);
   const gate = options.security ?? await securityGate(git, fetched.tracked);
   try {
     const cursor = await readCursor(context, state);
@@ -223,7 +224,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // so documents sharing a timestamp or edited during pagination are not lost.
     const through = result.leftOut.length > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
     const message = through === null ? 'Capture document ids' : `Capture document ids\n\nCapture-through: ${through}`;
-    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always: through !== cursor });
+    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always: through !== cursor, reserved });
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity);
     const prepared = await prepareLfs(git, fetched.tracked, changes);
     const linearCommit = await commitTree(git, { parents: [base], base, changes: prepared.changes, message: 'Capture Linear changes', identity });

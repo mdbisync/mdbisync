@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, afterEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY } from '../state/test-helpers.ts';
-import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, pushAtomic, stateRef, readIds } from '../state/index.ts';
+import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, pushAtomic, stateRef, readIds, readReservedIds } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { LinearClient } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
@@ -87,6 +87,22 @@ describe('capture from Linear', () => {
     assert.notEqual(second.state.linear, first.state.linear);
     assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nNext edit.\n');
     assert.deepEqual(context.fetched.state, initial);
+  });
+
+  it('preserves reserved document ids through capture and subsequent runs', async () => {
+    const reserved = new Map([['docs/future.md', 'future-document']]);
+    const state = context.fetched.state;
+    const next = await commitIds(context.git, state.ids, await readIds(context.git, state.ids), IDENTITY, {reserved});
+    assert.equal((await pushAtomic(context.git, config, [{ref:stateRef(config,'ids'), expected:state.ids, next}])).ok, true);
+    await refresh();
+    world.linear.documents[0]!.content = 'An accepted edit.\n';
+    const first = await run();
+    assert.deepEqual(await readReservedIds(context.git, first.state.ids), reserved);
+    assert.equal((await readIds(context.git, first.state.ids)).has('docs/future.md'), false);
+    await refresh();
+    const second = await run();
+    assert.deepEqual(await readReservedIds(context.git, second.state.ids), reserved);
+    assert.equal(second.state.ids, first.state.ids);
   });
 
   it('captures a new path, renames by id and moves across projects', async () => {
