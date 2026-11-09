@@ -13,8 +13,8 @@ starts from. Nothing in git changes except the sync's own state refs.
 > restored. Always start with the [dry run](#step-1-dry-run) and read what it
 > lists.
 
-How to set up the repository is in the [README](../README.md); how folders
-map to Linear and what every run checks is in [usage.md](usage.md). The
+How to set up the repository is in the [quickstart](quickstart.md); how
+folders map to Linear and what every run checks is in [usage.md](usage.md). The
 other direction, which takes Linear's documents into git through a pull
 request, has [its own page](initial-sync-linear-to-git.md).
 
@@ -30,8 +30,8 @@ instead ([initial-sync-linear-to-git.md](initial-sync-linear-to-git.md)).
 
 ## Before you start
 
-- Finish the setup and map each folder to its Linear team or project in the
-  front matter of its `README.md`
+- Finish the setup ([quickstart](quickstart.md)) and map each folder to its
+  Linear team or project in the front matter of its `README.md`
   ([folder mapping](usage.md#folder-mapping)).
 - Run the `linear-format` hook over the repository (`pre-commit run
   linear-format --all-files`) and commit its fixes. A file it cannot fix is
