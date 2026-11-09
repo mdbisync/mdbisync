@@ -302,7 +302,9 @@ export function documentLinks(): BodyTransform {
       const entry = rewritten.get(path);
       if (map === undefined || entry === undefined) return body;
       // Linear kept the text: each link comes back exactly as the file had it. Linear reformatted it: the links
-      // come back in Linear's form too, so the restored text is Linear's form of the file, not a mix of both.
+      // come back in Linear's form too, so the restored text is Linear's form of the file, not a mix of both. Spellings
+      // matter here because Linear can change how many links there are; the initial sync then puts the whole restored
+      // text in Linear's form (`restoreStored`), which settles the spellings of every other transform too.
       return linksFromLinear(body, path, map, sha256(body) === entry.writtenHash ? entry.asWritten : entry.inLinearForm);
     },
   };
