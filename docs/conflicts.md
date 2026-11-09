@@ -40,10 +40,11 @@ branch: the sync pull request carries it there like any other change. Git's
 own `<<<<<<<` lines are never used; Linear would turn them into quotes and
 headings.
 
-A document is in conflict exactly when its text holds one of these marker
-lines as a paragraph of its own. Marker lines inside a code block, an inline
-code span or a quote are only examples, like the ones on this page, and do
-not count.
+A document is in conflict exactly when one of its lines is one of these
+marker lines, character for character, with nothing before or after it on
+the line. Marker lines inside a code block, an inline code span, a quote or
+an HTML block are only examples, like the ones on this page, and do not
+count.
 
 ## A worked example
 
@@ -126,7 +127,9 @@ Ask the release team in the team chat.
 - The document shows this text, with the marker paragraphs in bold.
 - Its icon becomes the orange `Alert` icon. If the document had its own icon
   and color, the sync keeps them and puts them back exactly once the
-  conflict is resolved.
+  conflict is resolved. If the repository's security checks also reject the
+  document, their red `Cross` icon and comment show instead until the
+  finding is fixed; then the `Alert` icon and the conflict comment return.
 - The sync adds one comment, once per conflict:
 
   > This document contains conflicting versions. Edit the document here or
@@ -138,8 +141,10 @@ Ask the release team in the team chat.
 - The sync pull request brings the same text into the file on the tracked
   branch, and merges like any other sync pull request. Nothing blocks it,
   and other documents' changes reach git in the same run.
-- The run summary counts the documents with conflict markers and lists them
-  in its "Conflict markers" table, by path.
+- The summary of the run that writes the conflict counts the documents with
+  conflict markers and lists them in its "Conflict markers" table, by path.
+  Later runs do not list a conflict again while it stays open: search the
+  files for `Sync conflict:` to find every open one.
 
 ## Resolving a conflict
 
@@ -184,10 +189,12 @@ these takes in the whole block, and each version is a complete table, code
 block or list:
 
 - tables;
-- fenced code blocks, including Mermaid diagrams;
+- code blocks, including Mermaid diagrams;
+- quotes and HTML blocks;
 - ordered lists, and lists with nested items.
 
-For example, when one side writes `Ada` and the other `Ann` in this table:
+For example, both sides start from this table, git changes `Ana` to `Ada`
+and Linear changes it to `Ann` (the three versions, in that order):
 
 ```markdown
 # Owners
@@ -274,14 +281,16 @@ form of a file name is neither an edit nor a rename.
 | deleted | edited or renamed | The document stays as Linear has it. Its file comes back on the tracked branch through the sync pull request. | `edit-wins-delete` |
 | edited or renamed | deleted | The same document is restored in Linear, out of trash or back into its project or team, with the git text and title. Its comments stay as they were. | `edit-wins-delete` |
 | deleted | deleted | Removed on both sides. | none |
-| renamed | edited | Both apply: the git path, the merged text. Linear's title follows the path. | `rename-and-edit` |
-| edited | renamed | Both apply: Linear's path, the merged text. The file moves on the tracked branch through the sync pull request. | `rename-and-edit` |
+| renamed | edited | Both apply: the git path, the merged text. Linear's title follows the path. | `rename-and-edit`, when the text also conflicts |
+| edited | renamed | Both apply: Linear's path, the merged text. The file moves on the tracked branch through the sync pull request. | `rename-and-edit`, when the text also conflicts |
 | renamed | renamed to the same path | One rename, the merged text. | none |
 | renamed | renamed to another path | Git's path wins. Linear's title is set back to match it, and the document gets a comment. The merged text. | `git-path-wins` |
 
 A rename on one side with no change on the other is an ordinary rename, and
-a delete on one side with no change on the other is an ordinary delete. The
-run summary reports those as renames and deletes.
+a delete on one side with no change on the other is an ordinary delete. A
+rename on one side and an edit on the other that git's merge combines on
+its own, because the text does not conflict, is ordinary too. The run
+summary reports those as renames, moves and deletes.
 
 The comment on a title set back reads:
 

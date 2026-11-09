@@ -1,6 +1,7 @@
 // The public conflicts page against the code: every marker paragraph and
 // notice the sync writes, its merge examples reproduced by the merge itself,
-// and its table of delete and rename rules checked case by case.
+// and each row of its delete and rename table given the summary code the
+// rules module reports for that case.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -36,10 +37,13 @@ function flat(text: string): string {
   return text.replace(/^[ \t]*> ?/gm, '').replace(/\s+/g, ' ');
 }
 
-/** The cells of a section's table rows, header and separator left out. */
+/** The cells of the rows of a section's first table, header and separator left out. */
 function tableRows(text: string): string[][] {
-  const rows = text.split('\n').filter((line) => line.startsWith('| '));
-  return rows.slice(2).map((row) => row.slice(2, -2).split(' | '));
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line.startsWith('| '));
+  assert.notEqual(start, -1, 'the section has no table');
+  const end = lines.findIndex((line, index) => index > start && !line.startsWith('| '));
+  return lines.slice(start + 2, end === -1 ? undefined : end).map((row) => row.slice(2, -2).split(' | '));
 }
 
 const BASE = { path: 'notes/plan.md', text: '# Plan\n\nOne.\n\nTwo.\n' };
@@ -84,13 +88,14 @@ describe('conflicts docs', () => {
     });
   }
 
-  it('give each delete and rename rule with the summary code the code reports', async () => {
+  it('give each delete and rename rule with the summary code the rules report', async () => {
     const rows = tableRows(section('Deletes and renames'));
     assert.deepEqual(rows.map(([git, linear]) => `${git} | ${linear}`), Object.keys(ROWS));
-    for (const [git, linear, , code] of rows) {
+    for (const [git, linear, , summary] of rows) {
+      const code = /^`([a-z-]+)`/.exec(summary!)?.[1] ?? summary;
       for (const input of ROWS[`${git} | ${linear}`]!) {
         const result = await resolveStructural(input);
-        assert.equal(result.summary === null ? 'none' : `\`${result.summary.code}\``, code, `${git} | ${linear}: ${result.kind}`);
+        assert.equal(result.summary?.code ?? 'none', code, `${git} | ${linear}: ${result.kind}`);
       }
     }
   });
