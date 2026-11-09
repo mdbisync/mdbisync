@@ -1306,7 +1306,7 @@ export const SUBJECTS: Record<string, Compute> = {
   // --- blocked documents (L2-35) ----------------------------------------------------------------
   'securityCanary.isolated': async (env) => {
     const facts = (env.ctx.observations.get('securityCanary.facts') as CanaryFacts[] | undefined) ?? [];
-    return env.ctx.observations.get('securityCanary.missing') !== true && facts.length > 0 && facts.every(fact => fact.hookKeyMatches && !fact.linearSecretMatches && !fact.appTokenMatches && !fact.environmentNames.some(name => /^(INPUT_|CANARY_LINEAR_SECRET$|CANARY_APP_TOKEN$)/.test(name)));
+    return env.ctx.observations.get('securityCanary.missing') !== true && facts.length > 0 && facts.every(fact => fact.hookKeyMatches && !fact.linearSecretMatches && !fact.linearTokenMatches && !fact.appTokenMatches && !fact.environmentNames.some(name => /^(INPUT_|ACTIONS_|CANARY_LINEAR_SECRET$|CANARY_APP_TOKEN$)/.test(name)));
   },
   'blocked.icon': async (env) => observed(env.ctx, 'blocked.icon'),
   'blocked.color': normalizedObservation('blocked.color', (color) => colorLabel(color as string | null)),

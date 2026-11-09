@@ -256,7 +256,8 @@ async function runTemplate(release: string, template: string, inputs: Record<str
           assert.equal(fact.hookKeyMatches, true);
           assert.equal(fact.linearSecretMatches, false);
           assert.equal(fact.appTokenMatches, false);
-          assert.ok(!fact.environmentNames.some(name => name.startsWith('INPUT_') || name === 'CANARY_LINEAR_SECRET' || name === 'CANARY_APP_TOKEN'));
+          assert.equal(fact.linearTokenMatches, false);
+          assert.ok(!fact.environmentNames.some(name => name.startsWith('INPUT_') || name.startsWith('ACTIONS_') || name === 'CANARY_LINEAR_SECRET' || name === 'CANARY_APP_TOKEN'));
         }
         assert.ok(!evidence.includes('offline-hook-key') && !evidence.includes('client-secret') && !evidence.includes('app-token'), 'canary leaked a value');
       }

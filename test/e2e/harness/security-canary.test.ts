@@ -33,7 +33,7 @@ test('the canary fails on its own secrets or a wrong key and records only facts'
     for (const leak of [false, true]) {
       const child = spawn(process.execPath, [script], { env: {
         PATH: process.env.PATH, RUNNER_TEMP: directory, GITHUB_RUN_ID: randomUUID(), CANARY_HOOK_KEY: key,
-        ...(leak ? { LINEAR_INPUT: linear, APP_INPUT: app } : {}),
+        ...(leak ? { LINEAR_INPUT: linear, APP_INPUT: app, LINEAR_ACCESS_TOKEN: 'own-run-access-token' } : {}),
       }, stdio: ['ignore', 'pipe', 'pipe'] });
       const code = await new Promise<number | null>((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
       assert.equal(code, leak ? 1 : 0);
@@ -42,6 +42,7 @@ test('the canary fails on its own secrets or a wrong key and records only facts'
       assert.equal(facts.hookKeyMatches, true);
       assert.equal(facts.linearSecretMatches, leak);
       assert.equal(facts.appTokenMatches, leak);
+      assert.equal(facts.linearTokenMatches, leak);
       for (const value of [linear, app, key, digest(linear), digest(app), digest(key)]) assert.ok(!raw.includes(value));
     }
     await writeFile(script, canaryScript(digest('different-key')));

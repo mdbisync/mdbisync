@@ -29,6 +29,7 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 const baseline = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, '${CANARY_BASELINE}'), 'utf8'));
 if (!Array.isArray(baseline) || baseline.length !== 2 || !baseline.every(value => /^[0-9a-f]{64}$/.test(value))) throw new Error('Invalid canary baseline');
 const matched = [false, false];
+let linearTokenMatches = false;
 const run = process.env.GITHUB_RUN_ID;
 if (!run || !readFileSync('/proc/self/environ', 'utf8').split('\\0').includes('GITHUB_RUN_ID=' + run)) throw new Error('Cannot read own workflow environment');
 for (const pid of readdirSync('/proc')) {
@@ -36,6 +37,9 @@ for (const pid of readdirSync('/proc')) {
   let env;
   try { env = readFileSync('/proc/' + pid + '/environ', 'utf8').split('\\0'); } catch { continue; }
   if (!env.includes('GITHUB_RUN_ID=' + run)) continue;
+  // A Linear access token has no baseline before stage mints it. Detect its
+  // credential environment fields only in this workflow run.
+  linearTokenMatches ||= env.some(entry => /^[^=]*LINEAR[^=]*TOKEN[^=]*=.+/i.test(entry));
   // Compare complete environment values, never print them.
   const values = env.map(entry => entry.slice(entry.indexOf('=') + 1));
   try { values.push(...readFileSync('/proc/' + pid + '/cmdline', 'utf8').split('\\0')); } catch {}
@@ -43,10 +47,10 @@ for (const pid of readdirSync('/proc')) {
     matched[index] ||= values.some(value => digest(value) === baseline[index]);
   }
 }
-const facts = { environmentNames: Object.keys(process.env).sort(), hookKeyMatches: digest(process.env.${CANARY_KEY} ?? '') === '${keyDigest}', linearSecretMatches: matched[0], appTokenMatches: matched[1] };
+const facts = { environmentNames: Object.keys(process.env).sort(), hookKeyMatches: digest(process.env.${CANARY_KEY} ?? '') === '${keyDigest}', linearSecretMatches: matched[0], linearTokenMatches, appTokenMatches: matched[1] };
 mkdirSync(join(process.env.RUNNER_TEMP, 'mdbisync-report'), { recursive: true });
 appendFileSync(join(process.env.RUNNER_TEMP, 'mdbisync-report', '${CANARY_EVIDENCE}'), '${CANARY_PREFIX}' + JSON.stringify(facts) + '\\n', { mode: 0o600 });
-if (!facts.hookKeyMatches || matched.some(Boolean)) process.exitCode = 1;
+if (!facts.hookKeyMatches || linearTokenMatches || matched.some(Boolean)) process.exitCode = 1;
 `;
 }
 
@@ -54,6 +58,7 @@ export interface CanaryFacts {
   environmentNames: string[];
   hookKeyMatches: boolean;
   linearSecretMatches: boolean;
+  linearTokenMatches: boolean;
   appTokenMatches: boolean;
 }
 
@@ -64,7 +69,7 @@ export function canaryFacts(log: string): CanaryFacts[] {
     if (at < 0) return [];
     try {
       const value = JSON.parse(line.slice(at + CANARY_PREFIX.length)) as CanaryFacts;
-      if (Object.keys(value).sort().join(',') !== 'appTokenMatches,environmentNames,hookKeyMatches,linearSecretMatches' || !Array.isArray(value.environmentNames) || !value.environmentNames.every(name => typeof name === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) || ![value.hookKeyMatches, value.linearSecretMatches, value.appTokenMatches].every(flag => typeof flag === 'boolean')) return [];
+      if (Object.keys(value).sort().join(',') !== 'appTokenMatches,environmentNames,hookKeyMatches,linearSecretMatches,linearTokenMatches' || !Array.isArray(value.environmentNames) || !value.environmentNames.every(name => typeof name === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) || ![value.hookKeyMatches, value.linearSecretMatches, value.linearTokenMatches, value.appTokenMatches].every(flag => typeof flag === 'boolean')) return [];
       return [value];
     } catch { return []; }
   });
