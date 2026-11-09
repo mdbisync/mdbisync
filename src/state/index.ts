@@ -28,6 +28,7 @@ export {
   IDS_FILE,
   type IdEntry,
   type IdMap,
+  type MarkNotice,
   NotFastForwardError,
   type PushResult,
   type RefUpdate,

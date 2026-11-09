@@ -338,7 +338,7 @@ describe('confirmed initial sync from git to Linear', () => {
       restore: ({ body }) => body,
     };
     let result: ConfirmedResult | undefined;
-    const outcome = await runPreflight('initial-sync', inputs, { git: new Git(cwd), warn: () => undefined, fetch: fakeFetch(world) }, async (context) => {
+    const outcome = await runPreflight('initial-sync', inputs, { git: new Git(cwd), warn: () => undefined, log: () => undefined, fetch: fakeFetch(world) }, async (context) => {
       result = (await confirmInitialSync(context, { config: inputs.state, transforms: [marker, leaveOut], stopAfterDocuments: undefined })).result;
     });
     assert.equal(outcome.ok, true);
@@ -366,7 +366,7 @@ describe('confirmed initial sync from git to Linear', () => {
     const firstIds = preparedIds;
     const refsBefore = await refs();
     const writes = world.linear.writes.count;
-    await runPreflight('initial-sync', inputs, { git: new Git(cwd), warn: () => undefined, fetch: fakeFetch(world) }, async (context) => {
+    await runPreflight('initial-sync', inputs, { git: new Git(cwd), warn: () => undefined, log: () => undefined, fetch: fakeFetch(world) }, async (context) => {
       result = (await confirmInitialSync(context, { config: inputs.state, transforms: [marker, leaveOut], stopAfterDocuments: undefined })).result;
     });
     assert.equal(result?.complete, true);

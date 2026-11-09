@@ -30,6 +30,7 @@ export async function run(): Promise<void> {
     const outcome = await runOperation(operation, inputs, initialSync, {
       git: new Git(process.env["GITHUB_WORKSPACE"] || process.cwd()),
       warn: (message) => core.warning(message),
+      log: (entry) => core.info(JSON.stringify(entry)),
     });
     if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(outcome.summary).write();
     else core.info(outcome.summary);
