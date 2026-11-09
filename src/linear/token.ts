@@ -95,21 +95,73 @@ export async function withRunToken<T>(
     options.lifecycle?.minted(token.accessToken);
     return await work(token);
   } finally {
-    let revoked = false;
+    await endRunToken(token, options);
+  }
+}
+
+/** Revokes a run's token; a failure goes to `onRevokeError`, never replacing the run's outcome. */
+async function endRunToken(token: RunToken, options: TokenOptions & { onRevokeError: (error: unknown) => void; lifecycle?: TokenLifecycle }): Promise<void> {
+  let revoked = false;
+  try {
+    await revokeToken(token.accessToken, { ...options, auth: token.context });
+    revoked = true;
+  } catch (revokeError) {
+    options.onRevokeError(revokeError);
+  }
+  // Forgetting a revoked token is best effort: a later revocation of it is harmless.
+  if (revoked) {
     try {
-      await revokeToken(token.accessToken, { ...options, auth: token.context });
-      revoked = true;
-    } catch (revokeError) {
-      options.onRevokeError(revokeError);
+      options.lifecycle?.revoked();
+    } catch {
+      // Nothing to report: the token is revoked.
     }
-    // Forgetting a revoked token is best effort: a later revocation of it is harmless.
-    if (revoked) {
-      try {
-        options.lifecycle?.revoked();
-      } catch {
-        // Nothing to report: the token is revoked.
+  }
+}
+
+/** A run token that is minted when a request first needs it. */
+export interface DeferredRunToken {
+  /** The scopes an earlier step's token of the same credentials returned. */
+  scope: string[];
+  context: AuthContext;
+  /** Mints the token on the first call; later calls give the same one. */
+  accessToken(): Promise<string>;
+}
+
+/**
+ * Like `withRunToken`, for a run that may need no request of its own (its
+ * reads are answered from an earlier step's): the token is minted on the
+ * first request, and revoked afterwards only when it was minted.
+ */
+export async function withDeferredRunToken<T>(
+  credentials: AppCredentials,
+  known: { scope: string[]; context: AuthContext },
+  options: TokenOptions & { onRevokeError: (error: unknown) => void; lifecycle?: TokenLifecycle },
+  work: (token: DeferredRunToken) => Promise<T>,
+): Promise<T> {
+  let minting: Promise<RunToken> | undefined;
+  let access: Promise<string> | undefined;
+  const token: DeferredRunToken = {
+    scope: [...known.scope],
+    context: known.context,
+    accessToken() {
+      if (access === undefined) {
+        const mint = mintAppToken(credentials, options);
+        minting = mint;
+        // A lifecycle that fails fails the request; the token is still revoked below.
+        access = mint.then((minted) => {
+          options.lifecycle?.minted(minted.accessToken);
+          return minted.accessToken;
+        });
       }
-    }
+      return access;
+    },
+  };
+  try {
+    return await work(token);
+  } finally {
+    // A mint that failed left no token; its error reached the request that asked for it.
+    const minted = minting === undefined ? undefined : await minting.catch(() => undefined);
+    if (minted !== undefined) await endRunToken(minted, options);
   }
 }
 

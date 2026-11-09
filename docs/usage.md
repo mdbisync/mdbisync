@@ -104,16 +104,22 @@ failure), and run the hooks in a step of their own, between two
 mdbisync steps:
 
 1. `security-step: stage` reads Linear's changes into the runner's
-   temporary directory and writes nothing to git or Linear;
+   temporary directory, with Linear's answers to its reads, and writes
+   nothing to git or Linear;
 2. "Run the security hooks" runs the hooks marked `alias: security` on them
    and records their findings (hook and line, never the matched text). It
    holds no Linear secret or token and no App token, so a hook cannot read
    them, not even from another process's environment. Give this step only
    the keys your hooks need, in its `env:`;
 3. `security-step: apply` runs the sync (or the initial sync) with those
-   findings. A change the hooks have not seen, because it changed in Linear
-   after they ran or the hooks step did not run, is not pushed; the next
-   run checks it.
+   findings. It takes Linear's changes from the stage step's answers
+   instead of reading them again, so a run reads Linear once and pushes
+   what the hooks saw; a change made in Linear after the stage step waits
+   for the next run. A document whose blocked or conflict mark may change
+   is read again first, so a mark never overwrites an icon set in the
+   meantime, and the rest of the run reads Linear itself. A
+   change the hooks have not seen, because the hooks step did not run or
+   the tracked branch moved, is not pushed; the next run checks it.
 
 This keeps the secrets out of what a hook can read. It does not contain a
 hook that attacks the runner: the hooks step shares the runner's disk with
