@@ -138,7 +138,7 @@ it('prefers previously linked files for cached links, images and definitions acr
     const result = await read('docs/plan.md', content, new Map([[hash, url]]), previous);
     assert.equal(result.body, expected);
     assert.equal(result.files.size, 0);
-    const withoutPriorBrackets = previous.replace('<', '').replace('>', '');
+    const withoutPriorBrackets = previous.replaceAll('<', '').replaceAll('>', '');
     assert.equal((await read('docs/plan.md', content, new Map([[hash, url]]), withoutPriorBrackets)).body, expected, 'new Linear brackets stay');
     const withoutCurrentBrackets = content.replace(`<${url}?view=1#old>`, `${url}?view=1#old`);
     assert.equal((await read('docs/plan.md', withoutCurrentBrackets, new Map([[hash, url]]), previous)).body, expected.replace('<../assets/a%20preferred.png?view=1#old>', '../assets/a%20preferred.png?view=1#old'), 'removed Linear brackets stay removed');

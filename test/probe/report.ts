@@ -202,7 +202,7 @@ function fenced(lines: string[]): string[] {
 }
 
 function cell(text: string): string {
-  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
 function requestsLine(requests: unknown): string {
