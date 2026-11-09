@@ -17,6 +17,13 @@
       "args": {}
     },
     {
+      "kind": "git",
+      "action": "edit",
+      "args": {
+        "target": "other-document"
+      }
+    },
+    {
       "kind": "fault",
       "action": "pause",
       "args": {

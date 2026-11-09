@@ -65,8 +65,30 @@ export interface RunReport {
   stoppedEarly: boolean;
   /** Every document this run wrote has its id in the `ids` state ref. */
   progressRecorded: boolean;
-  /** The `linear` record an initial sync from git to Linear made or confirmed; null otherwise (a run from Linear reports its record under `linearToGit`). */
-  record: { kind: 'initial'; commit: string; moved: boolean; hasTrackedParent: boolean; reformattedCount: number } | null;
+  /**
+   * The `linear` record this run made: an initial sync from git to Linear's,
+   * or a sync run's step 5 (a merge of the tracked branch, or an ordinary
+   * commit when documents were skipped or left); null when it made none (a
+   * run from Linear reports its record under `linearToGit`).
+   */
+  record: {
+    kind: 'initial' | 'merge' | 'ordinary';
+    commit: string;
+    hasTrackedParent: boolean;
+    /** An initial sync's: whether the record moved `linear`, and how many files it took in Linear's form. */
+    moved?: boolean;
+    reformattedCount?: number;
+  } | null;
+  /** A push of this run was refused because a ref had moved under it: another run recorded first. */
+  atomicPushRefused: boolean;
+  /** Refs that a refused push moved anyway; always 0, since every push is atomic. */
+  partialRefUpdates: number;
+  /** A sync run skipped a document because it changed in Linear after the capture. */
+  skippedConcurrentDocument: boolean;
+  /** The tracked branch's commit a sync run took in (fetched at its start); null for other runs. */
+  capturedTrackedTip: string | null;
+  /** A sync run's longest time from a document's re-read to its write's answer, in milliseconds; null when it wrote none. */
+  rereadWindowMs: number | null;
   /** A confirmed initial sync from Linear: what it took and the pull request it left for a person; null for other runs. */
   linearToGit: ReverseReport | null;
 }
@@ -177,6 +199,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
             reformattedCount: confirmed.record.reformatted.length,
           },
     linearToGit: reverse === undefined ? null : toReverseReport(reverse),
+    ...raceFacts(outcome),
   };
 }
 
@@ -245,8 +268,21 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     ...faultFacts(outcome, write.stopped, write.failed, [...write.updated, ...write.created, ...write.relocated.map((entry) => entry.to)]),
     stoppedEarly: write.stopped !== undefined,
     progressRecorded: write.code !== 'state-moved',
-    record: null,
+    record: write.record === null ? null : { kind: write.record.kind, commit: write.record.commit, hasTrackedParent: write.record.parents.length > 1 },
     linearToGit: null,
+    ...raceFacts(outcome),
+  };
+}
+
+/** What a run met from other runs and from people while it worked. */
+function raceFacts(outcome: OperationOutcome) {
+  const write = outcome.sync?.write;
+  return {
+    atomicPushRefused: outcome.refusedPushes.length > 0,
+    partialRefUpdates: outcome.refusedPushes.reduce((sum, push) => sum + push.moved.length, 0),
+    skippedConcurrentDocument: write?.skipped.some((entry) => entry.reason === 'edited-in-linear' || entry.reason === 'missing-in-linear') ?? false,
+    capturedTrackedTip: outcome.sync?.trackedTip ?? null,
+    rereadWindowMs: write?.rereadWindowMs ?? null,
   };
 }
 

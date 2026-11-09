@@ -83,6 +83,19 @@ export type PushResult =
   | { ok: true; updated: string[] }
   | { ok: false; reason: 'stale' | 'rejected'; refs: { ref: string; message: string }[] };
 
+/** A push refused for its leases, and any of its refs git reported as updated anyway (none: the push is atomic). */
+export interface RefusedPush {
+  refs: string[];
+  moved: string[];
+}
+
+const refusals = new WeakMap<Git, RefusedPush[]>();
+
+/** The pushes refused so far through this working copy: one run's lost leases. */
+export function refusedPushes(git: Git): readonly RefusedPush[] {
+  return refusals.get(git) ?? [];
+}
+
 export class NotFastForwardError extends Error {
   constructor(ref: string) {
     super(`refusing to move ${ref} to a commit that does not descend from its current value`);
@@ -123,6 +136,8 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   const before = await lsRemote(git, config.remote, updates.map((update) => update.ref));
   const skipped = updates.filter((update) => update.next !== update.expected && before.get(update.ref) === update.next);
   if (skipped.length > 0) {
+    // Nothing was sent, so nothing moved.
+    logRefusal(git, changing, []);
     return { ok: false, reason: 'stale', refs: skipped.map((update) => ({ ref: update.ref, message: 'already at the new value, not at the expected one' })) };
   }
 
@@ -152,6 +167,9 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   const stale =
     rejected.some((line) => line.summary.includes('stale info')) ||
     (await movedAway(git, config.remote, updates));
+  // What git reports it updated in the refused push. A ref found at this push's value proves nothing: another run
+  // that took in the same changes in the same second makes the same commits.
+  if (stale) logRefusal(git, changing, lines.filter((line) => line.flag !== '!' && line.flag !== '=').map((line) => line.ref));
   return {
     ok: false,
     reason: stale ? 'stale' : 'rejected',
@@ -162,6 +180,12 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
 async function movedAway(git: Git, remote: string, updates: readonly RefUpdate[]): Promise<boolean> {
   const current = await lsRemote(git, remote, updates.map((update) => update.ref));
   return updates.some((update) => (current.get(update.ref) ?? null) !== update.expected);
+}
+
+function logRefusal(git: Git, changing: readonly RefUpdate[], moved: string[]): void {
+  const log = refusals.get(git) ?? [];
+  log.push({ refs: changing.map((update) => update.ref), moved });
+  refusals.set(git, log);
 }
 
 interface PorcelainLine {

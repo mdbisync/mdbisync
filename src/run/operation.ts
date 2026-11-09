@@ -23,6 +23,7 @@ import {
   uploadsTransform,
 } from '../initial-sync/index.ts';
 import { type CycleResult, renderSync, runSyncCycle } from '../sync/index.ts';
+import { type RefusedPush, refusedPushes } from '../state/index.ts';
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
 import { type Operation, type PreflightOptions, type PreflightOutcome, type RunContext, runPreflight } from './preflight.ts';
 
@@ -39,6 +40,8 @@ export interface OperationOutcome extends PreflightOutcome {
   sync?: CycleResult;
   /** What a sync run's capture of Linear changes recorded. */
   captured?: CaptureResult;
+  /** Pushes refused because a ref had moved under this run: another run got there first. */
+  refusedPushes: readonly RefusedPush[];
 }
 
 export async function runOperation(
@@ -106,8 +109,9 @@ export async function runOperation(
         ? undefined
         : (context) => (initialSync.direction === 'git-to-linear' ? gitToLinear : linearToGit)(context, initialSync.confirm),
   );
-  if (!preflight.ok) return { ...preflight, notImplemented: false };
-  const outcome: OperationOutcome = { ...preflight, notImplemented: false };
+  const refused = refusedPushes(options.git);
+  if (!preflight.ok) return { ...preflight, notImplemented: false, refusedPushes: refused };
+  const outcome: OperationOutcome = { ...preflight, notImplemented: false, refusedPushes: refused };
   if (plan !== undefined) outcome.plan = plan;
   if (workSummary !== '') outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;
   if (confirmed !== undefined) outcome.confirmed = confirmed;
