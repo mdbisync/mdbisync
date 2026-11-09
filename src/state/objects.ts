@@ -126,7 +126,8 @@ export async function commitTree(git: Git, spec: CommitSpec): Promise<Oid> {
   });
 }
 
-async function buildTree(git: Git, base: string | null, changes: ReadonlyMap<string, Buffer | string | null>): Promise<Oid> {
+/** Builds a tree from `base` (a commit or tree id; null for an empty tree) plus `changes`, without a commit. */
+export async function buildTree(git: Git, base: string | null, changes: ReadonlyMap<string, Buffer | string | null>): Promise<Oid> {
   const dir = await mkdtemp(join(tmpdir(), 'state-index-'));
   const env = { GIT_INDEX_FILE: join(dir, 'index') };
   try {
