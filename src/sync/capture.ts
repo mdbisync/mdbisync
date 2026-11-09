@@ -236,7 +236,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     const linkBase = [...work.values()].some((doc) => doc.content?.includes('https://linear.app/')) ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
     const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)));
-    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, Buffer | string>; checked?: string };
+    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, Buffer | string>; checked?: string; compared?: { body: string; same: boolean } };
     const candidates = new Map<string, Candidate>();
     const resetTarget = (id: string) => {
       for (const [path, target] of documentIds) if (target === id) documentIds.delete(path);
@@ -287,10 +287,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           body = linksFromLinear(body, path, map, seen);
         }
         // Linear's own spelling of the same document is no change: keep the file's text.
-        const newAssets = assets.files.size > 0 || [...assets.uploads].some(([hash, url]) => uploads.get(hash) !== url);
-        const kept = old?.path === path && candidate.previousBody !== undefined && !newAssets
-          && sameMarkdown(candidate.previousBody, body) ? previous.get(path)?.toString('utf8') : undefined;
-        const text = kept ?? head + body;
+        // Compared again only when a fallen-back link target changed the body.
+        if (candidate.compared?.body !== body) {
+          const newAssets = assets.files.size > 0 || [...assets.uploads].some(([hash, url]) => uploads.get(hash) !== url);
+          candidate.compared = {body, same: candidate.previousBody !== undefined && !newAssets && sameMarkdown(candidate.previousBody, body)};
+        }
+        const text = head + (candidate.compared.same ? candidate.previousBody : body);
         candidate.files.set(path, text);
         if (candidate.checked === text) continue;
         const unchanged = old?.path === path && previous.get(path)?.equals(Buffer.from(text)) === true && assets.files.size === 0 && assets.uploads.size === 0;

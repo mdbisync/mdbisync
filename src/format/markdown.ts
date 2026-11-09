@@ -6,6 +6,7 @@ import type { Nodes, Root } from 'mdast';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { gfm } from 'micromark-extension-gfm';
+import { normalizeUri } from 'micromark-util-sanitize-uri';
 
 /** A file split into the part that never goes to Linear and the body that does. */
 export interface SplitFile {
@@ -53,25 +54,24 @@ export function parse(body: string): Root {
  */
 export function sameMarkdown(a: string, b: string): boolean {
   if (a === b) return true;
-  return isDeepStrictEqual(withoutPositions(parse(a)), withoutPositions(parse(b)));
+  return isDeepStrictEqual(comparable(a), comparable(b));
 }
 
-function withoutPositions(node: Nodes): unknown {
-  const { position: _position, ...rest } = node;
-  if ('url' in rest) rest.url = renderedUrl(rest.url);
-  if ('children' in node) return { ...rest, children: node.children.map(withoutPositions) };
-  return rest;
-}
+// Escapes of characters that open Linear's own syntax, which Markdown reads
+// as text either way: `$$` math and `+++` collapsible sections.
+const LINEAR_SYNTAX_ESCAPES: Readonly<Record<string, string>> = { '\\$': '', '\\+': '' };
 
-/**
- * A destination as Markdown renders it: characters a URL cannot hold
- * percent-encoded, escapes in upper case. `<a b.png>` and `a%20b.png` are
- * the same destination.
- */
-function renderedUrl(url: string): string {
-  return url
-    .replace(/%(?![0-9A-Fa-f]{2})|[^!#$%&'()*+,\-./0-9:;=?@A-Z[\]_a-z~]/gu, (char) => encodeURIComponent(char))
-    .replace(/%[0-9a-f]{2}/gi, (escape) => escape.toUpperCase());
+/** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
+function comparable(body: string): unknown {
+  // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
+  const tree = parse(body.replace(/\\[$+]/g, (escape) => LINEAR_SYNTAX_ESCAPES[escape]!));
+  const strip = (node: Nodes): unknown => {
+    const { position: _position, ...rest } = node;
+    if ('url' in rest) rest.url = normalizeUri(rest.url);
+    if ('children' in node) return { ...rest, children: node.children.map(strip) };
+    return rest;
+  };
+  return strip(tree);
 }
 
 export function start(node: Nodes): number {

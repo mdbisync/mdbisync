@@ -463,6 +463,32 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
+  it("a document Linear reformats into other Markdown is recorded in Linear's form; its sync pull request merged, the next run writes nothing", async () => {
+    // Like Linear: a reference link is stored inline.
+    world.linear.store = (content) => fixText(content);
+    const file = `# Refs\n\nSee [the site][s].\n\n[s]: https://example.com\n\n${CANARY}\n`;
+    await commit({ 'eng/notes/refs.md': file });
+    const { result } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/refs.md'), fixText(file));
+    assert.notEqual(fixText(file), file);
+    world.github.merge = async (pr, sha) => {
+      const base = await rev(`refs/heads/${pr.base}`);
+      const tree = (await fixture.remote.text(['merge-tree', '--write-tree', base, sha])).split('\n')[0] as string;
+      const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number}`], {
+        env: { GIT_AUTHOR_NAME: 'bot', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'bot', GIT_COMMITTER_EMAIL: 'bot@example.com' },
+      });
+      await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
+      return { sha: commit };
+    };
+    assert.deepEqual((await sync()).writes, ['POST /pulls']);
+    assert.deepEqual((await sync()).writes, ['PUT /pulls/1/merge']);
+    assert.equal(await show('refs/heads/main:eng/notes/refs.md'), fixText(file));
+    // The run after the merge records it on `linear` and writes nothing to Linear; the next one changes nothing.
+    assert.deepEqual((await sync()).writes, []);
+    await assertIdempotent();
+  });
+
   it('L2-09: a new image is uploaded once; a second document embedding it reuses the upload', async () => {
     const uploadsBefore = world.linear.uploads.length;
     await commit({

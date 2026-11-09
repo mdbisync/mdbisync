@@ -10,6 +10,8 @@ describe('sameMarkdown', () => {
     assert.ok(sameMarkdown('An _aside_.', 'An *aside*.'));
     assert.ok(sameMarkdown('![Chart](<../media/chart copy.png>)', '![Chart](../media/chart%20copy.png)'));
     assert.ok(sameMarkdown('[Site](<https://example.com/a>)', '[Site](https://example.com/a)'));
+    assert.ok(sameMarkdown('![x](<a[1].png>)', '![x](a%5B1%5D.png)'));
+    assert.ok(sameMarkdown('+++ Details\n\nInside.', '+++ Details\n\nInside.\n'));
     // An empty heading at the very end, with or without a final newline.
     assert.ok(sameMarkdown('# Test\n\nThis is test change\n\n# ', '# Test\n\nThis is test change\n\n#\n'));
   });
@@ -21,5 +23,16 @@ describe('sameMarkdown', () => {
     assert.ok(!sameMarkdown('[a](b.md)', '[a](c.md)'));
     assert.ok(!sameMarkdown('![Chart](a%2Fb.png)', '![Chart](a/b.png)'));
     assert.ok(!sameMarkdown('# Test', '# Test\n\n# '));
+    assert.ok(!sameMarkdown('![x](a%zz)', '![x](a%25zz)'));
+    // `+++` opens a collapsible section in Linear; escaped, it is text.
+    assert.ok(!sameMarkdown('\\+++ Details', '+++ Details'));
+    assert.ok(!sameMarkdown('> \\+++ Details', '> +++ Details'));
+    // `$$` lines are math in Linear; escaped, they are text.
+    assert.ok(!sameMarkdown('\\$$\nx^2\n\\$$', '$$\nx^2\n$$'));
+  });
+
+  it('compares a destination holding a lone surrogate without throwing', () => {
+    assert.ok(!sameMarkdown('[a](x\uD800)', '[a](y\uD800)'));
+    assert.ok(sameMarkdown('[a](x\uD800)', '[a](<x\uD800>)'));
   });
 });
