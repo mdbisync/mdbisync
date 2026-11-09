@@ -37,6 +37,7 @@ import {
 } from './step-helpers.ts';
 import { jobSpans, maxOverlap, runResult, SCHEDULE_BLOCKED, waitForRun } from './workflows.ts';
 import { runWorkflows, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
+import { LINEAR_TOKEN_STATE } from '../../../src/action/state.ts';
 
 export { documentId, documentPaths, resolveDestination, sibling, targetPath };
 
@@ -395,7 +396,12 @@ const RUN: Record<string, Executor> = {
     // The action's post step, which runs after every job, killed ones too: it must revoke the run's Linear token (L5-20).
     if (ctx.live !== null) {
       const call = await engineCall(ctx, 'sync', {});
-      const result = spawnSync(process.execPath, [postEntry()], { cwd: call.cwd, env: engineEnv(call), encoding: 'utf8' });
+      // On a runner, `main` keeps its token in the step state and the runner hands it to `post`
+      // (checked offline in src/action/action.test.ts). The killed run here ran as the command
+      // line, which keeps no step state, so the harness hands over the token the proxy saw it mint.
+      const killed = (ctx.observations.get('tokens.byOutcome') as Record<string, string[]> | undefined)?.['killed'] ?? [];
+      const state = killed.length === 0 ? {} : { [`STATE_${LINEAR_TOKEN_STATE}`]: killed[killed.length - 1] as string, 'INPUT_LINEAR-API-URL': call.linearUrl };
+      const result = spawnSync(process.execPath, [postEntry()], { cwd: call.cwd, env: { ...engineEnv(call), ...state }, encoding: 'utf8' });
       if (result.error !== undefined) throw new Error(`could not run the post step: ${result.error.message}`);
       if (/not implemented/.test(`${result.stdout}${result.stderr}`)) throw new NotImplementedError('post', 'the cleanup step');
       ctx.observations.set('cleanup.exitCode', result.status);

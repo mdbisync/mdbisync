@@ -120,6 +120,10 @@ describe('the action entry points', () => {
     assert.equal(process.exitCode ?? 0, 0, dry.printed);
     assert.deepEqual(world.writes, [], 'the dry run wrote');
     assert.deepEqual(dry.report.summary?.plan?.create, ['eng/README.md', 'eng/backend/notes.md']);
+    // The job summary goes beside the report, for tooling that collects both.
+    const summary = await readFile(file('summary.md'), 'utf8');
+    assert.match(summary, /eng\/backend\/notes\.md/);
+    assert.ok(!summary.includes(CANARY));
     assert.equal(world.minted, 1);
     assert.equal(world.revoked, 1);
     // The token went to the step's state for `post`, and was taken back once revoked.
@@ -169,13 +173,16 @@ describe('the action entry points', () => {
   });
 
   it('git authenticates with the App token through each call, never through the repository configuration', async () => {
-    const env = gitAuthEnv('app-token', 'https://github.com');
+    // Configuration an earlier step gave git through the environment stays.
+    assert.deepEqual(Object.keys(gitAuthEnv('t', 'https://github.com', { GIT_CONFIG_COUNT: '2' })).sort(), ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_2', 'GIT_CONFIG_VALUE_2']);
+    assert.equal(gitAuthEnv('t', 'https://github.com', { GIT_CONFIG_COUNT: '2' })['GIT_CONFIG_COUNT'], '3');
+    const env = gitAuthEnv('app-token', 'https://github.com', {});
     const git = new Git(workspace, env);
     const header = await git.text(['config', '--get', 'http.https://github.com/.extraheader']);
     assert.equal(header.trim(), `AUTHORIZATION: basic ${Buffer.from('x-access-token:app-token').toString('base64')}`);
     const stored = await readFile(join(workspace, '.git', 'config'), 'utf8');
     assert.ok(!stored.includes('extraheader') && !stored.includes('app-token'));
     // Only the server the workflow runs on gets the header.
-    assert.equal(gitAuthEnv('t', 'https://ghe.example.com/')['GIT_CONFIG_KEY_0'], 'http.https://ghe.example.com/.extraheader');
+    assert.equal(gitAuthEnv('t', 'https://ghe.example.com/', {})['GIT_CONFIG_KEY_0'], 'http.https://ghe.example.com/.extraheader');
   });
 });

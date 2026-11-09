@@ -98,6 +98,7 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
     const uses = step.get('uses');
     if (typeof uses !== 'string' || !uses.startsWith(`${ACTION_REPOSITORY}@`)) continue;
     if (options.actionSha !== undefined) step.set('uses', `${ACTION_REPOSITORY}@${options.actionSha}`);
+    if (!isMap(step.get('with'))) step.set('with', doc.createNode({}));
     const inputs = step.get('with') as YAMLMap;
     inputs.set('tracked-branch', options.trackedBranch);
     inputs.set('sync-branch', options.syncBranch);

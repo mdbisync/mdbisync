@@ -9,6 +9,8 @@
 // Linear token stays in the step's state until this run revokes it; the
 // `post` step revokes it when a killed or failed run left it behind.
 
+import { writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import * as core from "@actions/core";
 import { notImplementedMessage } from "../commands.ts";
 import { PARTIAL, partialCode, pullRequestEnding, stoppedMessage } from "../run/exit.ts";
@@ -34,15 +36,21 @@ export function parseOperation(value: string): Operation {
  * App's installation token, as an HTTP header that applies to that server
  * only. Nothing is written to the repository's configuration.
  */
-export function gitAuthEnv(token: string, serverUrl: string): Record<string, string> {
+export function gitAuthEnv(token: string, serverUrl: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const origin = new URL(serverUrl).origin;
   const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
+  // Keep configuration an earlier step gave git the same way: add after it.
+  const given = Number(env["GIT_CONFIG_COUNT"] ?? "0");
+  const index = Number.isSafeInteger(given) && given > 0 ? given : 0;
   return {
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: `http.${origin}/.extraheader`,
-    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`,
+    GIT_CONFIG_COUNT: String(index + 1),
+    [`GIT_CONFIG_KEY_${index}`]: `http.${origin}/.extraheader`,
+    [`GIT_CONFIG_VALUE_${index}`]: `AUTHORIZATION: basic ${basic}`,
   };
 }
+
+/** Where the action writes the job summary beside its report, for tooling that reads both. */
+export const SUMMARY_FILE = "summary.md";
 
 export interface RunOptions {
   /** For tests: the fake services. */
@@ -56,8 +64,11 @@ export async function run(options: RunOptions = {}): Promise<void> {
     const inputs = readInputs(get);
     const initialSync = operation === "initial-sync" ? readInitialSyncInputs(get) : undefined;
     const serverUrl = process.env["GITHUB_SERVER_URL"] || "https://github.com";
+    const auth = gitAuthEnv(inputs.github.token, serverUrl);
+    // The header's encoded form is not the token itself; mask it too.
+    for (const [key, value] of Object.entries(auth)) if (key.startsWith("GIT_CONFIG_VALUE_")) core.setSecret(value.split(" ").pop() as string);
     const outcome = await runOperation(operation, inputs, initialSync, {
-      git: new Git(process.env["GITHUB_WORKSPACE"] || process.cwd(), gitAuthEnv(inputs.github.token, serverUrl)),
+      git: new Git(process.env["GITHUB_WORKSPACE"] || process.cwd(), auth),
       warn: (message) => core.warning(message),
       log: (entry) => core.info(JSON.stringify(entry)),
       tokenLifecycle: {
@@ -72,7 +83,10 @@ export async function run(options: RunOptions = {}): Promise<void> {
     });
     if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(outcome.summary).write();
     else core.info(outcome.summary);
-    if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
+    if (inputs.reportFile !== undefined) {
+      await writeRunReport(inputs.reportFile, outcome);
+      await writeFile(join(dirname(inputs.reportFile), SUMMARY_FILE), outcome.summary);
+    }
     const failure = pullRequestEnding(outcome);
     if (failure !== null) {
       core.setOutput("code", failure.code);

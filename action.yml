@@ -43,7 +43,7 @@ inputs:
     required: false
     default: "1000"
   report-file:
-    description: "Path to write the run's report as JSON (names and states only). Leave empty for none."
+    description: "Path to write the run's report as JSON (names and states only); the job summary goes beside it as summary.md. Leave empty for none."
     required: false
     default: ""
   direction:

@@ -91,15 +91,24 @@ export async function withRunToken<T>(
   work: (token: RunToken) => Promise<T>,
 ): Promise<T> {
   const token = await mintAppToken(credentials, options);
-  options.lifecycle?.minted(token.accessToken);
   try {
+    options.lifecycle?.minted(token.accessToken);
     return await work(token);
   } finally {
+    let revoked = false;
     try {
       await revokeToken(token.accessToken, { ...options, auth: token.context });
-      options.lifecycle?.revoked();
+      revoked = true;
     } catch (revokeError) {
       options.onRevokeError(revokeError);
+    }
+    // Forgetting a revoked token is best effort: a later revocation of it is harmless.
+    if (revoked) {
+      try {
+        options.lifecycle?.revoked();
+      } catch {
+        // Nothing to report: the token is revoked.
+      }
     }
   }
 }

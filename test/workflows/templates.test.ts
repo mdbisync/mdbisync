@@ -72,10 +72,17 @@ describe('workflow templates', () => {
         assert.equal(checkout?.uses, CHECKOUT);
         assert.equal(checkout?.with?.['persist-credentials'], false);
         assert.equal(checkout?.with?.['fetch-depth'], 0);
-        assert.equal(checkout?.with?.['token'], undefined);
+        // The workflow token has no permissions, so a private repository is read with the App's.
+        assert.equal(checkout?.with?.['token'], '${{ steps.app-token.outputs.token }}');
       });
 
-      it('gives the App token and the Linear secrets to the mdbisync step only', () => {
+      it('stops before the App token expires', () => {
+        for (const job of Object.values(workflow(file).jobs) as Array<{ 'timeout-minutes'?: number }>) {
+          assert.ok(typeof job['timeout-minutes'] === 'number' && job['timeout-minutes'] < 60, `${file}: timeout-minutes`);
+        }
+      });
+
+      it('gives the App token to checkout and mdbisync, and the Linear secrets to mdbisync only', () => {
         const action = actionStep(file);
         assert.equal(action.with?.['github-token'], '${{ steps.app-token.outputs.token }}');
         assert.equal(action.with?.['linear-client-id'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}');
@@ -83,7 +90,9 @@ describe('workflow templates', () => {
         for (const step of steps(file)) {
           if (step.uses === action.uses) continue;
           const text = JSON.stringify(step);
-          assert.ok(!/secrets\.MDBISYNC_LINEAR|steps\.app-token/.test(text), `${file}: ${step.name ?? step.uses ?? 'a step'} sees a sync credential`);
+          const label = step.name ?? step.uses ?? 'a step';
+          assert.ok(!/secrets\.MDBISYNC_LINEAR/.test(text), `${file}: ${label} sees the Linear secrets`);
+          if (step.uses !== CHECKOUT) assert.ok(!/steps\.app-token/.test(text), `${file}: ${label} sees the App token`);
         }
       });
     });

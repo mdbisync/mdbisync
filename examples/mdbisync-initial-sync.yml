@@ -33,6 +33,9 @@ on:
 permissions: {}
 
 # The same group as the sync workflow: one run at a time, never cancelled.
+# GitHub keeps one pending run per group, and a newer one replaces it: if a
+# sync is running when you start this workflow, a sync queued after it can
+# replace this run. Disable the sync workflow while you run initial sync.
 concurrency:
   group: mdbisync
   cancel-in-progress: false
@@ -40,7 +43,9 @@ concurrency:
 jobs:
   initial-sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    # The App token lives one hour. A longer initial sync stops here; start
+    # the workflow again with the same inputs and it goes on where it stopped.
+    timeout-minutes: 55
     steps:
       - name: Get the GitHub App token
         id: app-token
@@ -50,6 +55,7 @@ jobs:
           private-key: ${{ secrets.MDBISYNC_APP_PRIVATE_KEY }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
           persist-credentials: false
       # The action revokes its Linear token when it ends, and again in its

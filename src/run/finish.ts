@@ -2,7 +2,8 @@
 // for tests and tooling. Names, paths and states only, no content.
 
 import { type ContainerCapacity } from './capacity.ts';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
@@ -290,6 +291,7 @@ export function unfinishedMessage(command: string, code: string | undefined): st
 }
 
 export async function writeRunReport(path: string, outcome: OperationOutcome): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(toRunReport(outcome), null, 2)}\n`);
 }
 
