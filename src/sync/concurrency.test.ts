@@ -1,4 +1,4 @@
-// Races inside a sync run (L4-01 to L4-06), against a local git remote and
+// Races inside a sync run and its pull request (L4-01 to L4-09), against a local git remote and
 // a fake GitHub and Linear served over HTTP. Every run is a real engine
 // process in its own clone, as a workflow job is: a test pauses it at a
 // checkpoint (test hooks on), acts as a person meanwhile, then resumes it or
@@ -289,6 +289,92 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     return settled;
   }
 
+  /** A person or CI pushes a normal commit onto the pending sync branch. */
+  async function editSyncBranch(path: string, from: string, to: string): Promise<string> {
+    await person.run(['fetch', '--quiet', 'origin']);
+    await person.run(['checkout', '--quiet', '-B', 'pending', 'origin/mdbisync/linear']);
+    const file = join(personDir, path);
+    const text = await readFile(file, 'utf8');
+    assert.ok(text.includes(from));
+    await writeFile(file, text.replace(from, to));
+    await person.run(['commit', '--quiet', '--all', '-m', 'Apply review changes']);
+    await person.run(['push', '--quiet', 'origin', 'HEAD:refs/heads/mdbisync/linear']);
+    await observeRefs();
+    return person.text(['rev-parse', 'HEAD']);
+  }
+
+  async function assertRetained(commit: string): Promise<void> {
+    for (const ref of ['refs/heads/main', 'refs/heads/mdbisync/linear']) {
+      assert.equal((await fixture.remote.run(['merge-base', '--is-ancestor', commit, ref], { okCodes: [0, 1] })).code, 0, `${ref} lost the commit`);
+    }
+  }
+
+  it('L4-07: closing a pending pull request opens a replacement from the same branch, retaining its edits', async () => {
+    await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
+    const opened = await sync();
+    assert.equal(opened.report?.pullRequest?.pullRequest?.opened, true);
+    const commit = await editSyncBranch(NOTES, 'First paragraph.', 'First paragraph, reviewed by a person.');
+    const first = world.github.pullRequests[0];
+    assert.ok(first);
+    first.state = 'closed';
+    const replacement = await sync();
+    assert.equal(replacement.code, 0, replacement.stderr);
+    assert.equal(replacement.report?.pullRequest?.pullRequest?.opened, true);
+    assert.equal(world.github.pullRequests.length, 2);
+    assert.equal(world.github.pullRequests[1]?.head, first.head);
+    assert.equal(world.github.pullRequests[1]?.base, first.base);
+    await assertSettled(['Findings, edited in Linear.', 'First paragraph, reviewed by a person.']);
+    await assertRetained(commit);
+  });
+
+  it('L4-07: a replacement carries a pending person edit even when Linear has no remaining changes', async () => {
+    await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
+    await sync();
+    const commit = await editSyncBranch(NOTES, 'First paragraph.', 'First paragraph, reviewed by a person.');
+    const first = world.github.pullRequests[0];
+    assert.ok(first);
+    first.state = 'closed';
+    await editInLinear(REVIEW, 'Findings, edited in Linear.', 'Findings of the review.');
+    const replacement = await sync();
+    assert.equal(replacement.code, 0, replacement.stderr);
+    assert.equal(replacement.report?.pullRequest?.pullRequest?.opened, true);
+    assert.deepEqual(replacement.report?.pullRequest?.paths, [NOTES]);
+    await assertSettled(['First paragraph, reviewed by a person.', 'Findings of the review.']);
+    await assertRetained(commit);
+  });
+
+  it('L4-08: a person pushes to the pending sync branch; the commit and a later capture both converge', async () => {
+    await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
+    await sync();
+    const commit = await editSyncBranch(NOTES, 'First paragraph.', 'First paragraph, reviewed by a person.');
+    await editInLinear(NOTES, 'Second paragraph.', 'Second paragraph, edited in Linear.');
+    await assertSettled(['Findings, edited in Linear.', 'First paragraph, reviewed by a person.', 'Second paragraph, edited in Linear.']);
+    await assertRetained(commit);
+    assert.equal(world.github.pullRequests.length, 1);
+  });
+
+  it('L4-09: CI fixes before and after a new capture survive, including a push after the run fetched its head', async () => {
+    await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
+    await sync();
+    const first = await editSyncBranch(REVIEW, 'Findings, edited in Linear.', 'Findings, checked by CI.');
+    await editInLinear(NOTES, 'First paragraph.', 'First paragraph, edited in Linear.');
+    const captured = await sync();
+    assert.equal(captured.code, 0, captured.stderr);
+    assert.equal(captured.report?.pullRequest?.branchMoved, true);
+    await editInLinear(NOTES, 'Second paragraph.', 'Second paragraph, edited in Linear.');
+    const running = await startRun('after-capture-push-before-pr');
+    await reached(running, 'after-capture-push-before-pr');
+    const second = await editSyncBranch('eng/notes/plan.md', 'Steps one and two.', 'Steps one and two, checked by CI.');
+    running.hooks.resume('after-capture-push-before-pr');
+    const raced = await running.ended;
+    assert.equal(raced.report?.pullRequest?.code, 'state-moved');
+    assert.equal(raced.report?.pullRequest?.merged, null);
+    await assertSettled(['Findings, checked by CI.', 'Steps one and two, checked by CI.', 'First paragraph, edited in Linear.', 'Second paragraph, edited in Linear.']);
+    await assertRetained(first);
+    await assertRetained(second);
+    assert.equal(world.github.pullRequests.length, 1);
+  });
+
   it('L4-01: of two overlapping runs one lease push is refused, nothing partial is written to the refs, and the next run converges', async () => {
     await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
     await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
@@ -500,8 +586,9 @@ async function serve(world: FakeWorld): Promise<Served> {
         response.writeHead(reply.status, { ...Object.fromEntries(reply.headers), 'content-type': reply.headers.get('content-type') ?? 'application/json', 'content-length': String(bytes.length) });
         response.end(bytes);
       } catch (error) {
+        console.error(error);
         response.writeHead(500, { 'content-type': 'text/plain' });
-        response.end(error instanceof Error ? error.message : String(error));
+        response.end('Request failed');
       }
     });
   });

@@ -197,6 +197,13 @@ describe('format probe against a fake Linear', () => {
     assert.match(report, /-!\[Banner\]\(\.\.\/assets\/banner\.png "Quarterly banner"\)/);
   });
 
+  it('keeps backslashes and repeated pipes inside report table cells', async () => {
+    const run = await probe();
+    run.cleanup = [String.raw`one\|two\\|three`];
+    const report = renderReport(run, { drift: [], updated: false });
+    assert.ok(report.split('\n').includes(String.raw`| Cleanup | one\\\|two\\\\\|three |`));
+  });
+
   it('reports a Yjs state that can no longer be read as drift', async () => {
     const original = fake.operations.get('ReadBack')!;
     fake.operations.set('ReadBack', (r: ReceivedRequest) => {

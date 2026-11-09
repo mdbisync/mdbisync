@@ -44,7 +44,7 @@ export function isCommandName(value: string): value is CommandName {
 }
 
 /** Commands that run; the others are stubs. */
-export const IMPLEMENTED: ReadonlySet<CommandName> = new Set(["lint", "fix"]);
+export const IMPLEMENTED: ReadonlySet<CommandName> = new Set(["lint", "fix", "init"]);
 
 export function notImplementedMessage(command: string): string {
   return `${command}: not implemented`;
