@@ -23,7 +23,8 @@ describe('workflow templates rendered for a run', () => {
     const template = readTemplate(WORKFLOW_FILES['initial-sync']);
     const text = renderForRun(template, { ...RUN, actionSha: SHA });
     const parsed = parse(text) as { concurrency: { group: string; 'cancel-in-progress': boolean }; on: Record<string, unknown> };
-    assert.deepEqual(parsed.concurrency, { group: RUN.group, 'cancel-in-progress': false });
+    // Dispatches share the run's group; a registering push run has a group of its own, so it never replaces a pending dispatch.
+    assert.deepEqual(parsed.concurrency, { group: `\${{ github.event_name == 'push' && format('{0}-register-{1}', '${RUN.group}', github.run_id) || '${RUN.group}' }}`, 'cancel-in-progress': false });
     // Registered by a push to the run's own branch only, which runs no job.
     assert.deepEqual(Object.keys(parsed.on), ['workflow_dispatch', 'push']);
     assert.deepEqual(parsed.on['push'], { branches: [RUN.trackedBranch] });
@@ -77,6 +78,10 @@ describe('workflow templates rendered for a run', () => {
     assert.deepEqual(parsed.on['push'], { branches: [RUN.trackedBranch] });
     assert.equal(parsed.jobs['a']?.if, `${DISPATCH_GUARD} && (vars.ENABLED == 'true')`);
     assert.equal(parsed.jobs['b']?.if, DISPATCH_GUARD);
+    // A schedule never runs on the run's branch, so it does not register the workflow either.
+    const scheduled = parse(renderForRun('on:\n  workflow_dispatch:\n  schedule:\n    - cron: "0 * * * *"\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps: []\n', RUN)) as { on: Record<string, unknown> };
+    assert.deepEqual(scheduled.on['push'], { branches: [RUN.trackedBranch] });
+    assert.throws(() => renderForRun('on:\n  workflow_dispatch:\njobs:\n  a:\n    runs-on: ubuntu-latest\n    if: ${{ vars.A }} && ${{ vars.B }}\n    steps: []\n', RUN), /not one expression/);
     for (const file of [WORKFLOW_FILES.sync, WORKFLOW_FILES['pre-commit']]) {
       const rendered = parse(renderForRun(readTemplate(file), RUN)) as { on: Record<string, unknown> };
       assert.deepEqual(Object.keys(rendered.on), Object.keys((parse(readTemplate(file)) as { on: Record<string, unknown> }).on), file);
@@ -86,10 +91,11 @@ describe('workflow templates rendered for a run', () => {
 
   it('reads the prerequisite errors the templates\' install steps report, as log lines', () => {
     const errors = prerequisiteErrors();
-    assert.ok(errors.length >= 3, errors.join('\n'));
     assert.ok(errors.every((error) => error.startsWith('##[error]') && !/['"]/.test(error)));
     assert.ok(errors.some((error) => error.includes('Install Python 3 with venv support')));
     assert.ok(errors.some((error) => error.includes('venv support is required')));
+    // A failed install may be a wrong pin or the network: it proves nothing about the runner.
+    assert.ok(!errors.some((error) => error.includes('Could not install')), errors.join('\n'));
   });
 
   it('refuses a secret or variable the sandbox has no name for', () => {

@@ -192,9 +192,9 @@ export class SandboxRest {
     return data.workflows.find((workflow) => workflow.path === `.github/workflows/${file}`)?.id;
   }
 
-  /** Dispatches a workflow, by its file name or its registry id, on `ref`. */
-  async dispatchWorkflow(workflow: string | number, ref: string, inputs: Record<string, string>): Promise<void> {
-    await this.request('POST', `/actions/workflows/${encodeURIComponent(String(workflow))}/dispatches`, { ref, inputs });
+  /** Dispatches a registered workflow, by its registry id (workflowId), on `ref`. */
+  async dispatchWorkflow(workflowId: number, ref: string, inputs: Record<string, string>): Promise<void> {
+    await this.request('POST', `/actions/workflows/${workflowId}/dispatches`, { ref, inputs });
   }
 
   /** A run's jobs and their steps, in order. */

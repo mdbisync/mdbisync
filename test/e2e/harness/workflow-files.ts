@@ -3,7 +3,9 @@
 // isolation needs changes: the run's branches, state refs and concurrency
 // group, the sandbox's runner, its secret and variable names, the release
 // under test, and an artifact that carries the engine's report back to the
-// harness. Every other line is the template's.
+// harness. A template with no trigger on the run's branch also gets the push
+// trigger that registers it, with its jobs guarded to run only on a dispatch
+// (renderForRun). Every other line is the template's.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -81,12 +83,18 @@ export function renderForRun(template: string, options: RunWorkflowOptions): str
   if (doc.getIn(['concurrency', 'group']) === 'mdbisync') doc.setIn(['concurrency', 'group'], options.group);
   // GitHub dispatches a workflow only once it is registered, and a workflow
   // that is not on the default branch is registered only when it runs on
-  // another event. A dispatch-only template therefore also runs on a push to
-  // the run's own branch with every job skipped: that run registers it and
-  // does nothing else. The default branch and the repository's settings stay
-  // as they are.
-  const register = isMap(on) && on.items.length === 1 && on.has('workflow_dispatch');
-  if (register) on.set('push', { branches: [options.trackedBranch] });
+  // another event. A dispatchable template with no trigger on the run's
+  // branch therefore also runs on a push to that branch with every job
+  // skipped: that run registers it and does nothing else. The registering run
+  // gets a group of its own, so it never replaces a pending dispatch of the
+  // run's group. The default branch and the repository's settings stay as
+  // they are.
+  const register = isMap(on) && on.has('workflow_dispatch') && !on.has('push') && !on.has('pull_request');
+  if (register) {
+    on.set('push', { branches: [options.trackedBranch] });
+    const group = doc.getIn(['concurrency', 'group']);
+    if (typeof group === 'string') doc.setIn(['concurrency', 'group'], `\${{ github.event_name == 'push' && format('{0}-register-{1}', '${group}', github.run_id) || '${group}' }}`);
+  }
 
   const jobs = doc.get('jobs');
   if (!isMap(jobs)) throw new Error('the template has no jobs');
@@ -106,6 +114,8 @@ export const DISPATCH_GUARD = "github.event_name == 'workflow_dispatch'";
 function dispatchOnly(condition: unknown): string {
   if (condition === undefined || condition === null) return DISPATCH_GUARD;
   const own = String(condition).replace(/^\s*\$\{\{\s*|\s*\}\}\s*$/g, '');
+  // Several `${{ }}` parts make a string, not one expression the guard can join.
+  if (own.includes('${{') || own.includes('}}')) throw new Error(`cannot guard the job condition ${String(condition)}: it is not one expression`);
   return `${DISPATCH_GUARD} && (${own})`;
 }
 
@@ -141,12 +151,21 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
   }
 }
 
+let knownPrerequisiteErrors: string[] | undefined;
+
 /**
  * The errors the templates' prerequisite steps report when the runner lacks
  * what they need (`echo '::error::…'` in the step's script), as GitHub writes
- * them to the step's log.
+ * them to the step's log. A failed install ("Could not install …") is left
+ * out: a wrong pin or a passing network failure gives it too, so it proves
+ * nothing about the runner.
  */
 export function prerequisiteErrors(): string[] {
+  knownPrerequisiteErrors ??= readPrerequisiteErrors().filter((error) => !error.startsWith('##[error]Could not install'));
+  return knownPrerequisiteErrors;
+}
+
+function readPrerequisiteErrors(): string[] {
   const errors = new Set<string>();
   for (const file of Object.values(WORKFLOW_FILES)) {
     if (!existsSync(join(EXAMPLES, file))) continue;

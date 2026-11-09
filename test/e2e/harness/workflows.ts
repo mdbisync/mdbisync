@@ -71,6 +71,8 @@ export interface WaitOptions {
   exclude?: ReadonlySet<number>;
   /** Only the run for this commit (a push run). */
   headSha?: string;
+  /** Only runs of this `.github/workflows/` file: another workflow can run on the same push. */
+  workflow?: string;
   timeoutMs?: number;
   appearMs?: number;
   pollMs?: number;
@@ -86,6 +88,7 @@ export async function waitForRun(rest: SandboxRest, options: WaitOptions): Promi
     const run = (await rest.workflowRuns(options.branch))
       .filter((candidate) => candidate.event === options.event && Date.parse(candidate.created_at) >= options.after - 5_000 && !(options.exclude?.has(candidate.id) ?? false))
       .filter((candidate) => options.headSha === undefined || candidate.head_sha === options.headSha)
+      .filter((candidate) => options.workflow === undefined || candidate.path?.split('@')[0] === `.github/workflows/${options.workflow}`)
       .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))[0];
     if (run?.status === 'completed') return run;
     seen ||= run !== undefined;
@@ -209,8 +212,7 @@ export interface JobSpan {
 export async function jobSpans(rest: SandboxRest, runs: readonly WorkflowRun[]): Promise<JobSpan[]> {
   const spans: JobSpan[] = [];
   for (const run of runs) {
-    const data = await rest.request<{ jobs: Array<{ started_at: string | null; completed_at: string | null }> }>('GET', `/actions/runs/${run.id}/jobs`);
-    for (const job of data.jobs) {
+    for (const job of await rest.runJobs(run.id)) {
       if (job.started_at === null) continue;
       spans.push({ runId: run.id, started: Date.parse(job.started_at), completed: job.completed_at === null ? Date.now() : Date.parse(job.completed_at) });
     }

@@ -287,12 +287,16 @@ describe('workflows', () => {
       workflowId: async () => (++registryReads > (options.registeredAfter ?? 0) ? 99 : undefined),
       dispatchWorkflow: async (workflow: string | number) => {
         dispatched.push(workflow);
-        runs.push({ id: 500 + runs.length, event: 'workflow_dispatch', status: 'completed', conclusion: options.conclusion, created_at: new Date().toISOString() });
+        runs.push({ id: 500 + runs.length, event: 'workflow_dispatch', status: 'completed', conclusion: options.conclusion, created_at: new Date().toISOString(), path: '.github/workflows/mdbisync-initial-sync.yml' });
       },
       workflowRuns: async () => {
-        // Each push to the tracked branch starts a run for its tip.
+        // Each push to the tracked branch starts a skipped registering run of the initial sync first, then the sync's run.
         const tip = (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
-        if (!runs.some((run) => run.event === 'push' && run.head_sha === tip)) runs.push({ id: 500 + runs.length, event: 'push', status: 'completed', conclusion: options.conclusion, created_at: new Date().toISOString(), head_sha: tip });
+        if (!runs.some((run) => run.event === 'push' && run.head_sha === tip)) {
+          const at = Date.now();
+          runs.push({ id: 500 + runs.length, event: 'push', status: 'completed', conclusion: 'success', created_at: new Date(at).toISOString(), head_sha: tip, path: '.github/workflows/mdbisync-initial-sync.yml' });
+          runs.push({ id: 500 + runs.length, event: 'push', status: 'completed', conclusion: options.conclusion, created_at: new Date(at + 1).toISOString(), head_sha: tip, path: '.github/workflows/mdbisync.yml' });
+        }
         return runs;
       },
       request: async (_method: string, path: string) => {
@@ -309,12 +313,13 @@ describe('workflows', () => {
   it('stop at a push run\'s proven environment blocker, keeping the run\'s result and evidence', async () => {
     const { ctx, remoteGit } = await fakeRun();
     const logs = { 'sync/4_Install pre-commit.txt': missingCommand('pipx'), 'sync/1_Set up job.txt': 'ok\n' };
-    fakeActions(ctx, remoteGit, { conclusion: 'failure', jobs: [jobWith('Install pre-commit', 4)], logs });
+    const { runs } = fakeActions(ctx, remoteGit, { conclusion: 'failure', jobs: [jobWith('Install pre-commit', 4)], logs });
     await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
     await assert.rejects(STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' }), (error: Error) => error instanceof EnvBlockedError && /Install pre-commit.*pipx: command not found/.test(error.message));
     assert.equal(ctx.engine.results.length, 1, 'the failed run is the scenario\'s run');
     assert.equal(ctx.observations.get('runs.0.exitCode'), 1);
     const run = (ctx.observations.get('workflows.runs') as Array<{ id: number }>)[0]!;
+    assert.equal(runs.find((candidate) => candidate.id === run.id)?.path, '.github/workflows/mdbisync.yml', 'the sync\'s push run, not another workflow\'s run on the same push');
     const dir = join(ctx.runDir, 'workflows', String(run.id));
     assert.equal(JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).conclusion, 'failure');
     assert.equal(JSON.parse(readFileSync(join(dir, 'blocker.json'), 'utf8')).cause, 'pipx: command not found (exit 127)');

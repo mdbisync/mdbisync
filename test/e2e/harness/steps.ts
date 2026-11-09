@@ -203,7 +203,10 @@ async function settle(ctx: RunContext, limit = 4): Promise<void> {
  * under test; without it the templates' own pin runs. Only the command's
  * workflow and the pull request check go in: a sync workflow in an initial
  * sync scenario would start on the scenario's own pushes, as a deployer is
- * told to avoid.
+ * told to avoid. The rendered initial sync starts on those pushes too, but
+ * only to be registered: every job is skipped and its group is separate
+ * (workflow-files.ts), and the harness waits for each command's runs by
+ * workflow file.
  */
 async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'): Promise<void> {
   const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
@@ -274,13 +277,14 @@ async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Prom
   let run;
   if (event === 'workflow_dispatch') {
     // The push that installed the workflow registers it (workflow-files.ts).
-    const workflow = await waitForRegistration(world.rest, workflowFor(command));
+    const workflow = workflowFor(command);
+    const id = await waitForRegistration(world.rest, workflow);
     const after = Date.now();
-    await world.rest.dispatchWorkflow(workflow, ctx.names.trackedBranch, workflowInputs(args));
-    run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: seenRuns(ctx) });
+    await world.rest.dispatchWorkflow(id, ctx.names.trackedBranch, workflowInputs(args));
+    run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: seenRuns(ctx), workflow });
   } else if (event === 'push') {
-    // The run the latest push to the tracked branch started.
-    run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after: Number(ctx.observations.get('start.time') ?? 0), exclude: seenRuns(ctx), headSha: await trackedTipOnServer(ctx) });
+    // The run the latest push to the tracked branch started, of the command's workflow.
+    run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after: Number(ctx.observations.get('start.time') ?? 0), exclude: seenRuns(ctx), headSha: await trackedTipOnServer(ctx), workflow: workflowFor(command) });
   } else if (event === 'pull_request') {
     const pr = ctx.observations.get('ci.pullRequest') as { number: number; head: string; openedAt: number } | undefined;
     if (pr === undefined) throw new Error('run.workflow on pull_request needs git.open-pr first');
@@ -464,14 +468,15 @@ const RUN: Record<string, Executor> = {
     const after = Date.now();
     // Start every event at once, plus one more when a pending run must be replaced by a newer one.
     const starts = [...events, ...(args.replacePending === true ? ['workflow_dispatch'] : [])];
-    const workflow = starts.includes('workflow_dispatch') ? await waitForRegistration(world.rest, SYNC_WORKFLOW) : SYNC_WORKFLOW;
+    // The install push registered the sync workflow: its push trigger runs on the run's branch.
+    const id = await waitForRegistration(world.rest, SYNC_WORKFLOW);
     await Promise.all(starts.map(async (event) => {
       if (event === 'push') await loadDriver(ctx, async () => {}).gitEdit([targetPath(ctx)]);
-      else await world.rest.dispatchWorkflow(workflow, ctx.names.trackedBranch, workflowInputs({}));
+      else await world.rest.dispatchWorkflow(id, ctx.names.trackedBranch, workflowInputs({}));
     }));
     const runs = [];
     for (const event of starts) {
-      const run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: new Set([...seenRuns(ctx), ...runs.map((candidate) => candidate.id)]) });
+      const run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: new Set([...seenRuns(ctx), ...runs.map((candidate) => candidate.id)]), workflow: SYNC_WORKFLOW });
       runs.push(run);
       recordWorkflowRun(ctx, run);
     }
