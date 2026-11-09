@@ -27,6 +27,7 @@ export interface FakeDocument {
   projectId?: string;
   teamId?: string;
   createdAt: string;
+  /** Moves forward on every change; `createdAt` when absent. */
   updatedAt?: string;
   icon?: string | null;
   color?: string | null;
@@ -202,12 +203,14 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
     return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
-  if (operationName === 'GetDocuments') {
-    const ids = variables.ids as string[];
-    return json(200, { data: { documents: { nodes: world.linear.documents.filter((d) => ids.includes(d.id)).map((d) => documentNode(d, variables.withContent === true)) } } });
-  }
   if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
+  if (operationName === 'GetDocuments') {
+    // Read by id: trashed documents are included, unknown ids are absent.
+    const ids = variables.ids as string[];
+    const nodes = world.linear.documents.filter((d) => ids.includes(d.id)).map((d) => documentNode(d, variables.withContent === true));
+    return json(200, { data: { documents: { nodes } } });
+  }
   return json(400, { errors: [{ message: `unknown operation ${operationName}`, extensions: { code: 'INPUT_ERROR' } }] });
 }
 
@@ -229,13 +232,27 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
   if (operation === 'UpdateDocument') {
     const document = documents.find((d) => d.id === variables.id);
     if (document === undefined) return { documentUpdate: { success: false, document: null } };
-    const input = variables.input as { content?: string; title?: string; icon?: string | null; color?: string | null; projectId?: string | null; teamId?: string | null };
+    const input = variables.input as {
+      content?: string;
+      title?: string;
+      icon?: string | null;
+      color?: string | null;
+      projectId?: string | null;
+      teamId?: string | null;
+    };
     if (input.content !== undefined) document.content = world.linear.store(input.content);
-    for (const key of ['title', 'icon', 'color'] as const) if (input[key] !== undefined) Object.assign(document, { [key]: input[key] });
-    for (const key of ['projectId', 'teamId'] as const) {
-      if (input[key] === null) delete document[key];
-      else if (input[key] !== undefined) document[key] = input[key];
+    if (input.title !== undefined) document.title = input.title;
+    if (input.icon !== undefined) document.icon = input.icon;
+    if (input.color !== undefined) document.color = input.color;
+    // A document belongs to a project or, without one, to a team (the team zone).
+    if (input.projectId != null) {
+      document.projectId = input.projectId;
+      delete document.teamId;
+    } else if (input.teamId != null) {
+      document.teamId = input.teamId;
+      delete document.projectId;
     }
+    touch(document);
     return { documentUpdate: { success: true, document: documentNode(document, variables.withContent === true) } };
   }
   if (operation === 'CommentOnDocument') {
@@ -243,11 +260,6 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     const document = documents.find((d) => `content-${d.id}` === input.documentContentId);
     if (document !== undefined) (document.comments ??= []).push(input.body);
     return { commentCreate: { success: document !== undefined, comment: { id: 'comment' } } };
-  }
-  if (operation === 'RestoreDocument') {
-    const document = documents.find((d) => d.id === variables.id);
-    if (document !== undefined) document.trashed = false;
-    return { documentUnarchive: { success: document !== undefined } };
   }
   if (operation === 'FileUpload') {
     const index = world.linear.uploads.length;
@@ -263,10 +275,29 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
   }
   if (operation === 'TrashDocument') {
     const document = documents.find((d) => d.id === variables.id);
-    if (document !== undefined) document.trashed = true;
+    if (document !== undefined) {
+      document.trashed = true;
+      touch(document);
+    }
     return { documentDelete: { success: document !== undefined } };
   }
+  if (operation === 'RestoreDocument') {
+    const document = documents.find((d) => d.id === variables.id);
+    if (document !== undefined) {
+      delete document.trashed;
+      touch(document);
+    }
+    return { documentUnarchive: { success: document !== undefined } };
+  }
   return undefined;
+}
+
+let clock = 0;
+
+/** Moves a document's `updatedAt` past every earlier change, as Linear does on a write. */
+export function touch(document: FakeDocument): void {
+  clock += 1;
+  document.updatedAt = new Date(Date.UTC(2026, 1, 1) + clock * 1000).toISOString();
 }
 
 function documentNode(d: FakeDocument, withContent: boolean) {
