@@ -25,6 +25,8 @@ import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-help
 const EXAMPLES = new URL('../../examples/', import.meta.url);
 const ACTION = 'mdbisync/mdbisync@';
 const HOOKS_STEP = 'Run the security hooks';
+/** The hooks step's `run:`, which the smoke runs as the command it names. */
+const HOOKS_RUN = '"$MDBISYNC_NODE" "$MDBISYNC_HOOKS"';
 
 interface Step {
   name?: string;
@@ -224,8 +226,9 @@ async function runTemplate(release: string, template: string, inputs: Record<str
     let printed = '';
     if (hooks.if === undefined || condition(hooks.if, context)) {
       const env: Record<string, string> = { ...(await runnerEnv('hooks')), ...Object.fromEntries(Object.entries(hooks.env ?? {}).map(([key, value]) => [key, expand(value, context)])) };
-      // The runner's default shell for a `run:` step on Linux.
-      const result = await runProcess('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', hooks.run ?? ''], workspace, env);
+      // The step's command, run without a shell: the node and script its environment names.
+      assert.equal(hooks.run, HOOKS_RUN, `${template}: the hooks step's command`);
+      const result = await runProcess(env['MDBISYNC_NODE'] ?? '', [env['MDBISYNC_HOOKS'] ?? ''], workspace, env);
       assert.equal(result.status, 0, `${template} ${HOOKS_STEP}:\n${result.output}`);
       printed = result.output;
     }
