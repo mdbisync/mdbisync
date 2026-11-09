@@ -191,14 +191,16 @@ export function fakeWorld(): FakeWorld {
 }
 
 export function fakeFetch(world: FakeWorld): typeof fetch {
+  const githubUrl = new URL(GITHUB_API);
+  const linearUrl = new URL(LINEAR_API);
+  const uploadsUrl = new URL(UPLOADS_HOST);
   return async (input, init) => {
     const url = String(input);
-    const parsed = new URL(url);
-    const githubUrl = new URL(GITHUB_API);
-    const linearUrl = new URL(LINEAR_API);
     const method = init?.method ?? 'GET';
     world.requests.push(`${method} ${url}`);
-    if (method === 'GET' && parsed.origin === new URL(UPLOADS_HOST).origin) {
+    let parsed: URL;
+    try { parsed = new URL(url); } catch { throw new Error(`unexpected request to ${url}`); }
+    if (method === 'GET' && parsed.origin === uploadsUrl.origin) {
       const upload = world.linear.uploads.find((entry) => entry.assetUrl === url);
       return upload?.bytes === undefined ? new Response(null, {status:404}) : new Response(upload.bytes, {headers:{'content-type':upload.contentType}});
     }

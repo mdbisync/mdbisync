@@ -499,7 +499,8 @@ async function serve(world: FakeWorld): Promise<Served> {
         const bytes = Buffer.from(await reply.arrayBuffer());
         response.writeHead(reply.status, { ...Object.fromEntries(reply.headers), 'content-type': reply.headers.get('content-type') ?? 'application/json', 'content-length': String(bytes.length) });
         response.end(bytes);
-      } catch {
+      } catch (error) {
+        console.error(error);
         response.writeHead(500, { 'content-type': 'text/plain' });
         response.end('Request failed');
       }

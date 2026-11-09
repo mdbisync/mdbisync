@@ -120,7 +120,9 @@ printf '{"id":123}\\n'
   for (const outcome of ['success', 'failure', 'cancelled']) {
     run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', script('Publish result on the fixing commit')], { ...apiVars, CHECK_OUTCOME: outcome });
     request = (await readFile(capture, 'utf8')).trim().split('\n');
-    const endpoint = new URL(request[request.indexOf('--data') - 1]!);
+    const dataIndex = request.indexOf('--data');
+    assert.ok(dataIndex > 0, 'curl payload follows the endpoint URL');
+    const endpoint = new URL(request[dataIndex - 1]!);
     assert.equal(endpoint.origin, 'https://api.github.com');
     assert.equal(endpoint.pathname, '/repos/example/repository/check-runs/123');
     assert.deepEqual(JSON.parse(request.at(-1)!), { status: 'completed', conclusion: outcome === 'success' ? 'success' : 'failure' });
