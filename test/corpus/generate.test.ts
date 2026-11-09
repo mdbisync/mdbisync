@@ -16,6 +16,8 @@ import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
 import { fixText, lintText } from "../../src/format/index.ts";
 import { COLLISIONS, EDGE, EDGE_ZONE, LOOSE, preCommitConfig } from "./tree.ts";
+import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from "./check-workflow.ts";
+import { buildRunTree } from "../e2e/harness/corpus.ts";
 
 // The default corpus, built once for the tests that only read it.
 let defaultCorpus: ReturnType<typeof buildCorpus> | undefined;
@@ -23,6 +25,51 @@ function corpus(): ReturnType<typeof buildCorpus> {
   defaultCorpus ??= buildCorpus("a".repeat(40));
   return defaultCorpus;
 }
+
+test("every published slice keeps the PR-only marker workflow and excludes other workflows", () => {
+  const data = corpus();
+  const workflow = data.files.find((file) => file.path === CHECK_WORKFLOW_PATH)!;
+  assert.equal(workflow.synced, false);
+  assert.equal(workflow.content.toString(), CHECK_WORKFLOW);
+  const yaml = parse(CHECK_WORKFLOW);
+  assert.deepEqual(yaml.on, { pull_request: { branches: ['t/*/main'] } });
+  assert.equal(yaml.jobs.format['runs-on'], 'self-hosted');
+  assert.equal(yaml.jobs.format.name, 'format');
+  assert.equal(yaml.concurrency['cancel-in-progress'], true);
+  assert.deepEqual(yaml.permissions, { contents: 'read' });
+  const readmes = new Map(data.files.filter((file) => file.path.endsWith('README.md')).map((file) => [file.path, file.content.toString()]));
+  for (const [slice, paths] of Object.entries(data.slices)) {
+    assert.ok(paths.includes(CHECK_WORKFLOW_PATH), slice);
+    const tree = buildRunTree({ slice, paths: [...paths, '.github/workflows/unrelated.yml'] }, readmes);
+    assert.equal(tree.paths.get(CHECK_WORKFLOW_PATH), CHECK_WORKFLOW_PATH);
+    assert.equal(tree.paths.has('.github/workflows/unrelated.yml'), false);
+  }
+});
+
+test("the workflow passes without a marker, fails on failure or invalid markers, and holds pending", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'check-workflow-'));
+  try {
+    const yaml = parse(CHECK_WORKFLOW);
+    const script = yaml.jobs.format.steps.at(-1).run;
+    const run = () => {
+      try { return { status: 0, output: execFileSync('bash', ['-e', '-c', script], { cwd: dir, encoding: 'utf8' }) }; }
+      catch (error) { return error as { status: number; stdout: string }; }
+    };
+    assert.equal(run().status, 0);
+    writeFileSync(join(dir, CHECK_MARKER), 'failed\n');
+    assert.equal(run().status, 1);
+    writeFileSync(join(dir, CHECK_MARKER), 'invalid\n');
+    assert.equal(run().status, 1);
+    writeFileSync(join(dir, CHECK_MARKER), 'pending\n');
+    // Observe the long hold without sleeping: replace only sleep in this shell.
+    assert.throws(() => execFileSync('bash', ['-e', '-c', `sleep() { echo "hold:$1"; }; ${script}`], { cwd: dir, encoding: 'utf8' }), (error: unknown) => {
+      const result = error as { status: number; stdout: string };
+      return result.status === 1 && result.stdout.trim() === 'hold:1140';
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function treeDigest(dir: string, base = dir): Map<string, string> {
   const out = new Map<string, string>();

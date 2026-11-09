@@ -10,6 +10,7 @@ import { Git } from '../../../src/state/index.ts';
 import { checkpoint, CHECKPOINTS, HOOKS_DIR_ENV, HOOKS_ENV, hooksDir, testStopAfterDocuments } from '../../../src/test-hooks.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { annotatedFolders, buildRunTree, readAnnotation } from './corpus.ts';
+import { CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { engineInputs, inputEnv, runEngine, startEngine } from './engine.ts';
 import { operationOf, startFaultProxy, writeApplied, writeError, writeFields } from './fault-proxy.ts';
 import { runNames } from './isolation.ts';
@@ -379,7 +380,8 @@ describe('run tree from a slice', () => {
       const paths = corpus.slices[slice];
       const readmes = new Map(paths.filter((path) => /(^|\/)README\.md$/.test(path)).map((path) => [path, text.get(path) ?? '']));
       const tree = buildRunTree({ slice, paths }, readmes, names);
-      assert.equal(tree.paths.size, paths.filter((path) => !path.startsWith('.github/')).length, slice);
+      assert.equal(tree.paths.size, paths.filter((path) => !path.startsWith('.github/') || path === CHECK_WORKFLOW_PATH).length, slice);
+      assert.equal(tree.paths.get(CHECK_WORKFLOW_PATH), CHECK_WORKFLOW_PATH);
       // Every project of the slice gets a run project, and only ENG has a team zone.
       for (const [target, readme] of tree.rewritten) assert.doesNotMatch(readme, /PROJECT_[A-Z]+/, `${slice} ${target}`);
       assert.deepEqual([...tree.teamZones.keys()], tree.teamZones.size === 0 ? [] : ['ENG'], slice);

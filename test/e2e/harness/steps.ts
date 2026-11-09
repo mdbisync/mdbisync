@@ -20,6 +20,7 @@ import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
 import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, stripFrontMatter } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
+import { faultChecks } from './check-fault.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, postEntry, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
@@ -1178,9 +1179,7 @@ const FAULT: Record<string, Executor> = {
   'fault.merge-policy': async () => {
     throw new EnvBlockedError('needs the sandbox to refuse merge commits; agents do not change repository settings');
   },
-  'fault.checks': async () => {
-    throw new EnvBlockedError('needs a failing required check on the sync pull request; the GitHub App may only read checks');
-  },
+  'fault.checks': faultChecks,
   'fault.stale-lease': async (ctx, args) => {
     // Someone else moves a state ref while the run is between its reads and its atomic push.
     const store = typeof args.ref === 'string' ? args.ref : 'ids';
