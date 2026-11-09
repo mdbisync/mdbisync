@@ -1,6 +1,7 @@
 // The initial sync's dry run through the command line, against a local git
 // remote and a fake GitHub and Linear: it lists what a confirmed run would
-// do and writes nothing anywhere (L1-03, and the left-out part of L1-13).
+// do and writes nothing anywhere (L1-03, and the left-out part of L1-13),
+// including the documents its uploads would leave out.
 
 import assert from 'node:assert/strict';
 import { readFile, rm } from 'node:fs/promises';
@@ -10,7 +11,8 @@ import { runCli } from '../cli.ts';
 import { COMMANDS, SETUP_FAILED_EXIT_CODE, USAGE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
-import { type Fixture, createFixture } from '../state/test-helpers.ts';
+import { type Git } from '../state/index.ts';
+import { type Fixture, countLocalLfsObjects, createFixture } from '../state/test-helpers.ts';
 
 const CANARY = 'kx-7a2b9c40';
 const PRE_COMMIT = `repos:
@@ -195,4 +197,106 @@ describe('initial sync dry run', () => {
       assert.equal(report.summary, null);
     });
   }
+});
+
+describe('initial sync dry run: documents the uploads would leave out', () => {
+  const MB = 1024 * 1024;
+  /** A pointer to an LFS object the remote does not have: only the pointer can tell its size. */
+  const pointer = (size: number, extension = '') => `version https://git-lfs.github.com/spec/v1\n${extension}oid sha256:${'cd'.repeat(32)}\nsize ${size}\n`;
+  const UPLOAD_TREE = {
+    '.pre-commit-config.yaml': PRE_COMMIT,
+    'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
+    // A file over the 10 MB limit, stored in git, next to a small one.
+    'eng/big.md': `# Big\n\n![Scan](files/scan.bin) and [the small one](files/small.pdf)\n\n${CANARY}\n`,
+    'eng/files/scan.bin': Buffer.alloc(10 * MB + 1, 7),
+    // A small file stored in LFS: its document is written as usual.
+    'eng/small.md': `# Small\n\n[Report](files/small.pdf)\n\n${CANARY}\n`,
+    'eng/files/small.pdf': Buffer.from('%PDF-1.4 small report\n'),
+    // An LFS pointer of 20 MB whose object is not on the remote.
+    'eng/video.md': `# Video\n\n[Recording](raw/recording.mp4)\n\n${CANARY}\n`,
+    'eng/raw/recording.mp4': pointer(20 * MB),
+    // An LFS pointer naming an LFS extension: the run cannot read its object.
+    'eng/packed.md': `# Packed\n\n[Archive](raw/archive.zip)\n\n${CANARY}\n`,
+    'eng/raw/archive.zip': pointer(512, `ext-0-foo sha256:${'ef'.repeat(32)}\n`),
+  };
+
+  let fixture: Fixture;
+  let clone: Git;
+  before(async () => {
+    fixture = await createFixture();
+    await fixture.seed(UPLOAD_TREE, { lfs: ['*.pdf'] });
+    clone = await fixture.clone('work');
+  });
+  after(() => fixture.cleanup());
+
+  const refs = () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
+
+  const run = async (world: FakeWorld, confirm: boolean) => {
+    const reportFile = join(fixture.root, 'report.json');
+    const summaryFile = join(fixture.root, 'summary.md');
+    await rm(reportFile, { force: true });
+    await rm(summaryFile, { force: true });
+    const env = {
+      PATH: process.env.PATH ?? '',
+      HOME: process.env.HOME ?? '',
+      MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
+      MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
+      MDBISYNC_LINEAR_API_URL: LINEAR_API,
+      MDBISYNC_GITHUB_TOKEN: 'gh-token',
+      MDBISYNC_GITHUB_API_URL: GITHUB_API,
+      MDBISYNC_REPOSITORY: 'owner/repo',
+      MDBISYNC_REPORT_FILE: reportFile,
+      MDBISYNC_DIRECTION: 'git-to-linear',
+      MDBISYNC_CONFIRM: String(confirm),
+      GITHUB_STEP_SUMMARY: summaryFile,
+    };
+    const result = await runCli(['initial-sync'], { env, cwd: clone.dir, fetch: fakeFetch(world) });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
+    return { report: JSON.parse(await readFile(reportFile, 'utf8')) as RunReport, summary: await readFile(summaryFile, 'utf8') };
+  };
+
+  /** Linear holds the document of the file over the limit. */
+  const linearWithBig = () => {
+    const world = fakeWorld();
+    world.linear.documents = [{ id: 'doc-big', title: 'big', teamId: 'team-eng', createdAt: '2026-01-01T00:00:01Z' }];
+    return world;
+  };
+
+  const LEFT_OUT = [
+    { path: 'eng/big.md', rule: 'upload-too-large', files: ['eng/files/scan.bin'] },
+    { path: 'eng/packed.md', rule: 'upload-unreadable', files: ['eng/raw/archive.zip'] },
+    { path: 'eng/video.md', rule: 'upload-too-large', files: ['eng/raw/recording.mp4'] },
+  ];
+
+  it('lists a document linking a file over 10 MB as left out with upload-too-large and the file; uploads, downloads and writes nothing', async () => {
+    const world = linearWithBig();
+    const refsBefore = await refs();
+    const { report, summary } = await run(world, false);
+
+    assert.deepEqual(world.writes, [], 'the dry run wrote to GitHub or Linear');
+    assert.equal(await refs(), refsBefore, 'the dry run moved a ref');
+    assert.equal(await countLocalLfsObjects(clone), 0, 'the dry run downloaded an LFS object');
+
+    assert.deepEqual(report.summary?.plan.create, ['eng/README.md', 'eng/small.md']);
+    assert.deepEqual(report.summary?.plan.overwrite, []);
+    assert.deepEqual(report.summary?.plan.trash, [], 'the document of a left-out file is not trashed');
+    assert.deepEqual(
+      report.summary?.leftOutFiles,
+      LEFT_OUT.map(({ path, rule, files }) => ({ path, rules: [rule], lines: [], files, ...(path === 'eng/big.md' ? { documentId: 'doc-big' } : {}) })),
+    );
+    assert.deepEqual(report.oversizeFiles, ['eng/files/scan.bin', 'eng/raw/recording.mp4']);
+
+    assert.ok(!summary.includes(CANARY), 'the job summary holds content');
+    assert.match(summary, /- leave out 3 files, which stay in git only until they are fixed\./);
+    assert.match(summary, /^\| eng\/big\.md \| upload-too-large \|  \| eng\/files\/scan\.bin \|$/m);
+    assert.match(summary, /^\| eng\/video\.md \| upload-too-large \|  \| eng\/raw\/recording\.mp4 \|$/m);
+    assert.match(summary, /^\| eng\/packed\.md \| upload-unreadable \|  \| eng\/raw\/archive\.zip \|$/m);
+  });
+
+  it('lists the same documents, rules and files that the confirmed run leaves out at the write', async () => {
+    const { report } = await run(linearWithBig(), true);
+    assert.deepEqual(report.initialSync?.created, ['eng/README.md', 'eng/small.md']);
+    assert.deepEqual(report.initialSync?.leftOutAtWrite, LEFT_OUT);
+  });
 });

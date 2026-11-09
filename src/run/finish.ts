@@ -96,7 +96,13 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     sync: null,
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? 0,
-    oversizeFiles: [...new Set((confirmed?.leftOutAtWrite ?? []).filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
+    // A dry run finds them before the write and lists them in its plan; a confirmed run, at the write.
+    oversizeFiles: [
+      ...new Set([
+        ...(outcome.plan?.leftOutFiles ?? []).filter((entry) => entry.rules.includes(UPLOAD_TOO_LARGE)).flatMap((entry) => entry.files ?? []),
+        ...(confirmed?.leftOutAtWrite ?? []).filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []),
+      ]),
+    ].sort(),
     resumed: confirmed?.resumed ?? false,
     stoppedEarly: confirmed?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.

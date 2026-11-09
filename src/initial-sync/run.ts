@@ -6,7 +6,8 @@
 import { type LinearDocument } from '../linear/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { readBlobs } from '../state/index.ts';
-import { type InitialSyncPlan, type PlaceDocuments, type PlanInput, annotatedPlaces, placeId, planInitialSync } from './plan.ts';
+import { type InitialSyncPlan, type PlaceDocuments, type PlanInput, annotatedPlaces, leaveOutAtWrite, placeId, planInitialSync } from './plan.ts';
+import { predictUploadLeaveOuts } from './uploads.ts';
 
 export interface PlanSources {
   input: PlanInput;
@@ -34,6 +35,12 @@ export async function readPlanSources(context: RunContext, options: { withConten
   return { input: { mapping, texts, places, facts: linear.facts }, documents };
 }
 
+/**
+ * The dry run's plan: what a confirmed run would do, with the documents its
+ * uploads would leave out already listed as left out. Uploads and downloads
+ * nothing.
+ */
 export async function planFromRepository(context: RunContext): Promise<InitialSyncPlan> {
-  return planInitialSync((await readPlanSources(context)).input);
+  const plan = planInitialSync((await readPlanSources(context)).input);
+  return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan));
 }

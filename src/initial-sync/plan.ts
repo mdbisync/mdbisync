@@ -19,6 +19,8 @@ export interface LeftOutEntry {
   collidesWith?: string[];
   /** The Linear document with the file's title, which the run leaves as it is. */
   documentId?: string;
+  /** For a rule found from the files the document links (`upload-too-large`): those files. */
+  files?: string[];
 }
 
 export interface CreateEntry {
@@ -179,6 +181,31 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   plan.trash = byPath(plan.trash);
   plan.leftOut = byPath([...leftOut.values()]);
   return plan;
+}
+
+/**
+ * The plan with documents that the write would leave out (a linked file over
+ * the upload limit) moved from create and overwrite to the left-out files,
+ * with their rule and the files that cause it. An overwritten document stays
+ * as it is, as the confirmed run leaves it.
+ */
+export function leaveOutAtWrite(plan: InitialSyncPlan, entries: ReadonlyArray<{ path: string; rule: string; files: readonly string[] }>): InitialSyncPlan {
+  if (entries.length === 0) return plan;
+  const byPath = new Map(entries.map((entry) => [entry.path, entry]));
+  const leftOut = [...plan.leftOut];
+  const add = (path: string, documentId?: string) => {
+    const found = byPath.get(path);
+    if (found === undefined) return;
+    leftOut.push({ path, rules: [found.rule], lines: [], files: [...found.files], ...(documentId !== undefined ? { documentId } : {}) });
+  };
+  for (const entry of plan.create) add(entry.path);
+  for (const entry of plan.overwrite) add(entry.path, entry.documentId);
+  return {
+    create: plan.create.filter((entry) => !byPath.has(entry.path)),
+    overwrite: plan.overwrite.filter((entry) => !byPath.has(entry.path)),
+    trash: plan.trash,
+    leftOut: leftOut.sort((a, b) => compare(a.path, b.path)),
+  };
 }
 
 /**

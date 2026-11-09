@@ -73,8 +73,8 @@ export function renderDryRun(plan: InitialSyncPlan): string {
   section(
     'Left out',
     plan.leftOut.length,
-    ['Path', 'Rules', 'Lines', 'Collides with'],
-    plan.leftOut.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? []).join(', ')]),
+    ['Path', 'Rules', 'Lines', 'Collides with, or the files'],
+    plan.leftOut.map((entry) => [entry.path, entry.rules.join(', '), entry.lines.join(', '), (entry.collidesWith ?? entry.files ?? []).join(', ')]),
   );
   return lines.join('\n');
 }
