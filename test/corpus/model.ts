@@ -28,7 +28,12 @@ export type CorpusFile = {
   /** Corpus paths this file links to or embeds (documents, images, attachments). */
   links: string[];
   note: string | null;
+  /** What a scenario looks the file up by, for the few files it needs by name; see ROLES. */
+  role?: string;
 };
+
+/** Roles that exactly one corpus file has. */
+export const ROLES = ["pdf-11mb", "image-over-10mb"] as const;
 
 export const GROUPS = [
   "annotations",
@@ -136,6 +141,11 @@ export function destination(target: string): string {
 }
 
 export const CANARY = /kx-[0-9a-f]{8}/;
+
+/** The line that carries a document's canary token. */
+export function idLine(canary: string): string {
+  return `Doc ID: ${canary}`;
+}
 
 /** Hands out unique canary tokens from a seeded source. */
 export class Canaries {
