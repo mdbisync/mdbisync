@@ -9,11 +9,11 @@ import { fitScene, gifFrames, PLAN } from "./assets.ts";
 import { linkTargets, rewrite, targetPath } from "./bank.ts";
 import { checkCorpus } from "./check.ts";
 import { longTitle } from "./documents.ts";
-import { buildCorpus, writeCorpus } from "./generate.ts";
+import { buildCorpus, DEFAULT_SEED, writeCorpus } from "./generate.ts";
 import { parse } from "yaml";
 import { CONTENT_LIMIT, gitattributes, SHARED_IMAGE_USERS } from "./model.ts";
 import { Rng } from "./rng.ts";
-import { MINI_DOCUMENTS } from "./slices.ts";
+import { makeSlices, MID_REGRESSIONS, MINI_DOCUMENTS } from "./slices.ts";
 import { fixText, linkedFileCheck, lintText } from "../../src/format/index.ts";
 import { COLLISIONS, EDGE, EDGE_ZONE, LOOSE, preCommitConfig } from "./tree.ts";
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from "./check-workflow.ts";
@@ -149,6 +149,49 @@ test("the mid slice holds the shared image and every document that embeds it", (
   const users = built.files.filter((f) => f.synced && f.kind === "markdown" && f.links.includes(image.path));
   assert.equal(users.length, SHARED_IMAGE_USERS);
   assert.deepEqual(users.filter((f) => !mid.has(f.path)).map((f) => f.path), []);
+});
+
+test("the mid slice keeps the named list-construct documents with their linked files", () => {
+  const built = corpus();
+  const pinned = MID_REGRESSIONS[DEFAULT_SEED];
+  assert.ok(pinned, "the default seed pins its mid regressions");
+  const mid = new Set(built.slices.mid);
+  const byPath = new Map(built.files.map((f) => [f.path, f]));
+  for (const path of pinned) {
+    const file = byPath.get(path);
+    assert.ok(file && mid.has(path), `mid keeps ${path}`);
+    for (const target of file.links) assert.ok(mid.has(target), `mid keeps ${target}, linked from ${path}`);
+  }
+  // The constructs the checks need are still where the list says, so a change
+  // to the generated text fails here instead of quietly emptying the check.
+  const text = (path: string) => byPath.get(path)!.content.toString("utf8");
+  const taskCode = text("eng/edge-cases/formatting/task-code-3.md");
+  assert.match(taskCode, /^- \[X\] /m);
+  assert.match(taskCode, /^\* .+\n\n {2}!\[[^\]]*\]\(\.\.\/\.\.\/platform\/assets\/status-icon\.png\)$/m);
+  assert.deepEqual(byPath.get("eng/edge-cases/formatting/task-code-3.md")!.links, ["eng/platform/assets/status-icon.png"]);
+  assert.match(text("docs/release notes/releases/2025/kitewing-4-28-2.md"), /^\* \[[^\]]+\]\(\.\.\/\.\.\/media\/screen-recording-397\.mp4\)$/m);
+  assert.deepEqual(byPath.get("docs/release notes/releases/2025/kitewing-4-28-2.md")!.links, ["docs/release notes/media/screen-recording-397.mp4"]);
+});
+
+test("pinning keeps a document the seeded pick alone leaves out, and refuses a path mid cannot take", () => {
+  const built = corpus();
+  const rng = () => new Rng(DEFAULT_SEED).fork("slices");
+  const pinned = MID_REGRESSIONS[DEFAULT_SEED]!;
+  // The same random pick, without the list: at least one named document drops out.
+  const unpinned = new Set(makeSlices(built.files, rng()).mid);
+  const added = pinned.filter((path) => !unpinned.has(path));
+  assert.ok(added.length > 0, "the pinned list is needed for this seed");
+  assert.deepEqual(makeSlices(built.files, rng(), pinned).mid, built.slices.mid);
+  // Each added document replaces one random pick of its group; the rest of mid stays.
+  const byPath = new Map(built.files.map((f) => [f.path, f]));
+  const documents = (paths: Iterable<string>) => new Set([...paths].filter((p) => byPath.get(p)!.synced && byPath.get(p)!.kind === "markdown"));
+  const before = documents(unpinned);
+  const after = documents(built.slices.mid);
+  assert.deepEqual([...after].filter((p) => !before.has(p)).sort(), [...added].sort());
+  const dropped = [...before].filter((p) => !after.has(p));
+  assert.deepEqual(dropped.map((p) => byPath.get(p)!.group).sort(), added.map((p) => byPath.get(p)!.group).sort());
+  assert.throws(() => makeSlices(built.files, rng(), ["docs/no-such-page.md"]), /must keep docs\/no-such-page\.md/);
+  assert.throws(() => makeSlices(built.files, rng(), ["eng/README.md"]), /must keep eng\/README\.md/);
 });
 
 test("duplicate-title fixtures are taken from the bank once, never paired by the generator", () => {
