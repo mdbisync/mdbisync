@@ -140,8 +140,10 @@ minutes, in both directions.
 ## Documentation
 
 How folders map to Linear, the checks every run makes, the sync pull request
-and how to pin a release: [docs/usage.md](docs/usage.md). The initial sync
-from Linear to git, step by step:
+and how to pin a release: [docs/usage.md](docs/usage.md). How a change
+travels each way, what you see in GitHub and Linear, how long it takes and
+what each run's summary says: [docs/sync-cycle.md](docs/sync-cycle.md). The
+initial sync from Linear to git, step by step:
 [docs/initial-sync-linear-to-git.md](docs/initial-sync-linear-to-git.md). How
 Markdown is kept in Linear's form: [docs/linear-format.md](docs/linear-format.md).
 What happens when both sides change one document, and how to resolve a

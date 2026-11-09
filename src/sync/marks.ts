@@ -10,6 +10,9 @@ export const MARKS = {
 
 export const CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and remove every conflict marker paragraph throughout the document. The alert clears after the next sync.';
 
+/** The blocked mark's comment opens with this line; a list of hooks and lines follows. */
+export const BLOCKED_COMMENT = 'Security checks rejected this document. Fix the listed findings and sync again.';
+
 export interface SecurityFinding {
   hook: string;
   line: number;
@@ -44,7 +47,7 @@ function blockedComment(findings: readonly SecurityFinding[]): string {
     const location = Number.isSafeInteger(line) && line > 0 ? `, line ${line}` : '';
     return `- Hook \`${name}\`${location}.`;
   }))].sort();
-  return `Security checks rejected this document. Fix the listed findings and sync again.\n\n${locations.join('\n')}`;
+  return `${BLOCKED_COMMENT}\n\n${locations.join('\n')}`;
 }
 
 /**

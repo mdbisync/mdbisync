@@ -6,7 +6,8 @@ ever waits for you: every run finishes, every other document keeps syncing,
 and no edit from either side is thrown away.
 
 In this page, "git" means the tracked branch (usually `main`), and "the run
-summary" is the summary of the sync workflow's run in the Actions tab.
+summary" is the summary of the sync workflow's run in the Actions tab
+([the run summary](sync-cycle.md#the-run-summary)).
 
 ## How the two sides are merged
 
