@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LinearClient } from '../../../src/linear/index.ts';
-import { Git } from '../../../src/state/index.ts';
+import { Git, readIds } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs, stripFrontMatter, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
@@ -27,6 +27,36 @@ import { BEFORE_VIEW, takeStartView } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
 
 export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
+/** The longest setup, team-lock wait included; a full slice alone takes under a minute. */
+export const SETUP_TIMEOUT_MS = 15 * 60_000;
+/** How long a setup past its deadline gets to stop before cleanup runs anyway. */
+export const SETUP_STOP_MS = 2 * 60_000;
+
+/** Whether `work` settles (either way) within `ms`. */
+export async function settlesWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([work.then(() => true, () => true), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Rejects with `onTimeout()` when `work` has not settled in time. The work itself goes on unobserved. */
+export async function withDeadline<T>(work: Promise<T>, ms: number, onTimeout: () => Error): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(onTimeout()), ms);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 /** How long a run that reached its UI steps keeps its resources. */
 export const UI_HOLD_MS = 2 * 3_600_000;
 
@@ -69,17 +99,21 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   if (config.missing.length > 0) throw new EnvBlockedError(`test configuration is missing: ${config.missing.join(', ')}`);
   let token;
   try {
+    ctx.phase('github token');
     token = await githubToken(config, ctx.scenario.mode === 'actions' ? 'actions' : 'local');
   } catch (error) {
     throw new EnvBlockedError(`GitHub token: ${(error as Error).message}`);
   }
   const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, stateDir: deps.stateDir, runId: ctx.names.runId });
   ctx.sandbox = sandbox;
+  ctx.phase('sandbox cache');
   await sandbox.refreshCache();
   let manifest;
   let created;
   try {
+    ctx.phase('corpus manifest');
     manifest = await sandbox.manifest();
+    ctx.phase('tracked branch');
     created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names);
   } catch (error) {
     if (error instanceof CorpusMissingError) throw new EnvBlockedError(`corpus: ${error.message}`);
@@ -91,6 +125,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   const appClient = deps.appClients.get(appName) as LinearClient;
   const editors = { 'editor-a': editorClient(config.editors['editor-a']), 'editor-b': editorClient(config.editors['editor-b']) };
   const world = new LinearWorld(editors['editor-a']);
+  ctx.phase('linear teams');
   const teams = new Map((await world.teams()).map((team) => [team.key, team]));
   const live: LiveWorld = {
     sandbox,
@@ -117,10 +152,12 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   ctx.live = live;
 
   // The team lock: initial sync matches every document of an annotated team zone.
+  ctx.phase('team lock');
   if (ctx.scenario.setup.teamZoneLock) {
     for (const team of [...tree.teamZones.keys()].sort()) {
       try {
         locks.push(await acquireLock(`team-${team.toLowerCase()}`, {
+          signal: ctx.signal,
           stateDir: deps.stateDir,
           runId: ctx.names.runId,
           timeoutMs: TEAM_LOCK_TIMEOUT_MS,
@@ -137,6 +174,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   for (const [target, source] of tree.paths) {
     if (/(^|\/)README\.md$/.test(source)) readmes.set(source, tree.rewritten.get(target) ?? (await sandbox.readMain(`corpus/${source}`)) ?? '');
   }
+  ctx.phase('projects');
   const teamOf = projectTeams(readmes);
   for (const [placeholder, name] of tree.projects) {
     const key = teamOf.get(name) ?? teamOf.get(placeholder);
@@ -147,6 +185,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   }
 
   const state = ctx.scenario.setup.state;
+  ctx.phase('setup state');
   const tools = { runStep };
   await prepareFixtures(ctx, live, 'beforeSync', tools);
   if (state === 'linear-seeded') await seedLinear(ctx, live);
@@ -193,6 +232,8 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
     if (!synced.has(source) || !target.endsWith('.md')) continue;
     const folder = owningFolder(target, folders);
     if (folder === null) continue;
+    // A team zone's own README would be titled "README" without the run's prefix, shared by every run.
+    if (folder.project === null && target === `${folder.folder}/README.md`) continue;
     const project = folder.project === null ? undefined : [...live.projects.values()].find((p) => p.name === folder.project);
     const team = folder.team === null ? undefined : live.teams.get(folder.team);
     const place = project !== undefined ? { projectId: project.id } : team !== undefined ? { teamId: team.id } : null;
@@ -259,6 +300,18 @@ export const FIXTURE_PREPARATION: Record<string, (ctx: RunContext, live: LiveWor
   },
 };
 
+/** Document ids in the run's ids state ref, or none when the engine recorded nothing. */
+async function recordedIds(ctx: RunContext): Promise<string[]> {
+  const sandbox = ctx.sandbox;
+  if (sandbox === undefined) return [];
+  const ref = `${ctx.names.refPrefix}/ids`;
+  if (!(await sandbox.runRefs()).some((entry) => entry.ref === ref)) return [];
+  const git = await ctx.person();
+  await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+  const ids = await readIds(git, (await git.text(['rev-parse', ref])).trim());
+  return [...ids.values()].map((entry) => entry.id);
+}
+
 async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string }> {
   const problems: string[] = [];
   const attempt = async (what: string, action: () => Promise<unknown>) => {
@@ -274,6 +327,14 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
     delete ctx.engine.pending;
   }
   ctx.checkpoints.resumeAll();
+  // Every document the run made, by id: what the harness seeded and what the engine recorded.
+  // Read the ids before the refs go.
+  const created = new Set(ctx.live?.seededDocuments ?? []);
+  if (ctx.live !== null) {
+    await attempt('ids', async () => {
+      for (const id of await recordedIds(ctx)) created.add(id);
+    });
+  }
   const sandbox = ctx.sandbox;
   if (sandbox !== undefined) {
     await attempt('refs', async () => {
@@ -289,6 +350,8 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
     for (const project of live.projects.values()) {
       await attempt(`project ${project.name}`, () => live.world.deleteProject(project, ctx.names.runId));
     }
+    // Project documents went with their projects; team-zone documents the run made go to the trash.
+    await attempt('created team-zone documents', () => live.world.trashTeamZoneDocuments([...created]));
     for (const team of live.tree.teamZones.keys()) {
       const teamId = live.teams.get(team)?.id;
       if (teamId === undefined) continue;
@@ -312,7 +375,16 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
   const log = (line: string) => deps.log(`${scenario.id} ${runId}: ${line}`);
   let person: Git | undefined;
   let engineDir: string | undefined;
+  let phase = 'admission';
+  // Set when setup missed its deadline: setup stops at its next phase or lock wait, and creates nothing more.
+  const abort = new AbortController();
   const ctx: RunContext = {
+    signal: abort.signal,
+    phase(next: string) {
+      abort.signal.throwIfAborted();
+      phase = next;
+      log(`setup: ${next}`);
+    },
     scenario,
     names,
     runDir,
@@ -348,6 +420,8 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
   const appName = deps.config.linearApps[0]?.name ?? 'app1';
   /** Set when the scenario reached its UI steps: its resources stay for the UI session. */
   let heldForUi = false;
+  /** Set when setup did not stop after its deadline: the run stays registered, so the sweeper removes what it makes later. */
+  let setupStuck = false;
   try {
     if (scenario.setup.state !== 'offline') {
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');
@@ -358,7 +432,18 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
         throw blocked;
       }
       ctx.proxy = await startFaultProxy('https://api.linear.app');
-      await setupLive(ctx, deps, grant.app.name ?? appName, locks);
+      // A setup that does not finish must not hold a worker and its locks forever. On the deadline it is
+      // told to stop; cleanup waits until it has stopped, so nothing is created after the cleanup.
+      const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks);
+      try {
+        await withDeadline(setup, SETUP_TIMEOUT_MS, () =>
+          new EnvBlockedError(`setup did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes (last phase: ${phase})`));
+      } catch (late) {
+        abort.abort();
+        setupStuck = !(await settlesWithin(setup, SETUP_STOP_MS));
+        throw late;
+      }
+      ctx.phase('steps');
     }
     const history: Array<Record<string, string>> = [await snapshotRefs(ctx)];
     ctx.observations.set('refHistory', history);
@@ -394,7 +479,8 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
     locks.splice(0).reverse().forEach((lock) => lock.release());
     grant?.release();
     clearInterval(heartbeat);
-    if (cleanupOutcome.ok && !heldForUi) registration.done();
+    if (setupStuck) cleanupOutcome = { ok: false, detail: `setup did not stop; ${cleanupOutcome.detail ?? 'cleaned up'}; the sweeper removes the rest once this process ends` };
+    if (cleanupOutcome.ok && !heldForUi && !setupStuck) registration.done();
     rmSync(join(runDir, 'person'), { recursive: true, force: true });
     rmSync(join(runDir, 'engine'), { recursive: true, force: true });
   }

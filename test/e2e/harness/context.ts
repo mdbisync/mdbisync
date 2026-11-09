@@ -84,6 +84,10 @@ export interface RunContext {
   /** Counter for edit tokens. */
   sequence: number;
   log(line: string): void;
+  /** Names the setup phase now running, for the log and for a setup that does not finish. Throws once setup was told to stop. */
+  phase(name: string): void;
+  /** Aborted when setup missed its deadline. */
+  signal: AbortSignal;
   /** A clone of the tracked branch where people commit; made on first use. */
   person(): Promise<Git>;
   /** The working clone the engine runs in; made on first use. */

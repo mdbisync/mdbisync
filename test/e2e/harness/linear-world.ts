@@ -105,6 +105,21 @@ export class LinearWorld {
     });
   }
 
+  /**
+   * Moves the given documents to the trash when they are team-zone documents
+   * (no project). The ids come from the run itself (seeded or recorded).
+   */
+  async trashTeamZoneDocuments(ids: readonly string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    let trashed = 0;
+    for (const document of await this.client.getDocuments(ids)) {
+      if (document.projectId !== null || document.trashed) continue;
+      await this.client.trashDocument(document.id);
+      trashed += 1;
+    }
+    return trashed;
+  }
+
   /** Moves a run's team-zone document to the trash. Refuses any other document. */
   async trashRunDocument(document: Pick<LinearDocument, 'id' | 'title' | 'projectId'>, runId: string): Promise<void> {
     if (document.projectId !== null || runOfTeamTitle(document.title) !== runId) {

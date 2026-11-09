@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
-import type { LinearDocument } from '../../../src/linear/index.ts';
+import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
@@ -60,6 +60,15 @@ export function linkUploads(text: string, documentPath: string, hashes: Readonly
 /** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
 export function sameAsFile(text: string, content: string, path: string, sides: Pick<Sides, 'hashes' | 'uploadsByHash'>): boolean {
   return linkUploads(stripFrontMatter(text), path, sides.hashes, sides.uploadsByHash) === content;
+}
+
+/**
+ * The canaries I5 looks for: those in file content. A canary that is part of
+ * a file name (`canary_in: name`) appears wherever the path is listed, in
+ * summaries for example, and listing paths is allowed.
+ */
+export function contentCanaries<T extends { canary: string | null; canary_in?: 'content' | 'name' | null }>(files: readonly T[]): Array<T & { canary: string }> {
+  return files.filter((file): file is T & { canary: string } => file.canary !== null && file.canary_in !== 'name');
 }
 
 export interface CanaryHit {
@@ -153,8 +162,9 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   const config = resolveStateConfig({ trackedBranch: ctx.names.trackedBranch, syncBranch: ctx.names.syncBranch, refPrefix: ctx.names.refPrefix });
   const idsCommit = await fetchRef(git, stateRef(config, 'ids'));
   const uploadsCommit = await fetchRef(git, stateRef(config, 'uploads'));
-  if (idsCommit === null && options.allowNoIds !== true) throw new ProductError('the run has no ids state ref');
-  const ids = await readIds(git, idsCommit);
+  // No ids ref: the engine recorded nothing (a refusal, a check, a dry run). The mapping is empty, not an error.
+  void options;
+  const ids: IdMap = idsCommit === null ? new Map() : await readIds(git, idsCommit);
   const uploadsByHash = await readUploads(git, uploadsCommit);
 
   const tracked = (await git.text(['ls-files', '-z'])).split('\0').filter(Boolean);
@@ -346,7 +356,8 @@ export async function canaryScan(ctx: RunContext, options: { summariesOnly: bool
   const canaries = new Set<string>();
   if (world !== null) {
     const sources = new Set(world.tree.paths.values());
-    for (const file of world.manifest.files) if (file.canary !== null && sources.has(file.path)) canaries.add(file.canary);
+    // Content canaries only: a canary in a file name (canary_in: name) shows wherever paths are listed, which is allowed.
+    for (const file of contentCanaries(world.manifest.files)) if (sources.has(file.path)) canaries.add(file.canary);
   }
   const texts = new Map<string, string>();
   ctx.engine.results.forEach((result, index) => {
@@ -357,27 +368,17 @@ export async function canaryScan(ctx: RunContext, options: { summariesOnly: bool
   });
   if (world !== null && !options.summariesOnly) {
     for (const pr of await world.rest.pullRequests(`t/${ctx.names.runId}/`)) texts.set(`pull request #${pr.number}`, `${pr.title}\n${pr.body ?? ''}`);
-    // Linear comments on the run's documents.
+    // Linear comments on the run's documents: project documents, and team-zone documents with the run's prefix.
     for (const project of world.projects.values()) {
-      const data = await world.app.request<{ documents: { nodes: Array<{ id: string; comments: { nodes: Array<{ body: string }> } }> } }>(
-        'RunComments',
-        'query',
-        'query RunComments($projectId: ID!) { documents(first: 250, filter: { project: { id: { eq: $projectId } } }) { nodes { id comments(first: 50) { nodes { body } } } } }',
-        { projectId: project.id },
-      );
-      for (const document of data.documents.nodes) texts.set(`comments on ${document.id}`, document.comments.nodes.map((comment) => comment.body).join('\n'));
+      for (const document of await commentsOf(world.app, { project: { id: { eq: project.id } } })) {
+        texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
+      }
     }
     for (const team of world.tree.teamZones.keys()) {
       const teamId = world.teams.get(team)?.id;
       if (teamId === undefined) continue;
-      const data = await world.app.request<{ documents: { nodes: Array<{ id: string; project: { id: string } | null; comments: { nodes: Array<{ body: string }> } }> } }>(
-        'RunTeamComments',
-        'query',
-        'query RunTeamComments($teamId: ID!, $prefix: String!) { documents(first: 250, filter: { team: { id: { eq: $teamId } }, title: { startsWith: $prefix } }) { nodes { id project { id } comments(first: 50) { nodes { body } } } } }',
-        { teamId, prefix: ctx.names.teamZonePrefix },
-      );
-      for (const document of data.documents.nodes) {
-        if (document.project === null) texts.set(`comments on ${document.id}`, document.comments.nodes.map((comment) => comment.body).join('\n'));
+      for (const document of await commentsOf(world.app, { team: { id: { eq: teamId } }, title: { startsWith: ctx.names.teamZonePrefix } })) {
+        if (!document.inProject) texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
       }
     }
   }
@@ -388,6 +389,45 @@ async function trackedTip(ctx: RunContext): Promise<string | undefined> {
   const world = ctx.live;
   if (world === null) return undefined;
   return (await world.sandbox.runRefs()).find((ref) => ref.ref === `refs/heads/${ctx.names.trackedBranch}`)?.oid;
+}
+
+/**
+ * Small pages keep a query under Linear's complexity limit: documents times
+ * comments per document is what a query costs (250 × 50 was refused).
+ */
+export const COMMENT_DOCUMENTS_PER_PAGE = 25;
+export const COMMENTS_PER_DOCUMENT = 50;
+
+/** The comment bodies of every document that matches `filter`, page by page. */
+export async function commentsOf(
+  client: Pick<LinearClient, 'request'>,
+  filter: Record<string, unknown>,
+): Promise<Array<{ id: string; inProject: boolean; bodies: string[] }>> {
+  const result: Array<{ id: string; inProject: boolean; bodies: string[] }> = [];
+  let after: string | null = null;
+  for (;;) {
+    const data: {
+      documents: {
+        nodes: Array<{ id: string; project: { id: string } | null; comments: { nodes: Array<{ body: string }> } }>;
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      };
+    } = await client.request(
+      'RunComments',
+      'query',
+      `query RunComments($filter: DocumentFilter, $after: String) {
+        documents(first: ${COMMENT_DOCUMENTS_PER_PAGE}, after: $after, filter: $filter) {
+          nodes { id project { id } comments(first: ${COMMENTS_PER_DOCUMENT}) { nodes { body } } }
+          pageInfo { hasNextPage endCursor }
+        }
+      }`,
+      { filter, after },
+    );
+    for (const document of data.documents.nodes) {
+      result.push({ id: document.id, inProject: document.project !== null, bodies: document.comments.nodes.map((comment) => comment.body) });
+    }
+    if (!data.documents.pageInfo.hasNextPage) return result;
+    after = data.documents.pageInfo.endCursor;
+  }
 }
 
 /** The run's branches and state refs on the sandbox: ref → commit. */

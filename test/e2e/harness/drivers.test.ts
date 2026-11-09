@@ -99,26 +99,25 @@ describe('engine driver', () => {
     assert.equal(env['MDBISYNC_CONFIRM'], 'true');
   });
 
-  it('recognizes a command that answers "not implemented", and only that answer', async () => {
-    // Stub engines, so the test does not depend on which commands the real engine has implemented.
+  it('recognizes a command that answers "not implemented", and only that', async () => {
     const dir = fresh('engine-');
     const call = {
       command: 'sync' as const, names: runNames('4f1a9c'), cwd: dir, repository: 'o/r', hooksDir: dir, reportFile: join(dir, 'r.json'), summaryFile: join(dir, 's.md'),
       linearUrl: 'http://127.0.0.1:1', credentials: { linearClientId: '', linearClientSecret: '', githubToken: '' }, extraEnv: {}, timeoutMs: 30_000,
     };
-    const stub = (name: string, script: string) => {
-      const file = join(dir, name);
-      writeFileSync(file, script);
+    const stub = (body: string) => {
+      const file = join(dir, `stub-${Math.random().toString(16).slice(2)}.mjs`);
+      writeFileSync(file, body);
       return { ...process.env, MDBISYNC_ENGINE: file };
     };
-    const notImplemented = await runEngine(call, stub('not-implemented.mjs', "process.stderr.write('sync: not implemented\\n');\nprocess.exitCode = 10;\n"));
-    assert.equal(notImplemented.notImplemented, true);
-    assert.equal(notImplemented.timedOut, false);
-    // Another failure with the same words elsewhere, or another exit code, is not that answer.
-    const refused = await runEngine(call, stub('refused.mjs', "process.stderr.write('run initial sync first\\n');\nprocess.exitCode = 4;\n"));
-    assert.equal(refused.notImplemented, false);
-    const otherCode = await runEngine(call, stub('other-code.mjs', "process.stderr.write('sync: not implemented\\n');\nprocess.exitCode = 1;\n"));
-    assert.equal(otherCode.notImplemented, false);
+    // A warning line may come before the stub's answer.
+    const answered = await runEngine(call, stub("process.stderr.write('warning: x\\nsync: not implemented\\n'); process.exitCode = 10;\n"));
+    assert.equal(answered.notImplemented, true);
+    assert.equal(answered.timedOut, false);
+    // A setup stop or an input error is a real outcome, not "not implemented".
+    const stopped = await runEngine(call, stub("process.stderr.write('sync: stopped before any write (no-state)\\n'); process.exitCode = 4;\n"));
+    assert.equal(stopped.notImplemented, false);
+    assert.equal(stopped.exitCode, 4);
   });
 
   it('kills an engine that runs too long', async () => {
@@ -264,7 +263,7 @@ describe('run tree from a slice', () => {
 
   it('lays out the real corpus generator\'s slices', async () => {
     const { buildCorpus } = await import('../../corpus/generate.ts');
-    const corpus = buildCorpus();
+    const corpus = buildCorpus('0000000000000000000000000000000000000000');
     const text = new Map(corpus.files.map((file) => [file.path, file.content.toString('utf8')]));
     const names = runNames('4f1a9c');
     for (const slice of ['mini', 'bank', 'mid', 'full'] as const) {
