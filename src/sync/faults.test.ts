@@ -19,7 +19,7 @@ import { type RunReport } from '../run/finish.ts';
 import { INPUT_NAMES, environmentName } from '../run/inputs.ts';
 import { renderStop } from '../run/stop.ts';
 import { Git } from '../state/index.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
@@ -69,7 +69,7 @@ interface Faults {
   /** Refuse every write of this document id, as Linear does with an input it will not take. */
   rejectId?: string;
   /** Answer the `occurrence`-th request of `operation` with this status; with `ids`, only a request for exactly those ids. */
-  onOperation?: { operation: string; occurrence: number; status: number; ids?: readonly string[] };
+  onOperation?: { operation: string; occurrence: number; status: number; ids?: readonly string[]; code?: string };
 }
 
 interface Exchange {
@@ -102,8 +102,8 @@ function faultyFetch(world: FakeWorld) {
 
     if (onOperation !== undefined && counted && onOperation.operation === operationName && onOperation.occurrence === occurrence) {
       log(onOperation.status, true);
-      const code = onOperation.status === 429 ? 'RATELIMITED' : 'INTERNAL_SERVER_ERROR';
-      return new Response(JSON.stringify({ errors: [{ message: 'injected', extensions: { code } }] }), { status: onOperation.status, headers: { 'content-type': 'application/json' } });
+      const code = onOperation.code ?? (onOperation.status === 429 ? 'RATELIMITED' : 'INTERNAL_SERVER_ERROR');
+      return new Response(JSON.stringify({ errors: [{ message: 'injected', extensions: { code } }] }), { status: onOperation.status, headers: { 'content-type': 'application/json', ...LIMIT_HEADERS } });
     }
 
     if (http !== undefined && position >= http.at && http.times > 0) {
@@ -490,9 +490,37 @@ describe('sync: rate limits and transport faults', () => {
     const run = await sync();
     assertPartial(run);
     assert.equal(run.report.stop?.kind, 'rate-limited');
+    assert.ok(run.summary.includes('| x-ratelimit-requests-limit | 5000 |'), 'the capture stop gives the limits');
     assert.deepEqual(run.writes, []);
     assert.equal(await rev('refs/mdbisync/linear'), before);
     await assertNextRunConverges();
+  });
+
+  it('a refusal while capture reads Linear fails the run: it would come back on every run', async () => {
+    await editAll(1, 'Second text.');
+    transport.arm({ onOperation: { operation: 'ListDocuments', occurrence: 1, status: 200, code: 'FORBIDDEN' } });
+    const writesBefore = world.writes.length;
+    await assert.rejects(runCli(['sync'], { env: env({}), cwd, fetch: transport.fetch, log: () => {} }), /ListDocuments: Linear error FORBIDDEN/);
+    assert.deepEqual(world.writes.slice(writesBefore), [], 'nothing written');
+  });
+
+  it('a run goes on from a partial record also when its capture put a commit on top', async () => {
+    await editAll(10, 'Second text.');
+    transport.arm({ onOperation: { operation: 'UpdateDocument', occurrence: 4, status: 429 } });
+    const first = await sync();
+    assertPartial(first);
+    assert.equal(first.report.sync?.record?.kind, 'ordinary', 'a partial record');
+    // A person edits a document the run did not touch, so the next capture commits before the write step.
+    const untouched = await idOf(pathOf(20));
+    const document = world.linear.documents.find((d) => d.id === untouched) as FakeDocument;
+    document.content = `${document.content ?? ''}\nAdded in Linear.\n`;
+    touch(document);
+    transport.clear();
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    const subjects = (await fixture.remote.text(['log', '--format=%s', 'refs/mdbisync/linear'])).split('\n');
+    assert.ok(subjects.indexOf('Capture Linear changes') < subjects.indexOf(PARTIAL_RECORD_MESSAGE), 'capture committed on top of the partial record');
+    assert.equal(next.report.resumed, true);
   });
 
   it('a 500 while capture reads Linear ends the run partial with nothing written; the next run converges', async () => {
@@ -579,6 +607,22 @@ describe('sync: rate limits and transport faults', () => {
     assert.ok(older !== undefined && older[0] !== 'combined/new.md', JSON.stringify(older));
   });
 
+  it('when the reserved ids cannot be checked, only the new documents that would use one wait', async () => {
+    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    transport.arm({ writeError: 'server-error', writeErrorOn: 'CreateDocument' });
+    assertPartial(await sync());
+    const reservedId = JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json'))['combined/new.md'] as string;
+    await commit({ 'combined/other.md': `# Other\n\nAnother page. ${CANARY}\n` });
+    transport.arm({ onOperation: { operation: 'GetDocuments', occurrence: 1, status: 502, ids: [reservedId] } });
+    const run = await sync();
+    assertPartial(run);
+    assert.deepEqual(run.report.sync?.created, ['combined/other.md']);
+    assert.deepEqual(run.report.sync?.failed.map((entry) => [entry.path, entry.operation]), [['combined/new.md', 'GetDocuments']]);
+    assert.equal(run.report.rejectedDocumentNamed, false, 'a failed read is not a rejection');
+    await assertNextRunConverges();
+    assert.equal(await idOf('combined/new.md'), reservedId);
+  });
+
   it('a reserved id that Linear already gives a trashed document is not used again; the run is not stuck', async () => {
     const created = await createWithLostAnswer();
     (world.linear.documents.find((d) => d.id === created) as { trashed?: boolean }).trashed = true;
@@ -602,6 +646,7 @@ describe('sync: rate limits and transport faults', () => {
     assertPartial(run);
     assert.deepEqual(run.writes, []);
     assert.deepEqual(run.report.sync?.failed.map((entry) => entry.path).sort(), [pathOf(0), pathOf(1), pathOf(2)]);
+    assert.equal(run.report.rejectedDocumentNamed, false);
     await assertNextRunConverges();
   });
 });

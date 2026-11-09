@@ -24,7 +24,7 @@ import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, 
 import { randomUUID } from 'node:crypto';
 import { documentPath } from './paths.ts';
 import { splitFile } from '../format/index.ts';
-import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError } from '../linear/index.ts';
+import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
@@ -142,7 +142,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const result: WriteResult = {
     complete: false,
     changed: false,
-    resumed: (await git.text(['log', '-1', '--format=%s', linearTip])) === PARTIAL_RECORD_MESSAGE,
+    resumed: await wentOnFromPartial(git, [context.fetched.state.linear, linearTip]),
     updated: [],
     relocated: [],
     created: [],
@@ -167,7 +167,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       result.stopped = error.reason;
     } else {
       result.code = 'write-failed';
-      result.failed = result.notAttempted.map((path) => ({ path, operation: error.operation, error: describeError(error) }));
+      result.failed = result.notAttempted.map((path) => ({ path, operation: error.operation, error: describeLinearError(error) }));
     }
     return result;
   }
@@ -219,11 +219,17 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   }
   /** Reserved ids that a document in Linear already has (archived, trashed or retitled since): Linear refuses to create a second one. */
   const taken = new Set<string>();
-  /** Why the reserved ids could not be checked: creating with one could be refused or collide, so no new document is created. */
+  /** The new documents that would use a reserved id. */
+  const usingReserved = new Set(creates.filter((change) => !adoptable.has(change.path) && reserved.has(change.path)).map((change) => change.path));
+  /** Why the reserved ids could not be checked: those creates could be refused or collide, so they wait for the next run. */
   let unchecked: LinearError | undefined;
   try {
-    const saved = [...new Set(creates.flatMap((change) => (adoptable.has(change.path) ? [] : (reserved.get(change.path) ?? []))))];
-    if (saved.length > 0) for (const document of await linear.getDocuments(saved, { withContent: false })) taken.add(document.id);
+    const listed = new Set([...containers.values()].flat().map((document) => document.id));
+    const saved = [...new Set([...usingReserved].map((path) => reserved.get(path) as string))];
+    for (const id of saved) if (listed.has(id)) taken.add(id);
+    // A document moved out of the targets is not in their listing.
+    const unlisted = saved.filter((id) => !listed.has(id));
+    if (unlisted.length > 0) for (const document of await linear.getDocuments(unlisted, { withContent: false })) taken.add(document.id);
   } catch (error) {
     if (error instanceof LinearStoppedError) {
       // Stopped before any write or upload: nothing to record, and the next run starts again.
@@ -293,7 +299,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         if (error instanceof LinearStoppedError) stopAt(start, error.reason);
         if (!(error instanceof LinearError)) throw error;
         // The batch cannot be checked against Linear, so none of it is written.
-        for (const change of batch) result.failed.push({ path: changePath(change), operation: error.operation, error: describeError(error) });
+        for (const change of batch) result.failed.push({ path: changePath(change), operation: error.operation, error: describeLinearError(error) });
         notDone.push(...batch);
         continue;
       }
@@ -303,8 +309,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         const stop = linear.stopped ?? (stopAfter !== undefined && written >= stopAfter ? { kind: 'test-threshold' as const, documents: stopAfter } : undefined);
         if (stop !== undefined) stopAt(start + index, stop);
         const path = changePath(change);
-        if (change.kind === 'create' && unchecked !== undefined) {
-          result.failed.push({ path, operation: unchecked.operation, error: describeError(unchecked) });
+        if (change.kind === 'create' && unchecked !== undefined && usingReserved.has(path)) {
+          result.failed.push({ path, operation: unchecked.operation, error: describeLinearError(unchecked) });
           notDone.push(change);
           continue;
         }
@@ -321,7 +327,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
           // The write may have been applied; the next run reads it again.
           if (error instanceof LinearStoppedError) stopAt(start + index, error.reason);
           if (error instanceof LinearError) {
-            result.failed.push({ path, operation: error.operation, error: describeError(error) });
+            result.failed.push({ path, operation: error.operation, error: describeLinearError(error) });
             notDone.push(change);
             continue;
           }
@@ -715,17 +721,24 @@ function withoutUploads(client: LinearClient): LinearClient {
   });
 }
 
+/**
+ * Whether the run goes on from a partial record an earlier run left: the
+ * `linear` tip it found, before its capture added a commit, or the tip it
+ * writes on.
+ */
+async function wentOnFromPartial(git: RunContext['git'], tips: ReadonlyArray<Oid | null>): Promise<boolean> {
+  for (const tip of new Set(tips)) {
+    if (tip !== null && (await git.text(['log', '-1', '--format=%s', tip])) === PARTIAL_RECORD_MESSAGE) return true;
+  }
+  return false;
+}
+
 /** The paths of the record a change touches. */
 function pathsOf(change: DocumentChange): string[] {
   if (change.kind === 'keep') return change.from === change.to ? [change.to] : [change.from, change.to];
   return [change.path];
 }
 
-function describeError(error: LinearError): string {
-  const code = (error as { code?: unknown }).code;
-  const status = (error as { httpStatus?: unknown }).httpStatus;
-  return [error.name, typeof code === 'string' ? code : undefined, typeof status === 'number' ? `HTTP ${status}` : undefined].filter(Boolean).join(' ');
-}
 
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;

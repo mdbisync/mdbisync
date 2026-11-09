@@ -29,8 +29,7 @@ import {
   LinearError,
   LinearReadBackError,
   LinearStoppedError,
-  type StopReason,
-} from '../linear/index.ts';
+  type StopReason, describeLinearError } from '../linear/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import {
   type CommitIdentity,
@@ -343,7 +342,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           unpushed += 1;
         }
         if (error instanceof LinearError) {
-          result.failed.push({ path, operation: error.operation, error: describeError(error) });
+          result.failed.push({ path, operation: error.operation, error: describeLinearError(error) });
           continue;
         }
         throw error;
@@ -370,7 +369,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
             break;
           }
           if (error instanceof LinearError) {
-            result.failed.push({ path: entry.path, operation: error.operation, error: describeError(error) });
+            result.failed.push({ path: entry.path, operation: error.operation, error: describeLinearError(error) });
             continue;
           }
           throw error;
@@ -467,11 +466,6 @@ export function holdsBody(content: string, body: string): boolean {
   return content === body || content === fixText(body);
 }
 
-function describeError(error: LinearError): string {
-  const code = (error as { code?: unknown }).code;
-  const status = (error as { httpStatus?: unknown }).httpStatus;
-  return [error.name, typeof code === 'string' ? code : undefined, typeof status === 'number' ? `HTTP ${status}` : undefined].filter(Boolean).join(' ');
-}
 
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;

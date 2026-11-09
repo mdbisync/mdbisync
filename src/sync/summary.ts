@@ -43,7 +43,7 @@ export function renderSync(result: CycleResult): string {
     );
   }
   if (write.code === 'state-moved') lines.push(`This run is ${PARTIAL}: the next run writes again what is still missing.`, '');
-  else if (write.code !== undefined) lines.push(`This run is ${PARTIAL}: it recorded what it finished, and the next run goes on from there.`, '');
+  else if (write.code !== undefined && write.code !== 'container-cap') lines.push(`This run is ${PARTIAL}: it recorded what it finished, and the next run goes on from there.`, '');
   if (write.stopped !== undefined) {
     lines.push(...renderStop(write.stopped), `Not written yet: ${count(write.notAttempted.length, 'item')}.`, '');
   }

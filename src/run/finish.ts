@@ -7,6 +7,7 @@ import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type SyncRecord, type WriteResult } from '../sync/index.ts';
 import { type ExitStatus, exitStatusOf } from './exit.ts';
+import { cell } from './summary.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 
@@ -241,18 +242,21 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
  * job summary: the summary is what a person reads, so a fact about it is
  * checked in its text.
  */
-function faultFacts(outcome: OperationOutcome, stop: WriteStop | undefined, failed: ReadonlyArray<{ path: string; error: string }>, written: readonly string[]) {
+/** The requests that write a document; a failed read is never a rejection of a document. */
+const WRITES = new Set(['CreateDocument', 'UpdateDocument', 'TrashDocument']);
+
+function faultFacts(outcome: OperationOutcome, stop: WriteStop | undefined, failed: ReadonlyArray<{ path: string; operation: string; error: string }>, written: readonly string[]) {
   const recorded = new Set(written);
   const limits = stop === undefined || stop.kind === 'test-threshold' ? {} : (stop.limits ?? {});
   const endpointHeaders = Object.keys(limits).filter((name) => name.startsWith('x-ratelimit-endpoint-'));
   // A rejection is Linear's error answer to the write; a lost request or a server error is not.
-  const rejected = failed.filter((entry) => entry.error.startsWith('LinearGraphQLError') && !/HTTP 5\d\d/.test(entry.error));
+  const rejected = failed.filter((entry) => WRITES.has(entry.operation) && entry.error.startsWith('LinearGraphQLError') && !/HTTP 5\d\d/.test(entry.error));
   return {
     writtenDocuments: recorded.size,
     writesAfterLimit: outcome.writesAfterStop ?? 0,
     failedWriteRecorded: failed.some((entry) => recorded.has(entry.path)),
     endpointLimitHeadersPresent: endpointHeaders.length > 0 && endpointHeaders.every((name) => outcome.summary.includes(`| ${name} |`)),
-    rejectedDocumentNamed: rejected.length > 0 && rejected.every((entry) => outcome.summary.includes(entry.path)),
+    rejectedDocumentNamed: rejected.length > 0 && rejected.every((entry) => outcome.summary.includes(cell(entry.path))),
   };
 }
 

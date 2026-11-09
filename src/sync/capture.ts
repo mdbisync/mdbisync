@@ -8,7 +8,8 @@ import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } f
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { lintText, splitFile } from '../format/index.ts';
-import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeStop } from '../linear/index.ts';
+import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
+import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -338,15 +339,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     result.summary = renderCapture(result, gate.configured);
     return result;
   } catch (error) {
-    // Linear stopped the client or failed a request: the capture keeps what it published, and the next run reads again.
-    if (!(error instanceof LinearError)) throw error;
+    // Linear stopped the client or failed a request it may answer next time: the capture keeps what it published, and the
+    // next run reads again. A refusal (forbidden, invalid input) fails the run: it would come back on every run.
+    if (!(error instanceof LinearStoppedError) && !(error instanceof LinearError && isTransientLinearError(error))) throw error;
     result.ok = false;
     if (error instanceof LinearStoppedError) {
       result.code = 'stopped';
       result.stopped = error.reason;
     } else {
       result.code = 'linear-failed';
-      result.failure = { operation: error.operation, error: describeLinearError(error) };
+      result.failure = { operation: error.operation, error: describeLinearError(error as LinearError) };
     }
     if (!published) { result.changed = []; result.removed = []; }
     result.summary = renderCapture(result, gate.configured);
@@ -376,7 +378,7 @@ function relocatedHead(head: string): string {
 
 function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
-  if (result.stopped !== undefined) summary += `\nCapture partial, will continue: ${describeStop(result.stopped)}.`;
+  if (result.stopped !== undefined) summary += `\nCapture partial, will continue.\n\n${renderStop(result.stopped).join('\n')}`;
   if (result.failure !== undefined) summary += `\nCapture partial, will continue: Linear failed ${result.failure.operation} (${result.failure.error}).`;
   if (!configured) summary += '\nContent is pushed unchecked: no security hooks are configured.';
   return summary;
@@ -402,11 +404,4 @@ async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: Map<str
     }
     return { changes: result, oids: [...new Set(oids)] };
   } finally { await rm(dir, { recursive: true, force: true }); }
-}
-
-/** A Linear error as its class, Linear's code and the HTTP status; never Linear's message, which may quote content. */
-function describeLinearError(error: LinearError): string {
-  const code = (error as { code?: unknown }).code;
-  const status = (error as { httpStatus?: unknown }).httpStatus;
-  return [error.name, typeof code === 'string' ? code : undefined, typeof status === 'number' ? `HTTP ${status}` : undefined].filter(Boolean).join(' ');
 }

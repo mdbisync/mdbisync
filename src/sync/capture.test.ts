@@ -479,11 +479,7 @@ describe('capture from Linear', () => {
     const gate = {configured: true, check: async () => [{hook:'secret-check', line:5}]};
     world.linear.documents[0]!.content = 'Rejected.\n';
     world.linear.writes.reject = (operation) => operation === 'CommentOnDocument';
-    // The refused comment ends the capture partial, not with an error: the next run posts it again.
-    const failed = await capture(context, {config, state: context.fetched.state, security: gate});
-    assert.equal(failed.ok, false);
-    assert.equal(failed.code, 'linear-failed');
-    assert.equal(failed.failure?.operation, 'CommentOnDocument');
+    await assert.rejects(capture(context, {config, state: context.fetched.state, security: gate}));
     assert.equal(world.linear.documents[0]!.icon, 'Cross');
     await refresh();
     delete world.linear.writes.reject;
