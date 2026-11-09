@@ -28,6 +28,7 @@ import {
   type Git,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
   type Oid,
+  type PushRefusal,
   type StateConfig,
   type StateSnapshot,
   branchRef,
@@ -72,6 +73,8 @@ export interface PullRequestResult {
    * - `github-failed`: GitHub refused or failed a request; `status` is its HTTP status.
    */
   code?: 'check-failed' | 'conflict' | 'merge-refused' | 'initial-pull-request-pending' | 'state-moved' | 'github-failed';
+  /** A push of this step that the remote refused because a ref moved since the run read it (the lease). */
+  refusedPush?: PushRefusal;
   /** GitHub's HTTP status for `merge-refused` and `github-failed`. */
   status?: number;
 }
@@ -114,7 +117,12 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 
   // A sync branch the tracked branch has not merged is the open pull request's head, or will be.
   const pending = sync !== null && !(await isAncestor(git, sync, tracked));
-  if (!result.needed && !pending) return result;
+  if (!result.needed && !pending) {
+    if (sync !== null) return result;
+    // The branch follows `linear` from the first run on; one a person deleted comes back at `linear`.
+    const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: null, next: linear }]);
+    return pushed.ok ? { ...result, branchMoved: true } : { ...result, code: 'state-moved', refusedPush: pushed };
+  }
 
   try {
     const open = sync === null ? null : await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
@@ -144,7 +152,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 
     if (head !== sync) {
       const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: sync, next: head }]);
-      if (!pushed.ok) return { ...result, code: 'state-moved' };
+      if (!pushed.ok) return { ...result, code: 'state-moved', refusedPush: pushed };
       result.branchMoved = true;
     }
     const headTree = await mergedTree(git, tracked, head);

@@ -33,6 +33,7 @@ export {
   type IdMap,
   type MarkNotice,
   NotFastForwardError,
+  type PushRefusal,
   type PushResult,
   type RefUpdate,
   type StateSnapshot,

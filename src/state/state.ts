@@ -79,9 +79,19 @@ export interface RefUpdate {
   replace?: boolean;
 }
 
-export type PushResult =
-  | { ok: true; updated: string[] }
-  | { ok: false; reason: 'stale' | 'rejected'; refs: { ref: string; message: string }[] };
+export type PushResult = { ok: true; updated: string[] } | PushRefusal;
+
+/**
+ * A push the remote refused. `partial` names the refs of the push that hold
+ * their new value afterwards, read back from the remote: an atomic push
+ * leaves it empty.
+ */
+export interface PushRefusal {
+  ok: false;
+  reason: 'stale' | 'rejected';
+  refs: { ref: string; message: string }[];
+  partial: string[];
+}
 
 export class NotFastForwardError extends Error {
   constructor(ref: string) {
@@ -123,7 +133,7 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   const before = await lsRemote(git, config.remote, updates.map((update) => update.ref));
   const skipped = updates.filter((update) => update.next !== update.expected && before.get(update.ref) === update.next);
   if (skipped.length > 0) {
-    return { ok: false, reason: 'stale', refs: skipped.map((update) => ({ ref: update.ref, message: 'already at the new value, not at the expected one' })) };
+    return { ok: false, reason: 'stale', refs: skipped.map((update) => ({ ref: update.ref, message: 'already at the new value, not at the expected one' })), partial: [] };
   }
 
   const args = ['push', '--atomic', '--porcelain', '--no-verify', config.remote];
@@ -149,19 +159,16 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   // the later one ("atomic transaction failed"). Either way a ref has moved
   // away from its expected value; any other refusal (a hook, missing rights)
   // leaves them where they were.
+  const current = await lsRemote(git, config.remote, updates.map((update) => update.ref));
   const stale =
     rejected.some((line) => line.summary.includes('stale info')) ||
-    (await movedAway(git, config.remote, updates));
+    updates.some((update) => (current.get(update.ref) ?? null) !== update.expected);
   return {
     ok: false,
     reason: stale ? 'stale' : 'rejected',
     refs: rejected.map((line) => ({ ref: line.ref, message: line.summary })),
+    partial: changing.filter((update) => current.get(update.ref) === update.next).map((update) => update.ref),
   };
-}
-
-async function movedAway(git: Git, remote: string, updates: readonly RefUpdate[]): Promise<boolean> {
-  const current = await lsRemote(git, remote, updates.map((update) => update.ref));
-  return updates.some((update) => (current.get(update.ref) ?? null) !== update.expected);
 }
 
 interface PorcelainLine {

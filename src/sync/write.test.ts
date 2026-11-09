@@ -172,6 +172,13 @@ describe('sync: the tracked branch to Linear', () => {
   }
 
   it('with nothing new on the tracked branch the run writes nothing and records nothing', async () => {
+    // The first run after initial sync only creates the sync branch, at `linear`, which it follows from then on.
+    const linear = await rev('refs/mdbisync/linear');
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.deepEqual(first.writes, []);
+    assert.equal(await rev('refs/mdbisync/linear'), linear);
+    assert.equal(await rev('refs/heads/mdbisync/linear'), linear);
     await assertIdempotent();
   });
 

@@ -154,6 +154,7 @@ describe('state: stores and atomic lease pushes', () => {
     ]);
     assert.equal(result.ok, false);
     assert.ok(!result.ok && result.reason === 'stale' && result.refs.some((ref) => ref.ref === IDS));
+    assert.deepEqual(!result.ok && result.partial, [], 'no ref of the refused push moved');
     assert.equal(await remoteRef(fixture, LINEAR), seen.state.linear);
     assert.equal(await remoteRef(fixture, UPLOADS), seen.state.uploads);
     assert.equal(await remoteRef(fixture, IDS), otherIds);

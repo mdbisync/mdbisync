@@ -41,6 +41,7 @@ import {
   commitIds,
   commitTree,
   commitUploads,
+  type PushRefusal,
   pushAtomic,
   readBlobs,
   readIds,
@@ -92,6 +93,8 @@ export interface WriteResult {
   /** The run went on from a partial record that an earlier run left on `linear`. */
   resumed: boolean;
   code?: 'stopped' | 'write-failed' | 'state-moved' | 'container-cap';
+  /** A push of this step that the remote refused because a ref moved since the run read it (the lease). */
+  refusedPush?: PushRefusal;
   /** Content written to existing documents (a rename or move may come with it). */
   updated: string[];
   /** Documents renamed (new title) or moved to another project or team: from → to. */
@@ -123,7 +126,13 @@ export interface SyncRecord {
 class StopWriting extends Error {}
 
 /** A state ref moved while the run was writing: another run records first, this one records nothing. */
-class StateMovedError extends Error {}
+class StateMovedError extends Error {
+  readonly refusal: PushRefusal;
+  constructor(refusal: PushRefusal) {
+    super('a state ref moved');
+    this.refusal = refusal;
+  }
+}
 
 export async function writeTrackedToLinear(context: RunContext, options: WriteOptions): Promise<WriteResult> {
   const { git, fetched, targets, linear } = context;
@@ -171,7 +180,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     }
     return result;
   }
-  if (await alreadyMerged(git, linearTip, tracked)) {
+  // The upload cache is gone (capture records it on every run, so only a fresh setup or a lost ref starts without it):
+  // each document that links a file is written again with fresh uploads, and the cache is recorded anew.
+  const cacheLost = context.fetched.state.uploads === null;
+  if (!cacheLost && (await alreadyMerged(git, linearTip, tracked))) {
     result.capacity = assessCapacity(context, containers, [], options.documentCap);
     if (capacityBlocked(result.capacity)) {
       result.code = 'container-cap';
@@ -338,6 +350,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   } catch (error) {
     if (error instanceof StateMovedError) {
       result.code = 'state-moved';
+      result.refusedPush = error.refusal;
       return result;
     }
     if (error instanceof LinearStoppedError) {
@@ -387,7 +400,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       const text = textOf(next);
       // A cheap filter first for documents that stay where they are: a link to a changed file names it.
       const moved = change.from !== change.to;
-      if (!moved && ![...changedNames].some((name) => text.includes(name) || text.includes(encodeURI(name)) || text.includes(encodeURIComponent(name)))) continue;
+      if (!moved && !cacheLost && ![...changedNames].some((name) => text.includes(name) || text.includes(encodeURI(name)) || text.includes(encodeURIComponent(name)))) continue;
       let differs: boolean;
       try {
         const written = await transformBody(transforms, change.to, splitFile(text).body);
@@ -608,7 +621,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     for (const path of nextIds.keys()) nextReserved.delete(path);
     const next = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved });
     const pushed = await pushAtomic(git, options.config, [{ ref: stateRef(options.config, 'ids'), expected: expected.ids, next }]);
-    if (!pushed.ok) throw new StateMovedError();
+    if (!pushed.ok) throw new StateMovedError(pushed);
     expected.ids = next;
   }
 
@@ -682,7 +695,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     ];
     if (uploadsCommit !== null) updates.push({ ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit });
     const pushed = await pushAtomic(git, options.config, updates);
-    if (!pushed.ok) return null;
+    if (!pushed.ok) {
+      result.refusedPush = pushed;
+      return null;
+    }
     if (pushed.updated.length > 0) result.changed = true;
     result.state = { linear: commit, ids: idsCommit, uploads: uploadsCommit };
     const recorded: SyncRecord = { commit, kind: merged ? 'merge' : 'ordinary', parents: commit === linearTip ? [] : parents };

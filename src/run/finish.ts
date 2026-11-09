@@ -41,7 +41,7 @@ export interface RunReport {
   sync: SyncReport | null;
   /** A sync run's step 2, the sync pull request; null for other runs and when capture stopped before it. */
   pullRequest: PullRequestResult | null;
-  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'stopped'> | null;
+  capture: Pick<CaptureResult, 'ok' | 'changed' | 'removed' | 'blocked' | 'leftOut' | 'stopped' | 'rebuiltIds'> | null;
   /** Documents created or overwritten in Linear by this run. */
   writtenCount: number;
   /** Documents an unfinished earlier run had written, skipped by this one. */
@@ -62,6 +62,10 @@ export interface RunReport {
   rejectedDocumentNamed: boolean;
   /** The run stopped writing before it finished (rate limit, low budget, test threshold). */
   stoppedEarly: boolean;
+  /** A sync run's push of its state refs or its branch was refused because a ref moved since the run read it. */
+  atomicPushRefused: boolean;
+  /** Refs that a refused push left at its new value, read back from the remote; an atomic push leaves none. */
+  partialRefUpdates: number;
   /** Every document this run wrote has its id in the `ids` state ref. */
   progressRecorded: boolean;
   /** The `linear` record an initial sync from git to Linear made or confirmed; null otherwise (a run from Linear reports its record under `linearToGit`). */
@@ -157,6 +161,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     ].sort(),
     resumed: confirmed?.resumed ?? reverse?.resumed ?? false,
     ...faultFacts(outcome, outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped ?? reverse?.stopped, confirmed?.failed ?? [], [...(confirmed?.created ?? []), ...(confirmed?.overwritten ?? [])]),
+    ...leaseFacts(outcome),
     stoppedEarly: confirmed?.stopped !== undefined || reverse?.stopped !== undefined || outcome.stopped !== undefined || outcome.captured?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
     progressRecorded: confirmed?.progressRecorded ?? (reverse !== undefined && reverse.code !== 'state-moved'),
@@ -234,6 +239,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     oversizeFiles: [...new Set(write.leftOutAtWrite.filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
     resumed: write.resumed,
     ...faultFacts(outcome, write.stopped, write.failed, [...write.updated, ...write.created, ...write.relocated.map((entry) => entry.to)]),
+    ...leaseFacts(outcome),
     stoppedEarly: write.stopped !== undefined,
     progressRecorded: write.code !== 'state-moved',
     record: null,
@@ -293,6 +299,15 @@ export async function writeRunReport(path: string, outcome: OperationOutcome): P
   await writeFile(path, `${JSON.stringify(toRunReport(outcome), null, 2)}\n`);
 }
 
+/** The pushes of a sync run's steps that a moved ref refused. */
+function leaseFacts(outcome: OperationOutcome): Pick<RunReport, 'atomicPushRefused' | 'partialRefUpdates'> {
+  const refused = [outcome.captured?.refusedPush, outcome.sync?.pullRequest?.refusedPush, outcome.sync?.write?.refusedPush].filter((refusal) => refusal !== undefined);
+  return {
+    atomicPushRefused: refused.some((refusal) => refusal.reason === 'stale'),
+    partialRefUpdates: refused.reduce((sum, refusal) => sum + refusal.partial.length, 0),
+  };
+}
+
 function captureReport(captured: CaptureResult | undefined): RunReport['capture'] {
-  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, blocked:captured.blocked, leftOut:captured.leftOut, ...(captured.stopped ? {stopped:captured.stopped} : {})};
+  return captured === undefined ? null : {ok:captured.ok, changed:captured.changed, removed:captured.removed, blocked:captured.blocked, leftOut:captured.leftOut, ...(captured.stopped ? {stopped:captured.stopped} : {}), ...(captured.rebuiltIds ? {rebuiltIds:captured.rebuiltIds} : {})};
 }
