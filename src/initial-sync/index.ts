@@ -29,3 +29,15 @@ export {
   confirmInitialSync,
 } from './confirm.ts';
 export { type BodyTransform, LeaveOutError, type TransformContext, type TransformInput, restoreBody, transformBody } from './transform.ts';
+export {
+  DEFAULT_UPLOAD_LIMIT,
+  type FileLink,
+  UPLOAD_TOO_LARGE,
+  UPLOAD_UNREADABLE,
+  type UploadsOptions,
+  contentTypeOf,
+  findFileLinks,
+  resolveTarget,
+  restoreFileLinks,
+  uploadsTransform,
+} from './uploads.ts';
