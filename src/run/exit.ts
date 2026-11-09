@@ -15,6 +15,12 @@ export { PARTIAL } from './stop.ts';
 
 export type ExitStatus = 'success' | 'warning' | 'failure';
 
+/** Why a sync run is partial: a capture or write code, or a removal capture held. */
+export type PartialCode =
+  | NonNullable<NonNullable<OperationOutcome['captured']>['code']>
+  | Exclude<NonNullable<NonNullable<NonNullable<OperationOutcome['sync']>['write']>['code']>, 'container-cap'>
+  | 'removal-held';
+
 /**
  * Why a sync run is partial, or undefined when it is not: Linear stopped it
  * (in the setup check, the capture or the write step), failed a request
@@ -23,7 +29,7 @@ export type ExitStatus = 'success' | 'warning' | 'failure';
  * partial: the next run cannot go on until a person makes room; nor is a
  * sync pull request that needs a person.
  */
-export function partialCode(outcome: OperationOutcome): string | undefined {
+export function partialCode(outcome: OperationOutcome): PartialCode | undefined {
   if (pullRequestEnding(outcome) !== null) return undefined;
   return linearPartialCode(outcome);
 }
@@ -72,7 +78,7 @@ export function stoppedMessage(outcome: OperationOutcome): string | undefined {
 }
 
 /** Why a sync run is partial on Linear's side, before the sync pull request is weighed. */
-function linearPartialCode(outcome: OperationOutcome): string | undefined {
+function linearPartialCode(outcome: OperationOutcome): PartialCode | undefined {
   if (outcome.operation !== 'sync') return undefined;
   if (outcome.stopped !== undefined) return 'stopped';
   // Every way a capture ends unfinished (a stop, a failed request, a moved ref) leaves its state for the next run.

@@ -2,11 +2,12 @@
 
 How to set up and run mdbisync in a repository: how folders map to Linear,
 the checks every run makes, the workflows, both directions of the initial
-sync, the sync pull request, and how to pin a release. The setup steps (the
+sync ([Linear to git](initial-sync-linear-to-git.md) has its own page), the sync pull request, and how to pin a release. The setup steps (the
 Linear OAuth app, the GitHub App, the secrets and the workflows) are on
 [mdbisync.com](https://mdbisync.com/#setup). How Markdown is kept in
 Linear's form is in [linear-format.md](linear-format.md), and conflicts, when
-both sides change one document, in [conflicts.md](conflicts.md).
+both sides change one document, in [conflicts.md](conflicts.md). What each
+message means and how to recover is in [troubleshooting.md](troubleshooting.md).
 
 ## Generate repository files
 
@@ -184,37 +185,16 @@ variable to a positive integer to override the default of 1,000.
 
 `initial-sync` with `direction: linear-to-git` makes the synchronized folders
 of the tracked branch equal to Linear through one pull request, and writes
-nothing to Linear. Without `confirm: true` it is a dry run: it lists by path
-the files it would overwrite, create and remove, and what it leaves out, and
-writes nothing. With `confirm: true`:
-
-- a file whose path a document's title names gets the document's text (its
-  front matter stays); a document without a file becomes a new file at the
-  path its title names; a synchronized file without a document is removed,
-  except a folder's annotation `README.md`;
-- images and other files a document embeds from Linear are downloaded next
-  to it, named by their content's SHA-256 hash (`<hash>.png`), and linked
-  relatively; a file the branch already holds with the same content is
-  linked instead of copied. The repository's `.gitattributes` decides
-  whether a file is stored in Git LFS, as for a person's commit. The
-  `uploads` state ref records each file's Linear URL, so the sync does not
-  upload it again;
-- a link to another synchronized document's Linear URL becomes a relative
-  link to its file, in the spelling the tracked file already had for it;
-- the repository's security hooks (`alias: security`) check each document's
-  text with the files it embeds before anything is pushed. A document they
-  flag, or whose file cannot be downloaded, is listed: a new file is left
-  out, and an existing file keeps the tracked branch's text;
-- document ids go to `refs/mdbisync/ids` as the run goes, and at the end one
-  push records `refs/mdbisync/linear` (one commit on top of the tracked
-  branch, with the synchronized folders as Linear holds them), `ids`,
-  `uploads` and the sync branch, which points at the same commit;
-- it opens a pull request from the sync branch to the tracked branch.
+nothing to Linear. Without `confirm: true` it is a dry run that lists by path
+the files it would overwrite, create and remove, and what it leaves out.
+With `confirm: true` it downloads the files documents embed, records the
+sync state and opens the pull request **Initial sync from Linear**.
 
 **A person reviews and merges that pull request**, with a merge commit: it can
 remove files (they stay in the history). The sync never merges it, and `sync`
-refuses to run until it is merged. A run that stops early exits with code 5;
-run it again with the same inputs to go on without duplicate files.
+refuses to run until it is merged. When to use this direction, what each run
+writes, what is left out, and the review and merge steps are in
+[initial-sync-linear-to-git.md](initial-sync-linear-to-git.md).
 
 ### File names for titles
 
