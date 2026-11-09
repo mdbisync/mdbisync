@@ -250,17 +250,52 @@ export interface CommitStateOptions {
   always?: boolean;
 }
 
-/** Commits the id map on top of `parent`. Returns `parent` when nothing changed, unless `always`. */
-export function commitIds(git: Git, parent: Oid | null, ids: IdMap, identity: CommitIdentity, options: CommitStateOptions = {}): Promise<Oid> {
+/**
+ * Ids chosen for documents not created yet, by path: a file left out while
+ * writing keeps the id other documents already link to, so the next run
+ * creates it under that id. Kept beside `ids.json`, never in it: every
+ * entry there is a synchronized path with a document.
+ */
+export const RESERVED_IDS_FILE = 'reserved-ids.json';
+export type ReservedIds = Map<string, string>;
+
+export async function readReservedIds(git: Git, commit: Oid | null): Promise<ReservedIds> {
+  if (commit === null) return new Map();
+  const read = await git.run(['cat-file', 'blob', `${commit}:${RESERVED_IDS_FILE}`], { okCodes: [0, 128] });
+  if (read.code !== 0) return new Map();
+  const data = await readJsonFile(git, commit, RESERVED_IDS_FILE);
+  const map: ReservedIds = new Map();
+  for (const [path, id] of Object.entries(data)) {
+    if (typeof id !== 'string' || id === '') throw new Error(`${RESERVED_IDS_FILE} has an invalid entry`);
+    map.set(path, id);
+  }
+  return map;
+}
+
+/**
+ * Commits the id map (and the reserved ids, when there are any) on top of
+ * `parent`. Returns `parent` when nothing changed, unless `always`.
+ */
+export function commitIds(
+  git: Git,
+  parent: Oid | null,
+  ids: IdMap,
+  identity: CommitIdentity,
+  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string> } = {},
+): Promise<Oid> {
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
   const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry.saved === undefined ? { id: entry.id } : { id: entry.id, saved: entry.saved }]));
-  return commitJsonFile(git, parent, IDS_FILE, data, options.message ?? 'Update document ids', identity, options.always === true);
+  const files = new Map<string, unknown>([[IDS_FILE, data]]);
+  if (options.reserved !== undefined && options.reserved.size > 0) {
+    files.set(RESERVED_IDS_FILE, Object.fromEntries([...options.reserved.entries()].sort(([a], [b]) => compareStrings(a, b))));
+  }
+  return commitJsonFiles(git, parent, files, options.message ?? 'Update document ids', identity, options.always === true);
 }
 
 /** Commits the upload cache on top of `parent`. Returns `parent` when nothing changed. */
 export function commitUploads(git: Git, parent: Oid | null, uploads: UploadMap, identity: CommitIdentity): Promise<Oid> {
   const data = Object.fromEntries([...uploads.entries()].sort(([a], [b]) => compareStrings(a, b)));
-  return commitJsonFile(git, parent, UPLOADS_FILE, data, 'Update upload cache', identity);
+  return commitJsonFiles(git, parent, new Map([[UPLOADS_FILE, data]]), 'Update upload cache', identity);
 }
 
 function compareStrings(a: string, b: string): number {
@@ -298,11 +333,11 @@ async function readJsonFile(git: Git, commit: Oid | null, file: string): Promise
   return data as Record<string, unknown>;
 }
 
-function commitJsonFile(
+/** Commits a tree of exactly these JSON files. */
+function commitJsonFiles(
   git: Git,
   parent: Oid | null,
-  file: string,
-  data: unknown,
+  files: ReadonlyMap<string, unknown>,
   message: string,
   identity: CommitIdentity,
   always = false,
@@ -310,7 +345,7 @@ function commitJsonFile(
   return commitTree(git, {
     parents: parent === null ? [] : [parent],
     base: null,
-    changes: new Map([[file, `${JSON.stringify(data, null, 2)}\n`]]),
+    changes: new Map([...files].map(([file, data]) => [file, `${JSON.stringify(data, null, 2)}\n`])),
     message,
     identity,
     skipIfUnchanged: !always,
