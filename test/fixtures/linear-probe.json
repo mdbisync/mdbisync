@@ -929,6 +929,10 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "tables/table-header-hash.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "tables/table-header-only.md": {
       "yjs": "recorded",
       "fixedPoint": true

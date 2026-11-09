@@ -62,6 +62,8 @@ rules:
     title: "A URL inside raw HTML is turned into a Markdown link."
   - id: block-first-in-list-item
     title: "A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item."
+  - id: table-hash-cell
+    title: "A table body cell starting with # becomes a heading."
 known_constructs:
   - construct: sync-conflict-markers
     class: unchanged
@@ -323,6 +325,8 @@ known_constructs:
     class: unchanged
   - construct: table-empty-cells
     class: unchanged
+  - construct: table-hash-cells
+    class: lint-error
   - construct: table-inline-marks
     class: unchanged
   - construct: table-code-span-pipe
@@ -1450,12 +1454,13 @@ fixtures:
     canary: kx-5123bff2
   - file: "tables/table-header-hash.md"
     group: tables
-    construct: table-header-hash
-    class: unchanged
-    basis: assumed
+    construct: table-hash-cells
+    class: lint-error
+    rule: table-hash-cell
+    line: 3
+    basis: known
     canary: kx-a71b6d09
-    corpus: false
-    note: "expected fixed point for a lone hash header; dedicated live probe pending"
+    note: "Linear keeps the header hashes as text and stores the lone body hash as an empty heading"
   - file: "tables/table-inline-marks.md"
     group: tables
     construct: table-inline-marks

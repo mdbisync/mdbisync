@@ -241,10 +241,10 @@ the reason is fixed. The summaries list each with its rules:
 | `capture-translation` | The run could not turn the document's text from Linear into the file's text. | Check the document in Linear for unusual content, or report it as a bug. |
 
 The `linear-format` hook's rules leave a file out too until it is fixed:
-`footnote`, `subscript`, `table-escaped-pipe`, `image-in-link`,
-`table-alignment`, `link-title`, `image-title`, `code-in-emphasis`,
-`hard-break-backslash`, `git-conflict-marker`, `url-in-html` and
-`block-first-in-list-item`. Each is described, with its fix, in
+`footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`,
+`image-in-link`, `table-alignment`, `link-title`, `image-title`,
+`code-in-emphasis`, `hard-break-backslash`, `git-conflict-marker`,
+`url-in-html` and `block-first-in-list-item`. Each is described, with its fix, in
 [linear-format.md](linear-format.md#lint-rules).
 
 The initial sync also lists:

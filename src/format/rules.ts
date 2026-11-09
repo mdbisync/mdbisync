@@ -5,6 +5,7 @@ export const LINT_RULES = {
   footnote: 'Footnotes are dropped.',
   subscript: 'Tilde subscript is dropped.',
   'table-escaped-pipe': 'An escaped pipe in a plain table cell splits the row.',
+  'table-hash-cell': 'A table body cell starting with # becomes a heading.',
   'image-in-link': 'The link around an image is dropped.',
   'content-too-long': 'Documents over 250,000 characters are rejected.',
   'duplicate-title': 'Two files map to one document title.',
