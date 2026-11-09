@@ -17,6 +17,7 @@
 // that are not synchronized documents, external links, anchors within the
 // document, images and code are left as they are.
 
+import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Definition, Link, Nodes } from 'mdast';
 import { fixText } from '../format/index.ts';
@@ -247,11 +248,8 @@ function destinationSpan(body: string, node: Link | Definition): { from: number;
   return to > at ? { from: at, to } : undefined;
 }
 
-/** A raw destination as Linear's form writes it (`b.md` becomes `<b.md>`); unchanged when that cannot be read back. */
-function linearFormOf(raw: string): string {
-  const fixed = fixText(`[x](${raw})`);
-  const [destination] = linkDestinations(fixed);
-  return destination === undefined || destination.url !== destinationUrl(raw) ? raw : fixed.slice(destination.from, destination.to);
+function sha256(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
 }
 
 /** Reads the workspace's URL key; one request. */
@@ -274,7 +272,7 @@ export function documentLinks(): BodyTransform {
    * and for each document URL the destinations the file had, as written and
    * in Linear's form.
    */
-  const rewritten = new Map<string, { written: string; asWritten: LinkSpellings; inLinearForm: LinkSpellings }>();
+  const rewritten = new Map<string, { writtenHash: string; asWritten: LinkSpellings; inLinearForm: LinkSpellings }>();
   return {
     name: 'document-links',
     async prepare(run: TransformContext) {
@@ -292,8 +290,11 @@ export function documentLinks(): BodyTransform {
         rewritten.delete(path);
         return body;
       }
-      const inLinearForm: LinkSpellings = new Map([...asWritten].map(([url, raws]) => [url, raws.map(linearFormOf)]));
-      rewritten.set(path, { written, asWritten, inLinearForm });
+      // Spellings in Linear's form come from Linear's form of the whole body: it can expand a reference into
+      // several inline links, which changes how many links there are and in what order.
+      const inLinearForm: LinkSpellings = new Map();
+      linksToLinear(fixText(body), path, map, inLinearForm);
+      rewritten.set(path, { writtenHash: sha256(written), asWritten, inLinearForm });
       return written;
     },
     restore({ path, body }) {
@@ -302,7 +303,7 @@ export function documentLinks(): BodyTransform {
       if (map === undefined || entry === undefined) return body;
       // Linear kept the text: each link comes back exactly as the file had it. Linear reformatted it: the links
       // come back in Linear's form too, so the restored text is Linear's form of the file, not a mix of both.
-      return linksFromLinear(body, path, map, body === entry.written ? entry.asWritten : entry.inLinearForm);
+      return linksFromLinear(body, path, map, sha256(body) === entry.writtenHash ? entry.asWritten : entry.inLinearForm);
     },
   };
 }

@@ -6,6 +6,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
+import { fixText } from '../format/index.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { environmentName, readInputs } from '../run/inputs.ts';
@@ -106,6 +107,26 @@ describe('links between synchronized documents in a confirmed initial sync', () 
     assert.equal(again.result.exitCode, 0, again.result.stderr);
     assert.equal(world.linear.writes.count, writes);
     assert.deepEqual(again.report.initialSync?.unchanged, SYNCED_PATHS);
+  });
+
+  it("L1-18 with links: files not in Linear's form, stored in Linear's form, are not written again", async () => {
+    const world = fakeWorld();
+    // Like Linear: the stored text is the sent text in Linear's form (references inline, destinations in brackets).
+    world.linear.store = (stored) => fixText(stored);
+    await fixture.seed({ 'eng/notes/refs.md': `# Refs\n\nSee [the plan][p], [again][p] and [the guide](./guide.md#setup).\n\n[p]: plan.md\n\n${CANARY}` });
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    const ids = await readIds();
+    const refs = content(world, ids['eng/notes/refs.md']?.id);
+    const plan = `<${BASE}/${ids['eng/notes/plan.md']?.id}>`;
+    assert.equal(refs, `# Refs\n\nSee [the plan](${plan}), [again](${plan}) and [the guide](<${BASE}/${ids['eng/notes/guide.md']?.id}#setup>).\n\n${CANARY}`);
+    // The record holds Linear's form of each file, links included.
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/refs.md'), fixText(`# Refs\n\nSee [the plan][p], [again][p] and [the guide](./guide.md#setup).\n\n[p]: plan.md\n\n${CANARY}`));
+
+    const writes = world.linear.writes.count;
+    const second = await run(world);
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.equal(world.linear.writes.count, writes, 'the second run wrote again');
   });
 
   it('a rate limit on the workspace URL key stops the run like a write; the next run finishes', async () => {

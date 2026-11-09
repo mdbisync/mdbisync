@@ -141,7 +141,11 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
         const live = world.linear.documents.filter((d) => d.trashed !== true);
         assert.ok(Object.keys(ids).length > 0, 'nothing was synchronized');
         // I1 with links mapped: a link to another synchronized document is that document's URL by its recorded id.
-        const links = { base: documentUrlBase(world.linear.urlKey), ids: new Map(Object.entries(ids).map(([path, entry]) => [path, entry.id])) };
+        // A new document left out while writing keeps the id it was linked by (reserved-ids.json).
+        const reservedFile = await fixture.remote.run(['show', 'refs/mdbisync/ids:reserved-ids.json'], { okCodes: [0, 128] });
+        const reserved = (reservedFile.code === 0 ? JSON.parse(reservedFile.stdout.toString('utf8')) : {}) as Record<string, string>;
+        const linkIds = new Map([...Object.entries(reserved), ...Object.entries(ids).map(([path, entry]): [string, string] => [path, entry.id])]);
+        const links = { base: documentUrlBase(world.linear.urlKey), ids: linkIds };
         for (const [path, entry] of Object.entries(ids)) {
           const document = live.find((d) => d.id === entry.id);
           assert.ok(document !== undefined, `${path} has no document (I7)`);

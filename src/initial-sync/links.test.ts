@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, it } from 'node:test';
+import { fixText } from '../format/index.ts';
 import { type LinearClient } from '../linear/index.ts';
 import { type LinkSpellings, documentLinks, documentUrlBase, linkDestinations, linksFromLinear, linksToLinear, relativeLink, resolveRelative } from './links.ts';
 import { type TransformContext } from './transform.ts';
@@ -131,6 +132,19 @@ describe('document links', () => {
     // Linear changed something else in the document: the restored text is Linear's form of the file throughout.
     const reformatted = written.replace('* ', '- ');
     assert.equal(transform.restore({ path: 'eng/plan.md', body: reformatted }), '- [g](<guide.md>)\n* [h](<./guide.md#a>)');
+  });
+
+  it("follows Linear's form when it expands references into inline links, in their order and number", async () => {
+    const linear = { request: async () => ({ organization: { urlKey: 'example-team' } }) } as unknown as LinearClient;
+    const context = { linear, documentIds: new Map([['eng/guide.md', 'id-guide']]) } as unknown as TransformContext;
+    const transform = documentLinks();
+    await transform.prepare?.(context);
+    const body = `[web][r], [again][r] and [file](./guide.md)\n\n[r]: <${BASE}/id-guide>`;
+    const written = await transform.apply({ path: 'eng/plan.md', body });
+    // Linear stores references as inline links and drops the definition.
+    const stored = fixText(written);
+    assert.equal(stored, `[web](<${BASE}/id-guide>), [again](<${BASE}/id-guide>) and [file](<${BASE}/id-guide>)`);
+    assert.equal(transform.restore({ path: 'eng/plan.md', body: stored }), fixText(body));
   });
 
   it('round-trips every bank fixture exactly, with every bank document synchronized', () => {
