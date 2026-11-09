@@ -255,6 +255,9 @@ describe('preflight', () => {
         assert.equal(result.exitCode, SETUP_FAILED_EXIT_CODE);
         assert.equal(report.code, code);
         assert.ok(report.setupChecks.some((check) => check.state === 'failed' && named.test(check.detail)), JSON.stringify(report.setupChecks));
+        // It did not look at the files, so it says neither that none are left out nor how it names them.
+        assert.equal(report.leftOutRules, null);
+        assert.equal(report.paths, null);
         // The run's own error line names what failed too: the job summary is not always at hand.
         const line = result.stderr.split('\n').find((text) => text.startsWith('sync: stopped before any write')) ?? '';
         assert.ok(line.startsWith(`sync: stopped before any write (${code}): `), result.stderr);

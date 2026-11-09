@@ -7,6 +7,7 @@ import { dirname } from 'node:path';
 import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
+import { PATH_RULE } from '../sync/paths.ts';
 import { type ExitStatus, exitStatusOf, partialCode, pullRequestEnding } from './exit.ts';
 import { cell } from './summary.ts';
 import { type OperationOutcome } from './operation.ts';
@@ -49,6 +50,21 @@ export interface RunReport {
   skippedCompletedCount: number;
   /** Files over the upload limit, by repository path; the documents that link them are left out. */
   oversizeFiles: string[];
+  /**
+   * The rules of the job summary's "Left out" table, sorted, each once. A
+   * sync run lists them for the files of its merge result (the `linear` tip
+   * when nothing is new) on every run that reaches its write step, a run
+   * with nothing new to write included. Documents capture leaves out of git
+   * are in `capture.leftOut`, not here. Null when the run stopped before it
+   * looked at the files: a refused preflight, a capture that did not
+   * finish, or a sync pull request that held the run.
+   */
+  leftOutRules: string[] | null;
+  /**
+   * How the run names a file for a document read from Linear (a sync's
+   * capture, an initial sync from Linear); null for a run that names none.
+   */
+  paths: { rule: typeof PATH_RULE } | null;
   /** The run continued an unfinished initial sync, or a sync went on from a partial record an earlier run left. */
   resumed: boolean;
   /** Documents created or overwritten in Linear by this run (the same as `writtenCount`). */
@@ -183,6 +199,15 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
           : (outcome.plan?.leftOutFiles ?? []).filter((entry) => entry.rules.includes(UPLOAD_TOO_LARGE)).flatMap((entry) => entry.files ?? []),
       ),
     ].sort(),
+    leftOutRules:
+      outcome.plan === undefined
+        ? null
+        : ruleList([
+            ...outcome.plan.leftOutFiles.flatMap((entry) => entry.rules),
+            ...(confirmed?.leftOutAtWrite ?? []).map((entry) => entry.rule),
+            ...(reverse?.leftOutAtRecord ?? []).map((entry) => entry.rule),
+          ]),
+    paths: pathsOf(outcome),
     resumed: confirmed?.resumed ?? reverse?.resumed ?? false,
     ...faultFacts(outcome, outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped ?? reverse?.stopped, confirmed?.failed ?? [], [...(confirmed?.created ?? []), ...(confirmed?.overwritten ?? [])]),
     stoppedEarly: confirmed?.stopped !== undefined || reverse?.stopped !== undefined || outcome.stopped !== undefined || outcome.captured?.stopped !== undefined,
@@ -264,6 +289,8 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     writtenCount: new Set([...write.updated, ...write.created, ...write.restored, ...write.relocated.map((entry) => entry.to)]).size,
     skippedCompletedCount: 0,
     oversizeFiles: [...new Set(write.leftOutAtWrite.filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
+    leftOutRules: ruleList([...write.leftOut.flatMap((entry) => entry.rules), ...write.leftOutAtWrite.map((entry) => entry.rule)]),
+    paths: pathsOf(outcome),
     resumed: write.resumed,
     ...faultFacts(outcome, write.stopped, write.failed, [...write.updated, ...write.created, ...write.relocated.map((entry) => entry.to)]),
     stoppedEarly: write.stopped !== undefined,
@@ -272,6 +299,15 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     linearToGit: null,
     ...raceFacts(outcome),
   };
+}
+
+function ruleList(rules: readonly string[]): string[] {
+  return [...new Set(rules)].sort();
+}
+
+/** The naming rule, when the run named files for documents read from Linear: a sync's capture ran, or an initial sync from Linear planned. */
+function pathsOf(outcome: OperationOutcome): RunReport['paths'] {
+  return outcome.captured !== undefined || outcome.plan?.direction === 'linear-to-git' ? { rule: PATH_RULE } : null;
 }
 
 /** What a run met from other runs and from people while it worked. */

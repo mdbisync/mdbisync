@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 
+/**
+ * The name of the rule `titlePath` and `documentPath` follow, as run
+ * reports give it: a document read from Linear gets the same file name in a
+ * sync's capture and in an initial sync from Linear.
+ */
+export const PATH_RULE = 'percent-encode-unsafe-segments';
+
 /** Titles are slash paths. Encode unsafe segments without allowing traversal or platform aliases. */
 export function titlePath(title: string): string {
   return title.normalize('NFC').split('/').map((part) => {

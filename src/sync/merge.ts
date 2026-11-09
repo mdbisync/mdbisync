@@ -256,6 +256,14 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
   return { mapping, files, leftOut, leftOutPaths: new Set(leftOut.map((entry) => entry.path)) };
 }
 
+/**
+ * The files of a commit or tree the sync leaves out, with their rules: the
+ * list a merge gives for its result, for a run that has nothing to merge.
+ */
+export async function leftOutFiles(git: Git, treeish: Oid, facts: LinearFacts = LINEAR_FACTS): Promise<Array<{ path: string; rules: string[] }>> {
+  return (await synchronizedFiles(git, treeish, facts)).leftOut;
+}
+
 /** Versions of the `linear` chain examined for a file's last synchronized version. */
 export const BASELINE_DEPTH = 20;
 

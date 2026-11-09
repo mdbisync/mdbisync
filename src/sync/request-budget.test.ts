@@ -193,6 +193,8 @@ describe('sync: the Linear request budget (I9)', () => {
       const runReports = await syncAndSettle();
       assert.equal(await tracked('eng/notes/plan.md'), undefined);
       assert.match((await tracked(path)) ?? '', /Steps one and two\./);
+      // Every sync captures, so every report names the rule its file names follow.
+      for (const run of runReports) assert.deepEqual(run.report.paths, { rule: 'percent-encode-unsafe-segments' });
       assertBudget(runReports);
     });
   }

@@ -67,6 +67,9 @@ describe('sync: the tracked branch to Linear', () => {
     world.linear.projects.push({ id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
     const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
     assert.equal(initial.result.exitCode, 0, initial.result.stderr);
+    // The footnote of `eng/notes/draft.md` leaves it out; an initial sync from git names no file from a title.
+    assert.deepEqual(initial.report.leftOutRules, ['footnote']);
+    assert.equal(initial.report.paths, null);
   });
   afterEach(() => fixture.cleanup());
 
@@ -333,11 +336,25 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(writes, []);
     assert.ok(report.sync?.leftOut.some((entry) => entry.path === 'eng/notes/review.md' && entry.rules.includes('footnote')));
+    assert.deepEqual(report.leftOutRules, ['footnote']);
     assert.equal(document.content, content);
     assert.equal(document.trashed, undefined);
     assert.equal((await ids())['eng/notes/review.md']?.id, document.id);
     assert.equal(report.complete, true);
     await assertIdempotent();
+
+    // A run with nothing new still names the files that stay left out, and writes nothing.
+    const quiet = await sync();
+    assert.deepEqual(quiet.writes, []);
+    assert.equal(quiet.report.changed, false);
+    assert.equal(quiet.report.writtenDocuments, 0);
+    assert.deepEqual(quiet.report.sync?.leftOut, [
+      { path: 'eng/notes/draft.md', rules: ['footnote'] },
+      { path: 'eng/notes/review.md', rules: ['footnote'] },
+    ]);
+    assert.deepEqual(quiet.report.leftOutRules, ['footnote']);
+    assert.match(quiet.summary, /^\| eng\/notes\/review\.md \| footnote \|$/m);
+    assert.equal(document.content, content);
 
     // Fixed again: the same document gets the text.
     await commit({ 'eng/notes/review.md': `# Review\n\nFindings, fixed. ${CANARY}\n` });
@@ -420,6 +437,10 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal(second.result.exitCode, 0, second.result.stderr);
     assert.deepEqual(second.writes, ['CreateDocument', 'CreateDocument']);
     assert.equal(second.report.complete, true);
+    // The footnote file of the tree stays left out through the stop and the resume.
+    assert.deepEqual(first.report.leftOutRules, ['footnote']);
+    assert.equal(second.report.resumed, true);
+    assert.deepEqual(second.report.leftOutRules, ['footnote']);
     const parents = (await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^@'])).split('\n');
     assert.equal(parents.length, 2);
     assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^^']), previous);
