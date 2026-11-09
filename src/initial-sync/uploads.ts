@@ -370,11 +370,17 @@ export function resolveTarget(documentPath: string, url: string): string | null 
 function destinationRange(body: string, node: DestinationNode): { from: number; to: number } | null {
   const nodeEnd = end(node);
   const opener = node.type === 'definition' ? ']:' : '](';
+  let found: { from: number; to: number } | null = null;
   for (let at = body.indexOf(opener, start(node)); at !== -1 && at < nodeEnd; at = body.indexOf(opener, at + 1)) {
     const range = destinationAt(body, at + 2, nodeEnd);
-    if (range !== null && parsedDestination(body.slice(range.outerFrom, range.outerTo)) === node.url) return { from: range.from, to: range.to };
+    if (range === null || parsedDestination(body.slice(range.outerFrom, range.outerTo)) !== node.url) continue;
+    // A definition's label holds no `]:`, so its first match is its destination. A link's or
+    // image's text comes before its destination and may hold a link to the same file, so the
+    // last match is the node's own.
+    found = { from: range.from, to: range.to };
+    if (node.type === 'definition') break;
   }
-  return null;
+  return found;
 }
 
 /** The destination text starting at `position` (after optional spaces), with and without angle brackets. */

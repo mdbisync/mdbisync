@@ -194,6 +194,8 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   };
 
   let unpushed = 0;
+  /** The upload cache's size at the last push; uploads made since are recorded even when no document was. */
+  let uploadsPushed = uploads.size;
   const pushProgress = async () => {
     const updates: RefUpdate[] = [];
     const idsCommit = await commitIds(git, expected.ids, ids, identity, {
@@ -212,6 +214,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     if (updates.length > 1) expected.uploads = (updates[1] as RefUpdate).next;
     result.progressPushes += 1;
     unpushed = 0;
+    uploadsPushed = uploads.size;
   };
 
   const work: Work[] = [
@@ -263,7 +266,8 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       if (item.kind === 'overwrite' && document === undefined) throw new Error(`the planned document for ${path} was not listed`);
 
       try {
-        const body = await transformBody(transforms, path, splitFile(texts.get(path) as string).body);
+        const source = splitFile(texts.get(path) as string).body;
+        const body = await transformBody(transforms, path, source);
         const hash = sha256(body);
         // A resumed run skips what the stopped run wrote, as long as the text
         // to send is the same; a file changed since is written again.
@@ -276,8 +280,11 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         // A document already holding the body, as sent or in the form Linear
         // stores it, is not written again: files are often not in Linear's
         // form, and writing them again would change nothing but the
-        // document's history.
-        if (document !== undefined && holdsBody(document.content ?? '', body)) {
+        // document's history. Linear's form can depend on what a transform
+        // wrote (a link to an uploaded file is stored as a file), so the
+        // content is also compared after the transforms' inverses, with the
+        // file's own body.
+        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(restoreBody(transforms, path, document.content ?? ''), source))) {
           result.unchanged.push(path);
           remember(path, document);
           continue;
@@ -364,7 +371,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       // Always leave a progress commit: even a run that only trashed
       // documents has changed Linear, and the sync must not run on the old
       // state until initial sync finishes.
-      if (unpushed > 0 || (await readInitialSyncProgress(git, expected.ids)) === null) await pushProgress();
+      if (unpushed > 0 || uploads.size !== uploadsPushed || (await readInitialSyncProgress(git, expected.ids)) === null) await pushProgress();
       result.code = result.stopped !== undefined ? 'stopped' : 'write-failed';
       return { plan, result };
     }
@@ -386,7 +393,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       return { plan, result };
     }
     // A bug or a git failure: keep what was written before giving up.
-    if (unpushed > 0) await pushProgress().catch(() => undefined);
+    if (unpushed > 0 || uploads.size !== uploadsPushed) await pushProgress().catch(() => undefined);
     throw error;
   }
 

@@ -9,6 +9,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
+import { fixText } from '../format/index.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git } from '../state/index.ts';
@@ -177,6 +178,48 @@ describe('uploads of linked files in an initial sync', () => {
     assert.equal(await show('refs/mdbisync/linear:eng/notes/b.md'), B_BODY);
   });
 
+  it('L1-18: a file not in Linear form whose attachments Linear stores as files is not written again', async () => {
+    await fixture.seed({ 'eng/notes/list.md': `# List\n\n* [Diagram](../media/diagram.png)\n* [Notes](b.md)\n\n${CANARY}` });
+    const world = fakeWorld();
+    // Like Linear: a link to an uploaded file is stored as a file, the form `fix` gives a relative link to a file.
+    world.linear.store = (content) => fixText(content.replaceAll(`${UPLOADS_HOST}/`, 'uploaded/')).replaceAll('uploaded/', `${UPLOADS_HOST}/`);
+    assert.equal((await run(world)).result.exitCode, 0);
+    const stored = document(world, 'list')?.content ?? '';
+    assert.ok(stored.startsWith('# List\n\n* \n'), 'the fake stores the list as files');
+    const writes = world.linear.writes.count;
+
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(world.linear.writes.count, writes, 'the second run wrote again');
+    assert.ok(report.initialSync?.unchanged.includes('eng/notes/list.md'));
+  });
+
+  it('a stop right after a batch records the new uploads even when no document was written since the last push', async () => {
+    const world = fakeWorld();
+    // First run: the two README documents, then a stop; their ids are pushed.
+    const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '2' };
+    Object.assign(process.env, hooks);
+    try {
+      assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+    } finally {
+      for (const name of Object.keys(hooks)) delete process.env[name];
+    }
+    assert.equal(world.linear.uploads.length, 0);
+    // Resumed run: the README documents are skipped, the batch for a is uploaded (mutation 3)
+    // and the create of a is refused (mutation 4), with no document written since the last push.
+    world.linear.writes.rateLimitAt = 4;
+    const second = await run(world);
+    assert.equal(second.result.exitCode, INCOMPLETE_EXIT_CODE, second.result.stderr);
+    assert.equal(second.report.writtenCount, 0);
+    assert.equal(world.linear.uploads.length, 3);
+    const cached = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
+    assert.equal(Object.keys(cached).length, 3, 'the batch uploaded before the stop is recorded');
+
+    delete world.linear.writes.rateLimitAt;
+    assert.equal((await run(world)).result.exitCode, 0);
+    assert.equal(world.linear.uploads.length, 3, 'nothing is uploaded again');
+  });
+
   it('L1-18: a second run uploads nothing and writes nothing', async () => {
     const world = fakeWorld();
     assert.equal((await run(world)).result.exitCode, 0);
@@ -266,6 +309,12 @@ describe('file links in a document', () => {
     assert.deepEqual(targets('[**bold** text](../img/a.png)'), [['../img/a.png', 'docs/img/a.png']]);
     assert.deepEqual(targets('![x](a&amp;b.png)'), [['a&amp;b.png', 'docs/guide/a&b.png']], 'character references');
     assert.deepEqual(targets('![see [x](y) here](../img/a.png)'), [['../img/a.png', 'docs/img/a.png']], 'brackets in the alt text');
+    const same = '![see [x](../img/a.png) here](../img/a.png)';
+    assert.deepEqual(
+      findFileLinks('docs/guide/page.md', same, isFile).map((link) => link.from),
+      [same.lastIndexOf('../img/a.png')],
+      'a link in the alt text to the same file: the image destination is the one replaced',
+    );
     assert.deepEqual(targets('[a](../img/a.png "Title")'), [['../img/a.png', 'docs/img/a.png']]);
   });
 

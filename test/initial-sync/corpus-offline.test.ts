@@ -17,9 +17,12 @@ import { runCli } from '../../src/cli.ts';
 import { fixText, splitFile } from '../../src/format/index.ts';
 import { collectAnnotations } from '../../src/mapping/index.ts';
 import { type RunReport } from '../../src/run/finish.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../../src/setup/test-helpers.ts';
+import { type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../../src/setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../../src/state/test-helpers.ts';
 import { type Corpus, buildCorpus } from '../corpus/generate.ts';
+
+/** A relative folder standing in for the fake's upload host while the fake formats content. */
+const UPLOAD_PLACEHOLDER = 'uploaded-file-placeholder/';
 
 const LINEAR_FORMAT_HOOK = `repos:
   - repo: https://github.com/example/mdbisync
@@ -75,7 +78,12 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
         cwd = (await fixture.clone('work')).dir;
         world = worldFor(files);
         // Like Linear, the fake stores Markdown in its own form; the corpus is not written in that form.
-        world.linear.store = (content) => fixText(content);
+        // Linear stores a link to an uploaded file as a file, the form `fix` gives a relative link to a
+        // file (format probe, attachments/several.md); so upload URLs are formatted as such links.
+        world.linear.store = (content) => {
+          const asFiles = content.replaceAll(`${UPLOADS_HOST}/`, UPLOAD_PLACEHOLDER);
+          return fixText(asFiles).replaceAll(UPLOAD_PLACEHOLDER, `${UPLOADS_HOST}/`);
+        };
       });
       after(() => fixture.cleanup());
 
@@ -106,6 +114,23 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
       };
       const refs = () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
 
+      /**
+       * The text Linear should hold for a file: each link to a file of the
+       * slice points to the upload with that file's bytes (I1 maps links
+       * this way), keeping the link's query and fragment.
+       */
+      const withUploadUrls = (path: string, text: string): string => {
+        const isFile = (target: string) => files.has(target) && !target.endsWith('.md');
+        let result = text;
+        for (const link of findFileLinks(path, text, isFile).reverse()) {
+          const bytes = files.get(link.target) as Buffer;
+          const upload = world.linear.uploads.find((candidate) => candidate.bytes?.equals(bytes));
+          assert.ok(upload !== undefined, `${link.target}, linked from ${path}, was not uploaded`);
+          result = result.slice(0, link.from) + upload.assetUrl + link.suffix + result.slice(link.to);
+        }
+        return result;
+      };
+
       it('writes every synchronized file once, records the state, and a second run changes nothing', async () => {
         const first = await run();
         assert.equal(first.result.exitCode, 0, `${first.result.stderr}\n${first.result.stdout.slice(0, 2000)}`);
@@ -134,14 +159,7 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
           const restoredLinks = linksFromLinear(document.content ?? '', path, linkMap, spellings);
           const linkedFiles = findFileLinks(path, body, target => !target.endsWith('.md') && files.has(target));
           const written = linkedFiles.map(link => ({raw:link.raw, suffix:link.suffix, hash:createHash('sha256').update(files.get(link.target)!).digest('hex')}));
-          let uploaded = body;
-          for (const link of [...linkedFiles].reverse()) {
-            const hash = createHash('sha256').update(files.get(link.target)!).digest('hex');
-            const url = uploads.get(hash);
-            assert.ok(url !== undefined, `${path}: missing upload`);
-            uploaded = uploaded.slice(0, link.from) + url + link.suffix + uploaded.slice(link.to);
-          }
-          assert.equal(document.content, fixText(linksToLinear(uploaded, path, linkMap)), `${path} differs (I1, in Linear's form)`);
+          assert.equal(document.content, withUploadUrls(path, fixText(linksToLinear(body, path, linkMap))), `${path} differs (I1, in Linear's form)`);
           const restored = restoreFileLinks(restoredLinks, written, uploads);
           const recorded = await fixture.remote.run(['show', `refs/mdbisync/linear:${path}`]);
           assert.deepEqual(recorded.stdout, Buffer.from(head + restored), `${path}: recorded git bytes differ (I1)`);
