@@ -4,9 +4,10 @@
 // Optional: LINEAR_TEST_TEAM_KEY (default: the first team),
 // LINEAR_BASE_URL (a proxy in front of Linear), LINEAR_CONTRACT_REPORT (a
 // path for the JSON report of requests per operation),
-// LINEAR_CONTRACT_PAUSE_MS (the pause before the one permitted delayed
-// trash read or cleanup verification, default 2000). Trash must be confirmed
-// by at most two reads with one pause; a stale/absent final read fails.
+// LINEAR_CONTRACT_PAUSE_MS (the pause before a delayed read, default 2000).
+// Just-created documents must be read within three reads and two pauses,
+// trash confirmed by at most two reads with one pause; a stale or absent
+// final read fails.
 //
 // Everything written is neutral work text in two short-lived projects, which
 // are removed at the end; their documents end archived, never in the
@@ -29,7 +30,15 @@ import {
   type LogEntry,
   type RunToken,
 } from '../../src/linear/index.ts';
-import { cleanUpOwned, diagnoseTrashRead, type CleanupError, type CleanupResult, type TrashReadDiagnosis } from './contract-support.ts';
+import {
+  cleanUpOwned,
+  diagnoseTrashRead,
+  readCreated,
+  type CleanupError,
+  type CleanupResult,
+  type CreatedReadDiagnosis,
+  type TrashReadDiagnosis,
+} from './contract-support.ts';
 
 const clientId = process.env.LINEAR_TEST_APP_CLIENT_ID;
 const clientSecret = process.env.LINEAR_TEST_APP_CLIENT_SECRET;
@@ -58,6 +67,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   // Documents a trash was sent for (applied or not) and no restore confirmed since.
   const trashed = new Set<string>();
   let trashRead: TrashReadDiagnosis | undefined;
+  let createdRead: CreatedReadDiagnosis | undefined;
 
   /** Runs one step and records how many API requests it took. */
   async function measured<T>(name: string, step: () => Promise<T>): Promise<T> {
@@ -138,6 +148,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
       restoredInCleanup: cleanup?.restored ?? [],
       unconfirmedRestoreFailures: (cleanup?.unconfirmedRestoreFailures ?? []).map(describeCleanup),
       finalDocuments: cleanup?.final ?? [],
+      ...(createdRead ? { createdRead } : {}),
       ...(trashRead ? { trashRead } : {}),
     };
     console.log(JSON.stringify(report, null, 2));
@@ -176,8 +187,14 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
   });
 
   it('reads documents by ids in one request, with the content the create returned', async () => {
-    const docs = await measured('getDocuments (2 ids)', () => linear.getDocuments([first.id, second.id], { withContent: true }));
-    assert.deepEqual(docs.map((d) => d.id).sort(), [first.id, second.id].sort());
+    const ids = [first.id, second.id];
+    const { documents: docs, diagnosis } = await measured('getDocuments (2 ids)', () => readCreated(linear, requests, ids, { pauseMs }));
+    createdRead = diagnosis;
+    assert.deepEqual(
+      docs.map((d) => d.id).sort(),
+      [...ids].sort(),
+      `created documents must be read within ${diagnosis.maxReads} reads and ${pauseMs}ms pauses: ${JSON.stringify(diagnosis)}`,
+    );
     assert.ok(docs.every((d) => typeof d.content === 'string' && d.content.length > 0));
     const stored = new Map(docs.map((d) => [d.id, d.content]));
     assert.equal(stored.get(first.id), first.content, 'the create payload is the stored content');
