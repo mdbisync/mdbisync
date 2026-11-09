@@ -8,7 +8,11 @@ import { LINEAR_FACTS, type LinearDocument, type LinearFacts, lengthRefusal } fr
 import { type MappedDocument, type Place, type RepositoryMapping, type Zone } from '../mapping/index.ts';
 import { type ResolvedTargets, projectKey } from '../setup/index.ts';
 
-/** Why a synchronized file stays in git only: a lint rule, a title collision, or a title Linear refuses. */
+/**
+ * Why a synchronized file stays in git only: a lint rule, a title collision,
+ * or a title Linear refuses; in a dry run also a linked file the write would
+ * refuse (`upload-too-large`, `upload-unreadable`, see `leaveOutAtWrite`).
+ */
 export interface LeftOutEntry {
   path: string;
   /** Sorted, each rule once. */
@@ -19,7 +23,7 @@ export interface LeftOutEntry {
   collidesWith?: string[];
   /** The Linear document with the file's title, which the run leaves as it is. */
   documentId?: string;
-  /** For a rule found from the files the document links (`upload-too-large`): those files. */
+  /** For a rule found from the files the document links (`upload-too-large`, `upload-unreadable`): those files. */
   files?: string[];
 }
 

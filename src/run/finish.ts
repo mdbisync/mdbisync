@@ -96,12 +96,13 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     sync: null,
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? 0,
-    // A dry run finds them before the write and lists them in its plan; a confirmed run, at the write.
+    // A confirmed run finds them at the write; a dry run, before it, and lists them in its plan.
     oversizeFiles: [
-      ...new Set([
-        ...(outcome.plan?.leftOutFiles ?? []).filter((entry) => entry.rules.includes(UPLOAD_TOO_LARGE)).flatMap((entry) => entry.files ?? []),
-        ...(confirmed?.leftOutAtWrite ?? []).filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []),
-      ]),
+      ...new Set(
+        confirmed !== undefined
+          ? confirmed.leftOutAtWrite.filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? [])
+          : (outcome.plan?.leftOutFiles ?? []).filter((entry) => entry.rules.includes(UPLOAD_TOO_LARGE)).flatMap((entry) => entry.files ?? []),
+      ),
     ].sort(),
     resumed: confirmed?.resumed ?? false,
     stoppedEarly: confirmed?.stopped !== undefined,

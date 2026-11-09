@@ -4,6 +4,7 @@
 // including the documents its uploads would leave out.
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -202,7 +203,9 @@ describe('initial sync dry run', () => {
 describe('initial sync dry run: documents the uploads would leave out', () => {
   const MB = 1024 * 1024;
   /** A pointer to an LFS object the remote does not have: only the pointer can tell its size. */
-  const pointer = (size: number, extension = '') => `version https://git-lfs.github.com/spec/v1\n${extension}oid sha256:${'cd'.repeat(32)}\nsize ${size}\n`;
+  const pointer = (size: number, oid: string, extension = '') => `version https://git-lfs.github.com/spec/v1\n${extension}oid sha256:${oid}\nsize ${size}\n`;
+  const EXTENSION = `ext-0-foo sha256:${'ef'.repeat(32)}\n`;
+  const LOGO = Buffer.alloc(2048, 3);
   const UPLOAD_TREE = {
     '.pre-commit-config.yaml': PRE_COMMIT,
     'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
@@ -214,10 +217,16 @@ describe('initial sync dry run: documents the uploads would leave out', () => {
     'eng/files/small.pdf': Buffer.from('%PDF-1.4 small report\n'),
     // An LFS pointer of 20 MB whose object is not on the remote.
     'eng/video.md': `# Video\n\n[Recording](raw/recording.mp4)\n\n${CANARY}\n`,
-    'eng/raw/recording.mp4': pointer(20 * MB),
-    // An LFS pointer naming an LFS extension: the run cannot read its object.
-    'eng/packed.md': `# Packed\n\n[Archive](raw/archive.zip)\n\n${CANARY}\n`,
-    'eng/raw/archive.zip': pointer(512, `ext-0-foo sha256:${'ef'.repeat(32)}\n`),
+    'eng/raw/recording.mp4': pointer(20 * MB, 'cd'.repeat(32)),
+    // LFS pointers naming an LFS extension: the run cannot read their objects. Listed in link order.
+    'eng/packed.md': `# Packed\n\n[Second](raw/second.zip) and [Archive](raw/archive.zip)\n\n${CANARY}\n`,
+    'eng/raw/second.zip': pointer(512, 'ab'.repeat(32), EXTENSION),
+    'eng/raw/archive.zip': pointer(512, 'ce'.repeat(32), EXTENSION),
+    // A pointer with an extension whose content an earlier document uploads from git: the run never reads it.
+    'eng/a-logo.md': `# Logo\n\n![Logo](files/logo.bin)\n\n${CANARY}\n`,
+    'eng/files/logo.bin': LOGO,
+    'eng/b-logo.md': `# Logo again\n\n![Logo](raw/logo.bin)\n\n${CANARY}\n`,
+    'eng/raw/logo.bin': pointer(LOGO.length, createHash('sha256').update(LOGO).digest('hex'), EXTENSION),
   };
 
   let fixture: Fixture;
@@ -265,9 +274,11 @@ describe('initial sync dry run: documents the uploads would leave out', () => {
 
   const LEFT_OUT = [
     { path: 'eng/big.md', rule: 'upload-too-large', files: ['eng/files/scan.bin'] },
-    { path: 'eng/packed.md', rule: 'upload-unreadable', files: ['eng/raw/archive.zip'] },
+    { path: 'eng/packed.md', rule: 'upload-unreadable', files: ['eng/raw/second.zip', 'eng/raw/archive.zip'] },
     { path: 'eng/video.md', rule: 'upload-too-large', files: ['eng/raw/recording.mp4'] },
   ];
+
+  const WRITTEN = ['eng/README.md', 'eng/a-logo.md', 'eng/b-logo.md', 'eng/small.md'];
 
   it('lists a document linking a file over 10 MB as left out with upload-too-large and the file; uploads, downloads and writes nothing', async () => {
     const world = linearWithBig();
@@ -278,7 +289,7 @@ describe('initial sync dry run: documents the uploads would leave out', () => {
     assert.equal(await refs(), refsBefore, 'the dry run moved a ref');
     assert.equal(await countLocalLfsObjects(clone), 0, 'the dry run downloaded an LFS object');
 
-    assert.deepEqual(report.summary?.plan.create, ['eng/README.md', 'eng/small.md']);
+    assert.deepEqual(report.summary?.plan.create, WRITTEN);
     assert.deepEqual(report.summary?.plan.overwrite, []);
     assert.deepEqual(report.summary?.plan.trash, [], 'the document of a left-out file is not trashed');
     assert.deepEqual(
@@ -291,12 +302,12 @@ describe('initial sync dry run: documents the uploads would leave out', () => {
     assert.match(summary, /- leave out 3 files, which stay in git only until they are fixed\./);
     assert.match(summary, /^\| eng\/big\.md \| upload-too-large \|  \| eng\/files\/scan\.bin \|$/m);
     assert.match(summary, /^\| eng\/video\.md \| upload-too-large \|  \| eng\/raw\/recording\.mp4 \|$/m);
-    assert.match(summary, /^\| eng\/packed\.md \| upload-unreadable \|  \| eng\/raw\/archive\.zip \|$/m);
+    assert.match(summary, /^\| eng\/packed\.md \| upload-unreadable \|  \| eng\/raw\/second\.zip, eng\/raw\/archive\.zip \|$/m);
   });
 
   it('lists the same documents, rules and files that the confirmed run leaves out at the write', async () => {
     const { report } = await run(linearWithBig(), true);
-    assert.deepEqual(report.initialSync?.created, ['eng/README.md', 'eng/small.md']);
+    assert.deepEqual(report.initialSync?.created, WRITTEN);
     assert.deepEqual(report.initialSync?.leftOutAtWrite, LEFT_OUT);
   });
 });

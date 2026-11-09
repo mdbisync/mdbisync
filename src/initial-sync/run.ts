@@ -5,7 +5,7 @@
 
 import { type LinearDocument } from '../linear/index.ts';
 import { type RunContext } from '../run/preflight.ts';
-import { readBlobs } from '../state/index.ts';
+import { readBlobs, readUploads } from '../state/index.ts';
 import { type InitialSyncPlan, type PlaceDocuments, type PlanInput, annotatedPlaces, leaveOutAtWrite, placeId, planInitialSync } from './plan.ts';
 import { predictUploadLeaveOuts } from './uploads.ts';
 
@@ -41,6 +41,8 @@ export async function readPlanSources(context: RunContext, options: { withConten
  * nothing.
  */
 export async function planFromRepository(context: RunContext): Promise<InitialSyncPlan> {
-  const plan = planInitialSync((await readPlanSources(context)).input);
-  return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan));
+  const { input } = await readPlanSources(context);
+  const plan = planInitialSync(input);
+  const uploads = await readUploads(context.git, context.fetched.state.uploads);
+  return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan, input.texts, uploads));
 }
