@@ -23,6 +23,8 @@ export {
   RESERVED_IDS_FILE,
   type ReservedIds,
   readReservedIds,
+  WRITTEN_FILE,
+  readWrittenHashes,
   type FetchedState,
   type FileRead,
   IDS_FILE,
