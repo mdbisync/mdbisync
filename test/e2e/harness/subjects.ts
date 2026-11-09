@@ -26,7 +26,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
-import { listTree, readBlobs, readIds, readUploads, type Git } from '../../../src/state/index.ts';
+import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, type Git } from '../../../src/state/index.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readFixture, readOptional } from '../../probe/bank.ts';
@@ -1104,10 +1104,11 @@ export const SUBJECTS: Record<string, Compute> = {
     const head = await syncPullRequestHead(env.ctx);
     if (head === null) return false;
     const before = observed(env.ctx, BEFORE_VIEW) as View;
-    const original = await treeFiles(head.git, before.tip);
-    const files = await treeFiles(head.git, head.commit);
-    for (const [path, bytes] of original) {
-      if (!path.endsWith('.md')) continue;
+    const documents = await treeFiles(head.git, before.tip, (path) => path.endsWith('.md'));
+    const paths = new Set([...documents].flatMap(([path, bytes]) => embeddedImages(path, bytes.toString('utf8'))));
+    const original = await treeFiles(head.git, before.tip, (path) => paths.has(path));
+    const files = await treeFiles(head.git, head.commit, (path) => paths.has(path));
+    for (const [path, bytes] of documents) {
       for (const asset of embeddedImages(path, bytes.toString('utf8'))) {
         const blob = original.get(asset);
         if (blob !== undefined && !files.get(asset)?.equals(blob)) return false;
@@ -1602,17 +1603,25 @@ interface ReverseAsset {
 
 function reverseAssets(ctx: RunContext): ReverseAsset[] {
   const assets = observed(ctx, 'linear.assets') as ReverseAsset[];
-  if (assets.length === 0) throw new ProductError('the reverse asset fixture has no expected downloads');
-  return assets;
+  if (assets.length === 0) throw new Error('the reverse asset fixture has no expected downloads');
+  const before = observed(ctx, BEFORE_VIEW) as View;
+  return assets.map((asset) => {
+    // A reverse sync reuses an identical file already present before the run.
+    const existing = [...before.hashes].filter(([path, hash]) => !path.toLowerCase().endsWith('.md') && hash === asset.sha256).at(-1)?.[0];
+    return existing === undefined ? asset : { ...asset, path: existing };
+  });
 }
 
 async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string>; storage: { actual: Map<string, string>; expected: Map<string, string> }; links: string[] }> {
   const head = await syncPullRequestHead(env.ctx);
   if (head === null) throw new ProductError('the reverse initial sync opened no pull request');
-  const files = await treeFiles(head.git, head.commit);
+  const assets = reverseAssets(env.ctx);
+  const paths = new Set(assets.flatMap((asset) => [asset.path, asset.documentPath]));
+  const files = await treeFiles(head.git, head.commit, (path) => paths.has(path));
+  const readLfs = await lfsReader(head.git, 'origin');
   const links: string[] = [];
   const hashes = new Map<string, string>();
-  for (const asset of reverseAssets(env.ctx)) {
+  for (const asset of assets) {
     const document = files.get(asset.documentPath);
     if (document === undefined) throw new ProductError('the reverse asset fixture document is missing');
     const embedded = imageLinks(document.toString('utf8'));
@@ -1622,7 +1631,10 @@ async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string
     }
     const blob = files.get(asset.path);
     if (blob === undefined) throw new ProductError('the reverse asset fixture download is missing');
-    const bytes = lfsSize(blob) === null ? blob : (await head.git.run(['lfs', 'smudge'], { input: blob, env: { GIT_LFS_SKIP_SMUDGE: undefined } })).stdout;
+    const pointer = parseLfsPointer(blob);
+    const read = pointer === null ? { ok: true as const, content: blob } : await readLfs(pointer, asset.path);
+    if (!read.ok) throw new ProductError('the reverse asset fixture LFS download is missing or corrupt');
+    const bytes = read.content;
     if (!bytes.equals(asset.bytes)) throw new ProductError('the reverse asset fixture download has different bytes');
     hashes.set(asset.path, sha256(bytes));
   }
