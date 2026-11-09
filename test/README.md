@@ -86,6 +86,7 @@ node test/e2e/harness/cli.ts plan --levels L1 --slices mini   # what would run, 
 node test/e2e/harness/cli.ts run  --levels L1 --slices mini   # run them
 node test/e2e/harness/cli.ts run  --ids L1-04,L2-01 --workers 2
 node test/e2e/harness/cli.ts checklist --ids L6-05            # print a UI scenario's checklist
+node test/e2e/harness/cli.ts ui-result <run folder> <checklist>  # take up a held UI run with its answers
 node test/e2e/harness/cli.ts sweep                            # remove leftovers of dead or old runs
 ```
 
@@ -227,6 +228,30 @@ uploaded:
 
 `ui` mode is a checklist for a person or a browser session signed in as
 the two members.
+
+### UI sessions
+
+A `ui` scenario runs its setup and every step before its first UI step,
+then stops: the report says `env-blocked`, the run keeps its branches and
+projects for two hours, and its run folder (`out/<harness run>/runs/<scenario>-<run>/`)
+holds `ui-checklist.md` and `held-run.json`, which records where the run
+stopped (no credentials). The UI session answers the checklist in the file:
+`pass` or `fail` and what it saw for each item (never document content),
+and a JSON value for each `ui.*` value the checks read. Then:
+
+```sh
+node test/e2e/harness/cli.ts ui-result <run folder> <answered checklist> --status-page <file> --evidence-dir <dir>
+```
+
+The harness goes on from where the run stopped. It runs the harness steps
+between the answered items (such as `run.settle`); when it reaches an item
+that is not answered yet, it saves the run and keeps the hold, so the
+session answers the next items and runs `ui-result` again. Once every item
+is answered, it runs the checks, writes the result (pass, fail or
+expected-red) over the run's `env-blocked` one in the harness run's report
+and in the status page and evidence when given, cleans up and releases the
+hold. A `fail` ends the run at that item. A hold that has ended, a
+checklist of another scenario or missing values change nothing.
 
 ## Change the test base
 

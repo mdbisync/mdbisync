@@ -152,12 +152,17 @@ function names(body: string, target: string): boolean {
   return body.includes(JSON.stringify(target).slice(1, -1));
 }
 
-export async function startFaultProxy(upstream: string, options: { fetch?: typeof fetch } = {}): Promise<FaultProxy> {
+/**
+ * Starts the proxy. `history` holds the records of an earlier proxy of the
+ * same run (a run held for its UI steps and taken up again), so request
+ * numbers and I9's counts go on from them.
+ */
+export async function startFaultProxy(upstream: string, options: { fetch?: typeof fetch; history?: readonly ProxyRequestRecord[] } = {}): Promise<FaultProxy> {
   const forward = options.fetch ?? ((input: string | URL | Request, init?: RequestInit) => globalThis.fetch(input, init));
   const base = upstream.replace(/\/+$/, '');
   let faults: Array<Fault & { used?: number; matched?: number }> = [];
-  let counter = 0;
-  const requests: ProxyRequestRecord[] = [];
+  const requests: ProxyRequestRecord[] = [...(options.history ?? [])];
+  let counter = requests.reduce((highest, record) => Math.max(highest, record.n), 0);
   const tokens = new Set<string>();
 
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
