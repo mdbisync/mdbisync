@@ -11,12 +11,22 @@ import type { AddressInfo } from 'node:net';
 export type Fault =
   /** Answer the n-th request (counted from when the fault is set) with a status, `times` times. */
   | { kind: 'http'; status: number; requestNumber: number; retryAfterSeconds: number | null; times: number }
-  /** Fail the next document write (create or update) with a server error or a reset connection. */
-  | { kind: 'write-error'; variant: 'server-error' | 'reset'; times: number }
+  /**
+   * Fail the next document write (create or update, or only the one named):
+   * `server-error` answers 500 and `reset` drops the connection, both before
+   * Linear sees the write; `reset-after-apply` passes the write on, waits for
+   * Linear's answer and drops the connection instead of sending it, so Linear
+   * has applied a write the engine never hears about.
+   */
+  | { kind: 'write-error'; variant: 'server-error' | 'reset' | 'reset-after-apply'; operation?: 'create' | 'update'; times: number }
   /** Pass requests on, but report this little budget left. */
   | { kind: 'budget-headers'; remaining: number; includeEndpointLimits: boolean }
-  /** Refuse writes that name this document id or title. */
-  | { kind: 'reject-document'; target: string }
+  /**
+   * Refuse writes of one document: by its id once it exists, and by its
+   * name (a title equal to it or ending in `/<name>`) for a create.
+   * Only the write's own `id` and `title` fields count, never its content.
+   */
+  | { kind: 'reject-document'; ids: readonly string[]; titles: readonly string[] }
   /** Fail the upload request. */
   | { kind: 'upload-error'; times: number }
   /** Answer every request that names this document id as Linear answers for a document deleted for good. */
@@ -28,8 +38,68 @@ export interface ProxyRequestRecord {
   kind: 'query' | 'mutation' | 'other';
   status: number | 'reset';
   injected: boolean;
+  /**
+   * Linear answered (with `status`) but the proxy dropped the answer: the
+   * write happened, the engine never heard of it.
+   */
+  answerDropped?: boolean;
   /** When the request arrived (ms since the epoch). */
   at: number;
+}
+
+/**
+ * A write-error variant as specs write it, as the proxy's fault.
+ * `reset-after-apply` may name the write it hits: `-on-create` or `-on-update`.
+ */
+export function writeError(variant: string): Fault {
+  const applied = /^reset-after-apply(?:-on-(create|update))?$/.exec(variant);
+  if (applied !== null) return { kind: 'write-error', variant: 'reset-after-apply', ...(applied[1] === undefined ? {} : { operation: applied[1] as 'create' | 'update' }), times: 1 };
+  if (variant === 'reset' || variant === 'connection-reset') return { kind: 'write-error', variant: 'reset', times: 1 };
+  if (variant === 'server-error' || variant === 'http-500') return { kind: 'write-error', variant: 'server-error', times: 1 };
+  throw new Error(`unknown write-error variant ${variant}`);
+}
+
+/**
+ * Whether a GraphQL answer to a write says the write happened: data and no
+ * errors, and no mutation payload with `success: false`.
+ */
+export function writeApplied(payload: Buffer): boolean {
+  let answer: { data?: unknown; errors?: unknown[] };
+  try {
+    answer = JSON.parse(payload.toString('utf8')) as { data?: unknown; errors?: unknown[] };
+  } catch {
+    return false;
+  }
+  if ((answer.errors?.length ?? 0) > 0 || answer.data === null || typeof answer.data !== 'object') return false;
+  return Object.values(answer.data as Record<string, unknown>).every((result) => result !== null && (typeof result !== 'object' || (result as { success?: unknown }).success !== false));
+}
+
+/** Every `id` and `title` value in a GraphQL request's variables. */
+export function writeFields(body: string): { ids: string[]; titles: string[] } {
+  const ids: string[] = [];
+  const titles: string[] = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) node.forEach(walk);
+    else if (node !== null && typeof node === 'object') {
+      for (const [key, value] of Object.entries(node)) {
+        if (key === 'id' && typeof value === 'string') ids.push(value);
+        else if (key === 'title' && typeof value === 'string') titles.push(value);
+        else walk(value);
+      }
+    }
+  };
+  try {
+    walk((JSON.parse(body) as { variables?: unknown }).variables);
+  } catch {
+    // Not JSON: no fields.
+  }
+  return { ids, titles };
+}
+
+/** Whether a write names the rejected document: by its id, or by a title whose last segment is the document's name. */
+function namesDocument(body: string, fault: { ids: readonly string[]; titles: readonly string[] }): boolean {
+  const fields = writeFields(body);
+  return fields.ids.some((id) => fault.ids.includes(id)) || fields.titles.some((title) => fault.titles.some((name) => title === name || title.endsWith(`/${name}`)));
 }
 
 export interface FaultProxy {
@@ -104,6 +174,8 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
     const bearer = /^Bearer (\S+)$/.exec(String(request.headers.authorization ?? ''))?.[1];
     if (bearer !== undefined) tokens.add(bearer);
 
+    // A lost-answer fault for this write, used up only once the write has reached Linear.
+    let dropAnswer: (Fault & { used?: number }) | undefined;
     for (const fault of faults) {
       const used = fault.used ?? 0;
       if (fault.kind === 'http') {
@@ -117,7 +189,12 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
           record(fault.status, true);
           return;
         }
-      } else if (fault.kind === 'write-error' && WRITE_OPERATIONS.test(operation) && used < fault.times) {
+      } else if (fault.kind === 'write-error' && WRITE_OPERATIONS.test(operation) && used < fault.times && (fault.operation === undefined || (fault.operation === 'create') === /create/i.test(operation))) {
+        if (fault.variant === 'reset-after-apply') {
+          // Decided after every other fault had its say: a rejection or a "not found" still answers first.
+          dropAnswer ??= fault;
+          continue;
+        }
         fault.used = used + 1;
         if (fault.variant === 'reset') {
           record('reset', true);
@@ -127,7 +204,7 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
         response.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ errors: [{ message: 'injected fault' }] }));
         record(500, true);
         return;
-      } else if (fault.kind === 'reject-document' && kind === 'mutation' && WRITE_OPERATIONS.test(operation) && names(text, fault.target)) {
+      } else if (fault.kind === 'reject-document' && kind === 'mutation' && WRITE_OPERATIONS.test(operation) && namesDocument(text, fault)) {
         response.writeHead(200, { 'content-type': 'application/json' }).end(
           JSON.stringify({ data: null, errors: [{ message: 'injected rejection', extensions: { code: 'INPUT_ERROR', userPresentableMessage: 'rejected' } }] }),
         );
@@ -181,6 +258,16 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
       }
     }
     let payload: Buffer = Buffer.from(await upstreamResponse.arrayBuffer());
+    // A lost answer only for a write Linear applied: a refused one (GraphQL errors come with HTTP 200) is passed
+    // on as it is, and the fault stays armed for the next write.
+    if (dropAnswer !== undefined && upstreamResponse.ok && writeApplied(payload)) {
+      // Linear has the write and answered; the engine never hears it. The record keeps Linear's status, so the
+      // write counts as written for I9 and the writes subjects, and marks the lost answer.
+      dropAnswer.used = (dropAnswer.used ?? 0) + 1;
+      requests.push({ n, operation, kind, status: upstreamResponse.status, injected: false, answerDropped: true, at });
+      request.socket.destroy();
+      return;
+    }
     const gone = faults.flatMap((fault) => (fault.kind === 'document-gone' ? [fault.id] : []));
     if (gone.length > 0 && isGraphql) payload = withoutDocuments(payload, new Set(gone));
     response.writeHead(upstreamResponse.status, out).end(payload);
