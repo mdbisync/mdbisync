@@ -269,6 +269,19 @@ export function budgetHolds(requests: number, documentsWritten: number, runs: nu
 }
 
 /** Evaluates one assertion operator. */
+/** Whether a spec assertion holds now; `same-as` compares with the subject its `expected` names. */
+export async function assertionHolds(ctx: RunContext, assertion: Assertion): Promise<boolean> {
+  const actual = await resolveSubject(ctx, assertion.subject);
+  if (!actual.known) throw new HarnessGapError(`assertion subject ${assertion.subject}`);
+  let expected = assertion.expected;
+  if (assertion.operator === 'same-as') {
+    const other = await resolveSubject(ctx, String(assertion.expected));
+    if (!other.known) throw new HarnessGapError(`assertion subject ${String(assertion.expected)}`);
+    expected = other.value;
+  }
+  return compare(assertion.operator, actual.value, expected);
+}
+
 export function compare(operator: Assertion['operator'], actual: unknown, expected: unknown): boolean {
   switch (operator) {
     case 'equal':
@@ -771,15 +784,7 @@ export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
   refreshView(ctx);
   for (const assertion of ctx.scenario.checks.assertions) {
     try {
-      const actual = await resolveSubject(ctx, assertion.subject);
-      if (!actual.known) throw new HarnessGapError(`assertion subject ${assertion.subject}`);
-      let expected = assertion.expected;
-      if (assertion.operator === 'same-as') {
-        const other = await resolveSubject(ctx, String(assertion.expected));
-        if (!other.known) throw new HarnessGapError(`assertion subject ${String(assertion.expected)}`);
-        expected = other.value;
-      }
-      outcomes.push(compare(assertion.operator, actual.value, expected) ? ok(assertion.subject) : bad(assertion.subject, `${assertion.operator} did not hold`));
+      outcomes.push(await assertionHolds(ctx, assertion) ? ok(assertion.subject) : bad(assertion.subject, `${assertion.operator} did not hold`));
     } catch (error) {
       if (productFailure(error)) outcomes.push(bad(assertion.subject, (error as Error).message));
       else throw error;
