@@ -64,7 +64,7 @@ outputs:
   hooks:
     description: "`security-step: stage` only: the script of the hooks step."
   code:
-    description: "Why the run stopped before writing, for example `initial-sync-required`, or why a confirmed initial sync did not finish (`stopped`, `write-failed`, `state-moved`, `pull-request-failed`, `sync-branch-changed`), or why a sync's pull request step failed it (`check-failed` or `merge-blocked`, setup errors; `initial-pull-request-pending`; `state-moved` or `github-failed`, which a later run retries); empty when it finished."
+    description: "Why the run stopped before writing, for example `initial-sync-required`, or why a confirmed initial sync did not finish (`stopped`, `write-failed`, `state-moved`, `pull-request-failed`, `sync-branch-changed`), or why a sync's pull request step failed it (`check-failed` or `merge-blocked`, setup errors; `initial-pull-request-pending`; `state-moved` or `github-failed`, which a later run retries), or why a sync is partial (for example `removal-held`: Linear did not return documents while their place listed none, so their files stay until the next run confirms the removal); empty when it finished."
 runs:
   using: node24
   main: dist/action-main.js
