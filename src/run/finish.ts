@@ -2,7 +2,7 @@
 // for tests and tooling. Names, paths and states only, no content.
 
 import { writeFile } from 'node:fs/promises';
-import { type ConfirmedResult, type PlanReport, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
+import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type SyncRecord, type WriteResult } from '../sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
@@ -42,8 +42,25 @@ export interface RunReport {
   stoppedEarly: boolean;
   /** Every document this run wrote has its id in the `ids` state ref. */
   progressRecorded: boolean;
-  /** The `linear` record this run made or confirmed; null when it recorded none. */
+  /** The `linear` record an initial sync from git to Linear made or confirmed; null otherwise (a run from Linear reports its record under `linearToGit`). */
   record: { kind: 'initial'; commit: string; moved: boolean; hasTrackedParent: boolean; reformattedCount: number } | null;
+  /** A confirmed initial sync from Linear: what it took and the pull request it left for a person; null for other runs. */
+  linearToGit: ReverseReport | null;
+}
+
+export interface ReverseReport {
+  complete: boolean;
+  overwritten: string[];
+  created: string[];
+  skippedCompleted: string[];
+  removed: string[];
+  leftOutAtRecord: Array<{ path: string; rule: string }>;
+  notAttempted: string[];
+  stopped: WriteStop | null;
+  progressPushes: number;
+  /** The record commit, which is also the pull request's head. */
+  record: { commit: string; moved: boolean; hasTrackedParent: boolean; changesTracked: boolean } | null;
+  pullRequest: { number: number; url: string; opened: boolean } | null;
 }
 
 /** A sync run's writes to Linear, by path. */
@@ -82,12 +99,15 @@ export interface ConfirmedReport {
 export function toRunReport(outcome: OperationOutcome): RunReport {
   if (outcome.sync !== undefined) return toSyncRunReport(outcome, outcome.sync.write);
   const confirmed = outcome.confirmed;
+  const reverse = outcome.reverse;
   return {
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? confirmed?.code ?? null,
-    complete: confirmed?.complete ?? false,
-    changed: confirmed !== undefined && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true),
+    code: outcome.code ?? confirmed?.code ?? reverse?.code ?? null,
+    complete: confirmed?.complete ?? reverse?.complete ?? false,
+    changed:
+      (confirmed !== undefined && (confirmed.created.length + confirmed.overwritten.length + confirmed.trashed.length > 0 || confirmed.record?.moved === true)) ||
+      reverse?.record?.moved === true,
     setupChecks: (outcome.setup?.checks ?? []).map(({ name, state, detail }) => ({ name, state, detail })),
     securityHooks: outcome.setup?.securityHooks ?? null,
     notImplemented: outcome.notImplemented,
@@ -95,12 +115,12 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     initialSync: confirmed === undefined ? null : toConfirmedReport(confirmed),
     sync: null,
     writtenCount: confirmed === undefined ? 0 : confirmed.created.length + confirmed.overwritten.length,
-    skippedCompletedCount: confirmed?.skippedCompleted.length ?? 0,
+    skippedCompletedCount: confirmed?.skippedCompleted.length ?? reverse?.skippedCompleted.length ?? 0,
     oversizeFiles: [...new Set((confirmed?.leftOutAtWrite ?? []).filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
-    resumed: confirmed?.resumed ?? false,
-    stoppedEarly: confirmed?.stopped !== undefined,
+    resumed: confirmed?.resumed ?? reverse?.resumed ?? false,
+    stoppedEarly: confirmed?.stopped !== undefined || reverse?.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
-    progressRecorded: confirmed?.progressRecorded ?? false,
+    progressRecorded: confirmed?.progressRecorded ?? (reverse !== undefined && reverse.code !== 'state-moved'),
     record:
       confirmed?.record == null
         ? null
@@ -111,6 +131,26 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
             hasTrackedParent: confirmed.record.hasTrackedParent,
             reformattedCount: confirmed.record.reformatted.length,
           },
+    linearToGit: reverse === undefined ? null : toReverseReport(reverse),
+  };
+}
+
+function toReverseReport(result: ReverseResult): ReverseReport {
+  return {
+    complete: result.complete,
+    overwritten: result.overwritten,
+    created: result.created,
+    skippedCompleted: result.skippedCompleted,
+    removed: result.removed,
+    leftOutAtRecord: result.leftOutAtRecord,
+    notAttempted: result.notAttempted,
+    stopped: result.stopped ?? null,
+    progressPushes: result.progressPushes,
+    record:
+      result.record === null
+        ? null
+        : { commit: result.record.linear, moved: result.record.moved, hasTrackedParent: result.record.hasTrackedParent, changesTracked: result.record.changesTracked },
+    pullRequest: result.pullRequest === null ? null : { number: result.pullRequest.number, url: result.pullRequest.url, opened: result.pullRequest.opened },
   };
 }
 
@@ -148,6 +188,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     stoppedEarly: write.stopped !== undefined,
     progressRecorded: write.code !== 'state-moved',
     record: null,
+    linearToGit: null,
   };
 }
 
