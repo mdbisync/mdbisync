@@ -7,23 +7,46 @@ import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem,
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
 import { lintText } from './lint.ts';
-import { end, parse, splitFile, start, visit } from './markdown.ts';
+import { end, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+
+/** What `fix` may know about the file beyond its text. */
+export interface FixOptions {
+  /**
+   * Whether the file a relative link points to exists. The sync uploads a
+   * linked file that exists, and Linear stores a link to an uploaded file
+   * differently from a link it cannot resolve. Without this, every linked
+   * file is taken to exist.
+   */
+  linkedFileExists?: (url: string) => boolean;
+}
+
+/**
+ * The existence check `fix` takes, by the sync's own rule: a link names a
+ * file the sync uploads when it resolves to a repository path, as the sync
+ * resolves it, and that path is a file.
+ */
+export function linkedFileCheck(documentPath: string, isFile: (path: string) => boolean): (url: string) => boolean {
+  return (url) => {
+    const target = resolveTarget(documentPath, url);
+    return target !== null && isFile(target);
+  };
+}
 
 /** Returns the text in Linear's form, or the text itself when lint finds a problem. */
-export function fixText(text: string): string {
+export function fixText(text: string, options: FixOptions = {}): string {
   if (lintText('', text).length > 0) return text;
   const { head, body } = splitFile(text);
-  const fixed = fixBody(body.replace(/\r\n?/g, '\n'));
+  const fixed = fixBody(body.replace(/\r\n?/g, '\n'), options);
   return head + fixed;
 }
 
-function fixBody(body: string): string {
+function fixBody(body: string, options: FixOptions): string {
   if (body.trim() === '') return '';
   let current = body;
   // A rewrite can expose another (an inline image leaves its paragraph):
   // repeat until the text no longer changes.
   for (let pass = 0; pass < 5; pass++) {
-    const next = new Writer(current, parse(current)).root();
+    const next = new Writer(current, parse(current), options).root();
     if (next === current) return next;
     current = next;
   }
@@ -43,10 +66,12 @@ class Writer {
   private readonly containers: Container[] = [];
   private readonly source: string;
   private readonly tree: Root;
+  private readonly options: FixOptions;
 
-  constructor(source: string, tree: Root) {
+  constructor(source: string, tree: Root, options: FixOptions) {
     this.source = source;
     this.tree = tree;
+    this.options = options;
     visit(tree, (node) => {
       if (node.type === 'definition' && !this.definitions.has(node.identifier)) this.definitions.set(node.identifier, node);
     });
@@ -131,9 +156,16 @@ class Writer {
     const indent = ' '.repeat(marker.split(' ')[0]!.length + 1);
     const [first] = item.children;
     const attachment = first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
-    if (attachment) {
-      // Linear turns a list item holding only a link to a file into a file block.
-      return `${marker} \n${indent}[${this.inline(attachment.children)}](${imageDestination(attachment.url)})`;
+    // A link to a file that does not exist is not uploaded: Linear keeps it as a link.
+    if (attachment && this.options.linkedFileExists?.(attachment.url) !== false) {
+      const label = this.inline(attachment.children);
+      const destination = imageDestination(attachment.url);
+      // Linear turns a list item holding only a link to an uploaded file into
+      // a block: a video player for a video, which it writes on the item's
+      // line, and a file block for any other file, which it writes below.
+      // The video form is recorded for bullet items only.
+      if (marker === '*' && VIDEO.test(attachment.url.split(/[?#]/)[0]!)) return `${marker} [${label}](${destination})`;
+      return `${marker} \n${indent}[${label}](${destination})`;
     }
     if (first === undefined) return marker;
     this.containers.push({ kind: 'item', indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
@@ -344,6 +376,18 @@ function destination(url: string): string {
 function imageDestination(url: string): string {
   return destination(url).replace(/[<>()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
+
+/** The destinations of relative links in the text (no scheme, not an anchor), as written. */
+export function relativeLinkUrls(text: string): Set<string> {
+  const urls = new Set<string>();
+  visit(parse(splitFile(text).body), (node) => {
+    if (node.type === 'link' && !/^[a-z][a-z0-9+.-]*:/i.test(node.url) && !node.url.startsWith('#')) urls.add(node.url);
+  });
+  return urls;
+}
+
+/** Video files Linear stores as a video block (recorded for these three; other types are unconfirmed). */
+const VIDEO = /\.(?:mp4|mov|webm)$/i;
 
 /** A paragraph that holds only a link to a relative file other than Markdown: an attachment. */
 function attachmentLink(paragraph: Paragraph): Link | undefined {

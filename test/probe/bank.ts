@@ -119,6 +119,9 @@ const CONTENT_TYPES: Record<string, string> = {
   csv: 'text/csv',
   txt: 'text/plain',
   json: 'application/json',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
 };
 
 export function contentTypeOf(file: string): string {

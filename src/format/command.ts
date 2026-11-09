@@ -1,9 +1,9 @@
 // The `lint` and `fix` commands: Markdown files given as paths (folders are
 // searched for `.md` files), checked or rewritten into Linear's form.
 
-import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { fixText } from './fix.ts';
+import { fixText, linkedFileCheck } from './fix.ts';
 import { duplicateTitles, lintText } from './lint.ts';
 import type { Finding } from './rules.ts';
 
@@ -57,6 +57,24 @@ function describe(findings: readonly Finding[]): string {
   return findings.map((finding) => `${finding.file}:${finding.line}: ${finding.rule}: ${finding.message}\n`).join('');
 }
 
+/**
+ * The existence check for `fix` on `file`, a path relative to `root` (the
+ * repository's top folder, where the hook runs): a link resolves as the
+ * sync resolves it, and must name a file there.
+ */
+export function linkedFileResolver(file: string, root: string): (url: string) => boolean {
+  return linkedFileCheck(file.split(sep).join('/'), (path) => isFileAt(join(root, path)));
+}
+
+/** Whether a regular file is there; a path the file system cannot hold (a NUL byte) names none. */
+function isFileAt(path: string): boolean {
+  try {
+    return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    return false;
+  }
+}
+
 /** `lint`: exit 1 and one line per finding when Linear would lose or alter something, or a file is not in Linear's form. */
 export function runLint(paths: readonly string[], cwd: string = process.cwd()): CommandResult {
   const problem = badPaths(paths, cwd);
@@ -67,7 +85,7 @@ export function runLint(paths: readonly string[], cwd: string = process.cwd()): 
   const unfixed = files.filter((file) => {
     if (failing.has(file)) return false;
     const text = readFileSync(join(cwd, file), 'utf8');
-    return fixText(text) !== text;
+    return fixText(text, { linkedFileExists: linkedFileResolver(file, cwd) }) !== text;
   });
   const stdout = describe(findings) + unfixed.map((file) => `${file}: not in Linear's form; run fix\n`).join('');
   return { exitCode: stdout === '' ? 0 : 1, stdout, stderr: '' };
@@ -85,7 +103,7 @@ export function runFix(paths: readonly string[], cwd: string = process.cwd()): C
     if (colliding.has(file)) continue;
     const path = join(cwd, file);
     const text = readFileSync(path, 'utf8');
-    const fixed = fixText(text);
+    const fixed = fixText(text, { linkedFileExists: linkedFileResolver(file, cwd) });
     if (fixed !== text) {
       writeFileSync(path, fixed);
       changed.push(file);

@@ -229,6 +229,13 @@ test('a rule on a fixture that is not a lint error is reported', () => {
   assert.ok(errors.includes('tables/table-basic.md: only lint-error fixtures have a rule'), errors.join('\n'));
 });
 
+test('corpus takes only false', () => {
+  const errors = withCopy((d) =>
+    editIndex(d, '  - file: "tables/table-basic.md"\n', '  - file: "tables/table-basic.md"\n    corpus: true\n'),
+  );
+  assert.ok(errors.includes('tables/table-basic.md: corpus is either false or left out'), errors.join('\n'));
+});
+
 test('a fixture outside its group folder is reported', () => {
   const errors = withCopy((d) =>
     editIndex(d, '  - file: "tables/table-basic.md"\n    group: tables', '  - file: "tables/table-basic.md"\n    group: links'),
