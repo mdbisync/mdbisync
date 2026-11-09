@@ -619,16 +619,16 @@ async function localHookConfig(root: string): Promise<string> {
   return preCommitConfig(revision).replace('https://github.com/mdbisync/mdbisync', repo);
 }
 
-/**
- * A converged run world: a tracked branch with two project folders and three
- * documents, their ids ref, and Linear holding the same texts. With `hooks`,
- * the person's commits go through the corpus's hooks from a local hook repository.
- */
 /** A finished engine run with the given report, as the harness records it. */
 function engineRun(command: EngineResult['command'], report: Record<string, unknown>): EngineResult {
   return { command, exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report };
 }
 
+/**
+ * A converged run world: a tracked branch with two project folders and three
+ * documents, their ids ref, and Linear holding the same texts. With `hooks`,
+ * the person's commits go through the corpus's hooks from a local hook repository.
+ */
 async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
@@ -1589,6 +1589,13 @@ describe('subjects', () => {
     const tooLong = initial({ leftOutAtWrite: [{ path: 'c.md', rule: 'content-too-long' }] });
     assert.deepEqual([...deliberateOmissions([tooLong, sync({})])], [['c.md', 'write: content-too-long']]);
     assert.equal(deliberateOmissions([tooLong, sync({}), sync({ updated: ['c.md'] })]).size, 0);
+    // A later write that fails, is skipped, is not reached or moves a document onto the path also ends it.
+    for (const fields of [{ failed: [{ path: 'c.md', operation: 'create', error: 'Fault' }] }, { skipped: [{ path: 'c.md', reason: 'conflict' }] }, { notAttempted: ['c.md'] }, { relocated: [{ from: 'b.md', to: 'c.md' }] }]) {
+      assert.equal(deliberateOmissions([tooLong, sync(fields)]).size, 0, JSON.stringify(fields));
+    }
+    // A plan entry for an upload rule needs its files too.
+    assert.equal(deliberateOmissions([initial({}, [{ path: 'e.md', rules: ['upload-too-large'] }])]).size, 0);
+    assert.deepEqual([...deliberateOmissions([initial({}, [{ path: 'e.md', rules: ['upload-too-large'], files: ['e.bin'] }])])], [['e.md', 'lint: upload-too-large']]);
   });
 
   it('tell a trashed document from an archived or missing one in I7, reading unlisted ids one by one', async () => {

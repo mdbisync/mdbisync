@@ -8,6 +8,7 @@ import { join, posix } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import type { Definition, Image, Link, Nodes } from 'mdast';
 import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
+import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../../../src/initial-sync/uploads.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
@@ -300,23 +301,34 @@ export interface Sides {
 }
 
 /** Rules of files left out because of files they link; such an entry names those files. */
-const RULES_WITH_FILES = new Set(['upload-too-large', 'upload-unreadable']);
+const RULES_WITH_FILES = new Set([UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE]);
+
+/** Report lists of paths a run wrote, tried to write or held back: any of them ends a write-time omission. */
+const DECIDED_PATHS = ['created', 'overwritten', 'unchanged', 'updated', 'adopted', 'restored', 'notAttempted'];
+/** Report lists of entries with a path that do the same: failed and skipped writes. */
+const DECIDED_ENTRIES = ['failed', 'skipped'];
 
 /**
  * The files the runs left out on purpose, from their own reports, in run
- * order: the latest decision about a path wins. A run that wrote a path
- * (created, overwrote, updated, adopted, restored or found it unchanged)
- * takes it back in. A run that lists every left-out file of its tree (a
- * sync's `sync.leftOut`, a confirmed initial sync's plan) replaces the
- * lint-time omissions; a write-time omission (`leftOutAtWrite`) stays until
- * a run writes the path. An entry counts only with its rule and, for a rule
- * found from linked files, those files: anything else is unexplained.
+ * order: the latest decision about a path wins. A run that wrote a path, or
+ * tried to (created, overwrote, updated, relocated, adopted, restored, found
+ * it unchanged, failed, skipped or did not reach it), takes it back in. A
+ * run that lists every left-out file of its tree (a sync's `sync.leftOut`, a
+ * confirmed initial sync's plan) replaces the lint-time omissions; a
+ * write-time omission (`leftOutAtWrite`) stays until a run decides
+ * otherwise about the path. An entry counts only with its rule and, for a
+ * rule found from linked files, those files: anything else is unexplained.
  */
 export function deliberateOmissions(results: readonly Pick<EngineResult, 'report'>[]): Map<string, string> {
   const lint = new Map<string, string>();
   const write = new Map<string, string>();
   const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
   const record = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : null);
+  /** An entry's rules, or none when a rule found from linked files does not name them. */
+  const explained = (entry: Record<string, unknown> | null, rules: unknown[]): string[] => {
+    const named = rules.filter((rule): rule is string => typeof rule === 'string' && rule !== '');
+    return named.some((rule) => RULES_WITH_FILES.has(rule)) && list(entry?.['files']).length === 0 ? [] : named;
+  };
   for (const { report } of results) {
     const initial = record(report?.['initialSync']);
     const sync = record(report?.['sync']);
@@ -324,20 +336,21 @@ export function deliberateOmissions(results: readonly Pick<EngineResult, 'report
     const full = sync !== null ? list(sync['leftOut']) : list(record(report?.['summary'])?.['leftOutFiles']);
     lint.clear();
     for (const entry of full.map(record)) {
-      const rules = list(entry?.['rules']).filter((rule): rule is string => typeof rule === 'string' && rule !== '');
+      const rules = explained(entry, list(entry?.['rules']));
       if (typeof entry?.['path'] === 'string' && rules.length > 0) lint.set(entry['path'], `lint: ${rules.join(', ')}`);
     }
     for (const side of [initial, sync]) {
       if (side === null) continue;
-      for (const key of ['created', 'overwritten', 'unchanged', 'updated', 'adopted', 'restored']) {
-        for (const path of list(side[key])) if (typeof path === 'string') write.delete(path);
-      }
+      const decided = [
+        ...DECIDED_PATHS.flatMap((key) => list(side[key])),
+        ...DECIDED_ENTRIES.flatMap((key) => list(side[key]).map((entry) => record(entry)?.['path'])),
+        ...list(side['relocated']).map((entry) => record(entry)?.['to']),
+      ];
+      for (const path of decided) if (typeof path === 'string') write.delete(path);
       for (const entry of list(side['leftOutAtWrite']).map(record)) {
         const path = entry?.['path'];
-        const rule = entry?.['rule'];
-        if (typeof path !== 'string' || typeof rule !== 'string' || rule === '') continue;
-        if (RULES_WITH_FILES.has(rule) && list(entry?.['files']).length === 0) continue;
-        write.set(path, `write: ${rule}`);
+        const rules = explained(entry, [entry?.['rule']]);
+        if (typeof path === 'string' && rules.length > 0) write.set(path, `write: ${rules.join(', ')}`);
       }
     }
   }
