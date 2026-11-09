@@ -14,7 +14,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { runCli } from '../../src/cli.ts';
-import { splitFile } from '../../src/format/index.ts';
+import { fixText, splitFile } from '../../src/format/index.ts';
 import { collectAnnotations } from '../../src/mapping/index.ts';
 import { type RunReport } from '../../src/run/finish.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../../src/setup/test-helpers.ts';
@@ -53,7 +53,8 @@ function worldFor(files: ReadonlyMap<string, Buffer>): FakeWorld {
 describe('confirmed initial sync over the generated corpus (offline)', () => {
   let corpus: Corpus;
   before(() => {
-    corpus = buildCorpus();
+    // The hook revision only fills the corpus's .pre-commit-config.yaml, which this test replaces.
+    corpus = buildCorpus("a".repeat(40));
   });
 
   for (const slice of ['mini', 'bank', 'mid'] as const) {
@@ -73,6 +74,8 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
         await fixture.seed(Object.fromEntries(files), lfs.length > 0 ? { lfs } : {});
         cwd = (await fixture.clone('work')).dir;
         world = worldFor(files);
+        // Like Linear, the fake stores Markdown in its own form; the corpus is not written in that form.
+        world.linear.store = (content) => fixText(content);
       });
       after(() => fixture.cleanup());
 
@@ -124,16 +127,24 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
           const document = live.find((d) => d.id === entry.id);
           assert.ok(document !== undefined, `${path} has no document (I7)`);
           const source = files.get(path) as Buffer;
-          const body = splitFile(source.toString('utf8')).body;
+          const { head, body } = splitFile(source.toString('utf8'));
           // Compare in git's form: uploads and document links have URLs in Linear.
           const spellings: LinkSpellings = new Map();
           linksToLinear(body, path, linkMap, spellings);
           const restoredLinks = linksFromLinear(document.content ?? '', path, linkMap, spellings);
           const linkedFiles = findFileLinks(path, body, target => !target.endsWith('.md') && files.has(target));
           const written = linkedFiles.map(link => ({raw:link.raw, suffix:link.suffix, hash:createHash('sha256').update(files.get(link.target)!).digest('hex')}));
-          assert.equal(restoreFileLinks(restoredLinks, written, uploads), body, `${path} differs (I1)`);
+          let uploaded = body;
+          for (const link of [...linkedFiles].reverse()) {
+            const hash = createHash('sha256').update(files.get(link.target)!).digest('hex');
+            const url = uploads.get(hash);
+            assert.ok(url !== undefined, `${path}: missing upload`);
+            uploaded = uploaded.slice(0, link.from) + url + link.suffix + uploaded.slice(link.to);
+          }
+          assert.equal(document.content, fixText(linksToLinear(uploaded, path, linkMap)), `${path} differs (I1, in Linear's form)`);
+          const restored = restoreFileLinks(restoredLinks, written, uploads);
           const recorded = await fixture.remote.run(['show', `refs/mdbisync/linear:${path}`]);
-          assert.deepEqual(recorded.stdout, source, `${path}: recorded git bytes differ (I1)`);
+          assert.deepEqual(recorded.stdout, Buffer.from(head + restored), `${path}: recorded git bytes differ (I1)`);
         }
         assert.equal(live.length, Object.keys(ids).length, 'documents without a path, or duplicates (I8)');
         const keys = live.map((d) => `${d.projectId ?? d.teamId}\0${d.title}`);
