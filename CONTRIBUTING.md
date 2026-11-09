@@ -33,6 +33,10 @@ need npm 11.16.0 or newer; with an older npm those runs are reported as
 blocked by the environment. Tests that talk to Linear or GitHub
 are skipped unless you set the variables below.
 
+The scenario harness (building the corpus, running scenarios, reading their
+reports and the credentials of live runs) is described in
+[test/README.md](test/README.md).
+
 ## Live tests with your own Linear workspace
 
 The live tests create and delete their own data. Use a workspace and a
