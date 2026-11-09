@@ -16,17 +16,18 @@ export const MINI_DOCUMENTS = 12;
 export const MID_DOCUMENTS = 200;
 
 /**
- * Documents the mid slice always keeps, by seed, because checks name them and
- * a random pick could drop them at the next generation. Each carries a list
- * construct whose Linear form once differed from what `fix` wrote:
- * - task-code-3: an image at the end of a list item's paragraph, and a task
- *   list with `- [X]`;
+ * Documents the mid slice always keeps, by seed, because live checks over mid
+ * name them (a second initial sync must leave each of them alone) and a
+ * random pick could drop them at the next generation:
+ * - task-code-3: a task list with `- [X]`, and an image that ended a list
+ *   item's paragraph, which the corpus (written in Linear's form) holds as
+ *   its own paragraph in the item;
  * - kitewing-4-28-2: a link to a video alone in a bullet item;
- * - kitewing-4-22-0: named by the second-initial-sync check over mid, which
- *   expects it written once and then left alone.
+ * - kitewing-4-22-0: no list construct of its own any more; kept because
+ *   those checks name it.
  * Each replaces the last random pick of its group; its linked files come
- * with it through the slice's closure. Another seed
- * writes other paths, so it pins nothing.
+ * with it through the slice's closure. Another seed writes other paths, so
+ * it pins nothing.
  */
 export const MID_REGRESSIONS: Readonly<Record<string, readonly string[]>> = {
   "corpus-v1": [
@@ -35,6 +36,11 @@ export const MID_REGRESSIONS: Readonly<Record<string, readonly string[]>> = {
     "docs/release notes/releases/2025/kitewing-4-22-0.md",
   ],
 };
+
+/** The documents mid pins for a seed; none for a seed the list does not name. */
+export function midRegressions(seed: string): readonly string[] {
+  return Object.hasOwn(MID_REGRESSIONS, seed) ? (MID_REGRESSIONS[seed] as readonly string[]) : [];
+}
 
 const SUPPORT = [".gitattributes", ".pre-commit-config.yaml", CHECK_WORKFLOW_PATH];
 
@@ -86,7 +92,8 @@ function pickMini(files: CorpusFile[]): string[] {
   return documents;
 }
 
-function pickMid(files: CorpusFile[], rng: Rng, pinned: readonly string[]): string[] {
+/** The mid slice's documents before the closure; exported for its tests. */
+export function pickMid(files: CorpusFile[], rng: Rng, pinned: readonly string[]): string[] {
   // Colliding names only make sense as a pair and cannot be checked out on
   // macOS, so they stay in the bank and full slices.
   const documents = files

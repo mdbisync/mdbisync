@@ -14,7 +14,7 @@ import { documents } from "./documents.ts";
 import { fixText, linkedFileCheck } from "../../src/format/index.ts";
 import { Canaries, isLfs, type CorpusFile } from "./model.ts";
 import { Rng } from "./rng.ts";
-import { makeSlices, MID_REGRESSIONS, SLICES, type Slice } from "./slices.ts";
+import { makeSlices, midRegressions, SLICES, type Slice } from "./slices.ts";
 import { BANK_HOME, treeFiles } from "./tree.ts";
 
 export const DEFAULT_SEED = "corpus-v1";
@@ -129,7 +129,7 @@ export function buildCorpus(hookRevision: string, seed: string = DEFAULT_SEED, b
     })),
     excluded: bank.excluded,
   };
-  return { files, manifest, slices: makeSlices(files, rng.fork("slices"), MID_REGRESSIONS[seed] ?? []) };
+  return { files, manifest, slices: makeSlices(files, rng.fork("slices"), midRegressions(seed)) };
 }
 
 /** Writes `corpus/` and `corpus-slices/` under the output folder. */

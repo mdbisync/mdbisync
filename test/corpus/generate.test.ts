@@ -13,7 +13,7 @@ import { buildCorpus, DEFAULT_SEED, writeCorpus } from "./generate.ts";
 import { parse } from "yaml";
 import { CONTENT_LIMIT, gitattributes, SHARED_IMAGE_USERS } from "./model.ts";
 import { Rng } from "./rng.ts";
-import { makeSlices, MID_REGRESSIONS, MINI_DOCUMENTS } from "./slices.ts";
+import { makeSlices, MID_REGRESSIONS, midRegressions, MINI_DOCUMENTS, pickMid } from "./slices.ts";
 import { fixText, linkedFileCheck, lintText } from "../../src/format/index.ts";
 import { COLLISIONS, EDGE, EDGE_ZONE, LOOSE, preCommitConfig } from "./tree.ts";
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from "./check-workflow.ts";
@@ -155,6 +155,12 @@ test("the mid slice keeps the named list-construct documents with their linked f
   const built = corpus();
   const pinned = MID_REGRESSIONS[DEFAULT_SEED];
   assert.ok(pinned, "the default seed pins its mid regressions");
+  const [taskCode, video, named] = pinned;
+  assert.deepEqual(pinned, [
+    "eng/edge-cases/formatting/task-code-3.md",
+    "docs/release notes/releases/2025/kitewing-4-28-2.md",
+    "docs/release notes/releases/2025/kitewing-4-22-0.md",
+  ], "the paths the live checks name");
   const mid = new Set(built.slices.mid);
   const byPath = new Map(built.files.map((f) => [f.path, f]));
   for (const path of pinned) {
@@ -162,34 +168,36 @@ test("the mid slice keeps the named list-construct documents with their linked f
     assert.ok(file && mid.has(path), `mid keeps ${path}`);
     for (const target of file.links) assert.ok(mid.has(target), `mid keeps ${target}, linked from ${path}`);
   }
-  // The constructs the checks need are still where the list says, so a change
-  // to the generated text fails here instead of quietly emptying the check.
+  // The constructs are still where the list says, so a change to the
+  // generated text fails here instead of quietly emptying the live checks.
+  // The corpus is in Linear's form: the image that ended an item's paragraph
+  // is its own paragraph in the item.
   const text = (path: string) => byPath.get(path)!.content.toString("utf8");
-  const taskCode = text("eng/edge-cases/formatting/task-code-3.md");
-  assert.match(taskCode, /^- \[X\] /m);
-  assert.match(taskCode, /^\* .+\n\n {2}!\[[^\]]*\]\(\.\.\/\.\.\/platform\/assets\/status-icon\.png\)$/m);
-  assert.deepEqual(byPath.get("eng/edge-cases/formatting/task-code-3.md")!.links, ["eng/platform/assets/status-icon.png"]);
-  assert.match(text("docs/release notes/releases/2025/kitewing-4-28-2.md"), /^\* \[[^\]]+\]\(\.\.\/\.\.\/media\/screen-recording-397\.mp4\)$/m);
-  assert.deepEqual(byPath.get("docs/release notes/releases/2025/kitewing-4-28-2.md")!.links, ["docs/release notes/media/screen-recording-397.mp4"]);
+  assert.match(text(taskCode!), /^- \[X\] /m);
+  assert.match(text(taskCode!), /^\* .+\n\n {2}!\[[^\]]*\]\(\.\.\/\.\.\/platform\/assets\/status-icon\.png\)$/m);
+  assert.deepEqual(byPath.get(taskCode!)!.links, ["eng/platform/assets/status-icon.png"]);
+  assert.match(text(video!), /^\* \[[^\]]+\]\(\.\.\/\.\.\/media\/screen-recording-397\.mp4\)$/m);
+  assert.deepEqual(byPath.get(video!)!.links, ["docs/release notes/media/screen-recording-397.mp4"]);
+  assert.ok(byPath.get(named!)!.synced, named);
 });
 
-test("pinning keeps a document the seeded pick alone leaves out, and refuses a path mid cannot take", () => {
+test("a pinned document replaces one random pick of its group, and mid refuses a path it cannot take", () => {
   const built = corpus();
   const rng = () => new Rng(DEFAULT_SEED).fork("slices");
-  const pinned = MID_REGRESSIONS[DEFAULT_SEED]!;
-  // The same random pick, without the list: at least one named document drops out.
-  const unpinned = new Set(makeSlices(built.files, rng()).mid);
-  const added = pinned.filter((path) => !unpinned.has(path));
-  assert.ok(added.length > 0, "the pinned list is needed for this seed");
-  assert.deepEqual(makeSlices(built.files, rng(), pinned).mid, built.slices.mid);
-  // Each added document replaces one random pick of its group; the rest of mid stays.
   const byPath = new Map(built.files.map((f) => [f.path, f]));
-  const documents = (paths: Iterable<string>) => new Set([...paths].filter((p) => byPath.get(p)!.synced && byPath.get(p)!.kind === "markdown"));
-  const before = documents(unpinned);
-  const after = documents(built.slices.mid);
-  assert.deepEqual([...after].filter((p) => !before.has(p)).sort(), [...added].sort());
-  const dropped = [...before].filter((p) => !after.has(p));
-  assert.deepEqual(dropped.map((p) => byPath.get(p)!.group).sort(), added.map((p) => byPath.get(p)!.group).sort());
+  const unpinned = pickMid(built.files, rng(), []);
+  // Any mid document the seeded pick leaves out, whatever the seed happens to pick.
+  const outside = built.files.find((f) => f.synced && f.kind === "markdown" && f.group === "work-documents" && !f.macosUnsafe && !unpinned.includes(f.path))!;
+  const pinned = pickMid(built.files, rng(), [outside.path]);
+  assert.deepEqual(pinned.filter((p) => !unpinned.includes(p)), [outside.path]);
+  const dropped = unpinned.filter((p) => !pinned.includes(p));
+  assert.equal(dropped.length, 1);
+  assert.equal(byPath.get(dropped[0]!)!.group, outside.group);
+  // A document the seed picks anyway changes nothing.
+  assert.deepEqual(pickMid(built.files, rng(), [unpinned[unpinned.length - 1]!]).sort(), [...unpinned].sort());
+  assert.deepEqual(makeSlices(built.files, rng(), MID_REGRESSIONS[DEFAULT_SEED]).mid, built.slices.mid);
+  // A seed the list does not name pins nothing, even one named like an Object property.
+  for (const seed of ["seed-two", "constructor", "toString", "__proto__"]) assert.deepEqual(midRegressions(seed), [], seed);
   assert.throws(() => makeSlices(built.files, rng(), ["docs/no-such-page.md"]), /must keep docs\/no-such-page\.md/);
   assert.throws(() => makeSlices(built.files, rng(), ["eng/README.md"]), /must keep eng\/README\.md/);
 });
