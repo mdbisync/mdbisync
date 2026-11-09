@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { splitFile } from '../format/markdown.ts';
-import { MARKERS, RESTORED_COMMENT, RETITLED_COMMENT, resolveStructural } from './index.ts';
+import { detectConflicts, MARKERS, RETITLED_COMMENT, resolveStructural } from './index.ts';
 import type { StructuralInput, StructuralResult, Version } from './index.ts';
 
 // A small fake world: one document with an id, a tracked branch that maps
@@ -24,6 +24,7 @@ interface World {
 }
 
 const ID = 'doc-1';
+const EARLIER_COMMENT = 'Please check the install steps.';
 const BASE: Version = { path: 'guides/setup.md', text: '---\nowner: docs\n---\n\nIntro.\n\nInstall the tool.\n\nRun it.\n' };
 
 function world(git: Version | null, linear: Version | null, gone = false): World {
@@ -32,8 +33,8 @@ function world(git: Version | null, linear: Version | null, gone = false): World
   const docs = new Map<string, Doc>();
   if (!gone) {
     docs.set(ID, linear === null
-      ? { path: BASE.path, body: splitFile(BASE.text).body, trashed: true, comments: [] }
-      : { path: linear.path, body: splitFile(linear.text).body, trashed: false, comments: [] });
+      ? { path: BASE.path, body: splitFile(BASE.text).body, trashed: true, comments: [EARLIER_COMMENT] }
+      : { path: linear.path, body: splitFile(linear.text).body, trashed: false, comments: [EARLIER_COMMENT] });
   }
   return { files, docs, gone };
 }
@@ -95,7 +96,8 @@ test('L3-15: deleted in git, edited in Linear: the document stays and the file c
   assert.equal(result.git, 'restore');
   assert.deepEqual(result.linear, { restore: false, create: false, trash: false, retitle: false, write: false });
   assert.equal(result.text, linear.text, 'Linear text with the last known front matter');
-  assert.match(result.summary!, /^guides\/setup\.md: deleted in git but changed in Linear; .*comes back through the sync pull request$/);
+  assert.equal(result.summary!.code, 'edit-wins-delete');
+  assert.match(result.summary!.text, /^guides\/setup\.md: deleted in git but changed in Linear; .*comes back through the sync pull request$/);
   assertConverged(state, BASE.path);
   assertHas(state, 'Run it twice.');
 });
@@ -107,16 +109,19 @@ test('L3-15 variant: deleted in git, renamed in Linear: a rename is a change, so
   assertConverged(state, 'guides/install.md');
 });
 
-test('L3-16: deleted in Linear, edited in git: the same document is restored with the git text and a comment', async () => {
+test('L3-16: deleted in Linear, edited in git: the same document is restored with the git text and its comments as they were', async () => {
   const git = edit(BASE, 'Install the tool.', 'Install the tool with npm.');
   const { result, state } = await run(git, null);
   assert.equal(result.kind, 'linear-deleted-git-changed');
   assert.equal(result.git, 'none');
-  assert.deepEqual(result.linear, { restore: true, create: false, trash: false, retitle: true, write: true, comment: RESTORED_COMMENT });
-  assert.equal(result.summary, 'guides/setup.md: deleted in Linear but changed in git; the document is restored with the git text');
+  assert.deepEqual(result.linear, { restore: true, create: false, trash: false, retitle: true, write: true });
+  assert.deepEqual(result.summary, {
+    code: 'edit-wins-delete',
+    text: 'guides/setup.md: deleted in Linear but changed in git; the document is restored with the git text',
+  });
   const doc = assertConverged(state, BASE.path);
   assert.equal(state.docs.size, 1, 'restored, not recreated');
-  assert.deepEqual(doc.comments, [RESTORED_COMMENT]);
+  assert.deepEqual(doc.comments, [EARLIER_COMMENT], 'comments unchanged');
   assertHas(state, 'Install the tool with npm.');
   assert.equal(state.files.get(BASE.path), git.text, 'git front matter kept');
 });
@@ -133,8 +138,9 @@ test('L3-16 variant: deleted in Linear, renamed and edited in git: restored unde
 test('L3-16 variant: the document is gone from Linear for good: a new one is created with the git text', async () => {
   const git = edit(BASE, 'Run it.', 'Run it again.');
   const { result, state } = await run(git, null, true);
-  assert.deepEqual(result.linear, { restore: false, create: true, trash: false, retitle: false, write: true, comment: RESTORED_COMMENT });
-  assert.match(result.summary!, /gone from Linear, so a new one was created .*old comments are lost$/);
+  assert.deepEqual(result.linear, { restore: false, create: true, trash: false, retitle: false, write: true });
+  assert.equal(result.summary!.code, 'edit-wins-delete');
+  assert.match(result.summary!.text, /gone from Linear, so a new one was created .*old comments are lost$/);
   assertConverged(state, BASE.path);
   assertHas(state, 'Run it again.');
 });
@@ -149,7 +155,10 @@ test('L3-17: renamed in Linear, edited in git: both apply and the file moves', a
   assert.equal(result.linear.retitle, false);
   assert.equal(result.linear.write, true);
   assert.equal(result.linear.comment, undefined);
-  assert.equal(result.summary, 'guides/setup.md → guides/install.md: renamed in Linear and edited in git; both applied');
+  assert.deepEqual(result.summary, {
+    code: 'rename-and-edit',
+    text: 'guides/setup.md → guides/install.md: renamed in Linear and edited in git; both applied',
+  });
   assertConverged(state, 'guides/install.md');
   assertHas(state, 'Install the tool first.');
   assert.ok(result.text!.startsWith('---\nowner: docs\n---\n'), 'git front matter kept');
@@ -163,7 +172,10 @@ test('L3-18: renamed in git, edited in Linear: both apply and the title follows 
   assert.equal(result.git, 'none');
   assert.equal(result.linear.retitle, true);
   assert.equal(result.linear.write, false, 'Linear already holds the merged body');
-  assert.equal(result.summary, 'guides/setup.md → guides/install.md: renamed in git and edited in Linear; both applied');
+  assert.deepEqual(result.summary, {
+    code: 'rename-and-edit',
+    text: 'guides/setup.md → guides/install.md: renamed in git and edited in Linear; both applied',
+  });
   assertConverged(state, 'guides/install.md');
   assertHas(state, 'A short intro.');
 });
@@ -176,10 +188,12 @@ test('L3-19: renamed differently on both sides: the git path wins, the title is 
   assert.equal(result.path, 'guides/install.md');
   assert.equal(result.git, 'none');
   assert.deepEqual(result.linear, { restore: false, create: false, trash: false, retitle: true, write: true, comment: RETITLED_COMMENT });
-  assert.equal(result.summary,
-    'guides/setup.md: renamed to guides/install.md in git and to guides/getting-started.md in Linear; the git path wins and the Linear title is set back');
+  assert.deepEqual(result.summary, {
+    code: 'git-path-wins',
+    text: 'guides/setup.md: renamed to guides/install.md in git and to guides/getting-started.md in Linear; the git path wins and the Linear title is set back',
+  });
   const doc = assertConverged(state, 'guides/install.md');
-  assert.deepEqual(doc.comments, [RETITLED_COMMENT]);
+  assert.deepEqual(doc.comments, [EARLIER_COMMENT, RETITLED_COMMENT]);
   assertHas(state, 'Intro from git.', 'Run it from Linear.');
 });
 
@@ -189,10 +203,27 @@ test('a structural case with a same-paragraph edit keeps both versions inside ma
   const { result, state } = await run(git, linear);
   assert.equal(result.kind, 'git-renamed');
   assert.equal(result.conflicts.length, 1);
-  assert.match(result.summary!, /both applied; 1 text conflict is marked in the document$/);
+  assert.match(result.summary!.text, /both applied; 1 text conflict is marked in the document$/);
   assert.equal(result.linear.write, true);
   assertConverged(state, 'guides/install.md');
   assertHas(state, MARKERS.git, 'Run it in git.', MARKERS.linear, 'Run it in Linear.', MARKERS.end);
+});
+
+test('markers already in the kept version are reported when the other side deleted the document', async () => {
+  const marked = await resolveStructural({
+    base: BASE,
+    git: move(edit(BASE, 'Run it.', 'Run it in git.'), 'guides/install.md'),
+    linear: edit(BASE, 'Run it.', 'Run it in Linear.'),
+  });
+  const open: Version = { path: 'guides/install.md', text: marked.text! };
+  const base: Version = { ...open, path: BASE.path };
+  for (const [git, linear] of [[null, open], [open, null]] as const) {
+    const result = await resolveStructural({ base: { ...base, text: BASE.text }, git, linear });
+    assert.equal(result.summary!.code, 'edit-wins-delete');
+    assert.deepEqual(result.conflicts, detectConflicts(open.text));
+    assert.equal(result.conflicts.length, 1);
+    assert.match(result.summary!.text, /; 1 text conflict is marked in the document$/);
+  }
 });
 
 test('renamed to the same path on both sides: one rename, merged text, no comment', async () => {
@@ -204,6 +235,32 @@ test('renamed to the same path on both sides: one rename, merged text, no commen
   assert.equal(result.linear.comment, undefined);
   assertConverged(state, 'guides/install.md');
   assertHas(state, 'Intro, git.', 'Run it, Linear.');
+});
+
+test('the same name in NFC and NFD is the same path: not a rename, and not two different renames', async () => {
+  const nfc = 'guides/café.md';
+  const nfd = 'guides/café.md';
+  const same = await resolveStructural({ base: BASE, git: move(BASE, nfd), linear: move(BASE, nfc) });
+  assert.equal(same.kind, 'same-rename');
+  assert.equal(same.linear.comment, undefined);
+
+  const unchanged = await resolveStructural({ base: { ...BASE, path: nfc }, git: { ...BASE, path: nfd }, linear: null });
+  assert.equal(unchanged.kind, 'linear-deleted', 'a decomposed name alone is no change');
+});
+
+test('line endings alone are no edit: a delete stays a delete, and Linear gets no write', async () => {
+  const crlf: Version = { ...BASE, text: BASE.text.replaceAll('\n', '\r\n') };
+  const gitDeleted = await resolveStructural({ base: crlf, git: null, linear: BASE });
+  assert.equal(gitDeleted.kind, 'git-deleted');
+  assert.equal(gitDeleted.linear.trash, true);
+
+  const linearDeleted = await resolveStructural({ base: BASE, git: crlf, linear: null });
+  assert.equal(linearDeleted.kind, 'linear-deleted');
+
+  const renamedCrlf = await resolveStructural({ base: crlf, git: move(crlf, 'guides/install.md'), linear: BASE });
+  assert.equal(renamedCrlf.kind, 'git-renamed');
+  assert.equal(renamedCrlf.linear.write, false);
+  assert.equal(renamedCrlf.summary, null);
 });
 
 test('a delete against an unchanged document is a plain delete', async () => {
@@ -255,7 +312,7 @@ test('summaries and comments name paths and cases, never document content (I5)',
   for (const [git, linear] of cases) {
     const result = await resolveStructural({ base: BASE, git, linear });
     assert.ok(result.summary !== null);
-    assert.ok(!result.summary.includes(secret));
+    assert.ok(!result.summary.text.includes(secret));
     assert.ok(!(result.linear.comment ?? '').includes(secret));
   }
 });

@@ -9,6 +9,7 @@
 // - every case ends with at most one document and one file.
 
 import { splitFile } from '../format/markdown.ts';
+import { detectConflicts } from './markers.ts';
 import type { Conflict } from './markers.ts';
 import { mergeMarkdown } from './merge.ts';
 
@@ -28,7 +29,7 @@ export interface StructuralInput {
    * the document was trashed, deleted or moved out of every mapped place.
    */
   linear: Version | null;
-  /** Linear no longer has the document at all, so it cannot be restored. */
+  /** Linear no longer has the document at all, so it cannot be restored. Read only when `linear` is null. */
   linearGone?: boolean;
 }
 
@@ -54,6 +55,10 @@ export type StructuralKind =
   /** Renamed differently on both sides: the git path wins. */
   | 'different-renames';
 
+/**
+ * Linear steps for the cycle to run, in this order: restore or create, then
+ * retitle, write and comment. Each is one independent Linear call.
+ */
 export interface LinearSteps {
   /** Take the same document out of trash, or back into its mapped place. */
   restore: boolean;
@@ -65,12 +70,25 @@ export interface LinearSteps {
   retitle: boolean;
   /** Write the result's body. */
   write: boolean;
-  /** A neutral comment for the document, when Linear's own change was undone. */
+  /** A neutral comment for the document, when Linear's title was set back. */
   comment?: string;
 }
 
 /** What happens to the file on the tracked branch, through the sync pull request. */
 export type GitStep = 'none' | 'restore' | 'move' | 'delete';
+
+/**
+ * Summary codes, one per rule: a change beat a delete; a rename and an
+ * edit both applied; the tracked branch's path won over a different Linear
+ * rename.
+ */
+export type StructuralCode = 'edit-wins-delete' | 'rename-and-edit' | 'git-path-wins';
+
+export interface StructuralSummary {
+  code: StructuralCode;
+  /** One line naming paths and the case, never content. */
+  text: string;
+}
 
 export interface StructuralResult {
   kind: StructuralKind;
@@ -78,40 +96,54 @@ export interface StructuralResult {
   path: string | null;
   /** The file text after the run, or null when it is removed. */
   text: string | null;
-  /** Text conflicts in `text`, marked with the conflict marker paragraphs. */
+  /** Conflicts in `text`, new or already there, marked with the conflict marker paragraphs. */
   conflicts: Conflict[];
   linear: LinearSteps;
   git: GitStep;
-  /** One line for the run summary naming paths and the case, never content; null when nothing structural happened. */
-  summary: string | null;
+  /**
+   * The summary entry when a rule decided a structural conflict. Null where
+   * none had to: no change, a plain delete, both deleted, one side renamed
+   * with no edit on the other, or the same rename on both sides; the
+   * ordinary run summary reports those as deletes and moves.
+   */
+  summary: StructuralSummary | null;
 }
 
-export const RESTORED_COMMENT =
-  'Restored: this document was edited in git after it was deleted here. Delete it again if it is no longer needed.';
 export const RETITLED_COMMENT =
   'The title was set back because the file was renamed in git at the same time. Rename it again to change it.';
 
 const NO_LINEAR_STEPS: LinearSteps = { restore: false, create: false, trash: false, retitle: false, write: false };
 
+// Line endings are serialization, not edits (as in mergeMarkdown), and
+// paths compare in NFC, so a decomposed file name is not a rename.
+function lf(text: string): string {
+  return text.replaceAll('\r\n', '\n');
+}
+
 function body(text: string): string {
-  return splitFile(text).body;
+  return lf(splitFile(text).body);
+}
+
+function samePath(a: string, b: string): boolean {
+  return a.normalize('NFC') === b.normalize('NFC');
 }
 
 function edited(version: Version, base: Version): boolean {
-  return version.text !== base.text;
+  return lf(version.text) !== lf(base.text);
 }
 
 function renamed(version: Version, base: Version): boolean {
-  return version.path !== base.path;
+  return !samePath(version.path, base.path);
 }
 
 function changed(version: Version, base: Version): boolean {
   return edited(version, base) || renamed(version, base);
 }
 
-function conflictNote(conflicts: readonly Conflict[]): string {
-  if (conflicts.length === 0) return '';
-  return conflicts.length === 1 ? '; 1 text conflict is marked in the document' : `; ${conflicts.length} text conflicts are marked in the document`;
+function summary(code: StructuralCode, text: string, conflicts: readonly Conflict[]): StructuralSummary {
+  if (conflicts.length === 1) text += '; 1 text conflict is marked in the document';
+  else if (conflicts.length > 1) text += `; ${conflicts.length} text conflicts are marked in the document`;
+  return { code, text };
 }
 
 /**
@@ -131,14 +163,16 @@ export async function resolveStructural(input: StructuralInput): Promise<Structu
     if (!changed(side, base)) {
       return { kind: 'git-deleted', path: null, text: null, conflicts: [], linear: { ...NO_LINEAR_STEPS, trash: true }, git: 'none', summary: null };
     }
+    const conflicts = detectConflicts(side.text);
     return {
       kind: 'git-deleted-linear-changed',
       path: side.path,
       text: side.text,
-      conflicts: [],
+      conflicts,
       linear: { ...NO_LINEAR_STEPS },
       git: 'restore',
-      summary: `${side.path}: deleted in git but changed in Linear; the document is kept and its file comes back through the sync pull request`,
+      summary: summary('edit-wins-delete',
+        `${side.path}: deleted in git but changed in Linear; the document is kept and its file comes back through the sync pull request`, conflicts),
     };
   }
 
@@ -147,18 +181,21 @@ export async function resolveStructural(input: StructuralInput): Promise<Structu
       return { kind: 'linear-deleted', path: null, text: null, conflicts: [], linear: { ...NO_LINEAR_STEPS }, git: 'delete', summary: null };
     }
     const gone = input.linearGone === true;
+    const conflicts = detectConflicts(git.text);
     return {
       kind: 'linear-deleted-git-changed',
       path: git.path,
       text: git.text,
-      conflicts: [],
+      conflicts,
+      // A restore keeps the document's comments exactly as they were; the
+      // run summary, not a new comment, reports it.
       linear: gone
-        ? { ...NO_LINEAR_STEPS, create: true, write: true, comment: RESTORED_COMMENT }
-        : { ...NO_LINEAR_STEPS, restore: true, retitle: true, write: true, comment: RESTORED_COMMENT },
+        ? { ...NO_LINEAR_STEPS, create: true, write: true }
+        : { ...NO_LINEAR_STEPS, restore: true, retitle: true, write: true },
       git: 'none',
-      summary: gone
+      summary: summary('edit-wins-delete', gone
         ? `${git.path}: deleted in Linear but changed in git; the document was gone from Linear, so a new one was created with the git text and its old comments are lost`
-        : `${git.path}: deleted in Linear but changed in git; the document is restored with the git text`,
+        : `${git.path}: deleted in Linear but changed in git; the document is restored with the git text`, conflicts),
     };
   }
 
@@ -167,28 +204,28 @@ export async function resolveStructural(input: StructuralInput): Promise<Structu
   const merged = await mergeMarkdown(base.text, git.text, linear.text);
   const path = gitRenamed ? git.path : linear.path;
   const write = body(merged.text) !== body(linear.text);
-  const result = (kind: StructuralKind, steps: Partial<LinearSteps>, gitStep: GitStep, summary: string | null): StructuralResult => ({
+  const result = (kind: StructuralKind, steps: Partial<LinearSteps>, gitStep: GitStep, entry: [StructuralCode, string] | null): StructuralResult => ({
     kind,
     path,
     text: merged.text,
     conflicts: merged.conflicts,
     linear: { ...NO_LINEAR_STEPS, write, ...steps },
     git: gitStep,
-    summary: summary === null ? null : summary + conflictNote(merged.conflicts),
+    summary: entry === null ? null : summary(entry[0], entry[1], merged.conflicts),
   });
 
   if (!gitRenamed && !linearRenamed) return result('none', {}, 'none', null);
   if (gitRenamed && !linearRenamed) {
     return result('git-renamed', { retitle: true }, 'none', edited(linear, base)
-      ? `${base.path} → ${path}: renamed in git and edited in Linear; both applied`
+      ? ['rename-and-edit', `${base.path} → ${path}: renamed in git and edited in Linear; both applied`]
       : null);
   }
   if (!gitRenamed) {
     return result('linear-renamed', {}, 'move', edited(git, base)
-      ? `${base.path} → ${path}: renamed in Linear and edited in git; both applied`
+      ? ['rename-and-edit', `${base.path} → ${path}: renamed in Linear and edited in git; both applied`]
       : null);
   }
-  if (git.path === linear.path) return result('same-rename', {}, 'none', null);
-  return result('different-renames', { retitle: true, comment: RETITLED_COMMENT }, 'none',
-    `${base.path}: renamed to ${git.path} in git and to ${linear.path} in Linear; the git path wins and the Linear title is set back`);
+  if (samePath(git.path, linear.path)) return result('same-rename', {}, 'none', null);
+  return result('different-renames', { retitle: true, comment: RETITLED_COMMENT }, 'none', ['git-path-wins',
+    `${base.path}: renamed to ${git.path} in git and to ${linear.path} in Linear; the git path wins and the Linear title is set back`]);
 }
