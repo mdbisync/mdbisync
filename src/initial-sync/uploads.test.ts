@@ -179,6 +179,19 @@ describe('uploads of linked files in an initial sync', () => {
     assert.deepEqual(world.github.pullRequests, [], 'the later sync opened a pull request');
   });
 
+  it('does not repeat writes for a relative link whose source span cannot be rewritten', async () => {
+    await fixture.seed({ 'eng/notes/quoted.md': `# Quoted\n\n> [Notes](\n> b.md)\n\n* [Guide](files/report%202026.pdf)\n\n${CANARY}` });
+    const world = fakeWorld();
+    world.linear.store = (body) => fixText(body.replaceAll(`${UPLOADS_HOST}/`, 'uploaded/')).replaceAll('uploaded/', `${UPLOADS_HOST}/`);
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    const writes = world.linear.writes.count;
+    const again = await run(world);
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    assert.equal(world.linear.writes.count, writes);
+    assert.ok(again.report.initialSync?.unchanged.includes('eng/notes/quoted.md'));
+  });
+
   it('L1-07 and L1-08: uploads each linked file once by content hash, writes its URL and records the cache', async () => {
     const world = fakeWorld();
     const { result, report, summary } = await run(world);
