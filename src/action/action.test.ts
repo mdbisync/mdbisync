@@ -155,6 +155,23 @@ describe('the action entry points', () => {
     assert.deepEqual(await tokenStates(), ['fake-token', '']);
   });
 
+  it('cleans unknown stale tokens before staging and saves cleanup tokens for post', async () => {
+    const world = fakeWorld();
+    const { printed } = await runStep(world, { operation: 'initial-sync', direction: 'git-to-linear', 'cleanup-tokens': 'True' });
+    assert.match(printed, /token cleanup: replaced stale app tokens/);
+    assert.equal(world.minted, 3);
+    assert.equal(world.revoked, 3);
+    assert.deepEqual(await tokenStates(), ['fake-token', '', 'fake-token', '', 'fake-token', '']);
+  });
+
+  it('rejects token cleanup on apply before minting anything', async () => {
+    const world = fakeWorld();
+    step({ 'security-step': 'apply', 'cleanup-tokens': 'true' });
+    const printed = await quietly(() => runMain({ fetch: fakeFetch(world) }));
+    assert.match(printed, /cleanup-tokens belongs before the stage step/);
+    assert.equal(world.minted, 0);
+  });
+
   it('a run whose revocation failed leaves the token in the state for post, which revokes it', async () => {
     const world = fakeWorld();
     const fetchWithoutRevoke: typeof fetch = async (input, init) =>

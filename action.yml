@@ -15,6 +15,10 @@ inputs:
     description: "Linear API origin. Leave empty for Linear itself."
     required: false
     default: ""
+  cleanup-tokens:
+    description: "Set true only with exclusive use of this Linear app in the workspace: replaces tokens left by killed runs. Use once before stage, inside the shared workflow concurrency group. The app must not be shared with other repositories or workers."
+    required: false
+    default: "false"
   github-token:
     description: "Installation token of the sync's GitHub App (contents, pull requests and workflows write; checks and commit statuses read)."
     required: true

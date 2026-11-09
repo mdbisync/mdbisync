@@ -140,6 +140,21 @@ How folders map to Linear, the checks every run makes, the sync pull request
 and how to pin a release: [docs/usage.md](docs/usage.md). How Markdown is kept
 in Linear's form: [docs/linear-format.md](docs/linear-format.md).
 
+### Tokens left by interrupted jobs
+
+The action revokes each run's Linear token when it ends and retries in its
+`post` step, including failed and cancelled jobs. A runner that disappears
+before post can execute can leave an active token behind.
+
+The example workflows leave `cleanup-tokens: false`. Enable it before staging
+with `cleanup-tokens: true` to clean orphan tokens automatically. This
+requires a **dedicated Linear OAuth app** used only by these two workflows
+in this repository, both in the same `concurrency` group. Cleanup requests
+read-only scopes and then restores read/write scopes, replacing the app's
+existing tokens in that workspace. Do not enable it when another repository,
+process or test worker uses the same app; leave it false and revoke stale
+tokens during an exclusive maintenance window instead.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).

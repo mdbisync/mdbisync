@@ -9,6 +9,8 @@
 // neutral work text with a run token, so I2 can find it on both sides.
 
 import { spawnSync } from 'node:child_process';
+import { cleanupKilledTokens } from './token-cleanup.ts';
+import { tokenActive } from './subjects.ts';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,7 +25,7 @@ import { isCheckpoint } from './checkpoints.ts';
 import { faultChecks } from './check-fault.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
-import { REPO_ROOT, engineEntry, engineEnv, postEntry, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
+import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -37,7 +39,6 @@ import {
 } from './step-helpers.ts';
 import { jobSpans, maxOverlap, runResult, SCHEDULE_BLOCKED, waitForRun } from './workflows.ts';
 import { runWorkflows, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
-import { LINEAR_TOKEN_STATE } from '../../../src/action/state.ts';
 
 export { documentId, documentPaths, resolveDestination, sibling, targetPath };
 
@@ -406,11 +407,15 @@ const RUN: Record<string, Executor> = {
       // (checked offline in src/action/action.test.ts). The killed run here ran as the command
       // line, which keeps no step state, so the harness hands over the token the proxy saw it mint.
       const killed = (ctx.observations.get('tokens.byOutcome') as Record<string, string[]> | undefined)?.['killed'] ?? [];
-      const state = killed.length === 0 ? {} : { [`STATE_${LINEAR_TOKEN_STATE}`]: killed[killed.length - 1] as string, 'INPUT_LINEAR-API-URL': call.linearUrl };
-      const result = spawnSync(process.execPath, [postEntry()], { cwd: call.cwd, env: { ...engineEnv(call), ...state }, encoding: 'utf8' });
-      if (result.error !== undefined) throw new Error(`could not run the post step: ${result.error.message}`);
-      if (/not implemented/.test(`${result.stdout}${result.stderr}`)) throw new NotImplementedError('post', 'the cleanup step');
-      ctx.observations.set('cleanup.exitCode', result.status);
+      let before = 0;
+      for (const token of killed) if (await tokenActive(token)) before++;
+      ctx.observations.set('tokens.activeBeforeCleanup', before);
+      const output = await cleanupKilledTokens(killed, { cwd: call.cwd, env: engineEnv(call), linearUrl: call.linearUrl });
+      ctx.observations.set('cleanup.output', output);
+      ctx.observations.set('cleanup.exitCode', 0);
+      let after = 0;
+      for (const token of killed) if (await tokenActive(token)) after++;
+      ctx.observations.set('tokens.activeAfterCleanup', after);
     }
     ctx.observations.set('tokens.seen', [...(ctx.proxy?.tokens() ?? [])]);
   },
