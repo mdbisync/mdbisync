@@ -263,7 +263,7 @@ describe('run tree from a slice', () => {
 
   it('lays out the real corpus generator\'s slices', async () => {
     const { buildCorpus } = await import('../../corpus/generate.ts');
-    const corpus = buildCorpus();
+    const corpus = buildCorpus('0000000000000000000000000000000000000000');
     const text = new Map(corpus.files.map((file) => [file.path, file.content.toString('utf8')]));
     const names = runNames('4f1a9c');
     for (const slice of ['mini', 'bank', 'mid', 'full'] as const) {
