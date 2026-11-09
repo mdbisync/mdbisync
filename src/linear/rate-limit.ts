@@ -88,7 +88,7 @@ export function findLowBudget(
   ];
   for (const [header, remaining, threshold] of checks) {
     if (remaining !== undefined && remaining < threshold) {
-      return { kind: 'budget-low', operation, header, remaining, threshold };
+      return { kind: 'budget-low', operation, header, remaining, threshold, ...limitsOf(snapshot) };
     }
   }
   return undefined;
@@ -105,4 +105,9 @@ export function parseRetryAfter(value: string | null, now: number = Date.now()):
   const date = Date.parse(value);
   if (Number.isNaN(date)) return undefined;
   return Math.max(0, Math.ceil((date - now) / 1000));
+}
+
+/** The snapshot's headers as a stop's `limits`, or nothing when Linear sent none. */
+export function limitsOf(snapshot: RateLimitSnapshot): { limits?: Record<string, string> } {
+  return Object.keys(snapshot.headers).length === 0 ? {} : { limits: { ...snapshot.headers } };
 }

@@ -15,6 +15,7 @@ import {
 } from "./commands.ts";
 import { type LogEntry } from "./linear/index.ts";
 import { runFix, runLint } from "./format/command.ts";
+import { PARTIAL, partialCode, pullRequestEnding, stoppedMessage } from "./run/exit.ts";
 import { unfinishedMessage, writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
@@ -105,6 +106,19 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   const summaryFile = env["GITHUB_STEP_SUMMARY"];
   if (summaryFile) await appendFile(summaryFile, outcome.summary);
   const stderr = warnings.join("");
+  // A failed check on the sync pull request is a setup error: a person fixes it, so it comes before a partial ending.
+  const failure = pullRequestEnding(outcome);
+  if (failure !== null) {
+    const exitCode = failure.kind === "setup" ? SETUP_FAILED_EXIT_CODE : failure.kind === "no-state" ? NO_STATE_EXIT_CODE : INCOMPLETE_EXIT_CODE;
+    return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: ${failure.message}\n` };
+  }
+  // A partial run recorded what it finished; the next run goes on from there.
+  const partial = partialCode(outcome);
+  if (partial !== undefined) {
+    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}warning: ${command}: ${PARTIAL} (${partial})\n` };
+  }
+  const stopped = stoppedMessage(outcome);
+  if (stopped !== undefined) return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${stopped}\n` };
   if (!outcome.ok) {
     const exitCode = outcome.code === "initial-sync-required" || outcome.code === "initial-pull-request-pending" ? NO_STATE_EXIT_CODE : SETUP_FAILED_EXIT_CODE;
     return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (${outcome.code})\n` };
@@ -115,17 +129,6 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   const unfinished = outcome.confirmed ?? outcome.reverse;
   if (unfinished !== undefined && !unfinished.complete) {
     return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${unfinishedMessage(command, unfinished.code)}\n` };
-  }
-  if (outcome.captured?.stopped !== undefined) {
-    return {exitCode:0, stdout:outcome.summary, stderr:`${stderr}warning: ${command}: partial, will continue (${outcome.captured.code})\n`};
-  }
-  if (outcome.captured !== undefined && !outcome.captured.ok) {
-    return {exitCode:INCOMPLETE_EXIT_CODE, stdout:outcome.summary, stderr:`${stderr}${command}: capture did not finish (${outcome.captured.code})\n`};
-  }
-  const write = outcome.sync?.write;
-  // Skipped documents are normal (the next run takes them in); a stop, a refused push or a failed write is not.
-  if (write?.code !== undefined) {
-    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${write.code}); run it again\n` };
   }
   if (!outcome.notImplemented) return { exitCode: 0, stdout: outcome.summary, stderr };
   const stub = notImplemented(command);

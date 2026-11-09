@@ -113,14 +113,6 @@ export function readInput(dir: string, paths: Iterable<string>): Map<string, str
   return new Map([...paths].map((path) => [path, readFileSync(join(dir, path), 'utf8')]));
 }
 
-/**
- * What of a fixed file reaches Linear: the text without its front matter
- * (front matter stays in git) and the blank line after it.
- */
-export function linearPart(text: string): string {
-  return text.replace(/^(?:﻿)?---\r?\n(?:[\s\S]*?\r?\n)?---(?:\r?\n|$)(?:\r?\n)?/, '');
-}
-
 /** Runs the command line's `lint` or `fix` on a folder. */
 export function runFormatCommand(command: 'lint' | 'fix', dir: string): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(process.execPath, [engineEntry(), command, '.'], { cwd: dir, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });

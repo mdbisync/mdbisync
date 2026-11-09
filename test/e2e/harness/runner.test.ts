@@ -7,7 +7,7 @@ import { LinearClient } from '../../../src/linear/index.ts';
 import { fakeFetch, fakeWorld, LINEAR_API } from '../../../src/setup/test-helpers.ts';
 import { Git } from '../../../src/state/index.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
-import { budgetHolds, compare, gitLinks, scanCanaries, stripFrontMatter, titleOf } from './checks.ts';
+import { budgetHolds, compare, gitLinks, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
 import { parseEnvFile, parseRepoUrl } from './config.ts';
 import { appJwt } from './github.ts';
@@ -58,11 +58,24 @@ describe('results', () => {
 
 describe('check helpers', () => {
   it('compare files and documents the way I1 needs', () => {
-    assert.equal(stripFrontMatter('---\na: 1\n---\n# Title\n'), '# Title\n');
-    assert.equal(stripFrontMatter('# No front matter\n'), '# No front matter\n');
+    assert.equal(bodyOf('---\na: 1\n---\n# Title\n'), '# Title\n');
+    assert.equal(bodyOf('# No front matter\n'), '# No front matter\n');
+    assert.equal(bodyOf('---\na: 1\n---\n\n\n# Title\n'), '# Title\n', 'blank lines after the front matter stay with it');
+    assert.equal(bodyOf('﻿---\r\na: 1\r\n---\r\n\r\n# Title\r\n'), '# Title\r\n');
+    assert.equal(bodyOf('﻿# No front matter\n'), '# No front matter\n', 'the byte order mark never reaches Linear');
+    assert.equal(bodyOf('--- \na: 1\n---\t\n# Title\n'), '# Title\n', 'fence lines may end in spaces');
+    assert.equal(bodyOf('---\n---\n# Title\n\n---\n'), '# Title\n\n---\n', 'an empty block ends at its own fence');
     assert.equal(titleOf('eng/4f1a9c/guides/start.md', 'eng'), '4f1a9c/guides/start');
     assert.equal(titleOf('eng/alpha/plan.md', 'eng/alpha'), 'plan');
     assert.equal(gitLinks('![x](https://uploads.example.com/a)', 'eng/guides/start.md', { ids: new Map(), documentUrlBase: 'https://linear.app/acme/document', uploads: new Map([['https://uploads.example.com/a', 'eng/img/a.png']]) }), '![x](../img/a.png)');
+  });
+
+  it('compare a file with front matter to its document by the body the engine sends (I1)', () => {
+    const file = '---\nowner: platform\n---\n\n# Runbook\n\nRestart the worker.\n';
+    const sides = { hashes: new Map(), uploadsByHash: new Map() };
+    assert.equal(sameAsFile(file, '# Runbook\n\nRestart the worker.\n', 'eng/runbook.md', sides), true);
+    assert.equal(sameAsFile(file, '# Runbook\n\nRestart the queue.\n', 'eng/runbook.md', sides), false, 'a real body difference still fails I1');
+    assert.equal(sameAsFile(file, '\n# Runbook\n\nRestart the worker.\n', 'eng/runbook.md', sides), false);
   });
 
   it('find canaries without quoting the text around them', () => {

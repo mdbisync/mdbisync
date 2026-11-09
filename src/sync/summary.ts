@@ -3,8 +3,9 @@ import { cell } from '../run/summary.ts';
 // document content.
 
 import { renderCapacity } from '../run/capacity.ts';
-import { describeStop } from '../linear/index.ts';
+import { PARTIAL, renderStop } from '../run/stop.ts';
 import { type CycleResult } from './cycle.ts';
+import { renderPullRequest } from './pull-request.ts';
 import { type SkipReason } from './write.ts';
 
 const REASONS: Record<SkipReason, string> = {
@@ -17,7 +18,11 @@ const REASONS: Record<SkipReason, string> = {
 export function renderSync(result: CycleResult): string {
   const write = result.write;
   const lines = ['## Sync', '', result.capture.summary, ''];
-  if (write === undefined) { lines.push('Capture did not finish; no tracked-branch changes were written.', ''); return lines.join('\n'); }
+  if (result.pullRequest !== undefined) lines.push(...renderPullRequest(result.pullRequest));
+  if (write === undefined) {
+    if (result.pullRequest === undefined) lines.push('Capture did not finish; no tracked-branch changes were written.', '');
+    return lines.join('\n');
+  }
   lines.push('### Tracked branch to Linear', '');
   if (write.complete && write.record === null && !write.changed) {
     lines.push('Linear already holds the tracked branch: nothing to write.', '');
@@ -42,9 +47,10 @@ export function renderSync(result: CycleResult): string {
       '',
     );
   }
+  if (write.code === 'state-moved') lines.push(`This run is ${PARTIAL}: the next run writes again what is still missing.`, '');
+  else if (write.code !== undefined && write.code !== 'container-cap') lines.push(`This run is ${PARTIAL}: it recorded what it finished, and the next run goes on from there.`, '');
   if (write.stopped !== undefined) {
-    const why = write.stopped.kind === 'test-threshold' ? `the test threshold of ${write.stopped.documents} documents` : describeStop(write.stopped);
-    lines.push(`Stopped: ${why}. Not written yet: ${count(write.notAttempted.length, 'item')}.`, '');
+    lines.push(...renderStop(write.stopped), `Not written yet: ${count(write.notAttempted.length, 'item')}.`, '');
   }
   const table = (title: string, head: string[], rows: string[][]) => {
     if (rows.length === 0) return;
