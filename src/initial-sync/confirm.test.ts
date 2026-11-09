@@ -245,6 +245,25 @@ describe('confirmed initial sync from git to Linear', () => {
     await assertConverged(world);
   });
 
+  it('a resumed run skips what the stopped run wrote, whatever form Linear stored it in', async () => {
+    const world = fakeWorld();
+    // A form the format module does not predict, as for some links to attachments.
+    world.linear.store = (content) => `${content}\n\nStored.`;
+    world.linear.writes.rateLimitAt = 3;
+    assert.equal((await run(world)).result.exitCode, INCOMPLETE_EXIT_CODE);
+    const written = JSON.parse(await show('refs/mdbisync/ids:written.json')) as Record<string, string>;
+    assert.deepEqual(Object.keys(written).sort(), SYNCED_PATHS.slice(0, 2));
+
+    delete world.linear.writes.rateLimitAt;
+    const writes = world.linear.writes.count;
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(report.skippedCompletedCount, 2);
+    assert.equal(world.linear.writes.count - writes, SYNCED_PATHS.length - 2);
+    // The finished state keeps no progress files.
+    assert.equal((await fixture.remote.run(['cat-file', '-e', 'refs/mdbisync/ids:written.json'], { okCodes: [0, 128] })).code, 128);
+  });
+
   it('a resumed run writes again a document whose file changed after the stop', async () => {
     const world = fakeWorld();
     world.linear.writes.rateLimitAt = 3;
