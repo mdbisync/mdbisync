@@ -8,7 +8,7 @@ import { lintText, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
-import { type Git, type IdMap, type Oid, buildTree, listTree, readBlobs } from '../state/index.ts';
+import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, isAncestor, listTree, readBlobs } from '../state/index.ts';
 
 /** A synchronized file of one side: its path, blob, Linear title and place. */
 export interface SideFile {
@@ -183,9 +183,15 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     if (!claimed.has(path) && !conflicted.has(path)) {
       const file = resultSide.files.get(path)!;
       const previous = linearSide.files.get(path);
-      // Capture keeps an annotation-only carrier after its document leaves.
-      // It is repository configuration, not a request to recreate that document.
-      if ((path === 'README.md' || path.endsWith('/README.md')) && previous !== undefined && body(previous.oid) === '' && body(file.oid) === '') {
+      // A folder's annotation that the `linear` tip already holds without a document is repository
+      // configuration, not a request to create one: the annotation-only carrier capture keeps after its
+      // document leaves, and the README an initial sync from Linear keeps, body included, because Linear
+      // has no document for it. Only a change to its body on the tracked branch makes it a new document.
+      // A README with a body counts only when the latest initial sync named it as kept: one left out on the
+      // way to Linear, or one whose id map was lost, is created as every other file without a document is.
+      const unchanged = previous !== undefined && body(previous.oid) === body(file.oid);
+      const kept = unchanged && (body(file.oid) === '' || options.keptAnnotations?.has(path) === true);
+      if ((path === 'README.md' || path.endsWith('/README.md')) && kept) {
         const annotation = readAnnotation(path, (blobs.get(file.oid) as Buffer).toString('utf8'));
         if ('annotation' in annotation && annotation.annotation !== null) continue;
       }
@@ -281,6 +287,8 @@ export interface MergeOptions {
    * document Linear renamed or removed since the merge base.
    */
   knownId?: ((path: string) => Promise<string | undefined>) | undefined;
+  /** The folder READMEs the latest initial sync kept, body included, without a document. */
+  keptAnnotations?: ReadonlySet<string> | undefined;
 }
 
 interface ConflictInput {
@@ -428,6 +436,21 @@ async function renamesBetween(git: Git, from: Oid, to: Oid): Promise<Map<string,
 /** Whether the tracked commit is already merged into `linear`, so there is nothing to take to Linear. */
 export async function alreadyMerged(git: Git, linear: Oid, tracked: Oid): Promise<boolean> {
   return (await git.run(['merge-base', '--is-ancestor', tracked, linear], { okCodes: [0, 1] })).code === 0;
+}
+
+/**
+ * Whether the tracked branch is an initial sync from Linear taken in as it
+ * is: `linear` is that record, and the tracked branch descends from it and
+ * holds the same tree, as after a person merges its pull request and changes
+ * nothing else. Recording that merge would only move the merge base, with
+ * nothing to write; the record stays the merge base of the next change.
+ */
+export async function mergedInitialRecord(git: Git, linear: Oid, tracked: Oid): Promise<boolean> {
+  const [subject] = (await git.text(['show', '-s', '--format=%s', linear])).split('\n');
+  if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
+  if (!(await isAncestor(git, linear, tracked))) return false;
+  const [linearTree, trackedTree] = (await git.text(['rev-parse', `${linear}^{tree}`, `${tracked}^{tree}`])).split('\n');
+  return linearTree === trackedTree;
 }
 
 /** Lists a tree's files by path. */

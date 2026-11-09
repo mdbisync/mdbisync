@@ -33,6 +33,7 @@ import {
 import { type RunContext } from '../run/preflight.ts';
 import {
   type CommitIdentity,
+  type Git,
   type IdMap,
   type Oid,
   type RefUpdate,
@@ -60,6 +61,24 @@ import { withRecorded } from '../sync/recorded.ts';
 /** The subject of an `ids` commit made while an initial sync is still writing. */
 export const PROGRESS_MESSAGE = INITIAL_SYNC_PROGRESS;
 export const FINAL_IDS_MESSAGE = 'Initial sync: document ids';
+
+const KEPT_ANNOTATION = /^Kept-annotation: (".*")$/gm;
+
+/**
+ * The trailer of an initial sync's final `ids` commit that names a folder's
+ * README it kept, body included, without a document: Linear has none for it.
+ */
+export function keptAnnotationTrailer(path: string): string {
+  return `Kept-annotation: ${JSON.stringify(path)}`;
+}
+
+/** The READMEs the latest initial sync kept without a document, from its final `ids` commit. */
+export async function readKeptAnnotations(git: Git, ids: Oid | null): Promise<Set<string>> {
+  if (ids === null) return new Set();
+  const log = await git.text(['log', '--format=%B', '--fixed-strings', `--grep=${FINAL_IDS_MESSAGE}`, '-1', ids]);
+  if (log.split('\n')[0] !== FINAL_IDS_MESSAGE) return new Set();
+  return new Set([...log.matchAll(KEPT_ANNOTATION)].map((match) => JSON.parse(match[1] as string) as string));
+}
 export const RECORD_MESSAGE = "Initial sync: Linear's state";
 export const UPLOADS_MESSAGE = 'Initial sync: upload cache';
 

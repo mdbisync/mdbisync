@@ -16,7 +16,7 @@ import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { LinearClient } from '../linear/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
-import { fetchState, resolveStateConfig } from '../state/index.ts';
+import { commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
 import { type SecurityGate } from '../sync/security.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
 import { type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit } from './reverse.ts';
@@ -255,6 +255,67 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.github.pullRequests.length, 1);
   });
 
+  for (const deleted of [false, true]) {
+    it(`L1R-03: a kept folder annotation with a body stays in git, and the syncs after the merge write nothing and move no ref${deleted ? ' (head branch deleted on merge)' : ''}`, async () => {
+      const world = fakeWorld();
+      // Linear has no document for the Handbook folder's README; the others were edited after their creation.
+      world.linear.documents = linearDocuments()
+        .filter((d) => d.id !== 'doc-handbook')
+        .map((d, index) => ({ ...d, updatedAt: new Date(Date.UTC(2026, 2, 1, 12, index, 7 * index + 3)).toISOString() }));
+      const first = await run(world);
+      assert.equal(first.result.exitCode, 0, first.result.stderr);
+      assert.deepEqual(first.report.summary?.plan.remove, REMOVE);
+      // The annotation and the body stay through the pull request.
+      assert.equal(await show('refs/mdbisync/linear:combined/README.md'), TREE['combined/README.md']);
+      // The record holds every listed document: the next capture starts after the latest update listed.
+      const latest = world.linear.documents.map((d) => d.updatedAt as string).sort().at(-1);
+      const message = await fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/ids']);
+      assert.match(message, new RegExp(`^Capture-through: ${latest}$`, 'm'));
+      assert.match(message, /^Kept-annotation: "combined\/README\.md"$/m);
+      await merge(world);
+      // GitHub can delete the head branch of a merged pull request.
+      if (deleted) await fixture.remote.run(['update-ref', '-d', 'refs/heads/mdbisync/linear']);
+
+      for (const pass of ['first', 'second']) {
+        const before = await refs();
+        const mutations = linearMutations(world).length;
+        const documents = structuredClone(world.linear.documents);
+        const after = await run(world, {}, 'sync');
+        assert.equal(after.result.exitCode, 0, after.result.stderr);
+        assert.equal(after.report.code, null, pass);
+        assert.equal(after.report.writtenCount, 0, `${pass} sync wrote documents`);
+        assert.equal(linearMutations(world).length, mutations, `${pass} sync wrote to Linear`);
+        assert.deepEqual(world.linear.documents, documents, `${pass} sync changed Linear`);
+        assert.deepEqual(await refs(), before, `${pass} sync moved a ref`);
+        assert.equal(world.github.pullRequests.length, 1, `${pass} sync opened a pull request`);
+      }
+      assert.equal(await show('refs/heads/main:combined/README.md'), TREE['combined/README.md']);
+      assert.ok(!world.linear.documents.some((d) => d.projectId === 'project-handbook'), 'a document was created for the kept README');
+
+      // The tip stays the merge base: edits in git after the quiet runs reach Linear, the kept README's new body too.
+      const main = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
+      const edit = await commitTree(fixture.remote, {
+        parents: [main],
+        base: main,
+        changes: new Map([
+          ['combined/README.md', `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\nNow a document. ${CANARY}`],
+          ['eng/notes/plan.md', `---\nowner: platform\n---\n\n# Plan\n\nEdited in git. ${CANARY}`],
+        ]),
+        message: 'Edit in git',
+        identity: { name: 'A person', email: 'person@example.com' },
+      });
+      await fixture.remote.run(['update-ref', 'refs/heads/main', edit]);
+      const edited = await run(world, {}, 'sync');
+      assert.equal(edited.result.exitCode, 0, edited.result.stderr);
+      assert.equal(world.linear.documents.find((d) => d.id === 'doc-plan')?.content, `# Plan\n\nEdited in git. ${CANARY}`);
+      const handbook = world.linear.documents.filter((d) => d.projectId === 'project-handbook');
+      assert.deepEqual(handbook.map((d) => [d.title, d.content]), [['README', `# Handbook\n\nNow a document. ${CANARY}`]]);
+      assert.equal((await readIds())['combined/README.md'], handbook[0]?.id);
+      // The record of those edits brings back a deleted sync branch.
+      assert.notEqual((await refs())['refs/heads/mdbisync/linear'], undefined);
+    });
+  }
+
   it('L1R-04: downloads the files documents embed next to them, stored as .gitattributes decides, linked relatively and cached', async () => {
     await fixture.seed({ '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n' });
     const world = fakeWorld();
@@ -379,6 +440,49 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/notes/faq.md'));
     assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), (TREE['eng/notes/plan.md'] as string).replace(/\n$/, ''));
     assert.equal((await readIds())['eng/notes/plan.md'], 'doc-plan');
+    // The record does not hold the plan's text from Linear: the next capture starts at its document, not after it.
+    const planTime = world.linear.documents.find((d) => d.id === 'doc-plan')?.createdAt;
+    const latest = world.linear.documents.map((d) => d.updatedAt ?? d.createdAt).sort().at(-1);
+    assert.notEqual(planTime, latest);
+    assert.match(await fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/ids']), new RegExp(`^Capture-through: ${planTime}$`, 'm'));
+  });
+
+  it('a folder README an initial sync to Linear left out is created once its file can be uploaded, its body unchanged', async () => {
+    await fixture.seed({
+      'combined/missing.png': Buffer.alloc(10 * 1024 * 1024 + 1),
+      'combined/README.md': `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\n![Diagram](missing.png) ${CANARY}`,
+    });
+    const world = fakeWorld();
+    const first = await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' });
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.equal((await readIds())['combined/README.md'], undefined);
+    assert.ok(first.report.initialSync?.leftOutAtWrite?.some((entry) => entry.path === 'combined/README.md'));
+
+    await fixture.seed({ 'combined/missing.png': 'a small picture' });
+    const next = await run(world, {}, 'sync');
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    const id = (await readIds())['combined/README.md'];
+    assert.ok(id !== undefined, 'the README got no document');
+    assert.equal(world.linear.documents.find((d) => d.id === id)?.title, 'README');
+  });
+
+  it('a rerun that now keeps a tracked file moves the capture cursor back to its document, with the same ids', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    assert.equal((await run(world)).result.exitCode, 0);
+    const cursor = async () => /^Capture-through: (\S+)$/m.exec(await fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/ids']))?.[1];
+    const latest = world.linear.documents.map((d) => d.updatedAt ?? d.createdAt).sort().at(-1);
+    assert.equal(await cursor(), latest);
+    const ids = await readIds();
+
+    // The plan's file now cannot be downloaded, while its update time stays before the recorded cursor.
+    const plan = world.linear.documents.find((d) => d.id === 'doc-plan') as FakeDocument;
+    plan.content = `# Page\n\n![Gone](${UPLOADS_HOST}/9/gone.png)\n`;
+    const again = await run(world);
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    assert.deepEqual(again.report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/plan.md', rule: 'download-failed' }]);
+    assert.deepEqual(await readIds(), ids);
+    assert.equal(await cursor(), plan.createdAt);
   });
 
   it('L1R-05: titles a path cannot hold become files by one rule, and stay unchanged in Linear', async () => {

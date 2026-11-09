@@ -130,11 +130,14 @@ function completeBlocks(text: string): string {
       if (!opener) return; // Indented code ends at a blank marker boundary.
       const source = lines(raw);
       const last = lineText(source.at(-1) ?? '');
-      const closing = new RegExp(`^[ >\\t]*${opener[0]}{${opener.length},}[ \\t]*$`);
+      // A closing fence: container prefixes, then at least as many of the
+      // opener's characters, then only spaces or tabs.
+      const fence = /^[ >\t]*(`{3,}|~{3,})[ \t]*$/.exec(last)?.[1];
+      const closing = fence !== undefined && fence[0] === opener[0] && fence.length >= opener.length;
       // Container prefixes remain in raw source but not in the parsed value.
       // A real closing fence adds a source line beyond the opener and value.
       const valueLines = node.value === '' ? 0 : node.value.split('\n').length;
-      if (source.length > valueLines + 1 && closing.test(last)) return;
+      if (source.length > valueLines + 1 && closing) return;
       close = opener;
     } else {
       const tag = /^<(script|pre|style|textarea)(?:\s|>)/i.exec(raw)?.[1];
@@ -148,10 +151,14 @@ function completeBlocks(text: string): string {
     const prefix = text.slice(lineStart, start.offset).replace(/[^ >\t]/g, ' ');
     insertions.push({ offset: end.offset!, text: `${raw.endsWith('\n') ? '' : '\n'}${prefix}${close}\n` });
   });
+  // A separate variable, not `text`: the visit above reads `text`, and static
+  // analysis that merges a captured variable's assignments would otherwise
+  // see the inserted end strings flow into the source it parses.
+  let completed = text;
   for (const insertion of insertions.sort((a, b) => b.offset - a.offset)) {
-    text = text.slice(0, insertion.offset) + insertion.text + text.slice(insertion.offset);
+    completed = completed.slice(0, insertion.offset) + insertion.text + completed.slice(insertion.offset);
   }
-  return text.replace(/\n$/, '');
+  return completed.replace(/\n$/, '');
 }
 
 /**

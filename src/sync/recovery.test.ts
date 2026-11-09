@@ -239,6 +239,22 @@ describe('sync: lost state and deleted branches', () => {
     await assertQuiet();
   });
 
+  it('L5-13: a folder README whose document was renamed in Linear while the ids ref was lost keeps a document of its own', async () => {
+    const before = await ids();
+    await fixture.remote.run(['update-ref', '-d', STATE('ids')]);
+    const readme = world.linear.documents.find((document) => document.id === before['combined/README.md']?.id)!;
+    readme.title = 'Handbook home';
+    touch(readme);
+
+    await settle();
+    const after = await ids();
+    assert.equal(after['combined/Handbook home.md']?.id, readme.id, 'the renamed document keeps its id under its new path');
+    // The README holds a body and an annotation: as any other file the lost map held, it gets a document again.
+    assert.ok(after['combined/README.md'] !== undefined && after['combined/README.md'].id !== readme.id, 'the README has no document of its own');
+    await assertConverged();
+    await assertQuiet();
+  });
+
   it('L5-14: a lost uploads ref: the images are uploaded again and the tracked branch does not change', async () => {
     const tracked = await rev('refs/heads/main');
     const linear = await rev(STATE('linear'));
