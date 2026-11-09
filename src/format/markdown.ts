@@ -65,11 +65,11 @@ const LINEAR_SYNTAX_ESCAPES: Readonly<Record<string, string>> = { '\\$': '', 
 /** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
 function comparable(body: string): unknown {
   // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
-  // A list marker alone on its line opens a file block in Linear (`* \n  [a](a.pdf)`),
-  // which Markdown reads as the item `* [a](a.pdf)`: keep that line apart too.
+  // A list marker (with a task checkbox, if any) alone on its line opens a file block
+  // in Linear (`* \n  [a](a.pdf)`), which Markdown reads as `* [a](a.pdf)`: keep that line apart too.
   const marked = body
     .replace(/\\[$+]/g, (escape) => LINEAR_SYNTAX_ESCAPES[escape]!)
-    .replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)]))[ \t]*$/gm, '$1 ');
+    .replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, '$1 ');
   const tree = parse(marked);
   const strip = (node: Nodes): unknown => {
     const { position: _position, ...rest } = node;

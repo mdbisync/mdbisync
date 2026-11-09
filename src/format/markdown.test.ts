@@ -31,6 +31,9 @@ describe('sameMarkdown', () => {
     assert.ok(!sameMarkdown('\\$$\nx^2\n\\$$', '$$\nx^2\n$$'));
     // A list item that opens with a line break is a file block in Linear.
     assert.ok(!sameMarkdown('* \n  [Summary](a.pdf)', '* [Summary](a.pdf)'));
+    assert.ok(!sameMarkdown('- [ ] \n  [Demo](demo.mp4)', '- [ ] [Demo](demo.mp4)'));
+    assert.ok(!sameMarkdown('- [X] \n  [Demo](demo.mp4)', '- [X] [Demo](demo.mp4)'));
+    assert.ok(!sameMarkdown('1. \n   [Demo](demo.mp4)', '1. [Demo](demo.mp4)'));
     assert.ok(sameMarkdown('* \n  [Summary](a.pdf)', '* \n  [Summary](a.pdf)\n'));
   });
 
