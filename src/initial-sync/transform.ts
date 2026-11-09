@@ -7,7 +7,7 @@
 // A transform may make requests of its own (an upload); it must not write the
 // document itself.
 
-import { fixText, relativeLinkUrls } from '../format/index.ts';
+import { fixText, relativeLinkUrls, sameMarkdown } from '../format/index.ts';
 import { type LinearClient } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap } from '../state/index.ts';
 import { type InitialSyncPlan } from './plan.ts';
@@ -90,15 +90,16 @@ export async function transformBody(transforms: readonly BodyTransform[], path: 
 /**
  * Linear's content in the file's form: the transforms' inverses, in reverse
  * order, put back each link as the file spelled it. When Linear stored the
- * body it was sent, that is the file as it was. When Linear reformatted it,
- * the restored text is put in Linear's form as a whole, so the file's
- * spellings, placed into reformatted text, become Linear's spellings too
- * (`<a b.png>` as `a%20b.png`), and a later run finds the document holding
- * the file.
+ * body it was sent, or the same Markdown in a spelling of its own (a final
+ * newline, an escape it adds), the body sent is restored: that is the file
+ * as it was. When Linear reformatted it into other Markdown, the restored
+ * text is put in Linear's form as a whole, so the file's spellings, placed
+ * into reformatted text, become Linear's spellings too, and a later run finds
+ * the document holding the file.
  */
 export function restoreBody(transforms: readonly BodyTransform[], path: string, content: string, sent: string): string {
-  const kept = content === sent;
-  let current = content;
+  const kept = sameMarkdown(content, sent);
+  let current = kept ? sent : content;
   for (const transform of [...transforms].reverse()) current = transform.restore({ path, body: current, kept });
   if (kept) return current;
   // A relative link still in Linear's content was not uploaded, so its file

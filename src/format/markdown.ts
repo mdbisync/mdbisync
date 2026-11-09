@@ -1,10 +1,12 @@
 // Parsing helpers for the format module: the Markdown tree with source
 // positions, and the split between front matter and the body.
 
+import { isDeepStrictEqual } from 'node:util';
 import type { Nodes, Root } from 'mdast';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { gfm } from 'micromark-extension-gfm';
+import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { posix } from 'node:path';
 
 /** A file split into the part that never goes to Linear and the body that does. */
@@ -42,6 +44,40 @@ export function lineCount(text: string): number {
 
 export function parse(body: string): Root {
   return fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+}
+
+/**
+ * Whether two bodies are the same document: equal text, or text that
+ * Markdown reads as the same tree. Linear can return a body it stored in a
+ * spelling of its own (a final newline, `\-6` for `-6` at the start of a
+ * table cell, `*` for `_`), which changes nothing in the document; the sync
+ * keeps the file's spelling for those.
+ */
+export function sameMarkdown(a: string, b: string): boolean {
+  if (a === b) return true;
+  return isDeepStrictEqual(comparable(a), comparable(b));
+}
+
+// Escapes of characters that open Linear's own syntax, which Markdown reads
+// as text either way: `$$` math and `+++` collapsible sections.
+const LINEAR_SYNTAX_ESCAPES: Readonly<Record<string, string>> = { '\\$': '', '\\+': '' };
+
+/** The tree without source positions, destinations as Markdown renders them (`<a b.png>` is `a%20b.png`). */
+function comparable(body: string): unknown {
+  // Keep those escapes apart from the plain characters, so `\$$` and `$$` differ.
+  // A list marker (with a task checkbox, if any) alone on its line opens a file block
+  // in Linear (`* \n  [a](a.pdf)`), which Markdown reads as `* [a](a.pdf)`: keep that line apart too.
+  const marked = body
+    .replace(/\\[$+]/g, (escape) => LINEAR_SYNTAX_ESCAPES[escape]!)
+    .replace(/^([ \t>]*(?:[*+-]|\d{1,9}[.)])(?:[ \t]+\[[ xX]\])?)[ \t]*$/gm, '$1 ');
+  const tree = parse(marked);
+  const strip = (node: Nodes): unknown => {
+    const { position: _position, ...rest } = node;
+    if ('url' in rest) rest.url = normalizeUri(rest.url);
+    if ('children' in node) return { ...rest, children: node.children.map(strip) };
+    return rest;
+  };
+  return strip(tree);
 }
 
 export function start(node: Nodes): number {

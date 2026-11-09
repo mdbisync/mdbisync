@@ -7,7 +7,7 @@ import { isMap, parseDocument, stringify } from 'yaml';
 import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
-import { lintText, splitFile } from '../format/index.ts';
+import { lintText, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
@@ -241,7 +241,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     }
     const linkBase = [...work.values()].some((doc) => doc.content?.includes('https://linear.app/')) ? documentUrlBase(await workspaceUrlKey(linear)) : undefined;
     const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)));
-    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, Buffer | string>; checked?: string };
+    type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, Buffer | string>; checked?: string; compared?: { body: string; same: boolean } };
     const candidates = new Map<string, Candidate>();
     const resetTarget = (id: string, targets: Map<string, string> = documentIds) => {
       for (const [path, target] of targets) if (target === id) targets.delete(path);
@@ -287,7 +287,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (candidate.previousBody !== undefined) linksToLinear(candidate.previousBody, candidate.path, map, seen);
         body = linksFromLinear(body, candidate.path, map, seen);
       }
-      return candidate.head + body;
+      // Linear's own spelling of the same document is no change: keep the file's text.
+      // Compared again only when other link targets change the body.
+      if (candidate.compared?.body !== body) {
+        const {assets} = candidate;
+        const newAssets = assets.files.size > 0 || [...assets.uploads].some(([hash, url]) => uploads.get(hash) !== url);
+        candidate.compared = {body, same: candidate.previousBody !== undefined && !newAssets && sameMarkdown(candidate.previousBody, body)};
+      }
+      return candidate.head + (candidate.compared.same ? candidate.previousBody : body);
     };
     let again = true;
     while (again) {

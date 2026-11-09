@@ -12,7 +12,7 @@ import { type RunReport } from '../run/finish.ts';
 import { environmentName, readInputs } from '../run/inputs.ts';
 import { runPreflight } from '../run/preflight.ts';
 import { Git } from '../state/index.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { type ConfirmedResult, FINAL_IDS_MESSAGE, PROGRESS_MESSAGE, confirmInitialSync } from './confirm.ts';
 import { type BodyTransform, LeaveOutError } from './transform.ts';
@@ -439,5 +439,75 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(await show('refs/mdbisync/linear:eng/README.md'), `---\nlinear-team: ENG\n---\n\n# Engineering team\n\n${CANARY}`);
     assert.equal(await show('refs/mdbisync/linear:eng/notes/formula.md'), TREE['eng/notes/formula.md']);
     assert.equal((await refs())['refs/heads/main'], tracked);
+  });
+
+  describe("Linear's own spelling of the same document", () => {
+    // Shapes Linear was seen to return for documents a confirmed initial sync
+    // wrote from a lint-clean corpus: a final newline the file does not have,
+    // and a backslash before a `-` that opens a table cell.
+    const TABLE = `# Readings\n\n| Day | Change |\n| -- | -- |\n| Monday | -6 |\n| Tuesday | +2 |\n\n${CANARY}`;
+    const respell = (content: string) => `${content.replace(/\| -(?=\d)/g, '| \\-')}\n`;
+    let world: FakeWorld;
+    const sync = () => runCli(['sync'], { env: env({ MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }), cwd, fetch: fakeFetch(world) });
+    const document = async (path: string) => {
+      const ids = await readIds();
+      return world.linear.documents.find((d) => d.id === ids[path]?.id) as FakeWorld['linear']['documents'][number];
+    };
+    const respellAll = () => {
+      for (const each of live(world)) {
+        each.content = respell(each.content ?? '');
+        touch(each);
+      }
+    };
+
+    beforeEach(async () => {
+      await fixture.seed({ 'eng/notes/readings.md': TABLE });
+      world = fakeWorld();
+    });
+
+    /** No sync pull request, no write to Linear, and `linear` still holds the tracked files. */
+    const assertQuiet = async () => {
+      const writes = world.linear.writes.count;
+      const result = await sync();
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.deepEqual(world.github.pullRequests, [], 'a sync pull request was opened');
+      assert.equal(world.linear.writes.count, writes, 'the sync wrote to Linear');
+      assert.equal(await fixture.remote.text(['rev-parse', 'refs/mdbisync/linear^{tree}']), await fixture.remote.text(['rev-parse', 'refs/heads/main^{tree}']));
+    };
+
+    it('stored so at the write: the record keeps the files and the first sync opens no pull request', async () => {
+      world.linear.store = respell;
+      const { result, report } = await run(world);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal((await document('eng/notes/readings.md')).content, respell(TABLE));
+      assert.deepEqual(report.initialSync?.reformatted ?? [], []);
+      await assertQuiet();
+      await assertQuiet();
+    });
+
+    it('spelled so later: the sync captures nothing, while a real edit is still captured', async () => {
+      assert.equal((await run(world)).result.exitCode, 0);
+      respellAll();
+      await assertQuiet();
+
+      const readings = await document('eng/notes/readings.md');
+      readings.content = (readings.content ?? '').replace('| Tuesday | +2 |', '| Tuesday | +3 |');
+      touch(readings);
+      const edited = await sync();
+      assert.equal(edited.exitCode, 0, edited.stderr);
+      assert.equal(world.github.pullRequests.length, 1, 'the edit opened no sync pull request');
+      const changed = await fixture.remote.text(['diff', '--name-only', 'refs/heads/main', 'refs/mdbisync/linear']);
+      assert.equal(changed.trim(), 'eng/notes/readings.md');
+    });
+
+    it('a file changed in git is written although Linear holds its earlier version in its own spelling', async () => {
+      assert.equal((await run(world)).result.exitCode, 0);
+      respellAll();
+      await fixture.seed({ 'eng/notes/readings.md': TABLE.replace('| Tuesday | +2 |', '| Tuesday | +4 |') });
+      const synced = await sync();
+      assert.equal(synced.exitCode, 0, synced.stderr);
+      assert.match((await document('eng/notes/readings.md')).content ?? '', /\| Tuesday \| \+4 \|/);
+      await assertQuiet();
+    });
   });
 });
