@@ -651,6 +651,15 @@ describe('subjects', () => {
     assert.deepEqual(await resolveSubject(ctx, 'documents.duplicateCount'), { known: true, value: 0 });
   });
 
+  it('name the files left out for size by their manifest role, not by path', async () => {
+    const { ctx } = await fakeRun();
+    const files = ctx.live?.manifest.files ?? [];
+    files.push({ path: 'eng/platform/media/scan-11mb.pdf', group: 'attachments', kind: 'attachment', synced: false, lfs: true, canary: null, class: null, rule: null, role: 'pdf-11mb' });
+    ctx.live?.tree.paths.set('eng/platform/media/scan-11mb.pdf', 'eng/platform/media/scan-11mb.pdf');
+    ctx.engine.results.push({ command: 'initial-sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: { summary: { oversizeFiles: ['eng/platform/media/scan-11mb.pdf', 'eng/platform/unknown.png'] } } });
+    assert.deepEqual(await resolveSubject(ctx, 'summary.oversizeFiles'), { known: true, value: ['eng/platform/unknown.png', 'pdf-11mb'] });
+  });
+
   it('count the engine\'s commits as git writes and not the scenario\'s own', async () => {
     const { ctx, remoteGit } = await fakeRun();
     const { snapshotRefs } = await import('./checks.ts');

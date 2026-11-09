@@ -339,6 +339,16 @@ function manifestOf(ctx: RunContext) {
   return byTarget;
 }
 
+/**
+ * Repository paths of the run's tree as the roles the corpus manifest gives
+ * their files (`role`). A path whose file has no role stays a path, so an
+ * unexpected file still shows up in the comparison.
+ */
+export function rolesOf(ctx: RunContext, paths: readonly string[]): string[] {
+  const manifest = manifestOf(ctx);
+  return sorted(paths.map((path) => manifest.get(path)?.role ?? path));
+}
+
 /** The slice's documents of a corpus group; an empty group would make its subject vacuous, so it is an error. */
 function groupPaths(ctx: RunContext, group: string): string[] {
   const paths = sorted([...manifestOf(ctx)].filter(([, entry]) => entry.group === group && entry.kind === 'markdown').map(([path]) => path));
@@ -1219,6 +1229,14 @@ export const SUBJECTS: Record<string, Compute> = {
   'run.completed': async (env) => ownResults(env.ctx).at(-1)?.exitCode === 0,
   'leases.refusedCount': async (env) => ownResults(env.ctx).filter((result) => result.report?.['atomicPushRefused'] === true).length,
   'leases.partialRefUpdates': async (env) => ownResults(env.ctx).reduce((sum, result) => sum + Number(result.report?.['partialRefUpdates'] ?? 0), 0),
+  // The engine names the files it left out for size by repository path; specs name them by role (L1-08).
+  'summary.oversizeFiles': async (env) => {
+    const last = ownResults(env.ctx).at(-1);
+    if (last?.report === null || last === undefined) throw new ProductError('the engine wrote no report with the oversize files');
+    const reported = reportField(last.report, 'oversizeFiles');
+    if (!Array.isArray(reported)) throw new ProductError("the engine's report gives no oversizeFiles list");
+    return rolesOf(env.ctx, reported.map(String));
+  },
   'summary.canaryCount': async (env) => {
     const hits = await canaryScan(env.ctx, { summariesOnly: true });
     return hits.length;
