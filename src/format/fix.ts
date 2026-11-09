@@ -156,19 +156,22 @@ class Writer {
     const indent = ' '.repeat(marker.split(' ')[0]!.length + 1);
     const [first] = item.children;
     const attachment = first?.type === 'paragraph' && item.children.length === 1 ? attachmentLink(first) : undefined;
-    const path = attachment?.url.split(/[?#]/)[0] ?? '';
-    // A link to a file that does not exist is not uploaded: Linear keeps it
-    // as a link. So it does for an uploaded MP3 in a bullet item: the link
-    // stays on the item's line, in angle brackets, as below.
-    if (attachment && this.options.linkedFileExists?.(attachment.url) !== false && !(marker === '*' && AUDIO.test(path))) {
-      const label = this.inline(attachment.children);
-      const destination = imageDestination(attachment.url);
+    // A link to a file that does not exist is not uploaded: Linear keeps it as a link.
+    if (attachment && this.options.linkedFileExists?.(attachment.url) !== false) {
+      const path = attachment.url.split(/[?#]/)[0]!;
       // Linear turns a list item holding only a link to an uploaded file into
       // a block: a video player for a video, which it writes on the item's
       // line, and a file block for any other file, which it writes below.
-      // The video form is recorded for bullet items only.
-      if (marker === '*' && VIDEO.test(path)) return `${marker} [${label}](${destination})`;
-      return `${marker} \n${indent}[${label}](${destination})`;
+      // An MP3 file it keeps as a plain link, written like the link to a
+      // missing file below. The video and MP3 forms are recorded for bullet
+      // items only.
+      const bullet = marker === '*';
+      if (!(bullet && AUDIO.test(path))) {
+        const label = this.inline(attachment.children);
+        const destination = imageDestination(attachment.url);
+        if (bullet && VIDEO.test(path)) return `${marker} [${label}](${destination})`;
+        return `${marker} \n${indent}[${label}](${destination})`;
+      }
     }
     if (first === undefined) return marker;
     this.containers.push({ kind: 'item', indent: (first.position?.start.column ?? 1) - (item.position?.start.column ?? 1) });
