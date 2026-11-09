@@ -32,6 +32,8 @@ export interface FakeDocument {
   icon?: string | null;
   color?: string | null;
   comments?: string[];
+  /** Ids parallel to comments, including client-chosen notice ids. */
+  commentIds?: string[];
   trashed?: boolean;
   archivedAt?: string;
   /** The stored content. */
@@ -203,6 +205,11 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
       .map((project) => ({ id: project.id, name: project.name, teams: { nodes: project.teamIds.map((id) => ({ id })) } }));
     return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
+  if (operationName === 'FindDocumentComment') {
+    const id = variables.id as string;
+    const document = world.linear.documents.find((doc) => doc.commentIds?.includes(id));
+    return json(200, {data:{comments:{nodes:document === undefined ? [] : [{id, documentContentId:`content-${document.id}`}]}}});
+  }
   if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
   if (operationName === 'GetDocuments') {
@@ -256,10 +263,21 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     return { documentUpdate: { success: true, document: documentNode(document, variables.withContent === true) } };
   }
   if (operation === 'CommentOnDocument') {
-    const input = variables.input as { documentContentId: string; body: string };
+    const input = variables.input as { documentContentId: string; body: string; id?: string };
     const document = documents.find((d) => `content-${d.id}` === input.documentContentId);
-    if (document !== undefined) (document.comments ??= []).push(input.body);
-    return { commentCreate: { success: document !== undefined, comment: { id: 'comment' } } };
+    const id = input.id ?? `comment-${document?.id ?? 'unknown'}-${document?.comments?.length ?? 0}`;
+    if (document !== undefined) {
+      document.commentIds ??= (document.comments ?? []).map((_, index) => `comment-${document.id}-${index}`);
+      (document.comments ??= []).push(input.body);
+      document.commentIds.push(id);
+    }
+    return { commentCreate: { success: document !== undefined, comment: { id } } };
+  }
+  if (operation === 'UpdateDocumentComment') {
+    const id = variables.id as string;
+    const document = documents.find((doc) => doc.commentIds?.includes(id));
+    if (document !== undefined) document.comments![document.commentIds!.indexOf(id)] = (variables.input as {body:string}).body;
+    return {commentUpdate:{success:document !== undefined, comment:{id}}};
   }
   if (operation === 'FileUpload') {
     const index = world.linear.uploads.length;

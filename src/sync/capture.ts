@@ -12,6 +12,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { type CommitIdentity, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
+import { reconcileDocumentMark } from './marks.ts';
 import { documentPath } from './paths.ts';
 import { createAssetCapture, type CapturedAssets } from './assets.ts';
 
@@ -191,16 +192,6 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           again = true;
           break;
         }
-        if (old?.entry.saved !== undefined) {
-          try { await linear.updateDocument(id, {icon: old.entry.saved.icon, color: old.entry.saved.color}); }
-          catch {
-            result.leftOut.push({id, rule: 'capture-appearance'});
-            candidates.delete(id);
-            resetTarget(id);
-            again = true;
-            break;
-          }
-        }
         candidate.checked = text;
       }
     }
@@ -211,7 +202,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         ids.delete(old.path);
         result.removed.push(old.path);
       }
-      ids.set(candidate.path, {id});
+      ids.set(candidate.path, old?.entry ?? {id});
       for (const [path, content] of candidate.files) {
         if (previous.get(path)?.equals(Buffer.from(content)) !== true) {
           changes.set(path, content);
@@ -235,13 +226,26 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     if (!pushed.ok) { result.ok = false; result.code = 'state-moved'; }
     else {
       result.state = next;
-      for (const blocked of result.blocked) {
-        const doc = documents.get(blocked.id)!;
-        if (doc.icon !== 'Cross' || doc.color !== '#EB5757') await linear.updateDocument(doc.id, { icon: 'Cross', color: '#EB5757' });
-        if (doc.documentContentId !== null) {
-          const details = blocked.findings.map(({ hook, line }) => `hook \`${hook}\`, line ${line}`).join('; ');
-          await linear.commentOnDocument(doc.documentContentId, `A security check blocked this change: ${details}. Edit the document to fix it; the next run will try again.`);
+      const lostLease = new Error('state moved while recording document marks');
+      const marked = [
+        ...[...candidates.values()].map(({doc, path}) => ({doc, path, blocked: [] as SecurityFinding[]})),
+        ...result.blocked.map(({id, path, findings}) => ({doc: documents.get(id)!, path, blocked: findings})),
+      ];
+      try {
+        for (const {doc, path, blocked} of marked) {
+          await reconcileDocumentMark({document: doc, entry: ids.get(path)!, linear, blocked,
+            persistEntry: async (entry) => {
+              ids.set(path, entry);
+              const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, message:'Capture document marks'});
+              const updated = {...next, ids:tip};
+              const saved = await pushAtomic(git, options.config, (['linear', 'ids', 'uploads'] as const).map((store) => ({ref:stateRef(options.config, store), expected:result.state[store], next:updated[store]})));
+              if (!saved.ok) { result.ok = false; result.code = 'state-moved'; throw lostLease; }
+              result.state = updated;
+            },
+          });
         }
+      } catch (error) {
+        if (error !== lostLease) throw error;
       }
 
     }

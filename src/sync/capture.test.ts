@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
 import { capture } from './capture.ts';
+import { MARKERS } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 
 const TREE = {
@@ -154,11 +155,15 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
     assert.equal(await text('docs/safe.md'), 'Safe addition.\n');
     const ids = await readIds(context.git, rejected.state.ids);
-    assert.deepEqual(ids.get('docs/plan.md')?.saved, {icon: 'Fire', color: '#123456'});
+    const decoration = ids.get('docs/plan.md')!.saved!;
+    assert.equal(decoration.icon, 'Fire');
+    assert.equal(decoration.color, '#123456');
+    assert.equal(decoration.notice?.kind, 'blocked');
+    assert.equal(decoration.notice?.posted, true);
     assert.equal(world.linear.documents[0]!.icon, 'Cross');
     assert.equal(world.linear.documents[0]!.color, '#EB5757');
     const comments = world.linear.documents[0]!.comments ?? [];
-    assert.match(comments.join(''), /hook `secret-check`, line 5/);
+    assert.match(comments.join(''), /Hook `secret-check`, line 5/);
     assert.ok(!comments.join('').includes('blocked-value-731'));
     // The canary was assembled only at runtime, so no fixture script contains it verbatim.
     const canary = ['blocked', 'value', '731'].join('-');
@@ -232,6 +237,87 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/renamed.md'), 'Target.\n');
   });
 
+  it('reconciles conflict, blocked and clear marks with durable notices and one original icon', async () => {
+    const doc = world.linear.documents[0]!;
+    Object.assign(doc, {icon:'Fire', color:'#123456', content:`${MARKERS.git}\n\nFirst.\n\n${MARKERS.linear}\n\nSecond.\n\n${MARKERS.end}\n`});
+    const first = await run();
+    assert.equal(doc.icon, 'Alert');
+    assert.equal(doc.color, '#F2994A');
+    const original = (await readIds(context.git, first.state.ids)).get('docs/plan.md')!.saved!;
+    assert.equal(original.notice?.kind, 'conflict');
+    assert.equal(original.notice?.posted, true);
+    assert.equal(original.icon, 'Fire');
+    assert.equal(doc.comments?.length, 1);
+    await refresh();
+    const repeated = await run();
+    assert.equal(doc.comments?.length, 1);
+    assert.deepEqual((await readIds(context.git, repeated.state.ids)).get('docs/plan.md')!.saved, original);
+    await refresh();
+    const blocked = await capture(context, {config, state:context.fetched.state, security:{configured:true, check:async()=>[{hook:'secret-check', line:5}]}});
+    assert.equal(doc.icon, 'Cross');
+    const saved = (await readIds(context.git, blocked.state.ids)).get('docs/plan.md')!.saved!;
+    assert.equal(saved.icon, 'Fire');
+    assert.equal(saved.color, '#123456');
+    assert.equal(saved.notice?.kind, 'blocked');
+    assert.equal(saved.notice?.posted, true);
+    assert.notEqual(saved.notice?.id, original.notice?.id);
+    assert.equal(doc.comments?.length, 2);
+    await refresh();
+    const revised = await capture(context, {config, state:context.fetched.state, security:{configured:true, check:async()=>[{hook:'secret-check', line:7}]}});
+    const revisedNotice = (await readIds(context.git, revised.state.ids)).get('docs/plan.md')!.saved!.notice!;
+    assert.equal(revisedNotice.id, saved.notice?.id);
+    assert.notEqual(revisedNotice.bodyHash, saved.notice?.bodyHash);
+    assert.equal(revisedNotice.posted, true);
+    assert.equal(doc.comments?.length, 2);
+    assert.match(doc.comments!.at(-1)!, /line 7/);
+    await refresh();
+    doc.content = 'Resolved.\n';
+    const cleared = await run();
+    assert.equal(doc.icon, 'Fire');
+    assert.equal(doc.color, '#123456');
+    assert.equal((await readIds(context.git, cleared.state.ids)).get('docs/plan.md')!.saved, undefined);
+    assert.equal(doc.comments?.length, 2);
+  });
+
+  it('recovers a posted notice after losing the receipt lease and preserves reserved ids', async () => {
+    const reserved = new Map([['docs/future.md', 'future-document']]);
+    const state = context.fetched.state;
+    const next = await commitIds(context.git, state.ids, await readIds(context.git, state.ids), IDENTITY, {reserved});
+    assert.equal((await pushAtomic(context.git, config, [{ref:stateRef(config,'ids'), expected:state.ids, next}])).ok, true);
+    await refresh();
+    const ensure = context.linear.ensureDocumentComment.bind(context.linear);
+    context.linear.ensureDocumentComment = async (...args) => {
+      const comment = await ensure(...args);
+      const observed = await fetchState(context.git, config);
+      const current = await readIds(context.git, observed.state.ids);
+      const notice = current.get('docs/plan.md')!.saved!.notice!;
+      assert.equal(notice.id, comment.id);
+      assert.equal(notice.posted, false);
+      const competing = await commitIds(context.git, observed.state.ids, current, IDENTITY, {reserved, always:true, message:'Concurrent ids update'});
+      assert.equal((await pushAtomic(context.git, config, [{ref:stateRef(config,'ids'), expected:observed.state.ids, next:competing}])).ok, true);
+      return comment;
+    };
+    const gate = {configured:true, check:async()=>[{hook:'secret-check', line:5}]};
+    world.linear.documents[0]!.content = 'Rejected.\n';
+    world.linear.documents[0]!.comments = ['Existing note.'];
+    const interrupted = await capture(context, {config, state:context.fetched.state, security:gate});
+    assert.equal(interrupted.ok, false);
+    assert.equal(interrupted.code, 'state-moved');
+    assert.equal(world.linear.documents[0]!.comments?.length, 2);
+    await refresh();
+    const pending = (await readIds(context.git, context.fetched.state.ids)).get('docs/plan.md')!.saved!.notice!;
+    assert.equal(pending.posted, false);
+    context.linear.ensureDocumentComment = ensure;
+    const resumed = await capture(context, {config, state:context.fetched.state, security:gate});
+    assert.equal(resumed.ok, true);
+    assert.equal(world.linear.documents[0]!.comments?.length, 2);
+    const posted = (await readIds(context.git, resumed.state.ids)).get('docs/plan.md')!.saved!.notice!;
+    assert.equal(posted.id, pending.id);
+    assert.equal(posted.posted, true);
+    assert.deepEqual(await readReservedIds(context.git, resumed.state.ids), reserved);
+    assert.equal(world.linear.documents[0]!.comments![0], 'Existing note.');
+  });
+
   it('retries a security comment after its post-push delivery fails', async () => {
     const gate = {configured: true, check: async () => [{hook:'secret-check', line:5}]};
     world.linear.documents[0]!.content = 'Rejected.\n';
@@ -241,7 +327,7 @@ describe('capture from Linear', () => {
     await refresh();
     delete world.linear.writes.reject;
     await capture(context, {config, state: context.fetched.state, security: gate});
-    assert.match(world.linear.documents[0]!.comments?.join('') ?? '', /hook `secret-check`, line 5/);
+    assert.match(world.linear.documents[0]!.comments?.join('') ?? '', /Hook `secret-check`, line 5/);
   });
 
   it('keeps team-zone documents outside nested project folders', async () => {
