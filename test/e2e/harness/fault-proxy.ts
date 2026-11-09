@@ -169,11 +169,18 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
     const n = counter;
     const path = (request.url ?? '').split('?')[0];
     const isGraphql = path === '/graphql';
-    const { operation, kind } = isGraphql ? operationOf(text) : { operation: `http ${request.url?.split('?')[0] ?? ''}`, kind: 'other' as const };
+    const { operation, kind } = isGraphql ? operationOf(text) : { operation: `http ${path}`, kind: 'other' as const };
     const at = Date.now();
     const record = (status: number | 'reset', injected: boolean) => requests.push({ n, operation, kind, status, injected, at });
     const bearer = /^Bearer (\S+)$/.exec(String(request.headers.authorization ?? ''))?.[1];
     if (bearer !== undefined) tokens.add(bearer);
+
+    // Count for every HTTP fault before one can answer and hide the request from later faults.
+    for (const fault of faults) {
+      if (fault.kind !== 'http') continue;
+      const matchesTarget = fault.target === 'oauth' ? path === '/oauth/token' : isGraphql;
+      if (matchesTarget && (fault.operation === undefined || fault.operation === operation)) fault.matched = (fault.matched ?? 0) + 1;
+    }
 
     // A lost-answer fault for this write, used up only once the write has reached Linear.
     let dropAnswer: (Fault & { used?: number }) | undefined;
@@ -182,7 +189,7 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
       if (fault.kind === 'http') {
         const matchesTarget = fault.target === 'oauth' ? path === '/oauth/token' : isGraphql;
         if (!matchesTarget || (fault.operation !== undefined && fault.operation !== operation)) continue;
-        const position = fault.matched = (fault.matched ?? 0) + 1;
+        const position = fault.matched ?? 0;
         if (position >= fault.requestNumber && used < fault.times) {
           fault.used = used + 1;
           const headers: Record<string, string> = { 'content-type': 'application/json' };

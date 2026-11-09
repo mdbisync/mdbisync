@@ -1350,7 +1350,7 @@ describe('GraphQL HTTP fault scenario', () => {
         { operation: 'http /oauth/revoke', status: 200, injected: false },
       ]);
       assert.deepEqual(forwarded, ['/graphql', '/oauth/token', '/graphql', '/oauth/revoke']);
-      for (const assertion of scenario.checks.assertions.filter((item) => item.subject.startsWith('http.'))) {
+      for (const assertion of scenario.checks.assertions.filter((item) => item.subject.startsWith('http.') || item.subject === 'proxy.injectedOperations')) {
         assert.deepEqual(await resolveSubject(ctx, assertion.subject), { known: true, value: assertion.expected });
       }
       // An invariant's later normal run cannot turn a missing retry into a pass.
@@ -1360,6 +1360,7 @@ describe('GraphQL HTTP fault scenario', () => {
       ctx.observations.set('scenario.proxyEnd', 3);
       assert.deepEqual(await resolveSubject(ctx, 'http.retryCount'), { known: true, value: 0 });
       await assert.rejects(runStep(ctx, { kind: 'fault', action: 'http', args: { status: 429, target: 'unknown' } }), /unknown HTTP fault target/);
+      await assert.rejects(runStep(ctx, { kind: 'fault', action: 'http', args: { status: 500, target: 'oauth', operation: 'oauth.token' } }), /OAuth faults cannot select/);
       await runStep(ctx, { kind: 'fault', action: 'http', args: { status: 500, target: 'oauth' } });
       await assert.rejects(mintAppToken({ clientId: 'test-id', clientSecret: 'test-secret' }, { baseUrl: proxy.url }), /HTTP 500/);
     } finally {

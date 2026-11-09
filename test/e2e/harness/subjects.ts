@@ -1245,7 +1245,7 @@ export const SUBJECTS: Record<string, Compute> = {
   'writes.linear': async (env) => documentWrites(env.ctx),
   'writes.git': async (env) => gitWrites(env.ctx),
   'writes.total': async (env) => documentWrites(env.ctx) + (await gitWrites(env.ctx)) + (await pullRequestsSinceStart(env.ctx)).length,
-  'http.injectedOperations': async (env) => proxyRecordsSinceStart(env.ctx).filter((record) => record.injected).map((record) => record.operation),
+  'proxy.injectedOperations': async (env) => proxyRecordsSinceStart(env.ctx).filter((record) => record.injected).map((record) => record.operation),
   'http.retryCount': async (env) => {
     const records = proxyRecordsSinceStart(env.ctx);
     // A fault the proxy answered, or a write whose answer it dropped, followed by the same operation again.

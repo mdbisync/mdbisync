@@ -152,6 +152,7 @@ function validateArguments(kind: string, action: string, args: ObjectValue): voi
   if (kind === 'fault' && action === 'http') {
     assert.equal(typeof args.status, 'number', 'HTTP status must be numeric');
     if (args.target !== undefined) oneOf(args.target, ['graphql', 'oauth'], 'HTTP fault target');
+    if (args.target === 'oauth') assert.equal(args.operation, undefined, 'OAuth faults cannot select a GraphQL operation');
   }
   if (args.events !== undefined) { list(args.events); for (const event of args.events) oneOf(event, ['push', 'pull_request', 'workflow_dispatch', 'schedule'], 'event'); }
   if (args.actors !== undefined) { list(args.actors); for (const actor of args.actors) oneOf(actor, kind === 'ui' ? ['editor-a', 'editor-b'] : ['editor-a', 'editor-b', 'git'], 'editor role'); }

@@ -59,7 +59,7 @@
     },
     "assertions": [
       {
-        "subject": "http.injectedOperations",
+        "subject": "proxy.injectedOperations",
         "operator": "equal",
         "expected": [
           "ListDocuments"

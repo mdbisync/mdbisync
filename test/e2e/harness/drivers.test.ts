@@ -218,6 +218,30 @@ describe('fault proxy', () => {
     }
   });
 
+  it('counts a matching request for later faults even when an earlier fault answers it', async () => {
+    const up = await upstream();
+    const proxy = await startFaultProxy(up.url);
+    try {
+      proxy.setFaults([
+        { kind: 'http', status: 429, requestNumber: 1, retryAfterSeconds: 1, times: 1 },
+        { kind: 'http', status: 500, requestNumber: 2, retryAfterSeconds: null, times: 1 },
+      ]);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 429);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 500);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 200);
+      proxy.setFaults([
+        { kind: 'write-error', variant: 'server-error', times: 1 },
+        { kind: 'http', status: 429, requestNumber: 2, retryAfterSeconds: 1, times: 1 },
+      ]);
+      assert.equal((await post(proxy.url, 'mutation UpdateDocument { a }')).status, 500);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 429);
+      assert.equal((await post(proxy.url, 'query Q { a }')).status, 200);
+    } finally {
+      await proxy.close();
+      await up.close();
+    }
+  });
+
   it('faults OAuth only when explicitly targeted, without counting GraphQL or revocation', async () => {
     const up = await upstream();
     const proxy = await startFaultProxy(up.url);
