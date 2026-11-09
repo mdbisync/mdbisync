@@ -271,9 +271,12 @@ Linear or a write failed, a state ref moved while it captured or wrote, or
 a removal is held. It kept what it could record, and the next run goes on
 from there. A run fails when it needs a person (the setup check, a failed
 check on the sync pull request, a merge GitHub refuses again, an initial
-sync waiting to be merged, a full container), and also when only the sync
+sync from Linear not merged yet, a full container), and also when only the sync
 pull request step did not finish (`sync: not finished (<code>); run it
 again`, for `state-moved` or `github-failed` there): the next run tries
-again.
+again. An initial sync from Linear stays pending until a person merges its
+pull request or a new initial sync replaces it; closing the pull request or
+deleting its branch does not cancel it
+([`initial-pull-request-pending`](troubleshooting.md#sync-state)).
 [Last lines](troubleshooting.md#last-lines) gives every last line and exit
 code.
