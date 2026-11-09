@@ -63,7 +63,16 @@ function describe(findings: readonly Finding[]): string {
  * sync resolves it, and must name a file there.
  */
 export function linkedFileResolver(file: string, root: string): (url: string) => boolean {
-  return linkedFileCheck(file.split(sep).join('/'), (path) => statSync(join(root, path), { throwIfNoEntry: false })?.isFile() === true);
+  return linkedFileCheck(file.split(sep).join('/'), (path) => isFileAt(join(root, path)));
+}
+
+/** Whether a regular file is there; a path the file system cannot hold (a NUL byte) names none. */
+function isFileAt(path: string): boolean {
+  try {
+    return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    return false;
+  }
 }
 
 /** `lint`: exit 1 and one line per finding when Linear would lose or alter something, or a file is not in Linear's form. */
