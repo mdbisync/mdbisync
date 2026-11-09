@@ -7,6 +7,7 @@ import { LinearClient, LinearStoppedError } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { runCli } from '../cli.ts';
+import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
@@ -106,8 +107,10 @@ describe('capture from Linear', () => {
       MDBISYNC_LINEAR_CLIENT_ID:'client', MDBISYNC_LINEAR_CLIENT_SECRET:'secret', MDBISYNC_LINEAR_API_URL:LINEAR_API,
       MDBISYNC_GITHUB_TOKEN:'token', MDBISYNC_GITHUB_API_URL:GITHUB_API, MDBISYNC_REPOSITORY:'example/repository', MDBISYNC_REPORT_FILE:reportFile,
     }});
-    assert.equal(result.exitCode, 0, result.stderr);
+    // Every partial sync exits with the incomplete code, so a script can tell it from a complete one.
+    assert.equal(result.exitCode, INCOMPLETE_EXIT_CODE, result.stderr);
     assert.match(result.stderr, /warning: sync: partial, will continue/);
+    assert.equal(JSON.parse(await readFile(reportFile, 'utf8')).exitStatus, 'warning');
     const report = JSON.parse(await readFile(reportFile, 'utf8'));
     assert.equal(report.code, 'stopped');
     assert.equal(report.stoppedEarly, true);

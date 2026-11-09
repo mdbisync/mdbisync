@@ -8,7 +8,8 @@ import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } f
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { lintText, splitFile } from '../format/index.ts';
-import { type LinearDocument, type StopReason, LinearStoppedError, describeStop } from '../linear/index.ts';
+import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
+import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -32,7 +33,9 @@ export interface CaptureOptions {
 
 export interface CaptureResult {
   ok: boolean;
-  code?: 'state-moved' | 'stopped';
+  code?: 'state-moved' | 'stopped' | 'linear-failed';
+  /** Linear failed a request (a server error, a lost connection, an error answer): its operation and error, no content. */
+  failure?: { operation: string; error: string };
   /** A resumable client budget stop; state is the last successful push. */
   stopped?: StopReason;
   /** The state refs after capture, or the input snapshot if its push lost the lease. */
@@ -93,6 +96,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const blobs = await readBlobs(git, textEntries.map((entry) => entry.oid));
     const previous = new Map(textEntries.map((entry) => [entry.path, blobs.get(entry.oid)!]));
     const byId = new Map([...ids].map(([path, entry]) => [entry.id, { path, entry }]));
+    // A new document's id is reserved for its path until it is mapped. Documents an earlier run wrote may link to it, and
+    // its create may have landed with the answer lost: the reserved path is where it belongs.
+    const reservedById = new Map([...reserved].filter(([path, id]) => !ids.has(path) && !byId.has(id)).map(([path, id]) => [id, path]));
     const occupied = new Set([...entries.map((entry) => entry.path), ...ids.keys()]);
     const annotationHead = (path: string): string | undefined => {
       if (posix.basename(path) !== 'README.md' || !mapping.zones.has(folderOf(path))) return undefined;
@@ -155,6 +161,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     };
     const destination = (doc: LinearDocument, occupied: ReadonlySet<string>, allocated: ReadonlyMap<string, string> = new Map()) => {
       if (retained.has(doc.id)) return retained.get(doc.id)!;
+      const own = reservedById.get(doc.id);
+      if (own !== undefined && !occupied.has(own) && !allocated.has(own) && !invalidZone(doc, own)) return own;
       const old = byId.get(doc.id);
       const available = new Set(occupied);
       if (old !== undefined && (!allocated.has(old.path) || allocated.get(old.path) === doc.id)) available.delete(old.path);
@@ -177,10 +185,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Only files already present in the branch are link targets until their
     // candidates pass. A blocked rename continues to point at its old file.
     const documentIds = new Map([...ids].filter(([path]) => previous.has(path)).map(([path, entry]) => [path, entry.id]));
+    // A reserved id names its path too: a link written to a new document that is not created yet stays relative.
+    for (const [id, path] of reservedById) if (!documentIds.has(path)) documentIds.set(path, id);
     const paths = new Map<string, string>();
     const reservations = new Set(occupied);
     const allocated = new Map<string, string>();
-    for (const doc of [...work.values()].filter(live).sort((a, b) => a.id.localeCompare(b.id))) {
+    const reservedFirst = (a: LinearDocument, b: LinearDocument) => Number(reservedById.has(b.id)) - Number(reservedById.has(a.id)) || a.id.localeCompare(b.id);
+    for (const doc of [...work.values()].filter(live).sort(reservedFirst)) {
       const path = destination(doc, reservations, allocated);
       allocated.set(path, doc.id);
       paths.set(doc.id, path);
@@ -328,10 +339,17 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     result.summary = renderCapture(result, gate.configured);
     return result;
   } catch (error) {
-    if (!(error instanceof LinearStoppedError)) throw error;
+    // Linear stopped the client or failed a request it may answer next time: the capture keeps what it published, and the
+    // next run reads again. A refusal (forbidden, invalid input) fails the run: it would come back on every run.
+    if (!(error instanceof LinearStoppedError) && !(error instanceof LinearError && isTransientLinearError(error))) throw error;
     result.ok = false;
-    result.code = 'stopped';
-    result.stopped = error.reason;
+    if (error instanceof LinearStoppedError) {
+      result.code = 'stopped';
+      result.stopped = error.reason;
+    } else {
+      result.code = 'linear-failed';
+      result.failure = { operation: error.operation, error: describeLinearError(error as LinearError) };
+    }
     if (!published) { result.changed = []; result.removed = []; }
     result.summary = renderCapture(result, gate.configured);
     return result;
@@ -360,7 +378,8 @@ function relocatedHead(head: string): string {
 
 function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
-  if (result.stopped !== undefined) summary += `\nCapture partial, will continue: ${describeStop(result.stopped)}.`;
+  if (result.stopped !== undefined) summary += `\nCapture partial, will continue.\n\n${renderStop(result.stopped).join('\n')}`;
+  if (result.failure !== undefined) summary += `\nCapture partial, will continue: Linear failed ${result.failure.operation} (${result.failure.error}).`;
   if (!configured) summary += '\nContent is pushed unchecked: no security hooks are configured.';
   return summary;
 }
