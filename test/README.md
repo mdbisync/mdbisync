@@ -16,7 +16,7 @@ general setup are in [CONTRIBUTING.md](../CONTRIBUTING.md).
 | `fixtures/` | The fixture bank: one small file per Markdown construct and edge case, with Linear's recorded form beside it ([fixtures/README.md](fixtures/README.md)) |
 | `probe/` | The format probe that records Linear's form of every fixture ([probe/README.md](probe/README.md)) |
 | `corpus/` | The corpus generator: a deterministic, seeded repository tree of about 2,900 files built from the bank |
-| `scenarios/` | One spec per scenario id (`L0-01.yaml` and so on): slice, mode, setup, steps and checks |
+| `scenarios/` | One spec per scenario id (`L0-01.yaml` and so on): slice, mode, setup, steps and checks; the spec format, step kinds and invariants are in [scenarios/README.md](scenarios/README.md) |
 | `e2e/harness/` | The harness: isolation, steps, checks, reports and cleanup |
 | `e2e/expected-red.json` | Scenarios whose feature has not landed yet |
 
@@ -64,7 +64,8 @@ node test/corpus/check.ts test/corpus/out --lint
 The harness does not read a local corpus: live scenarios take their files
 from `corpus/` and `corpus-slices/` on the `main` branch of the test
 repository. To set one up, commit the generator's output there (with Git
-LFS) and run `check.ts --git` on a fresh clone.
+LFS) and run `check.ts --git` on a fresh clone made without LFS smudging
+(`GIT_LFS_SKIP_SMUDGE=1 git clone ...`).
 
 A scenario uses one slice of the corpus:
 
@@ -99,13 +100,18 @@ node test/e2e/harness/cli.ts sweep                            # remove leftovers
 
 `Ctrl-C` lets the running scenarios finish with their cleanup and skips the
 rest; a second `Ctrl-C` stops at once and leaves the leftovers to `sweep`.
-The command exits with 1 when a scenario fails, otherwise 0.
+`run` exits with 1 when a scenario fails and 0 otherwise, even when
+scenarios are env-blocked or expected-red. Any command also exits with 1
+when the harness itself stops with an error, 2 for an unknown command and
+130 after a second `Ctrl-C`.
 
 ### Without credentials
 
-With no test configuration, the offline format scenarios (most of L0) run
-for real, and every scenario that needs Linear or the test repository ends
-`env-blocked` with the missing item as its reason. This is the quickest way
+With no test configuration, the L0 format scenarios that need neither
+Linear nor the test repository (L0-01 to L0-04 and L0-07) run for real, and
+every other scenario ends `env-blocked` with the missing item as its
+reason; L0-08 is one of them, because it reads the corpus's hook
+configuration from the test repository. This is the quickest way
 to see that the harness works:
 
 ```sh
@@ -125,11 +131,16 @@ from it: branches `t/<run>/main` and `t/<run>/sync`, state refs under
 team-zone documents whose titles start with the run id. A scenario that
 uses a team zone takes a lock on that team, so two of them never overlap.
 
-Cleanup runs after every scenario, pass or fail: it closes the run's pull
+Cleanup runs after every scenario, pass or fail, except a scenario held
+for its UI steps, whose data stays for a person or a browser session until
+the hold ends (the report's Cleanup column says so). Cleanup closes the run's pull
 requests, deletes its branches and refs, and archives its Linear documents
 by deleting their run projects. `sweep` removes what a killed run left,
-using the run-id pattern; it is safe to run at any time and never touches
-a live run's data.
+using the run-id pattern. It knows the live runs of its own state folder
+(below) and removes another run's leftovers once they are older than two
+hours, so stop every run that uses a different state folder or another
+host before you sweep the shared repository and workspace. It needs the
+full live configuration below.
 
 Locks and the shared budget ledger live in a state folder on the host
 (`MDBISYNC_HARNESS_STATE_DIR`, default `<tmp>/mdbisync-harness`); harness
@@ -154,27 +165,16 @@ the engine's inputs and outputs, and the evidence the checks read.
 | Result | Meaning |
 | --- | --- |
 | `pass` | every step ran and every check held |
-| `fail` | a check failed or a step broke on a scenario that is not on the expected-red list, or the harness itself broke (its reason then starts with `harness:`) |
+| `fail` | a check failed or a step broke on a scenario that is not on the expected-red list, or the harness itself broke: its reason then starts with `harness:` (a step the harness cannot run yet) or `harness error:` (any other error of the harness) |
 | `expected-red` | the scenario is on the expected-red list and failed for a product reason: the engine answered "not implemented", a product step failed, or a check did not hold |
 | `env-blocked` | the environment could not run it: missing configuration, Linear budget, runner, corpus or browser; the reason says which |
 | `skipped` | not run: deferred, or stopped before its turn |
 
 The reason column lists the checks that did not hold, by name. `I1` to
-`I9` are the invariants every scenario checks; other names are the
+`I9` are the invariants every scenario checks, defined in
+[scenarios/README.md](scenarios/README.md); other names are the
 scenario's own assertions (for example `fix.output (same-as did not
 hold)`), defined in its spec under `checks.assertions`.
-
-| Id | Invariant |
-| --- | --- |
-| I1 | Converged: every synchronized file equals its Linear document |
-| I2 | No lost edit: every edit is on both sides, or inside conflict markers |
-| I3 | The tracked branch changes only through the scenario's own commits and the sync pull request's merges |
-| I4 | No force push of a state ref or the sync branch |
-| I5 | No document content in logs, summaries, pull request texts or comments (each file carries a canary token the scan looks for) |
-| I6 | One more run with no changes writes nothing |
-| I7 | Each synchronized path has exactly one Linear document id |
-| I8 | No duplicate documents |
-| I9 | Linear requests per written document stay within budget |
 
 `Engine requests` counts what the engine sent through the harness's Linear
 proxy; `Harness app reads` counts the harness's own reads through the OAuth
@@ -204,7 +204,7 @@ environment wins. Values are never written to a report or a log.
 | `MDBISYNC_TEST_SANDBOX_URL` | every live scenario | `https://github.com/<owner>/<repo>` of the test repository, which holds the corpus on `main` |
 | `MDBISYNC_TEST_SANDBOX_GIT_URL` | optional | where Git reads and pushes instead, for example a local mirror |
 | `SYNC_APP_CLIENT_ID` and the App's private key (`SYNC_APP_PRIVATE_KEY`, `SYNC_APP_PRIVATE_KEY_FILE`, or `sync-app.pem` in the configuration folder) | `actions` mode; optional for `local` | a GitHub App installed on the test repository; without it, local runs use your Git credential for the repository |
-| `MDBISYNC_TEST_ACTION_SHA` | optional, `actions` mode | a full release commit SHA the workflows run instead of the version their templates pin |
+| `MDBISYNC_TEST_ACTION_SHA` | optional, `actions` mode; environment only, not read from `secrets.env` | a full release commit SHA the workflows run instead of the version their templates pin |
 
 The test workspace needs two teams with the keys `ENG` and `DOCS`; the
 corpus's folders map to them. The free plan is enough, with two limits to
@@ -213,9 +213,20 @@ hourly API budget per OAuth application. The harness never trashes
 documents to clean up (Linear keeps trashed documents for 30 days); it
 archives them with their run project.
 
-`actions` mode also needs a self-hosted or hosted runner for the test
-repository's workflows; `ui` mode is a checklist for a person or a browser
-session signed in as the two members.
+`actions` mode runs the workflows in the test repository itself, so that
+repository needs its own settings; the local configuration is not
+uploaded:
+
+- the repository variable `SYNC_APP_CLIENT_ID` and the repository secrets
+  `SYNC_APP_PRIVATE_KEY`, `LINEAR_TEST_APP_CLIENT_ID` and
+  `LINEAR_TEST_APP_CLIENT_SECRET`, which the harness's copies of the
+  workflows read;
+- a self-hosted runner with the label `mdbisync-sandbox`: every job is
+  rewritten to run on `[self-hosted, mdbisync-sandbox]`, so without such a
+  runner the jobs stay queued.
+
+`ui` mode is a checklist for a person or a browser session signed in as
+the two members.
 
 ## Change the test base
 
