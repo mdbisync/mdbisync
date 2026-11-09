@@ -52,7 +52,7 @@ import {
   branchRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
-import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
+import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
 import { withRecorded } from './recorded.ts';
 
@@ -62,9 +62,6 @@ export const IDS_MESSAGE = 'Sync: document ids';
 
 /** Documents read again in one request, just before they are written. */
 export const REREAD_BATCH = 50;
-
-/** Versions of the id map searched for the id of a document Linear removed. */
-export const ID_HISTORY_DEPTH = 100;
 
 export interface WriteOptions {
   documentCap?: number | undefined;
@@ -237,25 +234,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // Step 3.
   const ids = await readIds(git, expected.ids);
   const reserved = await readReservedIds(git, expected.ids);
-  let idHistory: Oid[] | undefined;
-  const idVersions = new Map<Oid, IdMap>();
-  /** The id a path's document last had: now, or in an earlier version of the id map (a document Linear removed). */
-  const knownId = async (path: string): Promise<string | undefined> => {
-    const current = ids.get(path);
-    if (current !== undefined) return current.id;
-    idHistory ??= expected.ids === null ? [] : (await git.text(['rev-list', '--first-parent', '-n', String(ID_HISTORY_DEPTH), expected.ids])).split('\n').filter(Boolean);
-    // Newest first, one version at a time: the first match is the answer.
-    for (const commit of idHistory) {
-      let map = idVersions.get(commit);
-      if (map === undefined) {
-        map = await readIds(git, commit);
-        idVersions.set(commit, map);
-      }
-      const entry = map.get(path);
-      if (entry !== undefined) return entry.id;
-    }
-    return undefined;
-  };
+  const knownId = knownIdLookup(git, expected.ids, ids);
   const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations: await readKeptAnnotations(git, expected.ids) });
   // The tracked branch has nothing new: only the documents the cache rebuild relinks are written.
   if (nothingNew) merge.changes.length = 0;
