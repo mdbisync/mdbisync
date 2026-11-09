@@ -66,7 +66,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   };
   const downloaded = new Map<string, {bytes: Buffer; type: string}>();
 
-  return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string): Promise<CapturedAssets> => {
+  return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
     const files = new Map<string, Buffer>();
     const additions: UploadMap = new Map();
     // Restore known URLs before restricting new downloads to the upload host.
@@ -74,10 +74,15 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     const knownUpload = (url: string) => cachedUrls.some((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`));
     if (!destinations(body).some(({node}) => isUpload(node.url) || knownUpload(node.url))) return {body, files, uploads: additions};
     await index();
+    const preferredPaths = new Map<string, string>();
     if (previousBody !== undefined) {
       const written: WrittenLink[] = [];
-      for (const link of findFileLinks(path, previousBody, (target) => pathHashes.has(target))) {
-        if (await canRead(link.target)) written.push({raw: link.raw, hash: pathHashes.get(link.target)!, suffix: link.suffix});
+      for (const link of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
+        if (!await canRead(link.target)) continue;
+        const hash = pathHashes.get(link.target)!;
+        if (!preferredPaths.has(hash)) preferredPaths.set(hash, link.target);
+        const raw = previousPath === path ? link.raw : posix.relative(posix.dirname(path), link.target).split('/').map(encodeURIComponent).join('/') + link.suffix;
+        written.push({raw, hash, suffix: link.suffix});
       }
       body = restoreFileLinks(body, written, new Map(uploads));
     }
@@ -89,7 +94,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       const url = cached ?? (hashAt === -1 ? node.url : node.url.slice(0, hashAt));
       const suffix = cached === undefined ? (hashAt === -1 ? '' : node.url.slice(hashAt)) : node.url.slice(cached.length);
       let hash = [...uploads].find(([, known]) => known === url)?.[0];
-      let assetPath = hash === undefined ? undefined : hashPaths.get(hash);
+      let assetPath = hash === undefined ? undefined : preferredPaths.get(hash) ?? hashPaths.get(hash);
       if (assetPath !== undefined) {
         if (!await canRead(assetPath)) assetPath = undefined;
       }
@@ -97,7 +102,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         let asset = downloaded.get(url);
         if (asset === undefined) { asset = await download(url, fetcher); downloaded.set(url, asset); }
         hash = createHash('sha256').update(asset.bytes).digest('hex');
-        assetPath = hashPaths.get(hash);
+        assetPath = preferredPaths.get(hash) ?? hashPaths.get(hash);
         if (assetPath === undefined) {
           const extension = posix.extname(new URL(url).pathname).toLowerCase();
           const suffix = EXTENSIONS[asset.type] ?? (/^\.[a-z0-9]{1,8}$/.test(extension) && extension !== '.md' ? extension : '.bin');

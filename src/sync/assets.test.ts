@@ -102,3 +102,46 @@ it('restores cached upload spellings before restricting new downloads to the upl
     assert.equal(fresh.files.size, 0);
   } finally { await fixture.cleanup(); }
 });
+
+it('prefers previously linked files for cached links, images and definitions across runs', async () => {
+  const fixture = await createFixture();
+  try {
+    const previous = '[Earlier](<../assets/a%20preferred.png?view=1#old>)\n';
+    await fixture.seed({'docs/plan.md': previous, 'assets/a preferred.png': Buffer.from('same-image'), 'assets/z.png': Buffer.from('same-image')});
+    const git = await fixture.clone('prior-path');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const hash = createHash('sha256').update('same-image').digest('hex');
+    const url = 'https://uploads.linear.app/workspace/shared.png';
+    const content = [
+      `[Earlier](<${url}?view=1#old>)`,
+      `[New link](${url}?view=2#link)`,
+      `![New image](<${url}?view=3#image>)`,
+      '[Reference][asset]',
+      '',
+      `[asset]: <${url}?view=4#definition> "Asset title"`,
+      '',
+      `Literal URL: ${url}`,
+      '',
+      '`' + url + '`',
+      '',
+      '```md',
+      `[Example](${url})`,
+      '```',
+      '',
+    ].join('\n');
+    const expected = content
+      .replace(`${url}?view=1#old`, '../assets/a%20preferred.png?view=1#old')
+      .replace(`${url}?view=2#link`, '../assets/a%20preferred.png?view=2#link')
+      .replace(`${url}?view=3#image`, '../assets/a%20preferred.png?view=3#image')
+      .replace(`${url}?view=4#definition`, '../assets/a%20preferred.png?view=4#definition');
+    const read = createAssetCapture(git, resolveStateConfig({}), base, async () => { throw new Error('cached bytes must not be downloaded'); });
+    const result = await read('docs/plan.md', content, new Map([[hash, url]]), previous);
+    assert.equal(result.body, expected);
+    assert.equal(result.files.size, 0);
+    // A new capture has no transform-local or reader-local knowledge of the first.
+    const next = createAssetCapture(git, resolveStateConfig({}), base, async () => { throw new Error('cached bytes must not be downloaded'); });
+    assert.equal((await next('docs/plan.md', content, new Map([[hash, url]]), result.body)).body, expected);
+    const moved = await next('docs/deeper/plan.md', content, new Map([[hash, url]]), previous, 'docs/plan.md');
+    assert.equal(moved.body, expected.replaceAll('../assets/', '../../assets/'));
+  } finally { await fixture.cleanup(); }
+});

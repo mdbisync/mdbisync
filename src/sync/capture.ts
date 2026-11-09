@@ -144,7 +144,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const path = paths.get(doc.id)!;
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       try {
-        const assets = await downloadAssets(path, doc.content ?? '', uploads, old?.path === path ? prior.body : undefined);
+        const assets = await downloadAssets(path, doc.content ?? '', uploads, old === undefined ? undefined : prior.body, old?.path);
         const candidate: Candidate = {doc, path, head: prior.head, assets, files: new Map<string, Buffer | string>([[path, prior.head + assets.body], ...assets.files])};
         if (old?.path === path) candidate.previousBody = prior.body;
         candidates.set(doc.id, candidate);
