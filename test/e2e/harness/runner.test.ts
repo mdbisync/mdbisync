@@ -292,3 +292,11 @@ describe('sweeper', () => {
     assert.deepEqual(trashed, ['r1', 'r2']);
   });
 });
+
+describe('setup deadline', () => {
+  it('gives up on work that does not settle in time, and keeps the result of work that does', async () => {
+    const { withDeadline } = await import('./runner.ts');
+    assert.equal(await withDeadline(Promise.resolve(7), 1_000, () => new Error('late')), 7);
+    await assert.rejects(withDeadline(new Promise(() => {}), 20, () => new EnvBlockedError('setup did not finish')), EnvBlockedError);
+  });
+});

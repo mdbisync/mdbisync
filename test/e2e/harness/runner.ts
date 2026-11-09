@@ -24,6 +24,21 @@ import { runStep } from './steps.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
 
 export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
+/** The longest setup, team-lock wait included; a full slice alone takes under a minute. */
+export const SETUP_TIMEOUT_MS = 15 * 60_000;
+
+/** Rejects with `onTimeout()` when `work` has not settled in time. The work itself goes on unobserved. */
+export async function withDeadline<T>(work: Promise<T>, ms: number, onTimeout: () => Error): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(onTimeout()), ms);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 /** How long a run that reached its UI steps keeps its resources. */
 export const UI_HOLD_MS = 2 * 3_600_000;
 
@@ -66,17 +81,21 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   if (config.missing.length > 0) throw new EnvBlockedError(`test configuration is missing: ${config.missing.join(', ')}`);
   let token;
   try {
+    ctx.phase('github token');
     token = await githubToken(config, ctx.scenario.mode === 'actions' ? 'actions' : 'local');
   } catch (error) {
     throw new EnvBlockedError(`GitHub token: ${(error as Error).message}`);
   }
   const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, stateDir: deps.stateDir, runId: ctx.names.runId });
   ctx.sandbox = sandbox;
+  ctx.phase('sandbox cache');
   await sandbox.refreshCache();
   let manifest;
   let created;
   try {
+    ctx.phase('corpus manifest');
     manifest = await sandbox.manifest();
+    ctx.phase('tracked branch');
     created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names);
   } catch (error) {
     if (error instanceof CorpusMissingError) throw new EnvBlockedError(`corpus: ${error.message}`);
@@ -88,6 +107,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   const appClient = deps.appClients.get(appName) as LinearClient;
   const editors = { 'editor-a': editorClient(config.editors['editor-a']), 'editor-b': editorClient(config.editors['editor-b']) };
   const world = new LinearWorld(editors['editor-a']);
+  ctx.phase('linear teams');
   const teams = new Map((await world.teams()).map((team) => [team.key, team]));
   const live: LiveWorld = {
     sandbox,
@@ -108,6 +128,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   ctx.live = live;
 
   // The team lock: initial sync matches every document of an annotated team zone.
+  ctx.phase('team lock');
   if (ctx.scenario.setup.teamZoneLock) {
     for (const team of [...tree.teamZones.keys()].sort()) {
       try {
@@ -128,6 +149,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   for (const [target, source] of tree.paths) {
     if (/(^|\/)README\.md$/.test(source)) readmes.set(source, tree.rewritten.get(target) ?? (await sandbox.readMain(`corpus/${source}`)) ?? '');
   }
+  ctx.phase('projects');
   const teamOf = projectTeams(readmes);
   for (const [placeholder, name] of tree.projects) {
     const key = teamOf.get(name) ?? teamOf.get(placeholder);
@@ -138,6 +160,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   }
 
   const state = ctx.scenario.setup.state;
+  ctx.phase('setup state');
   if (state === 'linear-seeded') await seedLinear(ctx, live);
   if (state === 'converged' || state === 'conflicted') {
     await runStep(ctx, { kind: 'run', action: 'initial-sync', args: { direction: 'git-to-linear', confirm: true } });
@@ -306,7 +329,12 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
   const log = (line: string) => deps.log(`${scenario.id} ${runId}: ${line}`);
   let person: Git | undefined;
   let engineDir: string | undefined;
+  let phase = 'admission';
   const ctx: RunContext = {
+    phase(next: string) {
+      phase = next;
+      log(`setup: ${next}`);
+    },
     scenario,
     names,
     runDir,
@@ -352,7 +380,10 @@ export async function runScenario(scenario: Scenario, deps: RunnerDeps, runId: s
         throw blocked;
       }
       ctx.proxy = await startFaultProxy('https://api.linear.app');
-      await setupLive(ctx, deps, grant.app.name ?? appName, locks);
+      // A setup that hangs (seen twice on large slices, cause unknown) must not hold a worker and its locks forever.
+      await withDeadline(setupLive(ctx, deps, grant.app.name ?? appName, locks), SETUP_TIMEOUT_MS, () =>
+        new EnvBlockedError(`setup did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes (last phase: ${phase})`));
+      ctx.phase('steps');
     }
     const history: Array<Record<string, string>> = [await snapshotRefs(ctx)];
     ctx.observations.set('refHistory', history);
