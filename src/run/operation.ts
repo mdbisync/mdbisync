@@ -1,8 +1,8 @@
 // Runs one operation after its preflight: `check` stops there; an initial
 // sync from git to Linear without `confirm` plans and reports what it would
 // do, and with `confirm` makes Linear equal to the tracked branch and
-// records the state. The other operations are not built yet and say so after
-// a passed preflight.
+// records the state; `sync` runs one sync cycle. An initial sync from Linear
+// to git is not built yet and says so after a passed preflight.
 
 import {
   type ConfirmedResult,
@@ -15,6 +15,7 @@ import {
   toPlanReport,
   uploadsTransform,
 } from '../initial-sync/index.ts';
+import { type CycleResult, renderSync, runSyncCycle } from '../sync/index.ts';
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
 import { type Operation, type PreflightOptions, type PreflightOutcome, runPreflight } from './preflight.ts';
 
@@ -25,6 +26,8 @@ export interface OperationOutcome extends PreflightOutcome {
   plan?: PlanReport;
   /** What a confirmed initial sync wrote and recorded. */
   confirmed?: ConfirmedResult;
+  /** What a sync run wrote and recorded. */
+  sync?: CycleResult;
 }
 
 export async function runOperation(
@@ -39,12 +42,18 @@ export async function runOperation(
   const gitToLinear = initialSync?.direction === 'git-to-linear' ? initialSync : undefined;
   let plan: PlanReport | undefined;
   let confirmed: ConfirmedResult | undefined;
+  let sync: CycleResult | undefined;
   let workSummary = '';
   const preflight = await runPreflight(
     operation,
     inputs,
     options,
-    gitToLinear === undefined
+    operation === 'sync'
+      ? async (context) => {
+          sync = await runSyncCycle(context, { config: inputs.state, transforms: () => [uploadsTransform({ config: inputs.state }), documentLinks()] });
+          workSummary = renderSync(sync);
+        }
+      : gitToLinear === undefined
       ? undefined
       : async (context) => {
           if (gitToLinear.confirm) {
@@ -62,11 +71,10 @@ export async function runOperation(
         },
   );
   if (!preflight.ok) return { ...preflight, notImplemented: false };
-  const outcome: OperationOutcome = { ...preflight, notImplemented: operation !== 'check' && gitToLinear === undefined };
-  if (plan !== undefined) {
-    outcome.plan = plan;
-    outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;
-  }
+  const outcome: OperationOutcome = { ...preflight, notImplemented: operation === 'initial-sync' && gitToLinear === undefined };
+  if (plan !== undefined) outcome.plan = plan;
+  if (workSummary !== '') outcome.summary = `${preflight.summary.trimEnd()}\n\n${workSummary}`;
   if (confirmed !== undefined) outcome.confirmed = confirmed;
+  if (sync !== undefined) outcome.sync = sync;
   return outcome;
 }
