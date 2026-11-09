@@ -60,11 +60,11 @@ import {
   stateRef,
 } from '../state/index.ts';
 import { createAssetCapture } from '../sync/assets.ts';
-import { captureCursorTrailer, prepareLfs } from '../sync/capture.ts';
+import { captureCursorTrailer, cursorTime, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
 import { type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titlePath } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
-import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, SYNC_IDENTITY, type WriteStop } from './confirm.ts';
+import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, SYNC_IDENTITY, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey } from './links.ts';
@@ -589,10 +589,17 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
 
     const synced = new Set([...entries.map((entry) => entry.path), ...keptTracked]);
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
-    const through = captureCursor(keptTracked);
+    const through = captureCursor([...keptTracked].map((path) => documentOf.get(path) as string));
+    // The READMEs kept without a document are named, so the sync does not take them for new documents.
+    const kept = plan.kept.map((entry) => entry.path);
+    const trailers = [...(through === null ? [] : [captureCursorTrailer(through)]), ...kept.map(keptAnnotationTrailer)];
+    // A cursor or a kept set that changed is recorded even when the ids did not (a rerun that now keeps a tracked file).
+    const previousKept = await readKeptAnnotations(git, expected.ids);
+    const markersMoved =
+      (through !== null && through !== (await readCaptureCursor(git, expected.ids))) || previousKept.size !== kept.length || kept.some((path) => !previousKept.has(path));
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
-      message: through === null ? FINAL_IDS_MESSAGE : `${FINAL_IDS_MESSAGE}\n\n${captureCursorTrailer(through)}`,
-      always: (await readInitialSyncProgress(git, expected.ids)) !== null,
+      message: trailers.length === 0 ? FINAL_IDS_MESSAGE : `${FINAL_IDS_MESSAGE}\n\n${trailers.join('\n')}`,
+      always: markersMoved || (await readInitialSyncProgress(git, expected.ids)) !== null,
     });
     // The cache records each downloaded file, so the sync never uploads it again.
     const finalUploads: UploadMap = new Map(uploads);
@@ -623,23 +630,18 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
 
   /**
    * Where the first capture after this record starts reading Linear again.
-   * The record holds every listed document as it was listed, so the capture
-   * needs only what changed since: the latest update time listed, as the
-   * capture itself sets it. A file that kept the tracked branch's text while
-   * its document keeps its id (a download that failed, a hook's finding)
-   * does not hold Linear's text: the cursor stays at its document's update
-   * time so the capture reads it again. Null when nothing was listed.
+   * The record holds every listed document at least as it was listed (its
+   * text was read after the whole listing), so the capture needs only what
+   * changed since: the latest update time listed, as the capture itself sets
+   * it. A document whose file kept the tracked branch's text (a download that
+   * failed, a hook's finding) is not in the record: the cursor stays at its
+   * listed update time, the earliest of them, so the capture reads it again.
+   * Null when nothing was listed.
    */
-  function captureCursor(keptTracked: ReadonlySet<string>): string | null {
-    const time = (document: LinearDocument) => {
-      const parsed = new Date(document.updatedAt);
-      if (!Number.isFinite(parsed.getTime())) throw new Error('a document has an invalid update time');
-      return parsed.toISOString();
-    };
-    const idOf = new Map([...plan.overwrite, ...plan.create].map((entry) => [entry.path, entry.documentId]));
-    const pending = [...keptTracked].map((path) => documents.get(idOf.get(path) as string) as LinearDocument);
-    const times = (pending.length > 0 ? pending : [...documents.values()]).map(time).sort();
-    return (pending.length > 0 ? times[0] : times.at(-1)) ?? null;
+  function captureCursor(pendingIds: readonly string[]): string | null {
+    const listed = new Map(input.places.flatMap(({ documents: placed }) => placed.map((document): [string, string] => [document.id, cursorTime(document)])));
+    if (pendingIds.length > 0) return pendingIds.map((id) => listed.get(id) as string).reduce((a, b) => (b < a ? b : a));
+    return [...listed.values()].reduce<string | null>((a, b) => (a === null || b > a ? b : a), null);
   }
 
   /** Whether two commits have the same tree, parents and subject, so the newer one adds nothing. */

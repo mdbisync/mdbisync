@@ -8,7 +8,7 @@ import { lintText, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
-import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, listTree, readBlobs } from '../state/index.ts';
+import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, isAncestor, listTree, readBlobs } from '../state/index.ts';
 
 /** A synchronized file of one side: its path, blob, Linear title and place. */
 export interface SideFile {
@@ -187,7 +187,11 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
       // configuration, not a request to create one: the annotation-only carrier capture keeps after its
       // document leaves, and the README an initial sync from Linear keeps, body included, because Linear
       // has no document for it. Only a change to its body on the tracked branch makes it a new document.
-      if ((path === 'README.md' || path.endsWith('/README.md')) && previous !== undefined && body(previous.oid) === body(file.oid)) {
+      // A README with a body counts only when the latest initial sync named it as kept: one left out on the
+      // way to Linear, or one whose id map was lost, is created as every other file without a document is.
+      const unchanged = previous !== undefined && body(previous.oid) === body(file.oid);
+      const kept = unchanged && (body(file.oid) === '' || options.keptAnnotations?.has(path) === true);
+      if ((path === 'README.md' || path.endsWith('/README.md')) && kept) {
         const annotation = readAnnotation(path, (blobs.get(file.oid) as Buffer).toString('utf8'));
         if ('annotation' in annotation && annotation.annotation !== null) continue;
       }
@@ -283,6 +287,8 @@ export interface MergeOptions {
    * document Linear renamed or removed since the merge base.
    */
   knownId?: ((path: string) => Promise<string | undefined>) | undefined;
+  /** The folder READMEs the latest initial sync kept, body included, without a document. */
+  keptAnnotations?: ReadonlySet<string> | undefined;
 }
 
 interface ConflictInput {
@@ -442,7 +448,7 @@ export async function alreadyMerged(git: Git, linear: Oid, tracked: Oid): Promis
 export async function mergedInitialRecord(git: Git, linear: Oid, tracked: Oid): Promise<boolean> {
   const [subject] = (await git.text(['show', '-s', '--format=%s', linear])).split('\n');
   if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
-  if ((await git.run(['merge-base', '--is-ancestor', linear, tracked], { okCodes: [0, 1] })).code !== 0) return false;
+  if (!(await isAncestor(git, linear, tracked))) return false;
   const [linearTree, trackedTree] = (await git.text(['rev-parse', `${linear}^{tree}`, `${tracked}^{tree}`])).split('\n');
   return linearTree === trackedTree;
 }
