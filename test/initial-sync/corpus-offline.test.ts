@@ -291,7 +291,8 @@ describe('confirmed initial sync from Linear over the generated corpus (offline)
             assert.ok(url !== undefined, `${link.target}, linked from ${path}, has no cached upload URL`);
             result = result.slice(0, link.from) + url + link.suffix + result.slice(link.to);
           }
-          return result;
+          // And links to other synchronized documents back to their Linear URLs (by the recorded ids).
+          return linksToLinear(result, path, { base: documentUrlBase(world.linear.urlKey), ids: new Map(Object.entries(ids).map(([file, { id }]) => [file, id])) });
         };
         for (const [path, entry] of Object.entries(ids)) {
           const document = live.find((d) => d.id === entry.id);

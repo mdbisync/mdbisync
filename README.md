@@ -109,6 +109,12 @@ writes nothing. With `confirm: true`:
   whether a file is stored in Git LFS, as for a person's commit. The
   `uploads` state ref records each file's Linear URL, so the sync does not
   upload it again;
+- a link to another synchronized document's Linear URL becomes a relative
+  link to its file, in the spelling the tracked file already had for it;
+- the repository's security hooks (`alias: security`) check each document's
+  text with the files it embeds before anything is pushed. A document they
+  flag, or whose file cannot be downloaded, is listed: a new file is left
+  out, and an existing file keeps the tracked branch's text;
 - document ids go to `refs/mdbisync/ids` as the run goes, and at the end one
   push records `refs/mdbisync/linear` (one commit on top of the tracked
   branch, with the synchronized folders as Linear holds them), `ids`,

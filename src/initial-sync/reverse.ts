@@ -22,7 +22,6 @@
 //    find the one a previous run opened. A person merges it: it can remove
 //    files. The sync refuses to run until it is merged.
 
-import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import { splitFile } from '../format/index.ts';
 import { type LinearDocument, LinearStoppedError } from '../linear/index.ts';
@@ -47,6 +46,7 @@ import {
   type UploadMap,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
   branchRef,
+  parseLfsPointer,
   isAncestor,
   commitIds,
   commitTree,
@@ -61,11 +61,13 @@ import {
 } from '../state/index.ts';
 import { createAssetCapture } from '../sync/assets.ts';
 import { prepareLfs } from '../sync/capture.ts';
+import { type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titlePath } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, SYNC_IDENTITY, type WriteStop } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
+import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
 
 /**
@@ -123,15 +125,40 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
   const folders = new Map(annotatedPlaces(input.mapping.zones).map(({ place, folder }) => [placeKey(place), folder]));
   const invalid = (place: Place) => (candidate: string) => !landsInPlace(input.mapping, candidate, place);
 
+  const folderOfPlace = (place: Place) => folders.get(placeKey(place)) ?? '';
+  const plainPath = (title: string, place: Place) => `${posix.join(folderOfPlace(place), titlePath(title))}.md`;
+  const named = new Map<string, string>();
+
+  // An encoded name belongs to the title it encodes: `Q3%3A goals.md` is the file of `Q3: goals`, even when
+  // another document is titled `Q3%3A goals` (whose own name the rule encodes to `Q3%253A goals.md`).
+  const trash = [...plan.trash];
+  const overwriteByPath = new Map(result.overwrite.map((entry) => [entry.path, entry]));
+  for (const entry of plan.trash) {
+    const plain = plainPath(entry.title, entry.place);
+    const other = overwriteByPath.get(plain);
+    if (other === undefined || placeKey(other.place) !== placeKey(entry.place) || plainPath(other.title, other.place) === plain) continue;
+    result.overwrite = result.overwrite.filter((candidate) => candidate !== other);
+    const claimed = { path: plain, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: other.fileTitle };
+    result.overwrite.push(claimed);
+    overwriteByPath.set(plain, claimed);
+    named.set(entry.documentId, plain);
+    // The other document now has no file: it is named like any document without one.
+    trash.push({ path: plain, title: other.title, place: other.place, documentId: other.documentId });
+  }
+
   // A file without a document by title can be one by the naming rule: the file an earlier run named for an encoded title.
   const gitOnly = new Map(plan.create.map((entry) => [entry.path, entry]));
-  const named = new Map<string, string>();
-  for (const entry of plan.trash) {
-    const folder = folders.get(placeKey(entry.place)) as string;
-    const plain = `${posix.join(folder, titlePath(entry.title))}.md`;
-    const suffix = `~${createHash('sha256').update(entry.documentId).digest('hex').slice(0, 12)}`;
+  // Oldest first, as in the other direction: the older of two documents keeps the plain name.
+  const created = new Map(input.places.flatMap(({ documents }) => documents.map((document) => [document.id, document.createdAt] as const)));
+  const documentsOldestFirst = trash
+    .filter((entry) => !named.has(entry.documentId))
+    .sort((a, b) => compare(created.get(a.documentId) ?? '', created.get(b.documentId) ?? '') || compare(a.documentId, b.documentId));
+  for (const entry of documentsOldestFirst) {
+    const folder = folderOfPlace(entry.place);
+    const plain = plainPath(entry.title, entry.place);
     for (const [path, file] of gitOnly) {
-      if (path !== plain && !(path.startsWith(folder === '' ? '' : `${folder}/`) && path.includes(suffix))) continue;
+      // Only the plain encoded name or a suffixed one (`~`) can be the rule's; `documentPath` decides.
+      if (path !== plain && !(path.startsWith(folder === '' ? '' : `${folder}/`) && path.includes('~'))) continue;
       if (placeKey(file.place) !== placeKey(entry.place)) continue;
       const others = new Set([...input.treePaths].filter((other) => other !== path));
       if (documentPath(folder, entry.title, entry.documentId, others, path, invalid(entry.place)) !== path) continue;
@@ -148,10 +175,9 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
 
   const removed = new Set(result.remove);
   const occupied = new Set([...input.treePaths].filter((path) => !removed.has(path)));
-  // In the plan, a document without a file is listed for trash, oldest first within a path.
-  for (const entry of plan.trash) {
+  for (const entry of documentsOldestFirst) {
     if (named.has(entry.documentId)) continue;
-    const folder = folders.get(placeKey(entry.place)) as string;
+    const folder = folderOfPlace(entry.place);
     const path = documentPath(folder, entry.title, entry.documentId, occupied, undefined, invalid(entry.place));
     result.create.push({ path, title: entry.title, place: entry.place, documentId: entry.documentId, fileTitle: posix.relative(folder, path).slice(0, -'.md'.length) });
     occupied.add(path);
@@ -185,6 +211,8 @@ export interface ReverseOptions {
   transforms?: readonly BodyTransform[];
   identity?: CommitIdentity;
   progressBatch?: number;
+  /** The repository's security hooks; read from the tracked branch by default. */
+  security?: SecurityGate;
   /** Downloads files from Linear's upload host; the Linear client's authenticated request by default. */
   fetch?: typeof fetch;
   /** Stop after this many documents, as if the budget ran low; the test hook's value by default. */
@@ -375,7 +403,28 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
   async function record(): Promise<ReverseRecord | null | 'sync-branch-changed'> {
     // Each document's body once its embedded files are downloaded, the files, and their upload URLs by content hash.
     const bodies = new Map<string, { body: string; files: Map<string, Buffer>; uploads: UploadMap }>();
-    const restored = (entry: ReverseEntry): string => (bodies.get(entry.path) as { body: string }).body;
+    // A link to another synchronized document's URL becomes a relative link to its file, as the capture does:
+    // only to a file the record holds, so the links follow every file left out on the way.
+    let linkBase: string | undefined;
+    const documentOf = new Map([...plan.overwrite, ...plan.create].map((entry) => [entry.path, entry.documentId]));
+    let linkMemo: { entries: readonly ReverseEntry[]; kept: number; map: LinkMap } | undefined;
+    const linkMap = (base: string): LinkMap => {
+      if (linkMemo?.entries !== entries || linkMemo.kept !== keptTracked.size) {
+        const ids = new Map([...entries.map((entry): [string, string] => [entry.path, entry.documentId]), ...[...keptTracked].map((path): [string, string] => [path, documentOf.get(path) as string])]);
+        linkMemo = { entries, kept: keptTracked.size, map: { base, ids } };
+      }
+      return linkMemo.map;
+    };
+    const restored = (entry: ReverseEntry): string => {
+      const { body } = bodies.get(entry.path) as { body: string };
+      if (linkBase === undefined) return body;
+      const map = linkMap(linkBase);
+      // The tracked file's own spelling of each link comes back as it was.
+      const seen: LinkSpellings = new Map();
+      const tracked = input.texts.get(entry.path);
+      if (tracked !== undefined) linksToLinear(splitFile(tracked).body, entry.path, map, seen);
+      return linksFromLinear(body, entry.path, map, seen);
+    };
     const textOf = (entry: ReverseEntry): string => {
       const body = restored(entry);
       const tracked = input.texts.get(entry.path);
@@ -403,12 +452,16 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     const uploads = await readUploads(git, expected.uploads);
     const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)));
     const failed: string[] = [];
+    if (entries.some((entry) => ((documents.get(entry.documentId) as LinearDocument).content ?? '').includes('https://linear.app/'))) {
+      linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
+    }
     for (const entry of entries) {
       const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
       const tracked = input.texts.get(entry.path);
+      const trackedBody = tracked === undefined ? undefined : splitFile(tracked).body;
       try {
         // A file the tracked text links keeps its path; other uploads are downloaded next to the document.
-        const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content), uploads, tracked === undefined ? undefined : splitFile(tracked).body);
+        const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content), uploads, trackedBody);
         bodies.set(entry.path, captured);
       } catch (error) {
         if (error instanceof LinearStoppedError) throw error;
@@ -434,7 +487,25 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     // The document's text must stay the file's body: text that reads as front
     // matter would become the file's metadata (or a folder's annotation).
     keepTracked(entries.filter((entry) => splitFile(textOf(entry)).body !== restored(entry)).map((entry) => entry.path), 'front-matter-boundary');
+    // The repository's security hooks see Linear's text and every downloaded file before any byte is pushed, as in the capture.
+    const gate = options.security ?? (await securityGate(git, fetched.tracked));
+    try {
+      if (gate.configured) {
+        const blocked: string[] = [];
+        for (const entry of entries) {
+          const { files } = bodies.get(entry.path) as { files: Map<string, Buffer> };
+          const text = textOf(entry);
+          if (files.size === 0 && text === input.texts.get(entry.path)) continue;
+          if ((await gate.check(new Map<string, Buffer | string>([[entry.path, text], ...files]))).length > 0) blocked.push(entry.path);
+        }
+        keepTracked(blocked, 'security-hook');
+      }
+    } finally {
+      await gate.close?.();
+    }
     let lfsObjects: string[] = [];
+    // What `.gitattributes` makes of each changed path, cleaned once across the builds.
+    const stored = new Map<string, Buffer | string | null>();
     let commit = await build(entries);
     // The new tree must map every file back to its document's title and place.
     // Each pass leaves out more: the misplaced new files (and new README files,
@@ -465,9 +536,18 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       }
       for (const path of plan.remove) changes.set(path, null);
       // `.gitattributes` decides what is stored in LFS, as for a person's commit.
-      const prepared = await prepareLfs(git, fetched.tracked, changes);
-      lfsObjects = prepared.oids;
-      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared.changes, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false });
+      const fresh = new Map([...changes].filter(([path]) => !stored.has(path)));
+      if (fresh.size > 0) for (const [path, content] of (await prepareLfs(git, fetched.tracked, fresh)).changes) stored.set(path, content);
+      const prepared = new Map([...changes.keys()].map((path) => [path, stored.get(path) as Buffer | string | null]));
+      lfsObjects = [
+        ...new Set(
+          [...prepared]
+            .filter(([path, content]) => content !== null && content !== changes.get(path))
+            .map(([, content]) => parseLfsPointer(Buffer.from(content as Buffer | string))?.oid)
+            .filter((oid): oid is string => oid !== undefined),
+        ),
+      ];
+      return commitTree(git, { parents: [fetched.tracked], base: fetched.tracked, changes: prepared, message: REVERSE_RECORD_MESSAGE, identity, skipIfUnchanged: false });
     }
 
     const trees = (await git.text(['show', '-s', '--format=%T', commit, fetched.tracked])).split('\n');
