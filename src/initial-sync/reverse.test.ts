@@ -509,8 +509,10 @@ describe('initial sync from Linear to the tracked branch', () => {
 
     const dry = await run(world, { MDBISYNC_CONFIRM: '' });
     for (const path of Object.values(expected)) assert.ok(dry.report.summary?.plan.create.includes(path), path);
-    const { result } = await run(world);
+    assert.deepEqual(dry.report.paths, { rule: 'percent-encode-unsafe-segments' });
+    const { result, report } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.paths, { rule: 'percent-encode-unsafe-segments' });
     const ids = await readIds();
     for (const [id, path] of Object.entries(expected)) {
       assert.equal(ids[path], id, path);

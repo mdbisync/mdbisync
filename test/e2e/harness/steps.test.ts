@@ -1106,6 +1106,11 @@ describe('subjects', () => {
     assert.deepEqual(await resolveSubject(ctx, 'runs.1.summary.code'), { known: true, value: 'merge-commits-required' });
     assert.deepEqual(await resolveSubject(ctx, 'summary.setupChecks'), { known: true, value: ['linear-credentials', 'security-hooks'] });
     assert.deepEqual(await resolveSubject(ctx, 'summary.securityHooksReported'), { known: true, value: true });
+    // A sync's report holds `summary: null`; its left-out rules and path rule are read at the top (L2-13, L2-22).
+    ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { operation: 'sync', ok: true, summary: null, leftOutRules: ['footnote'], paths: { rule: 'percent-encode-unsafe-segments' } } });
+    assert.deepEqual(await resolveSubject(ctx, 'summary.leftOutRules'), { known: true, value: ['footnote'] });
+    assert.deepEqual(await resolveSubject(ctx, 'paths.rule'), { known: true, value: 'percent-encode-unsafe-segments' });
+    ctx.engine.results.pop();
     // The checks' own run (I6) is not the scenario's last run.
     ctx.observations.set('scenario.runsEnd', ctx.engine.results.length);
     ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { code: 'nothing-to-do' } });

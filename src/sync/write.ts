@@ -52,7 +52,7 @@ import {
   branchRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
-import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, lastSynchronized, mergeLocally } from './merge.ts';
+import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
@@ -218,7 +218,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // next record, as a branch a person deleted does.
   const nothingNew = (await alreadyMerged(git, linearTip, tracked)) || (await mergedInitialRecord(git, linearTip, tracked));
   if (nothingNew && !cacheLost) {
-    // Nothing to write: the capacity report can use this run's earlier listing.
+    // Nothing to write, but the files left out stay left out: the report names them on every run, not only on
+    // the run that first met them. The `linear` tip holds what a merge would give.
+    result.leftOut = await leftOutFiles(git, linearTip, linear.facts);
+    // The capacity report can use this run's earlier listing.
     const containers = options.containers ?? await readContainers();
     if (containers === undefined) return result;
     result.capacity = assessCapacity(context, containers, [], options.documentCap);
@@ -255,13 +258,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations: await readKeptAnnotations(git, expected.ids) });
   // The tracked branch has nothing new: only the documents the cache rebuild relinks are written.
   if (nothingNew) merge.changes.length = 0;
+  result.leftOut = merge.leftOut;
   // Anything from here may write (linked-file changes are found later too): capacity, adoption and
   // reserved ids are decided on the containers as Linear lists them now, not as capture saw them.
   const containerListing = await readContainers();
   if (containerListing === undefined) return result;
   // A separate const: the hoisted `adoptableDocuments` below does not see the narrowing above.
   const containers: Map<string, LinearDocument[]> = containerListing;
-  result.leftOut = merge.leftOut;
   await findGoneRestores();
   for (const path of merge.conflicts) if (merge.result.has(path) || merge.linear.has(path) || ids.has(path)) result.skipped.push({ path, reason: 'conflict' });
   for (const entry of merge.held) result.skipped.push({ path: entry.from, reason: 'renamed-to-unwritable' });
