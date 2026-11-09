@@ -17,7 +17,7 @@
 // the same refusal on the same head and tracked branch reads the note back
 // and reports a setup error: nothing will change until a person does.
 
-import { SYNC_IDENTITY } from '../initial-sync/index.ts';
+import { RECORD_MESSAGE, SYNC_IDENTITY } from '../initial-sync/index.ts';
 import {
   type CheckState,
   type GitHubRepository,
@@ -134,7 +134,15 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 
   // A sync branch the tracked branch has not merged is the open pull request's head, or will be.
   const pending = sync !== null && !(await isAncestor(git, sync, tracked));
-  if (!result.needed && !pending) return result;
+  if (!result.needed && !pending) {
+    // A sync branch is made by the first sync pull request and stays. Once `linear` holds more than initial sync's
+    // record and the tracked branch, a missing branch was deleted by a person: it comes back at `linear`.
+    if (sync !== null || (await isAncestor(git, linear, tracked)) || (await isInitialRecord(git, linear))) return result;
+    const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: null, next: linear }]);
+    if (pushed.ok) return { ...result, branchMoved: true };
+    // A refusal that is not a lease (a rule on branch names, missing rights) leaves the branch to the run that needs it.
+    return pushed.reason === 'stale' ? { ...result, code: 'state-moved' } : result;
+  }
 
   try {
     const open = sync === null ? null : await findOpenPullRequest(github, config.syncBranch, config.trackedBranch);
@@ -206,6 +214,12 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     if (error instanceof PullRequestError) return { ...result, code: 'github-failed', ...(error.status === undefined ? {} : { status: error.status }) };
     throw error;
   }
+}
+
+/** Whether `commit` is an initial sync's record, in either direction. */
+async function isInitialRecord(git: Git, commit: Oid): Promise<boolean> {
+  const [subject] = (await git.text(['show', '-s', '--format=%s', commit])).split('\n');
+  return subject === RECORD_MESSAGE || subject === INITIAL_SYNC_FROM_LINEAR_RECORD;
 }
 
 /**
