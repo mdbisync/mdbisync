@@ -351,6 +351,20 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/backend/notes.md'));
   });
 
+  it('a link to a new page the mapping leaves out (stored in LFS) stays its Linear URL in the record', async () => {
+    // `.gitattributes` routes the new FAQ into LFS; the mapping does not synchronize such a file.
+    await fixture.seed({ '.gitattributes': 'eng/notes/faq.md filter=lfs diff=lfs merge=lfs -text\n' });
+    const world = fakeWorld();
+    const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-runbook' ? { ...d, content: `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).\n` } : d));
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(report.linearToGit?.leftOutAtRecord.some((entry) => entry.path === 'eng/notes/faq.md'), JSON.stringify(report.linearToGit?.leftOutAtRecord));
+    assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/notes/faq.md'));
+    // A later build rewrote the runbook's link; the record holds that text, not the first build's.
+    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
+  });
+
   it('a file that cannot be downloaded keeps the tracked file, which stays its document', async () => {
     const world = fakeWorld();
     const gone = `![Gone](${UPLOADS_HOST}/9/gone.png)\n`;

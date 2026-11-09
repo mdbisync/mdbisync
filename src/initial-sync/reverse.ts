@@ -504,8 +504,11 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       await gate.close?.();
     }
     let lfsObjects: string[] = [];
-    // What `.gitattributes` makes of each changed path, cleaned once across the builds.
-    const stored = new Map<string, Buffer | string | null>();
+    // What `.gitattributes` makes of each changed path, by the content it was given: a later build
+    // reuses it only for the same bytes (a link can change when a document is left out).
+    const stored = new Map<string, { input: Buffer | string | null; output: Buffer | string | null }>();
+    const same = (a: Buffer | string | null, b: Buffer | string | null) =>
+      a === null || b === null ? a === b : Buffer.from(a).equals(Buffer.from(b));
     let commit = await build(entries);
     // The new tree must map every file back to its document's title and place.
     // Each pass leaves out more: the misplaced new files (and new README files,
@@ -536,14 +539,15 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       }
       for (const path of plan.remove) changes.set(path, null);
       // `.gitattributes` decides what is stored in LFS, as for a person's commit.
-      const fresh = new Map([...changes].filter(([path]) => !stored.has(path)));
-      if (fresh.size > 0) for (const [path, content] of (await prepareLfs(git, fetched.tracked, fresh)).changes) stored.set(path, content);
-      const prepared = new Map([...changes.keys()].map((path) => [path, stored.get(path) as Buffer | string | null]));
+      const fresh = new Map([...changes].filter(([path, content]) => !same(stored.get(path)?.input ?? null, content) || !stored.has(path)));
+      if (fresh.size > 0) for (const [path, output] of (await prepareLfs(git, fetched.tracked, fresh)).changes) stored.set(path, { input: fresh.get(path) as Buffer | string | null, output });
+      const prepared = new Map([...changes.keys()].map((path) => [path, (stored.get(path) as { output: Buffer | string | null }).output]));
       lfsObjects = [
         ...new Set(
-          [...prepared]
-            .filter(([path, content]) => content !== null && content !== changes.get(path))
-            .map(([, content]) => parseLfsPointer(Buffer.from(content as Buffer | string))?.oid)
+          [...changes.keys()]
+            .map((path) => stored.get(path) as { input: Buffer | string | null; output: Buffer | string | null })
+            .filter(({ input, output }) => output !== null && output !== input)
+            .map(({ output }) => parseLfsPointer(Buffer.from(output as Buffer | string))?.oid)
             .filter((oid): oid is string => oid !== undefined),
         ),
       ];
