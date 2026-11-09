@@ -876,7 +876,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: true });
     for (const path of nextIds.keys()) nextReserved.delete(path);
     const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved });
-    const rebuilt = cacheLost && merged ? { message: UPLOADS_REBUILT, always: true } : {};
+    // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the
+    // documents to relink, before they are changes) leaves the rest to the next run.
+    const rebuilt = cacheLost && merged && result.stopped === undefined ? { message: UPLOADS_REBUILT, always: true } : {};
     const uploadsCommit = expected.uploads === null && uploads.size === 0 && !cacheLost ? null : await commitUploads(git, expected.uploads, uploads, identity, rebuilt);
 
     const updates: RefUpdate[] = [
@@ -884,8 +886,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       { ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit },
     ];
     if (uploadsCommit !== null) updates.push({ ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit });
-    if (options.createSyncBranch === true && commit !== linearTip) updates.push({ ref: branchRef(options.config.syncBranch), expected: null, next: commit });
-    const pushed = await pushAtomic(git, options.config, updates);
+    const branch: RefUpdate | undefined = options.createSyncBranch === true && commit !== linearTip ? { ref: branchRef(options.config.syncBranch), expected: null, next: commit } : undefined;
+    let pushed = await pushAtomic(git, options.config, branch === undefined ? updates : [...updates, branch]);
+    // The branch is optional: a refusal that is not a lease (a rule on branch names, missing rights) moved nothing,
+    // and the record goes on without it.
+    if (!pushed.ok && pushed.reason === 'rejected' && branch !== undefined) pushed = await pushAtomic(git, options.config, updates);
     if (!pushed.ok) return null;
     if (pushed.updated.length > 0) result.changed = true;
     result.state = { linear: commit, ids: idsCommit, uploads: uploadsCommit };

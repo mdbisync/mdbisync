@@ -54,6 +54,8 @@ describe('sync: lost state and deleted branches', () => {
   let person: Git;
   let personDir: string;
   let world: FakeWorld;
+  /** Stands in front of the fake worlds when a test sets it. */
+  let fetchOverride: typeof fetch | undefined;
   const reportFile = () => join(fixture.root, 'report.json');
   const summaryFile = () => join(fixture.root, 'summary.md');
 
@@ -70,6 +72,7 @@ describe('sync: lost state and deleted branches', () => {
       GIT_COMMITTER_EMAIL: IDENTITY.email,
     });
     world = fakeWorld();
+    fetchOverride = undefined;
     world.github.checks = new Map();
     world.github.merge = mergeOnRemote;
     const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
@@ -98,7 +101,7 @@ describe('sync: lost state and deleted branches', () => {
     await rm(summaryFile(), { force: true });
     const writesBefore = world.writes.length;
     const uploadsBefore = world.linear.uploads.length;
-    const result = await runCli([command], { env: env(extra), cwd, fetch: fakeFetch(world) });
+    const result = await runCli([command], { env: env(extra), cwd, fetch: fetchOverride ?? fakeFetch(world) });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
@@ -301,6 +304,61 @@ describe('sync: lost state and deleted branches', () => {
     await settle();
     assert.equal(await rev('refs/heads/main'), tracked, 'no second file');
     await assertConverged();
+  });
+
+  it('L5-14: a re-upload whose search for the documents to relink is stopped by a rate limit stays pending', async () => {
+    await fixture.remote.run(['update-ref', '-d', STATE('uploads')]);
+    const hooks = { MDBISYNC_TEST_HOOKS: '1', MDBISYNC_TEST_HOOKS_DIR: join(fixture.root, 'hooks'), MDBISYNC_TEST_STOP_AFTER_DOCUMENTS: '1' };
+    Object.assign(process.env, hooks);
+    try {
+      assert.equal((await sync()).report.stoppedEarly, true);
+    } finally {
+      for (const name of Object.keys(hooks)) delete process.env[name];
+    }
+    const subject = () => fixture.remote.text(['log', '-1', '--format=%s', '--fixed-strings', `--grep=${UPLOADS_REBUILDING}`, `--grep=${UPLOADS_REBUILT}`, STATE('uploads')]);
+    assert.equal(await subject(), UPLOADS_REBUILDING);
+
+    // The next run's read of every linking document is answered with a rate limit.
+    const linking = live().filter((d) => d.title === 'diagram' || d.title === 'chart').map((d) => d.id).sort();
+    const base = fakeFetch(world);
+    let limited = 0;
+    fetchOverride = async (input, init) => {
+      const body = String(input).endsWith('/graphql') ? (JSON.parse(String(init?.body)) as { operationName?: string; variables?: { ids?: string[]; withContent?: boolean } }) : undefined;
+      if (body?.operationName === 'GetDocuments' && body.variables?.withContent === true && JSON.stringify([...(body.variables.ids ?? [])].sort()) === JSON.stringify(linking)) {
+        limited += 1;
+        return new Response(JSON.stringify({ errors: [{ message: 'limited', extensions: { code: 'RATELIMITED' } }] }), { status: 429, headers: { 'content-type': 'application/json' } });
+      }
+      return base(input, init);
+    };
+    const stopped = await sync();
+    fetchOverride = undefined;
+    assert.equal(limited, 1, 'the read of the documents to relink was limited');
+    assert.equal(stopped.report.stoppedEarly, true);
+    assert.equal(await subject(), UPLOADS_REBUILDING, 'the rebuild stays pending');
+
+    await settle();
+    assert.equal(await subject(), UPLOADS_REBUILT);
+    const latest = world.linear.uploads.filter((upload) => upload.bytes?.equals(DIAGRAM)).at(-1)!.assetUrl;
+    for (const title of ['diagram', 'chart']) assert.ok(live().find((d) => d.title === title)?.content?.includes(latest), `${title} links the fresh upload`);
+    await assertQuiet();
+  });
+
+  it('L5-18: a rule that refuses the sync branch does not stop the record; the branch is left out', async () => {
+    await fixture.remote.run(['update-ref', '-d', SYNC_BRANCH], { okCodes: [0, 1] });
+    const hook = join(fixture.root, 'remote.git', 'hooks', 'pre-receive');
+    await writeFile(hook, '#!/bin/sh\nwhile read old new ref; do [ "$ref" = "refs/heads/mdbisync/linear" ] && { echo "branch refused by rule" >&2; exit 1; }; done\nexit 0\n', { mode: 0o755 });
+    await commit({ 'combined/guide.md': `# Guide\n\nHow to start, edited. ${CANARY}\n` });
+
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.complete, true);
+    assert.equal(await fixture.remote.text(['show', '-s', '--format=%s', STATE('linear')]), MERGE_RECORD_MESSAGE);
+    assert.equal(await remoteRef(fixture, SYNC_BRANCH), null);
+    assert.match(live().find((d) => d.title === 'guide')?.content ?? '', /edited\./);
+    // Later runs try the branch again and go on without it.
+    await settle();
+    assert.equal(await remoteRef(fixture, SYNC_BRANCH), null);
+    await assertQuiet();
   });
 
   it('L5-13: a document trashed in Linear while the ids ref was lost is removed, not created again', async () => {
