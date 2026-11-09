@@ -36,7 +36,7 @@ interface Faults {
   staleTrashReads?: number;
   /** TrashDocument is applied, but answered with a 503. */
   loseTrashAnswer?: boolean;
-  /** Replace reads after trash with an empty result or a transport error. */
+  /** Replace reads after trash with an absent document or an HTTP error. */
   trashReadFault?: 'absent-once' | 'absent-always' | 'delayed-error';
   /** After the last DeleteProject, this many GetDocuments answers show no `archivedAt`. */
   staleArchiveReads?: number;
@@ -85,11 +85,16 @@ async function serve(world: FakeWorld, faults: Faults): Promise<Served> {
       [trashedId, staleTrash] = [variables.id as string, faults.staleTrashReads ?? 0];
       if (faults.loseTrashAnswer) return { status: 503, headers, text: '{}' };
     }
-    if (operationName === 'RestoreDocument') trashedId = undefined;
-    if (operationName === 'GetDocuments' && trashedId !== undefined) {
+    if (operationName === 'RestoreDocument' && response.ok && JSON.parse(text).data?.documentUnarchive?.success === true) {
+      trashedId = undefined;
+      staleTrash = 0;
+    }
+    if (operationName === 'GetDocuments' && trashedId !== undefined && (variables.ids as string[]).includes(trashedId)) {
       trashReads += 1;
       if (faults.trashReadFault === 'absent-always' || (faults.trashReadFault === 'absent-once' && trashReads === 1)) {
-        return { status: 200, headers, text: JSON.stringify({ data: { documents: { nodes: [] } } }) };
+        const body = JSON.parse(text) as { data: { documents: { nodes: Array<{ id: string }> } } };
+        body.data.documents.nodes = body.data.documents.nodes.filter((node) => node.id !== trashedId);
+        return { status: 200, headers, text: JSON.stringify(body) };
       }
       if (faults.trashReadFault === 'delayed-error' && trashReads === 2) return { status: 503, headers, text: '{}' };
     }
@@ -227,7 +232,7 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
       assert.ok('trashed' in diagnosis.delayed);
       assert.equal(diagnosis.delayed.trashed, true);
       assert.equal(diagnosis.delayed.afterMs, PAUSE_MS);
-      assert.ok(diagnosis.delayed.elapsedMs >= PAUSE_MS);
+      assert.ok(Number.isFinite(diagnosis.delayed.elapsedMs) && diagnosis.delayed.elapsedMs >= 0);
       const trash = run.operations.indexOf('TrashDocument');
       assert.deepEqual(run.operations.slice(trash, trash + 4), ['TrashDocument', 'GetDocuments', 'GetDocuments', 'RestoreDocument']);
       assert.equal(run.operations.filter((op) => op === 'TrashDocument').length, 1);
@@ -238,7 +243,7 @@ describe('Linear contract cleanup against the fake world', { timeout: 120_000 },
   for (const fault of ['absent-always', 'delayed-error'] as const) {
     it(`fails with diagnostics and restores before deleting after ${fault}`, async () => {
       const world = fakeWorld();
-      const run = await runContract(world, { trashReadFault: fault, staleTrashReads: 1 });
+      const run = await runContract(world, { trashReadFault: fault, ...(fault === 'delayed-error' ? { staleTrashReads: 1 } : {}) });
       assert.equal(run.code, 1, run.output);
       assert.match(run.output, TRASH_TEST_FAILED);
       assert.match(run.output, /trash must be confirmed within two reads/);

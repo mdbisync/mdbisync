@@ -250,7 +250,7 @@ describe('Linear client contract', { skip: live ? false : 'LINEAR_TEST_APP_CLIEN
     trashed.add(second.id);
     await measured('trashDocument', () => linear.trashDocument(second.id));
     const [read] = await linear.getDocuments([second.id]);
-    let finalRead = read && { trashed: read.trashed };
+    let finalRead: { trashed: boolean } | undefined = read;
     if (read?.trashed !== true) {
       trashRead = await diagnoseTrashRead(linear, requests, second.id, read, pauseMs);
       finalRead = 'trashed' in trashRead.delayed ? trashRead.delayed : undefined;
