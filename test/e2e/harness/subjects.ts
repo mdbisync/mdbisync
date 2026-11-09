@@ -742,7 +742,7 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'documents.imageUrl': async (env) => {
     const { document } = await target(env);
-    const urls = [...(document?.content ?? '').matchAll(/!\[[^\]]*\]\((https?:[^)\s]+)\)/g)].map((match) => match[1] as string);
+    const urls = linkDestinations(document?.content ?? '').filter((destination) => destination.image && /^https?:/.test(destination.url)).map((destination) => destination.url);
     const fresh = (await env.view()).uploadsByHash.get(observed(env.ctx, 'git.imageHash') as string);
     return urls.find((url) => url === fresh) ?? urls[0] ?? null;
   },
@@ -961,8 +961,9 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'uploads.cacheComplete': async (env) => {
     const view = await env.view();
+    // Images of the documents the engine wrote; a document it left out on purpose uploads nothing.
     const embedded = new Set<string>();
-    for (const [path, text] of view.files) for (const image of embeddedImages(path, text)) embedded.add(image);
+    for (const [path, text] of view.files) if (view.ids.has(path)) for (const image of embeddedImages(path, text)) embedded.add(image);
     return [...embedded].every((path) => {
       const hash = view.hashes.get(path);
       return hash !== undefined && view.uploadsByHash.has(hash);
@@ -1505,7 +1506,8 @@ async function downloads(env: Env, kind: 'image' | 'attachment'): Promise<Map<st
   const view = await env.view();
   const manifest = manifestOf(env.ctx);
   const result = new Map<string, string>();
-  const used = new Set([...view.documents.values()].flatMap((document) => [...(document.content ?? '').matchAll(/\]\((https?:[^)\s]+)\)/g)].map((match) => match[1] as string)));
+  // Destinations as the parser reads them (`<…>` included), without a fragment such as `#page=2`.
+  const used = new Set([...view.documents.values()].flatMap((document) => linkDestinations(document.content ?? '').map((destination) => destination.url.split('#')[0] as string)));
   for (const [url, path] of view.uploads) {
     if (!used.has(url) || manifest.get(path)?.kind !== kind) continue;
     result.set(path, sha256(await world.download(url)));

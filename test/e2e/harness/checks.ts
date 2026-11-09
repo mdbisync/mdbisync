@@ -11,7 +11,7 @@ import { parse, visit } from '../../../src/format/markdown.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
 import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
-import { HarnessGapError, ProductError, type CheckOutcome } from './results.ts';
+import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
 import { refreshView, resolveSubject } from './subjects.ts';
 
@@ -602,27 +602,35 @@ export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
   let cached: Promise<Sides> | undefined;
   const sides = () => (cached ??= readSides(ctx));
   const outcomes: CheckOutcome[] = [];
+  // A check the product cannot satisfy yet (a "not implemented" command in I6, a value the report lacks) fails
+  // on its own; every other check is still evaluated, so one missing command hides no other result.
+  const productFailure = (error: unknown) => error instanceof ProductError || error instanceof NotImplementedError;
   for (const id of INVARIANTS) {
     if (!ctx.scenario.checks.invariants[id].required) continue;
     try {
       outcomes.push(await INVARIANT_CHECKS[id](ctx, sides));
     } catch (error) {
-      if (error instanceof ProductError) outcomes.push(bad(id, error.message));
+      if (productFailure(error)) outcomes.push(bad(id, (error as Error).message));
       else throw error;
     }
   }
   // I6 ran the sync once more: assertions read the world as it is now.
   refreshView(ctx);
   for (const assertion of ctx.scenario.checks.assertions) {
-    const actual = await resolveSubject(ctx, assertion.subject);
-    if (!actual.known) throw new HarnessGapError(`assertion subject ${assertion.subject}`);
-    let expected = assertion.expected;
-    if (assertion.operator === 'same-as') {
-      const other = await resolveSubject(ctx, String(assertion.expected));
-      if (!other.known) throw new HarnessGapError(`assertion subject ${String(assertion.expected)}`);
-      expected = other.value;
+    try {
+      const actual = await resolveSubject(ctx, assertion.subject);
+      if (!actual.known) throw new HarnessGapError(`assertion subject ${assertion.subject}`);
+      let expected = assertion.expected;
+      if (assertion.operator === 'same-as') {
+        const other = await resolveSubject(ctx, String(assertion.expected));
+        if (!other.known) throw new HarnessGapError(`assertion subject ${String(assertion.expected)}`);
+        expected = other.value;
+      }
+      outcomes.push(compare(assertion.operator, actual.value, expected) ? ok(assertion.subject) : bad(assertion.subject, `${assertion.operator} did not hold`));
+    } catch (error) {
+      if (productFailure(error)) outcomes.push(bad(assertion.subject, (error as Error).message));
+      else throw error;
     }
-    outcomes.push(compare(assertion.operator, actual.value, expected) ? ok(assertion.subject) : bad(assertion.subject, `${assertion.operator} did not hold`));
   }
   return outcomes;
 }
