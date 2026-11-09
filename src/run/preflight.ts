@@ -2,7 +2,7 @@
 // its state, and every operation checks the setup. The run's Linear token
 // is minted here and revoked when the run's work is done, also on failure.
 
-import { LinearClient, RequestStats, withRunToken } from '../linear/index.ts';
+import { LinearClient, RequestStats, withRunToken, type LogEntry } from '../linear/index.ts';
 import { type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import {
   type FailureCode,
@@ -50,6 +50,8 @@ export interface PreflightOptions {
   /** For warnings that do not change the outcome, such as a token that could not be revoked. */
   warn: (message: string) => void;
   fetch?: typeof fetch;
+  /** Safe per-request diagnostics; emitted immediately, including on failure. */
+  log: (entry: LogEntry) => void;
 }
 
 /**
@@ -74,7 +76,8 @@ export async function runPreflight(
   const github = await checkGitHub({ ...inputs.github, commit: fetched.tracked, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
   const stats = new RequestStats();
-  const tokenOptions = { baseUrl: inputs.linear.apiUrl, stats, ...(options.fetch ? { fetch: options.fetch } : {}) };
+  const requestHooks = { log: options.log };
+  const tokenOptions = { hooks: requestHooks, baseUrl: inputs.linear.apiUrl, stats, ...(options.fetch ? { fetch: options.fetch } : {}) };
   const credentials = { clientId: inputs.linear.clientId, clientSecret: inputs.linear.clientSecret };
   const onRevokeError = (error: unknown) =>
     options.warn(`the run's Linear token could not be revoked: ${error instanceof Error ? error.message : String(error)}`);
@@ -82,7 +85,7 @@ export async function runPreflight(
   try {
     return await withRunToken(credentials, { ...tokenOptions, onRevokeError }, async (token) => {
       minted = true;
-      const linear = new LinearClient({ token: token.accessToken, baseUrl: inputs.linear.apiUrl, stats, ...(options.fetch ? { fetch: options.fetch } : {}) });
+      const linear = new LinearClient({ ...tokenOptions, token: token.accessToken, auth: token.context });
       const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
       if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear });
       return outcome(operation, report);
