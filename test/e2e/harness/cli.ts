@@ -16,7 +16,7 @@ import { hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { LinearClient, mintAppToken, revokeToken, type RunToken, type LogEntry, type LinearHooks } from '../../../src/linear/index.ts';
-import { countAppRequest, withAppRequests } from './app-reads.ts';
+import { countAppRequest } from './app-reads.ts';
 import { loadTestConfig } from './config.ts';
 import { REPO_ROOT } from './engine.ts';
 import { Governor, budgetFromStatus, estimate, type App } from './governor.ts';
@@ -31,7 +31,8 @@ import { Sandbox } from './sandbox.ts';
 import { loadScenarios, selectScenarios } from './spec.ts';
 import { sweep } from './sweeper.ts';
 import { parseUiAnswers, renderUiChecklist } from './ui-checklist.ts';
-import { recordUiResult, reportDirOf, takeUpHeldRun } from './ui-result.ts';
+import { loadHeldRun } from './held-run.ts';
+import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-result.ts';
 
 const list = (value: string | undefined) => (value === undefined ? undefined : value.split(',').map((item) => item.trim()).filter(Boolean));
 
@@ -152,22 +153,28 @@ async function main(argv: string[]): Promise<number> {
       if (runArg === undefined || checklistArg === undefined) throw new Error('usage: cli.ts ui-result <run folder> <answered checklist>');
       const runDir = resolve(runArg);
       const answers = parseUiAnswers(readFileSync(checklistArg, 'utf8'));
-      const apps: App[] = config.linearApps.map((app) => ({
+      const held = loadHeldRun(runDir);
+      // The result goes over the run's entry in its report: a run folder without one is refused before anything changes.
+      reportEntry(reportDirOf(runDir), held.scenarioId, held.runId);
+      // Admission on the run's own app: its engine and the harness's reads go through that app.
+      const apps: App[] = config.linearApps.filter((app) => app.name === held.appName).map((app) => ({
         name: app.name,
         readBudget: async () => budgetFromStatus(await (appClients.get(app.name) as LinearClient).rateLimitStatus(), Date.now()),
       }));
+      if (config.linearApps.length > 0 && apps.length === 0) throw new Error(`the held run uses app ${held.appName}, which the test configuration does not have`);
       const governor = apps.length === 0 ? null : new Governor({ apps, stateDir, log });
-      const { result: outcome, requests } = await withAppRequests(() => takeUpHeldRun(runDir, answers, all, { config, governor, appClients, stateDir, expectedRed: loadExpectedRed(), log }));
+      const outcome = await takeUpHeldRun(runDir, answers, all, { config, governor, appClients, stateDir, expectedRed: loadExpectedRed(), log });
       if (outcome.state === 'waiting') {
         process.stdout.write(`ran ${outcome.ran.length === 0 ? 'no harness step' : outcome.ran.join(', ')}; the run stays held: answer item ${outcome.nextItem} and the ones after it, then hand the checklist back\n`);
         return 0;
       }
       const { result } = outcome;
-      const { files } = recordUiResult(reportDirOf(runDir), result, requests, {
+      const { files, statusPage } = recordUiResult(runDir, result, {
         catalog: all.map((scenario) => scenario.id),
         ...(values['status-page'] === undefined ? {} : { statusPage: values['status-page'] }),
         ...(values['evidence-dir'] === undefined ? {} : { evidenceDir: values['evidence-dir'] }),
       });
+      if (statusPage === 'kept-newer') log(`status page: kept a newer result of ${result.id} from another run`);
       process.stdout.write(`${result.id} ${result.runId}: ${result.result}${result.reason === undefined ? '' : ` (${result.reason})`}; cleanup ${result.cleanup.ok ? 'ok' : `failed: ${result.cleanup.detail ?? ''}`}; report ${files.markdown}\n`);
       return result.result === 'fail' || !result.cleanup.ok ? 1 : 0;
     }

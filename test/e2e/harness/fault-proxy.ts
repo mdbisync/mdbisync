@@ -109,6 +109,8 @@ export interface FaultProxy {
   tokens(): readonly string[];
   setFaults(faults: readonly Fault[]): void;
   clearFaults(): void;
+  /** How many faults are armed now. */
+  armedFaults(): number;
   /** Requests by kind since the start or the last reset of the counters. */
   counts(): { total: number; queries: number; mutations: number; injected: number };
   resetCounters(): void;
@@ -308,6 +310,7 @@ export async function startFaultProxy(upstream: string, options: { fetch?: typeo
     clearFaults() {
       faults = [];
     },
+    armedFaults: () => faults.length,
     counts() {
       return {
         total: requests.length,

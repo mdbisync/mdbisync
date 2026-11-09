@@ -3,12 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
+import { countAppRequest } from './app-reads.ts';
 import type { TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { decodeHeldRun, encodeHeldRun, heldRunOf, HELD_RUN_FILE, loadHeldRun, saveHeldRun, type HeldRun } from './held-run.ts';
 import { runNames } from './isolation.ts';
 import { liveRuns, registerRun } from './locks.ts';
-import { readLatest, type HarnessReport } from './report.ts';
+import { readLatest, updateStatusPage, type HarnessReport } from './report.ts';
 import type { ScenarioResult } from './results.ts';
 import { createRunContext } from './runner.ts';
 import { loadScenarios, type Scenario, type Step } from './spec.ts';
@@ -142,6 +143,7 @@ function heldRun(options: { holdUntil?: number } = {}) {
     holdUntil,
     startedAt: new Date(Date.now() - 60_000).toISOString(),
     budgetWaitMs: 500,
+    takeUpRequests: { harness: 0, harnessApp: 0 },
     engine: { results: [], setupRuns: 0 },
     edits: [],
     ownCommits: ['0'.repeat(40)],
@@ -172,6 +174,7 @@ function heldRun(options: { holdUntil?: number } = {}) {
   const report: HarnessReport = { harnessRunId: '2026-11-09-c0ffee', startedAt: held.startedAt, finishedAt: held.startedAt, host: 'test', selection: {}, results: [result] };
   writeFileSync(join(outDir, 'report.json'), JSON.stringify(report));
   const steps: string[] = [];
+  const attached: number[] = [];
   const deps: UiResultDeps = {
     config,
     governor: null,
@@ -179,12 +182,16 @@ function heldRun(options: { holdUntil?: number } = {}) {
     stateDir,
     expectedRed: new Set(),
     log: () => {},
-    attach: async (saved) => fakeLive(remote, saved),
+    attach: async (saved) => {
+      attached.push(saved.stepIndex);
+      return fakeLive(remote, saved);
+    },
     runStep: async (_ctx: RunContext, step: Step) => {
       steps.push(`${step.kind}.${step.action}`);
+      countAppRequest(); // one harness read through the app
     },
   };
-  return { outDir, stateDir, runDir, remote, checklist, deps, steps };
+  return { outDir, stateDir, runDir, remote, checklist, deps, steps, attached };
 }
 
 const sweepTargets = (remote: FakeRemote) => ({ sandbox: remote.sandbox, rest: remote.rest, world: remote.world, teamIds: ['team-eng'] }) as unknown as SweepTargets;
@@ -205,8 +212,17 @@ describe('UI checklist answers', () => {
     assert.equal(done.values.get('ui.botCommentVisible'), true);
   });
 
-  it('asks the session for the texts the editors typed where a harness check needs them', () => {
+  it('asks the session for the texts the editors typed, and for the UI side of a same-as comparison', () => {
     assert.deepEqual(uiValueSubjects(byId('L6-08')), ['ui.typedTexts']);
+    assert.deepEqual(uiValueSubjects(byId('L6-05')), ['ui.markPresent', 'ui.resolvedText']);
+    assert.match(renderUiChecklist(byId('L6-05'), runNames(RUN), { live: null, runDir: 'run' }), /^- `ui\.resolvedText` \(compared with `tracked\.body`\)\n  - value:$/m);
+  });
+
+  it('reads which scenario and run the checklist is for', () => {
+    const { checklist } = heldRun();
+    const answers = parseUiAnswers(checklist);
+    assert.equal(answers.scenarioId, 'L6-03');
+    assert.equal(answers.runId, RUN);
   });
 
   it('refuses an answer that is neither pass nor fail, and a value that is not JSON', () => {
@@ -215,6 +231,8 @@ describe('UI checklist answers', () => {
     assert.throws(() => parseUiAnswers(checklist.replace('  - value:', '  - value: Alert')), /not JSON/);
   });
 });
+
+const extra = { stepIndex: 0, appName: 'app1', holdUntil: 1, startedAt: '2026-11-09T10:00:00.000Z', budgetWaitMs: 0, takeUpRequests: { harness: 0, harnessApp: 0 } };
 
 describe('held run file', () => {
   it('keeps maps, sets and bytes through a save', () => {
@@ -235,12 +253,24 @@ describe('held run file', () => {
     const { ctx } = createRunContext(scenario, RUN, runDir, { ...deps, outDir: join(runDir, '..', '..') });
     ctx.live = fakeLive(remote, held);
     ctx.observations.set('target.path', 'eng/guide.md');
-    const saved = heldRunOf(ctx, { stepIndex: 0, appName: 'app1', holdUntil: 1, startedAt: held.startedAt, budgetWaitMs: 0 });
+    const saved = heldRunOf(ctx, extra);
     const text = encodeHeldRun(saved);
     assert.equal(decodeHeldRun(text).observations.get('target.path'), 'eng/guide.md');
     assert.doesNotMatch(text, /not-a-token|secret/);
+    ctx.observations.set('canary.remoteTexts', { 'pull request #1': 'text' });
+    assert.equal(heldRunOf(ctx, extra).observations.has('canary.remoteTexts'), false, 'remote texts are read again after the take-up');
     ctx.observations.set('tokens.seen', ['bearer']);
-    assert.throws(() => heldRunOf(ctx, { stepIndex: 0, appName: 'app1', holdUntil: 1, startedAt: held.startedAt, budgetWaitMs: 0 }), /credentials \(tokens\.seen\)/);
+    assert.throws(() => heldRunOf(ctx, extra), /credentials \(tokens\.seen\)/);
+  });
+
+  it('does not keep a run whose faults live only in this process', () => {
+    const { runDir, remote, deps } = heldRun();
+    const held = loadHeldRun(runDir);
+    const { ctx } = createRunContext(scenario, RUN, runDir, { ...deps, outDir: join(runDir, '..', '..') });
+    ctx.live = fakeLive(remote, held);
+    ctx.engine.env.MDBISYNC_TEST_STOP_AFTER = 'push';
+    ctx.engine.restores.push(async () => {});
+    assert.throws(() => heldRunOf(ctx, extra), /cannot be saved: engine environment of a fault, undo steps of a fault/);
   });
 });
 
@@ -253,6 +283,7 @@ describe('ui-result', () => {
     const held = loadHeldRun(runDir);
     assert.equal(held.stepIndex, 3, 'the run goes on from the last UI step next time');
     assert.equal(held.proxyRequests.length, 1, 'the proxy records of the first part are kept');
+    assert.deepEqual(held.takeUpRequests, { harness: 3, harnessApp: 1 }, 'the take-up\'s requests are kept for the result');
     assert.ok(liveRuns(stateDir).has(RUN), 'the hold stays');
     assert.equal(remote.state.refs.length, 3);
     assert.equal(remote.state.projects.length, 1);
@@ -290,15 +321,56 @@ describe('ui-result', () => {
     // The report, the status page and the evidence.
     const statusPage = join(outDir, 'test-status.md');
     const evidenceDir = join(outDir, 'evidence');
-    recordUiResult(outDir, result, 5, { statusPage, evidenceDir, catalog: all.map((candidate) => candidate.id) });
+    assert.equal(recordUiResult(runDir, result, { statusPage, evidenceDir, catalog: all.map((candidate) => candidate.id) }).statusPage, 'updated');
+    assert.equal(JSON.parse(readFileSync(join(runDir, 'ui-result.json'), 'utf8')).result, 'pass', 'the result is kept in the run folder too');
     const [recorded] = loadReport(outDir).results;
     assert.equal(recorded?.result, 'pass');
-    assert.equal(recorded?.harnessAppRequests, 7 + 5, 'app reads add to the first part\'s');
-    assert.equal(recorded?.harnessRequests, 4 + 3);
+    assert.equal(recorded?.harnessAppRequests, 7 + 1, 'app reads of every take-up add to the first part\'s');
+    assert.equal(recorded?.harnessRequests, 4 + 3 + 3, 'editor requests of both take-ups add to the first part\'s');
     assert.match(readFileSync(join(outDir, 'report.md'), 'utf8'), /\| L6-03 \| a1b2c3 \| pass \|/);
     const latest = readLatest(readFileSync(statusPage, 'utf8'));
     assert.deepEqual(latest.map((entry) => [entry.id, entry.result]), [['L6-03', 'pass']]);
     assert.match(readFileSync(join(evidenceDir, '2026-11-09-c0ffee', 'summary.md'), 'utf8'), /pass: 1/);
+  });
+
+  it('keeps the outcomes of every check when one does not hold', async () => {
+    const { runDir, checklist, deps } = heldRun();
+    const wrong = answered(checklist, 3, { values: true }).replace('  - value: "orange"', '  - value: "red"');
+    const outcome = await takeUpHeldRun(runDir, parseUiAnswers(wrong), scenarios, deps);
+    assert.ok(outcome.state === 'done');
+    assert.equal(outcome.result.result, 'fail');
+    assert.match(outcome.result.reason ?? '', /checks failed: ui\.markColor/);
+    assert.equal(outcome.result.checks.length, 5);
+    assert.deepEqual(outcome.result.checks.filter((check) => !check.ok).map((check) => check.name), ['ui.markColor']);
+  });
+
+  it('takes nothing up while the item where the run stopped is still open', async () => {
+    const { runDir, checklist, deps, attached } = heldRun();
+    assert.deepEqual(await takeUpHeldRun(runDir, parseUiAnswers(checklist), scenarios, deps), { state: 'waiting', ran: [], nextItem: 1 });
+    assert.deepEqual(attached, [], 'no clients, budget or locks for a checklist with nothing new');
+  });
+
+  it('keeps a newer result of the scenario from another run on the status page', async () => {
+    const { runDir, outDir, checklist, deps } = heldRun();
+    const outcome = await takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 3, { values: true })), scenarios, deps);
+    assert.ok(outcome.state === 'done');
+    const statusPage = join(outDir, 'test-status.md');
+    const newer: HarnessReport = { ...loadReport(outDir), harnessRunId: '2026-11-09-beef00', results: [{ ...outcome.result, runId: 'ffffff', result: 'expected-red', startedAt: new Date().toISOString() }] };
+    updateStatusPage(statusPage, all.map((candidate) => candidate.id), newer);
+    assert.equal(recordUiResult(runDir, outcome.result, { statusPage, catalog: all.map((candidate) => candidate.id) }).statusPage, 'kept-newer');
+    assert.deepEqual(readLatest(readFileSync(statusPage, 'utf8')).map((entry) => [entry.runId, entry.result]), [['ffffff', 'expected-red']]);
+    assert.equal(loadReport(outDir).results[0]?.result, 'pass', 'the run\'s own report still gets its result');
+  });
+
+  it('refuses an admission on another app than the run\'s, and keeps the run held', async () => {
+    const { runDir, stateDir, checklist, deps, attached } = heldRun();
+    const released: string[] = [];
+    const governor = { admit: async () => ({ app: { name: 'app2' }, waitedMs: 0, release: () => released.push('app2') }) } as unknown as UiResultDeps['governor'];
+    await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 2)), scenarios, { ...deps, governor }), /admitted the run on app app2, but it runs on app app1/);
+    assert.deepEqual(released, ['app2']);
+    assert.deepEqual(attached, []);
+    assert.ok(liveRuns(stateDir).has(RUN));
+    assert.equal(loadHeldRun(runDir).stepIndex, 0);
   });
 
   it('ends the run on a failed UI step: expected-red on the expected-red list, fail otherwise, and cleans up either way', async () => {
@@ -321,8 +393,11 @@ describe('ui-result', () => {
 
     const { runDir, stateDir, remote, checklist, deps, steps } = heldRun();
     await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 3)), scenarios, deps), /these values are not: ui\.listIcon/);
-    const other = renderUiChecklist(byId('L6-06'), remote.names, { live: null, runDir });
-    await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(other, 4)), scenarios, deps), /4 items and L6-03 has 3 UI steps/);
+    // Another scenario with as many items, and another run of the same scenario.
+    const other = renderUiChecklist(byId('L6-04'), remote.names, { live: null, runDir });
+    await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(other, 2)), scenarios, deps), /checklist is of L6-04 run a1b2c3, and the held run is L6-03 run a1b2c3/);
+    const otherRun = checklist.replace(`(run ${RUN})`, '(run 0f0f0f)');
+    await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(otherRun, 2)), scenarios, deps), /checklist is of L6-03 run 0f0f0f/);
     const skipped = answered(checklist, 3, { values: true }).replace(/(2\. \[ \][^\n]*\n   - result:) pass/, '$1 pass | fail');
     await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(skipped), scenarios, deps), /item 3 is answered but item 2 before it is not/);
     assert.deepEqual(steps, []);

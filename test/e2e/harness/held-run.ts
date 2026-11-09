@@ -32,6 +32,8 @@ export interface HeldRun {
   holdUntil: number;
   startedAt: string;
   budgetWaitMs: number;
+  /** Harness requests of earlier take-ups that ended waiting; the run's report counts the part before the hold. */
+  takeUpRequests: { harness: number; harnessApp: number };
   engine: { results: EngineResult[]; setupRuns: number };
   edits: EditRecord[];
   ownCommits: string[];
@@ -92,11 +94,21 @@ export function decodeHeldRun(text: string): HeldRun {
 const NEVER_SAVED = ['tokens.seen'];
 
 /** What the run holds now, for `held-run.json`. */
-export function heldRunOf(ctx: RunContext, extra: Pick<HeldRun, 'stepIndex' | 'appName' | 'holdUntil' | 'startedAt' | 'budgetWaitMs'>): HeldRun {
+export function heldRunOf(ctx: RunContext, extra: Pick<HeldRun, 'stepIndex' | 'appName' | 'holdUntil' | 'startedAt' | 'budgetWaitMs' | 'takeUpRequests'>): HeldRun {
   const live = ctx.live;
   if (live === null) throw new Error('only a live run can be held for its UI steps');
   const credentials = NEVER_SAVED.filter((key) => ctx.observations.has(key));
   if (credentials.length > 0) throw new Error(`the run recorded credentials (${credentials.join(', ')}), which are never written to disk`);
+  // Faults live in this process (the proxy's armed faults, the engine's extra environment, undo steps): a later
+  // process could not go on with them, and a run that went on without them could pass falsely.
+  const faults = [
+    ...((ctx.proxy?.armedFaults() ?? 0) > 0 ? ['armed proxy faults'] : []),
+    ...(Object.keys(ctx.engine.env).length > 0 ? ['engine environment of a fault'] : []),
+    ...(ctx.engine.badCredential !== undefined ? ['a credentials fault'] : []),
+    ...(ctx.engine.restores.length > 0 ? ['undo steps of a fault'] : []),
+    ...(ctx.engine.trigger !== undefined || ctx.engine.pausedAt !== undefined ? ['a run paused at a checkpoint'] : []),
+  ];
+  if (faults.length > 0) throw new Error(`the run holds state that cannot be saved: ${faults.join(', ')}`);
   return {
     version: 1,
     scenarioId: ctx.scenario.id,
@@ -107,7 +119,8 @@ export function heldRunOf(ctx: RunContext, extra: Pick<HeldRun, 'stepIndex' | 'a
     ownCommits: ctx.ownCommits,
     sequence: ctx.sequence,
     uiSteps: ctx.uiSteps,
-    observations: ctx.observations,
+    // Remote texts read for the canary scan are read again after the take-up: steps run then may add to them.
+    observations: new Map([...ctx.observations].filter(([key]) => key !== 'canary.remoteTexts')),
     proxyRequests: [...(ctx.proxy?.requests ?? [])],
     live: {
       githubTokenSource: live.githubTokenSource,

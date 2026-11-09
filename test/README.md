@@ -250,8 +250,13 @@ session answers the next items and runs `ui-result` again. Once every item
 is answered, it runs the checks, writes the result (pass, fail or
 expected-red) over the run's `env-blocked` one in the harness run's report
 and in the status page and evidence when given, cleans up and releases the
-hold. A `fail` ends the run at that item. A hold that has ended, a
-checklist of another scenario or missing values change nothing.
+hold; the result is also kept as `ui-result.json` in the run folder, and
+the status page keeps a newer result of the scenario from another run. A
+`fail` ends the run at that item. A hold that has ended, a checklist of
+another scenario or run, or missing values change nothing. A run that
+holds a fault (armed proxy faults, a fault's engine environment or undo
+steps) is not kept for the UI session: it is cleaned up and reported
+`env-blocked`.
 
 ## Change the test base
 

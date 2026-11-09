@@ -18,7 +18,7 @@ import { BudgetBlockedError, estimate, type Governor } from './governor.ts';
 import { SandboxRest, githubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
 import { withAppRequests } from './app-reads.ts';
-import { LinearWorld, editorClient, type Project } from './linear-world.ts';
+import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
@@ -105,12 +105,13 @@ function projectTeams(readmes: ReadonlyMap<string, string>): Map<string, string>
 /**
  * The clients and handles of a live run around its sandbox and run tree:
  * a new run's (no projects yet) or a held run's, made again in a later
- * process. Reads the workspace's teams and its document URL prefix.
+ * process. Reads the workspace's teams and its document URL prefix unless
+ * they are known (a held run saved them).
  */
 export async function liveWorld(
   deps: Pick<RunnerDeps, 'config' | 'appClients'>,
   appName: string,
-  parts: { sandbox: Sandbox; token: { token: string; source: 'app' | 'host' }; manifest: Manifest; tree: RunTree },
+  parts: { sandbox: Sandbox; token: { token: string; source: 'app' | 'host' }; manifest: Manifest; tree: RunTree; known?: { teams: Map<string, Team>; documentUrlBase: string } },
 ): Promise<LiveWorld> {
   const { config } = deps;
   const app = appFor(deps, appName);
@@ -118,9 +119,10 @@ export async function liveWorld(
   if (appClient === undefined) throw new Error(`no harness client for app ${appName}`);
   const editors = { 'editor-a': editorClient(config.editors['editor-a']), 'editor-b': editorClient(config.editors['editor-b']) };
   const world = new LinearWorld(editors['editor-a']);
-  const teams = new Map((await world.teams()).map((team) => [team.key, team]));
+  const teams = parts.known?.teams ?? new Map((await world.teams()).map((team) => [team.key, team]));
   // Links between synchronized documents are written as document URLs of this workspace.
-  const organization = await appClient.request<{ organization: { urlKey: string } }>('Organization', 'query', 'query Organization { organization { urlKey } }');
+  const documentUrlBase = parts.known?.documentUrlBase
+    ?? `https://linear.app/${(await appClient.request<{ organization: { urlKey: string } }>('Organization', 'query', 'query Organization { organization { urlKey } }')).organization.urlKey}/document`;
   return {
     sandbox: parts.sandbox,
     rest: new SandboxRest(config, parts.token.token),
@@ -136,7 +138,7 @@ export async function liveWorld(
     world,
     engineApp: { clientId: app.clientId, clientSecret: app.clientSecret },
     seededDocuments: [],
-    documentUrlBase: `https://linear.app/${organization.organization.urlKey}/document`,
+    documentUrlBase,
     async download(url) {
       // Personal API keys go in the Authorization header as they are.
       const response = await fetch(url, { headers: { authorization: config.editors['editor-a'] } });
@@ -678,7 +680,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       await runStep(ctx, step);
       history.push(await snapshotRefs(ctx));
     }
-    checks = await checksHold(ctx);
+    checks = await runChecks(ctx);
+    failOnChecks(checks);
   } catch (caught) {
     error = caught;
   } finally {
@@ -690,7 +693,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       // What `ui-result` needs to take the run up again; a run that cannot be saved is cleaned up now.
       const holdUntil = Date.now() + UI_HOLD_MS;
       try {
-        saveHeldRun(runDir, heldRunOf(ctx, { stepIndex: heldAt, appName: grant?.app.name ?? appName, holdUntil, startedAt: new Date(started).toISOString(), budgetWaitMs: grant?.waitedMs ?? 0 }));
+        saveHeldRun(runDir, heldRunOf(ctx, { stepIndex: heldAt, appName: grant?.app.name ?? appName, holdUntil, startedAt: new Date(started).toISOString(), budgetWaitMs: grant?.waitedMs ?? 0, takeUpRequests: { harness: 0, harnessApp: 0 } }));
         heldForUi = true;
         registration.hold(holdUntil);
         cleanupOutcome = { ok: true, detail: 'kept for the UI session; the sweeper removes it after the hold' };
@@ -715,14 +718,12 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   return resultOf(ctx, outcome, { startedAt: started, budgetWaitMs: grant?.waitedMs ?? 0, checks, cleanup: cleanupOutcome });
 }
 
-/** Runs the scenario's checks; a check that does not hold fails the scenario as a product error. */
-export async function checksHold(ctx: RunContext): Promise<CheckOutcome[]> {
-  const checks = await runChecks(ctx);
+/** A check that does not hold fails the scenario as a product error; the outcomes stay in the result either way. */
+export function failOnChecks(checks: readonly CheckOutcome[]): void {
   const failed = checks.filter((check) => !check.ok);
   if (failed.length > 0) {
     throw new ProductError(`checks failed: ${failed.map((check) => `${check.name} (${check.detail ?? ''})`).join('; ')}`);
   }
-  return checks;
 }
 
 export function skippedResult(scenario: Scenario, reason: string): ScenarioResult {

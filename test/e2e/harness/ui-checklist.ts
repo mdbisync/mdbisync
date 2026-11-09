@@ -36,9 +36,11 @@ export function describeUiStep(step: Step): string {
   return render === undefined ? `${step.action} (no instruction yet)` : render(step.args);
 }
 
-/** The `ui.*` values the scenario's checks read, in order: its assertions' subjects, then what its UI steps record. */
+/** The `ui.*` values the scenario's checks read, in order: its assertions' subjects (both sides of `same-as`), then what its UI steps record. */
 export function uiValueSubjects(scenario: Scenario): string[] {
-  const subjects = scenario.checks.assertions.map((assertion) => assertion.subject).filter((subject) => subject.startsWith('ui.'));
+  const subjects = scenario.checks.assertions
+    .flatMap((assertion) => [assertion.subject, ...(assertion.operator === 'same-as' ? [String(assertion.expected)] : [])])
+    .filter((subject) => subject.startsWith('ui.'));
   for (const step of scenario.steps) if (step.kind === 'ui') subjects.push(...(RECORDS[step.action] ?? []));
   return [...new Set(subjects)];
 }
@@ -71,8 +73,13 @@ export function renderUiChecklist(scenario: Scenario, names: RunNames, ctx: Pick
     lines.push('', '## Values', '');
     for (const subject of values) {
       const assertion = scenario.checks.assertions.find((candidate) => candidate.subject === subject);
+      const compared = scenario.checks.assertions.find((candidate) => candidate.operator === 'same-as' && candidate.expected === subject);
       lines.push(
-        assertion === undefined ? `- \`${subject}\` (recorded for the harness's checks)` : `- \`${subject}\` expected ${assertion.operator} \`${JSON.stringify(assertion.expected)}\``,
+        assertion !== undefined
+          ? `- \`${subject}\` expected ${assertion.operator} \`${JSON.stringify(assertion.expected)}\``
+          : compared !== undefined
+            ? `- \`${subject}\` (compared with \`${compared.subject}\`)`
+            : `- \`${subject}\` (recorded for the harness's checks)`,
         '  - value:',
       );
     }
@@ -89,6 +96,9 @@ export interface UiItemAnswer {
 }
 
 export interface UiAnswers {
+  /** The scenario and run the checklist's heading names, null without a heading. */
+  scenarioId: string | null;
+  runId: string | null;
   items: UiItemAnswer[];
   /** `ui.*` subject → the value the session wrote; values not written yet are absent. */
   values: Map<string, unknown>;
@@ -100,6 +110,7 @@ export function parseUiAnswers(text: string): UiAnswers {
   const values = new Map<string, unknown>();
   let item: UiItemAnswer | undefined;
   let subject: string | undefined;
+  const title = /^# UI checklist: (\S+) \(run ([0-9a-f]{6})\)$/m.exec(text);
   for (const line of text.split(/\r?\n/)) {
     const heading = /^(\d+)\. \[[ xX]\] /.exec(line);
     if (heading !== null) {
@@ -139,5 +150,5 @@ export function parseUiAnswers(text: string): UiAnswers {
   items.forEach((answer, index) => {
     if (answer.number !== index + 1) throw new Error(`the checklist's items are not numbered 1, 2, 3, …: item ${index + 1} is numbered ${answer.number}`);
   });
-  return { items, values };
+  return { scenarioId: title?.[1] ?? null, runId: title?.[2] ?? null, items, values };
 }
