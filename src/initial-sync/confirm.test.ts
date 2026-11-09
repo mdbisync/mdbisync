@@ -359,6 +359,20 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(writesAtPrepare, 0);
     assert.deepEqual([...(preparedIds ?? new Map()).keys()].sort(), SYNCED_PATHS);
     for (const [path, entry] of Object.entries(await readIds())) assert.equal(entry.id, preparedIds?.get(path), path);
+
+    // The left-out new documents keep their ids beside the id map, so links to them do not change from run to run.
+    const reserved = JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json')) as Record<string, string>;
+    assert.deepEqual(reserved, { 'eng/README.md': preparedIds?.get('eng/README.md'), 'eng/notes/plan.md': preparedIds?.get('eng/notes/plan.md') });
+    const firstIds = preparedIds;
+    const refsBefore = await refs();
+    const writes = world.linear.writes.count;
+    await runPreflight('initial-sync', inputs, { git: new Git(cwd), warn: () => undefined, fetch: fakeFetch(world) }, async (context) => {
+      result = (await confirmInitialSync(context, { config: inputs.state, transforms: [marker, leaveOut], stopAfterDocuments: undefined })).result;
+    });
+    assert.equal(result?.complete, true);
+    assert.deepEqual(preparedIds, firstIds);
+    assert.equal(world.linear.writes.count, writes, 'the second run wrote to Linear');
+    assert.deepEqual(await refs(), refsBefore);
   });
 
   it("records Linear's form of a file it reformatted, with the file's front matter, and leaves the tracked branch alone", async () => {
