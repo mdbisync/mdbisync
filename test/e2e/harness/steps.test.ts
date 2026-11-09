@@ -1606,6 +1606,15 @@ describe('subjects', () => {
     // Both real images cached: the input's broken link has no file to upload, so it expects nothing and the check passes.
     await writeUploads(ctx, { [first]: 'https://uploads.linear.app/x/first', [second]: 'https://uploads.linear.app/x/second' });
     assert.equal(await cacheComplete(), true);
+    // The same broken target added to another written document is the run's link, not the input's: it fails.
+    const plan = join(git.dir, 'eng/platform/plan.md');
+    const planText = readFileSync(plan, 'utf8');
+    writeFileSync(plan, `${planText}\n![gone too](../assets/does-not-exist.png)\n`);
+    await push('The broken target in another document');
+    assert.equal(await cacheComplete(), false);
+    writeFileSync(plan, planText);
+    await push('Restore the plan');
+    assert.equal(await cacheComplete(), true);
     // A link the run adds to a file the branch does not hold is not the input's broken reference: it still fails.
     writeFileSync(notes, `${input}\n![new](media/new.png)\n`);
     await push('A link to an image that was never committed');
