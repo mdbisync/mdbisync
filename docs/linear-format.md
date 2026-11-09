@@ -332,7 +332,7 @@ time, and see the files pre-commit selects: use `--all-files` to check the
 whole repository, existing files included.
 
 Add the hook to `.pre-commit-config.yaml`, pinned to a release commit (see
-[Pre-release builds and pins](../README.md#pre-release-builds-and-pins) for
+[Pre-release builds and pins](usage.md#pre-release-builds-and-pins) for
 how to find its SHA):
 
 ```yaml

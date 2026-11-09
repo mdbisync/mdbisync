@@ -15,7 +15,16 @@ npm ci                     # exact versions from package-lock.json, no install s
 npm run typecheck
 npm run build              # bundles dist/, checks bundled licenses, writes the notices
 npm test
+npm run test:hooks         # needs pre-commit; offline scratch hook and CI checks
 pre-commit run --all-files
+```
+
+To generate the test corpus with a released hook, pass its release commit
+SHA (see [Pre-release builds and pins](docs/usage.md#pre-release-builds-and-pins));
+the generator keeps the `corpus/` and `corpus-slices/` layout:
+
+```sh
+node test/corpus/generate.ts --hook-rev <40-character-release-sha>
 ```
 
 `npm test` needs no network or accounts. In the live scenario runs, a
@@ -59,6 +68,24 @@ and refs under `refs/mdbisync-t/` in the test repository. It removes them at
 the end. The Git LFS objects the state tests upload (a few kilobytes) stay
 in the repository's LFS storage.
 
+## Where things are
+
+| Path | What |
+| --- | --- |
+| `src/cli.ts` | Command line: `sync`, `initial-sync`, `lint`, `fix`, `init`, `check`, `--version` |
+| `src/action/` | GitHub Action steps: `main` (operation `sync` or `initial-sync`) and `post` |
+| `src/run/` | Inputs and the preflight every run starts with |
+| `src/mapping/` | Folder annotations and the mapping of files to documents |
+| `src/setup/` | The setup check and the refusal to sync without state |
+| `src/format/` | `lint` and `fix`: Markdown in Linear's form ([docs/linear-format.md](docs/linear-format.md)) |
+| `src/initial-sync/` | Initial sync in both directions: plan, dry run, confirmed run |
+| `src/pull-request/` | Pull requests through GitHub's REST API: open, update, read checks, merge |
+| `src/linear/` | Linear client |
+| `src/state/` | The sync's state refs, trees and LFS reads |
+| `action.yml` | Action metadata (`node24`, bundled `main` and `post`) |
+| `tools/` | Build and supply-chain checks |
+| `test/fixtures/`, `test/corpus/`, `test/scenarios/`, `test/e2e/` | Test data, corpus generator, scenario specs and end-to-end harness |
+
 ## Pull requests
 
 - Keep a pull request to one change, with tests that show it working.
@@ -67,7 +94,8 @@ in the repository's LFS storage.
 - Dependencies: exact versions with hashes in `package-lock.json`, no
   install scripts, and only well-maintained packages under MIT, ISC, BSD or
   Apache-2.0. A pull request that adds one says why the standard library
-  is not enough.
+  is not enough. Updates are proposed no sooner than 14 days after a
+  release.
 - If your change adds, removes or updates a bundled package, run
   `npm run build -- --update-license-inventory` and commit the updated
   `third-party-licenses.json`; the build fails until the inventory matches
