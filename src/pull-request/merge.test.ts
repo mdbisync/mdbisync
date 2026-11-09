@@ -72,12 +72,29 @@ describe('readChecks', () => {
 });
 
 describe('mergePullRequest', () => {
-  it('merges with a merge commit while the head is the commit read, and reports a refusal by its status', async () => {
+  it('merges with a merge commit while the head is the commit read, and reports a refusal by its status and reason', async () => {
     const { world, repo } = target([]);
     world.github.pullRequests.push({ number: 1, title: 't', body: 'b', head: 'sync', base: 'main', state: 'open', merged: false });
-    world.github.merge = async (_pr, sha) => (sha === SHA ? { sha: 'b'.repeat(40) } : { status: 409 });
-    assert.deepEqual(await mergePullRequest(repo, 1, 'c'.repeat(40)), { merged: false, status: 409 });
+    world.github.merge = async (_pr, sha) => (sha === SHA ? { sha: 'b'.repeat(40) } : { status: 409, message: 'Head branch was modified. Review and try the merge again.' });
+    assert.deepEqual(await mergePullRequest(repo, 1, 'c'.repeat(40)), { merged: false, status: 409, reason: 'Head branch was modified. Review and try the merge again.' });
     assert.deepEqual(await mergePullRequest(repo, 1, SHA), { merged: true, sha: 'b'.repeat(40) });
-    assert.deepEqual(await mergePullRequest(repo, 1, SHA), { merged: false, status: 422 });
+    assert.deepEqual(await mergePullRequest(repo, 1, SHA), { merged: false, status: 422, reason: 'Pull Request is not open' });
+  });
+
+  it("keeps GitHub's reason on one line, without backticks, and short", async () => {
+    const { world, repo } = target([]);
+    world.github.pullRequests.push({ number: 1, title: 't', body: 'b', head: 'sync', base: 'main', state: 'open', merged: false });
+    world.github.merge = async () => ({ status: 405, message: 'Repository rule violations found\n\n`review`\trequired.' });
+    assert.deepEqual(await mergePullRequest(repo, 1, SHA), { merged: false, status: 405, reason: 'Repository rule violations found review required.' });
+    world.github.merge = async () => ({ status: 405, message: 'x'.repeat(1000) });
+    const long = await mergePullRequest(repo, 1, SHA);
+    assert.ok(!long.merged && long.reason.length === 300 && long.reason.endsWith('…'));
+  });
+
+  it('a request that gets no answer is a PullRequestError without a status', async () => {
+    const { world, repo } = target([]);
+    world.github.pullRequests.push({ number: 1, title: 't', body: 'b', head: 'sync', base: 'main', state: 'open', merged: false });
+    world.github.reset = () => 'before';
+    await assert.rejects(mergePullRequest(repo, 1, SHA), (error: unknown) => error instanceof PullRequestError && error.status === undefined && /did not answer/.test(error.message));
   });
 });

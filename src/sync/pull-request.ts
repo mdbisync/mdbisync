@@ -11,6 +11,11 @@
 // the branch or opened the pull request leaves the checks to start; a later
 // run reads them and merges with a merge commit when every one has finished
 // and passed. A run never waits for checks.
+//
+// A merge GitHub refuses is noted in the pull request's description, with
+// the head, the tracked branch and GitHub's reason. A later run that meets
+// the same refusal on the same head and tracked branch reads the note back
+// and reports a setup error: nothing will change until a person does.
 
 import { SYNC_IDENTITY } from '../initial-sync/index.ts';
 import {
@@ -21,6 +26,7 @@ import {
   findOpenPullRequest,
   mergePullRequest,
   readChecks,
+  updatePullRequest,
 } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import {
@@ -67,13 +73,25 @@ export interface PullRequestResult {
    * - `check-failed`: a check on the head failed; a setup error, the repository's checks must pass Linear's form.
    * - `conflict`: `linear` and the tracked branch, or `linear` and the sync branch, change the same lines; steps 3 to 5 merge them, and a later run takes the result.
    * - `merge-refused`: GitHub would not merge (the head moved, or the pull request cannot be merged now); a later run tries again.
+   * - `merge-blocked`: GitHub refused the merge for the same reason as an earlier run, on the same head and tracked branch; a setup error, a person must change what blocks it.
    * - `initial-pull-request-pending`: the sync branch holds the record of an initial sync from Linear that a person has not merged.
    * - `state-moved`: the sync branch moved while this run worked.
-   * - `github-failed`: GitHub refused or failed a request; `status` is its HTTP status.
+   * - `github-failed`: GitHub refused or failed a request, or no answer came; `status` is its HTTP status, absent when no answer came.
    */
-  code?: 'check-failed' | 'conflict' | 'merge-refused' | 'initial-pull-request-pending' | 'state-moved' | 'github-failed';
-  /** GitHub's HTTP status for `merge-refused` and `github-failed`. */
+  code?: 'check-failed' | 'conflict' | 'merge-refused' | 'merge-blocked' | 'initial-pull-request-pending' | 'state-moved' | 'github-failed';
+  /** GitHub's HTTP status for `merge-refused`, `merge-blocked` and `github-failed`. */
   status?: number;
+  /** GitHub's reason for `merge-refused` and `merge-blocked`, on one line; empty when it gave none. */
+  reason?: string;
+}
+
+/** A merge GitHub refused, as noted in the pull request's description. */
+interface MergeRefusal {
+  head: Oid;
+  /** The tracked branch's head at the time. */
+  base: Oid;
+  status: number;
+  reason: string;
 }
 
 /** How a run ends because of step 2; null when step 2 leaves the run successful (waiting for checks, a conflict, a refused merge). */
@@ -88,6 +106,8 @@ export function pullRequestFailure(result: PullRequestResult | undefined): PullR
   switch (result?.code) {
     case 'check-failed':
       return { kind: 'setup', code: result.code, message: `setup error (${result.code}): a check failed on the sync pull request` };
+    case 'merge-blocked':
+      return { kind: 'setup', code: result.code, message: `setup error (${result.code}): GitHub refuses again to merge the sync pull request (${refusalText(result)})` };
     case 'initial-pull-request-pending':
       return { kind: 'no-state', code: result.code, message: `stopped short (${result.code}): an initial sync from Linear waits for a person to merge it` };
     case 'state-moved':
@@ -150,11 +170,14 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const headTree = await mergedTree(git, tracked, head);
     if (headTree !== null) result.paths = (await git.text(['diff', '--name-only', '--no-renames', trackedTree, headTree])).split('\n').filter(Boolean);
 
+    // An earlier refusal stays noted while it still applies: the same head on the same tracked branch.
+    const noted = open === null ? null : readRefusal(open.body);
+    const earlier = noted !== null && noted.head === head && noted.base === tracked ? noted : null;
     const { pullRequest, opened } = await ensurePullRequest(github, {
       head: config.syncBranch,
       base: config.trackedBranch,
       title: SYNC_PULL_REQUEST_TITLE,
-      body: pullRequestBody(result.paths),
+      body: pullRequestBody(result.paths, earlier),
     });
     result.pullRequest = { number: pullRequest.number, url: pullRequest.url, opened };
     // New checks start for a new head or a new pull request; a later run reads them.
@@ -164,12 +187,18 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     if (result.checks.state === 'failed') return { ...result, code: 'check-failed' };
     if (result.checks.state === 'pending') return result;
     const merge = await mergePullRequest(github, pullRequest.number, head);
-    if (!merge.merged) return { ...result, code: 'merge-refused', status: merge.status };
+    if (!merge.merged) {
+      const refusal: MergeRefusal = { head, base: tracked, status: merge.status, reason: merge.reason };
+      const refused = { ...result, status: merge.status, reason: merge.reason };
+      if (earlier !== null && earlier.status === refusal.status && earlier.reason === refusal.reason) return { ...refused, code: 'merge-blocked' };
+      await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal) });
+      return { ...refused, code: 'merge-refused' };
+    }
     result.merged = merge.sha;
     result.pullRequest = null;
     return result;
   } catch (error) {
-    if (error instanceof PullRequestError) return { ...result, code: 'github-failed', status: error.status };
+    if (error instanceof PullRequestError) return { ...result, code: 'github-failed', ...(error.status === undefined ? {} : { status: error.status }) };
     throw error;
   }
 }
@@ -225,8 +254,8 @@ function commitMerge(git: Git, tree: string, sync: Oid, linear: Oid, identity: C
   });
 }
 
-/** Names and counts only, never document content. */
-function pullRequestBody(paths: readonly string[]): string {
+/** Names, counts and GitHub's reason for a refused merge; never document content. */
+function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null): string {
   const lines = [
     'Changes made in Linear, on their way to this branch.',
     '',
@@ -236,7 +265,35 @@ function pullRequestBody(paths: readonly string[]): string {
   ];
   if (paths.length > 0) lines.push('', ...paths.slice(0, LISTED_PATHS).map((path) => `- ${path}`));
   if (paths.length > LISTED_PATHS) lines.push(`- and ${paths.length - LISTED_PATHS} more`);
+  if (refusal !== null) {
+    lines.push(
+      '',
+      `GitHub refused to merge head \`${refusal.head.slice(0, 12)}\` (${refusalText(refusal)}). If it refuses this head again for the same reason, the sync reports a setup error.`,
+      `<!-- merge refused: head=${refusal.head} base=${refusal.base} status=${refusal.status} reason=${encodeURIComponent(refusal.reason)} -->`,
+    );
+  }
   return `${lines.join('\n')}\n`;
+}
+
+/** The hidden note a refused merge leaves; the reason is URI-encoded, so it cannot end the comment. */
+const REFUSAL_NOTE = /^<!-- merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->$/m;
+
+/** The refusal noted in a pull request's description, or null. */
+function readRefusal(body: string): MergeRefusal | null {
+  const note = REFUSAL_NOTE.exec(body);
+  if (note === null) return null;
+  let reason: string;
+  try {
+    reason = decodeURIComponent(note[4] as string);
+  } catch {
+    return null;
+  }
+  return { head: note[1] as Oid, base: note[2] as Oid, status: Number(note[3]), reason };
+}
+
+/** `HTTP 405: reason`, or the status alone when GitHub gave no reason. */
+function refusalText(refusal: { status?: number | undefined; reason?: string | undefined }): string {
+  return `HTTP ${refusal.status ?? 0}${refusal.reason ? `: ${refusal.reason}` : ''}`;
 }
 
 /** The job summary's section for step 2: names, numbers and states, no content. */
@@ -256,7 +313,13 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is; this run merges the tracked branch into Linear's state, and a later run takes the result to the sync pull request.");
       break;
     case 'merge-refused':
-      lines.push(`GitHub did not merge the sync pull request ${link} (HTTP ${result.status ?? 0}); a later run tries again.`);
+      lines.push(`GitHub did not merge the sync pull request ${link} (${refusalText(result)}); a later run tries again.`);
+      break;
+    case 'merge-blocked':
+      lines.push(
+        `Setup error: GitHub refused again to merge the sync pull request ${link}, on the same head and for the same reason as an earlier run (${refusalText(result)}).`,
+        "Nothing changes until a person does: let the sync's GitHub App merge into the tracked branch (for example, adjust the branch's rules), and a later run merges.",
+      );
       break;
     case 'initial-pull-request-pending':
       lines.push('The sync branch holds an initial sync from Linear that a person has not merged yet. The sync adds nothing to it and writes nothing to Linear until it is merged.');
@@ -265,7 +328,11 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       lines.push('The sync branch moved while this run worked; the next run updates the sync pull request.');
       break;
     case 'github-failed':
-      lines.push(`GitHub refused or failed a request for the sync pull request (HTTP ${result.status ?? 0}); the next run tries again.`);
+      lines.push(
+        result.status === undefined
+          ? 'A request to GitHub for the sync pull request got no answer (the connection broke or timed out); the next run tries again.'
+          : `GitHub refused or failed a request for the sync pull request (HTTP ${result.status}); the next run tries again.`,
+      );
       break;
     default:
       if (result.merged !== null) lines.push('Merged the sync pull request with a merge commit: every check on its head passed.');

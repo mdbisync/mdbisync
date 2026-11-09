@@ -30,12 +30,16 @@ export interface NewPullRequest {
   body: string;
 }
 
-/** GitHub refused or failed a pull request request; carries the status, never a body. */
+/**
+ * GitHub refused or failed a pull request request, or the request did not
+ * complete (a reset connection, a timeout); carries the status, never a body.
+ */
 export class PullRequestError extends Error {
-  readonly status: number;
+  /** GitHub's HTTP status; undefined when no answer came. */
+  readonly status: number | undefined;
 
-  constructor(what: string, status: number) {
-    super(`GitHub answered HTTP ${status} while ${what}`);
+  constructor(what: string, status: number | undefined) {
+    super(status === undefined ? `GitHub did not answer while ${what}` : `GitHub answered HTTP ${status} while ${what}`);
     this.name = 'PullRequestError';
     this.status = status;
   }
@@ -106,17 +110,25 @@ function toPullRequest(value: unknown): PullRequest | null {
 
 export async function request(target: GitHubRepository, method: string, path: string, body?: Record<string, unknown>): Promise<{ status: number; json: unknown }> {
   const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}/repos/${target.repository}`;
-  const response = await (target.fetch ?? fetch)(`${base}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${target.token}`,
-      accept: 'application/vnd.github+json',
-      'x-github-api-version': '2022-11-28',
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(30_000),
-  });
+  let response: Response;
+  try {
+    response = await (target.fetch ?? fetch)(`${base}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${target.token}`,
+        accept: 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    // No answer came (a reset connection, a timeout). The request may still
+    // have reached GitHub, so callers treat it as failed and a later run reads
+    // back what happened.
+    throw new PullRequestError(`sending ${method} to the pull request API`, undefined);
+  }
   let json: unknown = null;
   try {
     json = await response.json();
