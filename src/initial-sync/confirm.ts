@@ -462,8 +462,9 @@ function sha256(text: string): string {
  * `a%20b.png`), and the next run finds the document holding the file.
  */
 export function restoreStored(transforms: readonly BodyTransform[], path: string, content: string, sent: string): string {
-  const restored = restoreBody(transforms, path, content);
-  return content === sent ? restored : fixText(restored);
+  const kept = content === sent;
+  const restored = restoreBody(transforms, path, content, kept);
+  return kept ? restored : fixText(restored);
 }
 
 /** Whether Linear's content is the body, or the body in the form Linear stores (as the format module writes it). */

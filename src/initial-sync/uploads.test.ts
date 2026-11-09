@@ -320,11 +320,11 @@ describe('uploads of linked files in an initial sync', () => {
 describe('file links in a document', () => {
   const files = new Set(['docs/img/a.png', 'docs/files/a b.pdf', 'docs/x(1).png', 'top.zip', 'docs/guide/a&b.png']);
   const isFile = (path: string) => files.has(path);
-  const targets = (body: string) => findFileLinks('docs/guide/page.md', body, isFile).map((link) => [link.raw, link.target]);
+  const targets = (body: string) => findFileLinks('docs/guide/page.md', body, isFile).map((link) => [link.written, link.target]);
 
   it('finds images, links and definitions to files, with the destination as written', () => {
     assert.deepEqual(targets('![a](../img/a.png)'), [['../img/a.png', 'docs/img/a.png']]);
-    assert.deepEqual(targets('[a](<../files/a b.pdf>)'), [['../files/a b.pdf', 'docs/files/a b.pdf']]);
+    assert.deepEqual(targets('[a](<../files/a b.pdf>)'), [['<../files/a b.pdf>', 'docs/files/a b.pdf']], 'with its angle brackets');
     assert.deepEqual(targets('[a](../files/a%20b.pdf)'), [['../files/a%20b.pdf', 'docs/files/a b.pdf']]);
     assert.deepEqual(targets('[a](../x\\(1\\).png)'), [['../x\\(1\\).png', 'docs/x(1).png']]);
     assert.deepEqual(targets('[a](../x(1).png)'), [['../x(1).png', 'docs/x(1).png']]);
@@ -341,11 +341,6 @@ describe('file links in a document', () => {
       'a link in the alt text to the same file: the image destination is the one replaced',
     );
     assert.deepEqual(targets('[a](../img/a.png "Title")'), [['../img/a.png', 'docs/img/a.png']]);
-    assert.deepEqual(
-      findFileLinks('docs/guide/page.md', '[a](<../files/a b.pdf>) [b](../img/a.png)', isFile).map((link) => link.written),
-      ['<../files/a b.pdf>', '../img/a.png'],
-      'the spelling to restore keeps its angle brackets',
-    );
   });
 
   it('keeps the query and fragment to write after the upload URL', () => {
@@ -385,20 +380,23 @@ describe('file links in a document', () => {
       ['2'.repeat(64), 'https://uploads.example.test/12'],
     ]);
     const links = [
-      { raw: 'a.png', hash: '1'.repeat(64), suffix: '' },
-      { raw: './a.png', hash: '1'.repeat(64), suffix: '' },
-      { raw: '<b.png#p>', hash: '2'.repeat(64), suffix: '#p' },
-      { raw: '<c d.png>', hash: '1'.repeat(64), suffix: '' },
+      { written: 'a.png', hash: '1'.repeat(64), suffix: '' },
+      { written: './a.png', hash: '1'.repeat(64), suffix: '' },
+      { written: '<b.png#p>', hash: '2'.repeat(64), suffix: '#p' },
+      { written: '<c d.png>', hash: '1'.repeat(64), suffix: '' },
+      { written: 'e.png#q', hash: '2'.repeat(64), suffix: '#q' },
     ];
     const stored = [
       'Pasted: `https://uploads.example.test/1` and ![old](https://uploads.example.test/1?v=2)',
       '![x](https://uploads.example.test/1) ![y](https://uploads.example.test/1) [z](<https://uploads.example.test/12#p>)',
       // Linear dropped the brackets: the spelling keeps its own, so the image stays an image.
       '![w](https://uploads.example.test/1)',
+      // Linear added brackets the file did not have: the file's spelling comes back without them.
+      '[v](<https://uploads.example.test/12#q>)',
     ].join('\n\n');
     assert.equal(
       restoreFileLinks(stored, links, uploads),
-      'Pasted: `https://uploads.example.test/1` and ![old](https://uploads.example.test/1?v=2)\n\n![x](a.png) ![y](./a.png) [z](<b.png#p>)\n\n![w](<c d.png>)',
+      'Pasted: `https://uploads.example.test/1` and ![old](https://uploads.example.test/1?v=2)\n\n![x](a.png) ![y](./a.png) [z](<b.png#p>)\n\n![w](<c d.png>)\n\n[v](e.png#q)',
       'only the written destinations are mapped back',
     );
   });

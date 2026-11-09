@@ -18,6 +18,17 @@ export interface TransformInput {
   body: string;
 }
 
+/** What a transform's inverse gets: Linear's content so far, and whether Linear stored the text it was sent. */
+export interface RestoreInput {
+  path: string;
+  body: string;
+  /**
+   * Linear stored exactly what was sent. When false, Linear reformatted the
+   * document, and the caller puts the whole restored text in Linear's form.
+   */
+  kept: boolean;
+}
+
 /** Why a document cannot be written as it is; it is then left out and listed with the rule. */
 export class LeaveOutError extends Error {
   readonly rule: string;
@@ -44,7 +55,7 @@ export interface BodyTransform {
    * file's form (an asset URL back to its relative path), so the recorded
    * file equals the tracked one when Linear kept the text. Makes no requests.
    */
-  restore(input: TransformInput): string;
+  restore(input: RestoreInput): string;
 }
 
 /** What a transform may use. */
@@ -76,8 +87,8 @@ export async function transformBody(transforms: readonly BodyTransform[], path: 
 }
 
 /** Runs the transforms' inverses in reverse order. */
-export function restoreBody(transforms: readonly BodyTransform[], path: string, content: string): string {
+export function restoreBody(transforms: readonly BodyTransform[], path: string, content: string, kept: boolean): string {
   let current = content;
-  for (const transform of [...transforms].reverse()) current = transform.restore({ path, body: current });
+  for (const transform of [...transforms].reverse()) current = transform.restore({ path, body: current, kept });
   return current;
 }

@@ -59,8 +59,6 @@ export interface FileLink {
   /** Where the destination's text starts and ends in the body, without angle brackets. */
   from: number;
   to: number;
-  /** The destination as written, without angle brackets. */
-  raw: string;
   /** The destination as written, with its angle brackets when it has them: what the restore puts back. */
   written: string;
   /** The linked file's path in the repository. */
@@ -72,7 +70,7 @@ export interface FileLink {
 /** What a document's link to a file was before the upload: restored in place of `url + suffix`. */
 export interface WrittenLink {
   /** The destination as the file wrote it, angle brackets included, so it stays a destination wherever it lands. */
-  raw: string;
+  written: string;
   hash: string;
   suffix: string;
 }
@@ -272,7 +270,7 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       await uploadMissing(path, [...new Set(fileLinks.map((link) => link.target))]);
       const { uploads } = context;
       const urls = fileLinks.map((link) => uploads.get((linked.get(link.target) as LinkedFile).hash) as string);
-      links.set(path, fileLinks.map((link) => ({ raw: link.written, hash: (linked.get(link.target) as LinkedFile).hash, suffix: link.suffix })));
+      links.set(path, fileLinks.map((link) => ({ written: link.written, hash: (linked.get(link.target) as LinkedFile).hash, suffix: link.suffix })));
       return replaceRanges(body, fileLinks.map((link, index) => ({ from: link.from, to: link.to, text: (urls[index] as string) + link.suffix })));
     },
 
@@ -299,7 +297,7 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
     const url = uploads.get(link.hash);
     if (url === undefined) continue;
     const key = url + link.suffix;
-    raws.set(key, [...(raws.get(key) ?? []), link.raw]);
+    raws.set(key, [...(raws.get(key) ?? []), link.written]);
   }
   if (raws.size === 0) return body;
   const seen = new Map<string, number>();
@@ -321,7 +319,7 @@ export function findFileLinks(documentPath: string, body: string, isFile: (path:
     const target = resolveTarget(documentPath, node.url);
     if (target === null || !isFile(target)) continue;
     const cut = node.url.search(/[?#]/);
-    result.push({ ...range, raw: body.slice(range.from, range.to), written: body.slice(outer.from, outer.to), target, suffix: cut === -1 ? '' : node.url.slice(cut) });
+    result.push({ ...range, written: body.slice(outer.from, outer.to), target, suffix: cut === -1 ? '' : node.url.slice(cut) });
   }
   return result;
 }
