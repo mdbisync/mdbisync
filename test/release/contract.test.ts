@@ -14,6 +14,7 @@ test('CI and release install the same pinned pre-commit before tests', async () 
   const versions: string[] = [];
   for (const [file, job] of [['ci.yml', 'check'], ['release.yml', 'build']] as const) {
     const workflow = parse(await readFile(join(root, '.github/workflows', file), 'utf8'));
+    assert.ok(workflow.jobs?.[job], `${file} must contain the ${job} job`);
     const steps = workflow.jobs[job].steps as { run?: string }[];
     const installs = steps.flatMap((step, index) => {
       const match = step.run?.trim().match(/^pipx install pre-commit==(\d+\.\d+\.\d+)$/);
