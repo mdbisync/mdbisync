@@ -310,7 +310,9 @@ function ownResults(ctx: RunContext) {
 
 /** Relative link and image destinations of a Markdown body (as the parser reads them; nothing in code). */
 export function relativeLinks(text: string): string[] {
-  return linkDestinations(text).map((destination) => destination.url).filter((url) => linkedFile('', url) !== undefined);
+  // Relative by form: no scheme, not protocol-relative, not an anchor in the same document. Whether it stays
+  // inside the repository depends on the linking document, which `resolveLink` checks with that path.
+  return linkDestinations(text).map((destination) => destination.url).filter((url) => url !== '' && !url.startsWith('#') && !url.startsWith('//') && !/^[a-z][a-z0-9+.-]*:/i.test(url));
 }
 
 function imageLinks(text: string): string[] {
