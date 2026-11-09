@@ -5,11 +5,13 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
+import { fitScene, gifFrames, PLAN } from "./assets.ts";
 import { linkTargets, rewrite, targetPath } from "./bank.ts";
 import { checkCorpus } from "./check.ts";
 import { longTitle } from "./documents.ts";
 import { buildCorpus, writeCorpus } from "./generate.ts";
 import { gitattributes } from "./model.ts";
+import { Rng } from "./rng.ts";
 import { MINI_DOCUMENTS } from "./slices.ts";
 import { lintText } from "../../src/format/index.ts";
 import { COLLISIONS, EDGE, LOOSE } from "./tree.ts";
@@ -240,6 +242,20 @@ test("generated quoted markers stay separate paragraphs and diff3 examples inclu
     const diff3 = built.files.find((f) => f.path.endsWith(`/marker-lookalike-${n}.md`));
     assert.ok(diff3);
     assert.match(diff3.content.toString(), /```text\n<<<<<<< ours\nthe old line\n\|{7} base\nthe base line\n=======\nthe new line\n>>>>>>> theirs\n```/);
+  }
+});
+
+test("every animated GIF scene and size moves from frame to frame", () => {
+  const gif = PLAN.find((p) => p.format === "gif");
+  assert.ok(gif);
+  for (const scene of [...gif.scenes, "screenshot" as const]) {
+    for (const [width, height] of gif.sizes) {
+      const frames = gifFrames(new Rng(`${scene}-${width}`), width, height, { scene: fitScene(scene, width, height), title: "TITLE", labels: ["ONE", "TWO", "THREE", "FOUR"], accent: [37, 99, 235] }, true);
+      assert.ok(frames.length > 1);
+      for (let f = 1; f < frames.length; f++) {
+        assert.notDeepEqual(frames[f]?.indices, frames[f - 1]?.indices, `${scene} ${width}x${height}: frame ${f + 1} repeats frame ${f}`);
+      }
+    }
   }
 });
 

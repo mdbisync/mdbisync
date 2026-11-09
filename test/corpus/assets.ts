@@ -160,14 +160,33 @@ function picture(rng: Rng, profile: Profile, scene: Scene): Picture {
       return { spec: { scene, title: "", labels: [], accent }, label: name, base: `photo-${slugify(name)}` };
     }
     case "icon":
+    case "dot":
       return { spec: { scene, title: "", labels: [], accent }, label: `${profile.name} icon`, base: `icon-${slugify(profile.name)}` };
   }
+}
+
+/** Phones are drawn upright and app windows wide. */
+export function fitScene(scene: Scene, width: number, height: number): Scene {
+  if (scene === "phone" && width > height) return "screenshot";
+  if (scene === "screenshot" && height > width) return "phone";
+  return scene;
+}
+
+/** The frames of a GIF; an animation's frames differ only in how far its progress has moved. */
+export function gifFrames(rng: Rng, width: number, height: number, spec: PictureSpec, animated: boolean): { indices: Uint8Array; delay: number }[] {
+  const frames = animated ? rng.int(4, 6) : 1;
+  const seed = rng.hex(8);
+  return Array.from({ length: frames }, (_, f) => ({
+    // Every frame draws from the same seed, so only the progress moves.
+    indices: gifIndices(render(width, height, rng.fork(seed), { ...spec, progress: animated ? (f + 1) / frames : 1 })),
+    delay: f === frames - 1 ? 150 : 25,
+  }));
 }
 
 type ImageFormat = "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico";
 
 /** Which scenes each format draws, and at which sizes. */
-const PLAN: { format: ImageFormat; count: number; scenes: Scene[]; sizes: [number, number][] }[] = [
+export const PLAN: { format: ImageFormat; count: number; scenes: Scene[]; sizes: [number, number][] }[] = [
   { format: "png", count: 70, scenes: ["screenshot", "screenshot", "phone", "bar-chart", "map", "line-chart", "donut-chart", "diagram"], sizes: [[960, 600], [1280, 800], [800, 500], [1024, 640], [390, 780], [720, 405], [32, 32], [64, 64]] },
   { format: "jpg", count: 45, scenes: ["photo"], sizes: [[1200, 800], [900, 600], [1600, 1000], [800, 600], [640, 480], [160, 90]] },
   { format: "jpeg", count: 15, scenes: ["photo"], sizes: [[1024, 683], [800, 533], [480, 320], [120, 120]] },
@@ -185,20 +204,8 @@ function encodeImage(rng: Rng, format: ImageFormat, width: number, height: numbe
   switch (format) {
     case "svg":
       return Buffer.from(svgPicture(width, height, rng, pic.spec, pic.label));
-    case "gif": {
-      const frames = animated ? rng.int(4, 6) : 1;
-      const seed = rng.hex(8);
-      return encodeGif({
-        width,
-        height,
-        palette: GIF_PALETTE,
-        frames: Array.from({ length: frames }, (_, f) => ({
-          // Every frame draws from the same seed, so only the progress moves.
-          indices: gifIndices(render(width, height, rng.fork(seed), { ...pic.spec, progress: animated ? (f + 1) / frames : 1 })),
-          delay: f === frames - 1 ? 150 : 25,
-        })),
-      });
-    }
+    case "gif":
+      return encodeGif({ width, height, palette: GIF_PALETTE, frames: gifFrames(rng, width, height, pic.spec, animated) });
     case "jpg":
     case "jpeg":
       return jpegFrom(render(blocksAcross(width), blocksDown(height), rng, pic.spec), width, height);
@@ -276,16 +283,15 @@ export function makeAssets(rng: Rng): Assets {
 
   // The small non-LFS set: 40 tiny status icons in inline/ folders.
   const tinyFormats: ("png" | "gif" | "bmp")[] = ["png", "gif", "bmp", "png"];
-  const statusNames = ["green", "amber", "red", "blue", "violet"];
+  const statusColors: [string, Rgb][] = [["green", [22, 163, 74]], ["amber", [245, 158, 11]], ["red", [220, 38, 38]], ["blue", [37, 99, 235]], ["violet", [124, 58, 237]]];
   for (let i = 0; i < 40; i++) {
     const home = homeFor();
     const format = tinyFormats[i % tinyFormats.length] as ImageFormat;
     // Mostly dots big enough to see; one in five is a single pixel, the smallest image there is.
     const side = [1, 16, 12, 16, 8][i % 5] as number;
-    const color = statusNames[i % statusNames.length] as string;
-    // Each icon gets its own shade so no two files are equal.
-    const accent = mix(ACCENTS[i % ACCENTS.length] as Rgb, [255, 255, 255], (i % 7) / 20);
-    const pic: Picture = { spec: { scene: "icon", title: "", labels: [], accent }, label: `${color} status dot`, base: `status-${color}` };
+    // Colors step every five icons, so every color comes in every size.
+    const [color, accent] = statusColors[Math.floor(i / 5) % statusColors.length] as [string, Rgb];
+    const pic: Picture = { spec: { scene: "dot", title: "", labels: [], accent }, label: `${color} status dot`, base: `status-${color}` };
     enqueue(home, asset(`${home.path}/${NON_LFS_FOLDER}/${name(pic.base, format)}`, distinct((r) => encodeImage(r, format, side, side, pic, false)), "images"), pic.label);
   }
 
@@ -298,9 +304,10 @@ export function makeAssets(rng: Rng): Assets {
       const [w, h] = sizes[(i + round) % sizes.length] as [number, number];
       // Phones are drawn upright and app windows wide, whatever the plan pairs them with.
       const planned = scenes[(i + 2 * round + 1) % scenes.length] as Scene;
-      const scene: Scene = planned === "phone" && w > h ? "screenshot" : planned === "screenshot" && h > w ? "phone" : planned;
+      const scene = fitScene(planned, w, h);
       const pic = picture(rng, profileOf(home), scene);
-      const animated = format === "gif" && i % 2 === 0;
+      // Two of every three GIFs move; the step of three meets every scene in the cycle of four.
+      const animated = format === "gif" && i % 3 !== 2;
       const label = animated ? `${pic.label} (animated)` : pic.label;
       enqueue(home, asset(`${home.path}/images/${name(pic.base, format)}`, distinct((r) => encodeImage(r, format, w, h, pic, animated)), "images"), label);
     }
@@ -371,9 +378,9 @@ export function makeAssets(rng: Rng): Assets {
     oversized.push({ path: file.path, kind: file.group === "images" ? "image" : "attachment", label, tooLarge: file.rule === "upload-too-large" });
   };
   const noise: Pixels = { width: 2000, height: 1800, channels: 3, data: rng.bytes(2000 * 1800 * 3) };
-  edgeFile(asset(`${EDGE}/images/scan-full-resolution.png`, encodePng(noise, { level: 0 }), "images", "over the upload limit"), "full resolution scan");
+  edgeFile({ ...asset(`${EDGE}/images/scan-full-resolution.png`, encodePng(noise, { level: 0 }), "images", "over the upload limit"), role: "image-over-10mb" }, "full resolution scan");
   edgeFile(asset(`${EDGE}/${LFS_FOLDER}/scan-9mb.pdf`, encodePdf([{ lines: ["Scanned contract"], image: { width: 2000, height: 1500, rgb: rng.bytes(2000 * 1500 * 3) } }], "Scanned contract"), "attachments", "about 9 MB, under the upload limit"), "scanned contract");
-  edgeFile(asset(`${EDGE}/${LFS_FOLDER}/scan-11mb.pdf`, encodePdf([{ lines: ["Scanned archive"], image: { width: 2000, height: 1920, rgb: rng.bytes(2000 * 1920 * 3) } }], "Scanned archive"), "attachments", "about 11 MB, over the upload limit"), "scanned archive");
+  edgeFile({ ...asset(`${EDGE}/${LFS_FOLDER}/scan-11mb.pdf`, encodePdf([{ lines: ["Scanned archive"], image: { width: 2000, height: 1920, rgb: rng.bytes(2000 * 1920 * 3) } }], "Scanned archive"), "attachments", "about 11 MB, over the upload limit"), role: "pdf-11mb" }, "scanned archive");
 
   return { files, queues, shared, secondary, oversized };
 }

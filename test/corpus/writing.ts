@@ -38,7 +38,7 @@ export type WriteInput = {
 export function slugify(text: string): string {
   return text
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/\p{M}/gu, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
@@ -58,7 +58,7 @@ function first(name: string): string {
   return name.split(" ")[0] as string;
 }
 
-function amount(n: number, unit: string): string {
+export function amount(n: number, unit: string): string {
   const v = Number.isInteger(n) ? n.toLocaleString("en-US") : String(n);
   if (unit === "") return v;
   if (unit === "%") return `${v}%`;
@@ -71,7 +71,7 @@ function midway(topic: Topic, share: number): number {
   return Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
 }
 
-function lower(text: string): string {
+export function lower(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1);
 }
 
@@ -89,13 +89,14 @@ class Figures {
   constructor(media: Media[]) {
     this.#media = [...media];
   }
-  image(caption?: string): string[] {
+  /** The next image as a figure; its caption is its own label, so it always describes the picture. */
+  image(): string[] {
     const i = this.#media.findIndex((m) => m.kind === "image");
     if (i < 0) return [];
     const [m] = this.#media.splice(i, 1) as [Media];
     // Tiny status dots sit inline, as they would in a real status line.
     if (m.label.endsWith("status dot")) return [`Status: ${m.markdown} ${m.label.split(" ")[0]}`, ""];
-    return [m.markdown, "", `*${caption ?? m.label}*`, ""];
+    return [m.markdown, "", `*${m.label}*`, ""];
   }
   /** Whatever is left: images as figures, attachments as a list. */
   rest(): string[] {
@@ -327,7 +328,7 @@ function runbook(input: WriteInput, topic: Topic, f: Figures): Draft {
     `* ${topic.problem}`,
     `* The ${topic.metric} on the service dashboard moves away from its usual ${amount(topic.after, topic.unit)}.`,
     "",
-    ...f.image("The service dashboard during a typical incident"),
+    ...f.image(),
     "## Diagnose",
     "",
     "1. Check recent deploys of the service.",
@@ -399,7 +400,7 @@ function postmortem(input: WriteInput, topic: Topic, f: Figures): Draft {
       ["Support tickets", String(rng.int(5, 120))],
     ]),
     "",
-    ...f.image(`The ${topic.metric} during the incident`),
+    ...f.image(),
     "## Timeline (UTC)",
     "",
     table(["Time", "Event"], [
@@ -500,7 +501,7 @@ function howto(input: WriteInput, topic: Topic, f: Figures): Draft {
     `2. ${topic.change}`,
     "3. Check the result on the overview page.",
     "",
-    ...f.image("What the screen looks like after step 2"),
+    ...f.image(),
     "> [!TIP]",
     `> ${topic.risk} If that happens, undo the last step and ask in the team channel.`,
     "",
@@ -850,7 +851,6 @@ function handoff(input: WriteInput, f: Figures): Draft {
     "## Pages",
     "",
     table(["When", "Alert", "What we did"], Array.from({ length: pages }, () => {
-      const tp = rng.pick(input.profile.topics);
       return [`${weekDate(index, rng.int(0, 6))} ${String(rng.int(0, 23)).padStart(2, "0")}:${String(rng.int(0, 59)).padStart(2, "0")}`, `${rng.pick(SERVICES)} ${rng.pick(["high latency", "error rate", "queue depth", "health check"])}`, rng.pick(["Followed the runbook, resolved", "Rolled back the last deploy", "False alarm, threshold tuned", "Escalated to the service owner"])];
     })),
     "",
@@ -910,7 +910,7 @@ function release(input: WriteInput, f: Figures): Draft {
     "",
     `Released on ${date}. ${rng.pick(["A small release with mostly fixes.", "This release focuses on speed.", "A big one: thanks to everyone who sent feedback.", "Mostly improvements for planners."])}`,
     "",
-    ...f.image(`${product} ${version}`),
+    ...f.image(),
     "## New",
     "",
     ...rng.shuffle(NEW).slice(0, rng.int(1, 3)).map((s) => `* ${s}`),

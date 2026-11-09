@@ -3,6 +3,7 @@
 // draw on a Canvas; SVG scenes write vector markup with real text.
 
 import { Canvas, mix, textWidth, type Rgb } from "./binary/draw.ts";
+import { COMPANY } from "./company.ts";
 import type { Rng } from "./rng.ts";
 
 export const INK: Rgb = [31, 41, 55];
@@ -21,7 +22,7 @@ export const ACCENTS: readonly Rgb[] = [
 ];
 const STATUS: readonly Rgb[] = [[22, 163, 74], [245, 158, 11], [220, 38, 38], [37, 99, 235]];
 
-export type Scene = "screenshot" | "phone" | "bar-chart" | "line-chart" | "donut-chart" | "diagram" | "map" | "photo" | "icon";
+export type Scene = "screenshot" | "phone" | "bar-chart" | "line-chart" | "donut-chart" | "diagram" | "map" | "photo" | "icon" | "dot";
 
 /** What a picture shows; the documents use the title in alt text and captions. */
 export type PictureSpec = {
@@ -59,7 +60,7 @@ export function drawScreenshot(c: Canvas, rng: Rng, spec: PictureSpec): void {
   const side = Math.round(c.width * 0.17);
   c.rect(0, top, side, c.height - top, SIDEBAR);
   c.roundRect(6 * s, top + 6 * s, 8 * s, 8 * s, 2 * s, spec.accent);
-  c.text(17 * s, top + 7 * s, "KITEWING", WHITE, Math.max(1, Math.floor(s * 0.8)));
+  c.text(17 * s, top + 7 * s, COMPANY, WHITE, Math.max(1, Math.floor(s * 0.8)));
   const active = Math.floor((spec.progress ?? rng.next()) * spec.labels.length) % Math.max(1, spec.labels.length);
   spec.labels.forEach((label, i) => {
     const y = top + 24 * s + i * 13 * s;
@@ -72,6 +73,8 @@ export function drawScreenshot(c: Canvas, rng: Rng, spec: PictureSpec): void {
   const contentWidth = c.width - x0 - 10 * s;
   c.rect(side, top, c.width - side, 22 * s, WHITE);
   c.rect(side, top + 22 * s, c.width - side, 1 * s, LINE);
+  // In an animation, a loading bar under the header fills as the frames advance.
+  if (spec.progress !== undefined) c.rect(side, top + 22 * s, (c.width - side) * spec.progress, 1 * s, spec.accent);
   c.text(x0, top + 8 * s, spec.title, INK, s);
   const button = textWidth("NEW", s) + 10 * s;
   c.roundRect(c.width - 10 * s - button, top + 5 * s, button, 12 * s, 3 * s, spec.accent);
@@ -97,7 +100,7 @@ export function drawScreenshot(c: Canvas, rng: Rng, spec: PictureSpec): void {
     const mapHeight = c.height - y0 - 8 * s;
     const map = new Canvas(Math.max(1, mapWidth), Math.max(1, mapHeight), [241, 238, 232]);
     drawMap(map, rng, spec, s);
-    for (let y = 0; y < map.height; y++) for (let x = 0; x < map.width; x++) c.set(x0 + x, y0 + y, map.get(x, y));
+    for (let y = 0; y < map.height && y0 + y < c.height; y++) map.data.copy(c.data, ((y0 + y) * c.width + x0) * 3, y * map.width * 3, (y + 1) * map.width * 3);
     const lx = x0 + mapWidth + 8 * s;
     const lw = contentWidth - mapWidth - 8 * s;
     for (let i = 0; y0 + i * 18 * s + 14 * s < c.height - 8 * s; i++) {
@@ -216,7 +219,13 @@ export function drawLineChart(c: Canvas, rng: Rng, spec: PictureSpec): void {
       v = Math.max(0.08, Math.min(0.95, v + (rng.next() - 0.45) * 0.18 - k * 0.02));
       points.push([x + (w * i) / Math.max(1, n - 1), y + h - h * v]);
     }
-    const shown = points.slice(0, Math.max(2, Math.ceil(points.length * (spec.progress ?? 1))));
+    // The line grows smoothly with the progress, ending part-way along a segment.
+    const reach = (points.length - 1) * (spec.progress ?? 1);
+    const whole = Math.floor(reach);
+    const shown = points.slice(0, whole + 1);
+    const next = points[whole + 1];
+    const last = points[whole] as [number, number];
+    if (next && reach > whole) shown.push([last[0] + (next[0] - last[0]) * (reach - whole), last[1] + (next[1] - last[1]) * (reach - whole)]);
     c.polyline(shown, color, k === 0 ? 2.5 * s : 1.5 * s);
     if (k === 0) for (const [px, py] of shown) c.circle(px, py, 2.5 * s, color);
   });
@@ -293,6 +302,15 @@ export function drawDiagram(c: Canvas, rng: Rng, spec: PictureSpec): void {
     } else {
       c.arrow(ax, ay + boxH / 2, bx, by - boxH / 2 - s, MUTED, Math.max(1, s));
     }
+  }
+  // A thin timeline along the bottom fills as the frames advance.
+  if (spec.progress !== undefined) c.rect(10 * s, c.height - 6 * s, (c.width - 20 * s) * spec.progress, Math.max(1, s), mix(spec.accent, WHITE, 0.4));
+  // In an animation, a token walks from step to step as the frames advance.
+  if (spec.progress !== undefined && centers.length > 0) {
+    const step = Math.min(centers.length - 1, Math.max(0, Math.ceil(spec.progress * centers.length) - 1));
+    const [tx, ty] = centers[step] as [number, number];
+    c.circle(tx + boxW / 2 - 2 * s, ty - boxH / 2 + 2 * s, 4 * s, spec.accent);
+    c.circle(tx + boxW / 2 - 2 * s, ty - boxH / 2 + 2 * s, 2 * s, WHITE);
   }
 }
 
@@ -390,6 +408,15 @@ export function drawPhoto(c: Canvas, rng: Rng): void {
   }
 }
 
+/** A status dot: a filled circle in a slightly varied shade of its color, so no two files are equal. */
+export function drawDot(c: Canvas, rng: Rng, spec: PictureSpec): void {
+  const color = mix(spec.accent, WHITE, rng.next() * 0.15);
+  const side = Math.min(c.width, c.height);
+  if (side < 6) return c.rect(0, 0, c.width, c.height, color);
+  c.rect(0, 0, c.width, c.height, WHITE);
+  c.circle((c.width - 1) / 2, (c.height - 1) / 2, side * 0.42, color);
+}
+
 export function drawIcon(c: Canvas, rng: Rng, spec: PictureSpec): void {
   const side = Math.min(c.width, c.height);
   if (side < 6) {
@@ -401,6 +428,8 @@ export function drawIcon(c: Canvas, rng: Rng, spec: PictureSpec): void {
   c.rect(0, 0, c.width, c.height, WHITE);
   // A seeded shade of the accent keeps every icon file distinct.
   c.roundRect(0, 0, c.width, c.height, side * 0.22, mix(spec.accent, [17, 24, 39], rng.next() * 0.3));
+  // In an animation, a bar along the bottom fills as the frames advance.
+  if (spec.progress !== undefined) c.rect(side * 0.15, side * 0.86, side * 0.7 * spec.progress, Math.max(1, side * 0.05), mix(spec.accent, WHITE, 0.6));
   const glyph = rng.int(0, 3);
   const t = Math.max(1, side * 0.09);
   const m = side * 0.28;
@@ -422,7 +451,7 @@ export function drawIcon(c: Canvas, rng: Rng, spec: PictureSpec): void {
 }
 
 export function drawScene(c: Canvas, rng: Rng, spec: PictureSpec): void {
-  if (Math.min(c.width, c.height) < 100 && spec.scene !== "photo") return drawIcon(c, rng, spec);
+  if (Math.min(c.width, c.height) < 100 && spec.scene !== "photo" && spec.scene !== "dot") return drawIcon(c, rng, spec);
   switch (spec.scene) {
     case "screenshot": return drawScreenshot(c, rng, spec);
     case "phone": return drawPhone(c, rng, spec);
@@ -433,6 +462,7 @@ export function drawScene(c: Canvas, rng: Rng, spec: PictureSpec): void {
     case "map": return drawMap(c, rng, spec);
     case "photo": return drawPhoto(c, rng);
     case "icon": return drawIcon(c, rng, spec);
+    case "dot": return drawDot(c, rng, spec);
   }
 }
 

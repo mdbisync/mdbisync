@@ -9,11 +9,11 @@
 import { posix } from "node:path";
 import type { AssetRef, Assets } from "./assets.ts";
 import { COMPANY, CUSTOMERS, DEPOTS, PEOPLE, PROFILES, SERVICES, TOPIC_KINDS, type Kind, type Profile, type Topic } from "./company.ts";
-import { CONTENT_LIMIT, destination, markdownFile, relativeLink, type Canaries, type CorpusFile, type Group } from "./model.ts";
+import { CONTENT_LIMIT, destination, idLine, markdownFile, relativeLink, type Canaries, type CorpusFile, type Group } from "./model.ts";
 import type { Rng } from "./rng.ts";
 import { asciiFiller, capitalize, EMOJI, EMOJI_SEQUENCES, isoDate, paragraph, person, SCRIPT_SAMPLES, sentence, team, title, word } from "./text.ts";
 import { BANK_HOME, EDGE, HOMES, LOCALIZATION, LOOSE, type Home } from "./tree.ts";
-import { slugify, weekDate, writeDocument, type Media } from "./writing.ts";
+import { amount, lower as lowerFirst, slugify, weekDate, writeDocument, type Media } from "./writing.ts";
 
 type Context = {
   rng: Rng;
@@ -101,10 +101,6 @@ function fromFixture(ctx: Context, name: string): Pick<CorpusFile, "expected" | 
   return { expected: fixture.expected, rule: fixture.rule, basis: fixture.basis };
 }
 
-function idLine(canary: string): string {
-  return `Doc ID: ${canary}`;
-}
-
 /** Writes a document whose body ends with its canary line. */
 function doc(ctx: Context, folder: string, name: string, group: Group, build: (canary: string, path: string) => string, options: DocOptions = {}): CorpusFile {
   const canary = ctx.canaries.take();
@@ -189,9 +185,15 @@ function workDocuments(ctx: Context): void {
     const links = refs.map((r) => r.path);
     const body = withLogo(ctx, path, `${final.body}\n${idLine(canary)}\n`, links);
     const tooLarge = refs.find((r) => r.tooLarge);
-    addDoc(ctx, path, body, "work-documents", {
+    // A few everyday documents, in every home, were saved on Windows: CRLF line endings or a byte order mark.
+    const n = ctx.files.length;
+    const ending = n % 25 === 11 ? "crlf" : n % 37 === 19 ? "bom" : "lf";
+    const content = ending === "crlf" ? body.replace(/\n/g, "\r\n") : ending === "bom" ? Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(body)]) : body;
+    const endingNote = ending === "crlf" ? "CRLF line endings" : ending === "bom" ? "starts with a byte order mark" : null;
+    addDoc(ctx, path, content, "work-documents", {
       canary,
       links,
+      note: endingNote,
       ...(tooLarge === undefined ? {} : { rule: "upload-too-large", note: `embeds or links ${tooLarge.path}, over the upload limit` }),
     });
   }
@@ -638,10 +640,10 @@ function typography(ctx: Context): void {
     ["marks", (r) => `**bold** *italic* ~~strike~~ \`code\` <u>underline</u> ==highlight== ^sup^ ***both*** **bold with *italic* inside** ${word(r)}`],
     ...Object.entries(SCRIPT_SAMPLES).map(([name, lines]): [string, (rng: Rng) => string] => [name, () => lines.join("\n\n")]),
     ["emoji", () => `${EMOJI.join(" ")}\n\n${EMOJI_SEQUENCES.join(" ")}`],
-    ["combining", () => "Café, naïve, ậ, Z̵̡a̷l̶g̸o"],
+    ["combining", () => "Cafe\u0301, nai\u0308ve, a\u0323\u0302, Z\u0335\u0321a\u0337l\u0336g\u0338o"],
     ["math-alphanumerics", () => "𝐁𝐨𝐥𝐝 𝐼𝑡𝑎𝑙𝑖𝑐 𝔉𝔯𝔞𝔨𝔱𝔲𝔯 𝕯𝖔𝖚𝖇𝖑𝖊 𝟘𝟙𝟚"],
-    ["spaces", () => "non breaking, narrow no-break, zero​width, joiner‍, thin space"],
-    ["quotes", () => "“Smart quotes”, ‘single’, «guillemets», „low“, em—dash, en–dash, ellipsis…"],
+    ["spaces", () => "non\u00a0breaking, narrow\u202fno-break, zero\u200bwidth, joiner\u200d, thin\u2009space"],
+    ["quotes", () => "\u201cSmart quotes\u201d, \u2018single\u2019, \u00abguillemets\u00bb, \u201elow\u201c, em\u2014dash, en\u2013dash, ellipsis\u2026"],
     ["tabs", (r) => `Column\tValue\n${word(r)}\t${r.int(1, 99)}\n\tindented with a tab`],
     ["bidi", () => `Mixed: English, ${SCRIPT_SAMPLES.arabic?.[0]} and ${SCRIPT_SAMPLES.hebrew?.[0]} in one line.`],
   ];
@@ -724,10 +726,6 @@ function linksGroup(ctx: Context): void {
   }
 }
 
-function lowerFirst(text: string): string {
-  return text.charAt(0).toLowerCase() + text.slice(1);
-}
-
 function progressLine(tp: Topic): string {
   return `This week: ${tp.title.toLowerCase()}. ${tp.summary}`;
 }
@@ -776,7 +774,7 @@ function frontMatter(ctx: Context): void {
       "",
       tp.change,
       "",
-      `We will call it done when the ${tp.metric} is at or below ${tp.unit === "%" ? `${tp.after}%` : `${tp.after}${tp.unit ? ` ${tp.unit}` : ""}`}.`,
+      `We will call it done when the ${tp.metric} is at or ${tp.after < tp.before ? "below" : "above"} ${amount(tp.after, tp.unit)}.`,
       "",
     ].join("\n");
     addDoc(ctx, uniquePath(ctx, `${home.path}/briefs`, slugify(tp.title)), `---\n${yaml.join("\n")}\n---\n\n${body}`, "front-matter", { canary });
@@ -818,7 +816,7 @@ function conflictMarkers(ctx: Context): void {
     ["conflict-markers/in-code-fence.md", "In a code block, the markers look like this:", (s) => `\`\`\`text\n${s}\n\`\`\``],
     // Blank quote lines prevent the equals marker from becoming a setext heading.
     ["conflict-markers/in-quote.md", "Someone pasted the markers into a quote:", (s) => s.split("\n").map((l) => `> ${l}`).join("\n>\n")],
-    ["conflict-markers/in-inline-code.md", "The markers are", () => "`<<<<<<< ours` and `=======` and `>>>>>>> theirs`."],
+    ["conflict-markers/in-inline-code.md", "Written inline, the markers look like this:", () => "`<<<<<<< ours` and `=======` and `>>>>>>> theirs`."],
     ["conflict-markers/diff3-in-fence.md", "With the diff3 style, Git also shows the common base:", (s) => `\`\`\`text\n${s.replace("=======", "||||||| base\nthe base line\n=======")}\n\`\`\``],
     ["conflict-markers/in-indented-code.md", "Indented four spaces, the markers are code:", (s) => `    ${s.split("\n").join("\n    ")}`],
   ];
@@ -881,7 +879,7 @@ function unsynced(ctx: Context): void {
   for (let i = 0; i < 12; i++) {
     const canary = ctx.canaries.take();
     const tp = title(rng);
-    add(`${LOOSE}/notes/${person(rng).toLowerCase()}-${i + 1}.md`, `# Personal notes: ${tp.toLowerCase()}\n\n${paragraph(rng)}\n\nDoc ID: ${canary}\n`, { canary, canaryIn: "content" });
+    add(`${LOOSE}/notes/${person(rng).toLowerCase()}-${i + 1}.md`, `# Personal notes: ${tp.toLowerCase()}\n\n${paragraph(rng)}\n\n${idLine(canary)}\n`, { canary, canaryIn: "content" });
   }
   // A binary file with a Markdown name; the canary is in its name.
   const canary = ctx.canaries.take();

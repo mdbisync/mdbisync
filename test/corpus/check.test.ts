@@ -116,3 +116,25 @@ test("a size that differs from the manifest is reported", () => {
     assert.ok(problems().some((p) => p.includes("differs from the manifest") && p.endsWith(entry.path)));
   });
 });
+
+test("the two size cases carry their roles, and a missing or doubled role is reported", () => {
+  const pdf = manifest.files.find((f) => f.role === "pdf-11mb");
+  const image = manifest.files.find((f) => f.role === "image-over-10mb");
+  assert.ok(pdf && pdf.path.endsWith(".pdf") && pdf.bytes > 11 * 1000 * 1000, "the PDF over 11 MB has its role");
+  assert.ok(image && image.kind === "image" && image.bytes > 10 * 1024 * 1024, "the image over 10 MB has its role");
+  const withRoles = (change: (m: Manifest) => void) => (b: Buffer) => {
+    const m = JSON.parse(b.toString()) as Manifest;
+    change(m);
+    return Buffer.from(JSON.stringify(m));
+  };
+  withChange("corpus-slices/manifest.json", withRoles((m) => {
+    for (const f of m.files) if (f.role === "pdf-11mb") f.role = null;
+  }), () => {
+    assert.ok(problems().includes("role pdf-11mb is on 0 files"));
+  });
+  withChange("corpus-slices/manifest.json", withRoles((m) => {
+    (m.files.find((f) => f.path.endsWith(".md")) as Manifest["files"][number]).role = "image-over-10mb";
+  }), () => {
+    assert.ok(problems().some((p) => p.startsWith("role image-over-10mb is on 2 files")));
+  });
+});

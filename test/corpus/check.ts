@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { findCyrillicLines } from "../../tools/check-no-cyrillic.ts";
 import type { Manifest, ManifestEntry } from "./generate.ts";
-import { gitattributes, GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, type Group } from "./model.ts";
+import { gitattributes, GROUPS, isLfs, MAX_LFS_BYTES, MAX_NON_LFS_IMAGES, MIN_TOTAL_FILES, MINIMUMS, CANARY, ROLES, type Group } from "./model.ts";
 import { SLICES } from "./slices.ts";
 
 export type CheckResult = {
@@ -114,6 +114,15 @@ export function checkCorpus(root: string, options: { git?: boolean } = {}): Chec
   }
   if (lfsBytes >= MAX_LFS_BYTES) problems.push(`LFS holds ${lfsBytes} bytes, not under ${MAX_LFS_BYTES}`);
   if (nonLfsImages > MAX_NON_LFS_IMAGES) problems.push(`${nonLfsImages} images are outside LFS, more than ${MAX_NON_LFS_IMAGES}`);
+
+  // Every role is on exactly one file, and no file has a role outside the list.
+  for (const role of ROLES) {
+    const holders = [...entries.values()].filter((e) => e.role === role).map((e) => e.path);
+    if (holders.length !== 1) problems.push(`role ${role} is on ${holders.length} files${holders.length > 0 ? `: ${holders.join(", ")}` : ""}`);
+  }
+  for (const entry of entries.values()) {
+    if (entry.role !== undefined && entry.role !== null && !(ROLES as readonly string[]).includes(entry.role)) problems.push(`unknown role ${entry.role}: ${entry.path}`);
+  }
 
   // Slices name only corpus files, sorted and without duplicates.
   for (const slice of SLICES) {

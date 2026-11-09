@@ -7,7 +7,7 @@
 // can open the tidy part first.
 
 import { COMPANY, PROFILE_PATHS, PROFILES } from "./company.ts";
-import { gitattributes, markdownFile, relativeLink, type Canaries, type CorpusFile } from "./model.ts";
+import { gitattributes, idLine, markdownFile, relativeLink, type Canaries, type CorpusFile } from "./model.ts";
 import type { Rng } from "./rng.ts";
 
 /** A folder that holds synchronized documents. */
@@ -55,7 +55,7 @@ export const HOMES: Home[] = PROFILE_PATHS.map((path): Home => ({
 
 function annotated(path: string, frontMatter: string[], body: string, canary: string): CorpusFile {
   const front = frontMatter.length > 0 ? `---\n${frontMatter.join("\n")}\n---\n\n` : "";
-  return markdownFile({ path, content: Buffer.from(`${front}${body}\nDoc ID: ${canary}\n`), group: "annotations", canary, canaryIn: "content" });
+  return markdownFile({ path, content: Buffer.from(`${front}${body}\n${idLine(canary)}\n`), group: "annotations", canary, canaryIn: "content" });
 }
 
 function areaTable(prefix: string): string {

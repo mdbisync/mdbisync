@@ -37,6 +37,7 @@ export type ManifestEntry = {
   bank_group: string | null;
   links: string[];
   note: string | null;
+  role: string | null;
 };
 
 export type Manifest = {
@@ -89,6 +90,7 @@ export function buildCorpus(seed: string = DEFAULT_SEED, bankDir: string = DEFAU
       bank_group: f.bankGroup,
       links: [...f.links].sort(),
       note: f.note,
+      role: f.role ?? null,
     })),
     excluded: bank.excluded,
   };
