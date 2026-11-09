@@ -27,6 +27,10 @@ export interface FakeDocument {
   projectId?: string;
   teamId?: string;
   createdAt: string;
+  /** Moves forward on every change; `createdAt` when absent. */
+  updatedAt?: string;
+  icon?: string | null;
+  color?: string | null;
   trashed?: boolean;
   archivedAt?: string;
   /** The stored content. */
@@ -176,6 +180,12 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     return json(200, { data: { projects: { nodes, pageInfo: { hasNextPage: false } } } });
   }
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
+  if (operationName === 'GetDocuments') {
+    // Read by id: trashed documents are included, unknown ids are absent.
+    const ids = variables.ids as string[];
+    const nodes = world.linear.documents.filter((d) => ids.includes(d.id)).map((d) => documentNode(d, variables.withContent === true));
+    return json(200, { data: { documents: { nodes } } });
+  }
   return json(400, { errors: [{ message: `unknown operation ${operationName}`, extensions: { code: 'INPUT_ERROR' } }] });
 }
 
@@ -197,16 +207,54 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
   if (operation === 'UpdateDocument') {
     const document = documents.find((d) => d.id === variables.id);
     if (document === undefined) return { documentUpdate: { success: false, document: null } };
-    const input = variables.input as { content?: string };
+    const input = variables.input as {
+      content?: string;
+      title?: string;
+      icon?: string | null;
+      color?: string | null;
+      projectId?: string | null;
+      teamId?: string | null;
+    };
     if (input.content !== undefined) document.content = world.linear.store(input.content);
+    if (input.title !== undefined) document.title = input.title;
+    if (input.icon !== undefined) document.icon = input.icon;
+    if (input.color !== undefined) document.color = input.color;
+    // A document belongs to a project or, without one, to a team (the team zone).
+    if (input.projectId != null) {
+      document.projectId = input.projectId;
+      delete document.teamId;
+    } else if (input.teamId != null) {
+      document.teamId = input.teamId;
+      delete document.projectId;
+    }
+    touch(document);
     return { documentUpdate: { success: true, document: documentNode(document, variables.withContent === true) } };
   }
   if (operation === 'TrashDocument') {
     const document = documents.find((d) => d.id === variables.id);
-    if (document !== undefined) document.trashed = true;
+    if (document !== undefined) {
+      document.trashed = true;
+      touch(document);
+    }
     return { documentDelete: { success: document !== undefined } };
   }
+  if (operation === 'RestoreDocument') {
+    const document = documents.find((d) => d.id === variables.id);
+    if (document !== undefined) {
+      delete document.trashed;
+      touch(document);
+    }
+    return { documentUnarchive: { success: document !== undefined } };
+  }
   return undefined;
+}
+
+let clock = 0;
+
+/** Moves a document's `updatedAt` past every earlier change, as Linear does on a write. */
+export function touch(document: FakeDocument): void {
+  clock += 1;
+  document.updatedAt = new Date(Date.UTC(2026, 1, 1) + clock * 1000).toISOString();
 }
 
 function documentNode(d: FakeDocument, withContent: boolean) {
@@ -214,13 +262,13 @@ function documentNode(d: FakeDocument, withContent: boolean) {
     id: d.id,
     title: d.title,
     slugId: d.id,
-    icon: null,
-    color: null,
+    icon: d.icon ?? null,
+    color: d.color ?? null,
     documentContentId: `content-${d.id}`,
     trashed: d.trashed ?? null,
     archivedAt: d.archivedAt ?? null,
     createdAt: d.createdAt,
-    updatedAt: d.createdAt,
+    updatedAt: d.updatedAt ?? d.createdAt,
     project: d.projectId !== undefined ? { id: d.projectId } : null,
     team: d.projectId === undefined && d.teamId !== undefined ? { id: d.teamId } : null,
     ...(withContent ? { content: d.content ?? '' } : {}),
