@@ -59,6 +59,8 @@ export interface LockOptions {
   pollMs?: number;
   /** Told once per new holder while waiting. */
   onWait?: (holder: Owner | null) => void;
+  /** Stops the wait when aborted. */
+  signal?: AbortSignal;
 }
 
 export class LockTimeoutError extends Error {
@@ -77,6 +79,7 @@ export async function acquireLock(name: string, options: LockOptions): Promise<L
   const deadline = Date.now() + options.timeoutMs;
   let lastHolder: string | undefined;
   for (;;) {
+    options.signal?.throwIfAborted();
     try {
       mkdirSync(dir);
       const owner: Owner = { pid: process.pid, host: hostname(), runId: options.runId, since: new Date().toISOString() };

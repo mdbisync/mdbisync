@@ -1,6 +1,8 @@
-// Neutral English work text and short samples in other scripts, for the
-// corpus's Markdown files. Nothing here names a real person, company or tool.
+// Short pieces of neutral English work text and samples in other scripts,
+// for the corpus's Markdown files. Sentences come from the hand-written
+// topics of the fictional company in company.ts.
 
+import { PEOPLE, PROFILES } from "./company.ts";
 import type { Rng } from "./rng.ts";
 
 const NOUNS = [
@@ -8,17 +10,15 @@ const NOUNS = [
   "incident", "runbook", "checklist", "milestone", "workshop", "survey", "proposal", "roadmap", "pipeline",
   "dataset", "report", "template", "integration", "deployment", "handover", "retrospective", "estimate",
   "dependency", "queue", "cache", "index", "storage", "network", "alert", "metric", "contract", "invoice",
-];
-const VERBS = [
-  "review", "update", "confirm", "draft", "schedule", "measure", "compare", "archive", "approve", "publish",
-  "test", "simplify", "document", "share", "plan", "track", "merge", "split", "rename", "monitor",
-];
-const ADJECTIVES = [
-  "quarterly", "weekly", "shared", "internal", "public", "updated", "draft", "final", "pending", "stable",
-  "regional", "manual", "automated", "optional", "critical", "minor", "new", "legacy", "temporary", "default",
+  "route", "depot", "driver", "parcel", "stop", "planner",
 ];
 const TEAMS = ["platform", "mobile", "data", "support", "design", "finance", "operations", "research", "security", "web"];
-const PEOPLE = ["Alex", "Sam", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Jamie", "Avery", "Quinn", "Robin", "Drew"];
+
+/** Every topic sentence of the company, ASCII only, so fillers stay plain ASCII. */
+const SENTENCES: string[] = Object.values(PROFILES)
+  .flatMap((p) => p.topics.flatMap((t) => [t.summary, t.problem, t.change, t.risk]))
+  .filter((s) => /^[\x20-\x7e]+$/.test(s));
+const TITLES: string[] = Object.values(PROFILES).flatMap((p) => p.topics.map((t) => t.title));
 
 export const SCRIPT_SAMPLES: Record<string, string[]> = {
   greek: ["Η συνάντηση είναι αύριο το πρωί.", "Ενημερώστε τον πίνακα έργων.", "Καλή συνέχεια σε όλους."],
@@ -38,8 +38,9 @@ export function word(rng: Rng): string {
   return rng.pick(NOUNS);
 }
 
+/** A first name. */
 export function person(rng: Rng): string {
-  return rng.pick(PEOPLE);
+  return rng.pick(PEOPLE).split(" ")[0] as string;
 }
 
 export function team(rng: Rng): string {
@@ -51,36 +52,22 @@ export function capitalize(text: string): string {
 }
 
 export function sentence(rng: Rng): string {
-  const forms = [
-    () => `${capitalize(rng.pick(VERBS))} the ${rng.pick(ADJECTIVES)} ${rng.pick(NOUNS)} before the ${rng.pick(NOUNS)}.`,
-    () => `The ${rng.pick(TEAMS)} team will ${rng.pick(VERBS)} the ${rng.pick(NOUNS)} this week.`,
-    () => `${rng.pick(PEOPLE)} owns the ${rng.pick(ADJECTIVES)} ${rng.pick(NOUNS)} and will ${rng.pick(VERBS)} it.`,
-    () => `We agreed to ${rng.pick(VERBS)} the ${rng.pick(NOUNS)} after the ${rng.pick(ADJECTIVES)} ${rng.pick(NOUNS)}.`,
-    () => `Open question: should the ${rng.pick(NOUNS)} stay ${rng.pick(ADJECTIVES)}?`,
-  ];
-  return rng.pick(forms)();
+  return rng.pick(SENTENCES);
 }
 
-export function paragraph(rng: Rng, sentences = rng.int(2, 5)): string {
+export function paragraph(rng: Rng, sentences = rng.int(2, 4)): string {
   return Array.from({ length: sentences }, () => sentence(rng)).join(" ");
 }
 
 export function title(rng: Rng): string {
-  return `${capitalize(rng.pick(ADJECTIVES))} ${rng.pick(NOUNS)} ${rng.pick(["plan", "notes", "summary", "update", "guide", "review"])}`;
-}
-
-export function slug(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
+  return rng.pick(TITLES);
 }
 
 export function isoDate(rng: Rng): string {
   return `2026-${String(rng.int(1, 12)).padStart(2, "0")}-${String(rng.int(1, 28)).padStart(2, "0")}`;
 }
 
-/** Plain ASCII filler of exactly the given length, in lines of prose. */
+/** Plain ASCII filler of exactly the given length, in paragraphs of prose. */
 export function asciiFiller(rng: Rng, length: number): string {
   let out = "";
   while (out.length < length) out += `${paragraph(rng)}\n\n`;

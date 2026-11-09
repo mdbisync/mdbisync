@@ -73,6 +73,37 @@ describe('check helpers', () => {
     assert.equal(sibling('eng/plan.md', 'notes.md'), 'eng/notes.md');
   });
 
+  it('read comments in small pages, under Linear\'s complexity limit', async () => {
+    const { commentsOf, COMMENT_DOCUMENTS_PER_PAGE, COMMENTS_PER_DOCUMENT } = await import('./checks.ts');
+    assert.ok(COMMENT_DOCUMENTS_PER_PAGE * COMMENTS_PER_DOCUMENT <= 2_500, 'a page must stay far below the 250 x 50 that Linear refused');
+    const pages = [
+      { nodes: [{ id: 'd1', project: { id: 'p' }, comments: { nodes: [{ body: 'one' }] } }], pageInfo: { hasNextPage: true, endCursor: 'c1' } },
+      { nodes: [{ id: 'd2', project: null, comments: { nodes: [] } }], pageInfo: { hasNextPage: false, endCursor: null } },
+    ];
+    const afters: unknown[] = [];
+    const client = {
+      request: async (_operation: string, _kind: string, query: string, variables?: Record<string, unknown>) => {
+        assert.match(query, new RegExp(`documents\\(first: ${COMMENT_DOCUMENTS_PER_PAGE}, after: \\$after`));
+        afters.push(variables?.after);
+        return { documents: pages[afters.length - 1] } as never;
+      },
+    };
+    const documents = await commentsOf(client as never, { project: { id: { eq: 'p' } } });
+    assert.deepEqual(afters, [null, 'c1']);
+    assert.deepEqual(documents, [{ id: 'd1', inProject: true, bodies: ['one'] }, { id: 'd2', inProject: false, bodies: [] }]);
+  });
+
+  it('look only for canaries in content, since paths may be listed', async () => {
+    const { contentCanaries } = await import('./checks.ts');
+    const files = [
+      { path: 'a.md', canary: 'kx-00000001', canary_in: 'content' as const },
+      { path: 'empty-kx-00000002.md', canary: 'kx-00000002', canary_in: 'name' as const },
+      { path: 'b.png', canary: null, canary_in: null },
+      { path: 'c.md', canary: 'kx-00000003' },
+    ];
+    assert.deepEqual(contentCanaries(files).map((file) => file.canary), ['kx-00000001', 'kx-00000003']);
+  });
+
   it('hold I9 at 1.5 requests per written document plus 5 per run', () => {
     assert.ok(budgetHolds(155, 100, 1));
     assert.ok(!budgetHolds(156, 100, 1));
@@ -287,5 +318,28 @@ describe('sweeper', () => {
     const left = (await bare.text(['for-each-ref', '--format=%(refname)'])).split('\n').sort();
     assert.deepEqual(left, ['refs/heads/main', 'refs/heads/t/222222/main', 'refs/heads/t/333333/main']);
     live.done();
+  });
+
+});
+
+describe('setup deadline', () => {
+  it('gives up on work that does not settle in time, and keeps the result of work that does', async () => {
+    const { withDeadline } = await import('./runner.ts');
+    assert.equal(await withDeadline(Promise.resolve(7), 1_000, () => new Error('late')), 7);
+    await assert.rejects(withDeadline(new Promise(() => {}), 20, () => new EnvBlockedError('setup did not finish')), EnvBlockedError);
+  });
+
+  it('stops a setup past its deadline: a lock wait ends, and cleanup knows whether setup stopped', async () => {
+    const { settlesWithin } = await import('./runner.ts');
+    const { acquireLock } = await import('./locks.ts');
+    const stateDir = fresh('setup-abort-');
+    const held = await acquireLock('team-eng', { stateDir, runId: '555555', timeoutMs: 0 });
+    const abort = new AbortController();
+    const waiting = acquireLock('team-eng', { stateDir, runId: '666666', timeoutMs: 60_000, pollMs: 20, signal: abort.signal });
+    abort.abort();
+    assert.equal(await settlesWithin(waiting, 1_000), true);
+    await assert.rejects(waiting);
+    held.release();
+    assert.equal(await settlesWithin(new Promise(() => {}), 20), false);
   });
 });
