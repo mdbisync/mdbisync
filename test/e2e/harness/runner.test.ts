@@ -89,7 +89,13 @@ describe('check helpers', () => {
     assert.equal(pathFitsTitle('Notes%3A draft%3F%2A', 'Notes%3A draft%3F%2A~x', 'doc-notes'), false);
     assert.equal(pathFitsTitle('Q3%3A goals', 'Q3%3A goals extra', 'doc-notes'), false);
     assert.equal(pathFitsTitle(`Notes%3A draft%3F%2A~${other}`, 'Notes: draft?*', 'doc-notes'), false, "another document's collision suffix");
-    assert.equal(pathFitsTitle(`Notes%3A draft%3F%2A~${own}-0`, 'Notes: draft?*', 'doc-notes'), false);
+    assert.equal(pathFitsTitle(`Notes%3A draft%3F%2A~${own}-01`, 'Notes: draft?*', 'doc-notes'), true, 'any digits the rule keeps');
+    // Two segments of 100 bytes flatten to 203: 40 characters, `~` and SHA-256('a' x 100 + '/' + 'b' x 100), then the id suffix.
+    const long = `${'a'.repeat(100)}/${'b'.repeat(100)}`;
+    assert.equal(pathFitsTitle(long, long, 'doc-notes'), true, 'each segment is short enough');
+    assert.equal(pathFitsTitle(`${'a'.repeat(40)}~68aff0810e4c7b11~${own}`, long, 'doc-notes'), true, 'a long collision name');
+    assert.equal(pathFitsTitle(`${'a'.repeat(100)}%2F${'b'.repeat(100)}~${own}`, long, 'doc-notes'), false, 'an uncut long collision name');
+    assert.equal(pathFitsTitle(`Notes%3A draft%3F%2A~${own}-`, 'Notes: draft?*', 'doc-notes'), false);
     assert.equal(pathFitsTitle(`Notes%3A draft%3F%2A~${own}-x`, 'Notes: draft?*', 'doc-notes'), false);
     assert.equal(pathFitsTitle(`notes/pipe %7C table~${own}`, 'notes/pipe | table', 'doc-notes'), false, 'a collision name is flat');
     assert.equal(pathFitsTitle(`sub/Notes%3A draft%3F%2A~${own}`, 'Notes: draft?*', 'doc-notes'), false, 'a collision name below the folder');

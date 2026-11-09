@@ -522,6 +522,12 @@ describe('titles that are not paths', () => {
     assert.equal(encodeTitlePath('notes%3A'), 'notes%253A');
     assert.equal(encodeTitlePath('tab\there\u007f'), 'tab%09here%7F');
   });
+  it('cut a segment of more than 180 bytes to 40 characters and a hash of the segment', () => {
+    // Hashes written by hand: SHA-256 of 'x' x 200 and of 'é' x 100, first 16 hex digits.
+    assert.equal(encodeTitlePath(`a/${'x'.repeat(200)}`), `a/${'x'.repeat(40)}~aa20c23e32018340`);
+    assert.equal(encodeTitlePath('é'.repeat(100)), `${'é'.repeat(40)}~f42ec48e1e4b487e`, '200 bytes in 100 characters');
+    assert.equal(encodeTitlePath('x'.repeat(180)), 'x'.repeat(180), '180 bytes stay');
+  });
   it('keep leading spaces and encode trailing periods and spaces', () => {
     assert.equal(encodeTitlePath('  notes/leading spaces'), '  notes/leading spaces');
     assert.equal(encodeTitlePath(' leading'), ' leading');
@@ -1659,7 +1665,7 @@ describe('subjects', () => {
     const plan = ids['eng/platform/plan.md']?.id as string;
     const suffix = (id: string) => createHash('sha256').update(id).digest('hex').slice(0, 12);
     // The handbook document retitled `Notes: draft?*` (L2-22) and its file at `path`, mapped to `id`.
-    const i7 = async (path: string, title = 'Notes: draft?*', id = start) => {
+    const i7 = async (path: string, title = 'Notes: draft?*', id = start, projectId = OTHER.id) => {
       const files = new Map(base.files);
       const text = files.get('docs/handbook/start.md') as string;
       files.delete('docs/handbook/start.md');
@@ -1668,7 +1674,7 @@ describe('subjects', () => {
       mapped.delete('docs/handbook/start.md');
       mapped.set(path, { id });
       const documents = new Map(base.documents);
-      documents.set(start, { ...(base.documents.get(start) as LinearDocument), title });
+      documents.set(start, { ...(base.documents.get(start) as LinearDocument), title, projectId });
       return INVARIANT_CHECKS.I7(ctx, async () => ({ ...base, files, ids: mapped, documents }));
     };
     const pass = { name: 'I7', ok: true };
@@ -1687,6 +1693,9 @@ describe('subjects', () => {
     assert.match((await i7('docs/handbook/drafts/Notes%3A draft%3F%2A.md')).detail ?? '', wrong('docs/handbook/drafts/Notes%3A draft%3F%2A.md'));
     // A nested title's file directly in its folder, without the title's subfolder.
     assert.match((await i7('docs/handbook/b %7C c.md', 'a/b | c')).detail ?? '', wrong('docs/handbook/b %7C c.md'));
+    // The right name for a document of another project: its folder is not the document's place.
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F%2A.md', 'Notes: draft?*', start, PROJECT.id)).detail ?? '', /^1 problems: docs\/handbook\/Notes%3A draft%3F%2A\.md: its document is in project:Field notes aaaaaa, not in its folder's project:Garden plans aaaaaa$/);
+    assert.match((await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(start)}.md`, 'Notes: draft?*', start, PROJECT.id)).detail ?? '', /its document is in project:Field notes aaaaaa/);
     // Another document's identity on the right name: its own title differs.
     assert.match((await i7('docs/handbook/Notes%3A draft%3F%2A.md', 'Notes: draft?*', plan)).detail ?? '', /title differs from its path/);
   });
