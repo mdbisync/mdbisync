@@ -39,7 +39,7 @@ export function checkSyncState(
   if (initialPullRequestPending) {
     return {
       code: 'initial-pull-request-pending',
-      message: `The pull request of the initial sync from Linear is not merged into ${config.trackedBranch} yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. To start over instead, close that pull request, delete the branch ${config.syncBranch} and run initial sync again. The sync wrote nothing.`,
+      message: `The pull request of the initial sync from Linear is not merged into ${config.trackedBranch} yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. Closing the pull request or deleting its branch does not cancel this unmerged snapshot. To start over instead, close that pull request, delete the branch ${config.syncBranch} and run initial sync again to replace the snapshot. The sync wrote nothing.`,
     };
   }
   return null;

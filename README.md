@@ -47,68 +47,15 @@ before it writes anything, and says what is missing in the run summary.
 
 Each run gets a short-lived token and revokes it at the end.
 
-<details>
-<summary>Exact settings</summary>
-
-Linear → Settings → Administration → API → OAuth applications → New
-
-| Setting | Value |
-| --- | --- |
-| Application name | any |
-| Developer name | any |
-| Redirect URIs | `https://localhost:18327/callback` (required by the form, never used) |
-| Other URLs | leave empty |
-| Public | Off |
-| Client credentials | On |
-| Webhooks | Off |
-
-In your docs repository: Settings → Secrets and variables → Actions → New
-repository secret
-
-| Kind | Name | Value |
-| --- | --- | --- |
-| Secret | `MDBISYNC_LINEAR_CLIENT_ID` | OAuth app page → Client ID |
-| Secret | `MDBISYNC_LINEAR_CLIENT_SECRET` | OAuth app page → Client secret |
-
-Then store the client secret in your password manager or delete it. Don't
-leave a copy lying around.
-
-</details>
+Exact settings and the secrets to set: [Linear OAuth app](docs/quickstart.md#linear-oauth-app).
 
 ### 2. Create your own GitHub App
 
 No third-party app to trust: it is yours. Install it only on your docs
 repository and keep its key in your secrets.
 
-<details>
-<summary>Exact settings</summary>
-
-GitHub → Settings → Developer settings → GitHub Apps → New
-
-| Setting | Value |
-| --- | --- |
-| GitHub App name | any |
-| Homepage URL | any (required by the form) |
-| Webhook | Off |
-| Contents | Read and write |
-| Pull requests | Read and write |
-| Workflows | Read and write |
-| Checks | Read-only |
-| Commit statuses | Read-only |
-
-Then install the App: Only select repositories → your docs repository.
-
-In your docs repository: Settings → Secrets and variables → Actions
-
-| Kind | Name | Value |
-| --- | --- | --- |
-| Variable | `MDBISYNC_APP_CLIENT_ID` | App page → Client ID |
-| Secret | `MDBISYNC_APP_PRIVATE_KEY` | App page → Generate a private key; paste the whole `.pem` file |
-
-Then store the `.pem` file in your password manager or delete it. Don't leave
-a copy lying around.
-
-</details>
+Exact settings, the secrets to set, and a link that opens GitHub's
+new-App form already filled in: [GitHub App](docs/quickstart.md#github-app).
 
 ### 3. Run a one-time initial sync
 

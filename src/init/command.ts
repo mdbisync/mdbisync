@@ -6,6 +6,9 @@ import templates from './workflows.json' with { type: 'json' };
 import type { CliResult } from '../cli.ts';
 import { ANNOTATION_FILE, TEAM_KEY, PROJECT_KEY, resolveZones } from '../mapping/annotations.ts';
 import { collectAnnotations } from '../mapping/mapping.ts';
+import { appCreationUrl } from '../setup/app.ts';
+import { QUICKSTART_URL } from '../setup/fixes.ts';
+import { PROJECT_URL } from '../version.ts';
 import { LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
 import { findFrontMatter } from '../mapping/front-matter.ts';
 
@@ -108,10 +111,10 @@ function hookConfig(text: string | undefined, settings: Settings): string {
   const data = doc.toJS() as { repos: Array<{ repo?: string; rev?: string; hooks?: Array<{ id?: string; [key: string]: unknown }> }> };
   if (data.repos.some((repo) => repo === null || typeof repo !== 'object' || !Array.isArray(repo.hooks) || repo.hooks.some((hook) => hook === null || typeof hook !== 'object' || typeof hook.id !== 'string'))) throw new InitError('invalid pre-commit repository entry');
   const existing = data.repos.filter((repo) => repo.hooks?.some((hook) => hook.id === LINEAR_FORMAT_HOOK));
-  if (existing.some((repo) => repo.repo !== 'https://github.com/mdbisync/mdbisync' || repo.rev !== settings.sha)) throw new InitError('existing linear-format hook uses a different repository or release');
+  if (existing.some((repo) => repo.repo !== PROJECT_URL || repo.rev !== settings.sha)) throw new InitError('existing linear-format hook uses a different repository or release');
   let changed = text === undefined;
   if (!existing.length) {
-    repos.add(doc.createNode({ repo: 'https://github.com/mdbisync/mdbisync', rev: settings.sha, hooks: [{ id: LINEAR_FORMAT_HOOK }] }));
+    repos.add(doc.createNode({ repo: PROJECT_URL, rev: settings.sha, hooks: [{ id: LINEAR_FORMAT_HOOK }] }));
     changed = true;
   }
   if (settings.security) {
@@ -217,7 +220,7 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, text);
     }
-    return { exitCode: 0, stderr: '', stdout: `${changes.size ? `Wrote ${changes.size} repository files.` : 'Repository files are already initialized.'}\n\nRemaining admin steps:\n1. Create a Linear OAuth app with read,write client credentials; set repository secrets MDBISYNC_LINEAR_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_SECRET.\n2. Install a GitHub App with contents, pull requests and workflows write, checks and commit statuses read. Set variable MDBISYNC_APP_CLIENT_ID and secret MDBISYNC_APP_PRIVATE_KEY.\n3. Allow merge commits; configure required checks for main.\n4. Install Node 24 and pre-commit; run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.\n5. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.\n` };
+    return { exitCode: 0, stderr: '', stdout: `${changes.size ? `Wrote ${changes.size} repository files.` : 'Repository files are already initialized.'}\n\nRemaining admin steps:\n1. Create a Linear OAuth app with read,write client credentials; set repository secrets MDBISYNC_LINEAR_CLIENT_ID and MDBISYNC_LINEAR_CLIENT_SECRET.\n2. Create a GitHub App with contents, pull requests and workflows write, checks and commit statuses read (this link fills them in: ${appCreationUrl()}; for an organization's App see ${QUICKSTART_URL}#github-app), and install it on this repository. Set variable MDBISYNC_APP_CLIENT_ID and secret MDBISYNC_APP_PRIVATE_KEY.\n3. Allow merge commits; configure required checks for main.\n4. Install Node 24 and pre-commit; run pre-commit install and pre-commit install --hook-type pre-push. Security scanner examples also need Docker.\n5. Commit the files, run check, then dispatch initial sync with a direction and confirm unchecked for a dry run. Review its plan before confirming: the target side is overwritten.\n` };
   } catch (error) {
     if (!(error instanceof InitError)) throw error;
     return { exitCode: 2, stdout: '', stderr: `init: ${error.message}\n\n${INIT_USAGE}` };

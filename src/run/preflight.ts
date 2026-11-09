@@ -18,7 +18,7 @@ import {
   renderStateRefusal,
   runSetupCheck,
 } from '../setup/index.ts';
-import { type FetchedState, type Git, fetchState, initialPullRequestPending, readInitialSyncProgress } from '../state/index.ts';
+import { type FetchedState, type Git, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress } from '../state/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
 import { renderStoppedBeforeWriting } from './stop.ts';
@@ -89,12 +89,15 @@ export async function runPreflight(
   const fetched = await fetchState(git, inputs.state);
   if (operation === 'sync') {
     const unfinished = (await readInitialSyncProgress(git, fetched.state.ids)) !== null;
-    const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, sync: fetched.sync, tracked: fetched.tracked });
+    const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, tracked: fetched.tracked });
     const refusal = checkSyncState(fetched.state, inputs.state, unfinished, pending);
     if (refusal !== null) return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   } else if (options.refusePendingInitialPullRequest === true) {
-    // Writing Linear from the tracked branch while that pull request is open would leave it to be merged over the new state.
-    const pending = await initialPullRequestPending(git, { linear: fetched.state.linear, sync: fetched.sync, tracked: fetched.tracked });
+    // A new initial sync to Linear may replace an abandoned snapshot once
+    // its branch is deleted. A branch still carrying it must be removed first.
+    const pending = fetched.sync !== null && fetched.state.linear !== null
+      && (await isAncestor(git, fetched.state.linear, fetched.sync))
+      && (await initialPullRequestPending(git, { linear: fetched.state.linear, tracked: fetched.tracked }));
     const refusal = checkSyncState(fetched.state, inputs.state, false, pending);
     if (refusal?.code === 'initial-pull-request-pending') return { operation, ok: false, code: refusal.code, summary: renderStateRefusal(refusal), refusal };
   }
