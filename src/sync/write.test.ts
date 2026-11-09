@@ -190,8 +190,10 @@ describe('sync: the tracked branch to Linear', () => {
     await assertMergeRecord(previous);
     // The record holds the tracked tree: Linear kept the text.
     assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
-    // I9: one read again of the document and one write, plus the run's own few requests.
-    assert.ok(graphql <= 1 * 1.5 + 5, `requests: ${graphql}`);
+    // I9: one read again and one write, plus setup and one capacity list per annotated container.
+    const capacityLists = report.capacity.length;
+    assert.equal(capacityLists, 3);
+    assert.ok(graphql <= 1 * 1.5 + 5 + capacityLists, `requests: ${graphql}`);
     await assertConverged();
     await assertIdempotent();
   });

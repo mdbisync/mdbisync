@@ -266,15 +266,18 @@ export const INITIAL_SYNC_FROM_LINEAR_RECORD = "Initial sync from Linear: Linear
  * the tracked branch has not merged it. A record that needed no pull request
  * moves no sync branch, so it never waits.
  */
+/** Whether `commit` is `of` or one of its ancestors. */
+export async function isAncestor(git: Git, commit: Oid, of: Oid): Promise<boolean> {
+  return (await git.run(['merge-base', '--is-ancestor', commit, of], { okCodes: [0, 1] })).code === 0;
+}
+
 export async function initialPullRequestPending(git: Git, state: { linear: Oid | null; sync: Oid | null; tracked: Oid }): Promise<boolean> {
   const { linear, sync, tracked } = state;
   if (linear === null || sync === null) return false;
   const [subject] = (await git.text(['show', '-s', '--format=%s', linear])).split('\n');
   if (subject !== INITIAL_SYNC_FROM_LINEAR_RECORD) return false;
-  const onSync = sync === linear || (await git.run(['merge-base', '--is-ancestor', linear, sync], { okCodes: [0, 1] })).code === 0;
-  if (!onSync) return false;
-  const merged = await git.run(['merge-base', '--is-ancestor', linear, tracked], { okCodes: [0, 1] });
-  return merged.code !== 0;
+  if (!(await isAncestor(git, linear, sync))) return false;
+  return !(await isAncestor(git, linear, tracked));
 }
 
 export interface CommitStateOptions {

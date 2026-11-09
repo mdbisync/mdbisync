@@ -3,7 +3,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
+import { LinearClient } from '../../../src/linear/index.ts';
+import { fakeFetch, fakeWorld, LINEAR_API } from '../../../src/setup/test-helpers.ts';
 import { Git } from '../../../src/state/index.ts';
+import { countAppRequest, withAppRequests } from './app-reads.ts';
 import { budgetHolds, compare, gitLinks, scanCanaries, stripFrontMatter, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
 import { parseEnvFile, parseRepoUrl } from './config.ts';
@@ -138,7 +141,7 @@ describe('configuration and GitHub App', () => {
 describe('reports', () => {
   const result = (id: string, outcome: ScenarioResult['result'], extra: Partial<ScenarioResult> = {}): ScenarioResult => ({
     id, level: id.split('-')[0] as string, slice: 'mini', mode: 'local', runId: '4f1a9c', result: outcome, startedAt: '2026-11-08T23:00:00.000Z',
-    durationMs: 1000, engineRequests: 3, harnessRequests: 2, budgetWaitMs: 0, checks: [], cleanup: { ok: true }, ...extra,
+    durationMs: 1000, engineRequests: 3, harnessRequests: 2, harnessAppRequests: 4, budgetWaitMs: 0, checks: [], cleanup: { ok: true }, ...extra,
   });
   const report: HarnessReport = {
     harnessRunId: '2026-11-08-abc123', startedAt: '2026-11-08T23:00:00.000Z', finishedAt: '2026-11-08T23:10:00.000Z', host: 'test', selection: {},
@@ -177,7 +180,28 @@ describe('reports', () => {
   it('summarize evidence with counts and no content', () => {
     const summary = evidenceSummary(report);
     assert.match(summary, /Scenarios: 3; pass: 1, fail: 0, expected-red: 1, env-blocked: 1, skipped: 0/);
-    assert.match(summary, /engine 9, harness editors 6/);
+    assert.match(summary, /engine 9, harness editors 6, harness app reads 12;/);
+    assert.match(summary, /\| L1-04 \| expected-red \| 4 \| not implemented: initial-sync \|/);
+    assert.match(renderRunMarkdown(report), /\| L2-01 \| 4f1a9c \| pass \(expected red\) \|  \| 3 \| 4 \| 1 \| ok \|/);
+  });
+
+  it('count the harness\'s requests through the app per scenario, even when scenarios run in parallel', async () => {
+    const world = fakeWorld();
+    world.linear.documents.push({ id: 'doc-1', title: 'Plan', teamId: 'team-eng', createdAt: '2026-02-01T00:00:00.000Z' });
+    // One app client shared by every scenario, as the harness has it.
+    const app = new LinearClient({ token: 'fake-token', baseUrl: LINEAR_API, fetch: fakeFetch(world), hooks: { beforeRequest: countAppRequest } });
+    const reads = (count: number) => async () => {
+      for (let index = 0; index < count; index += 1) {
+        await app.getDocument('doc-1');
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return count;
+    };
+    const [one, two] = await Promise.all([withAppRequests(reads(2)), withAppRequests(reads(5))]);
+    assert.deepEqual([one, two], [{ result: 2, requests: 2 }, { result: 5, requests: 5 }]);
+    // A request outside any scenario counts for none.
+    await app.getDocument('doc-1');
+    assert.equal(app.stats.total, 8);
   });
 });
 

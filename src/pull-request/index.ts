@@ -3,6 +3,7 @@ export {
   type NewPullRequest,
   type PullRequest,
   PullRequestError,
+  closePullRequest,
   ensurePullRequest,
   findOpenPullRequest,
   openPullRequest,

@@ -61,12 +61,12 @@ export async function runOperation(
 
   const gitToLinear = async (context: RunContext, confirm: boolean) => {
     if (confirm) {
-      const run = await confirmInitialSync(context, { config: inputs.state, transforms: transforms() });
+      const run = await confirmInitialSync(context, { config: inputs.state, documentCap: inputs.documentCap, transforms: transforms() });
       plan = toPlanReport(run.plan, 'git-to-linear', true);
       confirmed = run.result;
       workSummary = renderConfirmed(run.plan, run.result);
     } else {
-      const planned = await planFromRepository(context);
+      const planned = await planFromRepository(context, inputs.documentCap);
       plan = toPlanReport(planned, 'git-to-linear', false);
       workSummary = renderDryRun(planned);
     }
@@ -85,7 +85,7 @@ export async function runOperation(
     }
   };
   const syncCycle = async (context: RunContext) => {
-    sync = await runSyncCycle(context, { config: inputs.state, transforms, ...(options.fetch ? { fetch: options.fetch } : {}) });
+    sync = await runSyncCycle(context, { config: inputs.state, documentCap: inputs.documentCap, transforms, ...(options.fetch ? { fetch: options.fetch } : {}) });
     workSummary = renderSync(sync);
   };
 

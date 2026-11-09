@@ -15,7 +15,7 @@ import {
 } from "./commands.ts";
 import { type LogEntry } from "./linear/index.ts";
 import { runFix, runLint } from "./format/command.ts";
-import { writeRunReport } from "./run/finish.ts";
+import { unfinishedMessage, writeRunReport } from "./run/finish.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { runOperation } from "./run/operation.ts";
 import { Git } from "./state/index.ts";
@@ -109,9 +109,12 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
     const exitCode = outcome.code === "initial-sync-required" || outcome.code === "initial-pull-request-pending" ? NO_STATE_EXIT_CODE : SETUP_FAILED_EXIT_CODE;
     return { exitCode, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (${outcome.code})\n` };
   }
+  if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write?.code === 'container-cap') {
+    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: stopped before any write (container-cap); reduce additions or check document-cap\n` };
+  }
   const unfinished = outcome.confirmed ?? outcome.reverse;
   if (unfinished !== undefined && !unfinished.complete) {
-    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${command}: not finished (${unfinished.code}); run it again with the same inputs\n` };
+    return { exitCode: INCOMPLETE_EXIT_CODE, stdout: outcome.summary, stderr: `${stderr}${unfinishedMessage(command, unfinished.code)}\n` };
   }
   if (outcome.captured?.stopped !== undefined) {
     return {exitCode:0, stdout:outcome.summary, stderr:`${stderr}warning: ${command}: partial, will continue (${outcome.captured.code})\n`};

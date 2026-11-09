@@ -28,7 +28,14 @@ import { splitFile } from '../format/index.ts';
 import { type LinearDocument, LinearStoppedError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
-import { type GitHubRepository, type PullRequest, PullRequestError, ensurePullRequest } from '../pull-request/index.ts';
+import {
+  type GitHubRepository,
+  type PullRequest,
+  PullRequestError,
+  closePullRequest,
+  ensurePullRequest,
+  findOpenPullRequest,
+} from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import {
   type CommitIdentity,
@@ -40,6 +47,7 @@ import {
   type UploadMap,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
   branchRef,
+  isAncestor,
   commitIds,
   commitTree,
   commitUploads,
@@ -204,15 +212,22 @@ export interface ReverseResult {
    * what reads as front matter), `title-not-a-path` when the new tree maps the
    * file to another document, `download-failed` when a file the document
    * embeds could not be downloaded (gone, over 10 MB, redirected elsewhere).
-   * Such a file keeps the tracked branch's version.
+   * Such a file keeps the tracked branch's version; an existing one also keeps
+   * its document's id (`front-matter-boundary`, `download-failed`).
    */
   leftOutAtRecord: Array<{ path: string; rule: string }>;
   notAttempted: string[];
   stopped?: WriteStop;
   progressPushes: number;
   record: ReverseRecord | null;
-  /** The pull request a person merges; null when the tracked branch already equals Linear. */
-  pullRequest: (PullRequest & { opened: boolean }) | null;
+  /**
+   * The pull request a person merges; null when the tracked branch already
+   * equals Linear and no earlier pull request of this sync is open.
+   * `updated`: an open one got a new title or description.
+   */
+  pullRequest: (PullRequest & { opened: boolean; updated: boolean }) | null;
+  /** An earlier record's pull request this run closed, because the tracked branch already equals Linear. */
+  closedPullRequest?: number;
   /** The HTTP status of a failed pull request request; absent when GitHub could not be reached. */
   pullRequestStatus?: number;
 }
@@ -225,6 +240,10 @@ export interface ReverseRecord {
   hasTrackedParent: boolean;
   /** Its tree differs from the tracked branch's, so a pull request carries it. */
   changesTracked: boolean;
+  /** The sync branch points at this record, which changes the tracked branch: a pull request must show it. */
+  needsPullRequest: boolean;
+  /** The record changes nothing, and the sync branch holds an earlier record whose pull request may still be open. */
+  closesPullRequest: boolean;
 }
 
 export async function confirmLinearToGit(context: RunContext, options: ReverseOptions): Promise<{ plan: ReversePlan; result: ReverseResult }> {
@@ -267,6 +286,14 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     return true;
   };
 
+  // The sync branch is the pull request's head. Holding commits this sync did
+  // not make that the tracked branch has not merged (a person's review, or the
+  // cycle's open pull request), it is left as it is: stop before writing anything.
+  if (fetched.sync !== null && !(await isOwnRecord(fetched.sync)) && !(await isAncestor(git, fetched.sync, fetched.tracked))) {
+    result.code = 'sync-branch-changed';
+    return { plan, result };
+  }
+
   // Take the documents in path order. Each needs no request now; the order
   // and the progress commits are what a resumed run relies on.
   const work = [...plan.overwrite.map((entry) => ({ kind: 'overwrite' as const, entry })), ...plan.create.map((entry) => ({ kind: 'create' as const, entry }))].sort(
@@ -280,9 +307,10 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       result.skippedCompleted.push(entry.path);
       continue;
     }
-    const stop = context.linear.stopped ?? (stopAfter !== undefined && taken >= stopAfter ? { kind: 'test-threshold' as const, documents: stopAfter } : undefined);
-    if (stop !== undefined) {
-      result.stopped = stop;
+    // Taking a document makes no request (the listing read every text), so
+    // only the test threshold stops here, not a budget that ran low on the last page.
+    if (stopAfter !== undefined && taken >= stopAfter) {
+      result.stopped = { kind: 'test-threshold', documents: stopAfter };
       result.notAttempted = work.slice(index).filter((rest) => !completed(rest.entry)).map((rest) => rest.entry.path);
       break;
     }
@@ -312,22 +340,29 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
   result.record = recorded;
   result.removed = [...plan.remove];
 
-  if (recorded.changesTracked) {
-    try {
-      const { pullRequest, opened } = await ensurePullRequest(options.github, {
+  try {
+    if (recorded.needsPullRequest) {
+      const { pullRequest, opened, updated } = await ensurePullRequest(options.github, {
         head: options.config.syncBranch,
         base: options.config.trackedBranch,
         title: PULL_REQUEST_TITLE,
         body: pullRequestBody(plan, result),
       });
-      result.pullRequest = { ...pullRequest, opened };
-    } catch (error) {
-      // GitHub refused, timed out or could not be reached. The state is recorded;
-      // running again with the same inputs changes no ref and opens the pull request.
-      result.code = 'pull-request-failed';
-      if (error instanceof PullRequestError) result.pullRequestStatus = error.status;
-      return { plan, result };
+      result.pullRequest = { ...pullRequest, opened, updated };
+    } else if (recorded.closesPullRequest) {
+      // The tracked branch already equals Linear: an earlier record's open pull request has nothing left to carry.
+      const open = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
+      if (open !== null) {
+        await closePullRequest(options.github, open.number);
+        result.closedPullRequest = open.number;
+      }
     }
+  } catch (error) {
+    // GitHub refused, timed out or could not be reached. The state is recorded;
+    // running again with the same inputs changes no ref and finishes the pull request step.
+    result.code = 'pull-request-failed';
+    if (error instanceof PullRequestError) result.pullRequestStatus = error.status;
+    return { plan, result };
   }
   result.complete = true;
   return { plan, result };
@@ -381,22 +416,44 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         failed.push(entry.path);
       }
     }
-    leaveOut(failed, 'download-failed');
+    const created = new Set(plan.create.map((entry) => entry.path));
+    // A new file is left out; an existing one keeps the tracked text and its
+    // document's id, so the document stays its document and is not adopted and overwritten later.
+    const keptTracked = new Set<string>();
+    const keepTracked = (paths: readonly string[], rule: string) => {
+      const kept = new Set(paths.filter((path) => !created.has(path)));
+      for (const path of kept) {
+        result.leftOutAtRecord.push({ path, rule });
+        keptTracked.add(path);
+      }
+      entries = entries.filter((entry) => !kept.has(entry.path));
+      result.overwritten = result.overwritten.filter((path) => !kept.has(path));
+      leaveOut(paths.filter((path) => created.has(path)), rule);
+    };
+    keepTracked(failed, 'download-failed');
     // The document's text must stay the file's body: text that reads as front
     // matter would become the file's metadata (or a folder's annotation).
-    leaveOut(entries.filter((entry) => splitFile(textOf(entry)).body !== restored(entry)).map((entry) => entry.path), 'front-matter-boundary');
+    keepTracked(entries.filter((entry) => splitFile(textOf(entry)).body !== restored(entry)).map((entry) => entry.path), 'front-matter-boundary');
     let lfsObjects: string[] = [];
     let commit = await build(entries);
     // The new tree must map every file back to its document's title and place.
-    const created = new Set(plan.create.map((entry) => entry.path));
+    // Each pass leaves out more: the misplaced new files (and new README files,
+    // which can name a folder's team or project), then every new file. Without
+    // new files the tree maps as the tracked one does, since text that reads as
+    // front matter is already out; a mismatch then is a defect, not data.
     for (let attempt = 0; ; attempt += 1) {
       const misplaced = mismatches(await loadMapping(git, commit), entries);
       if (misplaced.length === 0) break;
-      if (attempt > 0) throw new Error(`the recorded tree maps ${misplaced.length} files to other documents`);
-      // A new file can only move others when it is a README that names a folder's team or project.
-      const moved = misplaced.some((path) => !created.has(path));
-      const newReadmes = moved ? entries.filter((entry) => created.has(entry.path) && /(^|\/)README\.md$/.test(entry.path)).map((entry) => entry.path) : [];
-      leaveOut([...misplaced.filter((path) => created.has(path)), ...newReadmes], 'title-not-a-path');
+      const newPaths = entries.filter((entry) => created.has(entry.path)).map((entry) => entry.path);
+      if (attempt === 0) {
+        const moved = misplaced.some((path) => !created.has(path));
+        const newReadmes = moved ? newPaths.filter((path) => /(^|\/)README\.md$/.test(path)) : [];
+        leaveOut([...misplaced.filter((path) => created.has(path)), ...newReadmes], 'title-not-a-path');
+      } else if (attempt === 1 && newPaths.length > 0) {
+        leaveOut(newPaths, 'title-not-a-path');
+      } else {
+        throw new Error(`the recorded tree maps ${misplaced.length} files to other documents`);
+      }
       commit = await build(entries);
     }
 
@@ -422,15 +479,14 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         break;
       }
     }
-    // The sync branch is the pull request's head: replace it only while it holds nothing but a record of this sync.
-    // An earlier record's pull request still open is moved to the new record too, so it never merges stale text.
-    const ownSync = fetched.sync !== null && fetched.sync !== commit && (await isOwnRecord(fetched.sync));
-    if (changesTracked && fetched.sync !== null && fetched.sync !== commit && !ownSync) return 'sync-branch-changed';
-    // A record the tracked branch already merged has no open pull request to keep current.
-    const ownSyncOpen = ownSync && !(await mergedInto(fetched.sync as Oid, fetched.tracked));
-    const moveSync = fetched.sync !== commit && (changesTracked || ownSyncOpen);
+    // The sync branch moves to a record that changes the tracked branch; its open pull
+    // request then shows the new record. A record that changes nothing leaves the branch,
+    // and an earlier record's pull request still open is closed (it has nothing to carry).
+    const syncOpen = fetched.sync !== null && fetched.sync !== commit && !(await isAncestor(git, fetched.sync, fetched.tracked));
+    if (syncOpen && !(await isOwnRecord(fetched.sync as Oid))) return 'sync-branch-changed';
+    const moveSync = fetched.sync !== commit && changesTracked;
 
-    const synced = new Set(entries.map((entry) => entry.path));
+    const synced = new Set([...entries.map((entry) => entry.path), ...keptTracked]);
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
     const idsCommit = await commitIds(git, expected.ids, finalIds, identity, {
       message: FINAL_IDS_MESSAGE,
@@ -458,6 +514,8 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       parents,
       hasTrackedParent: parents.length === 1 && parents[0] === fetched.tracked,
       changesTracked,
+      needsPullRequest: changesTracked,
+      closesPullRequest: !changesTracked && syncOpen,
     };
   }
 
@@ -465,10 +523,6 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
   async function sameRecord(a: Oid, b: Oid): Promise<boolean> {
     const describe = (oid: Oid) => git.text(['show', '-s', '--format=%T %P%n%s', oid]);
     return (await describe(a)) === (await describe(b));
-  }
-
-  async function mergedInto(commit: Oid, into: Oid): Promise<boolean> {
-    return (await git.run(['merge-base', '--is-ancestor', commit, into], { okCodes: [0, 1] })).code === 0;
   }
 
   /** A record an initial sync from Linear made: its subject, the sync's identity, one parent. */
@@ -492,11 +546,14 @@ function mismatches(mapping: RepositoryMapping, entries: readonly ReverseEntry[]
 
 /** The pull request's text: counts and paths, never content. */
 export function pullRequestBody(plan: ReversePlan, result: ReverseResult): string {
+  const out = new Set(result.leftOutAtRecord.map((entry) => entry.path));
+  const overwritten = plan.overwrite.filter((entry) => !out.has(entry.path)).length;
+  const created = plan.create.filter((entry) => !out.has(entry.path)).length;
   const lines = [
     'This pull request makes the synchronized folders equal to Linear, as an initial sync from Linear asked.',
     '',
-    `- ${count(plan.overwrite.length, 'file')} take Linear's text (front matter kept);`,
-    `- ${count(plan.create.length - result.leftOutAtRecord.length, 'file')} are new, one per document only in Linear;`,
+    `- ${count(overwritten, 'file')} take Linear's text (front matter kept);`,
+    `- ${count(created, 'file')} are new, one per document only in Linear;`,
     `- ${count(plan.remove.length, 'file')} are removed: they have no document in Linear.`,
     '',
     'Review it and merge it with a merge commit. The sync does not merge it, because it removes files, and it does not run until this pull request is merged. Removed files stay in the history.',

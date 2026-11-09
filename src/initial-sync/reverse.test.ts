@@ -303,14 +303,21 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.linear.documents.find((d) => d.id === 'doc-runbook')?.content, contents['doc-runbook']);
   });
 
-  it('a file that cannot be downloaded leaves its document out; the tracked file stays', async () => {
+  it('a file that cannot be downloaded keeps the tracked file, which stays its document', async () => {
     const world = fakeWorld();
-    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Gone](${UPLOADS_HOST}/9/gone.png)\n` } : d));
+    const gone = `![Gone](${UPLOADS_HOST}/9/gone.png)\n`;
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' || d.id === 'doc-faq' ? { ...d, content: `# Page\n\n${gone}` } : d));
     const { result, report } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/plan.md', rule: 'download-failed' }]);
+    // A new file is left out with its id; an existing one keeps the tracked text and its id.
+    assert.deepEqual(report.linearToGit?.leftOutAtRecord.sort((a, b) => a.path.localeCompare(b.path)), [
+      { path: 'eng/notes/faq.md', rule: 'download-failed' },
+      { path: 'eng/notes/plan.md', rule: 'download-failed' },
+    ]);
+    assert.equal((await readIds())['eng/notes/faq.md'], undefined);
+    assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/notes/faq.md'));
     assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), (TREE['eng/notes/plan.md'] as string).replace(/\n$/, ''));
-    assert.equal((await readIds())['eng/notes/plan.md'], undefined);
+    assert.equal((await readIds())['eng/notes/plan.md'], 'doc-plan');
   });
 
   it('L1R-05: titles a path cannot hold become files by one rule, and stay unchanged in Linear', async () => {
@@ -489,6 +496,44 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal((await readIds())['eng/notes/fenced.md'], undefined);
     // The annotation-only README ended at its fence: the body starts on the next line.
     assert.equal(await show('refs/mdbisync/linear:eng/notes/README.md'), `---\nlinear-project: Field notes\n---\n# Field notes\n\n${CANARY}`);
+    // The description counts only the files the pull request carries.
+    assert.match(world.github.pullRequests[0]?.body ?? '', /- 3 files are new/);
+  });
+
+  it('keeps an existing file and its document id when the document reads as front matter', async () => {
+    const world = fakeWorld();
+    // The tracked file has no front matter, so the document's fence would become one.
+    world.linear.documents = [...linearDocuments(), doc('doc-notes', 'backend/notes', { teamId: 'team-eng' }, `---\nstatus: draft\n---\nNotes. ${CANARY}`)];
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{ path: 'eng/backend/notes.md', rule: 'front-matter-boundary' }]);
+    assert.ok(!(report.linearToGit?.overwritten ?? []).includes('eng/backend/notes.md'));
+    // The file keeps the tracked text, and stays the document's file.
+    assert.equal(await show('refs/mdbisync/linear:eng/backend/notes.md'), TREE['eng/backend/notes.md']);
+    assert.equal((await readIds())['eng/backend/notes.md'], 'doc-notes');
+    assert.match(world.github.pullRequests[0]?.body ?? '', /- 4 files take Linear's text/);
+  });
+
+  it('a rerun that finds the tracked branch equal to Linear closes the earlier open pull request, and the sync runs', async () => {
+    const world = fakeWorld();
+    assert.equal((await run(world, { MDBISYNC_DIRECTION: 'git-to-linear' })).result.exitCode, 0);
+    for (const store of ['linear', 'ids', 'uploads']) await fixture.remote.run(['update-ref', '-d', `refs/mdbisync/${store}`]);
+    const plan = world.linear.documents.find((d) => d.title === 'plan' && d.projectId === 'project-api') as FakeDocument;
+    const original = plan.content as string;
+    plan.content = `# Plan\n\nChanged in Linear. ${CANARY}`;
+    assert.equal((await run(world)).result.exitCode, 0);
+    assert.equal(world.github.pullRequests[0]?.state, 'open');
+    const branch = (await refs())['refs/heads/mdbisync/linear'];
+
+    plan.content = original;
+    const { result, report, summary } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(report.linearToGit?.closedPullRequest, 1);
+    assert.equal(world.github.pullRequests[0]?.state, 'closed');
+    assert.equal((await refs())['refs/heads/mdbisync/linear'], branch, 'the sync branch moved');
+    assert.match(summary, /Pull request #1 of an earlier run had nothing left to carry and is closed/);
+    const sync = await run(world, {}, 'sync');
+    assert.equal(sync.result.exitCode, 0, sync.result.stderr);
   });
 
   it('records its own marker even when an earlier record from the other direction has the same tree', async () => {
