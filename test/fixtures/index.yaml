@@ -63,7 +63,7 @@ rules:
   - id: block-first-in-list-item
     title: "A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item."
   - id: table-hash-cell
-    title: "A table body cell holding only # becomes an empty heading."
+    title: "A table body cell starting with # becomes a heading."
 known_constructs:
   - construct: sync-conflict-markers
     class: unchanged

@@ -101,7 +101,8 @@ Blocks:
 - `$$` math becomes a `math` fence.
 - Tables get outer pipes and short separators (`| -- | -- |`), and a row
   gets as many cells as the header. A cell containing only `#` is written
-  as `\#`, preserving its text (a bare `#` in a body cell is the
+  as `\#`, preserving its text, and an escaped `#` that starts a cell keeps
+  its escape (a bare one in a body cell is the
   [`table-hash-cell`](#table-hash-cell) rule).
 - An image does not share a paragraph with text: the text before and after
   it becomes its own paragraph.
@@ -184,9 +185,11 @@ or rephrase without the pipe.
 
 ### `table-hash-cell`
 
-A table body cell holding only # becomes an empty heading. Linear reads the
-bare `#` as heading syntax, so the cell loses its text. A header cell, or a
-`#` with other text in the cell, is not affected.
+A table body cell starting with # becomes a heading. Linear reads heading
+syntax at the start of a body cell (`#` to `######`, alone or followed by a
+space) as a heading: a lone `#` becomes an empty heading and the cell loses
+its text. A header cell, or a `#` later in the cell or not followed by a
+space (`Issue #`, `#5`), is not affected.
 
 ```markdown
 | Name | No. |
@@ -194,7 +197,7 @@ bare `#` as heading syntax, so the cell loses its text. A header cell, or a
 | Example | # |
 ```
 
-Instead, escape it as `\#`, which keeps the text.
+Instead, escape the first hash as `\#`, which keeps the text.
 
 ### `image-in-link`
 

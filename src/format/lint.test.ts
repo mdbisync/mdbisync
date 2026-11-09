@@ -17,6 +17,8 @@ const cases: Array<[LintRule, string, number]> = [
   ['table-escaped-pipe', '| A |\n| -- |\n| a \\| b |', 3],
   ['table-hash-cell', '| A | B |\n| -- | -- |\n| 1 | 2 |\n| # | 3 |', 4],
   ['table-hash-cell', 'Intro.\n\n> | Name | No. |\n> | -- | -- |\n> | Example |  # |', 5],
+  ['table-hash-cell', '| A |\n| -- |\n| ## |', 3],
+  ['table-hash-cell', '| A |\n| -- |\n| # Total **12** |', 3],
   ['image-in-link', '[![a](x.png)](https://example.com)', 1],
   ['table-alignment', '| A | B |\n| :-- | --: |\n| 1 | 2 |', 1],
   ['link-title', '[a](https://example.com "Title")', 1],
@@ -35,8 +37,8 @@ const cases: Array<[LintRule, string, number]> = [
 ];
 
 describe('lint rules', () => {
-  it('table-hash-cell spares a header hash, an escaped hash and a hash with other text', () => {
-    const text = '| # | `#` |\n| -- | -- |\n| \\# | **#** |\n| Issue # | `#` |';
+  it('table-hash-cell spares a header hash, an escaped hash and a hash that is no heading', () => {
+    const text = '| # | `#` |\n| -- | -- |\n| \\# | **#** |\n| Issue # | #5 |\n| \\## | ####### |';
     assert.deepEqual(lintText('doc.md', text), []);
   });
 
