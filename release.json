@@ -1,0 +1,17 @@
+{
+  "version": "v0.1.0-rc.2",
+  "source": "d261d3071c449fa011a896f52fbde75d6d625aa4",
+  "files": {
+    "action.yml": "f369dd9dbd2ae1276c9c639986405db87758ded3bf8d06d65fe09f8ad8bc4648",
+    ".pre-commit-hooks.yaml": "dbb790a7b1470d2b09a49587ff7741112b7120865e5226df3faca8ecc74bd60b",
+    "LICENSE": "a22e32a5583635ee055372e5ab613c3c15845f1c0ff79668bd1fd5068b23f6af",
+    "README.md": "7310e2ae38d86d3eacfcc11cd0d87180923cb88fc4650d5d04223f7df7f14cb5",
+    "dist/THIRD_PARTY_NOTICES.txt": "c952410014cf50a6dc2809ac4964cdb1746de097e17ca49228cd08d099721150",
+    "dist/action-main.js.LEGAL.txt": "da2a4ed932064e8eace052f31df1c34d8222a9241a38f8cbb97536a04a9936d9",
+    "dist/action-post.js.LEGAL.txt": "da2a4ed932064e8eace052f31df1c34d8222a9241a38f8cbb97536a04a9936d9",
+    "dist/action-main.js": "24dffcfe6e1cbaea68660d547077591845b84c23058d882e9a312096212fdbaa",
+    "dist/action-post.js": "d064a4c578915a25214e13252593765109f7e80970d60e11bdbc7e0a71db2d5e",
+    "dist/cli.js": "539dd7d8708bdbde2687125df62ef6f6e9f3a7e88963642748b443ac82650ccc",
+    "package.json": "b8780818d825ea021443fa41657ab302998b3135e843a44fd50e71fbcdcfc2ec"
+  }
+}
