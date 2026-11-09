@@ -1,16 +1,23 @@
 // The sandbox repository as the harness uses it: a shared blobless cache of
 // its main branch (the corpus), a run's tracked branch built from a slice, a
-// working clone for the engine, a clone where "people" commit, and the
-// removal of a run's branches and refs. Every push names its refs exactly;
-// nothing is force-pushed.
+// working clone for the engine, a clone where "people" commit through the
+// repository's pre-commit hooks, and the removal of a run's branches and
+// refs. Every push names its refs exactly; nothing is force-pushed.
 
-import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { Git } from '../../../src/state/index.ts';
+import { promisify } from 'node:util';
+import { parse } from 'yaml';
+import { validateSha } from '../../../src/release/package.ts';
+import { Git, GitError } from '../../../src/state/index.ts';
 import { CORPUS_DIR, SLICES_DIR, buildRunTree, parseManifest, parseSlice, type Manifest, type RunTree } from './corpus.ts';
 import { gitAuthEnv } from './github.ts';
 import { runOfRef, type RunNames } from './isolation.ts';
 import { acquireLock } from './locks.ts';
+import { EnvBlockedError, ProductError } from './results.ts';
+
+const execFileAsync = promisify(execFile);
 
 export const PERSON = { name: 'Test Editor', email: 'editor@example.com' };
 export const HARNESS = { name: 'Scenario Harness', email: 'harness@example.com' };
@@ -158,7 +165,60 @@ export class Sandbox {
   }
 }
 
-/** Writes or removes files in a person's clone, commits and pushes to the tracked branch. */
+/** A pre-commit hook refused a person's commit; nothing was committed and the clone is back at its last commit. */
+export class HookRejectedError extends ProductError {
+  /** The ids of the hooks that failed, in pre-commit's order. */
+  readonly hooks: string[];
+  constructor(hooks: string[]) {
+    super(`a pre-commit hook refused the commit (${hooks.length === 0 ? 'no hook id reported' : hooks.join(', ')})`);
+    this.name = 'HookRejectedError';
+    this.hooks = hooks;
+  }
+}
+
+/**
+ * Installs the repository's pre-commit hooks in a person's clone, as a person
+ * does after cloning: `pre-commit install`, with the hook environments built
+ * now so the first commit does not pay for them. Every remote hook repository
+ * must be pinned to a full commit SHA (the released hook), not a placeholder.
+ * A clone without a pre-commit configuration has no hooks to install.
+ */
+export async function installHooks(git: Git, env: Record<string, string> = {}): Promise<void> {
+  const file = join(git.dir, '.pre-commit-config.yaml');
+  if (!existsSync(file)) return;
+  const config = parse(readFileSync(file, 'utf8')) as { repos?: Array<{ repo?: unknown; rev?: unknown }> } | null;
+  for (const entry of config?.repos ?? []) {
+    if (entry.repo === 'local' || entry.repo === 'meta') continue;
+    try {
+      validateSha(String(entry.rev));
+    } catch {
+      throw new EnvBlockedError(`the repository's pre-commit configuration pins a hook to "${String(entry.rev)}", not a released commit SHA`);
+    }
+  }
+  try {
+    // Building a Node hook's environment runs npm, which can take minutes; the run's other work goes on meanwhile.
+    await execFileAsync('pre-commit', ['install', '--install-hooks'], { cwd: git.dir, env: { ...process.env, ...env }, maxBuffer: 16 * 1024 * 1024 });
+  } catch (error) {
+    const failure = error as { code?: unknown; stdout?: string; stderr?: string };
+    if (failure.code === 'ENOENT') throw new EnvBlockedError('pre-commit is not installed on this host');
+    // The reason without paths or output: npm's error code when there is one.
+    const code = /npm error code (\w+)/.exec(`${failure.stdout ?? ''}${failure.stderr ?? ''}`)?.[1];
+    throw new EnvBlockedError(`the repository's pre-commit hooks could not be installed${code === undefined ? '' : ` (npm ${code}; the Node hooks need npm 11.16.0 or newer)`}`);
+  }
+}
+
+/** The ids of the hooks pre-commit reports as failed. */
+export function failedHooks(output: string): string[] {
+  return [...output.matchAll(/^- hook id: (\S+)$/gm)].map((match) => match[1] as string);
+}
+
+/**
+ * Writes or removes files in a person's clone, commits and pushes to the
+ * tracked branch. With `verify`, the commit goes through the clone's installed
+ * hooks: when a hook fixes the files, the fixed files are staged and committed
+ * again, as a person does; when a hook refuses them, nothing is committed, the
+ * clone goes back to its last commit and HookRejectedError names the hooks.
+ */
 export async function personCommit(
   git: Git,
   names: RunNames,
@@ -179,9 +239,29 @@ export async function personCommit(
       await git.run(['add', '--', path]);
     }
   }
-  await git.run(['commit', '--quiet', ...(options.verify ? [] : ['--no-verify']), '-m', message]);
+  if (options.verify) await commitThroughHooks(git, [...changes.keys()], message);
+  else await git.run(['commit', '--quiet', '--no-verify', '-m', message]);
   // Objects first, so a pushed pointer never names an object the server lacks (a bypassed pre-push hook would skip it).
   if (binary) await git.run(['lfs', 'push', 'origin', 'HEAD']);
   await git.run(['push', '--quiet', ...(options.verify ? [] : ['--no-verify']), 'origin', `HEAD:refs/heads/${options.branch ?? names.trackedBranch}`]);
   return (await git.text(['rev-parse', 'HEAD'])).trim();
+}
+
+async function commitThroughHooks(git: Git, paths: readonly string[], message: string): Promise<void> {
+  let output = '';
+  // The second try commits what the hooks fixed; a hook that fails again then refuses the files.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await git.run(['commit', '--quiet', '-m', message]);
+      return;
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      output = error.stderr;
+    }
+    const fixed = (await git.text(['diff', '--name-only', '-z', '--', ...paths])).split('\0').filter((path) => path !== '');
+    if (fixed.length === 0) break;
+    await git.run(['add', '--', ...fixed]);
+  }
+  await git.run(['reset', '--quiet', '--hard', 'HEAD']);
+  throw new HookRejectedError(failedHooks(output));
 }

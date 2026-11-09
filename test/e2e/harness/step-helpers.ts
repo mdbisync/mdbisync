@@ -104,6 +104,7 @@ export async function pull(git: Git, ctx: RunContext): Promise<void> {
 export async function commitAsPerson(ctx: RunContext, changes: Map<string, string | Buffer | null>, message: string, bypassHook = false): Promise<string> {
   const git = await ctx.person();
   await pull(git, ctx);
+  if (!bypassHook) await ctx.personHooks();
   const commit = await personCommit(git, ctx.names, changes, message, { verify: !bypassHook });
   ctx.ownCommits.push(commit);
   return commit;

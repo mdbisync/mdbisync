@@ -19,10 +19,12 @@ import { burst, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { withoutDocuments } from './fault-proxy.ts';
-import { Sandbox } from './sandbox.ts';
+import { HookRejectedError, installHooks, personCommit, Sandbox } from './sandbox.ts';
+import { engineEntry } from './engine.ts';
+import { preCommitConfig } from '../../corpus/tree.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
-import { readRunIds } from './step-helpers.ts';
+import { commitAsPerson, readRunIds } from './step-helpers.ts';
 import { documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, tokenActive } from './subjects.ts';
 import { maxOverlap, unzip, waitForRun } from './workflows.ts';
 
@@ -465,21 +467,45 @@ class FakeLinear {
 const PROJECT = { id: 'project-1', name: 'Field notes aaaaaa', createdAt: '' };
 const OTHER = { id: 'project-2', name: 'Garden plans aaaaaa', createdAt: '' };
 
-/** A converged run world: a tracked branch with two project folders and three documents, their ids ref, and Linear holding the same texts. */
-async function fakeRun(options: { review?: string } = {}) {
+/**
+ * A local hook repository standing in for the released hook: its
+ * `linear-format` runs this checkout's fixer. Returns the corpus's own
+ * pre-commit configuration pinned to that repository's commit.
+ */
+async function localHookConfig(root: string): Promise<string> {
+  const repo = join(root, 'hooks');
+  const git = new Git(repo, IDENTITY);
+  await new Git(root, IDENTITY).run(['init', '--quiet', '--initial-branch=main', repo]);
+  writeFileSync(join(repo, '.pre-commit-hooks.yaml'), '- id: linear-format\n  name: Format Markdown for Linear\n  entry: ./fix.sh\n  language: script\n  types: [markdown]\n  require_serial: true\n');
+  writeFileSync(join(repo, 'fix.sh'), `#!/bin/sh\nexec node ${JSON.stringify(engineEntry())} fix "$@"\n`, { mode: 0o755 });
+  await git.run(['add', '--all']);
+  await git.run(['commit', '--quiet', '-m', 'Hook']);
+  const revision = (await git.text(['rev-parse', 'HEAD'])).trim();
+  return preCommitConfig(revision).replace('https://github.com/mikhail-yaskou/mdbisync', repo);
+}
+
+/**
+ * A converged run world: a tracked branch with two project folders and three
+ * documents, their ids ref, and Linear holding the same texts. With `hooks`,
+ * the person's commits go through the corpus's hooks from a local hook repository.
+ */
+async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
   const names = runNames('aaaaaa');
   await new Git(root, IDENTITY).run(['init', '--quiet', '--bare', '--initial-branch=main', remote]);
   const seed = new Git(join(root, 'seed'), IDENTITY);
   await new Git(root, IDENTITY).run(['init', '--quiet', '--initial-branch=main', join(root, 'seed')]);
+  // Hook environments of these tests stay in the test's own folder.
+  if (options.hooks === true) process.env.PRE_COMMIT_HOME = join(root, 'pre-commit');
+  const hookConfig = options.hooks === true ? await localHookConfig(root) : 'repos:\n  - repo: https://github.com/example/hooks\n    rev: v1\n    hooks:\n      - id: linear-format\n  - repo: local\n    hooks:\n      - id: test-secret\n        alias: security\n';
   const files: Record<string, string> = {
     'eng/platform/README.md': `---\nlinear-project: ${PROJECT.name}\n---\n`,
     'docs/handbook/README.md': `---\nlinear-project: ${OTHER.name}\n---\n`,
     'eng/platform/plan.md': '# Plan\n\nThe first paragraph.\n\nThe second paragraph.\n',
     'eng/platform/notes.md': '# Notes\n\nKept short.\n',
     'docs/handbook/start.md': '# Start\n\nWelcome.\n',
-    '.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/hooks\n    rev: v1\n    hooks:\n      - id: linear-format\n  - repo: local\n    hooks:\n      - id: test-secret\n        alias: security\n',
+    '.pre-commit-config.yaml': hookConfig,
     ...(options.review === undefined ? {} : { 'eng/platform/guides/weekly-plan.md': options.review }),
   };
   for (const [path, text] of Object.entries(files)) {
@@ -555,14 +581,72 @@ async function fakeRun(options: { review?: string } = {}) {
       person ??= await sandbox.clone(names, join(root, 'run', 'person'));
       return person;
     },
+    async personHooks() {
+      // Without a hook repository, these runs commit as before: the clone has no hooks installed.
+      if (options.hooks === true) await installHooks(await ctx.person());
+    },
     async engineClone() {
       return join(root, 'run', 'engine');
     },
   };
   const remoteGit = new Git(remote, IDENTITY);
   const remoteFile = async (path: string, ref = names.trackedBranch) => remoteGit.text(['show', `${ref}:${path}`]);
-  return { ctx, linear, ids, remoteGit, remoteFile, faults, created, docs };
+  // The file's exact bytes, final newline included.
+  const rawFile = async (path: string) => (await remoteGit.run(['show', `${names.trackedBranch}:${path}`])).stdout.toString('utf8');
+  return { ctx, linear, ids, remoteGit, remoteFile, rawFile, faults, created, docs };
 }
+
+describe('person commits through the repository hooks', () => {
+  it('commits the text the Linear-format hook fixed', async () => {
+    const { ctx, rawFile } = await fakeRun({ hooks: true });
+    // Linear's form has no final newline: the hook fixes it away.
+    const commit = await commitAsPerson(ctx, new Map([['eng/platform/fixable.md', '# Plan\n\n*one*\n']]), 'Add a page');
+    assert.equal(await rawFile('eng/platform/fixable.md'), '# Plan\n\n*one*');
+    assert.deepEqual(ctx.ownCommits, [commit]);
+    assert.equal((await (await ctx.person()).text(['status', '--porcelain'])).trim(), '');
+    // A git step commits through the same hooks.
+    await runStep(ctx, { kind: 'git', action: 'add', args: {} });
+    const added = await rawFile(ctx.observations.get('git.added') as string);
+    assert.ok(added.startsWith('# Notes\n\n') && !added.endsWith('\n'), added);
+  });
+
+  it('fails a commit the hook refuses and commits it when the step bypasses the hook', async () => {
+    const { ctx, remoteGit, rawFile } = await fakeRun({ hooks: true });
+    const head = async () => (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
+    const before = await head();
+    const refused = await runStep(ctx, { kind: 'git', action: 'add-footnote', args: {} }).then(() => null, (error: unknown) => error);
+    assert.ok(refused instanceof HookRejectedError, String(refused));
+    assert.deepEqual(refused.hooks, ['linear-format']);
+    assert.equal(await head(), before);
+    assert.equal((await (await ctx.person()).text(['status', '--porcelain'])).trim(), '');
+    // L2-13: the footnote goes in past the hook.
+    await runStep(ctx, { kind: 'git', action: 'add-footnote', args: { bypassHook: true } });
+    assert.notEqual(await head(), before);
+    assert.match(await rawFile(ctx.observations.get('target.path') as string), /\[\^1\]: Added later\.\n$/);
+  });
+
+  it('never lets the test secret reach the repository', async () => {
+    const { ctx, remoteGit } = await fakeRun({ hooks: true });
+    const secret = `TESTKEY-${'0123456789abcdef01234567'}`;
+    await assert.rejects(
+      commitAsPerson(ctx, new Map([['eng/platform/notes.md', `# Notes\n\nAccess key ${secret}.`]]), 'Update notes'),
+      (error: unknown) => error instanceof HookRejectedError && error.hooks.join() === 'test-secret' && !error.message.includes(secret),
+    );
+    assert.doesNotMatch(await remoteGit.text(['log', '-p', '--all']), new RegExp(secret));
+  });
+
+  it('refuses to install hooks pinned to anything but a released commit', async () => {
+    const { ctx } = await fakeRun();
+    await assert.rejects(installHooks(await ctx.person()), (error: unknown) => error instanceof EnvBlockedError && /"v1", not a released commit SHA/.test(error.message));
+  });
+
+  it('commits without the hooks only when asked to', async () => {
+    const { ctx, rawFile } = await fakeRun({ hooks: true });
+    await installHooks(await ctx.person());
+    await personCommit(await ctx.person(), ctx.names, new Map([['eng/platform/raw.md', '# Raw\n\n*one*\n']]), 'Add raw notes', { verify: false });
+    assert.equal(await rawFile('eng/platform/raw.md'), '# Raw\n\n*one*\n');
+  });
+});
 
 describe('git executors', () => {
   it('edit the target paragraph and record the edit for I2', async () => {
