@@ -491,6 +491,7 @@ describe('sync: the tracked branch to Linear', () => {
       const first = await sync();
       assert.equal(first.result.exitCode, INCOMPLETE_EXIT_CODE, first.result.stderr);
       assert.equal(first.report.exitStatus, 'warning');
+      assert.equal(first.writes.filter(isUpload).length, 1, 'only the write loop attempts the upload');
       assert.deepEqual(first.report.sync?.failed.map((entry) => entry.path), ['eng/notes/figure.md']);
       assert.deepEqual(first.report.sync?.updated, ['eng/notes/review.md']);
       assert.match(first.summary, /eng\/notes\/figure\.md/);
@@ -511,6 +512,26 @@ describe('sync: the tracked branch to Linear', () => {
       await assertIdempotent();
     });
   }
+
+  it('L5-11: a failing shared image is attempted only in the write loop for each document', async () => {
+    await commit({ 'eng/notes/shared.md': `# Shared\n\n![Diagram](../media/diagram.png)\n\n${CANARY}\n` });
+    assert.equal((await sync()).result.exitCode, 0);
+    const paths = ['eng/notes/figure.md', 'eng/notes/shared.md'];
+    const before = await Promise.all(paths.map(async (path) => (await documentOf(path)).content));
+    await commit({ 'eng/media/diagram.png': 'replacement shared diagram' });
+    world.linear.writes.reject = (operation) => isUpload(operation);
+    const failed = await sync();
+    assert.equal(failed.result.exitCode, INCOMPLETE_EXIT_CODE, failed.result.stderr);
+    assert.deepEqual(failed.report.sync?.failed.map((entry) => entry.path), paths);
+    assert.equal(failed.writes.filter(isUpload).length, paths.length, 'no comparison uploads or automatic per-document retry');
+    assert.deepEqual(await Promise.all(paths.map(async (path) => (await documentOf(path)).content)), before);
+    delete world.linear.writes.reject;
+    const recovered = await sync();
+    assert.equal(recovered.result.exitCode, 0, recovered.result.stderr);
+    assert.equal(recovered.writes.filter(isUpload).length, 1, 'the recovered shared image uploads once');
+    assert.deepEqual(recovered.report.sync?.updated, paths);
+    await assertIdempotent();
+  });
 
   for (const create of [false, true]) {
     it(`L5-11: upload rejection leaves a ${create ? 'new' : 'changed'} document unwritten until the next run`, async () => {
@@ -554,6 +575,7 @@ describe('sync: the tracked branch to Linear', () => {
       if (imageOnly) assert.equal((await documentOf(path)).content, before);
       else assert.equal(live().some((document) => document.title === 'new-figure'), false);
       const again = await sync();
+      assert.equal(again.result.exitCode, 0, again.result.stderr);
       assert.deepEqual(again.report.sync?.leftOutAtWrite, first.report.sync?.leftOutAtWrite);
       assert.deepEqual(again.report.sync?.updated, []);
     });

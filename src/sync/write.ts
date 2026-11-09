@@ -62,10 +62,9 @@ export interface WriteOptions {
   /** The state refs after capture: the expected old values of this step's push. */
   state: StateSnapshot;
   /**
-   * Makes a fresh set of body transforms. The run uses two: one turns the
-   * merge result's files into what is written, the other turns the
-   * `linear` tip's files into what Linear should hold now, to tell whether
-   * a document changed in Linear since the capture.
+   * Makes fresh body transforms. The write set turns the merge result's
+   * files into what is written. Comparison sets detect linked file changes
+   * and changes in Linear since capture, without uploading.
    */
   transforms?: () => readonly BodyTransform[];
   identity?: CommitIdentity;
@@ -321,6 +320,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       if (!path.endsWith('.md') && linearFiles.get(path) !== resultFiles.get(path)) changedNames.add(path.slice(path.lastIndexOf('/') + 1));
     }
     if (changedNames.size === 0) return;
+    // Comparing forms must not upload: an uncached file already needs a
+    // write. Only the write loop sends its bytes and handles its failures.
+    const comparisonTransforms = options.transforms?.() ?? [];
+    for (const transform of comparisonTransforms) await transform.prepare?.({ git, tracked: candidate, linear: withoutUploads(linear), plan: { create: [], overwrite: [], trash: [], leftOut: [] }, uploads, documentIds });
     for (const change of merge.unchanged) {
       const next = merge.result.get(change.to) as SideFile;
       const previous = merge.linear.get(change.from) as SideFile;
@@ -329,13 +332,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       if (![...changedNames].some((name) => text.includes(name) || text.includes(encodeURI(name)) || text.includes(encodeURIComponent(name)))) continue;
       let differs: boolean;
       try {
-        const written = await transformBody(transforms, change.to, splitFile(text).body);
+        const written = await transformBody(comparisonTransforms, change.to, splitFile(text).body);
         differs = written !== (await transformBody(tipTransforms, change.from, splitFile(textOf(previous)).body));
       } catch (error) {
-        // An upload can fail while comparing an otherwise unchanged document.
-        // Queue it for the write loop, which reports its failure per document
-        // and preserves the previous record while other documents go on.
-        if (!(error instanceof LeaveOutError) && !(error instanceof LinearError)) throw error;
+        // Left out or uncached: the write reports it, or stops before it.
+        if (!(error instanceof LeaveOutError) && !(error instanceof LinearStoppedError) && !(error instanceof UploadRefusedError)) throw error;
         differs = true;
       }
       if (differs) merge.changes.push({ ...change, content: true });
