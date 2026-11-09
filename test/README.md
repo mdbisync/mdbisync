@@ -191,9 +191,9 @@ workspace and a GitHub repository made for testing, never ones with real
 work in them.
 
 The harness reads its configuration from the environment and from
-`secrets.env` (lines of `NAME=value`) in the test configuration folder,
-`MDBISYNC_TEST_CONFIG_DIR` (default: `.config/mdbisync-test` in your home
-folder). The
+`secrets.env` (lines of `NAME=value`) in the test configuration folder
+that `MDBISYNC_TEST_CONFIG_DIR` names (its default is in
+`e2e/harness/config.ts`). The
 environment wins. Values are never written to a report or a log.
 
 | Variable | Needed for | Meaning |
