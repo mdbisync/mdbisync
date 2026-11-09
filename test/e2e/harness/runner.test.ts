@@ -7,7 +7,7 @@ import { LinearClient } from '../../../src/linear/index.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
 import { Git } from '../../../src/state/index.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
-import { budgetHolds, compare, gitLinks, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
+import { budgetHolds, compare, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
 import { parseEnvFile, parseRepoUrl } from './config.ts';
 import { appJwt, SandboxRest } from './github.ts';
@@ -68,6 +68,31 @@ describe('check helpers', () => {
     assert.equal(titleOf('eng/4f1a9c/guides/start.md', 'eng'), '4f1a9c/guides/start');
     assert.equal(titleOf('eng/alpha/plan.md', 'eng/alpha'), 'plan');
     assert.equal(gitLinks('![x](https://uploads.example.com/a)', 'eng/guides/start.md', { ids: new Map(), documentUrlBase: 'https://linear.app/acme/document', uploads: new Map([['https://uploads.example.com/a', 'eng/img/a.png']]) }), '![x](../img/a.png)');
+  });
+
+  it('fit a file name to its document title by the documented path rule (I7)', () => {
+    // Suffixes written by hand: the first twelve hex digits of SHA-256('doc-notes') and SHA-256('doc-other').
+    const own = 'e9949a68bede';
+    const other = '14dad63bd741';
+    assert.equal(pathFitsTitle('Notes: draft?*', 'Notes: draft?*', 'doc-notes'), true, 'a git spelling of the title is kept');
+    assert.equal(pathFitsTitle('Notes%3A draft%3F%2A', 'Notes: draft?*', 'doc-notes'), true, 'encoded punctuation');
+    assert.equal(pathFitsTitle('notes/pipe %7C table', 'notes/pipe | table', 'doc-notes'), true, 'encoded in a subfolder of the title');
+    assert.equal(pathFitsTitle('trailing dot%2E', 'trailing dot.', 'doc-notes'), true);
+    assert.equal(pathFitsTitle(`Notes%3A draft%3F%2A~${own}`, 'Notes: draft?*', 'doc-notes'), true, 'a collision name');
+    assert.equal(pathFitsTitle(`Notes%3A draft%3F%2A~${own}-2`, 'Notes: draft?*', 'doc-notes'), true, 'a collision name with a numeric suffix');
+    assert.equal(pathFitsTitle(`notes%2Fpipe %7C table~${own}`, 'notes/pipe | table', 'doc-notes'), true, 'a collision name flattens the title');
+    assert.equal(pathFitsTitle('Q3%3A goals', 'Q3: goals', 'doc-notes'), true);
+    assert.equal(pathFitsTitle('Q3%253A goals', 'Q3%3A goals', 'doc-notes'), true, 'an encoded-looking title is encoded again');
+    // What must not fit.
+    assert.equal(pathFitsTitle('Notes%3A draft%3F%2A', 'Notes: draft?', 'doc-notes'), false, 'a different title');
+    assert.equal(pathFitsTitle('Notes%3a draft%3f%2a', 'Notes: draft?*', 'doc-notes'), false, 'escapes are upper-case');
+    assert.equal(pathFitsTitle('Notes%3A draft%3F%2A', 'Notes%3A draft%3F%2A~x', 'doc-notes'), false);
+    assert.equal(pathFitsTitle('Q3%3A goals', 'Q3%3A goals extra', 'doc-notes'), false);
+    assert.equal(pathFitsTitle(`Notes%3A draft%3F%2A~${other}`, 'Notes: draft?*', 'doc-notes'), false, "another document's collision suffix");
+    assert.equal(pathFitsTitle(`Notes%3A draft%3F%2A~${own}-0`, 'Notes: draft?*', 'doc-notes'), false);
+    assert.equal(pathFitsTitle(`Notes%3A draft%3F%2A~${own}-x`, 'Notes: draft?*', 'doc-notes'), false);
+    assert.equal(pathFitsTitle(`notes/pipe %7C table~${own}`, 'notes/pipe | table', 'doc-notes'), false, 'a collision name is flat');
+    assert.equal(pathFitsTitle(`sub/Notes%3A draft%3F%2A~${own}`, 'Notes: draft?*', 'doc-notes'), false, 'a collision name below the folder');
   });
 
   it('compare a file with front matter to its document by the body the engine sends (I1)', () => {

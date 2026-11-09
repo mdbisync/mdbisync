@@ -1651,6 +1651,46 @@ describe('subjects', () => {
     assert.deepEqual(reads.sort(), [plan, notes, start].sort());
   });
 
+  it('accept encoded and collision file names in I7 and still catch a wrong title, identity or place', async () => {
+    const { ctx, ids } = await fakeRun();
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const base = await readSides(ctx);
+    const start = ids['docs/handbook/start.md']?.id as string;
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    const suffix = (id: string) => createHash('sha256').update(id).digest('hex').slice(0, 12);
+    // The handbook document retitled `Notes: draft?*` (L2-22) and its file at `path`, mapped to `id`.
+    const i7 = async (path: string, title = 'Notes: draft?*', id = start) => {
+      const files = new Map(base.files);
+      const text = files.get('docs/handbook/start.md') as string;
+      files.delete('docs/handbook/start.md');
+      files.set(path, text);
+      const mapped = new Map(base.ids);
+      mapped.delete('docs/handbook/start.md');
+      mapped.set(path, { id });
+      const documents = new Map(base.documents);
+      documents.set(start, { ...(base.documents.get(start) as LinearDocument), title });
+      return INVARIANT_CHECKS.I7(ctx, async () => ({ ...base, files, ids: mapped, documents }));
+    };
+    const pass = { name: 'I7', ok: true };
+    assert.deepEqual(await i7('docs/handbook/Notes%3A draft%3F%2A.md'), pass);
+    assert.deepEqual(await i7('docs/handbook/Notes: draft?*.md'), pass, 'a git spelling of the title is kept');
+    assert.deepEqual(await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(start)}.md`), pass);
+    assert.deepEqual(await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(start)}-1.md`), pass);
+    assert.deepEqual(await i7(`docs/handbook/a%2Fb %7C c~${suffix(start)}.md`, 'a/b | c'), pass, 'a flattened collision name');
+    assert.deepEqual(await i7('docs/handbook/a/b %7C c.md', 'a/b | c'), pass);
+    const wrong = (path: string) => new RegExp(`^1 problems: ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: title differs from its path$`);
+    // A wrong title, another document's suffix and a name outside the title's place all fail.
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F.md')).detail ?? '', wrong('docs/handbook/Notes%3A draft%3F.md'));
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F%2A.md', 'Notes: draft?')).detail ?? '', wrong('docs/handbook/Notes%3A draft%3F%2A.md'));
+    assert.match((await i7(`docs/handbook/Notes%3A draft%3F%2A~${suffix(plan)}.md`)).detail ?? '', wrong(`docs/handbook/Notes%3A draft%3F%2A~${suffix(plan)}.md`));
+    assert.match((await i7(`docs/handbook/a/b %7C c~${suffix(start)}.md`, 'a/b | c')).detail ?? '', wrong(`docs/handbook/a/b %7C c~${suffix(start)}.md`));
+    assert.match((await i7('docs/handbook/drafts/Notes%3A draft%3F%2A.md')).detail ?? '', wrong('docs/handbook/drafts/Notes%3A draft%3F%2A.md'));
+    // A nested title's file directly in its folder, without the title's subfolder.
+    assert.match((await i7('docs/handbook/b %7C c.md', 'a/b | c')).detail ?? '', wrong('docs/handbook/b %7C c.md'));
+    // Another document's identity on the right name: its own title differs.
+    assert.match((await i7('docs/handbook/Notes%3A draft%3F%2A.md', 'Notes: draft?*', plan)).detail ?? '', /title differs from its path/);
+  });
+
   it('count the engine\'s commits as git writes and not the scenario\'s own', async () => {
     const { ctx, remoteGit } = await fakeRun();
     const { snapshotRefs } = await import('./checks.ts');
