@@ -171,8 +171,9 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
   const ids: IdMap = resumed ? new Map(previous) : new Map();
   const uploads = await readUploads(git, expected.uploads);
   const uploadsAtStart = uploads.size;
-  /** What Linear stores for each synchronized path. */
+  /** What Linear stores for each synchronized path, and the text this run sent or would send for it. */
   const stored = new Map<string, string>();
+  const sent = new Map<string, string>();
 
   const result: ConfirmedResult = {
     complete: false,
@@ -278,6 +279,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         const source = splitFile(texts.get(path) as string).body;
         const body = await transformBody(transforms, path, source);
         const hash = sha256(body);
+        sent.set(path, body);
         // A resumed run skips what the stopped run wrote, as long as the text
         // to send is the same; a file changed since is written again.
         if (document !== undefined && resumed && previous.get(path)?.id === document.id && writtenBefore.get(path) === hash) {
@@ -293,7 +295,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         // wrote (a link to an uploaded file is stored as a file), so the
         // content is also compared after the transforms' inverses, with the
         // file's own body.
-        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(restoreBody(transforms, path, document.content ?? ''), source))) {
+        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(restoreBody(transforms, path, document.content ?? '', body), source))) {
           result.unchanged.push(path);
           remember(path, document);
           continue;
@@ -415,7 +417,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     const reformatted: string[] = [];
     for (const path of [...synced].sort(compare)) {
       const text = texts.get(path) as string;
-      const file = splitFile(text).head + restoreBody(transforms, path, stored.get(path) ?? '');
+      const file = splitFile(text).head + restoreBody(transforms, path, stored.get(path) ?? '', sent.get(path) as string);
       if (file !== text) {
         changes.set(path, file);
         reformatted.push(path);

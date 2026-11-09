@@ -195,8 +195,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // A new document left out by an earlier run keeps the id it was given, since other documents may link to it.
   for (const change of creates) documentIds.set(change.path, adoptable.get(change.path)?.id ?? reserved.get(change.path) ?? newId());
 
-  /** What Linear stores now for each path whose document this run wrote. */
-  const stored = new Map<string, string>();
+  /** What Linear stores now for each path whose document this run wrote, with the body sent for it. */
+  const stored = new Map<string, { content: string; sent: string }>();
   const nextIds: IdMap = new Map(ids);
   // A file that moved and kept its title, place and text (a renamed project folder): Linear needs nothing, the id map follows the file.
   for (const change of merge.unchanged) {
@@ -464,7 +464,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     if (holds) {
       // Linear already holds the change: written by a run that stopped before recording it, or kept back by a partial record.
       if (patch.content !== undefined) {
-        stored.set(change.to, document.content ?? '');
+        stored.set(change.to, { content: document.content ?? '', sent: patch.content });
         readBack = document;
       }
     } else {
@@ -473,7 +473,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       const updated = await linear.updateDocument(change.id, patch);
       // Without a content write the merge result's file stands: Linear holds its body already.
       if (patch.content !== undefined) {
-        stored.set(change.to, updated.content ?? '');
+        stored.set(change.to, { content: updated.content ?? '', sent: patch.content });
         readBack = updated;
       }
     }
@@ -501,7 +501,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });
       await checkpoint('document-created-before-ids-push');
     }
-    stored.set(change.path, document.content ?? '');
+    stored.set(change.path, { content: document.content ?? '', sent: body });
     nextIds.set(change.path, { id: document.id });
     result.created.push(change.path);
     await reconcileMark(change.path, document);
@@ -569,9 +569,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const keepTip = (path: string) => fromTip.add(path);
 
     // Written documents: the merge result's front matter and what Linear stored.
-    for (const [path, content] of stored) {
+    for (const [path, { content, sent }] of stored) {
       const file = merge.result.get(path) as SideFile;
-      const text = splitFile(textOf(file)).head + restoreBody(transforms, path, content);
+      const text = splitFile(textOf(file)).head + restoreBody(transforms, path, content, sent);
       if (resultFiles.get(path) !== undefined && text === textOf(file)) continue;
       changes.set(path, text);
     }

@@ -12,7 +12,8 @@ import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git } from '../state/index.ts';
-import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
+import { fixText } from '../format/index.ts';
+import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
@@ -430,6 +431,22 @@ describe('sync: the tracked branch to Linear', () => {
     assert.match(figure.content ?? '', /edited/);
     // `linear` keeps the relative link: its tree is the tracked tree.
     assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    await assertIdempotent();
+  });
+
+  it("an image in angle brackets in a document Linear reformats is recorded in Linear's form, still an image; the next run writes nothing", async () => {
+    // Like Linear: the stored text is in Linear's form, a link to an uploaded file stored as a file.
+    world.linear.store = (content) => fixText(content.replaceAll(`${UPLOADS_HOST}/`, 'uploaded/')).replaceAll('uploaded/', `${UPLOADS_HOST}/`);
+    await commit({
+      'eng/media/chart copy.png': Buffer.from('chart copy bytes').toString('latin1'),
+      'eng/notes/spaced.md': `# Spaced\n\n![Chart](<../media/chart copy.png>)\n\n${CANARY}\n`,
+    });
+    const { result } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    const [url] = uploadUrls((await documentOf('eng/notes/spaced.md')).content);
+    assert.equal((await documentOf('eng/notes/spaced.md')).content, `# Spaced\n\n![Chart](${url})\n\n${CANARY}`, 'Linear dropped the brackets');
+    // The record keeps an image: Linear's form of the file, not the file's spelling without its brackets.
+    assert.match(await show('refs/mdbisync/linear:eng/notes/spaced.md'), /!\[Chart\]\(\.\.\/media\/chart%20copy\.png\)/);
     await assertIdempotent();
   });
 
