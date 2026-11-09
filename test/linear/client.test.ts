@@ -73,7 +73,7 @@ describe('Linear client against a fake Linear', () => {
     assert.equal(request?.operation, 'CreateDocument');
     assert.equal(request?.headers.authorization, 'Bearer run-token');
     assert.deepEqual(request?.variables?.input, { title: 'Plans', content: 'Body', projectId: 'project-1' });
-    assert.deepEqual(linear.stats.toJSON(), { total: 1, storagePuts: 0, byOperation: { CreateDocument: 1 } });
+    assert.deepEqual(linear.stats.toJSON(), { total: 1, storagePuts: 0, writesAfterStop: 0, byOperation: { CreateDocument: 1 } });
   });
 
   it('stops writing at a 429 on the 30th request and returns what it finished', async () => {
@@ -93,7 +93,11 @@ describe('Linear client against a fake Linear', () => {
     assert.equal(outcome.stopped?.limits?.['x-ratelimit-requests-limit'], '5000');
     assert.equal(fake.graphqlCount(), 30, 'nothing is sent after the 429');
 
+    assert.equal(linear.stats.writesAfterStop, 0, 'the 429 itself was sent before the stop');
     await assert.rejects(linear.rateLimitStatus(), LinearStoppedError);
+    assert.equal(linear.stats.writesAfterStop, 0, 'a refused read is not a write');
+    await assert.rejects(linear.createDocument({ projectId: 'project-1' }, { title: 'Late' }), LinearStoppedError);
+    assert.equal(linear.stats.writesAfterStop, 1, 'a refused write is counted');
     assert.equal(fake.graphqlCount(), 30, 'a stopped client sends nothing');
   });
 
@@ -488,7 +492,7 @@ describe('Linear client against a fake Linear', () => {
     assert.equal(put?.headers['x-goog-meta-x'], 'y');
     assert.equal(put?.headers.authorization, undefined, 'the run token never goes to storage');
     assert.equal(put?.bodyBytes, 7);
-    assert.deepEqual(linear.stats.toJSON(), { total: 1, storagePuts: 1, byOperation: { FileUpload: 1 } });
+    assert.deepEqual(linear.stats.toJSON(), { total: 1, storagePuts: 1, writesAfterStop: 0, byOperation: { FileUpload: 1 } });
   });
 });
 

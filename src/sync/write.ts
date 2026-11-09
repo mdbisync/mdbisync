@@ -85,6 +85,8 @@ export interface WriteResult {
   complete: boolean;
   /** Something was written to Linear or a state ref moved. */
   changed: boolean;
+  /** The run went on from a partial record that an earlier run left on `linear`. */
+  resumed: boolean;
   code?: 'stopped' | 'write-failed' | 'state-moved';
   /** Content written to existing documents (a rename or move may come with it). */
   updated: string[];
@@ -136,6 +138,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const result: WriteResult = {
     complete: false,
     changed: false,
+    resumed: (await git.text(['log', '-1', '--format=%s', linearTip])) === PARTIAL_RECORD_MESSAGE,
     updated: [],
     relocated: [],
     created: [],

@@ -41,8 +41,18 @@ export interface RunReport {
   skippedCompletedCount: number;
   /** Files over the upload limit, by repository path; the documents that link them are left out. */
   oversizeFiles: string[];
-  /** The run continued an unfinished initial sync. */
+  /** The run continued an unfinished initial sync, or a sync went on from a partial record an earlier run left. */
   resumed: boolean;
+  /** Documents created or overwritten in Linear by this run (the same as `writtenCount`). */
+  writtenDocuments: number;
+  /** Writes the run tried after Linear stopped it (rate limit, low budget); each was refused without a request. */
+  writesAfterLimit: number;
+  /** A document whose write failed or was rejected is among those recorded as written; never true for a correct run. */
+  failedWriteRecorded: boolean;
+  /** The job summary gives Linear's endpoint rate-limit headers of the answer that stopped the run. */
+  endpointLimitHeadersPresent: boolean;
+  /** A document Linear rejected (an error answer, not a lost request) is named in the job summary. */
+  rejectedDocumentNamed: boolean;
   /** The run stopped writing before it finished (rate limit, low budget, test threshold). */
   stoppedEarly: boolean;
   /** Every document this run wrote has its id in the `ids` state ref. */
@@ -105,6 +115,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     skippedCompletedCount: confirmed?.skippedCompleted.length ?? 0,
     oversizeFiles: [...new Set((confirmed?.leftOutAtWrite ?? []).filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
     resumed: confirmed?.resumed ?? false,
+    ...faultFacts(outcome, outcome.stopped ?? confirmed?.stopped, confirmed?.failed ?? [], [...(confirmed?.created ?? []), ...(confirmed?.overwritten ?? [])]),
     stoppedEarly: confirmed?.stopped !== undefined || outcome.stopped !== undefined,
     // A stopped run pushes the ids it has before it ends; only a state ref that moved under it prevents that.
     progressRecorded: confirmed?.progressRecorded ?? false,
@@ -153,10 +164,31 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     writtenCount: new Set([...write.updated, ...write.created, ...write.relocated.map((entry) => entry.to)]).size,
     skippedCompletedCount: 0,
     oversizeFiles: [...new Set(write.leftOutAtWrite.filter((entry) => entry.rule === UPLOAD_TOO_LARGE).flatMap((entry) => entry.files ?? []))].sort(),
-    resumed: false,
+    resumed: write.resumed,
+    ...faultFacts(outcome, write.stopped, write.failed, [...write.updated, ...write.created, ...write.relocated.map((entry) => entry.to)]),
     stoppedEarly: write.stopped !== undefined,
     progressRecorded: write.code !== 'state-moved',
     record: null,
+  };
+}
+
+/**
+ * What the run did about Linear's faults, read from its results and its
+ * job summary: the summary is what a person reads, so a fact about it is
+ * checked in its text.
+ */
+function faultFacts(outcome: OperationOutcome, stop: WriteStop | undefined, failed: ReadonlyArray<{ path: string; error: string }>, written: readonly string[]) {
+  const recorded = new Set(written);
+  const limits = stop === undefined || stop.kind === 'test-threshold' ? {} : (stop.limits ?? {});
+  const endpointHeaders = Object.keys(limits).filter((name) => name.startsWith('x-ratelimit-endpoint-'));
+  // A rejection is Linear's error answer to the write; a lost request or a server error is not.
+  const rejected = failed.filter((entry) => entry.error.startsWith('LinearGraphQLError') && !/HTTP 5\d\d/.test(entry.error));
+  return {
+    writtenDocuments: recorded.size,
+    writesAfterLimit: outcome.writesAfterStop ?? 0,
+    failedWriteRecorded: failed.some((entry) => recorded.has(entry.path)),
+    endpointLimitHeadersPresent: endpointHeaders.length > 0 && endpointHeaders.every((name) => outcome.summary.includes(`| ${name} |`)),
+    rejectedDocumentNamed: rejected.length > 0 && rejected.every((entry) => outcome.summary.includes(entry.path)),
   };
 }
 

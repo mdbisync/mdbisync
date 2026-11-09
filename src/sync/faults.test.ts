@@ -254,6 +254,8 @@ describe('sync: rate limits and transport faults', () => {
     assert.equal(again.result.exitCode, 0, again.result.stderr);
     assert.deepEqual(again.writes, []);
     assert.equal(await rev('refs/mdbisync/linear'), before);
+    assert.equal(again.report.resumed, false, 'a run after a complete one does not resume');
+    return next.report;
   }
 
   function assertPartial(run: Awaited<ReturnType<typeof cli>>) {
@@ -288,8 +290,11 @@ describe('sync: rate limits and transport faults', () => {
     }
     assert.match(first.summary, /Stopped: rate limited/);
     assert.equal(first.report.sync?.notAttempted.length, DOCUMENTS - updated.length);
+    assert.equal(first.report.writesAfterLimit, 0);
+    assert.equal(first.report.resumed, false);
 
-    await assertNextRunConverges();
+    const next = await assertNextRunConverges();
+    assert.equal(next.resumed, true, 'the next run goes on from the partial record');
   });
 
   it('L5-07: a short Retry-After gets one retry, then the run finishes', async () => {
@@ -337,6 +342,8 @@ describe('sync: rate limits and transport faults', () => {
       assert.ok(run.summary.includes(`| ${name} | ${value} |`), `${name} in the summary`);
       assert.equal(run.report.stop?.limits?.[name], value, `${name} in the report`);
     }
+    assert.equal(run.report.endpointLimitHeadersPresent, true);
+    assert.equal(run.report.writesAfterLimit, 0);
     await assertNextRunConverges();
   });
 
@@ -358,6 +365,7 @@ describe('sync: rate limits and transport faults', () => {
     for (const path of updated) assert.ok((await recorded(path)).includes('Second text.'), `${path}: recorded`);
     assert.ok(run.summary.includes('| x-ratelimit-endpoint-requests-remaining | 2 |'));
     assert.ok(run.summary.includes('| x-ratelimit-endpoint-requests-limit | 30 |'));
+    assert.equal(run.report.endpointLimitHeadersPresent, true);
     await assertNextRunConverges();
   });
 
@@ -376,6 +384,9 @@ describe('sync: rate limits and transport faults', () => {
       for (const path of [pathOf(1), pathOf(2)]) assert.ok((await recorded(path)).includes('Second text.'));
       assert.equal((await contentOf(pathOf(0)))?.includes('Second text.'), variant === 'reset-after');
       assert.ok(run.summary.includes(pathOf(0)), 'the summary names the document');
+      assert.equal(run.report.failedWriteRecorded, false);
+      assert.equal(run.report.rejectedDocumentNamed, false, 'a server error or a lost request is not a rejection');
+      assert.equal(run.report.endpointLimitHeadersPresent, false);
       await assertNextRunConverges();
     });
 
@@ -406,6 +417,9 @@ describe('sync: rate limits and transport faults', () => {
     assert.match(run.report.sync?.failed[0]?.error ?? '', /INPUT_ERROR/);
     assert.ok(run.summary.includes(`| ${pathOf(1)} | UpdateDocument |`), 'the summary names the rejected document');
     assert.ok((await recorded(pathOf(1))).includes('First text.'));
+    assert.equal(run.report.writtenDocuments, 2);
+    assert.equal(run.report.rejectedDocumentNamed, true);
+    assert.equal(run.report.failedWriteRecorded, false);
     await assertNextRunConverges();
   });
 
