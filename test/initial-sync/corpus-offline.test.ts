@@ -158,11 +158,11 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
           linksToLinear(body, path, linkMap, spellings);
           const restoredLinks = linksFromLinear(document.content ?? '', path, linkMap, spellings);
           const linkedFiles = findFileLinks(path, body, target => !target.endsWith('.md') && files.has(target));
-          const written = linkedFiles.map(link => ({raw:link.raw, suffix:link.suffix, hash:createHash('sha256').update(files.get(link.target)!).digest('hex')}));
+          const written = linkedFiles.map(link => ({written:link.written, suffix:link.suffix, hash:createHash('sha256').update(files.get(link.target)!).digest('hex')}));
           assert.equal(document.content, withUploadUrls(path, fixText(linksToLinear(body, path, linkMap))), `${path} differs (I1, in Linear's form)`);
           const restored = restoreFileLinks(restoredLinks, written, uploads);
           const recorded = await fixture.remote.run(['show', `refs/mdbisync/linear:${path}`]);
-          assert.deepEqual(recorded.stdout, Buffer.from(head + restored), `${path}: recorded git bytes differ (I1)`);
+          assert.deepEqual(recorded.stdout, Buffer.from(head + (document.content === linksToLinear(withUploadUrls(path, body), path, linkMap) ? restored : fixText(restored))), `${path}: recorded git bytes differ (I1)`);
         }
         assert.equal(live.length, Object.keys(ids).length, 'documents without a path, or duplicates (I8)');
         const keys = live.map((d) => `${d.projectId ?? d.teamId}\0${d.title}`);

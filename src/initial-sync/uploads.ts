@@ -59,8 +59,8 @@ export interface FileLink {
   /** Where the destination's text starts and ends in the body, without angle brackets. */
   from: number;
   to: number;
-  /** The destination as written. */
-  raw: string;
+  /** The destination as written, with its angle brackets when it has them: what the restore puts back. */
+  written: string;
   /** The linked file's path in the repository. */
   target: string;
   /** The destination's query and fragment (`#page=3`), kept after the upload URL. */
@@ -69,7 +69,8 @@ export interface FileLink {
 
 /** What a document's link to a file was before the upload: restored in place of `url + suffix`. */
 export interface WrittenLink {
-  raw: string;
+  /** The destination as the file wrote it, angle brackets included, so it stays a destination wherever it lands. */
+  written: string;
   hash: string;
   suffix: string;
 }
@@ -269,7 +270,7 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
       await uploadMissing(path, [...new Set(fileLinks.map((link) => link.target))]);
       const { uploads } = context;
       const urls = fileLinks.map((link) => uploads.get((linked.get(link.target) as LinkedFile).hash) as string);
-      links.set(path, fileLinks.map((link) => ({ raw: link.raw, hash: (linked.get(link.target) as LinkedFile).hash, suffix: link.suffix })));
+      links.set(path, fileLinks.map((link) => ({ written: link.written, hash: (linked.get(link.target) as LinkedFile).hash, suffix: link.suffix })));
       return replaceRanges(body, fileLinks.map((link, index) => ({ from: link.from, to: link.to, text: (urls[index] as string) + link.suffix })));
     },
 
@@ -286,7 +287,9 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
  * link, image and definition destinations equal to an upload URL (with the
  * link's query and fragment) are touched; the same URL in code or prose
  * stays. The n-th such destination of a file gets the n-th spelling written
- * for it, so two spellings of one link come back as they were.
+ * for it, so two spellings of one link come back as they were. The whole
+ * destination is replaced, angle brackets included, so a spelling that needs
+ * them (a space) keeps them when Linear dropped them around the URL.
  */
 export function restoreFileLinks(body: string, written: readonly WrittenLink[], uploads: UploadMap): string {
   const raws = new Map<string, string[]>();
@@ -294,17 +297,17 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
     const url = uploads.get(link.hash);
     if (url === undefined) continue;
     const key = url + link.suffix;
-    raws.set(key, [...(raws.get(key) ?? []), link.raw]);
+    raws.set(key, [...(raws.get(key) ?? []), link.written]);
   }
   if (raws.size === 0) return body;
   const seen = new Map<string, number>();
   const replacements: Array<{ from: number; to: number; text: string }> = [];
-  for (const { node, range } of destinations(body)) {
+  for (const { node, outer } of destinations(body)) {
     const list = raws.get(node.url);
     if (list === undefined) continue;
     const index = seen.get(node.url) ?? 0;
     seen.set(node.url, index + 1);
-    replacements.push({ ...range, text: list[Math.min(index, list.length - 1)] as string });
+    replacements.push({ ...outer, text: list[Math.min(index, list.length - 1)] as string });
   }
   return replaceRanges(body, replacements);
 }
@@ -312,24 +315,29 @@ export function restoreFileLinks(body: string, written: readonly WrittenLink[], 
 /** Links, images and link definitions in `body` whose destination is a file of the repository. */
 export function findFileLinks(documentPath: string, body: string, isFile: (path: string) => boolean): FileLink[] {
   const result: FileLink[] = [];
-  for (const { node, range } of destinations(body)) {
+  for (const { node, range, outer } of destinations(body)) {
     const target = resolveTarget(documentPath, node.url);
     if (target === null || !isFile(target)) continue;
     const cut = node.url.search(/[?#]/);
-    result.push({ ...range, raw: body.slice(range.from, range.to), target, suffix: cut === -1 ? '' : node.url.slice(cut) });
+    result.push({ ...range, written: body.slice(outer.from, outer.to), target, suffix: cut === -1 ? '' : node.url.slice(cut) });
   }
   return result;
 }
 
 type DestinationNode = Extract<Nodes, { type: 'link' | 'image' | 'definition' }>;
 
-/** Every link, image and definition with the place of its destination's text, in document order. */
-export function destinations(body: string): Array<{ node: DestinationNode; range: { from: number; to: number } }> {
-  const result: Array<{ node: DestinationNode; range: { from: number; to: number } }> = [];
+type Range = { from: number; to: number };
+
+/**
+ * Every link, image and definition with the place of its destination's text,
+ * without (`range`) and with (`outer`) its angle brackets, in document order.
+ */
+export function destinations(body: string): Array<{ node: DestinationNode; range: Range; outer: Range }> {
+  const result: Array<{ node: DestinationNode; range: Range; outer: Range }> = [];
   visit(parse(body), (node) => {
     if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;
-    const range = destinationRange(body, node);
-    if (range !== null) result.push({ node, range });
+    const found = destinationRange(body, node);
+    if (found !== null) result.push({ node, range: { from: found.from, to: found.to }, outer: { from: found.outerFrom, to: found.outerTo } });
   });
   return result.sort((a, b) => a.range.from - b.range.from);
 }
@@ -361,23 +369,23 @@ export function resolveTarget(documentPath: string, url: string): string | null 
 
 /**
  * Where the destination's text is in a link, image or definition node,
- * without angle brackets. Each `](` (or `]:`) in the node is tried in turn,
+ * without and with its angle brackets. Each `](` (or `]:`) in the node is tried in turn,
  * and a candidate counts only when the parser reads it as the node's own
  * destination, escapes and character references included; so brackets in
  * the link text or alt text cannot misplace it. Null when none matches
  * (a reference link, whose destination is in its definition).
  */
-function destinationRange(body: string, node: DestinationNode): { from: number; to: number } | null {
+function destinationRange(body: string, node: DestinationNode): { from: number; to: number; outerFrom: number; outerTo: number } | null {
   const nodeEnd = end(node);
   const opener = node.type === 'definition' ? ']:' : '](';
-  let found: { from: number; to: number } | null = null;
+  let found: { from: number; to: number; outerFrom: number; outerTo: number } | null = null;
   for (let at = body.indexOf(opener, start(node)); at !== -1 && at < nodeEnd; at = body.indexOf(opener, at + 1)) {
     const range = destinationAt(body, at + 2, nodeEnd);
     if (range === null || parsedDestination(body.slice(range.outerFrom, range.outerTo)) !== node.url) continue;
     // A definition's label holds no `]:`, so its first match is its destination. A link's or
     // image's text comes before its destination and may hold a link to the same file, so the
     // last match is the node's own.
-    found = { from: range.from, to: range.to };
+    found = range;
     if (node.type === 'definition') break;
   }
   return found;

@@ -81,10 +81,30 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         if (!await canRead(link.target)) continue;
         const hash = pathHashes.get(link.target)!;
         if (!preferredPaths.has(hash)) preferredPaths.set(hash, link.target);
-        const raw = previousPath === path ? link.raw : posix.relative(posix.dirname(path), link.target).split('/').map(encodeURIComponent).join('/') + link.suffix;
-        written.push({raw, hash, suffix: link.suffix});
+        const raw = previousPath === path ? link.written : posix.relative(posix.dirname(path), link.target).split('/').map(encodeURIComponent).join('/') + link.suffix;
+        written.push({written: previousPath !== path && link.written.startsWith('<') ? `<${raw}>` : raw, hash, suffix: link.suffix});
       }
-      body = restoreFileLinks(body, written, new Map(uploads));
+      // Capture keeps the brackets Linear returned; the shared inverse now
+      // replaces the whole destination, so give it that occurrence's brackets.
+      const spellings = new Map<string, WrittenLink[]>();
+      for (const link of written) {
+        const url = uploads.get(link.hash);
+        if (url === undefined) continue;
+        const key = url + link.suffix;
+        spellings.set(key, [...(spellings.get(key) ?? []), link]);
+      }
+      const occurrences = new Map<string, number>();
+      const shaped: WrittenLink[] = [];
+      for (const {node, outer} of destinations(body)) {
+        const choices = spellings.get(node.url);
+        if (choices === undefined) continue;
+        const index = occurrences.get(node.url) ?? 0;
+        occurrences.set(node.url, index + 1);
+        const link = choices[Math.min(index, choices.length - 1)]!;
+        const inner = link.written.startsWith('<') ? link.written.slice(1, -1) : link.written;
+        shaped.push({...link, written:body[outer.from] === '<' ? `<${inner}>` : inner.replace(/\s/g, encodeURIComponent)});
+      }
+      body = restoreFileLinks(body, shaped, new Map(uploads));
     }
     const references = destinations(body).filter(({node}) => isUpload(node.url) || knownUpload(node.url));
     const replacements: Array<{from: number; to: number; text: string}> = [];
