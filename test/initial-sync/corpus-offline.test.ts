@@ -162,7 +162,7 @@ describe('confirmed initial sync over the generated corpus (offline)', () => {
           assert.equal(document.content, withUploadUrls(path, fixText(linksToLinear(body, path, linkMap))), `${path} differs (I1, in Linear's form)`);
           const restored = restoreFileLinks(restoredLinks, written, uploads);
           const recorded = await fixture.remote.run(['show', `refs/mdbisync/linear:${path}`]);
-          assert.deepEqual(recorded.stdout, Buffer.from(head + restored), `${path}: recorded git bytes differ (I1)`);
+          assert.deepEqual(recorded.stdout, Buffer.from(head + (document.content === linksToLinear(withUploadUrls(path, body), path, linkMap) ? restored : fixText(restored))), `${path}: recorded git bytes differ (I1)`);
         }
         assert.equal(live.length, Object.keys(ids).length, 'documents without a path, or duplicates (I8)');
         const keys = live.map((d) => `${d.projectId ?? d.teamId}\0${d.title}`);

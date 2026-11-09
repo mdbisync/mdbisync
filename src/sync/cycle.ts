@@ -39,6 +39,6 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   if (!captured.ok) return {complete:false, changed, capture:captured};
   await checkpoint('after-capture-push-before-pr');
   // Step 2 will take the captured state to the tracked branch through a pull request.
-  const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, state: captured.state, ...(options.transforms ? { transforms: options.transforms } : {}) });
+  const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, state:captured.state, ...(options.transforms ? { transforms: options.transforms } : {}) });
   return {complete:write.complete, changed:changed || write.changed, capture:captured, write};
 }

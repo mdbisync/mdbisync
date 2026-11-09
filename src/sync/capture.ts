@@ -2,8 +2,9 @@
 // accepted content and its identities in one atomic transaction.
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { loadMapping } from '../mapping/index.ts';
+import { join, posix } from 'node:path';
+import { isMap, parseDocument, stringify } from 'yaml';
+import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { lintText, splitFile } from '../format/index.ts';
@@ -92,6 +93,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const blobs = await readBlobs(git, textEntries.map((entry) => entry.oid));
     const previous = new Map(textEntries.map((entry) => [entry.path, blobs.get(entry.oid)!]));
     const byId = new Map([...ids].map(([path, entry]) => [entry.id, { path, entry }]));
+    const occupied = new Set([...entries.map((entry) => entry.path), ...ids.keys()]);
+    const annotationHead = (path: string): string | undefined => {
+      if (posix.basename(path) !== 'README.md' || !mapping.zones.has(folderOf(path))) return undefined;
+      const prior = previous.get(path)?.toString('utf8');
+      if (prior === undefined) return undefined;
+      const read = readAnnotation(path, prior);
+      return 'annotation' in read && read.annotation !== null ? splitFile(prior).head : undefined;
+    };
     const listed = new Map<string, LinearDocument>();
     const folders = new Map<string, string>();
     const places = annotatedPlaces(mapping.zones).map(({place, folder}) => {
@@ -144,18 +153,18 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const target = placeId(targets, place);
       return 'projectId' in target ? target.projectId !== doc.projectId : doc.projectId !== null || target.teamId !== doc.teamId;
     };
-    const destination = (doc: LinearDocument, occupied: ReadonlySet<string>) => {
+    const destination = (doc: LinearDocument, occupied: ReadonlySet<string>, allocated: ReadonlyMap<string, string> = new Map()) => {
       if (retained.has(doc.id)) return retained.get(doc.id)!;
       const old = byId.get(doc.id);
       const available = new Set(occupied);
-      if (old !== undefined) available.delete(old.path);
+      if (old !== undefined && (!allocated.has(old.path) || allocated.get(old.path) === doc.id)) available.delete(old.path);
       return documentPath(folderFor(doc)!, doc.title, doc.id, available, old?.path, (path) => invalidZone(doc, path));
     };
     // An unchanged source may link a renamed, moved or removed target.
     // Re-read bodies when a path changes so those inbound links are translated too.
     if ([...listed.values()].some((doc) => {
       const old = byId.get(doc.id);
-      return old !== undefined && (!live(doc) || destination(doc, new Set(entries.map((entry) => entry.path))) !== old.path);
+      return old !== undefined && (!live(doc) || destination(doc, occupied) !== old.path);
     })) selected = [...listed.values()];
     const documents = new Map<string, LinearDocument>(listed);
     const work = new Map<string, LinearDocument>();
@@ -164,15 +173,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
     result.documents = documents;
     const changes = new Map<string, Buffer | string | null>();
-    const occupied = new Set(entries.map((entry) => entry.path));
+    const removeBody = (path: string) => changes.set(path, annotationHead(path) ?? null);
     // Only files already present in the branch are link targets until their
     // candidates pass. A blocked rename continues to point at its old file.
     const documentIds = new Map([...ids].filter(([path]) => previous.has(path)).map(([path, entry]) => [path, entry.id]));
     const paths = new Map<string, string>();
     const reservations = new Set(occupied);
+    const allocated = new Map<string, string>();
     for (const doc of [...work.values()].filter(live).sort((a, b) => a.id.localeCompare(b.id))) {
-      const old = byId.get(doc.id);
-      const path = destination(doc, reservations);
+      const path = destination(doc, reservations, allocated);
+      allocated.set(path, doc.id);
       paths.set(doc.id, path);
       reservations.add(path);
     }
@@ -190,7 +200,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (!live(doc)) {
         if (old !== undefined) {
           if (old.entry.saved !== undefined) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
-          changes.set(old.path, null);
+          removeBody(old.path);
           ids.delete(old.path);
           documentIds.delete(old.path);
           result.removed.push(old.path);
@@ -199,9 +209,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       const path = paths.get(doc.id)!;
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
+      const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
         const assets = await downloadAssets(path, doc.content ?? '', uploads, old === undefined ? undefined : prior.body, old?.path);
-        const candidate: Candidate = {doc, path, head: prior.head, assets, files: new Map<string, Buffer | string>([[path, prior.head + assets.body], ...assets.files])};
+        const candidate: Candidate = {doc, path, head, assets, files: new Map<string, Buffer | string>([[path, head + assets.body], ...assets.files])};
         if (old?.path === path) candidate.previousBody = prior.body;
         candidates.set(doc.id, candidate);
         resetTarget(doc.id);
@@ -254,7 +265,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);
       if (old !== undefined && old.path !== candidate.path) {
-        changes.set(old.path, null);
+        removeBody(old.path);
         ids.delete(old.path);
         result.removed.push(old.path);
       }
@@ -325,6 +336,26 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     result.summary = renderCapture(result, gate.configured);
     return result;
   } finally { await gate.close?.(); }
+}
+
+/** Folder configuration remains at its original path; other metadata follows the body. */
+function relocatedHead(head: string): string {
+  const front = findFrontMatter(head);
+  if (front === null) return head;
+  const document = parseDocument(front.yaml, {logLevel:'error', prettyErrors:false});
+  const metadata = document.toJS() as Record<string, unknown>;
+  delete metadata[TEAM_KEY];
+  delete metadata[PROJECT_KEY];
+  document.delete(TEAM_KEY);
+  document.delete(PROJECT_KEY);
+  if (isMap(document.contents) && document.contents.items.length === 0) return '';
+  let yaml: string;
+  try { yaml = document.toString(); }
+  catch {
+    // An unrelated value may alias an annotation's deleted anchor.
+    yaml = stringify(metadata);
+  }
+  return `---\n${yaml}---\n\n`;
 }
 
 function renderCapture(result: CaptureResult, configured: boolean): string {
