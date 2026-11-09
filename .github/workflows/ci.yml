@@ -44,7 +44,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
-          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          key: pre-commit-validate-${{ hashFiles('.pre-commit-config.yaml') }}
       - name: Install pre-commit
         run: pipx install pre-commit==4.6.2
       - name: Published hook and CI example integration
@@ -78,7 +78,10 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
-          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          key: pre-commit-test-${{ matrix.shard }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      # Bundle tests need the release entry points on this runner too.
+      - name: Build test bundles
+        run: npm run build
       # The harness tests commit through pre-commit hooks.
       - name: Install pre-commit
         run: pipx install pre-commit==4.6.2

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { parse } from 'yaml';
 
 for (const [file, job] of [['ci.yml', 'test'], ['ci.yml', 'validate'], ['release.yml', 'build']] as const) {
-  test(`${file} ${job} allows at least 20 minutes for the full test suite and surrounding steps`, async () => {
+  test(`${file} ${job} allows at least 20 minutes for setup and validation`, async () => {
     const workflow = parse(await readFile(new URL(`../../.github/workflows/${file}`, import.meta.url), 'utf8'));
     assert.ok(workflow.jobs?.[job], `${file} must contain the ${job} job`);
     const timeout = workflow.jobs[job]['timeout-minutes'];
