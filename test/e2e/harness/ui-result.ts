@@ -23,6 +23,7 @@ import { snapshotRefs } from './checks.ts';
 import { runChecks } from './checks.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { startFaultProxy } from './fault-proxy.ts';
+import { OwnershipLedger } from './ownership.ts';
 import { BudgetBlockedError, estimate } from './governor.ts';
 import { githubToken } from './github.ts';
 import { forgetHeldRun, heldRunOf, loadHeldRun, saveHeldRun, type HeldRun } from './held-run.ts';
@@ -80,6 +81,7 @@ export async function attachHeldRun(held: HeldRun, deps: UiResultDeps): Promise<
     manifest: held.live.manifest,
     tree: held.live.tree,
     known: { teams: held.live.teams, documentUrlBase: held.live.documentUrlBase },
+    owned: new OwnershipLedger(deps.stateDir, held.runId),
   });
   live.projects = held.live.projects;
   live.seededDocuments = held.live.seededDocuments;
@@ -198,7 +200,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
     }
     ctx.live = await (deps.attach ?? attachHeldRun)(held, deps);
     ctx.sandbox = ctx.live.sandbox;
-    ctx.proxy = await startFaultProxy('https://api.linear.app', { history: held.proxyRequests });
+    ctx.proxy = await startFaultProxy('https://api.linear.app', { history: held.proxyRequests, observer: ctx.owned });
     await takeTeamLocks(ctx, deps.stateDir, held.live.tree.teamZones.keys(), locks);
   } catch (error) {
     await ctx.proxy?.close();

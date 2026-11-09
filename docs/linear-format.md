@@ -100,8 +100,10 @@ Blocks:
   carry one.
 - `$$` math becomes a `math` fence.
 - Tables get outer pipes and short separators (`| -- | -- |`), and a row
-  gets as many cells as the header. A header cell containing only `#` is
-  written as `\#`, preserving its text.
+  gets as many cells as the header. A cell containing only `#` is written
+  as `\#`, preserving its text, and an escaped `#` that starts a cell keeps
+  its escape (a bare one in a body cell is the
+  [`table-hash-cell`](#table-hash-cell) rule).
 - An image does not share a paragraph with text: the text before and after
   it becomes its own paragraph.
 - A list item holding only a link to a relative file other than Markdown
@@ -182,6 +184,22 @@ backslash, and the pipe starts a new cell.
 
 Instead, put the cell text in inline code (`` `a \| b` ``, kept as it is)
 or rephrase without the pipe.
+
+### `table-hash-cell`
+
+A table body cell starting with # becomes a heading. Linear reads heading
+syntax at the start of a body cell (`#` to `######`, alone or followed by a
+space) as a heading: a lone `#` becomes an empty heading and the cell loses
+its text. A header cell, or a `#` later in the cell or not followed by a
+space (`Issue #`, `#5`), is not affected.
+
+```markdown
+| Name | No. |
+| -- | -- |
+| Example | # |
+```
+
+Instead, escape the first hash as `\#`, which keeps the text.
 
 ### `image-in-link`
 

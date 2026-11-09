@@ -67,6 +67,8 @@ class Writer {
   private readonly source: string;
   private readonly tree: Root;
   private readonly options: FixOptions;
+  /** Where the table cell being written starts its text: an escape there stays. */
+  private cellStart: number | undefined;
 
   constructor(source: string, tree: Root, options: FixOptions) {
     this.source = source;
@@ -189,19 +191,23 @@ class Writer {
 
   private table(node: Table): string {
     const width = node.children[0]?.children.length ?? 0;
-    const row = (cells: TableRow, isHeader: boolean): string => {
+    const row = (cells: TableRow): string => {
       const texts = Array.from({ length: width }, (_, index) => {
         const cell = cells.children[index];
+        // Linear reads a hash that starts a body cell as heading syntax, so
+        // an escaped one keeps its escape (lint reports a bare one).
+        const first = cell?.children[0];
+        this.cellStart = first ? start(first) : undefined;
         const text = cell ? this.inline(cell.children).trim() : '';
-        // Linear escapes a header cell containing only a hash. Apply this
-        // after inline rewrites, which drop an unnecessary hash escape.
-        return isHeader && text === '#' ? '\\#' : text;
+        this.cellStart = undefined;
+        // Linear writes a header cell containing only a hash as `\#`.
+        return text === '#' ? '\\#' : text;
       });
       return `| ${texts.join(' | ')} |`;
     };
     const [header, ...rows] = node.children;
     if (!header) return '';
-    return [row(header, true), `| ${Array.from({ length: width }, () => '--').join(' | ')} |`, ...rows.map((cells) => row(cells, false))].join('\n');
+    return [row(header), `| ${Array.from({ length: width }, () => '--').join(' | ')} |`, ...rows.map(row)].join('\n');
   }
 
   /**
@@ -289,7 +295,7 @@ class Writer {
         return;
       }
       case 'text':
-        edits.push(...textEdits(this.source, from, to));
+        edits.push(...textEdits(this.source, from, to, this.cellStart));
         return;
       default:
         return;
@@ -314,8 +320,12 @@ class Writer {
   }
 }
 
-/** Rewrites inside plain text: entities, emoji shortcodes and backslashes Linear spells differently. */
-function textEdits(source: string, from: number, to: number): Edit[] {
+/**
+ * Rewrites inside plain text: entities, emoji shortcodes and backslashes
+ * Linear spells differently. `keepAt` marks the start of a table cell, where
+ * an escaped hash stays.
+ */
+function textEdits(source: string, from: number, to: number, keepAt?: number): Edit[] {
   const edits: Edit[] = [];
   const raw = source.slice(from, to);
   // Character references become the characters when that cannot make markup:
@@ -334,12 +344,13 @@ function textEdits(source: string, from: number, to: number): Edit[] {
   }
   // A backslash before a letter is a literal backslash; Linear doubles it.
   // An escaped `#` inside a line needs no escape and Linear drops it; at the
-  // start of a line's content or at its end it stays (heading syntax).
+  // start of a line's content or a table cell, or at the line's end, it
+  // stays (heading syntax).
   for (const match of raw.matchAll(/\\(.)/g)) {
     const at = from + match.index;
     const next = match[1]!;
     if (/[!-/:-@[-`{-~]/.test(next)) {
-      if (next === '#' && insideLine(source, at)) edits.push({ from: at, to: at + 1, text: '' });
+      if (next === '#' && at !== keepAt && insideLine(source, at)) edits.push({ from: at, to: at + 1, text: '' });
     } else {
       edits.push({ from: at, to: at + 1, text: '\\\\' });
     }

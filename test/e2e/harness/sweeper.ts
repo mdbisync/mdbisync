@@ -4,10 +4,19 @@
 // (registered on this host, process gone) or when they are older than two
 // hours and the run is not live. It never touches a live run, and it only
 // ever matches names of the run patterns, so it is safe to run at any time.
+//
+// A dead run with an ownership record is recovered from that record, not by
+// name patterns: exactly what it created, checked before and after (see
+// ownership.ts). Team-zone documents with its prefix that the record lacks (an
+// engine that ran in Actions, outside the proxy) are added to that recovery. Its registration and record are forgotten only once its
+// refs, open pull requests and projects read back gone and every document it
+// created reads back archived and not trashed.
 
 import { RUN_ID_PATTERN, runNames } from './isolation.ts';
+import type { LinearDocument } from '../../../src/linear/index.ts';
 import type { LinearWorld } from './linear-world.ts';
 import { deadLocalRuns, forgetRun, liveRuns } from './locks.ts';
+import { OwnershipLedger, ownedRuns, readOwnership, recoverOwned, type Recovery } from './ownership.ts';
 import type { SandboxRest } from './github.ts';
 import type { Sandbox } from './sandbox.ts';
 
@@ -26,6 +35,8 @@ export interface SweepReport {
   closedPullRequests: number[];
   deletedProjects: string[];
   archivedDocuments: number;
+  /** Dead runs recovered from their ownership records. */
+  recovered: Recovery[];
   keptLive: string[];
   errors: string[];
 }
@@ -39,7 +50,10 @@ export function shouldSweep(runId: string, createdAt: number | null, now: number
 export async function sweep(targets: SweepTargets, stateDir: string, now = Date.now()): Promise<SweepReport> {
   const live = liveRuns(stateDir, now);
   const dead = deadLocalRuns(stateDir, now);
-  const report: SweepReport = { removedRefs: [], closedPullRequests: [], deletedProjects: [], archivedDocuments: 0, keptLive: [...live].sort(), errors: [] };
+  const report: SweepReport = { removedRefs: [], closedPullRequests: [], deletedProjects: [], archivedDocuments: 0, recovered: [], keptLive: [...live].sort(), errors: [] };
+  // Dead runs whose Linear side is recovered from their records, not by name.
+  const recorded = new Set(ownedRuns(stateDir).filter((runId) => dead.has(runId)));
+  const named = new Map<string, LinearDocument[]>();
   const attempt = async (what: string, action: () => Promise<void>) => {
     try {
       await action();
@@ -79,7 +93,7 @@ export async function sweep(targets: SweepTargets, stateDir: string, now = Date.
 
   await attempt('projects', async () => {
     for (const project of await targets.world.runProjects()) {
-      if (!shouldSweep(project.runId, Date.parse(project.createdAt), now, live, dead)) continue;
+      if (recorded.has(project.runId) || !shouldSweep(project.runId, Date.parse(project.createdAt), now, live, dead)) continue;
       await targets.world.deleteProject(project, project.runId);
       report.deletedProjects.push(project.name);
     }
@@ -92,6 +106,12 @@ export async function sweep(targets: SweepTargets, stateDir: string, now = Date.
       const byRun = new Map<string, Awaited<ReturnType<typeof targets.world.runTeamDocuments>>>();
       for (const document of await targets.world.runTeamDocuments(teamId)) {
         if (!shouldSweep(document.runId, Date.parse(document.createdAt), now, live, dead)) continue;
+        // A recorded run's documents found by name (an engine that ran outside the proxy, in Actions) go to its
+        // recovery, which checks its record first.
+        if (recorded.has(document.runId)) {
+          named.set(document.runId, [...(named.get(document.runId) ?? []), document]);
+          continue;
+        }
         byRun.set(document.runId, [...(byRun.get(document.runId) ?? []), document]);
       }
       for (const [runId, documents] of byRun) {
@@ -99,6 +119,28 @@ export async function sweep(targets: SweepTargets, stateDir: string, now = Date.
       }
     });
   }
+
+  for (const runId of [...recorded].sort()) {
+    await attempt(`recovery of run ${runId}`, async () => {
+      const owned = readOwnership(stateDir, runId);
+      if (owned === null) return;
+      const recovery = await recoverOwned(targets.world, owned, new OwnershipLedger(stateDir, runId), named.get(runId) ?? []);
+      report.recovered.push(recovery);
+      report.deletedProjects.push(...recovery.deletedProjects);
+      report.archivedDocuments += recovery.archivedDocuments;
+      if (recovery.problems.length > 0) throw new Error(recovery.problems.join('; '));
+    });
+  }
+
+  // A dead run is forgotten only once its refs and open pull requests read back gone.
+  if (dead.size > 0) await attempt('refs read back', async () => {
+    const left = (await targets.sandbox.runRefs()).filter((ref) => dead.has(ref.runId)).map((ref) => ref.ref);
+    if (left.length > 0) throw new Error(`still on the sandbox: ${left.join(', ')}`);
+  });
+  if (dead.size > 0) await attempt('pull requests read back', async () => {
+    const open = (await targets.rest.pullRequests('t/', 'open')).filter((pr) => dead.has(/^t\/([0-9a-f]{6})\//.exec(pr.head.ref)?.[1] ?? ''));
+    if (open.length > 0) throw new Error(`still open: ${open.map((pr) => pr.number).join(', ')}`);
+  });
 
   if (report.errors.length === 0) for (const runId of dead) forgetRun(stateDir, runId);
   return report;

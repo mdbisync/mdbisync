@@ -2,8 +2,9 @@
 // action's `stage` step, the plain "Run the security hooks" step and the
 // `apply` step, each as its own process with the inputs, `if:` and `run:` the
 // template gives it. Every `uses:` of this action runs the release's own
-// `action.yml` entry, and the hooks step runs whatever script the stage step
-// names, so a bundle the release left out fails here before it is tagged.
+// `action.yml` entry. The hooks step verifies that stage names the expected
+// release bundle before launching that trusted path, so a bundle the release
+// left out fails here before it is tagged.
 // GitHub and Linear are the fakes, served over local HTTP; nothing leaves the
 // machine. Runs from the source checkout (it reads examples/ and the fakes):
 //
@@ -14,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { CANARY_TOKEN_OBSERVER, CANARY_TOKEN_OBSERVER_FILE, CANARY_EVIDENCE, CANARY_FILE, CANARY_HOOK_STEP, CANARY_PREPARE_STEP, canaryScript, canaryFacts, canaryIsolated } from '../e2e/harness/security-canary.ts';
 import { renderForRun } from '../e2e/harness/workflow-files.ts';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { basename, join, resolve } from 'node:path';
@@ -108,6 +109,15 @@ function runProcess(command: string, args: string[], cwd: string, env: Record<st
     child.on('error', fail);
     child.on('close', (code) => done({ status: code ?? -1, output }));
   });
+}
+
+/** Verify the stage outputs, then launch trusted paths rather than environment values. */
+export async function runHooksStep(release: string, cwd: string, env: Record<string, string>): Promise<{ status: number; output: string }> {
+  // Node resolves the action's module URL through directory symlinks too.
+  const script = join(await realpath(release), 'dist/action-hooks.js');
+  assert.equal(env['MDBISYNC_NODE'], process.execPath, 'unexpected Node executable from stage');
+  assert.equal(env['MDBISYNC_HOOKS'], script, 'unexpected hooks script from stage');
+  return runProcess(process.execPath, [script], cwd, env);
 }
 
 interface Job {
@@ -246,9 +256,9 @@ async function runTemplate(release: string, template: string, inputs: Record<str
     let printed = '';
     if (hooks.if === undefined || condition(hooks.if, context)) {
       const env: Record<string, string> = { ...(await runnerEnv('hooks')), ...Object.fromEntries(Object.entries(hooks.env ?? {}).map(([key, value]) => [key, expand(value, context)])) };
-      // The step's command, run without a shell: the node and script its environment names.
+      // Verify the template command and stage outputs before launching trusted paths.
       assert.equal(hooks.run, HOOKS_RUN, `${template}: the hooks step's command`);
-      const result = await runProcess(env['MDBISYNC_NODE'] ?? '', [env['MDBISYNC_HOOKS'] ?? ''], workspace, env);
+      const result = await runHooksStep(release, workspace, env);
       assert.equal(result.status, 0, `${template} ${HOOKS_STEP}:\n${result.output}`);
       printed = result.output;
       if (job.canary) {
