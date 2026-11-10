@@ -1281,6 +1281,7 @@ describe('git executors', () => {
   it('commit to the sync branch as CI and as a person, recording which interleaving it was', async () => {
     const { ctx, remoteGit, remoteFile } = await fakeRun();
     await assert.rejects(runStep(ctx, { kind: 'git', action: 'ci-fix', args: {} }), ProductError);
+    await commitAsPerson(ctx, new Map([['.pre-commit-config.yaml', `${await remoteFile('.pre-commit-config.yaml')}\ndefault_stages: [pre-commit]\n`]]), 'Set hook stages', true);
     await remoteGit.run(['update-ref', `refs/heads/${ctx.names.syncBranch}`, ctx.names.trackedBranch]);
     await runStep(ctx, { kind: 'git', action: 'ci-fix', args: { fixes: ['stable-fix', 'linear-would-undo'] } });
     ctx.engine.pausedAt = 'after-capture-push-before-pr';
@@ -1295,6 +1296,7 @@ describe('git executors', () => {
     const configured = readHookConfig(await remoteFile('.pre-commit-config.yaml', ctx.names.syncBranch));
     assert.ok(configured.hooks.some((hook) => hook.id === 'aligned-table'));
     assert.ok(configured.hooks.some((hook) => hook.id === 'stable-fix'));
+    assert.deepEqual(parseYaml(await remoteFile('.pre-commit-config.yaml', ctx.names.syncBranch)).default_stages, ['pre-commit']);
     const fixes = await remoteGit.text(['log', '--format=%(trailers:key=Pre-commit-fix,valueonly)', `refs/heads/${ctx.names.syncBranch}`]);
     assert.match(fixes, /aligned-table/);
     assert.match(fixes, /stable-fix/);
@@ -1314,7 +1316,7 @@ describe('git executors', () => {
     assert.deepEqual(await resolveSubject(ctx, 'summary.unstableHookNamed'), { known: true, value: false });
     const scenario = scenarios.find((item) => item.id === 'L2-33')!;
     const targets = scenario.steps.filter((step) => step.kind === 'git' && step.action === 'ci-fix').map((step) => step.args.target);
-    assert.deepEqual(targets, ['first-document', 'other-document']);
+    assert.deepEqual(targets, ['document', 'other-document']);
   });
 
   it('drop the format hook until fault.clear puts it back', async () => {

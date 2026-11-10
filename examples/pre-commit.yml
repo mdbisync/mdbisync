@@ -74,9 +74,12 @@ jobs:
             fi
             # Use pre-commit's Python, which already has its YAML dependency.
             # Limit untrusted output to configured ids before creating trailers.
-            read -r interpreter < "$(command -v pre-commit)"
+            read -r interpreter < "$(command -v pre-commit)" || interpreter=''
             read -ra python_command <<< "${interpreter#\#!}"
-            "${python_command[@]}" - <<'PY'
+            if [[ "${python_command[0]##*/}" != python* ]]; then
+              python_command=(python3)
+            fi
+            "${python_command[@]}" - <<'PY' || printf 'Apply pre-commit fixes\n' > "$RUNNER_TEMP/pre-commit-message"
           import os
           import re
           from pathlib import Path

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 import { createFixture } from '../../src/state/test-helpers.ts';
@@ -44,7 +44,7 @@ for (const file of process.argv.slice(2)) writeFileSync(file, readFileSync(file,
   await mkdir(temp);
   const workflow = parse(await readFile(new URL('../../examples/pre-commit.yml', import.meta.url), 'utf8'));
   const steps = workflow.jobs['pre-commit'].steps as Array<{ name?: string; run?: string }>;
-  const env = { ...process.env, RUNNER_TEMP: temp, PRE_COMMIT_HOME: join(temp, 'cache'), SAME_REPOSITORY: 'true', GITHUB_OUTPUT: join(temp, 'outputs') };
+  const env: NodeJS.ProcessEnv = { ...process.env, RUNNER_TEMP: temp, PRE_COMMIT_HOME: join(temp, 'cache'), SAME_REPOSITORY: 'true', GITHUB_OUTPUT: join(temp, 'outputs') };
   const run = (name: string) => {
     const script = steps.find((step) => step.name === name)?.run;
     assert.ok(script);
@@ -71,4 +71,21 @@ for (const file of process.argv.slice(2)) writeFileSync(file, readFileSync(file,
   const reviewed: Array<{ path: string; hooks?: string[] }> = [{ path: 'unstable.md' }];
   await nameFixingHooks(git, 'HEAD', reviewed);
   assert.equal(reviewed[0]?.hooks, undefined);
+
+  // A shell-wrapped pre-commit and an unavailable metadata parser must still commit fixes.
+  const installed = spawnSync('bash', ['-c', 'command -v pre-commit'], { encoding: 'utf8' });
+  assert.ifError(installed.error);
+  assert.equal(installed.status, 0);
+  const bin = join(temp, 'bin');
+  await mkdir(bin);
+  await writeFile(join(bin, 'pre-commit'), '#!/bin/sh\nexec "$REAL_PRE_COMMIT" "$@"\n', { mode: 0o755 });
+  await writeFile(join(bin, 'python3'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  env.REAL_PRE_COMMIT = installed.stdout.trim();
+  await writeFile(join(git.dir, 'stable.md'), '# Draft revised\n');
+  run('Run all hooks and collect fixes');
+  env.PATH = `${bin}${delimiter}${env.PATH}`;
+  run('Commit fixes or show the fork patch');
+  assert.equal(await readFile(join(git.dir, 'stable.md'), 'utf8'), '# Ready revised\n');
+  assert.equal(await git.text(['show', '-s', '--format=%s', 'HEAD']), 'Apply pre-commit fixes');
+  assert.equal((await git.text(['show', '-s', '--format=%(trailers:key=Pre-commit-fix,valueonly)', 'HEAD'])).trim(), '');
 });

@@ -31,7 +31,7 @@
         "fixes": [
           "stable-fix"
         ],
-        "target": "first-document"
+        "target": "document"
       }
     },
     {

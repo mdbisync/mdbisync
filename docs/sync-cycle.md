@@ -258,7 +258,7 @@ files left out. Tables follow, each only when it has rows:
 | Renamed or moved | Documents renamed or moved, from and to. |
 | Moved to trash | Documents whose files were removed in git. |
 | Left out | Files that stay in git only, with their rules ([files left out](troubleshooting.md#files-left-out)). |
-| CI fixes not written | Left-out files changed by a CI fixing commit, with its hook ids and the rules that prevent writing them to Linear. |
+| CI fixes not written | Files left out before writing by format or mapping checks, with their CI fixing commit's hook ids and the rules that prevent writing them to Linear. |
 
 The current pre-commit workflow records modifying hook ids in `Pre-commit-fix`
 commit trailers. The summary lists the configured hooks on the latest commit
