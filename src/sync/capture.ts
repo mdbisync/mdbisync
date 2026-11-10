@@ -14,7 +14,7 @@ import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, 
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
-import { type CommitIdentity, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
+import { type CommitIdentity, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
@@ -117,6 +117,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   const ids = await readIds(git, state.ids);
   const uploads = await readUploads(git, state.uploads);
   const reserved = await readReservedIds(git, state.ids);
+  // The write step relinks the documents that still name a superseded id; until then a link by it reads back as the
+  // link to its path.
+  const superseded = await readSupersededIds(git, state.ids);
   const gate = options.security ?? await securityGate(git, fetched.tracked);
   const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], heldRemovals:[], leftOut:[], writeBackWarnings:[], summary:''};
   let published = false;
@@ -333,9 +336,19 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const textOf = (candidate: Candidate, targets: ReadonlyMap<string, string>) => {
       let body = candidate.assets.body;
       if (linkBase !== undefined) {
-        const map = {base: linkBase, ids: new Map(targets)};
+        // A link by an id its target did not get (the document was created under another) reads back as the link
+        // to that target, with the spelling the file had.
+        const aliases = new Map([...superseded].filter(([id, path]) => targets.has(path) && targets.get(path) !== id));
+        const map = {base: linkBase, ids: new Map(targets), aliases};
         const seen: LinkSpellings = new Map();
-        if (candidate.previousBody !== undefined) linksToLinear(candidate.previousBody, candidate.path, map, seen);
+        if (candidate.previousBody !== undefined) {
+          linksToLinear(candidate.previousBody, candidate.path, map, seen);
+          if (aliases.size > 0) {
+            const written = new Map(targets);
+            for (const [id, path] of aliases) written.set(path, id);
+            linksToLinear(candidate.previousBody, candidate.path, {base: linkBase, ids: written}, seen);
+          }
+        }
         body = linksFromLinear(body, candidate.path, map, seen);
       }
       // Linear's own spelling of the same document is no change: keep the file's text.
@@ -461,7 +474,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // only holds back, which rereads more and loses nothing.
     const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
     const always = held.size > 0 || heldBefore.size > 0 || (through !== cursor && recordsChange);
-    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always, reserved });
+    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always, reserved, superseded });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.
     if (prepared.oids.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...prepared.oids]);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
@@ -484,7 +497,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           await reconcileDocumentMark({document: doc, entry: ids.get(path)!, linear, blocked,
             persistEntry: async (entry) => {
               ids.set(path, entry);
-              const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, message:'Capture document marks'});
+              const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, superseded, message:'Capture document marks'});
               const updated = {...next, ids:tip};
               const saved = await pushAtomic(git, options.config, (['linear', 'ids', 'uploads'] as const).map((store) => ({ref:stateRef(options.config, store), expected:result.state[store], next:updated[store]})));
               if (!saved.ok) { result.ok = false; result.code = 'state-moved'; throw lostLease; }

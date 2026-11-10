@@ -121,6 +121,8 @@ export interface LinkMap {
   base: string;
   /** Path → id of every document the run synchronizes. */
   ids: ReadonlyMap<string, string>;
+  /** Id → path of ids a document did not get (superseded), which earlier text may still link; read back only. */
+  aliases?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -191,7 +193,7 @@ export function linksFromLinear(content: string, fromPath: string, map: LinkMap,
     const rest = destination.url.slice(prefix.length);
     const hash = rest.indexOf('#');
     const id = hash === -1 ? rest : rest.slice(0, hash);
-    const path = paths.get(id);
+    const path = paths.get(id) ?? map.aliases?.get(id);
     if (path === undefined) return undefined;
     return `<${relativeLink(fromPath, path)}${hash === -1 ? '' : rest.slice(hash)}>`;
   });
