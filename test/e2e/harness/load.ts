@@ -4,6 +4,9 @@
 // and engine runs.
 
 import { setTimeout as delay } from 'node:timers/promises';
+import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
+import { paragraphEdit } from './fixtures.ts';
+import { MARKERS } from './conflicts.ts';
 import { Rng } from '../../corpus/rng.ts';
 
 export type Actor = 'editor-a' | 'editor-b' | 'git';
@@ -28,6 +31,30 @@ export interface BurstOptions {
   documents: readonly string[];
 }
 
+/** Used by the scheduler, content budget and token-width bound. */
+export function burstEditCounts(options: Omit<BurstOptions, 'documents'>): { linear: number; git: number } {
+  const count = (rate: number) => Math.ceil(Math.max(0, rate) * options.durationMs / 60_000);
+  if (![options.durationMs, options.linearEditsPerMinute, options.gitPushesPerMinute].every(Number.isFinite) || options.durationMs < 0) {
+    throw new Error('burst duration and edit rates must be finite numbers, with a nonnegative duration');
+  }
+  return { linear: count(options.linearEditsPerMinute), git: count(options.gitPushesPerMinute) };
+}
+
+/** Reserve all appends, duplicated conflict versions, and a marker set per edit on every candidate. */
+export function burstDocuments(
+  documents: ReadonlyMap<string, readonly string[]>,
+  options: Omit<BurstOptions, 'documents'>,
+  lastToken: string,
+): string[] {
+  const counts = burstEditCounts(options);
+  const edits = counts.linear + counts.git;
+  const growth = paragraphEdit('', undefined, lastToken).length * edits;
+  const markers = `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length * edits;
+  const paths = [...documents].filter(([, versions]) => versions.length > 0 && versions.every((text) => 2 * (text.length + growth) + markers <= CONTENT_LIMIT)).map(([path]) => path);
+  if (paths.length === 0) throw new Error('no document has room for the burst edits');
+  return paths;
+}
+
 export interface BurstResult {
   linearEdits: number;
   gitPushes: number;
@@ -41,14 +68,15 @@ export interface BurstResult {
  */
 export async function burst(driver: LoadDriver, options: BurstOptions): Promise<BurstResult> {
   if (options.documents.length === 0) throw new Error('a burst needs documents to edit');
+  const counts = burstEditCounts(options);
   const start = driver.now();
   const end = start + options.durationMs;
   const result: BurstResult = { linearEdits: 0, gitPushes: 0, syncRuns: 0 };
   let failed: unknown;
-  const scheduled = async (perMinute: number, act: (index: number) => Promise<void>) => {
+  const scheduled = async (perMinute: number, count: number, act: (index: number) => Promise<void>) => {
     if (perMinute <= 0) return;
     const interval = 60_000 / perMinute;
-    for (let index = 0; index * interval < options.durationMs && failed === undefined; index += 1) {
+    for (let index = 0; index < count && failed === undefined; index += 1) {
       await driver.sleep(start + index * interval - driver.now());
       await act(index);
     }
@@ -63,11 +91,11 @@ export async function burst(driver: LoadDriver, options: BurstOptions): Promise<
     }
   })());
   await Promise.all([
-    guard(scheduled(options.linearEditsPerMinute, async (index) => {
+    guard(scheduled(options.linearEditsPerMinute, counts.linear, async (index) => {
       await driver.linearEdit(index % 2 === 0 ? 'editor-a' : 'editor-b', options.documents[index % options.documents.length] as string);
       result.linearEdits += 1;
     })),
-    guard(scheduled(options.gitPushesPerMinute, async (index) => {
+    guard(scheduled(options.gitPushesPerMinute, counts.git, async (index) => {
       await driver.gitEdit([options.documents[(index * 7 + 3) % options.documents.length] as string]);
       result.gitPushes += 1;
     })),

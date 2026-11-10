@@ -32,7 +32,7 @@ import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineC
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
-import { burst, realClock, soak, type LoadDriver } from './load.ts';
+import { burst, burstDocuments, burstEditCounts, realClock, soak, type LoadDriver } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
@@ -45,7 +45,7 @@ import { writeError } from './fault-proxy.ts';
 import { lfsEndpoint, lfsUrlEnv, startLfsFaultProxy } from './lfs-fault-proxy.ts';
 import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
 import {
-  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
+  commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import type { WorkflowRun } from './github.ts';
 import { environmentBlocker, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun } from './workflows.ts';
@@ -499,6 +499,17 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
   };
 }
 
+/**
+ * How a run failed: at its failed setup check (named with the code and detail) or with its code. Null for a
+ * run that did not fail (a partial run is `ok`, and the next one goes on) or failed without a code.
+ */
+export function runFailure(report: Record<string, unknown> | null | undefined): string | null {
+  if (report?.['ok'] !== false || typeof report['code'] !== 'string') return null;
+  const checks = Array.isArray(report['setupChecks']) ? (report['setupChecks'] as Array<{ name?: unknown; state?: unknown; detail?: unknown }>) : [];
+  const check = checks.find((candidate) => candidate.state === 'failed');
+  return check === undefined ? `with ${report['code']}` : `at the setup check ${String(check.name)} (${report['code']}): ${String(check.detail)}`;
+}
+
 const RUN: Record<string, Executor> = {
   'run.sync': (ctx, args) => runCommand(ctx, 'sync', args),
   'run.initial-sync': (ctx, args) => runCommand(ctx, 'initial-sync', args),
@@ -517,9 +528,16 @@ const RUN: Record<string, Executor> = {
   'run.resume-until-complete': async (ctx, args) => {
     // Recovery continues the sync unless the scenario names the initial sync (L1-16).
     const command = args.command === 'initial-sync' ? 'initial-sync' : 'sync';
+    // A run that fails the same way twice in a row (a failed setup check, a refused sync) fails so on every
+    // resume: stop there and name it. One such failure may be passing (Linear once showed a token no team).
+    let previous: string | null = null;
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await runCommand(ctx, command, args);
-      if (ctx.engine.results.at(-1)?.report?.['complete'] === true) return;
+      const report = ctx.engine.results.at(-1)?.report;
+      if (report?.['complete'] === true) return;
+      const stop = runFailure(report);
+      if (stop !== null && stop === previous) throw new ProductError(`the run failed twice in a row ${stop}; resuming cannot clear it`);
+      previous = stop;
     }
     throw new ProductError('the run did not complete after 20 resumes');
   },
@@ -673,12 +691,26 @@ const RUN: Record<string, Executor> = {
     ctx.observations.set('tokens.byOutcome', byOutcome);
   },
   'run.burst': async (ctx, args) => {
-    const result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), {
+    const options = {
       durationMs: Number(args.durationSeconds ?? 900) * 1000,
       linearEditsPerMinute: Number(args.linearEditsPerMinute ?? 50),
       gitPushesPerMinute: Number(args.gitPushesPerMinute ?? 1),
-      documents: documentPaths(ctx),
-    });
+    };
+    const sides = await readSides(ctx);
+    const candidates = new Map<string, string[]>();
+    for (const path of documentPaths(ctx)) {
+      const file = sides.files.get(path);
+      const id = sides.ids.get(path)?.id;
+      const document = id === undefined ? undefined : sides.documents.get(id);
+      if (file === undefined || document === undefined) throw new ProductError('a burst target is missing from the tracked files or recorded Linear documents');
+      candidates.set(path, [file, document.content ?? '']);
+    }
+    // Git pushes can retry three times, consuming tokens even when their push fails.
+    const counts = burstEditCounts(options);
+    const maxTokens = counts.linear + 4 * counts.git;
+    const lastToken = `${ctx.names.runId}-${String(ctx.sequence + maxTokens).padStart(3, '0')}`;
+    const documents = burstDocuments(candidates, options, lastToken);
+    const result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), { ...options, documents });
     ctx.observations.set('report.generatedLinearEdits', result.linearEdits);
     ctx.observations.set('report.generatedGitPushes', result.gitPushes);
   },
@@ -925,14 +957,19 @@ const GIT: Record<string, Executor> = {
     ctx.observations.set('git.movedFolder', folder.documents.map((path) => ({ from: path, to: `${renamed}${path.slice(folder.path.length)}` })));
   },
   'git.annotation': async (ctx) => {
-    const folders = projectFolders(ctx);
-    const [own, other] = [folders[0], folders.find((candidate) => candidate.project !== folders[0]?.project)];
-    if (own === undefined || other === undefined) throw new EnvBlockedError('the slice needs two project folders');
+    // The folder moves to a project of its own team that no folder maps yet: the engine refuses a project
+    // of another team (annotation-target-not-found, the folder still inherits its team) and one that another
+    // folder already maps (annotation-target-shared). The project is a run helper, so cleanup deletes it.
+    const own = projectFolders(ctx)[0];
+    if (own === undefined) throw new EnvBlockedError('the slice has no project folder');
     const git = await ctx.person();
     await pull(git, ctx);
+    const key = folderTeam(git.dir, own.folder);
+    if (key === null) throw new EnvBlockedError(`no annotation names the team of ${own.folder}`);
+    const target = await createHelperProject(ctx, 'annotation-target', 'ANNOTATION_TARGET', key);
     const readme = `${own.folder}/README.md`;
-    await commitAsPerson(ctx, new Map([[readme, (await readWorking(git, readme)).split(own.project).join(other.project)]]), 'Move the folder to the other project');
-    ctx.observations.set('git.annotation', { folder: own.folder, project: other.project });
+    await commitAsPerson(ctx, new Map([[readme, (await readWorking(git, readme)).split(own.project).join(target.name)]]), 'Move the folder to the other project');
+    ctx.observations.set('git.annotation', { folder: own.folder, project: target.name });
   },
   'git.image-add': async (ctx, args) => {
     const storage = args.storage === 'regular' ? 'regular' : 'lfs';
@@ -1322,10 +1359,7 @@ const LINEAR: Record<string, Executor> = {
       setTarget(ctx, path, id);
       if (variant === 'unmapped-project') {
         // A run project that no folder names; cleanup deletes it with the run's projects.
-        const team = [...world.teams.values()][0];
-        if (team === undefined) throw new EnvBlockedError('the test workspace has no team');
-        const unmapped = await world.world.createProject(ctx.names.helperProject('unmapped'), [team.id]);
-        world.projects.set('UNMAPPED', unmapped);
+        const unmapped = await createHelperProject(ctx, 'unmapped', 'UNMAPPED');
         await editor.updateDocument(id, { projectId: unmapped.id });
       } else if (variant === 'trash') {
         await editor.trashDocument(id);

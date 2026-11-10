@@ -239,6 +239,10 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   run. The CLI uses `MDBISYNC_MERGE_GRACE_SECONDS`. Later runs read an
   unchanged head's checks once, without waiting. A moved head cannot merge
   using the old head's checks.
+- Checks still pending, queued or never started `check-deadline-minutes`
+  (default `60`, range `10`–`1440`) after the sync pushed a head count as
+  failed. The CLI uses `MDBISYNC_CHECK_DEADLINE_MINUTES`. The sync never
+  reruns a check; a check rerun on the same head counts by its latest result.
 - A check that fails is a setup error: the run summary names it, the run
   exits with code 3, and the pull request stays open until the repository's
   checks pass Linear's form. Tracked-branch changes are not written to Linear

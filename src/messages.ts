@@ -49,6 +49,7 @@ export const MESSAGES = {
   'inputs.app-slug-required': "the input app-slug is required: give it the App token step's output app-slug",
   'inputs.app-slug': 'the input app-slug must be a GitHub App slug (letters, digits and hyphens)',
   'inputs.merge-grace': 'the input merge-grace-seconds must be an integer from 0 to 120',
+  'inputs.check-deadline': 'the input check-deadline-minutes must be an integer from 10 to 1440',
   'inputs.direction': 'the input direction {problem} (initial sync never picks a direction itself)',
   'inputs.direction-missing': 'is required',
   'inputs.direction-unknown': 'must be one of {directions}, not "{direction}"',
