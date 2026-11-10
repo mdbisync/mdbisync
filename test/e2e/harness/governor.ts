@@ -3,11 +3,12 @@
 // the app shares it, also runs of other harness processes. Before a scenario
 // the governor reads the app's `rateLimitStatus` and waits while what is
 // left is below the scenario's estimate; it caps the workers per app with
-// slots shared by every harness process on the host, and spreads workers over
-// every app the secrets list. Only one `full` run at a time.
+// the shared Git admission store used by the live CLI. Local-only instances
+// retain host slots for offline tests and exclusive drivers. Full slices
+// exclude all other shared reservations.
 
 import { randomUUID } from 'node:crypto';
-import type { SharedAdmission } from './shared-state.ts';
+import { ZoneBusyError, type SharedAdmission } from './shared-state.ts';
 import { readRateLimitHeaders } from '../../../src/linear/rate-limit.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { RateLimitStatus } from '../../../src/linear/index.ts';
@@ -104,7 +105,7 @@ export interface Grant {
   waitedMs: number;
   budgetBefore: Budget;
   owner?: string;
-  claimZones?(zones: readonly string[]): Promise<void>;
+  claimZones?(zones: readonly string[], signal?: AbortSignal): Promise<void>;
   release(): void | Promise<void>;
 }
 
@@ -211,6 +212,7 @@ export class Governor {
     if (apps.length === 0) throw new Error('unknown OAuth app');
     const need = { requests: Math.min(estimated.requests, MAX_ADMISSION.requests), complexity: Math.min(estimated.complexity, MAX_ADMISSION.complexity) };
     for (;;) {
+      let retryAt = Infinity;
       for (const app of apps) {
         const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: scenario.slice === 'full', ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
           readBudget: async () => {
@@ -218,15 +220,32 @@ export class Governor {
             return this.#withObserved(app.name, await app.readBudget(), at);
           },
         });
-        if (admission.admitted) return {
-          app, owner, waitedMs: this.#now() - started, budgetBefore: admission.budget,
-          claimZones: (zones) => shared.claim(runId, owner, zones),
+        if (!admission.admitted) {
+          const budget = admission.budget;
+          const shortage = budget !== undefined && (budget.requestsRemaining - RESERVE.requests < need.requests || budget.complexityRemaining - RESERVE.complexity < need.complexity);
+          retryAt = Math.min(retryAt, shortage ? Math.max(budget!.resetAt + 1000, this.#now() + 5000) : this.#now() + RESERVATION_POLL_MS);
+          continue;
+        }
+        return {
+          app, owner, waitedMs: this.#now() - started, budgetBefore: admission.budget!,
+          claimZones: async (zones, signal) => {
+            const until = this.#now() + (options.maxWaitMs ?? MAX_BUDGET_WAIT_MS);
+            for (;;) {
+              signal?.throwIfAborted();
+              try { await shared.claim(runId, owner, zones); return; }
+              catch (error) {
+                if (!(error instanceof ZoneBusyError)) throw error;
+                if (this.#now() >= until) throw new BudgetBlockedError('shared team zone remained held');
+                await sleep(500, undefined, signal === undefined ? {} : { signal });
+              }
+            }
+          },
           release: () => shared.release(runId, owner),
         };
       }
-      if (this.#now() + RESERVATION_POLL_MS > deadline) throw new BudgetBlockedError('shared admission: budget, worker slots or full slice remained reserved');
+      if (retryAt > deadline) throw new BudgetBlockedError('shared admission: budget, worker slots or full slice remained reserved');
       options.log?.('shared admission: waiting for app budget, worker slot or exclusive full slice');
-      await this.#sleep(RESERVATION_POLL_MS);
+      await this.#sleep(Math.max(0, retryAt - this.#now()));
     }
   }
 

@@ -158,7 +158,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   const scenario = scenarios.find((candidate) => candidate.id === held.scenarioId);
   if (scenario === undefined) throw new Error(`the held run is of scenario ${held.scenarioId}, which the scenario set no longer has`);
   if (held.holdUntil <= Date.now()) {
-    throw new Error(`the hold of run ${held.runId} ended at ${new Date(held.holdUntil).toISOString()}; the sweeper removes what it kept. Run ${scenario.id} again.`);
+    throw new Error(`the hold of run ${held.runId} ended at ${new Date(held.holdUntil).toISOString()}; recover its retained reservation after verifying all writers stopped. Run ${scenario.id} again.`);
   }
   const itemOf = checkAnswers(scenario, held, answers);
   // Nothing new answered where the run stopped: nothing to take up.
@@ -207,7 +207,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
       if (team === undefined) throw new EnvBlockedError('held run team is unavailable');
       return team.id;
     });
-    await grant?.claimZones?.(zoneIds);
+    await grant?.claimZones?.(zoneIds, ctx.signal);
     await takeTeamLocks(ctx, deps.stateDir, held.live.tree.teamZones.keys(), locks);
   } catch (error) {
     await ctx.proxy?.close();

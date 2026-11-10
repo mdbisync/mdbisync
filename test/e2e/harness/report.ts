@@ -167,6 +167,7 @@ export function evidenceSummary(report: HarnessReport): string {
     `# Evidence: scenario run ${report.harnessRunId}`,
     '',
     `- Host: ${report.host}; started ${report.startedAt}; finished ${report.finishedAt}.`,
+    ...(report.selection['teams'] === undefined ? [] : [`- Partial corpus: selected teams ${JSON.stringify(report.selection['teams'])}; these results do not replace full catalog status.`]),
     `- Scenarios: ${report.results.length}; ${RESULTS.map((result) => `${result}: ${counts[result]}`).join(', ')}.`,
     `- Linear requests: engine ${engine}, harness editors ${harness}, harness app reads ${appReads}; budget waits ${Math.round(waited / 1000)} s.`,
     `- Cleanup failures: ${cleanupFailures.length === 0 ? 'none' : cleanupFailures.join(', ')}.`,

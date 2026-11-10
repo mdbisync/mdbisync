@@ -156,14 +156,29 @@ force, and retry competing updates after rereading state and app budget.
 
 Reservations never expire automatically: failed cleanup, a UI hold or a killed
 writer keeps its teams and app capacity reserved. To recover an abandoned
-reservation, first prove its writer and any workflow/engine children stopped,
-then recover its exact ownership record and verify refs, pull requests,
-projects and documents cleaned up before releasing that reservation through
-`SharedAdmission.release(runId, owner)`. Do not remove the control branch or
-release a reservation merely because a heartbeat is old. Automatic sweeping
-leaves these reservations alone; it continues to recover unreserved older
-runs by its existing rules. Keep the owning run's state and output folders
-until recovery succeeds.
+reservation, first prove its writer and any workflow/engine children stopped.
+Then use its original local state directory and the explicit recovery command:
+
+```sh
+node test/e2e/harness/cli.ts recover <run-id> --writer-stopped
+```
+
+`--writer-stopped` confirms that check; the command never infers death from a
+timeout. It requires the local ownership record, rotates shared ownership so
+old saved UI continuations cannot resume, and cleans only the requested run
+through the existing archival recovery. It reads trash before and after and
+releases the reservation only after cleanup and census checks pass. Failed
+recovery retains both the record and shared reservation for a safe retry.
+Do not delete the control branch or release a reservation merely because a
+heartbeat is old. Ordinary sweeping leaves shared reservations alone and
+continues recovering unreserved older runs by its existing rules. Preserve the
+owning run's state/output folders until recovery succeeds.
+
+Shared Git credentials refresh before installation-token expiry. Each command
+removes its disposable local control object cache on exit; ownership records,
+UI holds and corpus caches stay in the state folder. When a team is busy,
+ordinary runs wait with cancellation and a deadline. App-budget shortages wait
+for the upstream reset; full/worker contention does not poll Linear budget.
 
 Use one upgraded harness and the same sandbox URL for all cooperating
 processes; older harnesses and custom drivers require an exclusive window.

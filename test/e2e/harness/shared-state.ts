@@ -2,7 +2,7 @@
 // observed tip cannot both fast-forward it. Reservations never expire:
 // cleanup must finish before another writer can use the same zone.
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Git } from '../../../src/state/git.ts';
@@ -16,9 +16,11 @@ export interface Reservation extends Estimate {
   full: boolean;
   zones: string[];
   revision?: string;
+  recovering?: boolean;
 }
 export interface SharedState { version: 1; runs: Reservation[] }
 export interface StateStore {
+  close?(): Promise<void>;
   read(): Promise<SharedState>;
   update<T>(change: (state: SharedState) => T | Promise<T>): Promise<T>;
 }
@@ -30,6 +32,7 @@ export function parseSharedState(text: string): SharedState {
   const zones = new Set<string>();
   for (const entry of state.runs) {
     if (!/^[0-9a-f]{6}$/.test(entry.runId) || ids.has(entry.runId) || typeof entry.owner !== 'string' || entry.owner.length < 16 ||
+        (entry.revision !== undefined && typeof entry.revision !== 'string') || (entry.recovering !== undefined && typeof entry.recovering !== 'boolean') ||
         typeof entry.app !== 'string' || entry.app.length === 0 || typeof entry.full !== 'boolean' || !Array.isArray(entry.zones) ||
         !Number.isFinite(entry.requests) || entry.requests < 0 || !Number.isFinite(entry.complexity) || entry.complexity < 0) {
       throw new Error('invalid shared admission reservation');
@@ -44,26 +47,53 @@ export function parseSharedState(text: string): SharedState {
   return state;
 }
 
+export class ZoneBusyError extends Error {}
+
+/** Only known optimistic-update conflicts are retried; other failures stop. */
+export function isConcurrentPush(output: string): boolean {
+  return /\[rejected\].*(fetch first|non-fast-forward)|\[remote rejected\].*(failed to update ref|reference already exists|incorrect old value provided)/.test(output) ||
+    /cannot lock ref[^\n]*is at [0-9a-f]+ but expected [0-9a-f]+/.test(output);
+}
+
+/** Cache short-lived installation credentials, sharing in-flight refreshes. */
+export function refreshingGitEnv(load: () => Promise<Record<string, string>>, now: () => number = Date.now): () => Promise<Record<string, string>> {
+  let cached: { until: number; value: Promise<Record<string, string>> } | undefined;
+  return async () => {
+    if (cached === undefined || now() >= cached.until) cached = { until: now() + 45 * 60_000, value: Promise.resolve().then(load) };
+    const current = cached;
+    try { return await current.value; }
+    catch (error) { if (cached === current) cached = undefined; throw error; }
+  };
+}
+
 export class GitStateStore implements StateStore {
   readonly #git: Git;
   readonly #url: string;
+  readonly #dir: string;
+  readonly #env: Record<string, string> | (() => Promise<Record<string, string>>);
   readonly #ready: Promise<unknown>;
-  constructor(options: { stateDir: string; url: string; env?: Record<string, string> }) {
+  constructor(options: { stateDir: string; url: string; env?: Record<string, string> | (() => Promise<Record<string, string>>) }) {
     // Each process gets its own object directory: no fetch/index locks can
     // serialize unrelated hosts or accidentally overwrite another fetch.
     const dir = join(options.stateDir, 'control', randomUUID());
     mkdirSync(dir, { recursive: true });
-    this.#git = new Git(dir, { ...options.env, GIT_AUTHOR_NAME: 'Scenario Harness', GIT_AUTHOR_EMAIL: 'harness@example.com', GIT_COMMITTER_NAME: 'Scenario Harness', GIT_COMMITTER_EMAIL: 'harness@example.com' });
+    this.#dir = dir;
+    this.#env = options.env ?? {};
+    this.#git = new Git(dir, { GIT_AUTHOR_NAME: 'Scenario Harness', GIT_AUTHOR_EMAIL: 'harness@example.com', GIT_COMMITTER_NAME: 'Scenario Harness', GIT_COMMITTER_EMAIL: 'harness@example.com' });
     this.#url = options.url;
     this.#ready = this.#git.run(['init', '--bare', '--quiet']);
   }
+  async #auth(): Promise<Record<string, string>> { return typeof this.#env === 'function' ? this.#env() : this.#env; }
+  async close(): Promise<void> {
+    try { await this.#ready; } finally { rmSync(this.#dir, { recursive: true, force: true }); }
+  }
   async #snapshot(): Promise<{ tip: string | null; state: SharedState }> {
     await this.#ready;
-    const listing = await this.#git.text(['ls-remote', '--refs', this.#url, CONTROL_REF]);
+    const listing = await this.#git.text(['ls-remote', '--refs', this.#url, CONTROL_REF], { env: await this.#auth() });
     const tip = listing.trim().split(/\s+/)[0] || null;
     if (tip === null) return { tip, state: { version: 1, runs: [] } };
     if (!/^[0-9a-f]{40,64}$/.test(tip)) throw new Error('invalid shared admission ref');
-    await this.#git.run(['fetch', '--quiet', '--no-write-fetch-head', this.#url, tip]);
+    await this.#git.run(['fetch', '--quiet', '--no-write-fetch-head', this.#url, tip], { env: await this.#auth() });
     return { tip, state: parseSharedState(await this.#git.text(['show', `${tip}:state.json`])) };
   }
   async read(): Promise<SharedState> {
@@ -85,10 +115,10 @@ export class GitStateStore implements StateStore {
         const tree = (await this.#git.text(['mktree'], { input: `100644 blob ${blob}\tstate.json\n` })).trim();
         // The nonce also distinguishes identical concurrent updates.
         const commit = (await this.#git.text(['commit-tree', tree, ...(snapshot.tip === null ? [] : ['-p', snapshot.tip]), '-m', `Scenario admission ${randomUUID()}`])).trim();
-        const pushed = await this.#git.run(['push', '--porcelain', this.#url, `${commit}:${CONTROL_REF}`], { okCodes: [0, 1] });
+        const pushed = await this.#git.run(['push', '--porcelain', this.#url, `${commit}:${CONTROL_REF}`], { okCodes: [0, 1], env: await this.#auth() });
         if (pushed.code === 0) return result;
         // Retry only a proven competing ref update, never access failures.
-        if (!/\[rejected\].*(fetch first|non-fast-forward)|\[remote rejected\].*(failed to update ref|reference already exists|incorrect old value provided)/.test(pushed.stdout.toString())) {
+        if (!isConcurrentPush(pushed.stdout.toString() + pushed.stderr)) {
           throw new Error('shared admission push failed');
         }
       } catch { throw new Error('shared admission update failed'); }
@@ -101,20 +131,19 @@ export class GitStateStore implements StateStore {
 export class SharedAdmission {
   readonly store: StateStore;
   constructor(store: StateStore) { this.store = store; }
-  async reserve(options: { runId: string; owner: string; app: string; full: boolean; resume?: boolean; need: Estimate; maxWorkers: number; reserve: Estimate; readBudget: () => Promise<Budget> }): Promise<{ admitted: boolean; budget: Budget }> {
+  async reserve(options: { runId: string; owner: string; app: string; full: boolean; resume?: boolean; need: Estimate; maxWorkers: number; reserve: Estimate; readBudget: () => Promise<Budget> }): Promise<{ admitted: boolean; budget?: Budget }> {
     return this.store.update(async (state) => {
       const existing = state.runs.find((entry) => entry.runId === options.runId);
-      if (existing !== undefined && !(options.resume && existing.owner === options.owner && existing.app === options.app)) throw new Error('run id already has a shared reservation');
+      if (existing !== undefined && !(options.resume && !existing.recovering && existing.owner === options.owner && existing.app === options.app && existing.full === options.full)) throw new Error('run id already has a shared reservation');
       if (options.resume && existing === undefined) throw new Error('held run has no matching shared reservation');
       // Read afresh after every conflicting state update, including releases:
       // a stale read must not forget spending of a just-completed run.
-      const budget = await options.readBudget();
       const others = state.runs.filter((entry) => entry !== existing);
       const sameApp = others.filter((entry) => entry.app === options.app);
+      if ((options.full ? others.length > 0 : others.some((entry) => entry.full)) || sameApp.length >= options.maxWorkers) return { admitted: false };
+      const budget = await options.readBudget();
       const used = sameApp.reduce((sum, entry) => ({ requests: sum.requests + entry.requests, complexity: sum.complexity + entry.complexity }), { requests: 0, complexity: 0 });
-      const admitted = !(options.full ? others.length > 0 : others.some((entry) => entry.full)) &&
-        sameApp.length < options.maxWorkers &&
-        budget.requestsRemaining - options.reserve.requests - used.requests >= options.need.requests &&
+      const admitted = budget.requestsRemaining - options.reserve.requests - used.requests >= options.need.requests &&
         budget.complexityRemaining - options.reserve.complexity - used.complexity >= options.need.complexity;
       if (admitted) {
         if (existing === undefined) state.runs.push({ runId: options.runId, owner: options.owner, app: options.app, full: options.full, zones: [], ...options.need });
@@ -134,9 +163,21 @@ export class SharedAdmission {
       const entry = state.runs.find((run) => run.runId === runId && run.owner === owner);
       if (entry === undefined) throw new Error('shared reservation ownership lost');
       const wanted = [...new Set(zones)].sort();
-      if (state.runs.some((run) => run !== entry && run.zones.some((zone) => wanted.includes(zone)))) throw new Error('team zone held by another run');
+      if (state.runs.some((run) => run !== entry && run.zones.some((zone) => wanted.includes(zone)))) throw new ZoneBusyError('team zone held by another run');
       entry.zones = [...new Set([...entry.zones, ...wanted])].sort();
     });
+  }
+  /** Only after the caller has verified the writer and all children stopped.
+   * Rotate ownership so an old saved UI hold cannot resume during recovery. */
+  async beginRecovery(runId: string, previousOwner: string): Promise<string> {
+    const owner = randomUUID();
+    await this.store.update((state) => {
+      const entry = state.runs.find((run) => run.runId === runId && run.owner === previousOwner);
+      if (entry === undefined) throw new Error('shared reservation changed before recovery');
+      entry.owner = owner;
+      entry.recovering = true;
+    });
+    return owner;
   }
   async release(runId: string, owner: string): Promise<void> {
     await this.store.update((state) => {

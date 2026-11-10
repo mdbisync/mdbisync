@@ -26,6 +26,8 @@ export const SWEEP_AGE_MS = 2 * 3_600_000;
 export interface SweepTargets {
   /** Required by the live CLI; omitted only by isolated offline tests. */
   shared?: SharedAdmission;
+  /** Explicit stopped-writer recovery, after rotating shared ownership. */
+  recovering?: string;
   sandbox: Sandbox;
   rest: SandboxRest;
   world: LinearWorld;
@@ -53,9 +55,17 @@ export function shouldSweep(runId: string, createdAt: number | null, now: number
 export async function sweep(targets: SweepTargets, stateDir: string, now = Date.now()): Promise<SweepReport> {
   const live = liveRuns(stateDir, now);
   // Any shared read error stops before the first remote cleanup mutation.
-  for (const runId of await targets.shared?.liveRuns() ?? []) live.add(runId);
+  const shared = await targets.shared?.store.read();
+  for (const entry of shared?.runs ?? []) live.add(entry.runId);
+  const recovering = targets.recovering;
+  if (recovering !== undefined) {
+    if (!shared?.runs.some((entry) => entry.runId === recovering && entry.recovering)) throw new Error('recovery requires a fenced shared reservation');
+    live.delete(recovering);
+  }
   const dead = deadLocalRuns(stateDir, now);
   for (const runId of live) dead.delete(runId);
+  if (recovering !== undefined) { dead.clear(); dead.add(recovering); }
+  const canSweep = (runId: string, createdAt: number | null) => (recovering === undefined || recovering === runId) && shouldSweep(runId, createdAt, now, live, dead);
   const report: SweepReport = { removedRefs: [], closedPullRequests: [], deletedProjects: [], archivedDocuments: 0, recovered: [], keptLive: [...live].sort(), errors: [] };
   // Dead runs whose Linear side is recovered from their records, not by name.
   const recorded = new Set(ownedRuns(stateDir).filter((runId) => dead.has(runId)));
@@ -68,12 +78,21 @@ export async function sweep(targets: SweepTargets, stateDir: string, now = Date.
     }
   };
 
+  await attempt('pull requests', async () => {
+    for (const pr of await targets.rest.pullRequests('t/', 'open')) {
+      const runId = /^t\/([0-9a-f]{6})\//.exec(pr.head.ref)?.[1];
+      if (runId === undefined || !canSweep(runId, Date.parse(pr.created_at))) continue;
+      await targets.rest.closePullRequest(pr.number);
+      report.closedPullRequests.push(pr.number);
+    }
+  });
+
   // Git: group refs by run; a run's age is its tracked branch's (or any ref's) newest commit time.
   const refs = await targets.sandbox.runRefs();
   const byRun = new Map<string, Array<{ ref: string; oid: string }>>();
   for (const ref of refs) byRun.set(ref.runId, [...(byRun.get(ref.runId) ?? []), ref]);
   for (const [runId, runRefs] of byRun) {
-    if (live.has(runId)) continue;
+    if (live.has(runId) || (recovering !== undefined && recovering !== runId)) continue;
     let newest: number | null = null;
     if (!dead.has(runId)) {
       for (const ref of runRefs) {
@@ -81,25 +100,16 @@ export async function sweep(targets: SweepTargets, stateDir: string, now = Date.
         if (time !== null) newest = Math.max(newest ?? 0, time);
       }
     }
-    if (!shouldSweep(runId, newest, now, live, dead)) continue;
+    if (!canSweep(runId, newest)) continue;
     await attempt(`refs of run ${runId}`, async () => {
       await targets.sandbox.deleteRunRefs(runId, runRefs.map((ref) => ref.ref));
       report.removedRefs.push(...runRefs.map((ref) => ref.ref));
     });
   }
 
-  await attempt('pull requests', async () => {
-    for (const pr of await targets.rest.pullRequests('t/', 'open')) {
-      const runId = /^t\/([0-9a-f]{6})\//.exec(pr.head.ref)?.[1];
-      if (runId === undefined || !shouldSweep(runId, Date.parse(pr.created_at), now, live, dead)) continue;
-      await targets.rest.closePullRequest(pr.number);
-      report.closedPullRequests.push(pr.number);
-    }
-  });
-
   await attempt('projects', async () => {
     for (const project of await targets.world.runProjects()) {
-      if (recorded.has(project.runId) || !shouldSweep(project.runId, Date.parse(project.createdAt), now, live, dead)) continue;
+      if (recorded.has(project.runId) || !canSweep(project.runId, Date.parse(project.createdAt))) continue;
       await targets.world.deleteProject(project, project.runId);
       report.deletedProjects.push(project.name);
     }
@@ -111,7 +121,7 @@ export async function sweep(targets: SweepTargets, stateDir: string, now = Date.
     await attempt('team-zone documents', async () => {
       const byRun = new Map<string, Awaited<ReturnType<typeof targets.world.runTeamDocuments>>>();
       for (const document of await targets.world.runTeamDocuments(teamId)) {
-        if (!shouldSweep(document.runId, Date.parse(document.createdAt), now, live, dead)) continue;
+        if (!canSweep(document.runId, Date.parse(document.createdAt))) continue;
         // A recorded run's documents found by name (an engine that ran outside the proxy, in Actions) go to its
         // recovery, which checks its record first.
         if (recorded.has(document.runId)) {
@@ -148,6 +158,6 @@ export async function sweep(targets: SweepTargets, stateDir: string, now = Date.
     if (open.length > 0) throw new Error(`still open: ${open.map((pr) => pr.number).join(', ')}`);
   });
 
-  if (report.errors.length === 0) for (const runId of dead) forgetRun(stateDir, runId);
+  if (report.errors.length === 0) for (const runId of dead) if (runId !== recovering) forgetRun(stateDir, runId);
   return report;
 }

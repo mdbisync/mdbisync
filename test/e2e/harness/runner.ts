@@ -218,7 +218,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     if (team === undefined) throw new EnvBlockedError(`the test workspace has no team ${key}`);
     return team.id;
   });
-  try { await grant?.claimZones?.(zoneIds); }
+  try { await grant?.claimZones?.(zoneIds, ctx.signal); }
   catch { throw new EnvBlockedError('shared team zone is held or unavailable'); }
   await takeTeamLocks(ctx, deps.stateDir, tree.teamZones.keys(), locks);
 
@@ -603,6 +603,7 @@ export async function cleanupAndCount(ctx: RunContext): Promise<{ ok: boolean; d
   } catch (cleanupError) {
     outcome = { ok: false, detail: (cleanupError as Error).message };
   }
+  const trashProblems: string[] = [];
   const trash = ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> | undefined;
   if (trash !== undefined && ctx.live !== null) {
     for (const [key, counts] of Object.entries(trash)) {
@@ -610,12 +611,13 @@ export async function cleanupAndCount(ctx: RunContext): Promise<{ ok: boolean; d
       if (teamId === undefined) continue;
       try {
         counts.after = await ctx.live.world.trashedInZone(teamId);
-        if (counts.after > counts.before) outcome = { ok: false, detail: `team ${key}'s trash count increased` };
+        if (counts.after > counts.before) trashProblems.push(`team ${key}'s trash count increased`);
       } catch (error) {
-        outcome = { ok: false, detail: `could not read team ${key}'s trash count after cleanup` };
+        trashProblems.push(`could not read team ${key}'s trash count after cleanup`);
       }
     }
   }
+  if (trashProblems.length > 0) return { ok: false, detail: [...(outcome.detail === undefined ? [] : [outcome.detail]), ...trashProblems].join('; ') };
   return outcome;
 }
 
@@ -676,6 +678,9 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   const heartbeat = setInterval(() => registration.heartbeat(), 60_000);
   const { ctx, logLines, phase, abort } = createRunContext(scenario, runId, runDir, deps);
   const { names, log } = ctx;
+  // Persist even the pre-write scope so a crash immediately after admission
+  // still has an ownership record for explicit recovery.
+  ctx.owned.scope([]);
   if (deps.teams !== undefined) ctx.observations.set('corpus.teams', [...deps.teams]);
   const locks: Lock[] = [];
   let grant: Awaited<ReturnType<Governor['admit']>> | undefined;
