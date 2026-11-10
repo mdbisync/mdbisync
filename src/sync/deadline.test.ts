@@ -28,9 +28,10 @@ describe('the check deadline and red main', () => {
   });
 
   it('round-trips the red-main note with check names that need encoding', () => {
-    const hold = { head: HEAD, main: OTHER, checks: ['ci / build', 'lint,format', 'a -->b'] };
+    const hold = { head: HEAD, main: OTHER, checks: ['ci / build', 'lint,format', 'a -->b', 'c --!>d'] };
     const note = redMainNote(hold);
-    assert.doesNotMatch(note.slice(4, -4), /-->/);
+    // The encoded names hold no '>', so nothing inside the note can end the HTML comment.
+    assert.equal(note.slice('<!--'.length, -'-->'.length).includes('>'), false);
     assert.deepEqual(readRedMainNote(`Text\n${note}\n`), hold);
     assert.equal(readRedMainNote('Text'), null);
     assert.equal(readRedMainNote(`<!-- red main: head=${HEAD} main=${OTHER} checks=%E0%A4%A -->`), null);
