@@ -125,6 +125,14 @@ export function owningFolder(path: string, folders: readonly Folder[]): Folder |
   return best;
 }
 
+/** The team a folder's documents go to: its own annotation's team, else the nearest team annotated above it; null when none. */
+export function inheritedTeam(folder: string, folders: readonly Folder[]): string | null {
+  const own = folders.find((candidate) => candidate.folder === folder);
+  if (own !== undefined && own.team !== null) return own.team;
+  const parents = folders.filter((candidate) => candidate.folder !== folder && candidate.team !== null && inside(folder, candidate.folder));
+  return parents.sort((a, b) => b.folder.length - a.folder.length)[0]?.team ?? null;
+}
+
 /** Team zones: folders that name a team and no project. */
 export function teamZones(folders: readonly Folder[]): Folder[] {
   return folders.filter((folder) => folder.team !== null && folder.project === null);
@@ -147,11 +155,7 @@ export interface RunTree {
 export function selectTeams(slice: SliceList, readmes: ReadonlyMap<string, string>, selected: readonly string[]): SliceList {
   if (slice.slice === 'full') throw new Error('full slices cannot select teams');
   const folders = annotatedFolders(readmes);
-  const effectiveTeam = (folder: Folder): string | null => {
-    if (folder.team !== null) return folder.team;
-    const parents = folders.filter((candidate) => candidate !== folder && inside(folder.folder, candidate.folder)).sort((a, b) => b.folder.length - a.folder.length);
-    return parents.find((candidate) => candidate.team !== null)?.team ?? null;
-  };
+  const effectiveTeam = (folder: Folder): string | null => inheritedTeam(folder.folder, folders);
   const known = new Set(folders.map(effectiveTeam).filter((team) => team !== null));
   if (selected.length === 0 || selected.some((team) => !known.has(team))) throw new Error('team selection is empty or unknown to this slice');
   const kept = slice.paths.filter((path) => {

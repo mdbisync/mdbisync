@@ -34,7 +34,7 @@ import { waitForCheck } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, STEP_ACTIONS, watchRun } from './steps.ts';
-import { commitAsPerson, readRunIds, setTarget } from './step-helpers.ts';
+import { commitAsPerson, folderTeam, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
@@ -538,7 +538,7 @@ describe('team-zone cleanup', () => {
     const { PROJECT_PLACEHOLDERS } = await import('./corpus.ts');
     const names = runNames('aaaaaa');
     const placeholderProjects = PROJECT_PLACEHOLDERS.map((_, index) => names.project(index));
-    const helpers = (['archive', 'unmapped', 'archived-copy'] as const).map((purpose) => names.helperProject(purpose));
+    const helpers = (['archive', 'unmapped', 'archived-copy', 'annotation-target'] as const).map((purpose) => names.helperProject(purpose));
     // One name per purpose, so a run never holds two live projects with one name.
     assert.equal(new Set(helpers).size, helpers.length);
     for (const helper of helpers) {
@@ -1387,6 +1387,52 @@ describe('git executors', () => {
     ctx.observations.set('git.imagePath', 'eng/platform/media/diagram.png');
     await runStep(ctx, { kind: 'fault', action: 'missing-lfs-object', args: {} });
     assert.match(await remoteFile('eng/platform/media/diagram.png'), /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:[0-9a-f]{64}\nsize 4096$/);
+  });
+
+  it('move a folder by its annotation to a new project of the folder\'s own team (L2-08)', async () => {
+    const { ctx, remoteFile } = await fakeRun();
+    const world = ctx.live as LiveWorld;
+    // The team annotations above the project folders, as the corpus has them: each project folder inherits its team.
+    await commitAsPerson(ctx, new Map([['eng/README.md', '---\nlinear-team: ENG\n---\n'], ['docs/README.md', '---\nlinear-team: DOCS\n---\n']]), 'Name the teams');
+    world.teams.set('DOCS', { id: 'team-docs', key: 'DOCS', name: 'Documentation' });
+    const created: Array<{ name: string; teamIds: readonly string[] }> = [];
+    Object.assign(world, { world: { createProject: async (name: string, teamIds: readonly string[]) => { created.push({ name, teamIds }); return { id: `project-${name}`, name, createdAt: '' }; } } });
+    const before = await remoteFile('eng/platform/README.md');
+    await runStep(ctx, { kind: 'git', action: 'annotation', args: { project: 'other-project' } });
+    // The longest project folder moves; the project is new, so no other folder maps it, and it is in DOCS, the
+    // team docs/handbook inherits, not ENG, where the engine would not find it.
+    assert.deepEqual(created, [{ name: 'Spare cabinet aaaaaa', teamIds: ['team-docs'] }]);
+    assert.match(await remoteFile('docs/handbook/README.md'), /^linear-project: Spare cabinet aaaaaa$/m);
+    assert.equal(await remoteFile('eng/platform/README.md'), before);
+    assert.deepEqual(ctx.observations.get('git.annotation'), { folder: 'docs/handbook', project: 'Spare cabinet aaaaaa' });
+    // A run project like the others: the destination subject names it and cleanup deletes it.
+    assert.equal(world.projects.get('ANNOTATION_TARGET')?.name, 'Spare cabinet aaaaaa');
+    assert.deepEqual(await resolveSubject(ctx, 'expected.destination'), { known: true, value: ['project:Spare cabinet aaaaaa'] });
+    // One live project per helper name: a second move in the same run is refused before it creates another.
+    await assert.rejects(runStep(ctx, { kind: 'git', action: 'annotation', args: {} }), /already has its annotation-target helper project/);
+    assert.equal(created.length, 1);
+  });
+
+  it('end env-blocked when the workspace has no team for the folder', async () => {
+    const { ctx } = await fakeRun();
+    // No team annotation above the project folders at all.
+    await assert.rejects(runStep(ctx, { kind: 'git', action: 'annotation', args: {} }), (error: Error) => error instanceof EnvBlockedError && error.message === 'no annotation names the team of docs/handbook');
+  });
+
+  it('read a folder\'s team from its own annotation, else the nearest one above it', () => {
+    const dir = fresh('folder-team-');
+    const write = (path: string, text: string) => {
+      mkdirSync(join(dir, path, '..'), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    };
+    write('README.md', '# Repository\n');
+    write('eng/README.md', '---\nlinear-team: ENG\n---\n');
+    write('eng/platform/README.md', '---\nlinear-project: Field notes aaaaaa\n---\n');
+    write('support/README.md', '---\nlinear-team: DOCS\nlinear-project: Garden plans aaaaaa\n---\n');
+    assert.equal(folderTeam(dir, 'eng/platform'), 'ENG');
+    assert.equal(folderTeam(dir, 'eng/platform/deep/er'), 'ENG');
+    assert.equal(folderTeam(dir, 'support'), 'DOCS');
+    assert.equal(folderTeam(dir, 'other'), null);
   });
 
   it('prepare a left-out document and make it join', async () => {
@@ -2703,16 +2749,23 @@ describe('the setup check step (run.check)', () => {
   const FAILED_REPORT = { ...CHECK_REPORT, ok: false, code: 'setup-failed', exitStatus: 'setup-failed', setupChecks: FAILED_CHECKS };
   const DRY_RUN_REPORT = { operation: 'initial-sync', ok: true, code: null, complete: true, changed: false, summary: { plan: { paths: ['guides/start.md'] } }, writes: { linear: {}, git: {}, pullRequests: {} } };
 
-  /** Runs `steps` with a fake engine that answers each command from `answers` and records how it was called. */
-  async function withEngine(answers: Record<string, { report?: unknown; summary?: string; stderr?: string; exitCode: number }>, steps: Array<{ action: string; args: Record<string, unknown> }>) {
+  type Answer = { report?: unknown; summary?: string; stderr?: string; exitCode: number };
+  /**
+   * Runs `steps` with a fake engine that answers each command from `answers` and records how it was called.
+   * A list answers a command's runs in turn, its last entry every later run. With `seen`, the calls are
+   * also there when a step throws.
+   */
+  async function withEngine(answers: Record<string, Answer | Answer[]>, steps: Array<{ action: string; args: Record<string, unknown> }>, seen: { calls: Array<{ command: string }> } = { calls: [] }) {
     const { ctx } = await fakeRun();
     mkdirSync(await ctx.engineClone(), { recursive: true });
     const calls = join(ctx.runDir, 'engine-calls.jsonl');
     const driver = join(ctx.runDir, 'fake-engine.mjs');
     writeFileSync(driver, `
-      import { appendFileSync, writeFileSync } from 'node:fs';
+      import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
       const command = process.argv[2];
-      const answer = ${JSON.stringify(answers)}[command];
+      const before = existsSync(${JSON.stringify(calls)}) ? readFileSync(${JSON.stringify(calls)}, 'utf8').split('\\n').filter((line) => line.includes(JSON.stringify(command))).length : 0;
+      const answers = [${JSON.stringify(answers)}[command]].flat();
+      const answer = answers[Math.min(before, answers.length - 1)];
       const inputs = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith('MDBISYNC_') && !/SECRET|TOKEN/.test(name)));
       appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ command, cwd: process.cwd(), inputs }) + '\\n');
       if (answer.report !== undefined) writeFileSync(process.env.MDBISYNC_REPORT_FILE, JSON.stringify(answer.report));
@@ -2727,9 +2780,10 @@ describe('the setup check step (run.check)', () => {
     } finally {
       if (previous === undefined) delete process.env['MDBISYNC_ENGINE'];
       else process.env['MDBISYNC_ENGINE'] = previous;
+      // A partial line from a killed fake engine must not hide the step's own error.
+      seen.calls = existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n').flatMap((line) => { try { return [JSON.parse(line) as { command: string }]; } catch { return []; } }) : [];
     }
-    const recorded = existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { command: string; cwd: string; inputs: Record<string, string> }) : [];
-    return { ctx, calls: recorded };
+    return { ctx, calls: seen.calls as Array<{ command: string; cwd: string; inputs: Record<string, string> }> };
   }
 
   it('runs the engine check in the run clone with the run isolation and records it as the first run', async () => {
@@ -2770,6 +2824,47 @@ describe('the setup check step (run.check)', () => {
     assert.deepEqual(ctx.observations.get('runs.0.setupChecks'), FAILED_CHECKS);
     // An assertion on the dry run's plan cannot pass on the failed setup.
     await assert.rejects(resolveSubject(ctx, 'summary.plan.paths'), (error: Error) => error instanceof ProductError);
+  });
+
+  const TARGETS_FAILED = [{ name: 'annotation-targets', state: 'failed', detail: 'not found in Linear: project "Library index aaaaaa" of team "ENG"' }];
+  const SETUP_STOP = { ...CHECK_REPORT, operation: 'sync', ok: false, code: 'annotation-target-not-found', exitStatus: 'failure', complete: false, setupChecks: TARGETS_FAILED };
+  const COMPLETE = { ...CHECK_REPORT, operation: 'sync', ok: true, code: null, exitStatus: 'success', complete: true, changed: true };
+
+  /** Runs resume-until-complete against these sync answers; the error it ends with (or null) and the engine runs. */
+  async function resume(answers: Answer[]) {
+    const seen = { calls: [] as Array<{ command: string }> };
+    const error = await withEngine({ sync: answers }, [{ action: 'resume-until-complete', args: {} }], seen).then(() => null, (failure: Error) => failure);
+    return { error, runs: seen.calls.length };
+  }
+
+  it('stops resuming when a setup check fails the same way twice in a row, and names it', async () => {
+    const { error, runs } = await resume([{ report: SETUP_STOP, exitCode: 3 }]);
+    assert.ok(error instanceof ProductError);
+    assert.equal(error.message, 'the run failed twice in a row at the setup check annotation-targets (annotation-target-not-found): not found in Linear: project "Library index aaaaaa" of team "ENG"; resuming cannot clear it');
+    assert.equal(runs, 2);
+  });
+
+  it('stops resuming when the sync is refused the same way twice in a row', async () => {
+    const refused = { ...SETUP_STOP, code: 'initial-pull-request-pending', setupChecks: SETUP_CHECKS };
+    const { error, runs } = await resume([{ report: refused, exitCode: 3 }]);
+    assert.equal(error?.message, 'the run failed twice in a row with initial-pull-request-pending; resuming cannot clear it');
+    assert.equal(runs, 2);
+  });
+
+  it('resumes past a setup check that failed once', async () => {
+    const teamsHidden = { ...SETUP_STOP, code: 'linear-teams-not-visible', setupChecks: [{ name: 'annotation-targets', state: 'failed', detail: 'the token sees no team' }] };
+    // A passing failure, then a different one, then the run completes: no failure repeated.
+    const { error, runs } = await resume([{ report: teamsHidden, exitCode: 3 }, { report: SETUP_STOP, exitCode: 3 }, { report: COMPLETE, exitCode: 0 }]);
+    assert.equal(error, null);
+    assert.equal(runs, 3);
+  });
+
+  it('keeps resuming a run that stopped part-way, up to 20 runs', async () => {
+    const partial = { ...CHECK_REPORT, operation: 'sync', ok: true, code: 'rate-limited', exitStatus: 'warning', complete: false, setupChecks: SETUP_CHECKS };
+    const { error, runs } = await resume([{ report: partial, exitCode: 0 }]);
+    assert.ok(error instanceof ProductError);
+    assert.equal(error.message, 'the run did not complete after 20 resumes');
+    assert.equal(runs, 20);
   });
 
   it('stops the scenario when the engine does not implement the check', async () => {

@@ -44,7 +44,7 @@ import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
 import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
 import {
-  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
+  commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import type { WorkflowRun } from './github.ts';
 import { environmentBlocker, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun } from './workflows.ts';
@@ -498,6 +498,17 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
   };
 }
 
+/**
+ * How a run failed: at its failed setup check (named with the code and detail) or with its code. Null for a
+ * run that did not fail (a partial run is `ok`, and the next one goes on) or failed without a code.
+ */
+export function runFailure(report: Record<string, unknown> | null | undefined): string | null {
+  if (report?.['ok'] !== false || typeof report['code'] !== 'string') return null;
+  const checks = Array.isArray(report['setupChecks']) ? (report['setupChecks'] as Array<{ name?: unknown; state?: unknown; detail?: unknown }>) : [];
+  const check = checks.find((candidate) => candidate.state === 'failed');
+  return check === undefined ? `with ${report['code']}` : `at the setup check ${String(check.name)} (${report['code']}): ${String(check.detail)}`;
+}
+
 const RUN: Record<string, Executor> = {
   'run.sync': (ctx, args) => runCommand(ctx, 'sync', args),
   'run.initial-sync': (ctx, args) => runCommand(ctx, 'initial-sync', args),
@@ -516,9 +527,16 @@ const RUN: Record<string, Executor> = {
   'run.resume-until-complete': async (ctx, args) => {
     // Recovery continues the sync unless the scenario names the initial sync (L1-16).
     const command = args.command === 'initial-sync' ? 'initial-sync' : 'sync';
+    // A run that fails the same way twice in a row (a failed setup check, a refused sync) fails so on every
+    // resume: stop there and name it. One such failure may be passing (Linear once showed a token no team).
+    let previous: string | null = null;
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await runCommand(ctx, command, args);
-      if (ctx.engine.results.at(-1)?.report?.['complete'] === true) return;
+      const report = ctx.engine.results.at(-1)?.report;
+      if (report?.['complete'] === true) return;
+      const stop = runFailure(report);
+      if (stop !== null && stop === previous) throw new ProductError(`the run failed twice in a row ${stop}; resuming cannot clear it`);
+      previous = stop;
     }
     throw new ProductError('the run did not complete after 20 resumes');
   },
@@ -924,14 +942,19 @@ const GIT: Record<string, Executor> = {
     ctx.observations.set('git.movedFolder', folder.documents.map((path) => ({ from: path, to: `${renamed}${path.slice(folder.path.length)}` })));
   },
   'git.annotation': async (ctx) => {
-    const folders = projectFolders(ctx);
-    const [own, other] = [folders[0], folders.find((candidate) => candidate.project !== folders[0]?.project)];
-    if (own === undefined || other === undefined) throw new EnvBlockedError('the slice needs two project folders');
+    // The folder moves to a project of its own team that no folder maps yet: the engine refuses a project
+    // of another team (annotation-target-not-found, the folder still inherits its team) and one that another
+    // folder already maps (annotation-target-shared). The project is a run helper, so cleanup deletes it.
+    const own = projectFolders(ctx)[0];
+    if (own === undefined) throw new EnvBlockedError('the slice has no project folder');
     const git = await ctx.person();
     await pull(git, ctx);
+    const key = folderTeam(git.dir, own.folder);
+    if (key === null) throw new EnvBlockedError(`no annotation names the team of ${own.folder}`);
+    const target = await createHelperProject(ctx, 'annotation-target', 'ANNOTATION_TARGET', key);
     const readme = `${own.folder}/README.md`;
-    await commitAsPerson(ctx, new Map([[readme, (await readWorking(git, readme)).split(own.project).join(other.project)]]), 'Move the folder to the other project');
-    ctx.observations.set('git.annotation', { folder: own.folder, project: other.project });
+    await commitAsPerson(ctx, new Map([[readme, (await readWorking(git, readme)).split(own.project).join(target.name)]]), 'Move the folder to the other project');
+    ctx.observations.set('git.annotation', { folder: own.folder, project: target.name });
   },
   'git.image-add': async (ctx, args) => {
     const storage = args.storage === 'regular' ? 'regular' : 'lfs';
@@ -1321,10 +1344,7 @@ const LINEAR: Record<string, Executor> = {
       setTarget(ctx, path, id);
       if (variant === 'unmapped-project') {
         // A run project that no folder names; cleanup deletes it with the run's projects.
-        const team = [...world.teams.values()][0];
-        if (team === undefined) throw new EnvBlockedError('the test workspace has no team');
-        const unmapped = await world.world.createProject(ctx.names.helperProject('unmapped'), [team.id]);
-        world.projects.set('UNMAPPED', unmapped);
+        const unmapped = await createHelperProject(ctx, 'unmapped', 'UNMAPPED');
         await editor.updateDocument(id, { projectId: unmapped.id });
       } else if (variant === 'trash') {
         await editor.trashDocument(id);
