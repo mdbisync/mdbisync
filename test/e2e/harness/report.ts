@@ -48,6 +48,7 @@ export function renderRunMarkdown(report: HarnessReport): string {
     `| ${RESULTS.map(() => '---').join(' | ')} |`,
     `| ${RESULTS.map((result) => counts[result]).join(' | ')} |`,
     '',
+    ...(report.selection['teams'] === undefined ? [] : [`Partial corpus: selected teams ${JSON.stringify(report.selection['teams'])}. These results do not replace full catalog status.`, '']),
     '| Scenario | Run | Result | Reason | Engine requests | Harness app reads | Seconds | Cleanup |',
     '| --- | --- | --- | --- | --- | --- | --- | --- |',
   ];
@@ -81,8 +82,10 @@ export interface LatestResult {
 
 /** Merges new results into the latest-per-scenario record; skipped results do not replace a real one. */
 export function mergeLatest(previous: readonly LatestResult[], report: HarnessReport): LatestResult[] {
+  if (report.selection['teams'] !== undefined) return [...previous];
   const latest = new Map(previous.map((entry) => [entry.id, entry]));
   for (const result of report.results) {
+    if (result.corpusTeams !== undefined) continue;
     if (result.result === 'skipped' && latest.has(result.id)) continue;
     latest.set(result.id, {
       id: result.id,
@@ -164,6 +167,7 @@ export function evidenceSummary(report: HarnessReport): string {
     `# Evidence: scenario run ${report.harnessRunId}`,
     '',
     `- Host: ${report.host}; started ${report.startedAt}; finished ${report.finishedAt}.`,
+    ...(report.selection['teams'] === undefined ? [] : [`- Partial corpus: selected teams ${JSON.stringify(report.selection['teams'])}; these results do not replace full catalog status.`]),
     `- Scenarios: ${report.results.length}; ${RESULTS.map((result) => `${result}: ${counts[result]}`).join(', ')}.`,
     `- Linear requests: engine ${engine}, harness editors ${harness}, harness app reads ${appReads}; budget waits ${Math.round(waited / 1000)} s.`,
     `- Cleanup failures: ${cleanupFailures.length === 0 ? 'none' : cleanupFailures.join(', ')}.`,

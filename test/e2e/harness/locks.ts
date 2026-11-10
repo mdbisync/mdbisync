@@ -206,6 +206,19 @@ export function forgetRun(stateDir: string, runId: string): void {
   rmSync(join(stateDir, 'runs', `${runId}.json`), { force: true });
 }
 
+/** Recovery is local and explicit. Heartbeat age cannot prove a writer died.
+ * Keep the ui-result lock while calling this and throughout recovery, so a
+ * saved continuation cannot race the death check and ownership rotation. */
+export function requireStoppedLocalRun(stateDir: string, runId: string): void {
+  let entry: LiveRun;
+  try { entry = JSON.parse(readFileSync(join(stateDir, 'runs', `${runId}.json`), 'utf8')) as LiveRun; }
+  catch { throw new Error('recovery needs the original readable local run registration'); }
+  if (entry.runId !== runId || entry.host !== hostname() || !Number.isSafeInteger(entry.pid) || entry.pid <= 0) {
+    throw new Error('recovery cannot verify this writer on the current host');
+  }
+  if (processAlive(entry.pid)) throw new Error('recovery refused: the writer process is still alive');
+}
+
 /** Run ids this host registered whose process is gone (killed runs). */
 export function deadLocalRuns(stateDir: string, now = Date.now()): Set<string> {
   const root = join(stateDir, 'runs');

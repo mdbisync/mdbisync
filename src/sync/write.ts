@@ -54,6 +54,7 @@ import {
   branchRef,
 } from '../state/index.ts';
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
+import { nameFixingHooks } from './fix-hooks.ts';
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
 import { suspendedPaths } from './suspended.ts';
@@ -130,7 +131,7 @@ export interface WriteResult {
   decided: Decided[];
   skipped: Array<{ path: string; reason: SkipReason }>;
   /** Synchronized files the sync leaves out (lint, title, collisions); their documents stay as they were. */
-  leftOut: Array<{ path: string; rules: FileLeftOutRule[] }>;
+  leftOut: Array<{ path: string; rules: FileLeftOutRule[]; hooks?: string[] }>;
   /** Left out by a transform while writing. */
   leftOutAtWrite: LeftOutAtWrite[];
   failed: FailedWrite[];
@@ -227,6 +228,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Nothing to write, but the files left out stay left out: the report names them on every run, not only on
     // the run that first met them. The `linear` tip holds what a merge would give.
     result.leftOut = await leftOutFiles(git, linearTip, linear.facts);
+    await nameFixingHooks(git, tracked, result.leftOut);
     // The capacity report can use this run's earlier listing.
     const containers = options.containers ?? await readContainers();
     if (containers === undefined) return result;
@@ -251,6 +253,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   merge.changes = merge.changes.filter((change) => !pathsOf(change).some((path) => frozen.has(path)));
   merge.unchanged = merge.unchanged.filter((change) => !frozen.has(change.from) && !frozen.has(change.to));
   result.leftOut = merge.leftOut;
+  await nameFixingHooks(git, tracked, result.leftOut);
   // Anything from here may write (linked-file changes are found later too): capacity, adoption and
   // reserved ids are decided on the containers as Linear lists them now, not as capture saw them.
   const containerListing = await readContainers();

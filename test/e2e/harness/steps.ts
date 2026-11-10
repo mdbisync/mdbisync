@@ -35,9 +35,9 @@ import { burst, realClock, soak, type LoadDriver } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
-import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
+import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG, readHookConfig } from '../../../src/setup/hooks.ts';
 import { validateSha } from '../../../src/release/package.ts';
-import { parse } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { HOOK_REPOSITORY } from '../../corpus/tree.ts';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
@@ -1010,13 +1010,23 @@ const GIT: Record<string, Executor> = {
     interleavings.push(ctx.engine.pausedAt === 'after-capture-push-before-pr' ? 'capture-before-fix' : 'fix-before-capture');
     for (const fix of fixes) {
       const token = nextToken(ctx);
+      const id = fix === 'linear-would-undo' ? 'aligned-table' : 'stable-fix';
       const addition = fix === 'linear-would-undo'
         // Column alignment, which Linear drops (it keeps `| -- |` separators).
         ? `\n| Check | Result |\n|:--|--:|\n| ${token} | ok |\n`
-        : `\nChecked by the format job, ref ${token}.\n`;
+        // Linear stores a final paragraph without a trailing newline.
+        : `\nChecked by the format job, ref ${token}.`;
       commits.push(await commitToSyncBranch(ctx, async (git) => {
         writeFileSync(join(git.dir, path), `${readFileSync(join(git.dir, path), 'utf8').replace(/\n*$/, '\n')}${addition}`);
-      }, 'Apply the format fixes'));
+        // The simulated fixing hook must be configured, as in a real CI job.
+        const config = join(git.dir, PRE_COMMIT_CONFIG);
+        const text = readFileSync(config, 'utf8');
+        if (!readHookConfig(text).hooks.some((hook) => hook.id === id)) {
+          const data = parse(text);
+          data.repos.push({ repo: 'local', hooks: [{ id, name: 'Format check', language: 'system', entry: 'true' }] });
+          writeFileSync(config, stringify(data));
+        }
+      }, `Apply the format fixes\n\nPre-commit-fix: ${id}`));
       ctx.observations.set(fix === 'linear-would-undo' ? 'ciFix.unstable' : 'ciFix.stable', token);
     }
     ctx.observations.set('ciFix.commits', commits);
