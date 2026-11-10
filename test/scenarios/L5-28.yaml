@@ -119,7 +119,9 @@
     {
       "kind": "run",
       "action": "sync",
-      "args": {}
+      "args": {
+        "mergeGraceSeconds": 120
+      }
     },
     {
       "kind": "fault",
