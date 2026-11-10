@@ -36,6 +36,8 @@ export interface ManifestFile {
    * `pdf-11mb`, `image-over-10mb`), so specs do not depend on corpus paths.
    */
   role?: string | null;
+  /** What the generator built into the file (for example `…, and an invalid diagram`). */
+  note?: string | null;
 }
 
 export interface Manifest {
