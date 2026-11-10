@@ -220,7 +220,11 @@ Linear's changes reach the tracked branch through two lanes: the normal
 pull request **Changes from Linear** from `mdbisync/linear`, and at most
 one **Suspended changes from Linear** from `mdbisync/suspended` (default
 branch names). The sync opens and merges both, acting as the deployer's
-GitHub App so that CI runs on them.
+GitHub App so that CI runs on them. For a custom `sync-branch`, the last
+path segment becomes `suspended` (`team/sync` → `team/suspended`). With
+no slash, or a name already ending in `/suspended`, `-suspended` is
+appended (`docs-sync` → `docs-sync-suspended`). The suspended branch may
+remain after release; its presence alone does not mean a batch is on hold.
 
 - A run opens the pull request when merging Linear's state would change the
   tracked branch. Changes made in git alone open none.
@@ -241,7 +245,7 @@ GitHub App so that CI runs on them.
   run. The CLI uses `MDBISYNC_MERGE_GRACE_SECONDS`. Later runs read an
   unchanged head's checks once, without waiting. A moved head cannot merge
   using the old head's checks.
-- Checks still pending, queued or never started `check-deadline-minutes`
+- Checks GitHub reports as pending or queued `check-deadline-minutes`
   (default `60`, range `10`–`1440`) after the sync pushed a head count as
   failed. The CLI uses `MDBISYNC_CHECK_DEADLINE_MINUTES`. The sync never
   reruns a check; a check rerun on the same head counts by its latest result.
@@ -249,7 +253,11 @@ GitHub App so that CI runs on them.
   Actions permission; its permissions remain those in the
   [quickstart](quickstart.md#github-app). The push time for each head is
   kept in a hidden HTML note in the pull request description; a new head
-  starts a new deadline.
+  starts a new deadline. An unreported check does not time out: if no
+  checks register, the sync attempts a merge after the registration grace
+  period. GitHub can refuse it for a missing required check, yielding
+  `merge-refused` and then `merge-blocked`; fix the workflow filters or
+  required-check names.
 - A failed check counts at once. Unless that check also fails on the
   tracked branch's tip, the whole batch moves to the suspended lane, and
   the normal pull request closes. This is a successful sync run, not a

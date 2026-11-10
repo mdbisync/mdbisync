@@ -161,9 +161,10 @@ line) to the limit you have.
 
 ## The sync pull request
 
-A failed check, or one still pending past `check-deadline-minutes`
+A failed check, or one GitHub still reports as pending past `check-deadline-minutes`
 (default 60, range 10–1440), moves the whole batch to **Suspended changes
-from Linear** on `mdbisync/suspended`. The normal pull request closes;
+from Linear** on `mdbisync/suspended` (default branch names; see
+[custom branch names](usage.md#the-sync-pull-request)). The normal pull request closes;
 other documents continue through **Changes from Linear** on
 `mdbisync/linear`. The run succeeds. While the suspended head's checks
 are pending before the deadline, the normal lane waits to merge.
@@ -183,7 +184,10 @@ The sync never reruns a check. Configure retries for flaky checks in your
 repository's CI, or rerun them yourself; the latest result on the head
 counts. The App needs no Actions permission. The deadline is separate
 from `merge-grace-seconds` and starts again for a new head; its push time
-is kept in a hidden HTML note in the pull request description.
+is kept in a hidden HTML note in the pull request description. A check
+that never registers is invisible to the deadline: GitHub can refuse the
+merge for a missing required check instead (`merge-refused`, then
+`merge-blocked`). Check workflow filters and required-check names.
 
 If the same check fails on the tracked branch's tip (`main` by default),
 the normal pull request stays open and held instead: nothing is suspended,
@@ -200,7 +204,22 @@ the head's deadline and the red-main hold. See
 comment text and mark limits.
 
 Linear's changes reach the tracked branch through the sync pull request
-(see [usage.md](usage.md#the-sync-pull-request)). Its step reports:
+(see [usage.md](usage.md#the-sync-pull-request)). Its step reports the codes below. `merge-refused` and `merge-blocked`
+apply to either lane; the summary identifies a suspended merge refusal.
+
+For **Suspended files waiting for a manual merge**, fix the listed
+non-document files on the suspended branch (`mdbisync/suspended` by
+default), not the normal branch. For a conflict with the tracked branch,
+setting those files to the tracked branch's current versions removes the
+conflict. To keep a combined version, commit it on the tracked branch
+first, then use that version on the suspended branch. For binary assets
+changed in Linear as well, reconcile the source in Linear too. Keep the
+sync's recorded-base commit history and use ordinary commits; the next
+run retries the merge. Do not merge the entire Linear state ref into the
+suspended branch: it carries other documents that belong in the normal
+lane.
+
+Its step reports:
 
 | Code | Meaning | What to do |
 | --- | --- | --- |

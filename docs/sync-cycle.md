@@ -31,7 +31,9 @@ repository never overlap. Each run makes these steps, in this order:
    is not committed and gets the [blocked mark](#the-blocked-mark).
 2. **Linear to git.** When Linear's record holds something the tracked
    branch lacks, the run opens the sync pull request, or adds the new
-   changes to the open one, and merges it once its checks pass
+   changes to the open one, and merges it once its checks pass. A failed
+   batch moves to the suspended lane; a red tracked branch holds it, and
+   pending suspended checks take priority
    ([the sync pull request](usage.md#the-sync-pull-request)).
 3. **Git to Linear, computed.** The run merges the tracked branch into
    Linear's record in its own working copy, with git's three-way merge.
@@ -47,8 +49,10 @@ repository never overlap. Each run makes these steps, in this order:
 
 The sync's state lives in three refs under `refs/mdbisync/` (Linear's
 record, the map of files to Linear document ids, and the cache of uploaded
-images) and in the normal branch `mdbisync/linear` and, while a batch is on hold,
-`mdbisync/suspended`. A plain clone does not
+images) and in the normal branch `mdbisync/linear` and the suspended branch
+`mdbisync/suspended`, created when first needed. The suspended branch can
+stay after release unless GitHub automatically deletes merged branches.
+A plain clone does not
 fetch the refs, and the sync writes nothing of its own into your files.
 
 ## A change made in Linear
@@ -169,13 +173,18 @@ every run summary says so.
 ## Suspension and release
 
 A failed pull request check suspends its whole batch, even if only one
-file caused it. Checks still pending, queued or never started past
+file caused it. Checks GitHub reports as pending or queued past
 `check-deadline-minutes` (default 60, range 10–1440) count as failed too.
 This deadline starts at the head's push, recorded in a hidden HTML note
 in the pull request description; it is separate from the short merge
 grace period. A new head starts a new deadline. The sync never reruns a
 check. Configure flaky-check retries in the repository's CI; a rerun by a
 person or CI counts by its latest result. No Actions permission is needed.
+A check that never registers with GitHub is invisible to this deadline.
+With no reported checks, the sync attempts to merge after its registration
+grace period; an unreported required check can instead cause
+`merge-refused` and then `merge-blocked`. Check workflow filters and the
+required-check names if this happens.
 
 The batch joins the one **Suspended changes from Linear** pull request.
 The normal branch records `Set aside suspended changes` and its pull
@@ -307,12 +316,30 @@ What step 2 did with the sync pull request. An ordinary run says one of:
 | Added new Linear changes to the sync pull request | New captures joined the open pull request. |
 | The sync pull request waits for its checks | Nothing new; its checks are still running, and a later run merges it. |
 
-Suspension adds a **Suspended changes** line with the pull request and
-paths; release says **Released the suspended batch.** It names timed-out
-checks, counts marks set, updated and cleared, and lists deferred marks
-or manual merges. A red tracked branch has a held-pull-request line
-naming and linking to its failing checks; a normal head waiting for the
-suspended head says its checks passed and it merges after that pull request.
+The suspended lane and its marks add these lines when applicable:
+
+| Line or beginning | What it means |
+| --- | --- |
+| Suspended changes | Links the suspended pull request and lists its paths. |
+| Released the suspended batch. | Its head passed and merged; the freeze ends. |
+| GitHub refused the suspended merge | A merge refusal on that lane; `merge-refused` and `merge-blocked` apply to either lane. |
+| A GitHub request for the suspended lane failed; the normal lane still runs. | A later run retries that lane. |
+| Suspended files waiting for a manual merge | Named non-document files could not be merged; see [troubleshooting](troubleshooting.md#the-sync-pull-request). |
+| Failed checks: | Names the failed checks on the suspended head or joining batch. |
+| Checks that did not finish in time: | Names checks reported as pending past the deadline. |
+| The suspended documents' comments in Linear stay as they are: | The same check failed on the tracked tip; its failure must not rewrite document comments. |
+| The suspended documents' comments in Linear wait: | A check failed on the suspended head but still runs on the tracked tip; the comments wait for that result. |
+| Suspended documents in Linear: | Counts documents marked, comments updated and marks cleared. |
+| more suspended documents get their mark or comment in a later run | Counts deferred documents, at most 50 changed per run. |
+| Suspended documents in Linear's trash or archived, without a mark: | Lists documents that cannot receive a mark. |
+| GitHub did not give the annotations of | Comments name those checks without annotations; a later run can retry. |
+| The suspended marks did not finish | Gives the stopping code and, when available, operation; a later run goes on. |
+
+A red tracked branch has a held-pull-request line naming and linking to
+its failing checks. A line saying a check “failed on the sync pull request”
+and “still runs on the tracked branch's tip” means the sync waits for that
+result before suspending anything. A normal head waiting for the suspended
+head says “it merges after the suspended pull request, whose checks still run.”
 
 Any other line names a code (`conflict`, `merge-refused`,
 `merge-blocked`, `initial-pull-request-pending`, `state-moved`,

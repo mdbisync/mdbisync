@@ -104,6 +104,20 @@ describe('the sync cycle page', () => {
       'The tracked branch already holds every change from Linear',
       'Opened the sync pull request',
       'Added new Linear changes to the sync pull request',
+      'Released the suspended batch.',
+      'GitHub refused the suspended merge',
+      'A GitHub request for the suspended lane failed; the normal lane still runs.',
+      'Suspended files waiting for a manual merge',
+      'Failed checks:',
+      'Checks that did not finish in time:',
+      "The suspended documents' comments in Linear stay as they are:",
+      "The suspended documents' comments in Linear wait:",
+      'Suspended documents in Linear:',
+      'more suspended documents get their mark or comment in a later run',
+      "Suspended documents in Linear's trash or archived, without a mark:",
+      'GitHub did not give the annotations of',
+      'The suspended marks did not finish',
+      'it merges after the suspended pull request, whose checks still run.',
     ]);
     // "The sync pull request <link> waits for <checks>": the link sits between the words.
     assert.ok(read('src/sync/pull-request.ts').includes('`The sync pull request ${link} waits for'));

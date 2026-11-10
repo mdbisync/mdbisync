@@ -156,7 +156,8 @@ merge it with a merge commit.
 
 The normal pull request is **Changes from Linear** on `mdbisync/linear`.
 A failing batch moves to the one **Suspended changes from Linear** pull
-request on `mdbisync/suspended`, and the normal pull request closes so
+request on `mdbisync/suspended` (the default branch names), and the
+normal pull request closes so
 other documents can continue. A suspended document shows a red `Cross`
 and a comment naming the check, linking to its run when available, and
 listing annotations for that file or “did not finish in time”. Security
@@ -171,8 +172,10 @@ resumes. While its checks are pending before the deadline, the normal
 lane waits to merge.
 
 `check-deadline-minutes` (default 60, range 10–1440) limits how long
-checks can stay pending after a head is pushed, including checks that
-never start. The sync never reruns a check: configure flaky-check retries
+checks GitHub reports as pending can stay that way after a head is pushed.
+A required check that never registers is invisible to this deadline:
+GitHub may refuse the merge instead; check workflow filters and required
+check names. The sync never reruns a check: configure flaky-check retries
 in your own CI. The App's permissions above stay as they are; it needs no
 Actions permission.
 
