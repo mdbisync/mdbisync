@@ -2087,7 +2087,7 @@ describe('crash-created document adoption (L1-17)', () => {
     ctx.owned.after(createOf(id), Buffer.from(JSON.stringify({ data: { documentCreate: { success: true, document: { id } } } })));
   };
 
-  // Live run b0a807's shape: the engine, paused right after its first create, had made the team zone's
+  // A live run's shape: the engine, paused right after its first create, had made the team zone's
   // annotation README (plain title README, no run prefix) and was killed; the resumed run created the
   // other documents and kept that README as its file's document.
   async function crashed() {
