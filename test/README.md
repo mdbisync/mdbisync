@@ -243,7 +243,20 @@ uploaded:
   workflows read;
 - a self-hosted runner with the label `mdbisync-sandbox`: every job is
   rewritten to run on `[self-hosted, mdbisync-sandbox]`, so without such a
-  runner the jobs stay queued.
+  runner the jobs stay queued;
+- for the scenarios that need a scheduled run, the scheduled sync workflow
+  on the repository's default branch. GitHub starts a schedule only from
+  the default branch, and a run's branches never are, so that branch holds
+  one scheduled workflow, rendered from the sync template: each tick it
+  takes one run's request (the branch `t/<run>/schedule`, which it deletes)
+  and runs the template's job on that run's branches, as a job named for
+  the run. A tick without a request runs only that short request job.
+  Install it once, and again when the template or `MDBISYNC_TEST_ACTION_SHA`
+  changes, with `node test/e2e/harness/cli.ts scheduler --install`
+  (without `--install` it prints the file). A run never changes the default
+  branch: when the workflow there is missing, differs or is disabled, the
+  scenario is env-blocked with that reason. GitHub may start a tick late or
+  skip it; a request no tick takes within an hour blocks the run.
 
 `ui` mode is a checklist for a person or a browser session signed in as
 the two members.

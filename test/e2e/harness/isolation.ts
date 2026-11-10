@@ -7,8 +7,8 @@
 import { randomBytes } from 'node:crypto';
 
 export const RUN_ID_PATTERN = /^[0-9a-f]{6}$/;
-/** Branches of runs: t/<run>/main and t/<run>/sync. */
-export const RUN_BRANCH_PATTERN = /^refs\/heads\/t\/([0-9a-f]{6})\/(?:main|sync)$/;
+/** Branches of runs: t/<run>/main, t/<run>/sync and the scheduled-run request t/<run>/schedule. */
+export const RUN_BRANCH_PATTERN = /^refs\/heads\/t\/([0-9a-f]{6})\/(?:main|sync|schedule)$/;
 /** State refs of runs: refs/mdbisync-t/<run>/<store>. */
 export const RUN_STATE_REF_PATTERN = /^refs\/mdbisync-t\/([0-9a-f]{6})\/[a-z]+$/;
 /** Run projects: "<two words> <run>". */
@@ -48,6 +48,12 @@ export interface RunNames {
   trackedBranch: string;
   syncBranch: string;
   refPrefix: string;
+  /**
+   * The branch that asks the sandbox's scheduled workflow for one scheduled
+   * sync of this run (workflow-files.ts, renderScheduler). The scheduled run
+   * deletes it when it takes the request.
+   */
+  scheduleRequest: string;
   /** Title prefix of the run's team-zone documents. */
   teamZonePrefix: string;
   /** The i-th project of the run (0-based), for the corpus's project placeholders. */
@@ -68,6 +74,7 @@ export function runNames(runId: string): RunNames {
     trackedBranch: `t/${runId}/main`,
     syncBranch: `t/${runId}/sync`,
     refPrefix: `refs/mdbisync-t/${runId}`,
+    scheduleRequest: `t/${runId}/schedule`,
     teamZonePrefix: `${runId}/`,
     project(index: number): string {
       const words = PROJECT_WORDS[index];

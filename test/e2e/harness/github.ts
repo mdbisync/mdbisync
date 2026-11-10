@@ -281,6 +281,74 @@ export class SandboxRest {
     return activities.filter((activity) => activity.ref === ref);
   }
 
+  /** A file's text on `ref` (the default branch when absent), or undefined when it is not there. */
+  async fileText(path: string, ref?: string): Promise<string | undefined> {
+    try {
+      const file = await this.request<{ content?: string; encoding?: string }>('GET', `/contents/${path.split('/').map(encodeURIComponent).join('/')}${ref === undefined ? '' : `?ref=${encodeURIComponent(ref)}`}`);
+      if (file.encoding !== 'base64' || file.content === undefined) throw new Error(`${path} is not a file GitHub returns whole`);
+      return Buffer.from(file.content, 'base64').toString('utf8');
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return undefined;
+      throw error;
+    }
+  }
+
+  /** Writes a file on the default branch in one commit, creating or replacing it. */
+  async putFile(path: string, text: string, message: string): Promise<{ commit: string }> {
+    const url = `/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
+    let sha: string | undefined;
+    try {
+      sha = (await this.request<{ sha: string }>('GET', url)).sha;
+    } catch (error) {
+      if (!(error instanceof GitHubError && error.status === 404)) throw error;
+    }
+    const result = await this.request<{ commit: { sha: string } }>('PUT', url, { message, content: Buffer.from(text, 'utf8').toString('base64'), ...(sha === undefined ? {} : { sha }) });
+    return { commit: result.commit.sha };
+  }
+
+  /** A workflow file's state in the Actions registry (`active`, or one of the disabled states), or undefined while it is not registered. */
+  async workflowState(file: string): Promise<string | undefined> {
+    try {
+      return (await this.request<{ state: string }>('GET', `/actions/workflows/${encodeURIComponent(file)}`)).state;
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return undefined;
+      throw error;
+    }
+  }
+
+  /** The newest runs of one workflow file on one event, newest first. */
+  async workflowFileRuns(file: string, event: string): Promise<WorkflowRun[]> {
+    const data = await this.request<{ workflow_runs: WorkflowRun[] }>('GET', `/actions/workflows/${encodeURIComponent(file)}/runs?event=${encodeURIComponent(event)}&per_page=50`);
+    return data.workflow_runs;
+  }
+
+  /** Creates a branch at a commit. */
+  async createBranch(branch: string, sha: string): Promise<void> {
+    await this.request('POST', '/git/refs', { ref: `refs/heads/${branch}`, sha });
+  }
+
+  /** Whether a branch exists. */
+  async branchExists(branch: string): Promise<boolean> {
+    try {
+      await this.request('GET', `/git/ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`);
+      return true;
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return false;
+      throw error;
+    }
+  }
+
+  /** Deletes a branch; one that is already gone is no error. */
+  async deleteBranch(branch: string): Promise<void> {
+    try {
+      await this.request('DELETE', `/git/refs/heads/${branch.split('/').map(encodeURIComponent).join('/')}`);
+    } catch (error) {
+      // GitHub answers 422 "Reference does not exist" for a deleted branch.
+      if (error instanceof GitHubError && (error.status === 404 || error.status === 422)) return;
+      throw error;
+    }
+  }
+
   async workflowRuns(branch: string): Promise<WorkflowRun[]> {
     const data = await this.request<{ workflow_runs: WorkflowRun[] }>('GET', `/actions/runs?branch=${encodeURIComponent(branch)}&per_page=50`);
     return data.workflow_runs;

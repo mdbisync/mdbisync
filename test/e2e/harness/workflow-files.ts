@@ -10,9 +10,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isMap, isSeq, parseDocument, type Document, type YAMLMap } from 'yaml';
+import { isMap, isScalar, isSeq, parseDocument, type Document, type YAMLMap } from 'yaml';
 import { CANARY_TOKEN_OBSERVER_FILE, CANARY_ENABLED, CANARY_HOOK_STEP, CANARY_KEY, CANARY_PREPARE, CANARY_PREPARE_STEP } from './security-canary.ts';
 import type { CommandName } from '../../../src/commands.ts';
+import { runNames } from './isolation.ts';
 import { PREREQUISITE_STEPS, REPORT_ARTIFACT } from './workflows.ts';
 
 const EXAMPLES = fileURLToPath(new URL('../../../examples/', import.meta.url));
@@ -23,6 +24,11 @@ export const WORKFLOW_FILES = {
   'initial-sync': 'mdbisync-initial-sync.yml',
   'pre-commit': 'pre-commit.yml',
 } as const;
+
+/** A run's own concurrency group, in place of the templates' shared one. */
+export function runGroup(runId: string): string {
+  return `mdbisync-${runId}`;
+}
 
 /** The workflow file that runs a command. */
 export function workflowFor(command: CommandName): string {
@@ -119,11 +125,158 @@ export const DISPATCH_GUARD = "github.event_name == 'workflow_dispatch'";
 
 /** A job condition that holds only for a dispatch, keeping the job's own condition. */
 function dispatchOnly(condition: unknown): string {
-  if (condition === undefined || condition === null) return DISPATCH_GUARD;
+  return guarded(DISPATCH_GUARD, condition);
+}
+
+/** `guard` and a job's own condition, when it has one. */
+function guarded(guard: string, condition: unknown): string {
+  if (condition === undefined || condition === null) return guard;
   const own = String(condition).replace(/^\s*\$\{\{\s*|\s*\}\}\s*$/g, '');
   // Several `${{ }}` parts make a string, not one expression the guard can join.
   if (own.includes('${{') || own.includes('}}')) throw new Error(`cannot guard the job condition ${String(condition)}: it is not one expression`);
-  return `${DISPATCH_GUARD} && (${own})`;
+  return `${guard} && (${own})`;
+}
+
+// --- the scheduled sync -------------------------------------------------------
+//
+// GitHub starts a scheduled workflow only from the default branch, and a
+// run's branches never are. The sandbox's default branch therefore holds one
+// scheduled workflow, rendered from the sync template: on each tick its
+// `request` job takes one run's request (the branch t/<run>/schedule, which
+// it deletes, so a request is served once) and its sync jobs run the
+// template's steps for that run's branches, state refs and concurrency group.
+// A tick without a request runs only the `request` job. The workflow is
+// installed once, by hand (`cli.ts scheduler --install`); a run never changes
+// the default branch, and refuses to ask a scheduled workflow that is not
+// this template's rendering for the release under test.
+
+/** The scheduled workflow's file on the sandbox's default branch. */
+export const SCHEDULER_FILE = 'mdbisync-scheduled.yml';
+
+/** The scheduled workflow's own concurrency group: one tick at a time, the newest waiting. */
+export const SCHEDULER_GROUP = 'mdbisync-scheduled';
+
+const REQUEST_JOB = 'request';
+
+/** A request job output, as an expression in the sync jobs. */
+function requested(output: string): string {
+  return `\${{ needs.${REQUEST_JOB}.outputs.${output} }}`;
+}
+
+/** The name of a sync job of the scheduled workflow that serves run `runId`. */
+export function scheduledJobName(job: string, runId: string): string {
+  return `${job} ${runId}`;
+}
+
+/**
+ * The request job's script: takes the first request whose run still has its
+ * tracked branch and writes that run's names to the job's outputs. The run's
+ * names are runNames' and runGroup's, with the run id as `$run`.
+ */
+export function requestScript(): string {
+  const placeholder = '000000';
+  const names = runNames(placeholder);
+  const named = (value: string) => value.split(placeholder).join('$run');
+  const [requestHead, requestTail] = names.scheduleRequest.split(placeholder) as [string, string];
+  return [
+    'set -euo pipefail',
+    'auth="AUTHORIZATION: basic $(printf \'x-access-token:%s\' "$TOKEN" | base64 | tr -d \'\\n\')"',
+    'remote() { git -c http.extraheader="$auth" "$@"; }',
+    '# A push needs a repository; nothing is fetched into it.',
+    'git init --quiet "$RUNNER_TEMP/requests"',
+    'cd "$RUNNER_TEMP/requests"',
+    `refs=$(remote ls-remote --refs "$REMOTE" 'refs/heads/${requestHead}*' | awk '{print $2}')`,
+    `for run in $(printf '%s\\n' "$refs" | sed -n 's|^refs/heads/${requestHead}\\([0-9a-f]\\{6\\}\\)${requestTail}$|\\1|p'); do`,
+    '  # The deletion that succeeds takes the request: each is served once.',
+    `  remote push --quiet "$REMOTE" ":refs/heads/${named(names.scheduleRequest)}" || continue`,
+    '  # A request of a run whose branch is gone is dropped.',
+    `  printf '%s\\n' "$refs" | grep -qx "refs/heads/${named(names.trackedBranch)}" || continue`,
+    '  {',
+    '    echo "run=$run"',
+    `    echo "tracked-branch=${named(names.trackedBranch)}"`,
+    `    echo "sync-branch=${named(names.syncBranch)}"`,
+    `    echo "state-ref-prefix=${named(names.refPrefix)}"`,
+    `    echo "group=${named(runGroup(placeholder))}"`,
+    '  } >> "$GITHUB_OUTPUT"',
+    '  echo "Took the request of $run."',
+    '  exit 0',
+    'done',
+    'echo "No request."',
+    '',
+  ].join('\n');
+}
+
+const SCHEDULER_HEADER = [
+  ` The sync template, rendered for the test repository's default branch: the`,
+  ` only branch GitHub starts a schedule from. Each tick the request job takes`,
+  ` one run's request (its branch t/<run>/schedule) and the sync job runs the`,
+  ` template's steps on that run's branches. Generated; install with the`,
+  ` harness's \`scheduler --install\`, never edit it by hand.`,
+].join('\n');
+
+/** The sync template rendered as the sandbox's scheduled workflow, for the release `actionSha` (the template's pin when absent). */
+export function renderScheduler(template: string, actionSha?: string): string {
+  const rendered = renderForRun(template, {
+    trackedBranch: requested('tracked-branch'),
+    syncBranch: requested('sync-branch'),
+    refPrefix: requested('state-ref-prefix'),
+    group: SCHEDULER_GROUP,
+    ...(actionSha === undefined ? {} : { actionSha }),
+  });
+  const doc = parseDocument(rendered);
+  // The template's own header says where a deployer copies it; this file's says what it is.
+  doc.commentBefore = SCHEDULER_HEADER;
+  const top = doc.contents as YAMLMap;
+  const first = top.items[0]?.key;
+  if (isScalar(first)) first.commentBefore = null;
+  doc.set('name', `${String(doc.get('name') ?? 'mdbisync')} (scheduled)`);
+  const on = doc.get('on');
+  if (!isMap(on) || !on.has('schedule')) throw new Error('the template has no schedule');
+  for (const event of on.items.map((pair) => String(pair.key))) if (event !== 'schedule') on.delete(event);
+  if (doc.getIn(['concurrency', 'group']) !== SCHEDULER_GROUP) throw new Error('the template has no shared concurrency group');
+  const concurrency = top.items.find((pair) => isScalar(pair.key) && pair.key.value === 'concurrency')?.key;
+  if (isScalar(concurrency)) concurrency.commentBefore = ' One tick at a time; a newer tick replaces a waiting one.';
+
+  const jobs = doc.get('jobs') as YAMLMap;
+  for (const pair of jobs.items) {
+    const job = pair.value as YAMLMap;
+    const condition = job.get('if');
+    job.delete('if');
+    // Only a tick that took a request runs the template's job, as that run's job: its name carries the run id.
+    // The run's own group, the one its pushes and dispatches use, so the scheduled job queues behind them.
+    job.items.unshift(...Object.entries({
+      name: scheduledJobName(String(pair.key), requested('run')),
+      needs: REQUEST_JOB,
+      if: guarded(`needs.${REQUEST_JOB}.outputs.run != ''`, condition),
+      // A tick without a request skips the job; its group then is the tick's own, never empty and never shared.
+      concurrency: { group: `\${{ needs.${REQUEST_JOB}.outputs.group || format('${SCHEDULER_GROUP}-idle-{0}', github.run_id) }}`, 'cancel-in-progress': false },
+    }).map(([key, value]) => doc.createPair(key, value)));
+    const steps = job.get('steps');
+    if (!isSeq(steps)) continue;
+    for (const item of steps.items) {
+      const step = item as YAMLMap;
+      const uses = step.get('uses');
+      if (typeof uses !== 'string' || !uses.startsWith('actions/checkout@')) continue;
+      // On a schedule the checkout is the default branch's; the run's tracked branch takes its place, as main is the deployer's.
+      if (!isMap(step.get('with'))) step.set('with', doc.createNode({}));
+      (step.get('with') as YAMLMap).set('ref', requested('tracked-branch'));
+    }
+  }
+  const request = doc.createNode({
+    'runs-on': SANDBOX_RUNNER,
+    'timeout-minutes': 5,
+    permissions: { contents: 'write' },
+    outputs: Object.fromEntries(['run', 'tracked-branch', 'sync-branch', 'state-ref-prefix', 'group'].map((output) => [output, `\${{ steps.take.outputs.${output} }}`])),
+    steps: [{
+      name: 'Take a request',
+      id: 'take',
+      shell: 'bash',
+      env: { TOKEN: '${{ github.token }}', REMOTE: '${{ github.server_url }}/${{ github.repository }}' },
+      run: requestScript(),
+    }],
+  });
+  jobs.items.unshift(doc.createPair(REQUEST_JOB, request));
+  return doc.toString({ lineWidth: 0 });
 }
 
 function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): void {

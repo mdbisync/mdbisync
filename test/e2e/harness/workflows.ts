@@ -7,8 +7,10 @@
 // logs are read for the canary scan (I5).
 //
 // Scheduled workflows run only on the repository's default branch, and a
-// run's branches never are, so a step that needs the schedule is
-// env-blocked with that reason.
+// run's branches never are. A run asks the sandbox's scheduled workflow
+// (workflow-files.ts, renderScheduler) for a scheduled sync with its request
+// branch; the scheduled run that takes the request runs the sync for the
+// run's branches as a job named for the run.
 //
 // A failed run is an environment blocker only when it is proven: its first
 // failed step installs a tool the runner must provide, and that step's own
@@ -32,7 +34,8 @@ export const RUN_WAIT_MS = 30 * 60_000;
 export const RUN_APPEAR_MS = 5 * 60_000;
 export const POLL_MS = 10_000;
 
-export const SCHEDULE_BLOCKED = 'scheduled workflows run only on the default branch; a run\'s branches are not it';
+/** How long a run's request may wait for a scheduled run to take it: GitHub starts schedules late, and may skip a tick. */
+export const SCHEDULE_TAKE_MS = 60 * 60_000;
 
 /** Files of a zip archive (stored or deflated entries), by name. */
 export function unzip(archive: Buffer): Map<string, Buffer> {
@@ -99,6 +102,44 @@ export async function waitForRun(rest: SandboxRest, options: WaitOptions): Promi
     if (!seen && waited > (options.appearMs ?? RUN_APPEAR_MS)) throw new ProductError(`no ${options.event} run started on the run's branch`);
     if (waited > (options.timeoutMs ?? RUN_WAIT_MS)) throw new EnvBlockedError(`the ${options.event} run did not finish within ${Math.round((options.timeoutMs ?? RUN_WAIT_MS) / 60_000)} minutes (runner busy?)`);
     await sleep(poll);
+  }
+}
+
+/**
+ * Waits until a scheduled run takes the run's request (its branch is gone).
+ * A request no scheduled run took within `timeoutMs` blocks the run: GitHub
+ * did not start the schedule.
+ */
+export async function waitForRequestTaken(rest: SandboxRest, branch: string, options: { timeoutMs?: number; pollMs?: number } = {}): Promise<void> {
+  const started = Date.now();
+  const timeoutMs = options.timeoutMs ?? SCHEDULE_TAKE_MS;
+  while (await rest.branchExists(branch)) {
+    if (Date.now() - started > timeoutMs) throw new EnvBlockedError(`no scheduled run took the run's request within ${Math.round(timeoutMs / 60_000)} minutes (GitHub started no tick of the schedule, or the runner was busy)`);
+    await sleep(options.pollMs ?? POLL_MS);
+  }
+}
+
+/**
+ * The completed scheduled run of `workflow`, created at or after `after`,
+ * that ran a job for run `runId` (a job named `<job> <runId>`), once it has
+ * completed. Call it once the request is taken: that run exists by then.
+ */
+export async function waitForScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; after: number; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number }): Promise<WorkflowRun> {
+  const started = Date.now();
+  // Completed runs that served another run, or none: they never become this run's.
+  const others = new Set<number>(options.exclude ?? []);
+  for (;;) {
+    const candidates = (await rest.workflowFileRuns(options.workflow, 'schedule'))
+      .filter((run) => Date.parse(run.created_at) >= options.after - 5_000 && !others.has(run.id))
+      .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+    for (const run of candidates) {
+      const ours = (await rest.runJobs(run.id)).some((job) => job.name.endsWith(` ${options.runId}`));
+      if (ours && run.status === 'completed') return run;
+      if (!ours && run.status === 'completed') others.add(run.id);
+    }
+    const waited = Date.now() - started;
+    if (waited > (options.timeoutMs ?? RUN_WAIT_MS)) throw new EnvBlockedError(`the scheduled run that took the run's request did not finish within ${Math.round((options.timeoutMs ?? RUN_WAIT_MS) / 60_000)} minutes (runner busy?)`);
+    await sleep(options.pollMs ?? POLL_MS);
   }
 }
 
