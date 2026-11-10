@@ -3093,6 +3093,29 @@ describe('the setup check step (run.check)', () => {
     assert.equal(runs, 20);
   });
 
+  it('stops resuming at once when a document left out at write is all that keeps the sync incomplete', async () => {
+    const sync = { complete: false, failed: [], notAttempted: [], skipped: [], conflicts: [], stopped: null, leftOutAtWrite: [{ path: 'eng/notes/scan.md', rule: 'upload-too-large', files: ['eng/media/scan.png'] }] };
+    const leftOut = { ...COMPLETE, complete: false, changed: false, sync };
+    const { error, runs } = await resume([{ report: leftOut, exitCode: 0 }]);
+    assert.ok(error instanceof ProductError);
+    assert.equal(error.message, 'the run changed nothing and only left out at write eng/notes/scan.md (upload-too-large); resuming cannot clear it');
+    assert.equal(runs, 1);
+    // A run that still wrote something, or still has other work, resumes.
+    const progressed = await resume([{ report: { ...leftOut, changed: true }, exitCode: 0 }, { report: COMPLETE, exitCode: 0 }]);
+    assert.equal(progressed.error, null);
+    const failed = { ...leftOut, sync: { ...sync, failed: [{ path: 'eng/notes/a.md', operation: 'UpdateDocument', error: 'timeout' }] } };
+    const retried = await resume([{ report: failed, exitCode: 0 }, { report: COMPLETE, exitCode: 0 }]);
+    assert.equal(retried.error, null);
+    // A write step that completed leaves another cause (a held removal, the pull request): the run resumes.
+    const heldElsewhere = await resume([{ report: { ...leftOut, sync: { ...sync, complete: true } }, exitCode: 0 }, { report: COMPLETE, exitCode: 0 }]);
+    assert.equal(heldElsewhere.error, null);
+    // An unreadable upload can become readable with no git change: the run resumes.
+    const unreadable = { ...leftOut, sync: { ...sync, leftOutAtWrite: [{ path: 'eng/notes/lost.md', rule: 'upload-unreadable', files: ['eng/notes/lost.png'] }] } };
+    const recovered = await resume([{ report: unreadable, exitCode: 0 }, { report: COMPLETE, exitCode: 0 }]);
+    assert.equal(recovered.error, null);
+    assert.equal(recovered.runs, 2);
+  });
+
   it('stops the scenario when the engine does not implement the check', async () => {
     await assert.rejects(
       withEngine({ check: { stderr: 'check: not implemented\n', exitCode: 15 } }, [{ action: 'check', args: {} }]),
