@@ -1723,13 +1723,20 @@ async function mermaidFences(env: Env, side: 'git' | 'linear'): Promise<Map<stri
   return result;
 }
 
+/**
+ * The table rows of the slice's table documents: in Linear, as stored; in
+ * git, the file's body with its links as the engine writes them (I1's rule),
+ * since a cell's image or document link is a Linear URL there. Cell
+ * equality is therefore I1 restricted to table rows: it names the table
+ * documents whose cells differ.
+ */
 async function tableRows(env: Env, side: 'git' | 'linear'): Promise<Array<{ path: string; separator: boolean; cells: string[] }>> {
   const view = await env.view();
   const rows: Array<{ path: string; separator: boolean; cells: string[] }> = [];
   for (const path of groupPaths(env.ctx, 'tables')) {
     const id = view.ids.get(path)?.id;
     if (side === 'linear' && id === undefined) continue; // left out
-    const text = side === 'git' ? (fileBody(view, path) ?? '') : (view.documents.get(id as string)?.content ?? '');
+    const text = side === 'git' ? linearLinks(fileBody(view, path) ?? '', path, view) : (view.documents.get(id as string)?.content ?? '');
     for (const line of text.split('\n')) {
       if (!line.startsWith('|')) continue;
       const cells = line.replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((cell) => cell.trim());

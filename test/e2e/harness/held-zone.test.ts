@@ -6,8 +6,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, it } from 'node:test';
 import { Git } from '../../../src/state/git.ts';
@@ -16,6 +16,7 @@ import { BudgetBlockedError, Governor, estimate, type App } from './governor.ts'
 import { forgetRun, registerRun, type Lock } from './locks.ts';
 import { takeTeamLocks } from './runner.ts';
 import { GitStateStore, SharedAdmission } from './shared-state.ts';
+import { EnvBlockedError } from './results.ts';
 import { loadScenarios, type Scenario } from './spec.ts';
 
 const roots: string[] = [];
@@ -119,4 +120,79 @@ it('keeps a held UI run\'s team zone from the next zone run until the hold ends'
   assert.equal(zone.trashed, 0, 'the zone\'s trash is unchanged');
   locksB.forEach((lock) => lock.release());
   forgetRun(stateDir, 'bbbbbb');
+});
+
+it('lets setup wait past its limit for a zone that a live run holds, and takes a dead run\'s team lock at once', async () => {
+  const { SetupDeadline, takeTeamZones } = await import('./runner.ts');
+  const { acquireLock } = await import('./locks.ts');
+  const root = mkdtempSync(join(tmpdir(), 'zone-wait-'));
+  roots.push(root);
+  const stateDir = join(root, 'state');
+  const remote = join(root, 'control.git');
+  await new Git(root).run(['init', '--bare', '--quiet', remote]);
+  const governor = (dir: string, maxWaitMs: number) => new Governor({ apps: [app], stateDir, maxWaitMs, shared: new SharedAdmission(new GitStateStore({ stateDir: join(root, dir), url: remote })) });
+  // L1-05 is the scenario the shared admission lets run beside another zone run; it takes the team lock too.
+  const scenario = byId('L1-05');
+  assert.equal(scenario.setup.teamZoneLock, true);
+  const setupOf = (deadline: InstanceType<typeof SetupDeadline>, grant: Parameters<typeof takeTeamZones>[2], runId: string, lines: string[], locks: Lock[]) =>
+    deadline.race(takeTeamZones(lockContext(scenario, runId, new AbortController().signal, lines), stateDir, grant, { ids: [ZONE], lockKeys: ['ENG'] }, locks, deadline).then(() => 'ready'),
+      () => new EnvBlockedError('setup did not finish'));
+  const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Run A, live, holds the shared zone claim and then team ENG's lock, each well past run B's setup limit.
+  const a = await governor('a', 0).admit(scenario, 'aaaaaa', estimate(scenario), app.name);
+  await a.claimZones!([ZONE]);
+  const b = await governor('b', 60_000).admit(scenario, 'bbbbbb', estimate(scenario), app.name);
+  const lockA = await acquireLock('team-eng', { stateDir, runId: 'aaaaaa', timeoutMs: 0 });
+  const deadline = new SetupDeadline(3_000);
+  const lines: string[] = [];
+  const locksB: Lock[] = [];
+  const setup = setupOf(deadline, b, 'bbbbbb', lines, locksB);
+  await pause(4_000);
+  await a.release();
+  await pause(4_000);
+  lockA.release();
+  assert.equal(await setup, 'ready');
+  assert.deepEqual(lines, ['waiting for team ENG (held by run aaaaaa)']);
+  assert.ok(deadline.creditedMs >= 5_000, `the waits were not counted (${deadline.creditedMs} ms)`);
+  assert.equal(locksB.length, 1);
+  locksB.splice(0).forEach((lock) => lock.release());
+  await b.release();
+
+  // A claim that never answers is not a wait for a held zone: setup's limit still stops it.
+  const stalled = { claimZones: () => new Promise<void>(() => {}) };
+  await assert.rejects(setupOf(new SetupDeadline(300), stalled, 'cccccc', [], []), EnvBlockedError);
+
+  // A run that died while holding team ENG's lock: the next run takes it over without waiting.
+  const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+  await once(child, 'exit');
+  mkdirSync(join(stateDir, 'locks', 'team-eng'));
+  writeFileSync(join(stateDir, 'locks', 'team-eng', 'owner.json'), JSON.stringify({ pid: child.pid, host: hostname(), runId: 'dddddd', since: new Date().toISOString() }));
+  const recovered: string[] = [];
+  const locksE: Lock[] = [];
+  assert.equal(await setupOf(new SetupDeadline(5_000), undefined, 'eeeeee', recovered, locksE), 'ready');
+  assert.deepEqual(recovered, [], 'no wait for a dead run\'s lock');
+  assert.equal(JSON.parse(readFileSync(join(stateDir, 'locks', 'team-eng', 'owner.json'), 'utf8')).runId, 'eeeeee');
+  locksE.splice(0).forEach((lock) => lock.release());
+  for (const runId of ['aaaaaa', 'bbbbbb']) forgetRun(stateDir, runId);
+});
+
+it('does not let setup\'s limit expire during a pause between two looks at a held team lock', async () => {
+  const { SetupDeadline, takeTeamZones } = await import('./runner.ts');
+  const { acquireLock } = await import('./locks.ts');
+  const root = mkdtempSync(join(tmpdir(), 'zone-pause-'));
+  roots.push(root);
+  const stateDir = join(root, 'state');
+  const scenario = byId('L1-05');
+  // Less setup time is left than one 500 ms pause between two looks at the lock.
+  const holder = await acquireLock('team-eng', { stateDir, runId: 'aaaaaa', timeoutMs: 0 });
+  const deadline = new SetupDeadline(300);
+  const locks: Lock[] = [];
+  const setup = deadline.race(takeTeamZones(lockContext(scenario, 'bbbbbb', new AbortController().signal, []), stateDir, undefined, { ids: [ZONE], lockKeys: ['ENG'] }, locks, deadline).then(() => 'ready'),
+    () => new EnvBlockedError('setup did not finish'));
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  holder.release();
+  assert.equal(await setup, 'ready');
+  assert.equal(locks.length, 1);
+  locks.splice(0).forEach((lock) => lock.release());
 });
