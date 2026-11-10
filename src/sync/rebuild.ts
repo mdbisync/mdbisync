@@ -3,11 +3,14 @@
 // title in the file's place. Live documents come first, the oldest of them
 // as in initial sync; a trashed or archived document is matched only when
 // no live one has the title, so capture records its removal instead of the
-// write step creating it again. Files the sync leaves out (lint findings, a
-// title Linear refuses) stay git-only and are not matched. A file capture
-// named (an encoded title, a collision suffix) is matched by the path capture
-// gives that document, as the write step checks it. A file with no
-// such document stays unmapped; a document with no file is captured as new.
+// write step creating it again. A file the sync leaves out now (lint
+// findings, a title Linear refuses) keeps the document it had, as an ongoing
+// run keeps it untouched: it is matched by the title and place of its last
+// synchronized version since the latest initial sync. One left out ever since
+// was never mapped, and stays git-only. A file capture named (an encoded
+// title, a collision suffix) is matched by the path capture gives that
+// document, as the write step checks it. A file with no such document stays
+// unmapped; a document with no file is captured as new.
 // What the map alone held is lost: renames made in Linear since the last
 // run (the document comes back under its new title as a new file), the ids
 // reserved for documents not created yet, and a marked document's own icon
@@ -15,13 +18,18 @@
 
 import { lintInTree } from '../format/index.ts';
 import { type DocumentPlace, type LinearClient, type LinearFacts, lengthRefusal } from '../linear/index.ts';
-import { type MappedDocument } from '../mapping/index.ts';
+import { type MappedDocument, type Place } from '../mapping/index.ts';
+import { RECORD_MESSAGE } from '../initial-sync/index.ts';
 import { placeId } from '../initial-sync/plan.ts';
 import { type ResolvedTargets } from '../setup/index.ts';
-import { type IdMap } from '../state/index.ts';
+import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
+import { type Side, lastSynchronized } from './merge.ts';
 import { documentPath } from './paths.ts';
 
 export interface RebuildInput {
+  git: Git;
+  /** The `linear` record the documents are read from. */
+  record: Oid;
   linear: LinearClient;
   facts: LinearFacts;
   targets: ResolvedTargets;
@@ -31,24 +39,33 @@ export interface RebuildInput {
   files: ReadonlySet<string>;
 }
 
-export async function rebuildIds({ linear, facts, targets, documents, files: treeFiles }: RebuildInput): Promise<IdMap> {
+export async function rebuildIds({ git, record, linear, facts, targets, documents, files: treeFiles }: RebuildInput): Promise<IdMap> {
   const keyOf = (place: DocumentPlace, title: string) =>
     `${'projectId' in place ? `project:${place.projectId}` : `team:${place.teamId}`}\0${title.normalize('NFC')}`;
   const files = new Map<string, string>();
   const places = new Map<string, DocumentPlace>();
   /** Files by place, for the paths capture gives: folder and path. */
   const byPlace = new Map<string, Array<{ folder: string; path: string }>>();
+  const initial = await latestInitialRecord(git, record);
+  const sides = new Map<Oid, Promise<Side>>();
   for (const document of documents) {
-    if (lintInTree(document.path, document.text, treeFiles).length > 0 || lengthRefusal({ title: document.title }, facts) !== undefined) continue;
+    // The title and place Linear was last given for the file.
+    let synchronized: { title: string; place: Place } = document;
+    if (lintInTree(document.path, document.text, treeFiles).length > 0 || lengthRefusal({ title: document.title }, facts) !== undefined) {
+      const last = initial === undefined ? null : await lastSynchronized(git, record, document.path, facts, sides, initial);
+      if (last === null) continue;
+      synchronized = last.file;
+    }
+    const { title } = synchronized;
     let place: DocumentPlace;
     try {
-      place = placeId(targets, document.place);
+      place = placeId(targets, synchronized.place);
     } catch {
       continue;
     }
     places.set(JSON.stringify(place), place);
-    files.set(keyOf(place, document.title), document.path);
-    const folder = document.path.slice(0, -(document.title.length + '.md'.length)).replace(/\/$/, '');
+    files.set(keyOf(place, title), document.path);
+    const folder = document.path.slice(0, -(title.length + '.md'.length)).replace(/\/$/, '');
     byPlace.set(JSON.stringify(place), [...(byPlace.get(JSON.stringify(place)) ?? []), { folder, path: document.path }]);
   }
   const allPaths = new Set(documents.map((document) => document.path));
@@ -78,6 +95,21 @@ export async function rebuildIds({ linear, facts, targets, documents, files: tre
     candidates.splice(index, 1);
   }
   return ids;
+}
+
+/**
+ * The newest initial sync record on the `linear` chain (first parents). The
+ * chain goes on into the tracked branch's history before it, where a file
+ * was never synchronized.
+ */
+async function latestInitialRecord(git: Git, record: Oid): Promise<Oid | undefined> {
+  const subjects = new Set([RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD]);
+  const log = await git.text(['log', '--first-parent', '--format=%H %s', '--fixed-strings', ...[...subjects].map((subject) => `--grep=${subject}`), record]);
+  for (const line of log.split('\n')) {
+    const space = line.indexOf(' ');
+    if (space > 0 && subjects.has(line.slice(space + 1))) return line.slice(0, space);
+  }
+  return undefined;
 }
 
 function compare(a: string, b: string): number {

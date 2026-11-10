@@ -146,7 +146,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
       const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
-      for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents, files: recorded.files })) ids.set(path, entry);
+      for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, documents, files: recorded.files })) ids.set(path, entry);
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length };
     }
     const cursor = await readCaptureCursor(git, state.ids);
@@ -435,8 +435,28 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       for (const [id, {doc}] of candidates) if (marking.includes(id) && current.get(id)?.updatedAt !== doc.updatedAt) unmarked.add(id);
     }
+    // An excluded file's document that Linear still holds as last accepted has nothing to capture, the images it
+    // downloaded included: they are read in the commit of that version, since git may have removed one since (the
+    // reason the file is excluded). A run whose capture cursor is lost reads every document again.
+    const acceptedAssets = new Map<Oid, ReturnType<typeof createAssetCapture>>();
+    const asLastAccepted = async (candidate: Candidate): Promise<boolean> => {
+      const baseline = excludedPath(candidate.path) ? baselines.get(candidate.path) : undefined;
+      if (baseline == null || candidate.assets.files.size === 0) return false;
+      const capture = acceptedAssets.get(baseline.commit) ?? createAssetCapture(git, options.config, baseline.commit, () => Promise.reject(new Error(message('assets.download-failed'))));
+      acceptedAssets.set(baseline.commit, capture);
+      const body = splitFile(baseline.text).body;
+      let assets: CapturedAssets;
+      try {
+        assets = await capture(candidate.path, candidate.doc.content ?? '', uploads, body);
+      } catch {
+        // An image that version did not have: the document changed.
+        return false;
+      }
+      return assets.files.size === 0 && splitFile(textOf({doc: candidate.doc, path: candidate.path, head: candidate.head, assets, files: new Map(), ...(candidate.previousBody === undefined ? {} : {previousBody: candidate.previousBody})}, documentIds)).body === body;
+    };
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);
+      if (old?.path === candidate.path && await asLastAccepted(candidate)) continue;
       if (old !== undefined && old.path !== candidate.path) {
         removeBody(old.path);
         ids.delete(old.path);
