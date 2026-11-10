@@ -5,6 +5,7 @@
 import { DIRECTIONS, type Direction } from '../initial-sync/summary.ts';
 import { type StateConfig, StateConfigError, resolveStateConfig } from '../state/index.ts';
 import { message } from '../messages.ts';
+import { MAX_CHECK_DEADLINE_MINUTES, MIN_CHECK_DEADLINE_MINUTES } from '../sync/deadline.ts';
 
 export const INPUT_NAMES = [
   'linear-client-id',
@@ -20,6 +21,7 @@ export const INPUT_NAMES = [
   'report-file',
   'document-cap',
   'merge-grace-seconds',
+  'check-deadline-minutes',
   'direction',
   'confirm',
 ] as const;
@@ -37,6 +39,8 @@ export interface RunInputs {
   reportFile?: string;
   documentCap?: number;
   mergeGraceSeconds?: number;
+  /** Minutes a head's checks may stay pending before its batch is suspended. */
+  checkDeadlineMinutes?: number;
 }
 
 export class InputError extends Error {
@@ -108,6 +112,13 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   if (grace !== '') {
     if (!/^(0|[1-9][0-9]*)$/.test(grace) || Number(grace) > 120) throw new InputError(message('inputs.merge-grace'));
     inputs.mergeGraceSeconds = Number(grace);
+  }
+  const deadline = value('check-deadline-minutes');
+  if (deadline !== '') {
+    if (!/^[1-9][0-9]*$/.test(deadline) || Number(deadline) < MIN_CHECK_DEADLINE_MINUTES || Number(deadline) > MAX_CHECK_DEADLINE_MINUTES) {
+      throw new InputError(message('inputs.check-deadline'));
+    }
+    inputs.checkDeadlineMinutes = Number(deadline);
   }
   return inputs;
 }

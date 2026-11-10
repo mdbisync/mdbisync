@@ -21,6 +21,7 @@
 
 import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import {
+  type CheckFailure,
   type CheckState,
   type GitHubRepository,
   PullRequestError,
@@ -46,7 +47,8 @@ import {
   readIds,
   commitTree,
 } from '../state/index.ts';
-import { HOLD_MARK_LIMIT, type HoldMarksResult } from './hold.ts';
+import { HOLD_MARK_LIMIT, type HoldMarksResult, linkTarget } from './hold.ts';
+import { DEFAULT_CHECK_DEADLINE_MINUTES, codeNames, headNote, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold } from './deadline.ts';
 import { LaneMoved, LaneConflict, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import { message } from '../messages.ts';
@@ -69,6 +71,8 @@ export interface PullRequestOptions {
   github: GitHubRepository;
   identity?: CommitIdentity;
   mergeGraceSeconds?: number | undefined;
+  /** Minutes a head's checks may stay pending before its batch is suspended; `DEFAULT_CHECK_DEADLINE_MINUTES` when absent. */
+  checkDeadlineMinutes?: number | undefined;
 }
 
 export interface PullRequestResult {
@@ -83,6 +87,16 @@ export interface PullRequestResult {
   branchMoved: boolean;
   /** The checks on the head; null when this run did not read them. */
   checks: CheckState | null;
+  /**
+   * Red tracked branch: checks that failed (or did not finish in time) on the
+   * head and also failed on the tracked branch's tip, with their runs there.
+   * The pull request is held: nothing is suspended or marked.
+   */
+  redMain?: CheckFailure[];
+  /** Checks that failed on the head and still run on the tracked branch's tip: the decision waits for them. */
+  mainPending?: string[];
+  /** The head's checks passed, but it merges only after the suspended pull request, whose checks still run. */
+  waitsForSuspended?: boolean;
   /** The merge commit on the tracked branch when this run merged the pull request. */
   merged: Oid | null;
   /** Files the pull request changes on the tracked branch. */
@@ -196,6 +210,8 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     if (open !== null && pending && (await holdsInitialRecord(git, sync as Oid, tracked))) return { ...result, code: 'initial-pull-request-pending' };
 
     const identity = options.identity ?? context.identity;
+    /** A hold on a red tracked branch that this pull request's description notes. */
+    const held = open === null ? null : readRedMainNote(open.body);
     // The id map is read only when a merge has documents to resolve.
     const merger = markedMerger(git, options.state.ids, identity, frozen);
     /** What this run's merges into the sync branch resolved; reported only once the branch has moved to them. */
@@ -234,6 +250,23 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       addResolution(resolved, merged);
       headTree = await git.text(['rev-parse', `${head}^{tree}`]);
     }
+    // The hold covers the branch as it came into this run, also when Linear's changes joined it above: the new head
+    // still lacks the tracked branch's fix until it is merged in.
+    let hold = held !== null && held.head === sync ? held : null;
+    // A held branch: once the tracked branch's tip no longer fails those checks (a fix, or a person's rerun there),
+    // the sync branch merges it, so the checks run again on a head that holds that tip.
+    if (hold !== null && !(await isAncestor(git, tracked, head))) {
+      const verdict = await readMainVerdict(github, tracked, hold.checks);
+      // Only a tip that ran those checks and passed them: one whose CI has not registered them yet proves nothing.
+      if (verdict.state === 'clear' && verdict.passed) {
+        const merged = await merger(head, tracked, [head, tracked], TRACKED_MERGE_MESSAGE);
+        if (merged === null) return { ...result, code: 'conflict' };
+        head = merged.head;
+        addResolution(resolved, merged);
+        headTree = await git.text(['rev-parse', `${head}^{tree}`]);
+        hold = null;
+      }
+    }
     if (open === null && !result.needed && headTree === trackedTree) return result;
 
     if (head !== sync) {
@@ -248,34 +281,80 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // An earlier refusal stays noted while it still applies: the same head on the same tracked branch.
     const noted = open === null ? null : readRefusal(open.body);
     const earlier = noted !== null && noted.head === head && noted.base === tracked ? noted : null;
+    // The deadline runs from the push of this head, noted in the description; a new head starts it now.
+    const since = headSince(open?.body, head, new Date());
+    const stillHeld = hold === null ? null : { ...hold, head };
     const { pullRequest, opened } = await ensurePullRequest(github, {
       head: config.syncBranch,
       base: config.trackedBranch,
       title: SYNC_PULL_REQUEST_TITLE,
-      body: pullRequestBody(result.paths, earlier),
+      body: pullRequestBody(result.paths, earlier, { head, since, held: stillHeld }),
     });
     result.pullRequest = { number: pullRequest.number, url: pullRequest.url, opened };
     const fresh = result.branchMoved || opened || suspended?.released !== undefined;
     const grace = options.mergeGraceSeconds ?? DEFAULT_MERGE_GRACE_SECONDS;
     if (fresh && grace === 0) return result;
     result.checks = fresh ? await waitForChecks(github, head, grace) : await readChecks(github, head);
-    if (result.checks.state === 'failed') {
-      const lane = result.suspended?.failure;
-      result.suspended = await suspendBatch(context, options, head, pullRequest.number, result.checks.failures ?? result.checks.failed.map((name) => ({ name })));
-      // The suspended head's own failure still describes the documents suspended before this batch.
-      if (lane !== undefined) result.suspended.failure = lane;
+    const expired = pastDeadline(since, options.checkDeadlineMinutes ?? DEFAULT_CHECK_DEADLINE_MINUTES, new Date());
+    // A check still pending, queued or never started at the deadline counts as failed.
+    const timedOut = result.checks.state === 'pending' && expired ? result.checks.pending : [];
+    if (result.checks.state === 'failed' || timedOut.length > 0) {
+      const failures = result.checks.state === 'failed' ? result.checks.failures ?? result.checks.failed.map((name) => ({ name })) : [];
+      // The same check failing on the tracked branch's tip is not this batch's fault: the pull request is held.
+      const verdict = await readMainVerdict(github, tracked, [...failures.map(({ name }) => name), ...timedOut]);
+      if (verdict.state === 'red') {
+        result.redMain = verdict.checks;
+        const hold: RedMainHold = { head, main: tracked, checks: verdict.checks.map(({ name }) => name) };
+        const body = pullRequestBody(result.paths, earlier, { head, since, held: hold });
+        try {
+          if (body !== pullRequest.body) await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body });
+        } catch (error) {
+          // The hold is what this run reports; an unrecorded note is written again by the next run.
+          if (!(error instanceof PullRequestError)) throw error;
+        }
+        return result;
+      }
+      // While such a check still runs there, the decision waits, up to the deadline; a held head waits for it.
+      if (verdict.state === 'pending' && (!expired || stillHeld !== null)) {
+        result.mainPending = verdict.checks;
+        return result;
+      }
+      // A held head waits for a tip that has not run those checks yet (its CI has not registered them): no result there
+      // proves the documents are to blame.
+      if (verdict.state === 'clear' && !verdict.passed && stillHeld !== null) {
+        result.mainPending = stillHeld.checks;
+        return result;
+      }
+      const lane = result.suspended;
+      result.suspended = await suspendBatch(context, options, head, pullRequest.number, failures, timedOut);
+      if (lane !== undefined) {
+        // The suspended head's own failure still describes the documents suspended before this batch; the report names
+        // both heads' checks.
+        const joined = result.suspended;
+        if (lane.failure !== undefined) joined.failure = lane.failure;
+        if (lane.redMain !== undefined) joined.redMain = lane.redMain;
+        if (lane.mainPending !== undefined) joined.mainPending = lane.mainPending;
+        joined.checks = [...new Set([...lane.checks, ...joined.checks])].sort();
+        const late = [...new Set([...(lane.timedOut ?? []), ...(joined.timedOut ?? [])])].sort();
+        if (late.length > 0) joined.timedOut = late;
+      }
       result.pullRequest = null;
       result.branchMoved = true;
       return result;
     }
     if (result.checks.state === 'pending') return result;
+    // The suspended lane goes first: while its head's checks run, a normal merge would move the tracked branch under it.
+    if (suspended?.waiting === true) {
+      result.waitsForSuspended = true;
+      return result;
+    }
     const merge = await mergePullRequest(github, pullRequest.number, head);
     if (!merge.merged) {
       const refusal: MergeRefusal = { head, base: tracked, status: merge.status, reason: merge.reason };
       const refused = { ...result, status: merge.status, reason: merge.reason };
       if (earlier !== null && earlier.status === refusal.status && earlier.reason === refusal.reason) return { ...refused, code: 'merge-blocked' };
       try {
-        await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal) });
+        await updatePullRequest(github, pullRequest.number, { title: SYNC_PULL_REQUEST_TITLE, body: pullRequestBody(result.paths, refusal, { head, since, held: stillHeld }) });
       } catch (error) {
         // The refusal is what this run reports; an unrecorded note only means a later run notes it again.
         if (!(error instanceof PullRequestError)) throw error;
@@ -407,8 +486,8 @@ function commitMerge(git: Git, tree: string, parents: [Oid, Oid], message: strin
   });
 }
 
-/** Names, counts and GitHub's reason for a refused merge; never document content. */
-function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null): string {
+/** Names, counts and GitHub's reason for a refused merge, and the notes on its head; never document content. */
+function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null, notes: { head: Oid; since: Date; held: RedMainHold | null }): string {
   const lines = [
     'Changes made in Linear, on their way to this branch.',
     '',
@@ -425,6 +504,10 @@ function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null)
       `<!-- merge refused: head=${refusal.head} base=${refusal.base} status=${refusal.status} reason=${encodeURIComponent(refusal.reason)} -->`,
     );
   }
+  if (notes.held !== null) {
+    lines.push('', `Waiting: ${codeNames(notes.held.checks)} also failed on the tracked branch's tip, so this change is not to blame. The sync merges the tracked branch in once it passes there.`, redMainNote(notes.held));
+  }
+  lines.push('', headNote(notes.head, notes.since));
   return `${lines.join('\n')}\n`;
 }
 
@@ -463,7 +546,10 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     if (hold.code === 'merge-refused' || hold.code === 'merge-blocked') lines.push(`GitHub refused the suspended merge (${refusalText(hold)}).`, '');
     if (hold.code === 'github-failed') lines.push('A GitHub request for the suspended lane failed; the normal lane still runs.', '');
     if (hold.conflicts !== undefined) lines.push(`Suspended files waiting for a manual merge: ${hold.conflicts.map((path) => `\`${path}\``).join(', ')}.`, '');
-    if (hold.checks.length > 0) lines.push(`Failed checks: ${hold.checks.map((name) => `\`${name}\``).join(', ')}.`, '');
+    if (hold.checks.length > 0) lines.push(`Failed checks: ${codeNames(hold.checks)}.`, '');
+    if (hold.timedOut !== undefined && hold.timedOut.length > 0) lines.push(`Checks that did not finish in time: ${codeNames(hold.timedOut)}.`, '');
+    if (hold.redMain !== undefined) lines.push(`The suspended documents' comments in Linear stay as they are: ${checkRuns(hold.redMain)} also failed on the tracked branch's tip.`, '');
+    if (hold.mainPending !== undefined) lines.push(`The suspended documents' comments in Linear wait: ${codeNames(hold.mainPending)} failed on the suspended pull request and still runs on the tracked branch's tip.`, '');
   }
   const marks = result.holdMarks;
   if (marks !== undefined) {
@@ -476,7 +562,15 @@ export function renderPullRequest(result: PullRequestResult): string[] {
   }
   const pr = result.pullRequest;
   const link = pr === null ? '' : `[#${pr.number}](${pr.url})`;
-  const names = (list: readonly string[] | undefined) => (list ?? []).map((name) => `\`${name}\``).join(', ');
+  const names = (list: readonly string[] | undefined) => codeNames(list ?? []);
+  if (result.redMain !== undefined) {
+    lines.push(`The sync pull request ${link} is held: ${checkRuns(result.redMain)} also failed on the tracked branch's tip, so the change is not to blame. Nothing is suspended and nothing is written to Linear about it; once the check passes on the tracked branch, the sync merges it into the sync branch and the checks run again.`);
+  } else if (result.mainPending !== undefined) {
+    lines.push(`${codeNames(result.mainPending)} failed on the sync pull request ${link} and still runs on the tracked branch's tip; the sync waits for that result before it suspends anything.`);
+  } else if (result.waitsForSuspended === true) {
+    lines.push(`Every check on the sync pull request ${link} passed; it merges after the suspended pull request, whose checks still run.`);
+  }
+  const explained = result.redMain !== undefined || result.mainPending !== undefined || result.waitsForSuspended === true;
   switch (result.code) {
     case 'conflict':
       lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
@@ -504,6 +598,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
       );
       break;
     default:
+      if (explained) break;
       if (result.merged !== null) lines.push('Merged the sync pull request with a merge commit: every check on its head passed.');
       else if (pr === null) lines.push('The tracked branch already holds every change from Linear: no pull request is needed.');
       else if (pr.opened) lines.push(`Opened the sync pull request ${link}. ${result.checks?.pending.length ? `Waiting for ${names(result.checks.pending)}; a later run merges it.` : 'A later run merges it when every check on its head has passed.'}`);
@@ -525,4 +620,9 @@ export function renderPullRequest(result: PullRequestResult): string[] {
   }
   lines.push('');
   return lines;
+}
+
+/** Check names with links to their runs: `name` ([run](url)). */
+function checkRuns(checks: readonly CheckFailure[]): string {
+  return checks.map((check) => `${codeNames([check.name])}${check.url === undefined ? '' : ` ([run](${linkTarget(check.url)}))`}`).join(', ');
 }

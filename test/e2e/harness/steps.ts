@@ -32,7 +32,7 @@ import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineC
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
-import { burst, realClock, soak, type LoadDriver } from './load.ts';
+import { burst, burstDocuments, burstEditCounts, realClock, soak, type LoadDriver } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
@@ -690,12 +690,26 @@ const RUN: Record<string, Executor> = {
     ctx.observations.set('tokens.byOutcome', byOutcome);
   },
   'run.burst': async (ctx, args) => {
-    const result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), {
+    const options = {
       durationMs: Number(args.durationSeconds ?? 900) * 1000,
       linearEditsPerMinute: Number(args.linearEditsPerMinute ?? 50),
       gitPushesPerMinute: Number(args.gitPushesPerMinute ?? 1),
-      documents: documentPaths(ctx),
-    });
+    };
+    const sides = await readSides(ctx);
+    const candidates = new Map<string, string[]>();
+    for (const path of documentPaths(ctx)) {
+      const file = sides.files.get(path);
+      const id = sides.ids.get(path)?.id;
+      const document = id === undefined ? undefined : sides.documents.get(id);
+      if (file === undefined || document === undefined) throw new ProductError('a burst target is missing from the tracked files or recorded Linear documents');
+      candidates.set(path, [file, document.content ?? '']);
+    }
+    // Git pushes can retry three times, consuming tokens even when their push fails.
+    const counts = burstEditCounts(options);
+    const maxTokens = counts.linear + 4 * counts.git;
+    const lastToken = `${ctx.names.runId}-${String(ctx.sequence + maxTokens).padStart(3, '0')}`;
+    const documents = burstDocuments(candidates, options, lastToken);
+    const result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), { ...options, documents });
     ctx.observations.set('report.generatedLinearEdits', result.linearEdits);
     ctx.observations.set('report.generatedGitPushes', result.gitPushes);
   },

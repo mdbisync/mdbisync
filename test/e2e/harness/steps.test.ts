@@ -14,10 +14,10 @@ import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS
 import type { LiveWorld, RunContext } from './context.ts';
 import type { RunTree } from './corpus.ts';
 import { FIXTURE_PREPARATION } from './runner.ts';
-import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
+import { DOCUMENT_FIXTURES, fixtureEdit, paragraphEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
 import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
-import { burst, soak, type SoakDriver } from './load.ts';
+import { burst, burstDocuments, burstEditCounts, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { bodyOf, compare, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -415,6 +415,64 @@ describe('load', () => {
     assert.equal(edits.filter((actor) => actor === 'editor-b').length, 375);
   });
 
+  it('keeps the full burst off near-limit documents on either side', async () => {
+    const options = { durationMs: 900_000, linearEditsPerMinute: 50, gitPushesPerMinute: 1 };
+    const nearLimit = 'a'.repeat(249_999);
+    const versions = new Map([
+      ['near-linear.md', ['Small file.', nearLimit]],
+      ['near-git.md', [nearLimit, 'Small document.']],
+      ['notes.md', ['# Notes\n', '# Notes\n']],
+    ]);
+    const documents = burstDocuments(versions, options, 'abcdef-9999');
+    assert.deepEqual(documents, ['notes.md']);
+    const texts = new Map([...versions].map(([path, values]) => [path, values[0] as string]));
+    const tokens: string[] = [];
+    const edit = async (path: string) => {
+      const token = `abcdef-${String(tokens.length + 1).padStart(3, '0')}`;
+      tokens.push(token);
+      const text = paragraphEdit(texts.get(path) as string, undefined, token);
+      assert.ok(text.length <= 250_000);
+      texts.set(path, text);
+    };
+    const clock = fakeClock();
+    const result = await burst({ ...clock, linearEdit: async (_, path) => edit(path), gitEdit: async ([path]) => edit(path as string), sync: async () => void clock.sleep(60_000) }, { ...options, documents });
+    assert.equal(result.linearEdits, 750);
+    assert.equal(result.gitPushes, 15);
+    assert.ok(tokens.every((token) => texts.get('notes.md')?.includes(token)));
+    assert.equal(texts.get('near-git.md'), nearLimit);
+    assert.equal(texts.get('near-linear.md'), 'Small file.');
+  });
+
+  it('reserves exact append headroom and refuses an exhausted candidate set', () => {
+    const options = { durationMs: 60_000, linearEditsPerMinute: 1, gitPushesPerMinute: 1 };
+    const token = 'abcdef-1000';
+    const growth = 2 * paragraphEdit('', undefined, token).length;
+    const markers = 2 * `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length;
+    const fitting = 'a'.repeat(Math.floor((250_000 - markers) / 2) - growth);
+    assert.deepEqual(burstDocuments(new Map([['fits.md', [fitting, fitting]], ['full.md', [fitting + 'a']]]), options, token), ['fits.md']);
+    assert.throws(() => burstDocuments(new Map([['full.md', ['a'.repeat(250_000)]]]), options, token), /no document has room/);
+    assert.throws(() => burstDocuments(new Map(), options, token), /no document has room/);
+  });
+
+  it('uses the budgeted count for non-divisor rates and rejects invalid options', async () => {
+    const options = { durationMs: 60_000, linearEditsPerMinute: 49, gitPushesPerMinute: 0 };
+    const counts = burstEditCounts(options);
+    let edits = 0;
+    const clock = fakeClock();
+    const result = await burst({ ...clock, linearEdit: async () => { edits += 1; }, gitEdit: async () => {}, sync: async () => void clock.sleep(60_000) }, { ...options, documents: ['notes.md'] });
+    assert.equal(result.linearEdits, counts.linear);
+    assert.equal(edits, 49);
+    assert.throws(() => burstEditCounts({ ...options, linearEditsPerMinute: NaN }), /finite numbers/);
+  });
+
+  it('reports a missing mapped document as a product failure before the burst starts', async () => {
+    const { ctx, linear } = await fakeRun();
+    linear.documents.clear();
+    await assert.rejects(runStep(ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 0 } }), ProductError);
+    assert.equal(ctx.edits.length, 0);
+    assert.equal(ctx.engine.results.length, 0);
+  });
+
   it('runs a soak with hourly checks and a repeatable schedule', async () => {
     const run = async () => {
       const clock = fakeClock();
@@ -529,6 +587,17 @@ describe('oracles', () => {
     assert.equal(await tokenActive('t', answer(401, {}), 0), false);
     assert.equal(await tokenActive('t', answer(400, { errors: [{ extensions: { code: 'AUTHENTICATION_ERROR' } }] }), 0), false);
     await assert.rejects(tokenActive('t', answer(503, {}), 0), EnvBlockedError);
+  });
+
+  it('give up on a token probe Linear does not answer in time', async () => {
+    let calls = 0;
+    const stalled = (async (_url: string, init: RequestInit) => {
+      calls += 1;
+      assert.ok(init.signal instanceof AbortSignal, 'every probe has a deadline');
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    }) as unknown as typeof fetch;
+    await assert.rejects(tokenActive('t', stalled, 0), (error: Error) => error instanceof EnvBlockedError && /no answer in time/.test(error.message));
+    assert.equal(calls, 3);
   });
 });
 
@@ -860,7 +929,7 @@ async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: b
     runDir: join(root, 'run'),
     live: liveWorld,
     sandbox,
-    proxy: { url: 'http://127.0.0.1:1', requests: [], tokens: () => [], setFaults: (next: readonly unknown[]) => void faults.push(...next), clearFaults: () => {}, armedFaults: () => faults.length, counts: () => ({ total: 0, queries: 0, mutations: 0, injected: 0 }), resetCounters: () => {}, close: async () => {} },
+    proxy: { url: 'http://127.0.0.1:1', requests: [], tokens: () => [], unrevokedTokens: () => [], setFaults: (next: readonly unknown[]) => void faults.push(...next), clearFaults: () => {}, armedFaults: () => faults.length, counts: () => ({ total: 0, queries: 0, mutations: 0, injected: 0 }), resetCounters: () => {}, close: async () => {} },
     owned: new OwnershipLedger(stateDir, names.runId),
     checkpoints: new CheckpointControl(join(root, 'run', 'hooks')),
     engine: { results: [], setupRuns: 0, env: {}, restores: [] },

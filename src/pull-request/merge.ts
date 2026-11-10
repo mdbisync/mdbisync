@@ -24,6 +24,8 @@ export interface CheckState {
   pending: string[];
   /** The failed checks with their runs, sorted by name; absent when nothing failed. */
   failures?: CheckFailure[];
+  /** Names of the checks that finished and passed, sorted; absent when none did. */
+  succeeded?: string[];
 }
 
 /** A failed check run or commit status: its name, its page on GitHub and, for a check run, its id. */
@@ -51,6 +53,7 @@ export interface CheckAnnotation {
  */
 export async function readChecks(target: GitHubRepository, sha: string): Promise<CheckState> {
   const pending = new Set<string>();
+  const succeeded = new Set<string>();
   const failures = new Map<string, CheckFailure>();
   const fail = (name: string, url: unknown, checkRunId?: unknown) => {
     if (failures.has(name)) return;
@@ -74,6 +77,7 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
       const name = typeof run.name === 'string' ? run.name : 'unnamed check';
       if (run.status !== 'completed') pending.add(name);
       else if (typeof run.conclusion !== 'string' || !PASSING_CONCLUSIONS.has(run.conclusion)) fail(name, run.html_url, run.id);
+      else succeeded.add(name);
     }
     seen += body.check_runs.length;
     if (seen >= body.total_count) break;
@@ -95,11 +99,13 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
     const name = typeof status.context === 'string' ? status.context : 'unnamed status';
     if (status.state === 'pending') pending.add(name);
     else if (status.state !== 'success') fail(name, status.target_url);
+    else succeeded.add(name);
   }
 
   const failed = [...failures.keys()].sort();
   const state: CheckState = { hasChecks: hasRuns || combined.total_count > 0, state: failed.length > 0 ? 'failed' : pending.size > 0 ? 'pending' : 'passed', failed, pending: [...pending].sort() };
   if (failed.length > 0) state.failures = failed.map((name) => failures.get(name) as CheckFailure);
+  if (succeeded.size > 0) state.succeeded = [...succeeded].sort();
   return state;
 }
 
