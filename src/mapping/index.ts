@@ -21,6 +21,7 @@ export {
   annotationFiles,
   candidateFiles,
   collectAnnotations,
+  isRegularFile,
   loadMapping,
   mapFiles,
   titleKey,

@@ -110,8 +110,11 @@ sides ([conflicts.md](conflicts.md)).
 - **Merge commits** on the tracked branch, made by the App, one for each
   merged sync pull request. The repository must allow merge commits.
 - The commits the sync makes itself, on the sync branch and its refs, have
-  the author `mdbisync` and fixed messages such as `Capture Linear changes`.
-  They name no person and quote no content.
+  the App's bot account (`<your app>[bot]`) as author and committer, with
+  the address GitHub links to the App, so GitHub shows them as the App's.
+  They have fixed messages such as `Capture Linear changes`, name no person
+  and quote no content. A commit a CI job adds to the sync branch keeps the
+  name that job gives it.
 - The branch `mdbisync/linear` is never force-pushed. Commits a person or a
   CI job adds to it are kept and go to the tracked branch with the pull
   request; closing the pull request does not drop them, and the next run

@@ -709,12 +709,20 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal((await ids())['eng/notes/review.md']?.id, document.id);
   });
 
-  it('a file with an image moved without a text change keeps its relative link on `linear`', async () => {
+  it('a file moved so that its image no longer resolves is left out, and its document keeps the image it has', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const content = figure.content;
+    const recorded = await show('refs/mdbisync/linear:eng/notes/figure.md');
+    // From the new folder, `../media/diagram.png` names `eng/notes/media/diagram.png`, which the commit does not have.
     await commit({}, [['eng/notes/figure.md', 'eng/notes/old/figure.md']]);
-    const { result, writes } = await sync();
+    const { result, report, writes } = await sync();
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(writes, ['UpdateDocument']);
-    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+    assert.deepEqual(writes, []);
+    assert.ok(report.sync?.leftOut.some((entry) => entry.path === 'eng/notes/old/figure.md' && entry.rules.includes('image-file-missing')));
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/figure.md', reason: 'renamed-to-unwritable' }]);
+    assert.equal(figure.content, content);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/figure.md'), recorded);
+    assert.equal((await ids())['eng/notes/figure.md']?.id, figure.id);
   });
 
   it('with the upload cache lost, an edited document with an image is written, not taken for a Linear edit', async () => {
@@ -918,6 +926,68 @@ describe('sync: the tracked branch to Linear', () => {
       'eng/notes/review.md',
     );
     assert.match(document.content ?? '', /After the collision/);
+  });
+
+  it('a commit that skipped the hook with an image that is no file of the repository leaves its documents out until the image is committed', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    const content = figure.content;
+    const text = `# New figure\n\n![Missing](../media/missing.png)\n\n${CANARY}\n`;
+    // The image of an existing document is removed, and a new document names one never committed.
+    await commit({ 'eng/media/diagram.png': null, 'eng/notes/new-figure.md': text });
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.deepEqual(first.writes, []);
+    assert.deepEqual(first.report.sync?.leftOut, [
+      { path: 'eng/notes/draft.md', rules: ['footnote'] },
+      { path: 'eng/notes/figure.md', rules: ['image-file-missing'] },
+      { path: 'eng/notes/new-figure.md', rules: ['image-file-missing'] },
+    ]);
+    assert.deepEqual(first.report.leftOutRules, ['footnote', 'image-file-missing']);
+    assert.equal(figure.content, content);
+    assert.equal(live().some((document) => document.title === 'new-figure'), false);
+    assert.ok(!world.linear.documents.some((document) => (document.content ?? '').includes('missing.png')), 'an unresolved image path reached Linear');
+
+    // Both images committed: the new document is created with its upload, the other keeps its document.
+    await commit({ 'eng/media/diagram.png': Buffer.from('first diagram bytes').toString('latin1'), 'eng/media/missing.png': 'missing image bytes' });
+    const second = await sync();
+    assert.equal(second.result.exitCode, 0, second.result.stderr);
+    assert.deepEqual(second.report.sync?.created, ['eng/notes/new-figure.md']);
+    assert.deepEqual(second.report.sync?.leftOut, [{ path: 'eng/notes/draft.md', rules: ['footnote'] }]);
+    assert.equal(uploadUrls((await documentOf('eng/notes/new-figure.md')).content).length, 1);
+    assert.equal((await ids())['eng/notes/figure.md']?.id, figure.id);
+    await assertIdempotent();
+  });
+
+  it('a document whose image is removed after an image-only update and then restored is not taken for a Linear edit', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    await commit({ 'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1') });
+    assert.deepEqual(kinds((await sync()).writes), ['upload', 'UpdateDocument']);
+    const content = figure.content;
+    await commit({ 'eng/media/diagram.png': null });
+    assert.deepEqual((await sync()).writes, []);
+    // Restored with other bytes: the document gets the new image.
+    await commit({ 'eng/media/diagram.png': Buffer.from('third diagram bytes').toString('latin1') });
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(report.sync?.updated, ['eng/notes/figure.md']);
+    assert.equal(report.complete, true);
+    assert.notEqual(figure.content, content);
+    assert.ok(!report.sync?.leftOut.some((entry) => entry.path === 'eng/notes/figure.md'));
+    await assertIdempotent();
+  });
+
+  it('a file left out for a missing image in the commit that moves its folder to another project is moved and written once fixed', async () => {
+    const document = await leftOutThenFixed(
+      {
+        'eng/notes/README.md': `---\nlinear-project: Archive\n---\n\n# Field notes\n\n${CANARY}\n`,
+        'eng/notes/review.md': `# Review\n\n![Chart](chart.png)\n\nFindings. ${CANARY}\n`,
+      },
+      { 'eng/notes/chart.png': 'chart bytes', 'eng/notes/review.md': `# Review\n\n![Chart](chart.png)\n\nFindings, fixed. ${CANARY}\n` },
+      'eng/notes/review.md',
+    );
+    assert.equal(document.projectId, 'project-archive');
+    assert.match(document.content ?? '', /fixed/);
   });
 
   it('a file left out in the commit that moves its folder to another project is moved and written once fixed', async () => {

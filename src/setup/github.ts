@@ -3,8 +3,11 @@
 // a request that needs it: GitHub answers 403 without the permission, and
 // with it either serves a read or rejects a write's empty body with 422
 // before anything is created. The repository's merge settings are read the
-// same way (they are visible to a token with write access).
+// same way (they are visible to a token with write access). The App's bot
+// account, which the sync's commits name as their author, is read by the
+// App's slug.
 
+import { type CommitIdentity, NEUTRAL_IDENTITY } from '../state/index.ts';
 import { type CheckResult, failed, notChecked, passed } from './report.ts';
 import { message } from '../messages.ts';
 
@@ -17,6 +20,8 @@ export interface GitHubTarget {
   /** A commit of the repository, for the checks and statuses probes. */
   commit: string;
   apiUrl?: string | undefined;
+  /** The slug of the App whose installation token `token` is. */
+  appSlug?: string | undefined;
   fetch?: typeof fetch;
 }
 
@@ -49,10 +54,16 @@ export const PERMISSION_PROBES: readonly Probe[] = [
 
 export interface GitHubCheck {
   access: CheckResult;
+  app: CheckResult;
   mergeCommits: CheckResult;
+  /** Who the sync's commits are by: the App's bot account; absent without an App slug or when it was not found. */
+  identity?: CommitIdentity;
 }
 
-/** Probes the token's permissions and the repository's merge setting. At most six requests, no writes. */
+/**
+ * Probes the token's permissions and the repository's merge setting, and
+ * reads the App's bot account. At most seven requests, no writes.
+ */
 export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
   const request = requester(target);
   const repository = await request('GET', '');
@@ -62,7 +73,7 @@ export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
   if (repository.status === 401 || repository.status === 403 || repository.status === 404) {
     const why = repository.status === 401 ? message('setup.github-refused', { status: repository.status }) : message('setup.github-cannot-see', { status: repository.status });
     const access = failed('github-access', 'github-credential-failed', why);
-    return { access, mergeCommits: notChecked('merge-commits', 'needs a working GitHub token') };
+    return { access, app: notChecked('github-app', 'needs a working GitHub token'), mergeCommits: notChecked('merge-commits', 'needs a working GitHub token') };
   }
   ensureAnswered(repository.status, message('setup.github-reading-repository'));
 
@@ -99,11 +110,38 @@ export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
     : allow
       ? passed('merge-commits', 'merge commits are allowed')
       : failed('merge-commits', 'merge-commits-required', message('setup.merge-commits-off'));
-  return { access, mergeCommits };
+  return { access, mergeCommits, ...(await checkApp(target)) };
 }
 
-function requester(target: GitHubTarget) {
-  const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}/repos/${target.repository}`;
+/**
+ * Reads the bot account GitHub keeps for the App (`<slug>[bot]`): its login
+ * and id give the commit identity GitHub links to the App,
+ * `<slug>[bot] <<id>+<slug>[bot]@users.noreply.github.com>`. An
+ * installation token cannot read its own App, so the slug comes from the
+ * step that minted the token.
+ */
+async function checkApp(target: GitHubTarget): Promise<{ app: CheckResult; identity?: CommitIdentity }> {
+  if (target.appSlug === undefined) {
+    return { app: passed('github-app', `no App slug given: commits name ${NEUTRAL_IDENTITY.name} <${NEUTRAL_IDENTITY.email}>`) };
+  }
+  const login = `${target.appSlug}[bot]`;
+  const answer = await requester(target, '')('GET', `/users/${encodeURIComponent(login)}`);
+  if (answer.status === 403 && isRateLimited(answer)) throw new Error(message('setup.github-rate-limited-app'));
+  const notFound = failed('github-app', 'github-app-not-found', message('setup.github-app-not-found', { login }));
+  if (answer.status === 404) return { app: notFound };
+  ensureAnswered(answer.status, message('setup.github-reading-app'));
+  const account = answer.json as { login?: unknown; id?: unknown; type?: unknown } | null;
+  // A user may not take a login ending in `[bot]`, but the answer is checked all the same.
+  // Logins are compared without case, as GitHub does; the commits use GitHub's spelling.
+  if (typeof account?.login !== 'string' || account.login.toLowerCase() !== login.toLowerCase() || account.type !== 'Bot'
+    || typeof account.id !== 'number' || !Number.isSafeInteger(account.id) || account.id <= 0) return { app: notFound };
+  const identity: CommitIdentity = { name: account.login, email: `${account.id}+${account.login}@users.noreply.github.com` };
+  return { app: passed('github-app', `commits name the App ${account.login}`), identity };
+}
+
+/** Requests to the API under `prefix`: the repository's paths by default. */
+function requester(target: GitHubTarget, prefix = `/repos/${target.repository}`) {
+  const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}${prefix}`;
   const fetchImpl = target.fetch ?? fetch;
   return async (method: string, path: string, body?: Record<string, unknown>): Promise<Answer> => {
     const response = await fetchImpl(`${base}${path}`, {

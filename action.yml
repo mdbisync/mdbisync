@@ -22,6 +22,9 @@ inputs:
   github-token:
     description: "Installation token of the sync's GitHub App (contents, pull requests and workflows write; checks and commit statuses read)."
     required: true
+  app-slug:
+    description: "Slug of the sync's GitHub App: give it the App token step's output `app-slug`. The sync's commits name the App's bot account (`<slug>[bot]`) as their author and committer, so GitHub links them to the App."
+    required: true
   github-api-url:
     description: "GitHub REST API URL. Leave empty for the runner's API."
     required: false
