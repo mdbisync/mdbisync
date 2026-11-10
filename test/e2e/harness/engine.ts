@@ -35,6 +35,7 @@ export interface EngineCall {
   confirm?: boolean;
   /** The merge grace for this call; 0 (deferred merging) when absent. */
   mergeGraceSeconds?: number;
+  checkDeadlineMinutes?: number;
   cwd: string;
   /** owner/name of the sandbox repository. */
   repository: string;
@@ -84,6 +85,7 @@ export function engineInputs(call: EngineCall): Record<string, string> {
     // Most scenarios exercise deferred merging; a run's `mergeGraceSeconds` sets a positive grace.
     'merge-grace-seconds': String(call.mergeGraceSeconds ?? 0),
   };
+  if (call.checkDeadlineMinutes !== undefined) inputs['check-deadline-minutes'] = String(call.checkDeadlineMinutes);
   // The sync's commits name the App when the engine knows it, as in the workflows.
   if (call.credentials.appSlug !== undefined) inputs['app-slug'] = call.credentials.appSlug;
   if (call.command === 'initial-sync') {

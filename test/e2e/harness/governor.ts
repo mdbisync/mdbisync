@@ -47,14 +47,15 @@ export interface Estimate {
 /** How many times the engine runs in a scenario: setup, its run steps and the I6 re-run. */
 export function engineRuns(scenario: Scenario): number {
   const setup = { offline: 0, empty: 0, 'no-state': 0, 'linear-seeded': 0, converged: 1, conflicted: 2 }[scenario.setup.state];
-  const steps = scenario.steps.filter((step) => step.kind === 'run' && !['fix', 'lint', 'scan-canaries', 'cleanup', 'pre-commit'].includes(step.action)).length;
+  const steps = scenario.steps.reduce((count, step) => count + (step.kind !== 'run' || ['fix', 'lint', 'scan-canaries', 'cleanup', 'pre-commit'].includes(step.action) ? 0 : step.action === 'settle' ? 4 : 1), 0);
   return setup + steps + (scenario.checks.invariants.I6.required ? 1 : 0);
 }
 
 export function estimate(scenario: Scenario, documents: number = SLICE_DOCUMENTS[scenario.slice]): Estimate {
   if (scenario.setup.state === 'offline') return { requests: 0, complexity: 0 };
   const runs = engineRuns(scenario);
-  const requests = Math.ceil(runs * (REQUESTS_PER_DOCUMENT * documents + REQUESTS_PER_RUN) + HARNESS_REQUESTS_PER_DOCUMENT * documents + HARNESS_REQUESTS_FIXED);
+  const holds = scenario.steps.some((s) => s.kind === 'fault' && s.action === 'checks') ? 2 * documents * runs : 0;
+  const requests = Math.ceil(holds + runs * (REQUESTS_PER_DOCUMENT * documents + REQUESTS_PER_RUN) + HARNESS_REQUESTS_PER_DOCUMENT * documents + HARNESS_REQUESTS_FIXED);
   return { requests, complexity: requests * COMPLEXITY_PER_REQUEST };
 }
 

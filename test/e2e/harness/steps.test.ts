@@ -1135,7 +1135,7 @@ describe('marker-driven checks', () => {
       summary: null, code: null, exitStatus: 'success', pullRequest: { suspended: { checks: ['format'] }, merged: null }, writtenCount: 1,
     } });
     const scenario = scenarios.find((item) => item.id === 'L5-17')!;
-    for (const assertion of scenario.checks.assertions.filter((item) => item.subject.startsWith('runs.1.'))) {
+    for (const assertion of scenario.checks.assertions.filter((item) => item.subject.startsWith('runs.1.') && subjectSource(item.subject) === 'engine')) {
       const subject = await resolveSubject(ctx, assertion.subject);
       assert.equal(subject.known, true);
       assert.equal((await evaluateAssertion(ctx, assertion)).holds, true, assertion.subject);

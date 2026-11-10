@@ -31,6 +31,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
+import { MARKS } from '../../../src/sync/marks.ts';
+import type { PullRequest } from './github.ts';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { relativeLinkUrls } from '../../../src/format/index.ts';
 import { resolveTarget } from '../../../src/format/markdown.ts';
@@ -58,6 +60,8 @@ import { UNSAFE_TITLES } from './fixtures.ts';
 export interface View extends Sides {
   /** Comment bodies by document id, for the documents read so far. */
   comments: Map<string, string[]>;
+  holdComments?: Map<string, Array<{ id: string; body: string; resolvedAt: string | null }>>;
+  pullRequests?: Array<PullRequest & { empty: boolean }>;
 }
 
 export const BEFORE_VIEW = 'view.before';
@@ -69,6 +73,21 @@ export async function takeView(ctx: RunContext, withComments: boolean, options: 
     const ids = new Set([...sides.ids.values()].map((entry) => entry.id));
     for (const id of (ctx.observations.get('setup.seeded') as string[] | undefined) ?? []) ids.add(id);
     for (const id of ids) view.comments.set(id, await documentComments(ctx, id));
+  }
+  if (ctx.scenario.checks.assertions.some((a) => /suspended\.|normal\./.test(a.subject))) {
+    view.holdComments = new Map();
+    const held = (ctx.observations.get('suspended.documents') as Set<string> | undefined) ?? new Set<string>();
+    for (const entry of view.ids.values()) if (entry.suspended !== undefined) held.add(entry.id);
+    ctx.observations.set('suspended.documents', held);
+    if (ctx.live !== null) for (const id of held) {
+      const data = await ctx.live.app.request<{ document: { comments: { nodes: Array<{ id: string; body: string; resolvedAt: string | null }> } } | null }>(
+        'SuspendedComments', 'query',
+        'query SuspendedComments($id: String!) { document(id: $id) { comments(first: 100) { nodes { id body resolvedAt } } } }', { id },
+      );
+      view.holdComments.set(id, data.document?.comments.nodes ?? []);
+    }
+    view.pullRequests = [];
+    for (const pr of await pullRequestsSinceStart(ctx)) view.pullRequests.push({ ...pr, empty: (await pullRequestFiles(ctx, pr.number)).length === 0 });
   }
   return view;
 }
@@ -1165,6 +1184,49 @@ export const SUBJECTS: Record<string, Compute> = {
   'uploads.reuploaded': async (env) => (await stateTip(env.ctx, 'uploads')) !== null && proxyRecordsSinceStart(env.ctx).some((record) => /fileUpload|FileUpload/.test(record.operation) && record.status === 200),
 
   // --- pull requests ---------------------------------------------------------------------------
+  'suspended.trackedUnchanged': async (env) => {
+    const view = await env.view();
+    const before = env.ctx.observations.get(BEFORE_VIEW) as View;
+    const held = [...view.ids].filter(([, entry]) => entry.suspended !== undefined);
+    return held.length > 0 && held.every(([path]) => view.files.get(path) === before.files.get(path));
+  },
+  'suspended.count': async (env) => [...(await env.view()).ids.values()].filter((entry) => entry.suspended !== undefined).length,
+  'suspended.markedCount': async (env) => {
+    const view = await env.view();
+    return [...view.ids.values()].filter((entry) => entry.suspended !== undefined && view.documents.get(entry.id)?.icon === MARKS.suspended.icon && view.documents.get(entry.id)?.color === MARKS.suspended.color).length;
+  },
+  'suspended.commentCount': async (env) => [...(await env.view()).holdComments?.values() ?? []].flat().filter((c) => c.body.includes('Check `')).length,
+  'suspended.commentsDetailed': async (env) => {
+    const view = await env.view();
+    const held = [...view.ids.values()].filter((entry) => entry.suspended !== undefined);
+    return held.length > 0 && held.every((entry) => {
+      const comments = view.holdComments?.get(entry.id) ?? [];
+      return comments.length === 1 && comments.every((c) => c.body.includes('Check `format`') && /\[run\]\(https:\/\/github\.com\//.test(c.body) && /Line 1/.test(c.body) && c.resolvedAt === null);
+    });
+  },
+  'suspended.commentsTimedOut': async (env) => {
+    const comments = [...(await env.view()).holdComments?.values() ?? []].flat();
+    return comments.length > 0 && comments.every((c) => c.body.includes('did not finish in time'));
+  },
+  'suspended.commentsResolved': async (env) => {
+    const comments = [...(await env.view()).holdComments?.values() ?? []].flat();
+    return comments.length > 0 && comments.every((c) => typeof c.resolvedAt === 'string');
+  },
+  'suspended.marksRestored': async (env) => {
+    const view = await env.view();
+    const before = env.ctx.observations.get(BEFORE_VIEW) as View;
+    const held = env.ctx.observations.get('suspended.documents') as Set<string> | undefined;
+    return held !== undefined && held.size > 0 && [...held].every((id) => {
+      const document = view.documents.get(id);
+      const own = before.documents.get(id);
+      return document?.icon === own?.icon && document?.color === own?.color;
+    });
+  },
+  'suspended.comments': async (env) => [...(await env.view()).holdComments?.values() ?? []].flat().map((c) => c.body).sort(),
+  'normal.merged': async (env) => ((await env.view()).pullRequests ?? []).filter((pr) => pr.head.ref === env.ctx.names.syncBranch && pr.merged_at !== null).length,
+  'normal.open': async (env) => ((await env.view()).pullRequests ?? []).filter((pr) => pr.head.ref === env.ctx.names.syncBranch && pr.state === 'open').length,
+  'normal.closedEmpty': async (env) => ((await env.view()).pullRequests ?? []).filter((pr) => pr.head.ref === env.ctx.names.syncBranch && pr.state === 'closed' && pr.merged_at === null && pr.empty).length,
+  'checks.personReruns': async (env) => env.ctx.observations.get('checks.personReruns') ?? 0,
   'pullRequests.created': async (env) => (await pullRequestsSinceStart(env.ctx)).length,
   'pullRequests.open': async (env) => (await pullRequestsSinceStart(env.ctx)).filter((pr) => pr.state === 'open').length,
   'pullRequests.merged': async (env) => (await pullRequestsSinceStart(env.ctx)).filter((pr) => pr.merged_at !== null).length,
@@ -1926,7 +1988,7 @@ function setupFailureValue(ctx: RunContext, subject: string): string {
  * Subjects that also name one run, `runs.<n|last>.<subject>`: computed on the
  * world the harness snapshotted right after that run (`harness.runView.<n>`).
  */
-export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm)$/;
+export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|suspended\.(?:count|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|marksRestored|comments)|normal\.(?:open|merged|closedEmpty))$/;
 
 /** The runs whose world the scenario asserts on (`runs.<n|last>.` document subjects): their indices, and whether the last. */
 function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {

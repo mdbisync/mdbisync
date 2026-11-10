@@ -6,7 +6,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { Git, resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import type { RunContext } from './context.ts';
-import type { SandboxRest } from './github.ts';
+import { SandboxRest, hostToken } from './github.ts';
+import { targetPath } from './step-helpers.ts';
 import { nextToken } from './context.ts';
 import { EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
 import { HARNESS } from './sandbox.ts';
@@ -41,8 +42,8 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
   const state = args.status;
   if (state !== 'pending' && state !== 'failed' && state !== 'passed') throw new Error('invalid check status');
   if (args.name !== undefined && args.name !== CHECK_NAME) throw new Error(`the marker workflow provides only the ${CHECK_NAME} check`);
-  if (args.lane !== undefined && args.lane !== 'normal' && args.lane !== 'suspended') throw new Error('invalid check lane');
-  const branch = args.lane === 'suspended' ? suspendedBranch(resolveStateConfig({trackedBranch:ctx.names.trackedBranch,syncBranch:ctx.names.syncBranch,refPrefix:ctx.names.refPrefix})) : ctx.names.syncBranch;
+  if (args.lane !== undefined && args.lane !== 'normal' && args.lane !== 'suspended' && args.lane !== 'tracked') throw new Error('invalid check lane');
+  const branch = args.lane === 'suspended' ? suspendedBranch(resolveStateConfig({trackedBranch:ctx.names.trackedBranch,syncBranch:ctx.names.syncBranch,refPrefix:ctx.names.refPrefix})) : args.lane === 'tracked' ? ctx.names.trackedBranch : ctx.names.syncBranch;
   const world = live(ctx);
   const person = await ctx.person();
   const ref = `refs/heads/${branch}`;
@@ -57,9 +58,19 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
   try {
     const workflow = await git.run(['cat-file', '-e', `HEAD:${CHECK_WORKFLOW_PATH}`], { okCodes: [0, 128] });
     if (workflow.code !== 0) throw new EnvBlockedError('the run tree has no marker check workflow; publish the updated corpus first');
+    {
+      const path = targetPath(ctx);
+      writeFileSync(join(dir, '.harness-check-target'), `${path}\n`);
+      await git.run(['add', '--', '.harness-check-target']);
+    }
+    if (args.reset === true || state !== 'passed') await git.run(['rm', '--quiet', '--ignore-unmatch', '--', '.harness-check-fixed']);
+    if (state === 'passed' && args.lane === 'tracked' && args.reset !== true) {
+      writeFileSync(join(dir, '.harness-check-fixed'), 'approved\n');
+      await git.run(['add', '--', '.harness-check-fixed']);
+    }
     if (state === 'passed') await git.run(['rm', '--quiet', '--ignore-unmatch', '--', CHECK_MARKER]);
     else {
-      writeFileSync(join(dir, CHECK_MARKER), `${state}\n`);
+      writeFileSync(join(dir, CHECK_MARKER), `${args.flaky === true ? 'flaky' : args.document === true ? 'document' : state}\n`);
       await git.run(['add', '--', CHECK_MARKER]);
     }
     await git.run(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', `Set check state to ${state}`]);
@@ -70,7 +81,7 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
     await person.run(['worktree', 'remove', '--force', dir]);
   }
   const prs = await world.rest.pullRequests(branch, 'open');
-  if (!prs.some((pr) => pr.head.ref === branch && pr.base.ref === ctx.names.trackedBranch)) {
+  if (args.lane !== 'tracked' && !prs.some((pr) => pr.head.ref === branch && pr.base.ref === ctx.names.trackedBranch)) {
     // A check fault is a fixture of an already waiting PR. Seeding it lets
     // the workflow run before the scenario's first sync; it does not test
     // the product's ability to create a PR.
@@ -79,4 +90,47 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
   ctx.log(`waiting up to 5 minutes for ${CHECK_NAME} to reach ${state}`);
   await waitForCheck(world.rest, sha, state, { signal: ctx.signal });
   ctx.observations.set('fault.checks', { name: CHECK_NAME, state, sha });
+}
+
+/** A person's rerun uses a host credential, never the sync App's token. */
+export async function rerunSuspendedCheck(ctx: RunContext): Promise<void> {
+  const world = live(ctx);
+  const [owner, repo] = world.repository.split('/');
+  if (!owner || !repo) throw new Error('invalid sandbox repository');
+  const token = hostToken({ owner, repo });
+  if (token === null || token === world.githubToken) throw new EnvBlockedError('a separate person credential with Actions write permission is required to rerun the check');
+  await rerunCheckAsPerson(ctx, new SandboxRest({ owner, repo }, token));
+}
+
+/** The caller supplies a separate person's REST client; the App client only reads. */
+export async function rerunCheckAsPerson(ctx: RunContext, person: SandboxRest): Promise<void> {
+  const world = live(ctx);
+  const branch = suspendedBranch(resolveStateConfig(ctx.names));
+  const git = await ctx.person();
+  await git.run(['fetch', '--quiet', 'origin', `refs/heads/${branch}`]);
+  const sha = (await git.text(['rev-parse', 'FETCH_HEAD'])).trim();
+  ctx.log(`waiting up to 5 minutes for the suspended head's first failed check`);
+  await waitForCheck(world.rest, sha, 'failed', { signal: ctx.signal });
+  const { workflow_runs: runs } = await world.rest.request<{ workflow_runs: Array<{ id: number; head_sha: string; path: string; status: string }> }>(
+    'GET', `/actions/workflows/harness-check.yml/runs?head_sha=${sha}&per_page=100`,
+  );
+  const run = runs.find((run) => run.head_sha === sha && run.path === CHECK_WORKFLOW_PATH && run.status === 'completed');
+  if (run === undefined) throw new ProductError('no completed marker workflow on the suspended head to rerun');
+  await person.request('POST', `/actions/runs/${run.id}/rerun-failed-jobs`);
+  ctx.log(`waiting up to 5 minutes for the person-rerun ${CHECK_NAME} check`);
+  await waitForCheck(world.rest, sha, 'passed', { signal: ctx.signal });
+  ctx.observations.set('checks.personReruns', Number(ctx.observations.get('checks.personReruns') ?? 0) + 1);
+}
+
+/** Age the fixture's durable head timestamp without a ten-minute wall-clock wait. */
+export async function ageCheck(ctx: RunContext, args: Record<string, unknown>): Promise<void> {
+  const world = live(ctx);
+  const git = await ctx.person();
+  await git.run(['fetch', '--quiet', 'origin', `refs/heads/${ctx.names.syncBranch}`]);
+  const sha = (await git.text(['rev-parse', 'FETCH_HEAD'])).trim();
+  const pr = (await world.rest.pullRequests(ctx.names.syncBranch, 'open')).find((pr) => pr.head.ref === ctx.names.syncBranch);
+  if (pr === undefined) throw new ProductError('no normal pull request to age');
+  const note = `<!-- head: sha=${sha} since=${new Date(Date.now() - Number(args.minutes) * 60_000).toISOString()} -->`;
+  const body = (pr.body ?? '').replace(/^<!-- head:.* -->\r?$/gm, '').trimEnd();
+  await world.rest.request('PATCH', `/pulls/${pr.number}`, { body: `${body}\n\n${note}\n` });
 }

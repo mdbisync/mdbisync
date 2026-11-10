@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "id": "L5-34",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "failed",
+        "name": "format"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "pause",
+      "args": {
+        "checkpoint": "before-suspension-push"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {
+        "wait": false
+      }
+    },
+    {
+      "kind": "kill",
+      "action": "engine",
+      "args": {
+        "checkpoint": "before-suspension-push"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "passed",
+        "name": "format",
+        "lane": "tracked"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {
+        "mergeGraceSeconds": 120
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "suspended.count",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "suspended.marksRestored",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "suspended.commentsResolved",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "suspended.commentCount",
+        "operator": "equal",
+        "expected": 1
+      }
+    ]
+  }
+}

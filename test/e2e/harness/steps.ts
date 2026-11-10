@@ -18,14 +18,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { COMMANDS, type CommandName } from '../../../src/commands.ts';
 import { LinearError, LinearStoppedError, LinearTokenError, isTransientLinearError } from '../../../src/linear/index.ts';
-import { Git } from '../../../src/state/index.ts';
+import { resolveStateConfig, suspendedBranch, Git } from '../../../src/state/index.ts';
 import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
 import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
-import { faultChecks } from './check-fault.ts';
+import { faultChecks, rerunSuspendedCheck, ageCheck } from './check-fault.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
@@ -119,6 +119,7 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
     ...(typeof args.direction === 'string' ? { direction: args.direction } : {}),
     ...(args.confirm === true ? { confirm: true } : {}),
     ...(typeof args.mergeGraceSeconds === 'number' ? { mergeGraceSeconds: args.mergeGraceSeconds } : {}),
+    ...(typeof args.checkDeadlineMinutes === 'number' ? { checkDeadlineMinutes: args.checkDeadlineMinutes } : {}),
     cwd: await ctx.engineClone(),
     repository: world.repository,
     extraEnv: { ...ctx.engine.env },
@@ -272,10 +273,10 @@ export async function watchRun(ctx: RunContext, options: { throughProxy: boolean
 }
 
 /** Runs the sync until a run changes nothing more (at most `limit` runs). */
-async function settle(ctx: RunContext, limit = 4): Promise<void> {
+async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit = 4): Promise<void> {
   for (let attempt = 0; attempt < limit; attempt += 1) {
     if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) await workflowRun(ctx, { event: 'workflow_dispatch' });
-    else await runCommand(ctx, 'sync', {});
+    else await runCommand(ctx, 'sync', args);
     const last = ctx.engine.results.at(-1);
     if (last?.report?.['changed'] === false) return;
   }
@@ -521,7 +522,7 @@ const RUN: Record<string, Executor> = {
     if (ctx.engine.trigger !== undefined || ctx.engine.pausedAt !== undefined) throw new Error('run.check cannot run while a checkpoint fault waits for the next sync run');
     return runCommand(ctx, 'check', {});
   },
-  'run.settle': (ctx) => settle(ctx),
+  'run.settle': (ctx, args) => settle(ctx, args),
   'run.capture': (ctx) => runCommand(ctx, 'sync', {}),
   'run.lint': (ctx, args) => runCommand(ctx, 'lint', args),
   'run.fix': (ctx, args) => runCommand(ctx, 'fix', args),
@@ -1016,6 +1017,10 @@ const GIT: Record<string, Executor> = {
     const stores = Array.isArray(args.names) ? (args.names as string[]) : ['linear', 'ids', 'uploads'];
     await world.sandbox.deleteRunRefs(ctx.names.runId, stores.map((store) => `${ctx.names.refPrefix}/${store}`));
   },
+  'git.delete-suspended-branch': async (ctx) => {
+    const branch = suspendedBranch(resolveStateConfig(ctx.names));
+    await live(ctx).sandbox.deleteRunRefs(ctx.names.runId, [`refs/heads/${branch}`]);
+  },
   'git.delete-sync-branch': async (ctx) => {
     await live(ctx).sandbox.deleteRunRefs(ctx.names.runId, [`refs/heads/${ctx.names.syncBranch}`]);
   },
@@ -1255,7 +1260,7 @@ const LINEAR: Record<string, Executor> = {
       return;
     }
     const path = targetPath(ctx, args.target);
-    await editorEdit(ctx, editorOf(args), path, async (text, token) => (await fixtureEdit(ctx, args.fixture, 'linear', path, text, token))?.text ?? paragraphEdit(text, args.target, token));
+    await editorEdit(ctx, editorOf(args), path, async (text, token) => args.fixture === 'check-fix' ? `${text}\nApproved for review. ${token}\n` : (await fixtureEdit(ctx, args.fixture, 'linear', path, text, token))?.text ?? paragraphEdit(text, args.target, token));
     if (args.fixture === 'adjacent-paragraphs') {
       const base = ctx.observations.get('fixture.base') as string | undefined;
       const gitBody = ctx.observations.get('edited.gitBody') as string | undefined;
@@ -1273,6 +1278,7 @@ const LINEAR: Record<string, Executor> = {
       paths = [];
       for (let index = 0; paths.length < count && lists.some((list) => index < list.length); index += 1) for (const list of lists) if (list[index] !== undefined && paths.length < count) paths.push(list[index] as string);
     }
+    if (paths.length < count) throw new EnvBlockedError(`the slice has only ${paths.length} documents; ${count} are required`);
     for (const path of paths.slice(0, count)) await editorEdit(ctx, editorOf(args), path, (text, token) => paragraphEdit(text, undefined, token));
   },
   'linear.repeated-edit': async (ctx, args) => {
@@ -1537,6 +1543,8 @@ const FAULT: Record<string, Executor> = {
     throw new EnvBlockedError('needs the sandbox to refuse merge commits; the harness does not change repository settings');
   },
   'fault.checks': faultChecks,
+  'fault.check-age': ageCheck,
+  'git.rerun-suspended-check': rerunSuspendedCheck,
   'fault.stale-lease': async (ctx, args) => {
     // Someone else moves a state ref while the run is between its reads and its atomic push.
     const store = typeof args.ref === 'string' ? args.ref : 'ids';
