@@ -6,6 +6,7 @@
 // slots shared by every harness process on the host, and spreads workers over
 // every app the secrets list. Only one `full` run at a time.
 
+import { readRateLimitHeaders } from '../../../src/linear/rate-limit.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { RateLimitStatus } from '../../../src/linear/index.ts';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -150,6 +151,41 @@ export class Governor {
   readonly #now: () => number;
   readonly #sleep: (ms: number) => Promise<void>;
   #next = 0;
+  readonly #observed = new Map<string, Partial<Record<'requests' | 'complexity', { remaining: number; resetAt: number; at: number }>>>();
+
+  /** Record real GraphQL evidence. A later fresh budget read supersedes it;
+   * evidence arriving during that read can still constrain its admission.
+   */
+  observeRateLimits(app: string, headers: Record<string, string>, observedAt = this.#now()): void {
+    let parsed: Headers;
+    try { parsed = new Headers(headers); } catch { return; }
+    const limit = readRateLimitHeaders(parsed);
+    const observed = this.#observed.get(app) ?? {};
+    for (const [kind, remaining, resetAt] of [
+      ['requests', limit.requestsRemaining, limit.requestsReset],
+      ['complexity', limit.complexityRemaining, limit.complexityReset],
+    ] as const) {
+      if (remaining === undefined || resetAt === undefined || !Number.isFinite(remaining) || !Number.isFinite(resetAt) || !Number.isFinite(observedAt) || remaining < 0 || resetAt <= this.#now()) continue;
+      const previous = observed[kind];
+      if (previous === undefined || observedAt > previous.at || (observedAt === previous.at && remaining < previous.remaining)) {
+        observed[kind] = { remaining, resetAt, at: observedAt };
+      }
+    }
+    this.#observed.set(app, observed);
+  }
+
+  #withObserved(app: string, fresh: Budget, readStartedAt: number): Budget {
+    const observed = this.#observed.get(app);
+    const result = { ...fresh };
+    for (const [kind, field] of [['requests', 'requestsRemaining'], ['complexity', 'complexityRemaining']] as const) {
+      const limit = observed?.[kind];
+      if (limit !== undefined && limit.at >= readStartedAt && limit.resetAt > this.#now() && limit.remaining < result[field]) {
+        result[field] = limit.remaining;
+        result.resetAt = Math.max(result.resetAt, limit.resetAt);
+      }
+    }
+    return result;
+  }
 
   constructor(options: GovernorOptions) {
     if (options.apps.length === 0) throw new Error('the governor needs at least one OAuth app');
@@ -163,7 +199,7 @@ export class Governor {
    * the estimate. The grant holds the slot (and the full-run lock) until
    * released. Throws BudgetBlockedError after the longest wait.
    */
-  async admit(scenario: Scenario, runId: string, estimated: Estimate): Promise<Grant> {
+  async admit(scenario: Scenario, runId: string, estimated: Estimate, appName?: string): Promise<Grant> {
     const options = this.#options;
     // A scenario bigger than one window (L1-16) starts on a mostly full
     // window and goes on by resume in the next ones.
@@ -177,7 +213,10 @@ export class Governor {
         held.push(await acquireLock('slice-full', { stateDir: options.stateDir, runId, timeoutMs: Math.max(0, deadline - this.#now()), onWait: (holder) => options.log?.(`full slice: waiting for run ${holder?.runId ?? 'unknown'}`) }));
       }
       // Try the apps in turn, starting after the last one used.
-      const apps = options.apps.map((_, index) => options.apps[(this.#next + index) % options.apps.length] as App);
+      const apps = appName === undefined
+        ? options.apps.map((_, index) => options.apps[(this.#next + index) % options.apps.length] as App)
+        : options.apps.filter((app) => app.name === appName);
+      if (apps.length === 0) throw new Error(`unknown OAuth app ${appName}`);
       this.#next = (this.#next + 1) % options.apps.length;
       let slot: { app: App; lock: Lock } | undefined;
       while (slot === undefined) {
@@ -198,7 +237,8 @@ export class Governor {
       held.push(slot.lock);
       let loggedReservationWait = false;
       for (;;) {
-        const budget = await slot.app.readBudget();
+        const readStartedAt = this.#now();
+        const budget = this.#withObserved(slot.app.name, await slot.app.readBudget(), readStartedAt);
         const app = slot.app;
         const admitted = await withLedger(options.stateDir, app.name, runId, (ledger) => {
           const reserved = sumLedger(ledger);

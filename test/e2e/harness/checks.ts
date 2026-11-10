@@ -2,6 +2,7 @@
 // scenario's own assertions. A check reports what failed in words and paths,
 // never document content.
 
+import { engineRequestCount, remoteRequests, isDocumentWrite } from './request-accounting.ts';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
@@ -685,9 +686,11 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
 
   async I9(ctx) {
     const proxy = ctx.proxy;
-    if (proxy === null) return ok('I9');
-    const requests = proxy.requests.filter((record) => !record.injected).length;
-    const written = proxy.requests.filter((record) => record.kind === 'mutation' && /document(Create|Update)|(Create|Update)Document/i.test(record.operation) && record.status === 200).length;
+    const missing = ctx.engine.results.some((result) => result.remote !== undefined && result.remote.linearEngine !== false && result.remote.requests.length === 0 && ['sync', 'initial-sync', 'check'].includes(result.command));
+    if (missing) return bad('I9', 'remote request diagnostics are missing; request cost is unknown');
+    const remote = remoteRequests(ctx);
+    const requests = engineRequestCount(ctx, remote);
+    const written = (proxy?.requests.filter(isDocumentWrite).length ?? 0) + remote.filter(({ entry }) => isDocumentWrite(entry)).length;
     const runs = ctx.engine.results.length;
     return budgetHolds(requests, written, runs)
       ? ok('I9')

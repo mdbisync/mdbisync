@@ -110,6 +110,7 @@ export interface PullRequest {
 
 export interface WorkflowRun {
   id: number;
+  run_attempt?: number;
   status: string;
   conclusion: string | null;
   event: string;

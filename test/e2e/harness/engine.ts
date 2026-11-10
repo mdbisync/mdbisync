@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { RemoteRequests } from './request-accounting.ts';
 import { COMMANDS, type CommandName } from '../../../src/commands.ts';
 import { HOOKS_DIR_ENV, HOOKS_ENV } from '../../../src/test-hooks.ts';
 import type { RunNames } from './isolation.ts';
@@ -48,6 +49,8 @@ export interface EngineCall {
 }
 
 export interface EngineResult {
+  /** Present for Actions runs, including failed runs with no diagnostics. */
+  remote?: RemoteRequests;
   command: CommandName;
   exitCode: number | null;
   signal: NodeJS.Signals | null;

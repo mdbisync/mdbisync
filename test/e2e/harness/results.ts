@@ -73,8 +73,9 @@ export interface ScenarioResult {
   unexpectedPass?: boolean;
   startedAt: string;
   durationMs: number;
-  /** Requests the engine made through the proxy, and the documents it wrote, for I9. */
+  /** Local proxy requests plus deduplicated remote GraphQL attempts, for I9. */
   engineRequests: number;
+  requestBuckets?: ReturnType<typeof import('./request-accounting.ts').requestBuckets>;
   /** Requests of the harness's editors (personal API keys). */
   harnessRequests: number;
   /** The harness's own requests through the OAuth app (reads of both sides, budget checks), retries included. */
