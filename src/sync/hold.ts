@@ -34,12 +34,8 @@ export const HOLD_FOOTER = 'The failure may come from another document of the sa
 /** What a head's checks said: the failed commit, its failed checks and the ones past the deadline. */
 export interface HoldFailure {
   head: Oid;
-  /**
-   * `batch`: the normal head whose batch this run suspended; it describes
-   * only the documents that batch brought, never an earlier episode's.
-   * `lane`: the suspended head itself; it describes every suspended document.
-   */
-  scope: 'batch' | 'lane';
+  /** For a batch's failure: the paths that batch changed, the only documents it describes. */
+  paths?: string[];
   checks: CheckFailure[];
   /** Checks still pending at the deadline; the check deadline sets them. */
   timedOut?: string[];
@@ -55,8 +51,10 @@ export interface HoldMarksOptions {
   /** The capture's documents by id: metadata for every listed document. */
   documents: ReadonlyMap<string, LinearDocument>;
   github: GitHubRepository;
-  /** The failure the comments describe, when this run read one. */
+  /** The suspended head's own failure, when this run read one: it describes every suspended document. */
   failure?: HoldFailure | undefined;
+  /** The failure of a normal batch this run suspended: it describes only that batch's documents. */
+  batchFailure?: HoldFailure | undefined;
   linear: HoldClient;
   limit?: number;
 }
@@ -151,7 +149,8 @@ export function holdComment(checks: readonly CheckFailure[], timedOut: readonly 
 }
 
 type Work =
-  | { kind: 'clear'; path: string; entry: IdEntry; document: LinearDocument }
+  /** `document` is absent for one in Linear's trash, archived or gone: its comment is resolved, its decoration left alone. */
+  | { kind: 'clear'; path: string; entry: IdEntry; document?: LinearDocument }
   | { kind: 'repaint'; path: string; entry: IdEntry; document: LinearDocument }
   | { kind: 'set'; path: string; entry: IdEntry; document: LinearDocument; body?: string; failure?: string; previous?: HoldNotice }
   | { kind: 'update'; path: string; entry: IdEntry; document: LinearDocument; body: string; failure?: string };
@@ -168,32 +167,39 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
   const ids = await readIds(git, options.state.ids);
   const limit = options.limit ?? HOLD_MARK_LIMIT;
   const failure = options.failure;
+  const batchFailure = options.batchFailure;
+  const batch = new Set(batchFailure?.paths ?? []);
+  // A batch's failure describes only its own documents, never one an earlier episode left unmarked: those take the
+  // suspended head's failure, or their episode's check names while it is still checking.
+  const failureFor = (path: string) => (batch.has(path) ? batchFailure : failure);
 
   // Annotations are read once per failed check run, and only when a comment is to be written.
-  let annotations: Map<string, CheckAnnotation[]> | undefined;
-  const readAll = async (): Promise<Map<string, CheckAnnotation[]>> => {
-    if (annotations !== undefined) return annotations;
-    annotations = new Map();
-    for (const check of failure?.checks ?? []) {
+  const annotations = new Map<HoldFailure, Map<string, CheckAnnotation[]>>();
+  const readAll = async (described: HoldFailure): Promise<Map<string, CheckAnnotation[]>> => {
+    const known = annotations.get(described);
+    if (known !== undefined) return known;
+    const read = new Map<string, CheckAnnotation[]>();
+    annotations.set(described, read);
+    for (const check of described.checks) {
       if (check.checkRunId === undefined) continue;
       try {
-        annotations.set(check.name, await readAnnotations(options.github, check.checkRunId));
+        read.set(check.name, await readAnnotations(options.github, check.checkRunId));
       } catch (error) {
         // A run whose annotations GitHub will not give (deleted, another app's) is named without them, so it never stalls the marks.
         if (!(error instanceof PullRequestError)) throw error;
-        result.unreadAnnotations = [...(result.unreadAnnotations ?? []), check.name];
+        result.unreadAnnotations = [...new Set([...(result.unreadAnnotations ?? []), check.name])];
       }
     }
-    return annotations;
+    return read;
   };
-  const bodyOf = async (path: string, entry: IdEntry, describing: boolean): Promise<{ body: string; failure?: string }> => {
-    // A batch's failure is not an earlier episode's: those keep the episode's check names.
-    if (failure === undefined || !describing) {
+  const bodyOf = async (path: string, entry: IdEntry, described = failureFor(path)): Promise<{ body: string; failure?: string }> => {
+    if (described === undefined) {
       // No failure read this run (the head is still checking): the episode's check names, without links.
       const checks = (entry.suspended?.checks ?? []).map((name) => ({ name }));
       return { body: holdComment(checks, [], new Map(), '') };
     }
-    const all = await readAll();
+    const failure = described;
+    const all = await readAll(failure);
     const own = new Map([...all].map(([name, list]) => [name, list.filter((annotation) => annotation.path === path)] as const));
     const needsText = [...own.values()].some((list) => list.length > 0);
     const shown = needsText ? await git.run(['show', `${failure.head}:${path}`], { okCodes: [0, 128] }) : undefined;
@@ -205,8 +211,6 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
 
   const work: Work[] = [];
   const quiet: Array<{ path: string; entry: IdEntry }> = [];
-  // Documents a `batch` failure describes: those of the batch just suspended, whose episode has no comment yet.
-  const describes = (entry: IdEntry) => failure?.scope === 'lane' || (failure !== undefined && entry.saved?.hold?.id !== entry.suspended?.noticeId);
   for (const [path, entry] of ids) {
     const hold = entry.saved?.hold;
     const episode = entry.suspended;
@@ -214,6 +218,8 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
     const document = options.documents.get(entry.id);
     if (document === undefined || document.trashed || document.archivedAt !== null) {
       if (episode !== undefined) result.removed.push(path);
+      // Released while in the trash: its comment is resolved before the write step may drop the entry.
+      else work.push({ kind: 'clear', path, entry });
       continue;
     }
     if (episode === undefined) {
@@ -228,11 +234,12 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
     }
     // The cross was taken off (the document came back from the trash, or a person changed its icon): put it back.
     const repaint = document.icon !== MARKS.suspended.icon || document.color !== MARKS.suspended.color;
-    if (failure === undefined || failure.scope !== 'lane' || hold.failure === failureKey(failure)) {
+    // Only the suspended head's own failure edits a posted comment.
+    if (failure === undefined || hold.failure === failureKey(failure)) {
       if (repaint) work.push({ kind: 'repaint', path, entry, document });
       continue;
     }
-    const next = await bodyOf(path, entry, true);
+    const next = await bodyOf(path, entry, failure);
     if (sha256(next.body) === hold.bodyHash) quiet.push({ path, entry: withHold(entry, { ...hold, ...(next.failure === undefined ? {} : { failure: next.failure }) }) });
     else work.push({ kind: 'update', path, entry, document, ...next });
   }
@@ -242,7 +249,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
   const chosen = work.slice(0, limit);
   result.deferred = work.length - chosen.length;
   // Comments are written only for the chosen documents: the rest read nothing this run.
-  for (const item of chosen) if (item.kind === 'set') Object.assign(item, await bodyOf(item.path, item.entry, describes(item.entry)));
+  for (const item of chosen) if (item.kind === 'set') Object.assign(item, await bodyOf(item.path, item.entry));
 
   let expected = options.state.ids;
   const persist = async () => {
@@ -273,12 +280,13 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
         const { hold: _hold, ...saved } = item.entry.saved as NonNullable<IdEntry['saved']>;
         // A conflict or blocked notice still stands: its own mark comes back. Otherwise the document's own decoration.
         const mark = saved.notice === undefined ? { icon: saved.icon, color: saved.color } : MARKS[saved.notice.kind];
-        if (document.icon !== mark.icon || document.color !== mark.color) await linear.updateDocument(document.id, mark);
+        if (document !== undefined && (document.icon !== mark.icon || document.color !== mark.color)) await linear.updateDocument(document.id, mark);
         const { saved: _saved, ...rest } = item.entry;
         ids.set(path, saved.notice === undefined ? rest : { ...rest, saved });
         result.cleared.push(path);
         continue;
       }
+      if (document === undefined) continue;
       if (item.kind === 'repaint') {
         await linear.updateDocument(document.id, MARKS.suspended);
         result.updated.push(path);

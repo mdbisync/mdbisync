@@ -260,7 +260,10 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     if (fresh && grace === 0) return result;
     result.checks = fresh ? await waitForChecks(github, head, grace) : await readChecks(github, head);
     if (result.checks.state === 'failed') {
+      const lane = result.suspended?.failure;
       result.suspended = await suspendBatch(context, options, head, pullRequest.number, result.checks.failures ?? result.checks.failed.map((name) => ({ name })));
+      // The suspended head's own failure still describes the documents suspended before this batch.
+      if (lane !== undefined) result.suspended.failure = lane;
       result.pullRequest = null;
       result.branchMoved = true;
       return result;

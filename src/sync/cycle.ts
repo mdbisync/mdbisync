@@ -60,7 +60,7 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   if (pullRequest.code === 'initial-pull-request-pending') return { complete: false, changed, trackedTip, capture: captured, pullRequest };
   // The suspended marks follow the lane's push: set for new episodes, edited for a new failure, cleared at release.
   if (pullRequest.code !== 'state-moved') {
-    const marks = await reconcileHoldMarks(context, { config: options.config, state: captured.state, documents: captured.documents, github: options.github, failure: pullRequest.suspended?.failure, linear: context.linear });
+    const marks = await reconcileHoldMarks(context, { config: options.config, state: captured.state, documents: captured.documents, github: options.github, failure: pullRequest.suspended?.failure, batchFailure: pullRequest.suspended?.batchFailure, linear: context.linear });
     if (holdChanges(marks) > 0 || marks.deferred > 0 || marks.removed.length > 0 || marks.code !== undefined) pullRequest.holdMarks = marks;
   }
   const marksDone = pullRequest.holdMarks === undefined || (pullRequest.holdMarks.code === undefined && pullRequest.holdMarks.deferred === 0);

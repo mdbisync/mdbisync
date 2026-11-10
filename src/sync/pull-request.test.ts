@@ -464,6 +464,37 @@ describe('sync: the sync pull request', () => {
     assert.ok(idle.linearRequests <= 5, `an idle suspended run made ${idle.linearRequests} Linear requests`);
   });
 
+  it('a batch that joins while earlier documents still wait for their mark describes only its own documents', async () => {
+    const projectId = (await documentOf('eng/notes/plan.md')).projectId as string;
+    for (let i = 0; i < MANY; i += 1) await editInLinear(`eng/notes/item-${i}.md`, `# Item ${i}\n\nClosed.\n`);
+    for (let i = 0; i < MANY; i += 1) await editInLinear(`combined/page-${i}.md`, `# Page ${i}\n\nFinal.\n`);
+    for (let i = 0; i < MANY; i += 1) {
+      world.linear.documents.push({ id: `fresh-${i}`, title: `fresh-${i}`, projectId, content: `# Fresh ${i}\n\nNew.\n`, createdAt: '2026-01-03T00:00:00Z' });
+      touch(world.linear.documents.at(-1) as FakeDocument);
+    }
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), FAILED);
+    const first = await sync();
+    assert.equal(first.report.pullRequest?.holdMarks?.deferred, 60 - HOLD_MARK_LIMIT);
+    const waiting = Object.entries(await ids()).filter(([, entry]) => (entry as { suspended?: unknown; saved?: unknown }).suspended !== undefined && (entry as { saved?: unknown }).saved === undefined).map(([path]) => path);
+    assert.equal(waiting.length, 60 - HOLD_MARK_LIMIT);
+    // The suspended head fails `ci` again; a new normal batch fails `spelling` within the same run.
+    checksOn(await rev(SUSPENDED), FAILED);
+    const spelling: FakeCheck[] = [{ name: 'spelling', status: 'completed', conclusion: 'failure' }];
+    const known = world.github.checks as Map<string, FakeCheck[]>;
+    world.github.checks = new (class extends Map<string, FakeCheck[]> { override get(sha: string) { return super.get(sha) ?? spelling; } })(known);
+    await editInLinear('eng/backend/notes.md', '# Notes\n\nA joining edit.\n');
+    const joined = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '5' });
+    assert.equal(joined.result.exitCode, 0, joined.result.stderr);
+    assert.ok(joined.report.pullRequest?.suspended);
+    assert.match(commentsOf(await documentOf('eng/backend/notes.md'))[0]?.body ?? '', /Check `spelling`/);
+    for (const path of waiting) {
+      const body = commentsOf(await documentOf(path))[0]?.body ?? '';
+      assert.match(body, /Check `ci`: \[run\]/, path);
+      assert.doesNotMatch(body, /spelling/, path);
+    }
+  });
+
   it('L5-25: a Linear edit of a suspended document reaches only the suspended pull request and releases it', async () => {
     const path = 'eng/notes/plan.md';
     await suspendOne();
@@ -696,6 +727,9 @@ describe('sync: the sync pull request', () => {
     touch(document);
     await sync();
     assert.match(await show(`${SUSPENDED}:${path}`), /Held Linear edit/);
+    // Back from the trash, it shows the cross again, with the same one comment.
+    assert.equal(document.icon, MARKS.suspended.icon);
+    assert.equal(commentsOf(document).length, 1);
     document.trashed = true;
     touch(document);
     await sync();
@@ -703,6 +737,9 @@ describe('sync: the sync pull request', () => {
     assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/heads/main:${path}`], {okCodes:[0,128]})).code, 128);
     assert.equal(document.trashed, true);
     assert.equal((await ids())[path], undefined);
+    // Released while in the trash: its comment is resolved before its id is forgotten.
+    assert.equal(commentsOf(document).length, 1);
+    assert.equal(commentsOf(document)[0]?.resolved, true);
   });
 
   it('keeps suspended membership by id through a Linear rename', async () => {

@@ -18,8 +18,10 @@ export const LINEAR_INTAKE_MESSAGE = "Take Linear's changes to suspended documen
 export interface SuspendedResult {
   paths: string[];
   checks: string[];
-  /** The failed head this run read, with its check runs: what the suspended documents' comments describe. */
+  /** The suspended head's failure this run read, with its check runs: what the suspended documents' comments describe. */
   failure?: HoldFailure;
+  /** The failure of the normal batch this run suspended: it describes only that batch's documents. */
+  batchFailure?: HoldFailure;
 
   pullRequest?: { number: number; url: string };
   released?: Oid;
@@ -210,7 +212,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   if (fresh && grace === 0) return { ...result, waiting: true };
   const checks = fresh ? await waitForChecks(options.github, head, grace) : await readChecks(options.github, head);
   result.checks = checks.failed;
-  if (checks.state === 'failed') result.failure = { head, scope: 'lane', checks: checks.failures ?? checks.failed.map((name) => ({ name })) };
+  if (checks.state === 'failed') result.failure = { head, checks: checks.failures ?? checks.failed.map((name) => ({ name })) };
   result.waiting = checks.state === 'pending';
   if (checks.state !== 'passed') return result;
   if (!(await isAncestor(git, tracked, head))) return result;
@@ -265,6 +267,8 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   const batchTree = await mergeTree(git, failed, tracked, undefined, ids, options.state.ids);
   const batch = await treeCommit(git, batchTree, failed);
   const paths = new Set(await changedPaths(git, tracked, batchTree));
+  // The batch's own paths, before the lane's earlier ones join them: its failure describes only these.
+  const batchPaths = [...paths].sort();
   const previous = context.fetched.suspended ?? null;
   let head: Oid;
   // Never adopt an unrelated pre-existing branch, even when main contains it.
@@ -287,5 +291,5 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE,
     body: `Changes on hold: ${checks.map((name) => `\`${name}\``).join(', ')}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n`,
   });
-  return { paths: [...paths].sort(), checks, failure: { head: failed, scope: 'batch', checks: failures }, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
+  return { paths: [...paths].sort(), checks, batchFailure: { head: failed, paths: batchPaths, checks: failures }, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
 }
