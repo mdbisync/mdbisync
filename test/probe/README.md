@@ -56,6 +56,19 @@ the first one); `LINEAR_BASE_URL` puts a proxy in front of Linear.
 A full run sends about 650 API requests, one at a time. Exit codes: 0 no
 drift, 1 drift, 2 the run could not finish or left its project behind.
 
+## Daily drift run
+
+[`drift-workflow.yml`](drift-workflow.yml) runs the probe every day (and on
+demand) in a test repository with a self-hosted runner labeled
+`mdbisync-sandbox` and the secrets `LINEAR_TEST_APP_CLIENT_ID` and
+`LINEAR_TEST_APP_CLIENT_SECRET`; copy it to that repository's
+`.github/workflows/`. It checks out this repository at `main`, runs
+`npm run probe:format -- --no-facts` and fails on drift or an unfinished run,
+with an error annotation naming each drifted fixture. The report, the JSON
+result and the probe's log are uploaded as the `format-probe-report`
+artifact, never committed. A manual run can probe another branch through the
+`ref` input.
+
 If Linear stops serving `contentState` (an internal field), the probe
 reports the Yjs part as blocked and still checks the Markdown forms.
 
