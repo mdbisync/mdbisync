@@ -1608,7 +1608,8 @@ const FAULT: Record<string, Executor> = {
     const copy = join(ctx.runDir, 'bank');
     cpSync(BANK_DIR, copy, { recursive: true });
     const construct = String(args.construct ?? 'table');
-    const fixture = loadBank(copy).fixtures.find((candidate) => candidate.construct.includes(construct) && existsSync(join(copy, goldenMarkdownPath(candidate.file))));
+    // The probe reports drift by construct, so the edited fixture's construct must be exactly the one asked for.
+    const fixture = loadBank(copy).fixtures.find((candidate) => candidate.construct === construct && existsSync(join(copy, goldenMarkdownPath(candidate.file))));
     if (fixture === undefined) throw new EnvBlockedError(`no recorded Linear form for a ${construct} fixture`);
     const golden = join(copy, goldenMarkdownPath(fixture.file));
     writeFileSync(golden, `${readFileSync(golden, 'utf8')}\nEdited by hand.\n`);

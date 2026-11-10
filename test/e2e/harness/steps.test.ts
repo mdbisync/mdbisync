@@ -21,7 +21,7 @@ import { burst, burstDocuments, burstEditCounts, soak, type SoakDriver } from '.
 import { EnvBlockedError, ProductError } from './results.ts';
 import { bodyOf, compare, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
-import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
+import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, readFixture } from '../../probe/bank.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
@@ -170,6 +170,27 @@ describe('run.probe', () => {
     await assert.rejects(probeFailingWith(refused), (thrown: Error) => thrown === refused);
     assert.equal(isProbeEnvironmentError(new LinearHttpError('Teams', 400)), false);
     assert.equal(isProbeEnvironmentError(new Error('no team with key ENG')), false);
+  });
+});
+
+describe('fault.golden-drift', () => {
+  // The probe reports drift by construct, so the hand edit must land on a fixture of exactly that construct,
+  // not on the first one whose name only contains it (marks-in-table-cell comes before table in the bank).
+  it('edits the recorded form of a fixture whose construct is exactly the one asked for', async () => {
+    const runDir = mkdtempSync(join(tmpdir(), 'golden-drift-'));
+    try {
+      const ctx = { observations: new Map(), runDir, log: () => {} } as unknown as RunContext;
+      await STEP_ACTIONS['fault.golden-drift']!(ctx, { construct: 'table' });
+      const copy = ctx.observations.get('probe.bankDir') as string;
+      const edited = loadBank(copy).fixtures.filter((fixture) => {
+        const golden = join(copy, goldenMarkdownPath(fixture.file));
+        return existsSync(golden) && readFileSync(golden, 'utf8') !== readFileSync(join(BANK_DIR, goldenMarkdownPath(fixture.file)), 'utf8');
+      });
+      assert.deepEqual(edited.map((fixture) => fixture.construct), ['table']);
+      assert.ok(loadBank().fixtures.some((fixture) => fixture.construct !== 'table' && fixture.construct.includes('table')), 'the bank still has constructs that only contain the name');
+    } finally {
+      rmSync(runDir, { recursive: true, force: true });
+    }
   });
 });
 
