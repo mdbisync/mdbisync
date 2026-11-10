@@ -958,6 +958,25 @@ describe('sync: the tracked branch to Linear', () => {
     await assertIdempotent();
   });
 
+  it('a document whose image is removed after an image-only update and then restored is not taken for a Linear edit', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    await commit({ 'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1') });
+    assert.deepEqual(kinds((await sync()).writes), ['upload', 'UpdateDocument']);
+    const content = figure.content;
+    await commit({ 'eng/media/diagram.png': null });
+    assert.deepEqual((await sync()).writes, []);
+    // Restored with other bytes: the document gets the new image.
+    await commit({ 'eng/media/diagram.png': Buffer.from('third diagram bytes').toString('latin1') });
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.deepEqual(report.sync?.updated, ['eng/notes/figure.md']);
+    assert.equal(report.complete, true);
+    assert.notEqual(figure.content, content);
+    assert.ok(!report.sync?.leftOut.some((entry) => entry.path === 'eng/notes/figure.md'));
+    await assertIdempotent();
+  });
+
   it('a file left out for a missing image in the commit that moves its folder to another project is moved and written once fixed', async () => {
     const document = await leftOutThenFixed(
       {

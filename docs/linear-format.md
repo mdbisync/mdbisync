@@ -369,9 +369,10 @@ Markdown document. The path is resolved from the document's folder. `lint`
 and `fix` check that the file is there, as the repository stores it: a
 symbolic link does not count, and the case of each name must match. They
 take the folder they run in as the repository's top folder, as the hook
-does, so run them from there. The sync checks the commit it reads the same
-way: a document whose image is not a file of that commit stays out of
-Linear, even when the commit skipped the hook, until the file is committed.
+does, so run them from there. The sync checks each commit it reads the same
+way, the tracked branch and its own record of what Linear was given: a
+document whose image is not a file of that commit stays out of Linear,
+even when the commit skipped the hook, until the file is committed.
 A file that is on disk but not committed passes the hook, so the sync is
 where that one is found.
 

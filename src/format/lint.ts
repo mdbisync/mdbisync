@@ -25,9 +25,9 @@ export interface LintOptions {
 }
 
 /**
- * The existence check `fix` takes, by the sync's own rule: a link names a
- * file the sync uploads when it resolves to a repository path, as the sync
- * resolves it, and that path is a file.
+ * The existence check of `lint`, `fix` and the sync: a link or an image names
+ * a file the sync uploads when it resolves to a repository path, as the sync
+ * resolves it, and that path is a file. It decides `image-file-missing`.
  */
 export function linkedFileCheck(documentPath: string, isFile: (path: string) => boolean): (url: string) => boolean {
   return (url) => {

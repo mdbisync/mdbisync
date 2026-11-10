@@ -242,7 +242,7 @@ describe('sync: lost state and deleted branches', () => {
     assert.deepEqual(run.report.capture?.rebuiltIds, { matched: Object.keys(before).length - 2, files: Object.keys(before).length });
     const after = await ids();
     for (const [path, entry] of Object.entries(before)) {
-      if (path === 'eng/notes/chart.md' || path === 'eng/notes/diagram.md') assert.notEqual(after[path]?.id, entry.id, path);
+      if (path === 'eng/notes/chart.md' || path === 'eng/notes/diagram.md') assert.equal(after[path], undefined, path);
       else assert.equal(after[path]?.id, entry.id, path);
     }
   });

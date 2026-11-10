@@ -202,7 +202,7 @@ function isMarkdown(entry: TreeEntry): boolean {
 }
 
 /** A file whose bytes git stores as they are: not a symlink or a submodule. */
-function isRegularFile(entry: TreeEntry): boolean {
+export function isRegularFile(entry: TreeEntry): boolean {
   return entry.type === 'blob' && (entry.mode === '100644' || entry.mode === '100755');
 }
 

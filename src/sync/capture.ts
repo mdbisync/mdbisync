@@ -21,7 +21,7 @@ import { reconcileDocumentMark } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
-import { lastSynchronized } from './merge.ts';
+import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, type CapturedAssets } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
@@ -207,6 +207,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Git-only exclusions keep their last accepted identity and place. A
     // collision or an annotation recorded for other files is not a Linear move.
     const baselines = new Map<string, Awaited<ReturnType<typeof lastSynchronized>>>();
+    // Several excluded files walk the same commits of the chain: each commit is read once.
+    const sides = new Map<string, Promise<Side>>();
     const excludedPath = (path: string) => {
       const mapped = recorded.documents.find((document) => document.path === path);
       const prior = previous.get(path);
@@ -216,7 +218,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const retained = new Map<string, string>();
     for (const [id, old] of byId) {
       if (!excludedPath(old.path)) continue;
-      const baseline = await lastSynchronized(git, base, old.path, linear.facts);
+      const baseline = await lastSynchronized(git, base, old.path, linear.facts, sides);
       baselines.set(old.path, baseline);
       const doc = listed.get(id);
       if (baseline === null || doc === undefined || doc.title.normalize('NFC') !== baseline.file.title.normalize('NFC')) continue;
