@@ -21,7 +21,8 @@ class ReadError extends Error {}
 
 type Json = Record<string, unknown>;
 
-function record(value: unknown): Json {
+// The fields of an API object; anything else reads as an object without fields.
+function fields(value: unknown): Json {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {};
 }
 
@@ -48,26 +49,34 @@ function client(apiUrl: string, defaultToken: string) {
         'X-GitHub-Api-Version': '2022-11-28',
       },
       redirect: 'error',
+    }).catch((error: unknown) => {
+      throw new ReadError(`Cannot read ${what}: ${error instanceof Error ? error.message : String(error)}`);
     });
     if (!response.ok) {
-      const message = record(await response.json().catch(() => ({}))).message;
+      const message = fields(await response.json().catch(() => ({}))).message;
       throw new ReadError(`Cannot read ${what}: HTTP ${response.status}${typeof message === 'string' ? ` ${message}` : ''}`);
     }
     return response;
   }
 
+  async function body(response: Response, what: string): Promise<unknown> {
+    return response.json().catch(() => {
+      throw new ReadError(`Cannot read ${what}: the API did not return JSON`);
+    });
+  }
+
   return {
     async get(path: string, what: string, token = defaultToken): Promise<unknown> {
-      return (await request(`${base}${path}`, what, token)).json();
+      return body(await request(`${base}${path}`, what, token), what);
     },
     // Every page of a list, so a blocking item on a later page is never missed.
     async list(path: string, what: string, token = defaultToken): Promise<Json[]> {
       const items: Json[] = [];
       for (let url: string | undefined = `${base}${path}`; url !== undefined;) {
         const response = await request(url, what, token);
-        const page: unknown = await response.json();
+        const page = await body(response, what);
         if (!Array.isArray(page)) throw new ReadError(`Cannot read ${what}: the API did not return a list`);
-        items.push(...page.map(record));
+        items.push(...page.map(fields));
         url = nextPage(response.headers.get('link'));
       }
       return items;
@@ -91,7 +100,7 @@ async function codeScanningAlerts(api: Client, repo: string): Promise<string | u
   const alerts = await api.list(`/repos/${repo}/code-scanning/alerts?state=open&ref=refs/heads/main&per_page=100`, 'code scanning alerts');
   // A security alert of medium or higher blocks, and so does any alert of severity error.
   const blocking = alerts.filter((alert) => {
-    const rule = record(alert.rule);
+    const rule = fields(alert.rule);
     return BLOCKING_SEVERITIES.includes(String(rule.security_severity_level)) || rule.severity === 'error';
   });
   if (blocking.length === 0) return undefined;
@@ -108,29 +117,36 @@ async function secretScanningAlerts(api: Client, repo: string, token: string | u
 
 async function dependabotAlerts(api: Client, repo: string): Promise<string | undefined> {
   const alerts = await api.list(`/repos/${repo}/dependabot/alerts?state=open&severity=${BLOCKING_SEVERITIES.join(',')}&per_page=100`, 'Dependabot alerts');
-  const blocking = alerts.filter((alert) => BLOCKING_SEVERITIES.includes(String(record(alert.security_advisory).severity)));
+  const blocking = alerts.filter((alert) => BLOCKING_SEVERITIES.includes(String(fields(alert.security_advisory).severity)));
   if (blocking.length === 0) return undefined;
   return `${blocking.length} open Dependabot alert(s) of medium or higher: ${blocking.map((alert) => `#${String(alert.number)}`).join(', ')}`;
 }
 
 async function codeqlCoverage(api: Client, repo: string, sha: string): Promise<string | undefined> {
-  // Analyses are listed newest first; the newest of each category must include the source commit.
-  const analyses = await api.get(`/repos/${repo}/code-scanning/analyses?ref=refs/heads/main&tool_name=CodeQL&per_page=100`, 'CodeQL analyses');
-  if (!Array.isArray(analyses) || analyses.length === 0) return 'no CodeQL analysis on main';
-  const latest = new Map<string, string>();
-  for (const analysis of analyses.map(record)) {
+  // Analyses are listed newest first; the newest of each category must have
+  // succeeded and include the source commit. A category that is analyzed
+  // rarely can sit on a later page, so every page is read.
+  const analyses = await api.list(`/repos/${repo}/code-scanning/analyses?ref=refs/heads/main&tool_name=CodeQL&per_page=100`, 'CodeQL analyses');
+  const latest = new Map<string, Json>();
+  for (const analysis of analyses) {
     const category = String(analysis.category ?? '');
-    if (!latest.has(category) && typeof analysis.commit_sha === 'string') latest.set(category, analysis.commit_sha);
+    if (!latest.has(category) && typeof analysis.commit_sha === 'string') latest.set(category, analysis);
   }
   if (latest.size === 0) return 'no CodeQL analysis on main';
-  const stale: string[] = [];
-  for (const [category, analyzed] of latest) {
+  const failed: string[] = [];
+  for (const [category, analysis] of latest) {
+    const analyzed = analysis.commit_sha as string;
+    const name = `${category || 'default'} (${analyzed})`;
+    if (typeof analysis.error === 'string' && analysis.error !== '') {
+      failed.push(`${name} failed: ${analysis.error}`);
+      continue;
+    }
     if (analyzed === sha) continue;
     // "ahead" or "identical" means the analyzed commit contains the source commit.
-    const comparison = record(await api.get(`/repos/${repo}/compare/${sha}...${analyzed}`, 'the commit comparison'));
-    if (comparison.status !== 'ahead' && comparison.status !== 'identical') stale.push(`${category || 'default'} (${analyzed})`);
+    const comparison = fields(await api.get(`/repos/${repo}/compare/${sha}...${analyzed}`, 'the commit comparison'));
+    if (comparison.status !== 'ahead' && comparison.status !== 'identical') failed.push(`${name} does not include it`);
   }
-  return stale.length === 0 ? undefined : `the latest CodeQL analysis on main does not include ${sha}: ${stale.join(', ')}`;
+  return failed.length === 0 ? undefined : `the latest CodeQL analysis on main does not cover ${sha}: ${failed.join('; ')}`;
 }
 
 export async function releaseGate(options: GateOptions): Promise<string[]> {

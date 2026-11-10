@@ -128,8 +128,35 @@ test('the gate refuses when a CodeQL category was last analyzed before the sourc
     { category: '/language:actions', commit_sha: later },
   ] };
   await withApi(routes, async (apiUrl) => {
-    assert.deepEqual(await gate(apiUrl), [`the latest CodeQL analysis on main does not include ${source}: /language:javascript-typescript (${older})`]);
+    assert.deepEqual(await gate(apiUrl), [`the latest CodeQL analysis on main does not cover ${source}: /language:javascript-typescript (${older}) does not include it`]);
   });
+});
+
+test('the gate refuses a CodeQL category whose latest analysis failed, and finds a category on a later page', async () => {
+  const routes = cleanRoutes();
+  const first = `/repos/${repo}/code-scanning/analyses?ref=refs/heads/main&tool_name=CodeQL&per_page=100`;
+  routes[first] = { body: [
+    { category: '/language:javascript-typescript', commit_sha: source, error: 'Analysis failed during processing' },
+    { category: '/language:javascript-typescript', commit_sha: older, error: '' },
+  ], link: '<API/next-analyses?page=2>; rel="next"' };
+  routes['/next-analyses?page=2'] = { body: [{ category: '/language:actions', commit_sha: older, error: '' }] };
+  await withApi(routes, async (apiUrl) => {
+    assert.deepEqual(await gate(apiUrl), [
+      `the latest CodeQL analysis on main does not cover ${source}: /language:javascript-typescript (${source}) failed: Analysis failed during processing; /language:actions (${older}) does not include it`,
+    ]);
+  });
+});
+
+test('the gate names an answer that is not JSON and an unreachable API as reasons instead of stopping', async () => {
+  const routes = cleanRoutes();
+  routes[`/repos/${repo}/dependabot/alerts?state=open&severity=medium,high,critical&per_page=100`] = { body: undefined };
+  await withApi(routes, async (apiUrl) => {
+    const reasons = await gate(apiUrl);
+    assert.deepEqual(reasons, ['Cannot read Dependabot alerts: the API did not return JSON']);
+  });
+  const reasons = await gate('http://127.0.0.1:9');
+  assert.equal(reasons.length, 5);
+  assert.ok(reasons.every((reason) => reason.startsWith('Cannot read ')), reasons.join('\n'));
 });
 
 test('the gate refuses when it cannot read a check, and without a secret scanning token', async () => {

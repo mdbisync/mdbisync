@@ -270,7 +270,7 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   synchronized document, which cannot hold markers, still waits for you to
   merge the tracked branch into the sync branch.
 
-## Pre-release builds and pins
+## Release builds and pins
 
 Maintainers dispatch **Build release** on `main`, supplying a new
 pre-release tag such as `v0.1.0-rc.1` and a full source SHA already on `main`.
@@ -285,8 +285,8 @@ security gate passes. The gate refuses the build unless the source commit
 has a `security-gate` commit status of `success`, `main` has no open code
 scanning alert of medium or higher severity (or of severity error), no open
 Dependabot alert of medium or higher, and no open secret scanning alert, and
-CodeQL's latest analysis of each category on `main` includes the source
-commit. It names every reason it refuses. The workflow token cannot read
+CodeQL's latest analysis of each category on `main` succeeded and includes
+the source commit. It names every reason it refuses. The workflow token cannot read
 secret scanning alerts, so the gate reads them with the repository secret
 `SECRET_SCANNING_READ_TOKEN`, a fine-grained token with read-only access to
 secret scanning alerts; without it the gate refuses. Pre-release builds do
@@ -327,7 +327,7 @@ are described in [linear-format.md](linear-format.md).
 Enable Dependabot's
 `github-actions` ecosystem in your repository to propose action SHA updates,
 then copy the proposed release SHA into the hook's `rev` in the same change.
-To update to a specific pre-release, resolve its annotated tag and use the
+To update to a specific release, resolve its annotated tag and use the
 first column as both pins:
 
 ```sh

@@ -51,7 +51,7 @@ node test/corpus/check.ts test/corpus/out --lint
 
 - `--hook-rev` is the release commit of the Linear-format hook that the
   corpus's `.pre-commit-config.yaml` pins (see
-  [Pre-release builds and pins](../docs/usage.md#pre-release-builds-and-pins)).
+  [Release builds and pins](../docs/usage.md#release-builds-and-pins)).
   To look at the corpus only, any 40-character hex string works.
 - `--seed` changes the generated text; the same seed always gives the same
   bytes. `--replace` overwrites an existing output folder.

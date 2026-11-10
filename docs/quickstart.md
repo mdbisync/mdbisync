@@ -108,7 +108,7 @@ that its installation accepted them.
 Files reach Linear only in the form Linear keeps
 ([linear-format.md](linear-format.md)); the `linear-format` pre-commit hook
 puts them in that form. Add it to `.pre-commit-config.yaml`, pinned to a
-release ([pins](usage.md#pre-release-builds-and-pins)). It must come from
+release ([pins](usage.md#release-builds-and-pins)). It must come from
 this project's repository, not a `local` hook. `mdbisync init` writes it.
 
 Mark your security hooks `alias: security`: changes from Linear pass them
