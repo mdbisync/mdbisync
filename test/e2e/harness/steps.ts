@@ -1014,7 +1014,8 @@ const GIT: Record<string, Executor> = {
       const addition = fix === 'linear-would-undo'
         // Column alignment, which Linear drops (it keeps `| -- |` separators).
         ? `\n| Check | Result |\n|:--|--:|\n| ${token} | ok |\n`
-        : `\nChecked by the format job, ref ${token}.\n`;
+        // Linear stores a final paragraph without a trailing newline.
+        : `\nChecked by the format job, ref ${token}.`;
       commits.push(await commitToSyncBranch(ctx, async (git) => {
         writeFileSync(join(git.dir, path), `${readFileSync(join(git.dir, path), 'utf8').replace(/\n*$/, '\n')}${addition}`);
         // The simulated fixing hook must be configured, as in a real CI job.

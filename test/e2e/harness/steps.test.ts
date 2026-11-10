@@ -1286,10 +1286,11 @@ describe('git executors', () => {
     await runStep(ctx, { kind: 'git', action: 'ci-fix', args: { fixes: ['stable-fix', 'linear-would-undo'] } });
     ctx.engine.pausedAt = 'after-capture-push-before-pr';
     await runStep(ctx, { kind: 'git', action: 'ci-fix', args: { target: 'first-document' } });
+    const path = ctx.observations.get('target.path') as string | undefined ?? 'docs/handbook/start.md';
+    assert.ok((await remoteFile(path, ctx.names.syncBranch)).endsWith(`Checked by the format job, ref ${ctx.observations.get('ciFix.stable')}.`));
     await runStep(ctx, { kind: 'git', action: 'edit-sync-branch', args: {} });
     assert.equal((ctx.observations.get('ciFix.commits') as string[]).length, 3);
     assert.deepEqual(ctx.observations.get('report.interleavingsCovered'), ['fix-before-capture', 'capture-before-fix']);
-    const path = ctx.observations.get('target.path') as string | undefined ?? 'docs/handbook/start.md';
     const synced = await remoteFile(path, ctx.names.syncBranch);
     assert.ok(synced.includes(ctx.observations.get('ciFix.unstable') as string));
     assert.ok(ctx.observations.has('syncBranch.personCommit'));
