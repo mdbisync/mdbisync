@@ -106,6 +106,8 @@ export interface LocalMerge {
   held: HeldRename[];
   /** The blobs of every synchronized file of both sides, by id. */
   texts: Map<Oid, Buffer>;
+  /** Kept READMEs (named by `keptAnnotations`) the tracked branch renamed: tip path to merge result path. */
+  keptMoves: Map<string, string>;
 }
 
 export interface HeldRename {
@@ -210,21 +212,37 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     if (change.content || change.title || change.place) changes.push(change);
     else unchanged.push(change);
   }
+  /** The tip's README without a document that git renamed to `path`, when the merge result no longer holds it. */
+  const renamedTo = new Map([...renames].map(([from, to]) => [to, from]));
+  const renamedFrom = (path: string): string | undefined => {
+    const from = renamedTo.get(path);
+    if (from === undefined || !isReadme(from) || ids.has(from) || !linearSide.files.has(from) || resultSide.files.has(from)) return undefined;
+    return from;
+  };
+  /** Kept READMEs the tracked branch moved, from their tip path to their path in the merge result. */
+  const keptMoves = new Map<string, string>();
   for (const path of resultSide.files.keys()) {
     if (!claimed.has(path) && !conflicted.has(path)) {
       const file = resultSide.files.get(path)!;
-      const previous = linearSide.files.get(path);
       // A folder's annotation that the `linear` tip already holds without a document is repository
       // configuration, not a request to create one: the annotation-only carrier capture keeps after its
       // document leaves, and the README an initial sync from Linear keeps, body included, because Linear
       // has no document for it. Only a change to its body on the tracked branch makes it a new document.
-      // A README with a body counts only when the latest initial sync named it as kept: one left out on the
-      // way to Linear, or one whose id map was lost, is created as every other file without a document is.
+      // A README with a body counts only when the kept set names it (the latest initial sync's, or the one a
+      // later sync recorded after a kept README moved): one left out on the way to Linear, or one whose id map
+      // was lost, is created as every other file without a document is. A renamed folder takes its README
+      // along: the tip's file is found at git's rename source.
+      const source = linearSide.files.has(path) ? path : renamedFrom(path);
+      const previous = source === undefined ? undefined : linearSide.files.get(source);
       const unchanged = previous !== undefined && body(previous.oid) === body(file.oid);
-      const kept = unchanged && (body(file.oid) === '' || options.keptAnnotations?.has(path) === true);
-      if ((path === 'README.md' || path.endsWith('/README.md')) && kept) {
+      const keptByName = source !== undefined && options.keptAnnotations?.has(source) === true;
+      const kept = unchanged && (body(file.oid) === '' || keptByName);
+      if (isReadme(path) && kept) {
         const annotation = readAnnotation(path, (blobs.get(file.oid) as Buffer).toString('utf8'));
-        if ('annotation' in annotation && annotation.annotation !== null) continue;
+        if ('annotation' in annotation && annotation.annotation !== null) {
+          if (keptByName && source !== path) keptMoves.set(source as string, path);
+          continue;
+        }
       }
       const restore = resolved.restores.get(path);
       changes.push(restore === undefined ? { kind: 'create', path } : { kind: 'create', path, restore });
@@ -245,6 +263,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     unchanged: unchanged.sort((a, b) => compare(a.to, b.to)),
     held,
     texts: blobs,
+    keptMoves,
   };
 }
 
@@ -610,4 +629,8 @@ export async function takePaths(git: Git, into: Oid, from: Oid, paths: ReadonlyS
 /** A content-only side for a merge; never pushed or used as a real lane parent. */
 export function treeCommit(git: Git, tree: Oid, parent: Oid): Promise<Oid> {
   return commitTree(git, { base: tree, changes: new Map(), parents: [parent], message: 'Merge input', identity: NEUTRAL_IDENTITY });
+}
+
+function isReadme(path: string): boolean {
+  return path === 'README.md' || path.endsWith('/README.md');
 }

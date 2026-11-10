@@ -28,7 +28,7 @@ import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
-import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, type WriteStop, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
+import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, type WriteStop, keptAnnotationsTrailers, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from '../initial-sync/transform.ts';
 import { linkDestinations, resolveRelative } from '../initial-sync/links.ts';
 import {
@@ -57,7 +57,7 @@ import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments }
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
 import { suspendedPaths } from './suspended.ts';
-import { withRecorded } from './recorded.ts';
+import { recordedTrailers } from './recorded.ts';
 import { message } from '../messages.ts';
 import { type FileLeftOutRule, type SkipReason, type WriteCode } from '../codes.ts';
 
@@ -243,7 +243,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const reserved = await readReservedIds(git, expected.ids);
   const supersededBefore = await readSupersededIds(git, expected.ids);
   const knownId = knownIdLookup(git, expected.ids, ids);
-  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations: await readKeptAnnotations(git, expected.ids) });
+  const keptAnnotations = await readKeptAnnotations(git, expected.ids);
+  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations });
   // The tracked branch has nothing new: only the documents the cache rebuild relinks are written.
   if (nothingNew && !releasing) merge.changes.length = 0;
   // Frozen paths remain exactly as capture left them, including deletes and renames.
@@ -974,7 +975,14 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         return held ? [[document.id, document.updatedAt] as const] : [];
       }),
     );
-    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: withRecorded(IDS_MESSAGE, asWritten), reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 });
+    // A kept README the merge record holds at a new path (its folder renamed) stays kept there: the set is recorded
+    // anew. A partial record keeps the tip's README where it was, and the next run follows the rename again.
+    // Only READMEs the record still holds without a document stay in the recorded set.
+    const keptMoved = merged && merge.keptMoves.size > 0;
+    const kept = [...keptAnnotations].map((path) => merge.keptMoves.get(path) ?? path).filter((path) => merge.result.has(path) && !nextIds.has(path));
+    const trailers = [...recordedTrailers(asWritten), ...(keptMoved ? keptAnnotationsTrailers(kept) : [])];
+    const idsMessage = trailers.length === 0 ? IDS_MESSAGE : `${IDS_MESSAGE}\n\n${trailers.join('\n')}`;
+    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved });
     // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the
     // documents to relink, before they are changes) leaves the rest to the next run.
     const rebuilt = cacheLost && merged && result.stopped === undefined ? { message: UPLOADS_REBUILT, always: true } : {};
