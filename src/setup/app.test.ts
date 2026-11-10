@@ -109,7 +109,7 @@ describe('setup check failures L5-01 to L5-05', () => {
     { folder: 'eng', readme: 'eng/README.md', team: 'ENG' },
     { folder: 'combined', readme: 'combined/README.md', team: 'Docs', project: 'Handbook' },
   ];
-  const MAPPING = { annotations, zones: resolveZones(annotations).zones, problems: [], documents: [], unsynced: [], leftOut: [] };
+  const MAPPING = { annotations, zones: resolveZones(annotations).zones, problems: [], documents: [], unsynced: [], leftOut: [], files: new Set<string>() };
   type World = ReturnType<typeof fakeWorld>;
   const scenarios: Array<{ id: string; change: (world: World) => void; hooks?: string; linearError?: string; anchor: string; names: RegExp }> = [
     { id: 'L5-01 refused credentials', change: () => {}, linearError: 'Linear refused the OAuth app client credentials', anchor: 'linear-oauth-app', names: /client credentials/ },

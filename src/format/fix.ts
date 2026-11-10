@@ -10,7 +10,7 @@ import { decodeNamedCharacterReference } from 'decode-named-character-reference'
 import { nameToEmoji } from 'gemoji';
 import { lintText } from './lint.ts';
 import { IMAGE_PLACE_RULES } from './rules.ts';
-import { end, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
+import { end, parse, splitFile, start, visit } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
 export interface FixOptions {
@@ -21,18 +21,6 @@ export interface FixOptions {
    * file is taken to exist.
    */
   linkedFileExists?: (url: string) => boolean;
-}
-
-/**
- * The existence check `fix` takes, by the sync's own rule: a link names a
- * file the sync uploads when it resolves to a repository path, as the sync
- * resolves it, and that path is a file.
- */
-export function linkedFileCheck(documentPath: string, isFile: (path: string) => boolean): (url: string) => boolean {
-  return (url) => {
-    const target = resolveTarget(documentPath, url);
-    return target !== null && isFile(target);
-  };
 }
 
 /** Returns the text in Linear's form, or the text itself when lint finds a construct Linear would lose or alter. */
