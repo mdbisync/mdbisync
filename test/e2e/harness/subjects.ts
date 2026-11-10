@@ -941,6 +941,10 @@ export const SUBJECTS: Record<string, Compute> = {
     const token = observed(env.ctx, 'ciFix.unstable') as string;
     return [...(await env.view()).documents.values()].some((document) => (document.content ?? '').includes(token));
   },
+  'summary.unstableHookNamed': async (env) => ownResults(env.ctx).some((run) => {
+    const sync = run.report?.['sync'] as { leftOut?: Array<{ hooks?: string[] }> } | null | undefined;
+    return sync?.leftOut?.some((file) => file.hooks?.includes('aligned-table')) === true && run.summary.includes('aligned-table');
+  }),
 
   // --- the tracked branch ----------------------------------------------------------------
   'tracked.body': (env) => perTarget(env, (path, _document, view) => fileBody(view, path)),
