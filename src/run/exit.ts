@@ -59,19 +59,17 @@ export function pullRequestEnding(outcome: OperationOutcome): PullRequestFailure
 /**
  * How a run ended: its status, the command line's exit code, the one-line
  * message the command line prints and the action reports (as a warning or
- * as the step's failure), and the action's `code` output.
+ * as the step's failure), and the `code` the action outputs and the run
+ * report records (empty when the run has no code to give). A run that
+ * succeeded says nothing more; any other ending says why.
  */
-export interface RunEnding {
-  readonly status: ExitStatus;
-  readonly exitCode: number;
-  /** Undefined for a run that succeeded. */
-  readonly message: string | undefined;
-  /** Empty when the run has no code to give. */
-  readonly code: string;
-}
+export type RunEnding =
+  | { readonly status: 'success'; readonly exitCode: 0; readonly message: undefined; readonly code: string }
+  | { readonly status: 'warning' | 'failure'; readonly exitCode: number; readonly message: string; readonly code: string };
 
 /**
- * The one decision for how a run ends. The order matters: a sync pull
+ * The one decision for how a run ends. The order matters: the stage step
+ * of the security hooks (its part done, it succeeds), a sync pull
  * request's failure that decides the ending, a partial sync, a stop by
  * Linear before any write, a failed preflight, a container at its cap, an
  * unfinished initial sync, and an operation that is not built yet.

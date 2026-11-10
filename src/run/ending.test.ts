@@ -193,7 +193,9 @@ describe('how a run ends, on the command line, in the action and in the report',
       assert.deepEqual(action.warnings, row.status === 'warning' ? [row.message] : [], 'action warning');
       assert.deepEqual(action.failures, row.status === 'failure' ? [row.message] : [], 'action failure');
 
-      assert.equal(toRunReport(row.outcome).exitStatus, row.status, 'report exit status');
+      const report = toRunReport(row.outcome);
+      assert.equal(report.exitStatus, row.status, 'report exit status');
+      assert.equal(report.code ?? '', row.code, 'report code');
       // A run that ends well exits 0 and says nothing more; any other ending says why.
       assert.equal(row.exitCode === 0, row.status === 'success');
       assert.equal(row.message === undefined, row.status === 'success');

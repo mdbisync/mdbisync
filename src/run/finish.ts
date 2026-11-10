@@ -8,7 +8,7 @@ import { type CaptureResult } from '../sync/capture.ts';
 import { type ConfirmedResult, type PlanReport, type ReverseResult, UPLOAD_TOO_LARGE, type WriteStop } from '../initial-sync/index.ts';
 import { type PullRequestResult, type SyncRecord, type WriteResult } from '../sync/index.ts';
 import { PATH_RULE } from '../sync/paths.ts';
-import { type ExitStatus, exitStatusOf, partialCode, pullRequestEnding } from './exit.ts';
+import { type ExitStatus, runEnding } from './exit.ts';
 import { cell } from './summary.ts';
 import { type OperationOutcome, type RunWrites } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
@@ -17,7 +17,10 @@ export interface RunReport {
   capacity: ContainerCapacity[];
   operation: PreflightOutcome['operation'];
   ok: boolean;
-  /** Why the run stopped before writing, or why a confirmed initial sync or a sync run did not finish. */
+  /**
+   * Why the run stopped before writing, or why a confirmed initial sync or a
+   * sync run did not finish: the action's `code` output, null when it is empty.
+   */
   code: string | null;
   /** `warning` for a partial run (it recorded what it finished; the next run goes on), `failure` when it could not run. */
   exitStatus: ExitStatus;
@@ -180,8 +183,7 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     capacity: outcome.plan?.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? outcome.captured?.code ?? pullRequestEnding(outcome)?.code ?? confirmed?.code ?? reverse?.code ?? (outcome.stopped === undefined ? null : 'stopped'),
-    exitStatus: exitStatusOf(outcome),
+    ...endingOf(outcome),
     stop: outcome.stopped ?? outcome.captured?.stopped ?? confirmed?.stopped ?? reverse?.stopped ?? null,
     complete: outcome.sync?.complete ?? confirmed?.complete ?? reverse?.complete ?? false,
     changed:
@@ -265,8 +267,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     capacity: write.capacity ?? [],
     operation: outcome.operation,
     ok: outcome.ok,
-    code: outcome.code ?? pullRequestEnding(outcome)?.code ?? write.code ?? partialCode(outcome) ?? null,
-    exitStatus: exitStatusOf(outcome),
+    ...endingOf(outcome),
     stop: write.stopped ?? null,
     complete: outcome.sync!.complete,
     changed: outcome.sync!.changed,
@@ -309,6 +310,12 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     ...raceFacts(outcome),
     writes: outcome.writes,
   };
+}
+
+/** The report's code and exit status: the run's ending, as the command line and the action give it. */
+function endingOf(outcome: OperationOutcome): Pick<RunReport, 'code' | 'exitStatus'> {
+  const ending = runEnding(outcome);
+  return { code: ending.code === '' ? null : ending.code, exitStatus: ending.status };
 }
 
 function ruleList(rules: readonly string[]): string[] {
