@@ -38,6 +38,8 @@ export const MAX_ADMISSION = { requests: 3_000, complexity: 1_200_000 };
 export const RESERVATION_POLL_MS = 5_000;
 /** The longest wait for budget before a scenario is reported env-blocked. */
 export const MAX_BUDGET_WAIT_MS = 65 * 60_000;
+/** The pause between two attempts to claim a held team zone. */
+const ZONE_POLL_MS = 500;
 
 export interface Estimate {
   requests: number;
@@ -119,7 +121,8 @@ export interface Grant {
   claimBudgets?(accounts: readonly AccountBudget[], signal?: AbortSignal, maxWaitMs?: number): Promise<void>;
   /**
    * Waits at most the governor's longest wait for the zones. After each attempt that found a zone held by
-   * another run, and the pause after it, `onHeld` is told how long both took: a setup deadline does not count it.
+   * another run, and before the pause after it, `onHeld` is told how long both take: a setup deadline does
+   * not count it.
    */
   claimZones?(zones: readonly string[], signal?: AbortSignal, onHeld?: (waitedMs: number) => void): Promise<void>;
   release(): void | Promise<void>;
@@ -265,9 +268,10 @@ export class Governor {
               catch (error) {
                 if (!(error instanceof ZoneBusyError)) throw error;
                 if (this.#now() >= until) throw new BudgetBlockedError('shared team zone remained held');
-                await sleep(500, undefined, signal === undefined ? {} : { signal });
                 // Only an attempt that ended with the zone held is a wait: a stalled attempt never reaches here.
-                onHeld?.(this.#now() - attempt);
+                // The fixed pause is reported before it starts, so a deadline cannot expire during it.
+                onHeld?.(this.#now() - attempt + ZONE_POLL_MS);
+                await sleep(ZONE_POLL_MS, undefined, signal === undefined ? {} : { signal });
               }
             }
           },

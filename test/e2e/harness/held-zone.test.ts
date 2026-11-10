@@ -176,3 +176,23 @@ it('lets setup wait past its limit for a zone that a live run holds, and takes a
   locksE.splice(0).forEach((lock) => lock.release());
   for (const runId of ['aaaaaa', 'bbbbbb']) forgetRun(stateDir, runId);
 });
+
+it('does not let setup\'s limit expire during a pause between two looks at a held team lock', async () => {
+  const { SetupDeadline, takeTeamZones } = await import('./runner.ts');
+  const { acquireLock } = await import('./locks.ts');
+  const root = mkdtempSync(join(tmpdir(), 'zone-pause-'));
+  roots.push(root);
+  const stateDir = join(root, 'state');
+  const scenario = byId('L1-05');
+  // Less setup time is left than one 500 ms pause between two looks at the lock.
+  const holder = await acquireLock('team-eng', { stateDir, runId: 'aaaaaa', timeoutMs: 0 });
+  const deadline = new SetupDeadline(300);
+  const locks: Lock[] = [];
+  const setup = deadline.race(takeTeamZones(lockContext(scenario, 'bbbbbb', new AbortController().signal, []), stateDir, undefined, { ids: [ZONE], lockKeys: ['ENG'] }, locks, deadline).then(() => 'ready'),
+    () => new EnvBlockedError('setup did not finish'));
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  holder.release();
+  assert.equal(await setup, 'ready');
+  assert.equal(locks.length, 1);
+  locks.splice(0).forEach((lock) => lock.release());
+});
