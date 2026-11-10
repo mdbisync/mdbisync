@@ -61,6 +61,17 @@ describe('document links', () => {
     assert.equal(linksFromLinear(written, 'eng/notes/plan.md', map, seen), body);
   });
 
+  it('maps a link by a superseded id back to its path, with the spelling the file had, and records each spelling once', () => {
+    const map = { ...ids({ 'eng/new.md': 'id-new', 'eng/guide.md': 'id-guide' }), aliases: new Map([['id-old', 'eng/new.md']]) };
+    const body = 'See [new](./new.md#top), [guide](guide.md) and [guide again](./guide.md).';
+    const seen: LinkSpellings = new Map();
+    linksToLinear(body, 'eng/plan.md', map, seen);
+    assert.deepEqual(seen.get(`${BASE}/id-guide`), ['guide.md', './guide.md']);
+    // Linear holds the link by the old id (written before the id was superseded) and a link a person added.
+    const content = `See [new](<${BASE}/id-old#top>), [guide](<${BASE}/id-guide>) and [guide again](<${BASE}/id-guide>), [added](<${BASE}/id-old>).`;
+    assert.equal(linksFromLinear(content, 'eng/plan.md', map, seen), 'See [new](./new.md#top), [guide](guide.md) and [guide again](./guide.md), [added](<new.md>).');
+  });
+
   it('gives a link added in Linear the shortest relative path', () => {
     const map = ids({ 'eng/guide.md': 'id-guide', 'docs/a b.md': 'id-ab' });
     const content = `Read [it](<${BASE}/id-guide#setup>), [that](${BASE}/id-ab) and [other](<${BASE}/id-unknown>).`;
