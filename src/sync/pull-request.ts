@@ -581,7 +581,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     case 'merge-blocked':
       lines.push(
         `Setup error: GitHub refused again to merge the sync pull request ${link}, on the same head and for the same reason as an earlier run (${refusalText(result)}).`,
-        "Nothing changes until a person does: let the sync's GitHub App merge into the tracked branch (for example, adjust the branch's rules), and a later run merges.",
+        "Nothing changes until a person does: when GitHub names a required check that is expected, make that check run on the sync pull request (check workflow filters and the required check's name); otherwise let the sync's GitHub App merge into the tracked branch (for example, adjust the branch's rules). A later run merges.",
       );
       break;
     case 'initial-pull-request-pending':

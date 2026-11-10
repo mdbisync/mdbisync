@@ -256,8 +256,8 @@ remain after release; its presence alone does not mean a batch is on hold.
   starts a new deadline. An unreported check does not time out: if no
   checks register, the sync attempts a merge after the registration grace
   period. GitHub can refuse it for a missing required check, yielding
-  `merge-refused` and then `merge-blocked`; fix the workflow filters or
-  required-check names.
+  `merge-refused` and then `merge-blocked`, with nothing suspended or
+  marked in Linear; fix the workflow filters or required-check names.
 - A failed check counts at once. Unless that check also fails on the
   tracked branch's tip, the whole batch moves to the suspended lane, and
   the normal pull request closes. This is a successful sync run, not a
