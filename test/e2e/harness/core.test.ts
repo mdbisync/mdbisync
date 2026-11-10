@@ -105,13 +105,14 @@ describe('locks', () => {
 
   it('keeps a held run\'s lock after its process ends, for its own take-up, until its hold ends', async () => {
     const stateDir = freshStateDir();
-    const keep = async (runId: string, lockUntil: number, runUntil: number) => {
+    /** A process of run `runId` takes the lock (or its kept lock), registers the run as held and keeps the lock, unless `dies`. */
+    const keep = async (runId: string, lockUntil: number, runUntil: number, dies = false) => {
       const child = spawn(process.execPath, ['--input-type=module', '-e', `
         const { acquireLock, registerRun } = await import(${JSON.stringify(new URL('./locks.ts', import.meta.url).href)});
         const stateDir = ${JSON.stringify(stateDir)};
-        const lock = await acquireLock('team-eng', { stateDir, runId: '${runId}', timeoutMs: 0 });
-        registerRun(stateDir, '${runId}').hold(${runUntil});
-        lock.hold(${lockUntil});
+        const lock = await acquireLock('team-eng', { stateDir, runId: '${runId}', timeoutMs: 0, takeOverHeld: true });
+        registerRun(stateDir, '${runId}', { holdUntil: ${runUntil} });
+        if (!${dies}) lock.hold(${lockUntil});
       `], { stdio: ['ignore', 'inherit', 'inherit'] });
       const [code] = await new Promise<unknown[]>((resolve) => child.once('exit', (...args) => resolve(args)));
       assert.equal(code, 0);
@@ -119,6 +120,9 @@ describe('locks', () => {
     const later = Date.now() + 3_600_000;
     await keep('aaaaaa', later, later);
     await assert.rejects(acquireLock('team-eng', { stateDir, runId: 'bbbbbb', timeoutMs: 0 }), LockTimeoutError, 'the holder\'s process ended, the hold did not');
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: 'aaaaaa', timeoutMs: 0 }), LockTimeoutError, 'only a take-up takes a kept lock over');
+    await keep('aaaaaa', later, later, true); // a take-up that dies before it keeps the lock again
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: 'bbbbbb', timeoutMs: 0 }), LockTimeoutError, 'the lock stays kept');
     await keep('aaaaaa', later, later); // the run's take-up in a later process, still waiting for the UI session
     await assert.rejects(acquireLock('team-eng', { stateDir, runId: 'bbbbbb', timeoutMs: 0 }), LockTimeoutError, 'kept again after the take-up');
     registerRun(stateDir, 'aaaaaa').done();
@@ -131,6 +135,14 @@ describe('locks', () => {
     (await acquireLock('team-eng', { stateDir, runId: 'ffffff', timeoutMs: 0 })).release();
     forgetRun(stateDir, 'cccccc');
     forgetRun(stateDir, 'eeeeee');
+
+    // A process that kept a lock and goes on with other scenarios does not hold it past the run's hold.
+    const kept = await acquireLock('team-eng', { stateDir, runId: '111111', timeoutMs: 0 });
+    const registration = registerRun(stateDir, '111111', { holdUntil: later });
+    kept.hold(later);
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: '222222', timeoutMs: 0 }), LockTimeoutError);
+    registration.done();
+    (await acquireLock('team-eng', { stateDir, runId: '222222', timeoutMs: 0 })).release();
   });
 
   it('counts slots: at most N holders of a semaphore', async () => {

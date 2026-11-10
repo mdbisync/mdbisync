@@ -77,19 +77,30 @@ it('keeps a held UI run\'s team zone from the next zone run until the hold ends'
   const [code] = await once(child, 'exit');
   assert.equal(code, 0, 'the held run\'s process ended');
 
-  // Run B, another zone run: the shared admission and the team lock both keep it out.
-  await assert.rejects(governor('b').admit(next, 'bbbbbb', estimate(next), app.name), BudgetBlockedError);
+  // Run B, another zone run: it syncs the zone only once both gates let it in, as the runner's setup does.
+  const locksB: Lock[] = [];
+  const startB = async (gate: 'admission' | 'team lock', signal: AbortSignal, lines: string[] = []) => {
+    if (gate === 'admission') {
+      const b = await governor('b').admit(next, 'bbbbbb', estimate(next), app.name);
+      await b.claimZones!([ZONE]);
+      await b.release();
+    }
+    await takeTeamLocks(lockContext(next, 'bbbbbb', signal, lines), stateDir, ['ENG'], locksB);
+    zone.initialSync('bbbbbb');
+  };
+  // The shared admission keeps it out (a zone-concurrent run too)...
+  await assert.rejects(startB('admission', new AbortController().signal), BudgetBlockedError);
   await assert.rejects(governor('b').admit(byId('L1-05'), 'cccccc', estimate(byId('L1-05')), app.name), BudgetBlockedError, 'a zone-concurrent run waits too');
+  // ...and so does the team lock on its own, as for a run admitted without the shared admission.
   const waiting = new AbortController();
   const lines: string[] = [];
-  const locksB: Lock[] = [];
-  const blocked = takeTeamLocks(lockContext(next, 'bbbbbb', waiting.signal, lines), stateDir, ['ENG'], locksB);
+  const blocked = startB('team lock', waiting.signal, lines);
   await new Promise((resolve) => setTimeout(resolve, 300));
   waiting.abort();
   await assert.rejects(blocked);
   assert.deepEqual(lines, ['waiting for team ENG (held by run aaaaaa)']);
   assert.equal(locksB.length, 0);
-  assert.equal(zone.trashed, 0);
+  assert.equal(zone.trashed, 0, 'the held run\'s documents are still in the zone, not in the trash');
 
   // The UI session's answers: run A is taken up in a new process, cleaned up, and lets go.
   const takeUp = await governor('a2').admit(held, 'aaaaaa', estimate(held), app.name, a.owner);
@@ -99,16 +110,13 @@ it('keeps a held UI run\'s team zone from the next zone run until the hold ends'
   assert.equal(locksA.length, 1, 'the take-up holds the run\'s own kept lock');
   zone.archiveRun('aaaaaa');
   await takeUp.release();
-  registerRun(stateDir, 'aaaaaa').done();
+  registerRun(stateDir, 'aaaaaa', { holdUntil }).done();
   locksA.forEach((lock) => lock.release());
 
   // Now run B starts, and its initial sync finds nothing of run A's.
-  const b = await governor('b').admit(next, 'bbbbbb', estimate(next), app.name);
-  await b.claimZones!([ZONE]);
-  await takeTeamLocks(lockContext(next, 'bbbbbb', new AbortController().signal, []), stateDir, ['ENG'], locksB);
-  zone.initialSync('bbbbbb');
+  await startB('admission', new AbortController().signal);
+  assert.equal(locksB.length, 1);
   assert.equal(zone.trashed, 0, 'the zone\'s trash is unchanged');
   locksB.forEach((lock) => lock.release());
-  await b.release();
   forgetRun(stateDir, 'bbbbbb');
 });

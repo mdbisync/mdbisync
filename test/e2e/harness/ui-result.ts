@@ -166,9 +166,8 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   const next = itemOf.get(held.stepIndex);
   if (next !== undefined && answers.items[next - 1]?.result === null) return { state: 'waiting', ran: [], nextItem: next };
 
-  const registration = registerRun(deps.stateDir, held.runId);
   // The hold stays while this process works: should it die, the run still waits for the UI session.
-  registration.hold(held.holdUntil);
+  const registration = registerRun(deps.stateDir, held.runId, { holdUntil: held.holdUntil });
   const heartbeat = setInterval(() => registration.heartbeat(), 60_000);
   const { ctx, logLines } = createRunContext(scenario, held.runId, runDir, { ...deps, outDir: reportDirOf(runDir) });
   const locks: Lock[] = [];

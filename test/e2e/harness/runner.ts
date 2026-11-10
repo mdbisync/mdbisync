@@ -672,6 +672,8 @@ export async function takeTeamLocks(ctx: RunContext, stateDir: string, teams: It
         stateDir,
         runId: ctx.names.runId,
         timeoutMs: TEAM_LOCK_TIMEOUT_MS,
+        // A held run's take-up goes on with the team locks the run kept.
+        takeOverHeld: true,
         onWait: (holder) => ctx.log(`waiting for team ${team} (held by run ${holder?.runId ?? 'unknown'})`),
       }));
     } catch (error) {
@@ -734,7 +736,6 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   let heldAt: number | undefined;
   /** Set when the run was kept for the UI session: its resources stay until `ui-result` or the hold's end. */
   let heldForUi = false;
-  let holdUntil = 0;
   /** Set when setup did not stop after its deadline: the run stays registered, so the sweeper removes what it makes later. */
   let setupStuck = false;
   try {
@@ -788,11 +789,14 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     await captureCanaryEvidence(ctx);
     if (heldAt !== undefined) {
       // What `ui-result` needs to take the run up again; a run that cannot be saved is cleaned up now.
-      holdUntil = Date.now() + UI_HOLD_MS;
+      const holdUntil = Date.now() + UI_HOLD_MS;
       try {
         saveHeldRun(runDir, heldRunOf(ctx, { stepIndex: heldAt, appName: grant?.app.name ?? appName, holdUntil, startedAt: new Date(started).toISOString(), budgetWaitMs: grant?.waitedMs ?? 0, takeUpRequests: { harness: 0, harnessApp: 0 } }));
         heldForUi = true;
         registration.hold(holdUntil);
+        // A held run's documents stay in its team zones, so its team locks stay too: another zone run's
+        // initial sync would take them for documents without a file and move them to the trash.
+        locks.splice(0).reverse().forEach((lock) => lock.hold(holdUntil));
         cleanupOutcome = { ok: true, detail: grant?.owner === undefined ? 'kept for the UI session; the sweeper removes it after the hold' : 'kept for the UI session; shared reservation retained until cleanup or verified recovery' };
       } catch (saveError) {
         error = new EnvBlockedError(`the run could not be kept for the UI session: ${(saveError as Error).message}`);
@@ -800,9 +804,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     }
     if (!heldForUi) cleanupOutcome = await cleanupAndCount(ctx);
     await ctx.proxy?.close();
-    // A held run's documents stay in its team zones, so its team locks stay too: another zone run's
-    // initial sync would take them for documents without a file and move them to the trash.
-    locks.splice(0).reverse().forEach((lock) => (heldForUi ? lock.hold(holdUntil) : lock.release()));
+    locks.splice(0).reverse().forEach((lock) => lock.release());
     if (grant !== undefined) for (const { entry } of remoteRequests(ctx)) {
       if (isGraphql(entry) && deps.config.linearApps[0] !== undefined) {
         deps.governor?.observeRateLimits(deps.config.linearApps[0].name, entry.rateLimitHeaders, Date.parse(entry.finishedAt));
