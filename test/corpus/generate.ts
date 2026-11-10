@@ -64,8 +64,7 @@ export type Corpus = {
  * so. A bank copy classed fixable becomes unchanged; its basis stays known
  * only when the rewritten text is the form the probe recorded from Linear.
  */
-export function inLinearForm(files: CorpusFile[], bankDir: string): void {
-  const paths = new Set(files.map((file) => file.path));
+export function inLinearForm(files: CorpusFile[], bankDir: string, paths: ReadonlySet<string> = new Set(files.map((file) => file.path))): void {
   for (const file of files) {
     if (!file.synced || file.kind !== "markdown" || file.expected === "lint-error") continue;
     const text = file.content.toString("utf8");
