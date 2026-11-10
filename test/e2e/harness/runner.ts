@@ -37,8 +37,12 @@ export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
 export const ZONE_CAP = 1_000;
 /** The harness warns from here on. */
 export const ZONE_TRASH_WARNING = 900;
-/** The longest setup, team-lock wait included; a full slice alone takes under a minute. */
+/** Default setup deadline, including team-lock waits. */
 export const SETUP_TIMEOUT_MS = 15 * 60_000;
+/** Full setup can include initial sync of thousands of documents. */
+export function setupTimeoutMs(slice: Scenario['slice']): number {
+  return slice === 'full' ? 45 * 60_000 : SETUP_TIMEOUT_MS;
+}
 /** How long a setup past its deadline gets to stop before cleanup runs anyway. */
 export const SETUP_STOP_MS = 2 * 60_000;
 
@@ -732,8 +736,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       // told to stop; cleanup waits until it has stopped, so nothing is created after the cleanup.
       const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks, grant);
       try {
-        await withDeadline(setup, SETUP_TIMEOUT_MS, () =>
-          new EnvBlockedError(`setup did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes (last phase: ${phase()})`));
+        await withDeadline(setup, setupTimeoutMs(scenario.slice), () =>
+          new EnvBlockedError(`setup did not finish within ${setupTimeoutMs(scenario.slice) / 60_000} minutes (last phase: ${phase()})`));
       } catch (late) {
         abort.abort();
         setupStuck = !(await settlesWithin(setup, SETUP_STOP_MS));

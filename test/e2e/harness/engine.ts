@@ -47,6 +47,8 @@ export interface EngineCall {
   /** Test-hook settings for this call. */
   extraEnv: Record<string, string>;
   timeoutMs: number;
+  /** Stops a local engine when its setup or run is cancelled. */
+  signal?: AbortSignal;
 }
 
 export interface EngineResult {
@@ -119,12 +121,15 @@ export function postEntry(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.env): RunningEngine {
+  call.signal?.throwIfAborted();
   const started = Date.now();
   const child = spawn(process.execPath, [engineEntry(env), call.command], {
     cwd: call.cwd,
     env: engineEnv(call, env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const stop = () => { child.kill('SIGKILL'); };
+  call.signal?.addEventListener('abort', stop, { once: true });
   let stdout = '';
   let stderr = '';
   child.stdout?.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
@@ -140,6 +145,7 @@ export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.e
   const done = new Promise<EngineResult>((resolve) => {
     child.on('close', (exitCode, signal) => {
       clearTimeout(timer);
+      call.signal?.removeEventListener('abort', stop);
       const read = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8') : '');
       let report: Record<string, unknown> | null = null;
       try {
@@ -166,5 +172,7 @@ export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.e
 }
 
 export async function runEngine(call: EngineCall, env?: NodeJS.ProcessEnv): Promise<EngineResult> {
-  return startEngine(call, env).done;
+  const result = await startEngine(call, env).done;
+  call.signal?.throwIfAborted();
+  return result;
 }

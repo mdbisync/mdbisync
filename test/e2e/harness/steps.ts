@@ -119,6 +119,7 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
       ...(world.githubAppLogin === undefined ? {} : { appSlug: world.githubAppLogin.replace(/\[bot\]$/, '') }),
     },
     timeoutMs: ENGINE_TIMEOUT_MS,
+    signal: ctx.signal,
   };
 }
 

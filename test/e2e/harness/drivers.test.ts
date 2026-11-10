@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -132,6 +133,42 @@ describe('engine driver', () => {
     const stopped = await runEngine(call, stub("process.stderr.write('sync: stopped before any write (no-state)\\n'); process.exitCode = 4;\n"));
     assert.equal(stopped.notImplemented, false);
     assert.equal(stopped.exitCode, 4);
+  });
+
+  it('stops a setup engine before cleanup when its setup deadline expires', async () => {
+    const { settlesWithin, withDeadline } = await import('./runner.ts');
+    const dir = fresh('engine-abort-');
+    const stub = join(dir, 'waiting.mjs');
+    writeFileSync(stub, "setInterval(() => {}, 60_000); process.stdout.write('ready');\n");
+    const abort = new AbortController();
+    const call = {
+      command: 'initial-sync' as const, names: runNames('4f1a9c'), cwd: dir, repository: 'o/r', hooksDir: dir,
+      reportFile: join(dir, 'r.json'), summaryFile: join(dir, 's.md'), linearUrl: 'http://127.0.0.1:1',
+      credentials: { linearClientId: '', linearClientSecret: '', githubToken: '' }, extraEnv: {}, timeoutMs: 30_000, signal: abort.signal,
+    };
+    const env = { ...process.env, MDBISYNC_ENGINE: stub };
+    const running = startEngine(call, env);
+    try {
+      await once(running.child.stdout!, 'data');
+      const setup = running.done.then(() => abort.signal.throwIfAborted());
+      await assert.rejects(async () => {
+        try {
+          await withDeadline(setup, 20, () => new Error('setup deadline'));
+        } catch (error) {
+          abort.abort();
+          assert.equal(await settlesWithin(setup, 1_000), true);
+          throw error;
+        }
+      }, /setup deadline/);
+      // Cleanup starts here, after setup has settled and the child has closed.
+      assert.equal(running.child.signalCode, 'SIGKILL');
+      assert.equal((await running.done).timedOut, false);
+      assert.throws(() => startEngine(call, env), { name: 'AbortError' });
+      await assert.rejects(runEngine(call, env), { name: 'AbortError' });
+    } finally {
+      running.kill();
+      await running.done;
+    }
   });
 
   it('kills an engine that runs too long', async () => {
