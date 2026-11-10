@@ -196,3 +196,64 @@ it('does not let setup\'s limit expire during a pause between two looks at a hel
   assert.equal(locks.length, 1);
   locks.splice(0).forEach((lock) => lock.release());
 });
+
+it('locks a team zone a run writes only through its README, so two such runs do not hold it at once, while runs on separate zones start together', async () => {
+  const { SetupDeadline, runTeamZones, takeTeamZones } = await import('./runner.ts');
+  const { buildRunTree } = await import('./corpus.ts');
+  const { runNames } = await import('./isolation.ts');
+  const root = mkdtempSync(join(tmpdir(), 'readme-zone-'));
+  roots.push(root);
+  const stateDir = join(root, 'state');
+  const scenario = byId('L1-05');
+  assert.equal(scenario.setup.teamZoneLock, true);
+  const annotation = (team: string) => `---\nlinear-team: ${team}\n---\n# Area\n`;
+  const readmes = new Map([['eng/README.md', annotation('ENG')], ['ops/README.md', annotation('OPS')], ['docs/README.md', annotation('DOCS')]]);
+  const teams = new Map([['ENG', { id: 'team-eng' }], ['OPS', { id: 'team-ops' }], ['DOCS', { id: 'team-docs' }]]);
+  // Each run's slice: files below its own zone and, for runs A and B, the DOCS zone's own README, which the engine syncs into DOCS.
+  const zonesOf = (runId: string, paths: string[]) => {
+    const tree = buildRunTree({ slice: 'mini', paths }, new Map(paths.filter((path) => readmes.has(path)).map((path) => [path, readmes.get(path)!])), runNames(runId));
+    return { tree, zones: runTeamZones(tree, teams) };
+  };
+  const a = zonesOf('aaaaaa', ['eng/README.md', 'eng/guides/start.md', 'docs/README.md']);
+  const b = zonesOf('bbbbbb', ['ops/README.md', 'ops/runbooks/deploy.md', 'docs/README.md']);
+  const c = zonesOf('cccccc', ['ops/README.md', 'ops/runbooks/deploy.md']);
+  // DOCS is no zone the runs place files below, yet it is in their lock keys and ids, one set.
+  assert.deepEqual([...a.tree.teamZones.keys()], ['ENG']);
+  assert.deepEqual([...b.tree.teamZones.keys()], ['OPS']);
+  assert.deepEqual(a.zones, { lockKeys: ['DOCS', 'ENG'], ids: ['team-docs', 'team-eng'] });
+  assert.deepEqual(b.zones, { lockKeys: ['DOCS', 'OPS'], ids: ['team-docs', 'team-ops'] });
+  assert.deepEqual(c.zones, { lockKeys: ['OPS'], ids: ['team-ops'] });
+
+  const setup = (runId: string, zones: { ids: string[]; lockKeys: string[] }, signal: AbortSignal, lines: string[], locks: Lock[]) =>
+    takeTeamZones(lockContext(scenario, runId, signal, lines), stateDir, undefined, zones, locks, new SetupDeadline(60_000));
+
+  // Run A takes its zones, the README-only DOCS zone included.
+  const locksA: Lock[] = [];
+  await setup('aaaaaa', a.zones, new AbortController().signal, [], locksA);
+  assert.equal(locksA.length, 2);
+
+  // Run B, whose slice writes the same DOCS README, waits for DOCS and holds none of its zones meanwhile.
+  const waiting = new AbortController();
+  const linesB: string[] = [];
+  const locksB: Lock[] = [];
+  const blocked = setup('bbbbbb', b.zones, waiting.signal, linesB, locksB);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  waiting.abort();
+  await assert.rejects(blocked);
+  assert.deepEqual(linesB, ['waiting for team DOCS (held by run aaaaaa)']);
+  assert.equal(locksB.length, 0);
+
+  // Run C, on a zone run A does not write into, starts while run A still holds its zones.
+  const linesC: string[] = [];
+  const locksC: Lock[] = [];
+  await setup('cccccc', c.zones, new AbortController().signal, linesC, locksC);
+  assert.deepEqual(linesC, []);
+  assert.equal(locksC.length, 1);
+  locksC.splice(0).forEach((lock) => lock.release());
+
+  // Once run A lets go, run B takes DOCS.
+  locksA.splice(0).forEach((lock) => lock.release());
+  await setup('bbbbbb', b.zones, new AbortController().signal, [], locksB);
+  assert.equal(locksB.length, 2);
+  locksB.splice(0).forEach((lock) => lock.release());
+});
