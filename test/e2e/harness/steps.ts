@@ -1450,8 +1450,8 @@ const FAULT: Record<string, Executor> = {
   'fault.clear': async (ctx) => {
     ctx.proxy?.clearFaults();
     ctx.engine.env = {};
-    await ctx.engine.lfsProxy?.close();
-    delete ctx.engine.lfsProxy;
+    // An engine already started through the LFS proxy goes on through it; the run closes it at its end.
+    ctx.engine.lfsProxy?.clear();
     delete ctx.engine.badCredential;
     delete ctx.engine.trigger;
     for (const restore of ctx.engine.restores.splice(0).reverse()) await restore();
@@ -1572,7 +1572,8 @@ const FAULT: Record<string, Executor> = {
     const engine = new Git(await ctx.engineClone());
     const upstream = await lfsEndpoint(engine);
     if (upstream === null) throw new EnvBlockedError('the sandbox has no LFS server to pass on to');
-    const authorization = `basic ${Buffer.from(`x-access-token:${world.githubToken}`).toString('base64')}`;
+    // The engine's own GitHub credential at the time of each request, as the engine would send it.
+    const authorization = () => `basic ${Buffer.from(`x-access-token:${ctx.engine.badCredential === 'github' ? 'not-a-valid-token' : world.githubToken}`).toString('base64')}`;
     await ctx.engine.lfsProxy?.close();
     ctx.engine.lfsProxy = await startLfsFaultProxy(upstream, authorization, new Set([oid]));
     ctx.engine.env = { ...ctx.engine.env, ...lfsUrlEnv(ctx.engine.lfsProxy.url, ctx.engine.env) };

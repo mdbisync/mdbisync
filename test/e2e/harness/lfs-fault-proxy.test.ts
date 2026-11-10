@@ -28,7 +28,7 @@ async function batch(url: string, operation: string, oids: string[]): Promise<{ 
 describe('LFS fault proxy', () => {
   it('answers 404 for a refused download without asking the server, and passes the rest on with its credential', async () => {
     const server = upstream();
-    const proxy = await startLfsFaultProxy('https://lfs.example/repo.git/info/lfs/', 'basic token', new Set([MISSING]), server.fetchImpl);
+    const proxy = await startLfsFaultProxy('https://lfs.example/repo.git/info/lfs/', () => 'basic token', new Set([MISSING]), server.fetchImpl);
     try {
       const alone = await batch(proxy.url, 'download', [MISSING]);
       assert.equal(alone.status, 200);
@@ -43,6 +43,11 @@ describe('LFS fault proxy', () => {
       await batch(proxy.url, 'upload', [MISSING]);
       assert.deepEqual(server.calls.at(-1)?.body, { operation: 'upload', objects: [{ oid: MISSING, size: 1 }] });
       assert.deepEqual(proxy.requests, [{ operation: 'download', refused: [MISSING] }, { operation: 'download', refused: [MISSING] }, { operation: 'upload', refused: [] }]);
+
+      // Cleared, it passes the object on like any other.
+      proxy.clear();
+      await batch(proxy.url, 'download', [MISSING]);
+      assert.deepEqual(server.calls.at(-1)?.body.objects.map((object) => object.oid), [MISSING]);
     } finally {
       await proxy.close();
     }
@@ -50,13 +55,13 @@ describe('LFS fault proxy', () => {
 
   it('passes on the server\'s refusal and answers 502 when the server cannot be reached', async () => {
     const refusing = upstream(403);
-    const proxy = await startLfsFaultProxy('https://lfs.example/info/lfs', 'basic token', new Set([MISSING]), refusing.fetchImpl);
+    const proxy = await startLfsFaultProxy('https://lfs.example/info/lfs', () => 'basic token', new Set([MISSING]), refusing.fetchImpl);
     try {
       assert.equal((await batch(proxy.url, 'download', [OTHER, MISSING])).status, 403);
     } finally {
       await proxy.close();
     }
-    const unreachable = await startLfsFaultProxy('https://lfs.example/info/lfs', 'basic token', new Set(), (async () => { throw new TypeError('fetch failed'); }) as typeof fetch);
+    const unreachable = await startLfsFaultProxy('https://lfs.example/info/lfs', () => 'basic token', new Set(), (async () => { throw new TypeError('fetch failed'); }) as typeof fetch);
     try {
       assert.equal((await batch(unreachable.url, 'download', [OTHER])).status, 502);
     } finally {
@@ -64,13 +69,16 @@ describe('LFS fault proxy', () => {
     }
   });
 
-  it('serves nothing but the batch API', async () => {
+  it('serves nothing but the batch API at its own random address', async () => {
     const server = upstream();
-    const proxy = await startLfsFaultProxy('https://lfs.example/info/lfs', 'basic token', new Set(), server.fetchImpl);
+    const proxy = await startLfsFaultProxy('https://lfs.example/info/lfs', () => 'basic token', new Set(), server.fetchImpl);
     try {
       assert.equal((await fetch(`${proxy.url}/objects/${OTHER}`)).status, 404);
       assert.equal((await fetch(`${proxy.url}/locks`, { method: 'POST', body: '{}' })).status, 404);
       assert.equal((await fetch(`${proxy.url}/objects/batch`, { method: 'POST', body: '{}' })).status, 422);
+      assert.equal((await fetch(`${proxy.url}/objects/batch`, { method: 'POST', body: 'not json' })).status, 422);
+      assert.equal((await fetch(`${proxy.url}/objects/batch`, { method: 'POST', body: '{"operation":"download","objects":[null]}' })).status, 422);
+      assert.equal((await fetch(`${new URL(proxy.url).origin}/lfs/objects/batch`, { method: 'POST', body: '{"operation":"download","objects":[]}' })).status, 404);
       assert.equal(server.calls.length, 0);
     } finally {
       await proxy.close();
@@ -87,9 +95,9 @@ describe('LFS fault proxy', () => {
       assert.equal(await lfsEndpoint(git), 'https://github.com/example/sandbox.git/info/lfs');
       await git.run(['remote', 'set-url', 'origin', 'https://github.com/example/sandbox.git']);
       assert.equal(await lfsEndpoint(git), 'https://github.com/example/sandbox.git/info/lfs');
-      await git.run(['config', 'lfs.url', 'https://lfs.example/info/lfs']);
+      await git.run(['config', 'remote.origin.lfsurl', 'https://lfs.example/info/lfs']);
       assert.equal(await lfsEndpoint(git), 'https://lfs.example/info/lfs');
-      await git.run(['config', '--unset', 'lfs.url']);
+      await git.run(['config', '--unset', 'remote.origin.lfsurl']);
       await git.run(['remote', 'set-url', 'origin', join(dir, 'remote.git')]);
       assert.equal(await lfsEndpoint(git), null);
     } finally {

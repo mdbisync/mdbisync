@@ -1414,11 +1414,14 @@ describe('git executors', () => {
       // Only the object the server holds was asked about, with the sandbox's credential added by the proxy; the
       // download itself goes straight to the address the server answered with.
       assert.deepEqual(server.requests, ['POST /info/lfs/objects/batch', `GET /objects/${keptPointer!.oid}`]);
+      assert.match(ctx.engine.lfsProxy!.url, /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]{36}\/lfs$/);
       assert.equal(server.authorizations[0], `basic ${Buffer.from('x-access-token:sandbox-token').toString('base64')}`);
 
+      // After fault.clear, an engine started with the proxy downloads the object again.
       await runStep(ctx, { kind: 'fault', action: 'clear', args: {} });
       assert.deepEqual(ctx.engine.env, {});
-      assert.equal(ctx.engine.lfsProxy, undefined);
+      assert.equal((await read(pointer!, image)).ok, false, 'the fake server never got the object, so it answers 404 itself');
+      assert.deepEqual(ctx.engine.lfsProxy?.requests.at(-1), { operation: 'download', refused: [] });
     } finally {
       await ctx.engine.lfsProxy?.close();
       await server.close();
