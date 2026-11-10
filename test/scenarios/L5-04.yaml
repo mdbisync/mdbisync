@@ -76,9 +76,14 @@
         "expected": "linear-format-hook-required"
       },
       {
-        "subject": "runs.0.summary.failedItemNamed",
+        "subject": "runs.0.setupFailure.item",
         "operator": "equal",
-        "expected": true
+        "expected": "linear-format-hook"
+      },
+      {
+        "subject": "runs.0.setupFailure.fixLink",
+        "operator": "equal",
+        "expected": "https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#linear-format-hook"
       }
     ]
   }
