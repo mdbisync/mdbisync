@@ -417,8 +417,7 @@ function groupPaths(ctx: RunContext, group: string): string[] {
 
 /** The slice's Mermaid documents the corpus manifest notes as holding an invalid diagram. */
 function invalidMermaidPaths(ctx: RunContext): string[] {
-  const manifest = manifestOf(ctx);
-  const paths = groupPaths(ctx, 'mermaid').filter((path) => manifest.get(path)?.note?.includes(INVALID_DIAGRAM_NOTE) === true);
+  const paths = sorted([...manifestOf(ctx)].filter(([, entry]) => entry.group === 'mermaid' && entry.kind === 'markdown' && entry.note?.includes(INVALID_DIAGRAM_NOTE) === true).map(([path]) => path));
   if (paths.length === 0) throw new Error('the slice has no Mermaid document with an invalid diagram');
   return paths;
 }

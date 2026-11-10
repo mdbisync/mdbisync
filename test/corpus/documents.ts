@@ -530,9 +530,10 @@ const DIAGRAMS: Record<string, Diagram> = {
 };
 
 /**
- * The words a Mermaid document's manifest note ends with when the document
- * also holds a diagram Mermaid cannot parse; the live checks find those
- * documents by them, since neither the path nor the text says "invalid".
+ * The words a Mermaid document's manifest note contains when the document
+ * also holds a diagram Mermaid cannot parse (`inLinearForm` may append to
+ * the note); the live checks find those documents by them, since neither
+ * the path nor the text says "invalid".
  */
 export const INVALID_DIAGRAM_NOTE = "an invalid diagram";
 

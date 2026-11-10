@@ -23,9 +23,10 @@ function viewOf(missing: readonly string[] = [], trashed: readonly string[] = []
   return { files: texts, ids, documents };
 }
 
+const assertion = loadScenarios().find((candidate) => candidate.id === 'L1-09')?.checks.assertions.find((candidate) => candidate.subject === 'documents.invalidMermaidIncluded');
+
+// evaluateAssertion reads its view from git and Linear; this runs the same compare and differingPaths on a given view.
 async function check(view: ReturnType<typeof viewOf>): Promise<{ holds: boolean; paths: string | undefined }> {
-  const scenario = loadScenarios().find((candidate) => candidate.id === 'L1-09');
-  const assertion = scenario?.checks.assertions.find((candidate) => candidate.subject === 'documents.invalidMermaidIncluded');
   assert.ok(assertion);
   assert.equal(assertion.operator, 'same-as');
   const env = { ctx, which: 'now' as const, view: async () => view } as unknown as Parameters<(typeof SUBJECTS)[string]>[0];
@@ -39,7 +40,9 @@ const invalid = [
   'eng/edge-cases/diagrams/the-life-of-an-order.md',
 ];
 
-it('finds the mid slice invalid diagrams by the manifest, not by the word in the path or text', () => {
+it('finds the mid slice invalid diagrams by the manifest, not by the word in the path or text', async () => {
+  const env = { ctx, which: 'now' as const, view: async () => viewOf() } as unknown as Parameters<(typeof SUBJECTS)[string]>[0];
+  assert.deepEqual([...((await SUBJECTS['expected.invalidMermaidIncluded']!(env)) as Map<string, boolean>).keys()], invalid);
   for (const path of invalid) {
     assert.ok(mermaid.includes(path), path);
     assert.doesNotMatch(path, /invalid/i);
