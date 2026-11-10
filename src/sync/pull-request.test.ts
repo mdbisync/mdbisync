@@ -254,6 +254,50 @@ describe('sync: the sync pull request', () => {
     assert.deepEqual(quiet.writes, []);
   });
 
+  // The deadline covers registered checks only. A required check that never
+  // registers is not read as pending: the sync tries the merge, GitHub refuses
+  // it for the missing check, and the repeated refusal is a setup error. Nothing
+  // is suspended or marked, even past the deadline, because no check result
+  // blames the batch's documents.
+  for (const registered of [[], [{ name: 'build', status: 'completed', conclusion: 'success' }]] satisfies FakeCheck[][]) {
+    it(`a required check that never registers ${registered.length === 0 ? 'on a head with no checks' : 'beside a passing check'} is a merge refusal, not a deadline suspension`, async () => {
+      const deadline = { MDBISYNC_CHECK_DEADLINE_MINUTES: '10' };
+      const path = 'eng/notes/plan.md';
+      await editInLinear(path, `# Plan\n\nWaits for a check that never runs. ${CANARY}\n`);
+      await sync(deadline);
+      checksOn(await rev(SYNC_BRANCH), registered);
+      const missing = 'Repository rule violations found\n\nRequired status check "lint" is expected.';
+      const reason = 'Repository rule violations found Required status check "lint" is expected.';
+      world.github.merge = async () => ({ status: 405, message: missing });
+
+      const requestsBefore = githubRequests.length;
+      const refused = await sync(deadline);
+      assert.equal(refused.result.exitCode, 0, refused.result.stderr);
+      assert.equal(refused.report.pullRequest?.code, 'merge-refused');
+      assert.equal(refused.report.pullRequest?.reason, reason);
+      assert.equal(refused.report.pullRequest?.suspended, undefined);
+      assert.ok(githubRequests.slice(requestsBefore).some((request) => request.startsWith('PUT ') && request.endsWith('/pulls/1/merge')), 'the sync tried the merge');
+      // The refusal is noted on the pull request, which is what lets the next run call it repeated.
+      assert.deepEqual(refused.writes, ['PATCH /pulls/1']);
+      assert.ok(openPullRequests()[0]?.body.includes('Required status check "lint" is expected.'), 'the pull request names the refusal');
+
+      backdate('mdbisync/linear', 11);
+      const blocked = await sync(deadline);
+      assert.equal(blocked.result.exitCode, SETUP_FAILED_EXIT_CODE, blocked.result.stderr);
+      assert.equal(blocked.report.pullRequest?.code, 'merge-blocked');
+      assert.equal(blocked.report.pullRequest?.suspended, undefined);
+      assert.ok(blocked.summary.includes(reason), blocked.summary);
+      assert.match(blocked.summary, /make that check run on the sync pull request/);
+      assert.deepEqual(blocked.writes, []);
+      assert.deepEqual(openPullRequests().map((pr) => pr.head), ['mdbisync/linear']);
+      assert.equal(await rev('refs/heads/main'), start);
+      const document = await documentOf(path);
+      assert.notEqual(document.icon, MARKS.suspended.icon);
+      assert.deepEqual(commentsOf(document), []);
+      assertNoRerun();
+    });
+  }
+
   it('cannot merge a branch that moves while waiting using checks from its old head', async () => {
     await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
     const transport = fakeFetch(world);
