@@ -13,7 +13,8 @@ export const operationArguments: Record<string, readonly string[]> = {
   "fault.annotation-target": ["variants"],
   "fault.budget": ["stopAfterDocuments"],
   "fault.budget-headers": ["includeEndpointLimits", "remaining"],
-  "fault.checks": ["name", "status", "lane"],
+  "fault.check-age": ["minutes"],
+  "fault.checks": ["name", "status", "lane", "flaky", "document", "reset", "target"],
   "fault.clear": [],
   "fault.credentials": ["service", "valid"],
   "fault.golden-drift": ["construct"],
@@ -38,6 +39,8 @@ export const operationArguments: Record<string, readonly string[]> = {
   "git.delete": ["target"],
   "git.delete-refs": ["names"],
   "git.delete-sync-branch": [],
+  "git.delete-suspended-branch": [],
+  "git.rerun-suspended-check": [],
   "git.edit": ["cleanEdits", "conflictingDocuments", "fixture", "target", "workflows"],
   "git.edit-many": ["documents"],
   "git.edit-sync-branch": [],
@@ -84,9 +87,9 @@ export const operationArguments: Record<string, readonly string[]> = {
   "run.probe": ["compareGolden", "measure", "passes", "scheduled"],
   "run.resume-until-complete": ["command", "confirm", "direction"],
   "run.scan-canaries": ["scope", "sources"],
-  "run.settle": [],
+  "run.settle": ["mergeGraceSeconds"],
   "run.soak": ["actors", "durationSeconds", "invariantIntervalSeconds", "randomSeed", "scheduleSeconds"],
-  "run.sync": ["mergeGraceSeconds", "wait"],
+  "run.sync": ["mergeGraceSeconds", "wait", "checkDeadlineMinutes"],
   "run.token-lifecycle": ["outcomes"],
   "run.workflow": ["command", "confirm", "direction", "event"],
   "run.workflow-parallel": ["events", "replacePending"],
@@ -124,10 +127,11 @@ function list(value: unknown): asserts value is unknown[] {
 }
 
 const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name lane operation path project ref scope service source storage target title'.split(' '));
-const booleanArguments = new Set('allFiles bypassHook compareGolden concurrencyGroup confirm coverAllConstructs includeEndpointLimits linearFormat mergeCommits replacePending samePath scheduled valid wait workflows'.split(' '));
-const numericArguments = new Set('characters cleanEdits conflictingDocuments count documents durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
+const booleanArguments = new Set('reset flaky document allFiles bypassHook compareGolden concurrencyGroup confirm coverAllConstructs includeEndpointLimits linearFormat mergeCommits replacePending samePath scheduled valid wait workflows'.split(' '));
+const numericArguments = new Set('minutes checkDeadlineMinutes characters cleanEdits conflictingDocuments count documents durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
 const arrayArguments = new Set('actors constructs events fixes measure names orderings outcomes sources variants'.split(' '));
 const requiredArguments: Record<string, string[]> = {
+    'fault.check-age': ['minutes'],
     'run.initial-sync': ['direction', 'confirm'],
     'run.workflow': ['event'],
     'git.move': ['destination'],
@@ -146,6 +150,7 @@ function validateArguments(kind: string, action: string, args: ObjectValue): voi
     else if (numericArguments.has(key)) {
       assert.ok(typeof value === 'number' && Number.isFinite(value) && value >= 0, `${key} must be a nonnegative number`);
       if (key === 'rewriteFraction') assert.ok(value <= 1, 'rewriteFraction must be at most 1');
+      else if (key === 'checkDeadlineMinutes') assert.ok(Number.isInteger(value) && value >= 10 && value <= 1440, 'checkDeadlineMinutes must be an integer from 10 to 1440');
       else if (key === 'mergeGraceSeconds') assert.ok(Number.isInteger(value) && value <= 120, 'mergeGraceSeconds must be an integer from 0 to 120');
       else assert.ok(Number.isInteger(value), `${key} must be an integer`);
     }
@@ -158,7 +163,13 @@ function validateArguments(kind: string, action: string, args: ObjectValue): voi
   for (const field of requiredArguments[`${kind}.${action}`] ?? []) assert.ok(Object.hasOwn(args, field), `missing argument ${field}`);
   if (kind === 'fault' && action === 'checks') {
     oneOf(args.status, ['pending', 'passed', 'failed'], 'check status');
-    if (args.lane !== undefined) oneOf(args.lane, ['normal', 'suspended'], 'check lane');
+    assert.ok(!(args.flaky === true && args.document === true), 'check fixture modes are mutually exclusive');
+    if (args.flaky === true || args.document === true) assert.equal(args.status, 'failed', 'check fixture mode requires failed status');
+    if (args.reset === true) {
+      assert.equal(args.status, 'passed', 'check reset requires passed status');
+      assert.equal(args.lane, 'tracked', 'check reset requires tracked lane');
+    }
+    if (args.lane !== undefined) oneOf(args.lane, ['normal', 'suspended', 'tracked'], 'check lane');
   }
   if (kind === 'fault' && action === 'http') {
     assert.equal(typeof args.status, 'number', 'HTTP status must be numeric');

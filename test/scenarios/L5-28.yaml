@@ -1,0 +1,215 @@
+{
+  "version": 1,
+  "id": "L5-28",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "failed",
+        "name": "format"
+      }
+    },
+    {
+      "kind": "git",
+      "action": "edit",
+      "args": {
+        "target": "other-document"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "failed",
+        "name": "format",
+        "lane": "tracked"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "passed",
+        "name": "format",
+        "lane": "tracked"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {
+        "mergeGraceSeconds": 120
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {
+        "mergeGraceSeconds": 120
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "passed",
+        "lane": "tracked",
+        "reset": true
+      }
+    },
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "failed"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "failed",
+        "lane": "tracked"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {
+        "mergeGraceSeconds": 120
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "passed",
+        "lane": "tracked"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {
+        "mergeGraceSeconds": 120
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "runs.1.suspended.count",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "runs.1.suspended.commentCount",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "runs.1.normal.open",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "runs.1.writtenCount",
+        "operator": "at-least",
+        "expected": 1
+      },
+      {
+        "subject": "runs.1.pullRequest.redMain.0.name",
+        "operator": "equal",
+        "expected": "format"
+      },
+      {
+        "subject": "runs.6.suspended.comments",
+        "operator": "same-as",
+        "expected": "runs.5.suspended.comments"
+      },
+      {
+        "subject": "runs.6.suspended.count",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "runs.6.pullRequest.suspended.redMain.0.name",
+        "operator": "equal",
+        "expected": "format"
+      }
+    ]
+  }
+}

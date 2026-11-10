@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "id": "L5-32",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "mini"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "failed",
+        "name": "format"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "linear",
+      "action": "trash",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "linear",
+      "action": "restore",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "linear",
+      "action": "trash",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "fault",
+      "action": "checks",
+      "args": {
+        "status": "passed",
+        "name": "format",
+        "lane": "tracked"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "settle",
+      "args": {
+        "mergeGraceSeconds": 120
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "runs.1.suspended.count",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "runs.1.suspended.markedCount",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "runs.1.suspended.commentsDetailed",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "runs.1.normal.closedEmpty",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "runs.2.suspended.count",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "suspended.count",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "suspended.commentsResolved",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "tracked.body",
+        "operator": "equal",
+        "expected": null
+      },
+      {
+        "subject": "documents.state",
+        "operator": "equal",
+        "expected": "trash"
+      },
+      {
+        "subject": "runs.3.suspended.contentsCurrent",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "runs.3.suspended.markedCount",
+        "operator": "equal",
+        "expected": 1
+      }
+    ]
+  }
+}

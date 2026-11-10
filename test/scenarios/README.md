@@ -218,3 +218,25 @@ or assertions, and the absence of any required proposed rule. Coverage validatio
 rejects missing, extra, duplicate and misnamed specs and duplicate catalog IDs.
 
 HTTP faults default to GraphQL. `fault.http` accepts `operation` to select an exact operation name; `requestNumber` counts only matching requests after arming. Use `target: "oauth"` explicitly to fault the token exchange instead.
+
+## Suspended batches
+
+L5-17 and L5-23 through L5-35 use the sandbox marker workflow. Publish the
+updated corpus workflow before live execution. Its checks run on pull
+requests and the run's tracked branch, annotate the selected document, and
+can fail only on the first workflow attempt or wait without finishing.
+`git.rerun-suspended-check` uses a separate host credential with Actions write
+permission; the sync App never receives it. `fault.check-age` ages only the
+fixture pull request's persisted head timestamp so the ten-minute shortened
+check deadline can be tested without a wall-clock wait.
+
+Run the same steps and I1–I9 assertions against local Git and fake services:
+
+```sh
+node --test test/e2e/harness/suspended-specs.test.ts
+```
+
+L5-34 remains selectable for planning, but its offline execution is explicitly
+skipped until the engine exposes `before-suspension-push`. Its spec names the
+required crash window; substituting an earlier checkpoint would exercise a
+different failure.

@@ -70,7 +70,7 @@ export async function appInstallationToken(config: TestConfig, fetchImpl: typeof
 }
 
 /** The host's git credential for the sandbox, through git's credential helper. */
-export function hostToken(config: TestConfig): string | null {
+export function hostToken(config: Pick<TestConfig, 'owner' | 'repo'>): string | null {
   const result = spawnSync('git', ['credential', 'fill'], {
     input: `protocol=https\nhost=github.com\npath=${config.owner}/${config.repo}.git\n\n`,
     encoding: 'utf8',
