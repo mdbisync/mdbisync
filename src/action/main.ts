@@ -13,11 +13,10 @@ import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as core from "@actions/core";
-import { notImplementedMessage } from "../commands.ts";
-import { PARTIAL, partialCode, pullRequestEnding, stoppedBeforeWritingMessage, stoppedMessage } from "../run/exit.ts";
-import { unfinishedMessage, writeRunReport } from "../run/finish.ts";
+import { runEnding } from "../run/exit.ts";
+import { writeRunReport } from "../run/finish.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
-import { runOperation } from "../run/operation.ts";
+import { type OperationOutcome, runOperation } from "../run/operation.ts";
 import { Git } from "../state/index.ts";
 import { SECURITY_STEPS, type SecurityStep, stageFolder } from "../sync/staged.ts";
 import { cleanupAppTokens } from "../linear/cleanup.ts";
@@ -126,46 +125,24 @@ export async function run(options: RunOptions = {}): Promise<void> {
       // The hooks step runs this script with the runner's Node.js.
       core.setOutput("node", process.execPath);
       core.setOutput("hooks", hooksScript());
-      core.setOutput("code", "");
-      return;
     }
-    const failure = pullRequestEnding(outcome);
-    if (failure !== null) {
-      core.setOutput("code", failure.code);
-      core.setFailed(`${operation}: ${failure.message}`);
-      return;
-    }
-    const partial = partialCode(outcome);
-    core.setOutput("code", partial ?? outcome.code ?? (outcome.stopped === undefined ? "" : "stopped"));
-    // A partial sync kept what it could record; the next run goes on, so the job ends with a warning, not a failure.
-    if (partial !== undefined) {
-      core.warning(`${operation}: ${PARTIAL} (${partial})`);
-      return;
-    }
-    const stopped = stoppedMessage(outcome);
-    if (stopped !== undefined) {
-      core.setFailed(stopped);
-      return;
-    }
-    if (!outcome.ok) {
-      core.setFailed(stoppedBeforeWritingMessage(operation, outcome));
-      return;
-    }
-    if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write?.code === 'container-cap') {
-      core.setOutput("code", "container-cap");
-      core.setFailed(`${operation}: stopped before any write (container-cap); reduce additions or check document-cap`);
-      return;
-    }
-    const unfinished = outcome.confirmed ?? outcome.reverse;
-    if (unfinished !== undefined && !unfinished.complete) {
-      core.setOutput("code", unfinished.code ?? "");
-      core.setFailed(unfinishedMessage(operation, unfinished.code));
-      return;
-    }
-    if (outcome.notImplemented) core.setFailed(notImplementedMessage(operation));
+    reportEnding(outcome, core);
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
   }
+}
+
+/** Where the action reports a run's ending: the step's `code` output, a warning, or the step's failure. */
+export type EndingSink = Pick<typeof core, "setOutput" | "warning" | "setFailed">;
+
+/** Reports how the run ended: its `code` output, then a warning or the step's failure, or nothing more for a run that succeeded. */
+export function reportEnding(outcome: OperationOutcome, sink: EndingSink): void {
+  const ending = runEnding(outcome);
+  sink.setOutput("code", ending.code);
+  if (ending.message === undefined) return;
+  // A partial sync kept what it could record; the next run goes on, so the job ends with a warning, not a failure.
+  if (ending.status === "warning") sink.warning(ending.message);
+  else sink.setFailed(ending.message);
 }
 
 if (import.meta.main) {
