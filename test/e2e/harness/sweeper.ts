@@ -12,6 +12,7 @@
 // refs, open pull requests and projects read back gone and every document it
 // created reads back archived and not trashed.
 
+import type { SharedAdmission } from './shared-state.ts';
 import { RUN_ID_PATTERN, runNames } from './isolation.ts';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import type { LinearWorld } from './linear-world.ts';
@@ -23,6 +24,8 @@ import type { Sandbox } from './sandbox.ts';
 export const SWEEP_AGE_MS = 2 * 3_600_000;
 
 export interface SweepTargets {
+  /** Required by the live CLI; omitted only by isolated offline tests. */
+  shared?: SharedAdmission;
   sandbox: Sandbox;
   rest: SandboxRest;
   world: LinearWorld;
@@ -49,7 +52,10 @@ export function shouldSweep(runId: string, createdAt: number | null, now: number
 
 export async function sweep(targets: SweepTargets, stateDir: string, now = Date.now()): Promise<SweepReport> {
   const live = liveRuns(stateDir, now);
+  // Any shared read error stops before the first remote cleanup mutation.
+  for (const runId of await targets.shared?.liveRuns() ?? []) live.add(runId);
   const dead = deadLocalRuns(stateDir, now);
+  for (const runId of live) dead.delete(runId);
   const report: SweepReport = { removedRefs: [], closedPullRequests: [], deletedProjects: [], archivedDocuments: 0, recovered: [], keptLive: [...live].sort(), errors: [] };
   // Dead runs whose Linear side is recovered from their records, not by name.
   const recorded = new Set(ownedRuns(stateDir).filter((runId) => dead.has(runId)));

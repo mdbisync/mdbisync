@@ -93,6 +93,7 @@ node test/e2e/harness/cli.ts sweep                            # remove leftovers
 | Option | Meaning |
 | --- | --- |
 | `--ids`, `--levels`, `--slices`, `--modes` | comma-separated filters; modes are `local` (the command line), `actions` (the workflows in the test repository) and `ui` (a checklist for a person or a browser session) |
+| `--teams` | optional comma-separated team keys for a partial-corpus run; supported for compatible targeted scenarios only, refused for `full`; results do not replace catalog status |
 | `--workers` | scenarios at once (default 4); the budget governor still holds back scenarios that Linear's hourly budget cannot cover |
 | `--out` | the report folder (default `test/e2e/out/<harness run id>/`) |
 | `--defer` | ids to report as skipped instead of running them |
@@ -129,19 +130,54 @@ Many runs can share one test repository and one Linear workspace. Each
 scenario run gets a six-character run id and works only under names made
 from it: branches `t/<run>/main` and `t/<run>/sync`, state refs under
 `refs/mdbisync-t/<run>/`, Linear projects with neutral generated names, and
-team-zone documents whose titles start with the run id. A scenario that
-uses a team zone takes a lock on that team, so two of them never overlap.
+team-zone documents whose titles start with the run id. Live CLI runs reserve shared admission state on the sandbox branch
+`scenario-control`. A run claims all teams in its selected corpus before
+Linear writes; two runs claiming the same team never overlap. Claims stay
+through cleanup. A `full` run excludes all other live runs, including runs
+on other apps. App worker limits and request/complexity reservations are
+shared across hosts, keyed by app identity rather than configuration labels.
 
 Cleanup runs after every scenario, pass or fail, except a scenario held
 for its UI steps, whose data stays for a person or a browser session until
 the hold ends (the report's Cleanup column says so). Cleanup closes the run's pull
 requests, deletes its branches and refs, and archives its Linear documents
-by deleting their run projects. `sweep` removes what a killed run left,
-using the run-id pattern. It knows the live runs of its own state folder
-(below) and removes another run's leftovers once they are older than two
-hours, so stop every run that uses a different state folder or another
-host before you sweep the shared repository and workspace. It needs the
-full live configuration below.
+by deleting their run projects. Before writes, the harness requires a readable
+census of active and trashed team-zone documents and enough headroom for the
+planned documents. Each selected team's trash count is read before and after;
+an increased or unreadable after-count fails cleanup.
+
+`sweep` reads shared admission state before touching any remote resource and
+protects every registered run regardless of age or host. An unavailable or
+malformed shared state stops sweeping and new admissions. The control branch
+contains only counts, run identities and zone claims; never document content
+or credentials. Its updates use ordinary fast-forward-only pushes, without
+force, and retry competing updates after rereading state and app budget.
+
+Reservations never expire automatically: failed cleanup, a UI hold or a killed
+writer keeps its teams and app capacity reserved. To recover an abandoned
+reservation, first prove its writer and any workflow/engine children stopped,
+then recover its exact ownership record and verify refs, pull requests,
+projects and documents cleaned up before releasing that reservation through
+`SharedAdmission.release(runId, owner)`. Do not remove the control branch or
+release a reservation merely because a heartbeat is old. Automatic sweeping
+leaves these reservations alone; it continues to recover unreserved older
+runs by its existing rules. Keep the owning run's state and output folders
+until recovery succeeds.
+
+Use one upgraded harness and the same sandbox URL for all cooperating
+processes; older harnesses and custom drivers require an exclusive window.
+For compatible scenarios that do not require both teams or cross-team links,
+start separate processes with separate output/state directories, for example:
+
+```sh
+node test/e2e/harness/cli.ts run --ids L1-05 --teams ENG --workers 1 --out test/e2e/out/team-a
+node test/e2e/harness/cli.ts run --ids L1-05 --teams DOCS --workers 1 --out test/e2e/out/team-b
+```
+
+Choose scenarios and teams present in their slice. Filtering preserves paths,
+project-team inheritance and common unannotated assets; it does not repair a
+scenario that needs an excluded fixture. Scoped reports explicitly identify
+their teams and never replace the latest complete-corpus scenario status.
 
 Each run also keeps an ownership record in the state folder
 (`owned/<run>.jsonl`): every document id, project id and name, and team zone
@@ -162,9 +198,11 @@ every document it created reads back archived and not trashed; a document a
 scenario deleted for good, or trashed in a project already deleted, is
 counted, not cleaned. The run's report keeps its failed cleanup.
 
-Locks and the shared budget ledger live in a state folder on the host
-(`MDBISYNC_HARNESS_STATE_DIR`, default `<tmp>/mdbisync-harness`); harness
-processes on one host share it.
+Cache locks, ownership records and UI holds live in a state folder on the
+host (`MDBISYNC_HARNESS_STATE_DIR`, default `<tmp>/mdbisync-harness`).
+The live CLI uses the sandbox control branch for cross-host admission;
+local-only governor instances are for offline tests and exclusive legacy
+drivers. Shared control updates fail closed when Git access fails.
 
 ## Read a report
 

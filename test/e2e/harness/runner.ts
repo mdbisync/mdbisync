@@ -42,6 +42,16 @@ export const SETUP_TIMEOUT_MS = 15 * 60_000;
 /** How long a setup past its deadline gets to stop before cleanup runs anyway. */
 export const SETUP_STOP_MS = 2 * 60_000;
 
+/** Census must succeed and leave room for every planned team-zone document. */
+export async function requireZoneCapacity(world: Pick<LinearWorld, 'zoneUsage'>, teamId: string, planned: number): Promise<{ active: number; trashed: number }> {
+  let usage;
+  try { usage = await world.zoneUsage(teamId); }
+  catch { throw new EnvBlockedError('document capacity census unavailable'); }
+  if (!Number.isInteger(planned) || planned < 0 || !Number.isInteger(usage.active) || usage.active < 0 || !Number.isInteger(usage.trashed) || usage.trashed < 0) throw new EnvBlockedError('document capacity census invalid');
+  if (usage.active + usage.trashed + planned > ZONE_CAP) throw new EnvBlockedError(`document capacity insufficient (active ${usage.active}, trash ${usage.trashed}, planned at most ${planned}, cap ${ZONE_CAP})`);
+  return usage;
+}
+
 /** Whether `work` settles (either way) within `ms`. */
 export async function settlesWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
   let timer: NodeJS.Timeout | undefined;
@@ -72,6 +82,8 @@ export const UI_HOLD_MS = 2 * 3_600_000;
 
 export interface RunnerDeps {
   config: TestConfig;
+  /** Optional partial-corpus team selection; never a full catalog result. */
+  teams?: readonly string[];
   governor: Governor | null;
   /** The harness's own Linear client per app (as the app), for reads and budget. */
   appClients: Map<string, LinearClient>;
@@ -111,7 +123,7 @@ function projectTeams(readmes: ReadonlyMap<string, string>): Map<string, string>
  * they are known (a held run saved them).
  */
 export async function liveWorld(
-  deps: Pick<RunnerDeps, 'config' | 'appClients'>,
+  deps: Pick<RunnerDeps, 'config' | 'appClients' | 'teams'>,
   appName: string,
   parts: {
     sandbox: Sandbox;
@@ -132,7 +144,7 @@ export async function liveWorld(
     'editor-b': editorClient(config.editors['editor-b'], undefined, parts.owned),
   };
   const world = new LinearWorld(editors['editor-a']);
-  const teams = parts.known?.teams ?? new Map((await world.teams()).map((team) => [team.key, team]));
+  const teams = parts.known?.teams ?? new Map((await world.teams()).filter((team) => deps.teams === undefined || deps.teams.includes(team.key)).map((team) => [team.key, team]));
   // Links between synchronized documents are written as document URLs of this workspace.
   const documentUrlBase = parts.known?.documentUrlBase
     ?? `https://linear.app/${(await appClient.request<{ organization: { urlKey: string } }>('Organization', 'query', 'query Organization { organization { urlKey } }')).organization.urlKey}/document`;
@@ -162,7 +174,7 @@ export async function liveWorld(
   };
 }
 
-async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[]): Promise<void> {
+async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
   const { config } = deps;
   if (config.missing.length > 0) throw new EnvBlockedError(`test configuration is missing: ${config.missing.join(', ')}`);
   let token;
@@ -184,6 +196,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     ctx.phase('tracked branch');
     created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names, {
       checks: publishesCheckWorkflow(ctx.scenario),
+      ...(deps.teams === undefined ? {} : { teams: deps.teams }),
     });
   } catch (error) {
     if (error instanceof CorpusMissingError) throw new EnvBlockedError(`corpus: ${error.message}`);
@@ -200,29 +213,38 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
 
   // The team lock: initial sync matches every document of an annotated team zone.
   ctx.phase('team lock');
-  await takeTeamLocks(ctx, deps.stateDir, tree.teamZones.keys(), locks);
-
-  // Trashed documents per team zone the run uses, counted once the team lock is held so another run's work
-  // is not counted as this run's. They count against the zone's cap and cannot be purged. Only a measure:
-  // a count that cannot be read is logged and leaves the run alone.
-  const trash: Record<string, { before: number; after?: number }> = {};
-  for (const key of tree.teamZones.keys()) {
+  const zoneIds = [...tree.teams].map((key) => {
     const team = teams.get(key);
-    if (team === undefined) continue;
-    try {
-      const before = await world.trashedInZone(team.id);
-      trash[key] = { before };
-      if (before >= ZONE_TRASH_WARNING) ctx.log(`warning: team ${key}'s zone holds ${before} trashed documents, near the cap of about ${ZONE_CAP}; creates there fail with QUOTA_EXCEEDED at the cap`);
-    } catch (error) {
-      ctx.log(`could not count team ${key}'s trashed documents: ${(error as Error).message}`);
-    }
-  }
-  ctx.observations.set('zone.trash', trash);
+    if (team === undefined) throw new EnvBlockedError(`the test workspace has no team ${key}`);
+    return team.id;
+  });
+  try { await grant?.claimZones?.(zoneIds); }
+  catch { throw new EnvBlockedError('shared team zone is held or unavailable'); }
+  await takeTeamLocks(ctx, deps.stateDir, tree.teamZones.keys(), locks);
 
   const readmes = new Map<string, string>();
   for (const [target, source] of tree.paths) {
     if (/(^|\/)README\.md$/.test(source)) readmes.set(source, tree.rewritten.get(target) ?? (await sandbox.readMain(`corpus/${source}`)) ?? '');
   }
+  // Census is required before writes while all selected zones are leased.
+  const trash: Record<string, { before: number; after?: number }> = {};
+  const synced = new Set(manifest.files.filter((file) => file.synced && file.class !== 'lint-error').map((file) => file.path));
+  const folders = annotatedFolders(readmes);
+  const additions = ctx.scenario.steps.reduce((count, step) => count + (['git.add', 'git.copy', 'linear.create'].includes(`${step.kind}.${step.action}`) ? 1 : 0), 0);
+  ctx.observations.set('zone.trash', trash);
+  for (const key of tree.teams) {
+    const planned = [...tree.paths].filter(([target, source]) => {
+      const folder = owningFolder(target, folders);
+      return synced.has(source) && folder?.team === key && folder.project === null;
+    }).length + additions;
+    const team = teams.get(key)!;
+    let usage;
+    try { usage = await requireZoneCapacity(world, team.id, planned); }
+    catch (error) { throw new EnvBlockedError(`team ${key}: ${(error as Error).message}`); }
+    trash[key] = { before: usage.trashed };
+    if (usage.trashed >= ZONE_TRASH_WARNING) ctx.log(`warning: team ${key}'s zone is near its trash cap`);
+  }
+
   ctx.phase('projects');
   const teamOf = projectTeams(readmes);
   for (const [placeholder, name] of tree.projects) {
@@ -588,9 +610,9 @@ export async function cleanupAndCount(ctx: RunContext): Promise<{ ok: boolean; d
       if (teamId === undefined) continue;
       try {
         counts.after = await ctx.live.world.trashedInZone(teamId);
-        if (counts.after > counts.before) ctx.log(`warning: the run left ${counts.after - counts.before} more trashed documents in team ${key}'s zone`);
+        if (counts.after > counts.before) outcome = { ok: false, detail: `team ${key}'s trash count increased` };
       } catch (error) {
-        ctx.log(`could not count team ${key}'s trashed documents after the run: ${(error as Error).message}`);
+        outcome = { ok: false, detail: `could not read team ${key}'s trash count after cleanup` };
       }
     }
   }
@@ -640,6 +662,7 @@ export function resultOf(
     checks: extra.checks,
     cleanup: extra.cleanup,
     ...(ctx.observations.has('metrics') ? { metrics: ctx.observations.get('metrics') as Record<string, unknown> } : {}),
+    ...(ctx.observations.has('corpus.teams') ? { corpusTeams: ctx.observations.get('corpus.teams') as string[] } : {}),
     ...(ctx.observations.has('zone.trash') ? { teamZoneTrash: ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> } : {}),
   };
 }
@@ -653,6 +676,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   const heartbeat = setInterval(() => registration.heartbeat(), 60_000);
   const { ctx, logLines, phase, abort } = createRunContext(scenario, runId, runDir, deps);
   const { names, log } = ctx;
+  if (deps.teams !== undefined) ctx.observations.set('corpus.teams', [...deps.teams]);
   const locks: Lock[] = [];
   let grant: Awaited<ReturnType<Governor['admit']>> | undefined;
   let error: unknown;
@@ -677,10 +701,11 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
         if (blocked instanceof BudgetBlockedError) throw new EnvBlockedError(blocked.message);
         throw blocked;
       }
+      if (grant.owner !== undefined) ctx.observations.set('admission.owner', grant.owner);
       ctx.proxy = await startFaultProxy('https://api.linear.app', { observer: ctx.owned });
       // A setup that does not finish must not hold a worker and its locks forever. On the deadline it is
       // told to stop; cleanup waits until it has stopped, so nothing is created after the cleanup.
-      const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks);
+      const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks, grant);
       try {
         await withDeadline(setup, SETUP_TIMEOUT_MS, () =>
           new EnvBlockedError(`setup did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes (last phase: ${phase()})`));
@@ -732,9 +757,12 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
         deps.governor?.observeRateLimits(deps.config.linearApps[0].name, entry.rateLimitHeaders, Date.parse(entry.finishedAt));
       }
     }
-    grant?.release();
+    if (grant !== undefined && (grant.owner === undefined || (cleanupOutcome.ok && !heldForUi && !setupStuck))) {
+      try { await grant.release(); }
+      catch { cleanupOutcome = { ok: false, detail: 'shared reservation could not be released; retry cleanup before reuse' }; }
+    }
     clearInterval(heartbeat);
-    if (setupStuck) cleanupOutcome = { ok: false, detail: `setup did not stop; ${cleanupOutcome.detail ?? 'cleaned up'}; the sweeper removes the rest once this process ends` };
+    if (setupStuck) cleanupOutcome = { ok: false, detail: `setup did not stop; ${cleanupOutcome.detail ?? 'cleaned up'}; shared admission keeps its resources reserved for verified recovery` };
     if (cleanupOutcome.ok && !heldForUi && !setupStuck) registration.done();
     rmSync(join(runDir, 'person'), { recursive: true, force: true });
     rmSync(join(runDir, 'engine'), { recursive: true, force: true });

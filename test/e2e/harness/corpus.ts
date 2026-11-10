@@ -143,6 +143,26 @@ export interface RunTree {
   teams: Set<string>;
 }
 
+/** Restricts a slice by its effective annotated team, retaining unannotated assets. */
+export function selectTeams(slice: SliceList, readmes: ReadonlyMap<string, string>, selected: readonly string[]): SliceList {
+  if (slice.slice === 'full') throw new Error('full slices cannot select teams');
+  const folders = annotatedFolders(readmes);
+  const effectiveTeam = (folder: Folder): string | null => {
+    if (folder.team !== null) return folder.team;
+    const parents = folders.filter((candidate) => candidate !== folder && inside(folder.folder, candidate.folder)).sort((a, b) => b.folder.length - a.folder.length);
+    return parents.find((candidate) => candidate.team !== null)?.team ?? null;
+  };
+  const known = new Set(folders.map(effectiveTeam).filter((team) => team !== null));
+  if (selected.length === 0 || selected.some((team) => !known.has(team))) throw new Error('team selection is empty or unknown to this slice');
+  const kept = slice.paths.filter((path) => {
+    // A README annotates its own folder, rather than its parent.
+    const folder = folders.find((candidate) => annotationPath(candidate) === path) ?? owningFolder(path, folders);
+    return folder === null || selected.includes(effectiveTeam(folder) ?? '');
+  });
+  if (kept.length === 0) throw new Error('team selection leaves no corpus paths');
+  return { ...slice, paths: kept };
+}
+
 /**
  * Lays a slice out as a run's tracked tree. `readmes` holds the text of the
  * slice's README.md files (paths relative to `corpus/`).

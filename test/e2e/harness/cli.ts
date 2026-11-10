@@ -11,6 +11,8 @@
 // The test configuration comes from the environment and the test
 // configuration folder (see config.ts).
 
+import { createHash } from 'node:crypto';
+import { GitStateStore, SharedAdmission } from './shared-state.ts';
 import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -45,6 +47,7 @@ async function main(argv: string[]): Promise<number> {
       levels: { type: 'string' },
       slices: { type: 'string' },
       modes: { type: 'string' },
+      teams: { type: 'string' },
       workers: { type: 'string', default: '4' },
       out: { type: 'string' },
       'status-page': { type: 'string' },
@@ -56,8 +59,10 @@ async function main(argv: string[]): Promise<number> {
   const log = (line: string) => process.stderr.write(`${new Date().toISOString().slice(11, 19)} ${line}\n`);
   const all = loadScenarios();
   const selection = { ids: list(values.ids), levels: list(values.levels), slices: list(values.slices), modes: list(values.modes) };
+  const teams = list(values.teams);
   const cleanSelection = Object.fromEntries(Object.entries(selection).filter(([, value]) => value !== undefined));
   const scenarios = selectScenarios(all, cleanSelection);
+  if (teams !== undefined && scenarios.some((scenario) => scenario.slice === 'full')) throw new Error('full slices cannot select teams');
   const workers = Number(values.workers);
   if (!Number.isInteger(workers) || workers < 1) throw new Error(`--workers must be a whole number of at least 1, not ${values.workers}`);
   const stateDir = defaultStateDir();
@@ -81,6 +86,15 @@ async function main(argv: string[]): Promise<number> {
   }
 
   // Live commands mint one token per OAuth app for the harness's own reads and revoke it at the end.
+  let shared: SharedAdmission | undefined;
+  const sharedAdmission = async () => {
+    if (shared === undefined) {
+      const token = await githubToken(config, 'local');
+      const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, stateDir, runId: 'control' });
+      shared = new SharedAdmission(new GitStateStore({ stateDir, url: config.gitUrl, env: sandbox.env() }));
+    }
+    return shared;
+  };
   const appClients = new Map<string, LinearClient>();
   const tokens: Array<{ token: RunToken; hooks: LinearHooks }> = [];
   const harnessRunId = `${new Date().toISOString().slice(0, 10)}-${newRunId()}`;
@@ -89,7 +103,7 @@ async function main(argv: string[]): Promise<number> {
     log: (entry: LogEntry) => { process.stderr.write(`${JSON.stringify({ harnessRunId, app, ...entry })}\n`); },
   });
   try {
-    for (const app of command === 'run' || command === 'ui-result' ? config.linearApps : []) {
+    for (const app of (command === 'run' && scenarios.some((scenario) => scenario.setup.state !== 'offline')) || command === 'ui-result' ? config.linearApps : []) {
       const hooks = hooksFor(app.name);
       const token = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
       tokens.push({ token, hooks });
@@ -107,6 +121,7 @@ async function main(argv: string[]): Promise<number> {
           rest: new SandboxRest(config, token.token),
           world,
           teamIds: teams.map((team) => team.id),
+          shared: await sharedAdmission(),
         },
         stateDir,
       );
@@ -116,11 +131,12 @@ async function main(argv: string[]): Promise<number> {
 
     if (command === 'run') {
       const outDir = values.out ?? join(REPO_ROOT, 'test/e2e/out', harnessRunId);
-      const apps: App[] = config.linearApps.map((app) => ({
+      const apps: App[] = (scenarios.some((scenario) => scenario.setup.state !== 'offline') ? config.linearApps : []).map((app) => ({
         name: app.name,
+        key: createHash('sha256').update(app.clientId).digest('hex'),
         readBudget: async () => budgetFromStatus(await (appClients.get(app.name) as LinearClient).rateLimitStatus(), Date.now()),
       }));
-      const governor = apps.length === 0 ? null : new Governor({ apps, stateDir, log });
+      const governor = apps.length === 0 ? null : new Governor({ apps, stateDir, log, shared: await sharedAdmission() });
       const startedAt = new Date().toISOString();
       log(`run ${harnessRunId}: ${scenarios.length} scenarios, ${values.workers} workers, output ${outDir}`);
       // SIGINT or SIGTERM: running scenarios finish with their cleanup, the rest are skipped.
@@ -137,15 +153,15 @@ async function main(argv: string[]): Promise<number> {
       process.on('SIGTERM', onSignal);
       // --defer: selected scenarios reported skipped (for example to keep a heavy one for a quiet budget window).
       const deferred = new Set(list(values.defer) ?? []);
-      const ran = await runScenarios(scenarios.filter((s) => !deferred.has(s.id)), { config, governor, appClients, stateDir, outDir, expectedRed: loadExpectedRed(), log }, workers, stop);
+      const ran = await runScenarios(scenarios.filter((s) => !deferred.has(s.id)), { config, governor, appClients, stateDir, outDir, ...(teams === undefined ? {} : { teams }), expectedRed: loadExpectedRed(), log }, workers, stop);
       const byId = new Map(ran.map((result) => [result.id, result]));
       const results = scenarios.map((s) => byId.get(s.id) ?? skippedResult(s, 'deferred to a later run'));
-      const report: HarnessReport = { harnessRunId, startedAt, finishedAt: new Date().toISOString(), host: hostname(), selection: cleanSelection, results };
+      const report: HarnessReport = { harnessRunId, startedAt, finishedAt: new Date().toISOString(), host: hostname(), selection: { ...cleanSelection, ...(teams === undefined ? {} : { teams }) }, results };
       const files = writeRunReport(report, outDir);
       log(`report: ${files.markdown}`);
       if (values['status-page'] !== undefined) updateStatusPage(values['status-page'], all.map((scenario) => scenario.id), report);
       if (values['evidence-dir'] !== undefined) log(`evidence: ${writeEvidence(report, values['evidence-dir'])}`);
-      return results.some((result) => result.result === 'fail') ? 1 : 0;
+      return results.some((result) => result.result === 'fail' || !result.cleanup.ok) ? 1 : 0;
     }
 
     if (command === 'ui-result') {
@@ -159,10 +175,11 @@ async function main(argv: string[]): Promise<number> {
       // Admission on the run's own app: its engine and the harness's reads go through that app.
       const apps: App[] = config.linearApps.filter((app) => app.name === held.appName).map((app) => ({
         name: app.name,
+        key: createHash('sha256').update(app.clientId).digest('hex'),
         readBudget: async () => budgetFromStatus(await (appClients.get(app.name) as LinearClient).rateLimitStatus(), Date.now()),
       }));
       if (config.linearApps.length > 0 && apps.length === 0) throw new Error(`the held run uses app ${held.appName}, which the test configuration does not have`);
-      const governor = apps.length === 0 ? null : new Governor({ apps, stateDir, log });
+      const governor = apps.length === 0 ? null : new Governor({ apps, stateDir, log, shared: await sharedAdmission() });
       const outcome = await takeUpHeldRun(runDir, answers, all, { config, governor, appClients, stateDir, expectedRed: loadExpectedRed(), log });
       if (outcome.state === 'waiting') {
         process.stdout.write(`ran ${outcome.ran.length === 0 ? 'no harness step' : outcome.ran.join(', ')}; the run stays held: answer item ${outcome.nextItem} and the ones after it, then hand the checklist back\n`);

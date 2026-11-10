@@ -194,6 +194,13 @@ export class LinearWorld {
     return archived;
   }
 
+  /** Active and trashed documents that consume a team's document-zone capacity. */
+  async zoneUsage(teamId: string): Promise<{ active: number; trashed: number }> {
+    const documents = await this.client.listDocuments({ teamId }, { includeArchived: true });
+    const zone = documents.filter((document) => document.projectId === null);
+    return { active: zone.filter((document) => !document.trashed && document.archivedAt === null).length, trashed: zone.filter((document) => document.trashed).length };
+  }
+
   /** Trashed documents in a team's zone (not in a project): the count that runs into the zone's cap. */
   async trashedInZone(teamId: string): Promise<number> {
     const documents = await this.client.listDocuments({ teamId }, { includeArchived: true });

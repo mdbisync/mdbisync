@@ -174,7 +174,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   let grant: Awaited<ReturnType<NonNullable<RunnerDeps['governor']>['admit']>> | undefined;
   const release = () => {
     locks.splice(0).reverse().forEach((lock) => lock.release());
-    grant?.release();
+    if (grant?.owner === undefined) void grant?.release();
     clearInterval(heartbeat);
   };
   const ran: string[] = [];
@@ -190,17 +190,24 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
     for (const [subject, value] of answers.values) ctx.observations.set(subject, value);
     if (deps.governor !== null) {
       try {
-        grant = await deps.governor.admit(scenario, held.runId, estimate(scenario));
+        grant = await deps.governor.admit(scenario, held.runId, estimate(scenario), held.appName, held.observations.get('admission.owner') as string | undefined);
       } catch (blocked) {
         if (blocked instanceof BudgetBlockedError) throw new EnvBlockedError(blocked.message);
         throw blocked;
       }
       // The engine and the harness's reads go on through the run's own app, so its budget is the one to reserve.
+      if (grant.owner !== undefined) ctx.observations.set('admission.owner', grant.owner);
       if (grant.app.name !== held.appName) throw new Error(`the governor admitted the run on app ${grant.app.name}, but it runs on app ${held.appName}`);
     }
     ctx.live = await (deps.attach ?? attachHeldRun)(held, deps);
     ctx.sandbox = ctx.live.sandbox;
     ctx.proxy = await startFaultProxy('https://api.linear.app', { history: held.proxyRequests, observer: ctx.owned });
+    const zoneIds = [...held.live.tree.teams].map((key) => {
+      const team = ctx.live!.teams.get(key);
+      if (team === undefined) throw new EnvBlockedError('held run team is unavailable');
+      return team.id;
+    });
+    await grant?.claimZones?.(zoneIds);
     await takeTeamLocks(ctx, deps.stateDir, held.live.tree.teamZones.keys(), locks);
   } catch (error) {
     await ctx.proxy?.close();
@@ -276,6 +283,10 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   await captureCanaryEvidence(ctx);
   const cleanup = await cleanupAndCount(ctx);
   await ctx.proxy?.close();
+  if (cleanup.ok && grant?.owner !== undefined) {
+    try { await grant.release(); }
+    catch { cleanup.ok = false; cleanup.detail = 'shared reservation release failed'; }
+  }
   if (cleanup.ok) registration.done();
   // A run left half cleaned up is no longer held: once this process ends, the sweeper takes it as dead.
   else registration.hold(0);

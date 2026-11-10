@@ -6,6 +6,8 @@
 // slots shared by every harness process on the host, and spreads workers over
 // every app the secrets list. Only one `full` run at a time.
 
+import { randomUUID } from 'node:crypto';
+import type { SharedAdmission } from './shared-state.ts';
 import { readRateLimitHeaders } from '../../../src/linear/rate-limit.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { RateLimitStatus } from '../../../src/linear/index.ts';
@@ -81,11 +83,14 @@ export function budgetFromStatus(status: RateLimitStatus, now: number): Budget {
 export interface App {
   /** A neutral label, never the client id. */
   name: string;
+  /** Stable identity shared across configurations, never a credential. */
+  key?: string;
   readBudget(): Promise<Budget>;
 }
 
 export interface GovernorOptions {
   apps: readonly App[];
+  shared?: SharedAdmission;
   stateDir: string;
   maxWorkersPerApp?: number;
   maxWaitMs?: number;
@@ -98,7 +103,9 @@ export interface Grant {
   app: App;
   waitedMs: number;
   budgetBefore: Budget;
-  release(): void;
+  owner?: string;
+  claimZones?(zones: readonly string[]): Promise<void>;
+  release(): void | Promise<void>;
 }
 
 export class BudgetBlockedError extends Error {
@@ -194,12 +201,49 @@ export class Governor {
     this.#sleep = options.sleep ?? ((ms) => sleep(ms).then(() => undefined));
   }
 
+  async #admitShared(scenario: Scenario, runId: string, estimated: Estimate, appName?: string, resumeOwner?: string): Promise<Grant> {
+    const options = this.#options;
+    const shared = options.shared!;
+    const started = this.#now();
+    const deadline = started + (options.maxWaitMs ?? MAX_BUDGET_WAIT_MS);
+    const owner = resumeOwner ?? randomUUID();
+    const apps = options.apps.filter((app) => appName === undefined || app.name === appName);
+    if (apps.length === 0) throw new Error('unknown OAuth app');
+    const need = { requests: Math.min(estimated.requests, MAX_ADMISSION.requests), complexity: Math.min(estimated.complexity, MAX_ADMISSION.complexity) };
+    for (;;) {
+      for (const app of apps) {
+        let admission: { admitted: boolean; budget: Budget };
+        if (resumeOwner !== undefined) {
+          const entry = (await shared.store.read()).runs.find((run) => run.runId === runId && run.owner === resumeOwner && run.app === (app.key ?? app.name));
+          if (entry === undefined) throw new BudgetBlockedError('held run has no matching shared reservation');
+          admission = { admitted: true, budget: await app.readBudget() };
+        } else {
+          admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: scenario.slice === 'full', need, maxWorkers: options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, reserve: RESERVE,
+            readBudget: async () => {
+              const at = this.#now();
+              return this.#withObserved(app.name, await app.readBudget(), at);
+            },
+          });
+        }
+        if (admission.admitted) return {
+          app, owner, waitedMs: this.#now() - started, budgetBefore: admission.budget,
+          claimZones: (zones) => shared.claim(runId, owner, zones),
+          release: () => shared.release(runId, owner),
+        };
+      }
+      if (this.#now() + RESERVATION_POLL_MS > deadline) throw new BudgetBlockedError('shared admission: budget, worker slots or full slice remained reserved');
+      options.log?.('shared admission: waiting for app budget, worker slot or exclusive full slice');
+      await this.#sleep(RESERVATION_POLL_MS);
+    }
+  }
+
   /**
    * Waits for a worker slot on some app and for that app's budget to cover
    * the estimate. The grant holds the slot (and the full-run lock) until
    * released. Throws BudgetBlockedError after the longest wait.
    */
-  async admit(scenario: Scenario, runId: string, estimated: Estimate, appName?: string): Promise<Grant> {
+  async admit(scenario: Scenario, runId: string, estimated: Estimate, appName?: string, owner?: string): Promise<Grant> {
+    if (this.#options.shared !== undefined) return this.#admitShared(scenario, runId, estimated, appName, owner);
     const options = this.#options;
     // A scenario bigger than one window (L1-16) starts on a mostly full
     // window and goes on by resume in the next ones.
