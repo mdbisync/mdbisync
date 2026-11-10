@@ -27,9 +27,9 @@ export interface AccountBudget {
 }
 export interface SharedState { version: 1; runs: Reservation[] }
 /**
- * The most of one account's window a run reserves: the same share as the
- * app's admission cap takes of its 5,000 requests. A larger run continues
- * across windows. Reading the budget spends a request, so the whole window
+ * The most of one account's window a run reserves: the share the app's
+ * admission cap takes of the app's window (3,000 of 5,000 requests, 1.2M of
+ * 2M points). A larger run continues across windows. Reading the budget spends a request, so the whole window
  * minus the reserve would never be free.
  */
 export const ACCOUNT_WINDOW_SHARE = 0.6;
@@ -46,7 +46,7 @@ export function neverFits(need: Estimate, budget: Budget, reserve: Estimate): st
     ['requests', budget.requestsAllowed, need.requests, reserve.requests],
     ['complexity points', budget.complexityAllowed, need.complexity, reserve.complexity],
   ] as const) {
-    if (allowed !== undefined && allowed - kept < wanted) return `an editor key allows ${allowed} ${kind} an hour, too few for ${wanted} plus the reserve of ${kept}`;
+    if (allowed !== undefined && allowed - kept < wanted) return `a window of the account allows ${allowed} ${kind}, too few for ${wanted} plus the reserve of ${kept}`;
   }
   return undefined;
 }
@@ -206,10 +206,10 @@ export class SharedAdmission {
       entry.zones = [...new Set([...entry.zones, ...wanted])].sort();
     });
   }
-  /** Reserve personal editor budgets by viewer identity, across all apps. */
   /**
-   * Reserves each account's need, capped to what one window of that account
-   * can grant. `never` explains a need that no window could ever admit.
+   * Reserves personal editor budgets by viewer identity, across all apps.
+   * Each need is capped to what one window of that account can grant;
+   * `never` explains a need that no window could ever admit.
    */
   async reserveAccounts(runId: string, owner: string, accounts: readonly AccountBudget[], reserve: Estimate): Promise<{ admitted: boolean; wakeAt?: number; never?: string }> {
     return this.store.update(async (state) => {
@@ -223,12 +223,12 @@ export class SharedAdmission {
       const resources: NonNullable<Reservation['resources']> = [];
       let admitted = true;
       let wakeAt: number | undefined;
-      let never: string | undefined;
       for (const account of grouped.values()) {
         const old = entry.resources?.find((resource) => resource.key === account.key);
         const budget = await account.readBudget();
         const need = windowNeed({ requests: Math.max(account.need.requests, old?.requests ?? 0), complexity: Math.max(account.need.complexity, old?.complexity ?? 0) }, budget);
-        never ??= neverFits(need, budget, reserve);
+        const never = neverFits(need, budget, reserve);
+        if (never !== undefined) return { admitted: false, never };
         const used = state.runs.filter((run) => run !== entry).flatMap((run) => run.resources ?? []).filter((resource) => resource.key === account.key).reduce((sum, resource) => ({ requests: sum.requests + resource.requests, complexity: sum.complexity + resource.complexity }), { requests: 0, complexity: 0 });
         if (budget.requestsRemaining - reserve.requests - used.requests < need.requests || budget.complexityRemaining - reserve.complexity - used.complexity < need.complexity) {
           admitted = false;
@@ -236,7 +236,6 @@ export class SharedAdmission {
         }
         resources.push({ key: account.key, ...need });
       }
-      if (never !== undefined) return { admitted: false, never };
       if (admitted) {
         entry.resources = resources;
         entry.revision = randomUUID();

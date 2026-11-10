@@ -428,19 +428,19 @@ it('keeps a killed process lease until verified recovery, fencing and cleanup le
 });
 
 // A `full` scenario against an editor key with Linear's 2,500-request hourly window.
-async function editorClaim(allowed: { requests: number; complexity: number }) {
+async function editorClaim(allowed: { requests: number; complexity: number }, spent = 1) {
   const { claimEditorBudgets } = await import('./runner.ts');
   const { first } = await fixture();
   const full = loadScenarios().find((item) => item.slice === 'full' && item.setup.state !== 'offline')!;
   const governor = new Governor({ apps: [{ name: 'app', readBudget: async () => budget }], stateDir: join(roots.at(-1)!, 'state'), shared: first, maxWaitMs: 0 });
   const grant = await governor.admit(full, 'aaaaaa', { requests: 1, complexity: 1 });
   const status = { identifier: null, kind: 'api key', limits: [
-    { type: 'requestLimit', allowedAmount: allowed.requests, remainingAmount: allowed.requests - 1, requestedAmount: 1, period: 3_600_000, reset: Date.now() + 3_600_000 },
+    { type: 'requestLimit', allowedAmount: allowed.requests, remainingAmount: allowed.requests - spent, requestedAmount: 1, period: 3_600_000, reset: Date.now() + 3_600_000 },
     { type: 'complexityLimit', allowedAmount: allowed.complexity, remainingAmount: allowed.complexity - 10, requestedAmount: 10, period: 3_600_000, reset: Date.now() + 3_600_000 },
   ] };
   const editor = { request: async () => ({ viewer: { id: 'stable-viewer' } }), rateLimitStatus: async () => status };
   const ctx = { scenario: full, signal: new AbortController().signal, live: { editors: { 'editor-a': editor, 'editor-b': editor } } } as never;
-  return { first, full, grant, claim: () => claimEditorBudgets(ctx, grant) };
+  return { first, full, grant, claim: (maxWaitMs?: number) => claimEditorBudgets(ctx, grant, maxWaitMs) };
 }
 
 it('admits a full-sized editor claim on a 2,500-request key at once', { timeout: 30_000 }, async () => {
@@ -455,7 +455,15 @@ it('admits a full-sized editor claim on a 2,500-request key at once', { timeout:
 it('fails an editor claim at once when no window of the key could admit it', { timeout: 30_000 }, async () => {
   const { EnvBlockedError } = await import('./results.ts');
   const { first, grant, claim } = await editorClaim({ requests: 300, complexity: 3_000_000 });
-  await assert.rejects(claim(), (error: Error) => error instanceof EnvBlockedError && /can never be admitted: an editor key allows 300 requests an hour/.test(error.message));
+  await assert.rejects(claim(), (error: Error) => error instanceof EnvBlockedError && /can never be admitted: a window of the account allows 300 requests/.test(error.message));
   assert.equal((await first.store.read()).runs[0]?.resources, undefined, 'a claim that never fits reserves nothing');
+  await grant.release();
+});
+
+it('reports an editor key that frees up only after setup would end, without waiting', { timeout: 30_000 }, async () => {
+  const { EnvBlockedError } = await import('./results.ts');
+  const { first, grant, claim } = await editorClaim({ requests: 2500, complexity: 3_000_000 }, 1500);
+  await assert.rejects(claim(15 * 60_000), (error: Error) => error instanceof EnvBlockedError && /editor budget unavailable: it frees up in 6\d minutes/.test(error.message));
+  assert.equal((await first.store.read()).runs[0]?.resources, undefined);
   await grant.release();
 });

@@ -146,6 +146,15 @@ describe('budget governor', () => {
       ],
     }, 0);
     assert.deepEqual(budget, { requestsRemaining: 4200, complexityRemaining: 1_500_000, resetAt: 1_900_000_100_000, requestsAllowed: 5000, complexityAllowed: 2_000_000 });
+    const unknown = budgetFromStatus({
+      identifier: null,
+      kind: 'api key',
+      limits: [
+        { type: 'requestLimit', allowedAmount: null as never, remainingAmount: 10, requestedAmount: 1, period: 3600000, reset: 1_900_000_000_000 },
+        { type: 'complexityLimit', allowedAmount: 0, remainingAmount: 10, requestedAmount: 1, period: 3600000, reset: 1_900_000_000_000 },
+      ],
+    }, 0);
+    assert.deepEqual(unknown, { requestsRemaining: 10, complexityRemaining: 10, resetAt: 1_900_000_000_000 }, 'a missing or zero allowance is unknown, not a zero window');
     assert.throws(() => budgetFromStatus({ identifier: null, kind: 'app', limits: [] }, 0), /lacks/);
   });
 
