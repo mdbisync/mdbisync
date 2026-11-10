@@ -16,7 +16,11 @@ test('the Actions variation preserves every blocked-secret assertion and dispatc
   const actions = scenarios.find(scenario => scenario.id === 'L2-41')!;
   assert.equal(actions.mode, 'actions');
   assert.deepEqual(actions.checks.invariants, original.checks.invariants);
-  assert.deepEqual(actions.checks.assertions.slice(0, -1), original.checks.assertions);
+  // L2-35's assertions first, then the canary's, then the oracles only an Actions run has: who wrote and merged.
+  const shared = original.checks.assertions.length;
+  assert.deepEqual(actions.checks.assertions.slice(0, shared), original.checks.assertions);
+  assert.equal(actions.checks.assertions[shared]?.subject, 'securityCanary.isolated');
+  assert.deepEqual(actions.checks.assertions.slice(shared + 1).map((assertion) => assertion.subject), ['writes.commitIdentity', 'pullRequests.merger', 'pullRequests.mergeKind']);
   assert.deepEqual(actions.steps[1], { kind: 'run', action: 'workflow', args: { event: 'workflow_dispatch' } });
   assert.deepEqual(actions.steps.at(-1), original.steps.at(-1));
 });
