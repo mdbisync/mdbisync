@@ -17,6 +17,7 @@ import { annotatedFolders, annotationPath, owningFolder, type Folder } from './c
 import type { EngineResult } from './engine.ts';
 import { ownedDocuments } from './ownership.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
+import { zoneConcurrent } from './concurrency.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
 import { encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
 
@@ -452,6 +453,46 @@ export async function fetchRef(git: Git, ref: string): Promise<string | null> {
 /** Single-document reads `readSides` sends at once. */
 const SINGLE_READS_AT_ONCE = 5;
 
+/** The assertion view contains only this run's projects and owned team documents.
+ * Every network list is filtered; mapped-id fallbacks fail closed if a
+ * concurrent scenario ever points outside its leased scope. */
+export async function readRunDocuments(ctx: RunContext, ids: IdMap): Promise<Pick<Sides, 'documents' | 'allDocuments'>> {
+  const world = ctx.live;
+  if (world === null) throw new Error('offline scenarios have no documents');
+  const allDocuments: LinearDocument[] = [];
+  for (const project of world.projects.values()) allDocuments.push(...(await world.app.listDocuments({ projectId: project.id }, { withContent: true })));
+  // A team zone is shared with other runs: a document there is this run's when its title carries the run's
+  // prefix or the run's ownership record holds its id. Annotation READMEs keep their plain title (README),
+  // so only the record shows they are the run's, and a second one there is seen as a duplicate.
+  const owned = ownedDocuments(ctx.owned);
+  const projectIds = new Set([...world.projects.values()].map((project) => project.id));
+  const teamIds = new Set([...world.tree.teams].map((key) => world.teams.get(key)?.id));
+  const belongs = (document: LinearDocument) => !zoneConcurrent(ctx.scenario) ||
+    (document.projectId !== null ? projectIds.has(document.projectId) : document.teamId !== null && teamIds.has(document.teamId) && (document.title.startsWith(ctx.names.teamZonePrefix) || owned.has(document.id)));
+  const accept = (document: LinearDocument) => {
+    if (!belongs(document)) throw new ProductError('mapped document is outside the leased run scope');
+    return document;
+  };
+  for (const team of world.tree.teamZones.keys()) {
+    const teamId = world.teams.get(team)?.id;
+    if (teamId === undefined) continue;
+    const documents = await world.app.listDocuments({ teamId }, { withContent: true });
+    allDocuments.push(...documents.filter((document) => document.projectId === null && (document.title.startsWith(ctx.names.teamZonePrefix) || owned.has(document.id))));
+  }
+  const documents = new Map(allDocuments.map((document) => [document.id, accept(document)]));
+  const missing = [...ids.values()].map((entry) => entry.id).filter((id) => !documents.has(id));
+  if (missing.length > 0) for (const document of await world.app.getDocuments(missing, { withContent: true })) documents.set(document.id, accept(document));
+  // An id that no list and no batch read returned is read on its own, so the checks tell a trashed or
+  // archived document from one Linear no longer has. Measured, the batch read returns trashed and
+  // archived documents, so this stays rare; the reads run a few at a time.
+  const unresolved = missing.filter((id) => !documents.has(id));
+  for (let start = 0; start < unresolved.length; start += SINGLE_READS_AT_ONCE) {
+    const read = await Promise.all(unresolved.slice(start, start + SINGLE_READS_AT_ONCE).map((id) => world.app.getDocument(id)));
+    for (const document of read) if (document !== null) documents.set(document.id, accept(document));
+  }
+  return { documents, allDocuments };
+}
+
 /** Reads both sides; without `allowNoIds`, a run with no ids state ref is a product error. */
 export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean } = {}): Promise<Sides> {
   const world = ctx.live;
@@ -493,29 +534,7 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
     if (path !== undefined) uploads.set(url, path);
   }
 
-  const allDocuments: LinearDocument[] = [];
-  for (const project of world.projects.values()) allDocuments.push(...(await world.app.listDocuments({ projectId: project.id }, { withContent: true })));
-  // A team zone is shared with other runs: a document there is this run's when its title carries the run's
-  // prefix or the run's ownership record holds its id. Annotation READMEs keep their plain title (README),
-  // so only the record shows they are the run's, and a second one there is seen as a duplicate.
-  const owned = ownedDocuments(ctx.owned);
-  for (const team of world.tree.teamZones.keys()) {
-    const teamId = world.teams.get(team)?.id;
-    if (teamId === undefined) continue;
-    const documents = await world.app.listDocuments({ teamId }, { withContent: true });
-    allDocuments.push(...documents.filter((document) => document.projectId === null && (document.title.startsWith(ctx.names.teamZonePrefix) || owned.has(document.id))));
-  }
-  const documents = new Map(allDocuments.map((document) => [document.id, document]));
-  const missing = [...ids.values()].map((entry) => entry.id).filter((id) => !documents.has(id));
-  if (missing.length > 0) for (const document of await world.app.getDocuments(missing, { withContent: true })) documents.set(document.id, document);
-  // An id that no list and no batch read returned is read on its own, so the checks tell a trashed or
-  // archived document from one Linear no longer has. Measured, the batch read returns trashed and
-  // archived documents, so this stays rare; the reads run a few at a time.
-  const unresolved = missing.filter((id) => !documents.has(id));
-  for (let start = 0; start < unresolved.length; start += SINGLE_READS_AT_ONCE) {
-    const read = await Promise.all(unresolved.slice(start, start + SINGLE_READS_AT_ONCE).map((id) => world.app.getDocument(id)));
-    for (const document of read) if (document !== null) documents.set(document.id, document);
-  }
+  const { documents, allDocuments } = await readRunDocuments(ctx, ids);
   const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
   const omitted = deliberateOmissions(ctx.engine.results);
   const linearTip = await fetchRef(git, stateRef(config, 'linear'));
@@ -841,6 +860,27 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
   return Object.fromEntries(refs.filter((ref) => ref.runId === ctx.names.runId && ref.ref !== `refs/heads/${ctx.names.trackedBranch}`).map((ref) => [ref.ref, ref.oid]));
 }
 
+/** Stable solo/parallel evidence. Only known resource identities are normalized;
+ * document text is hashed after its own links are resolved to corpus paths. */
+export function isolationSnapshot(ctx: RunContext, sides: Sides): unknown {
+  const world = ctx.live;
+  if (world === null) throw new Error('isolation evidence needs a live world');
+  const source = (path: string) => world.tree.paths.get(path) ?? path;
+  const ids = new Map([...sides.ids].map(([path, entry]) => [source(path), entry]));
+  const uploads = new Map([...sides.uploads].map(([url, path]) => [url, source(path)]));
+  const projects = new Map([...world.projects].map(([placeholder, project]) => [project.id, placeholder]));
+  const teams = new Map([...world.teams].map(([key, team]) => [team.id, key]));
+  return [...sides.files.keys()].sort().map((path) => {
+    const id = sides.ids.get(path)?.id;
+    const doc = id === undefined ? undefined : sides.documents.get(id);
+    if (doc === undefined) return { path: source(path), document: null };
+    const content = gitLinks(doc.content ?? '', source(path), { ids, uploads, documentUrlBase: sides.documentUrlBase });
+    return { path: source(path), title: doc.projectId === null && doc.title.startsWith(ctx.names.teamZonePrefix) ? doc.title.slice(ctx.names.teamZonePrefix.length) : doc.title,
+      place: doc.projectId === null ? teams.get(doc.teamId ?? '') : projects.get(doc.projectId), state: documentState(doc),
+      contentHash: createHash('sha256').update(content).digest('hex') };
+  }).sort((a, b) => a.path.localeCompare(b.path));
+}
+
 // --- assertions --------------------------------------------------------------
 
 // Assertion subjects resolve in subjects.ts: observed, from the engine's report, or computed by the harness.
@@ -877,5 +917,6 @@ export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
       else throw error;
     }
   }
+  if (zoneConcurrent(ctx.scenario)) ctx.observations.set('isolation.snapshot', isolationSnapshot(ctx, await readSides(ctx)));
   return outcomes;
 }
