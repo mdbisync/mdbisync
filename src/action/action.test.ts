@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
 import { type RunReport } from '../run/finish.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { type FakeWorld, FAKE_APP_IDENTITY, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { Git } from '../state/index.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { gitAuthEnv, run as runMain } from './main.ts';
@@ -69,6 +69,7 @@ describe('the action entry points', () => {
       'linear-client-secret': 'client-secret',
       'linear-api-url': LINEAR_API,
       'github-token': 'gh-token',
+      'app-slug': FAKE_APP_SLUG,
       'github-api-url': GITHUB_API,
       repository: 'owner/repo',
       'report-file': file('report.json'),
@@ -140,6 +141,9 @@ describe('the action entry points', () => {
     const titles = world.linear.documents.filter((d) => d.trashed !== true).map((d) => d.title).sort();
     assert.deepEqual(titles, ['README', 'backend/notes']);
     assert.notEqual(await fixture.remote.text(['rev-parse', '--verify', '--quiet', 'refs/mdbisync/linear']).catch(() => ''), '');
+    // The action's commits name the App's bot account, read by the App slug.
+    const identities = await fixture.remote.text(['log', '--format=%an <%ae>%n%cn <%ce>', 'refs/mdbisync/linear', 'refs/mdbisync/ids', '--not', 'refs/heads/main']);
+    assert.deepEqual(new Set(identities.split('\n')), new Set([`${FAKE_APP_IDENTITY.name} <${FAKE_APP_IDENTITY.email}>`]));
     assert.equal(world.minted, 2);
     assert.equal(world.revoked, 2);
     assert.deepEqual(await tokenStates(), ['fake-token', '']);
@@ -170,6 +174,16 @@ describe('the action entry points', () => {
     const printed = await quietly(() => runMain({ fetch: fakeFetch(world) }));
     assert.match(printed, /cleanup-tokens belongs before the stage step/);
     assert.equal(world.minted, 0);
+  });
+
+  it('requires the App slug before minting anything', async () => {
+    const world = fakeWorld();
+    step({ operation: 'initial-sync', direction: 'git-to-linear', confirm: 'true', 'app-slug': '' });
+    const printed = await quietly(() => runMain({ fetch: fakeFetch(world) }));
+    assert.match(printed, /the input app-slug is required: give it the App token step's output app-slug/);
+    assert.notEqual(process.exitCode ?? 0, 0);
+    assert.equal(world.minted, 0);
+    assert.deepEqual(world.requests, []);
   });
 
   it('a run whose revocation failed leaves the token in the state for post, which revokes it', async () => {

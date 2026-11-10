@@ -6,6 +6,10 @@
 import { PERMISSION_PROBES } from './github.ts';
 
 export const GITHUB_API = 'https://github.test/api';
+/** The fake App: the run's `app-slug`, and the commit identity GitHub links to it. */
+export const FAKE_APP_SLUG = 'sync-app';
+export const FAKE_APP_ID = 1001;
+export const FAKE_APP_IDENTITY = { name: 'sync-app[bot]', email: '1001+sync-app[bot]@users.noreply.github.com' } as const;
 export const LINEAR_API = 'https://linear.test';
 
 export interface FakeTeam {
@@ -99,6 +103,8 @@ export interface FakeCheck {
 export interface FakeWorld {
   github: {
     tokenValid: boolean;
+    /** The App the token is of: its slug and its bot account's id, which `GET /users/<slug>[bot]` answers. */
+    app: { slug: string; id: number };
     missing: Set<string>;
     allowMergeCommit: boolean;
     rateLimited: boolean;
@@ -170,7 +176,7 @@ export interface FakeWorld {
 
 export function fakeWorld(): FakeWorld {
   return {
-    github: { tokenValid: true, missing: new Set(), allowMergeCommit: true, rateLimited: false, rateLimitedRepository: false, pullRequests: [] },
+    github: { tokenValid: true, app: { slug: FAKE_APP_SLUG, id: FAKE_APP_ID }, missing: new Set(), allowMergeCommit: true, rateLimited: false, rateLimitedRepository: false, pullRequests: [] },
     linear: {
       credentialsValid: true,
       unavailable: false,
@@ -232,6 +238,14 @@ function json(status: number, body: unknown): Response {
 async function github(world: FakeWorld, method: string, path: string, init: RequestInit | undefined): Promise<Response> {
   if (!world.github.tokenValid) return json(401, { message: 'Bad credentials' });
   if (world.github.rateLimitedRepository) return json(403, { message: 'API rate limit exceeded for installation.' });
+  const user = /^\/users\/([^/?]+)$/.exec(path);
+  if (user !== null && method === 'GET') {
+    // GitHub's bot account of an App; logins are matched without case.
+    const login = `${world.github.app.slug}[bot]`;
+    return decodeURIComponent(user[1] as string).toLowerCase() === login.toLowerCase()
+      ? json(200, { login, id: world.github.app.id, type: 'Bot' })
+      : json(404, { message: 'Not Found' });
+  }
   const repo = /^\/repos\/[^/]+\/[^/]+/.exec(path);
   if (repo === null) return json(404, { message: 'Not Found' });
   const rest = path.slice(repo[0].length);

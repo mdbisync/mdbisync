@@ -16,6 +16,7 @@ export const FIX_ANCHORS: Readonly<Record<FailureCode, string>> = {
   'linear-teams-not-visible': 'linear-oauth-app',
   'github-credential-failed': 'github-app',
   'missing-permission': 'github-app',
+  'github-app-not-found': 'github-app',
   'merge-commits-required': 'merge-commits',
   'linear-format-hook-required': 'linear-format-hook',
   'invalid-annotation': 'folder-annotations',

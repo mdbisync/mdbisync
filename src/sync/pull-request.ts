@@ -19,7 +19,7 @@
 // the same refusal on the same head and tracked branch reads the note back
 // and reports a setup error: nothing will change until a person does.
 
-import { RECORD_MESSAGE, SYNC_IDENTITY } from '../initial-sync/index.ts';
+import { RECORD_MESSAGE } from '../initial-sync/index.ts';
 import {
   type CheckState,
   type GitHubRepository,
@@ -175,7 +175,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // That record can remove files from the tracked branch: a person merges its pull request, and nothing else may ride along.
     if (open !== null && pending && (await holdsInitialRecord(git, sync as Oid, tracked))) return { ...result, code: 'initial-pull-request-pending' };
 
-    const identity = options.identity ?? SYNC_IDENTITY;
+    const identity = options.identity ?? context.identity;
     // The id map is read only when a merge has documents to resolve.
     const merger = markedMerger(git, options.state.ids, identity);
     /** What this run's merges into the sync branch resolved; reported only once the branch has moved to them. */

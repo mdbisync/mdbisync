@@ -11,6 +11,7 @@ export const INPUT_NAMES = [
   'linear-client-secret',
   'linear-api-url',
   'github-token',
+  'app-slug',
   'github-api-url',
   'repository',
   'tracked-branch',
@@ -26,7 +27,11 @@ export type InputName = (typeof INPUT_NAMES)[number];
 
 export interface RunInputs {
   linear: { clientId: string; clientSecret: string; apiUrl?: string };
-  github: { token: string; apiUrl?: string; repository: string };
+  /**
+   * `appSlug`: the slug of the GitHub App whose installation token `token`
+   * is; the sync's commits name the App's bot account as their author.
+   */
+  github: { token: string; apiUrl?: string; repository: string; appSlug?: string };
   state: StateConfig;
   /** Where to write the run's report as JSON; for tests and tooling. */
   reportFile?: string;
@@ -46,11 +51,23 @@ export function environmentName(name: InputName): string {
   return `MDBISYNC_${name.toUpperCase().replace(/-/g, '_')}`;
 }
 
+export interface ReadInputsOptions {
+  /**
+   * The action runs with the App's token only, so it needs the App's slug.
+   * The command line may run without it; its commits then name
+   * `mdbisync <mdbisync@sync.invalid>`.
+   */
+  appSlugRequired?: boolean;
+}
+
+/** A GitHub App slug: letters, digits and hyphens. GitHub itself says whether the App exists. */
+const APP_SLUG = /^[A-Za-z0-9-]+$/;
+
 /**
  * Reads and checks the inputs. `repository` falls back to the runner's
  * `GITHUB_REPOSITORY`, the API URLs to the public services.
  */
-export function readInputs(get: (name: InputName) => string, env: NodeJS.ProcessEnv = process.env): RunInputs {
+export function readInputs(get: (name: InputName) => string, env: NodeJS.ProcessEnv = process.env, options: ReadInputsOptions = {}): RunInputs {
   const value = (name: InputName): string => get(name).trim();
   const required = (name: InputName): string => {
     const given = value(name);
@@ -68,6 +85,14 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
     github: { token, repository },
     state: stateConfig(value('tracked-branch'), value('sync-branch'), value('state-ref-prefix')),
   };
+  const appSlug = value('app-slug');
+  if (appSlug === '' && options.appSlugRequired === true) {
+    throw new InputError(message('inputs.app-slug-required'));
+  }
+  if (appSlug !== '') {
+    if (!APP_SLUG.test(appSlug)) throw new InputError(message('inputs.app-slug'));
+    inputs.github.appSlug = appSlug;
+  }
   const linearApiUrl = value('linear-api-url');
   if (linearApiUrl !== '') inputs.linear.apiUrl = linearApiUrl;
   const githubApiUrl = value('github-api-url') || (env.GITHUB_API_URL ?? '').trim();

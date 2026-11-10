@@ -49,6 +49,7 @@ export async function runSetupCheck(input: SetupInput): Promise<SetupResult> {
   const checks: CheckResult[] = [
     credentials,
     input.github.access,
+    input.github.app,
     input.github.mergeCommits,
     checkLinearFormatHook(input.hooks),
     annotations,

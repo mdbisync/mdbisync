@@ -134,6 +134,9 @@ the other steps, and a hook that rewrites files there can reach a later
 step that holds the secrets. Use only hooks you trust. Each workflow mints the GitHub App's installation token with
 `actions/create-github-app-token`, checks out without stored credentials,
 and gives the App token and the Linear secrets to the mdbisync steps only.
+The mdbisync steps also take the token step's output `app-slug`: the sync's
+commits name the App's bot account as author and committer, read from
+GitHub by that slug, so GitHub shows them as the App's.
 Without `security-step` (as from the command line), the hooks run in a
 child process of the mdbisync step whose environment holds only `PATH`,
 `HOME` and `LANG`.

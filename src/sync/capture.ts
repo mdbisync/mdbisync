@@ -15,7 +15,6 @@ import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
-import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
@@ -115,7 +114,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   const state = { ...options.state };
   const base = state.linear;
   if (base === null) throw new Error(message('sync.needs-initial-sync'));
-  const identity = options.identity ?? SYNC_IDENTITY;
+  const identity = options.identity ?? context.identity;
   const ids = await readIds(git, state.ids);
   const uploads = await readUploads(git, state.uploads);
   const reserved = await readReservedIds(git, state.ids);

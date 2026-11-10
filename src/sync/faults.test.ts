@@ -19,7 +19,7 @@ import { type RunReport } from '../run/finish.ts';
 import { INPUT_NAMES, environmentName } from '../run/inputs.ts';
 import { renderStop } from '../run/stop.ts';
 import { Git } from '../state/index.ts';
-import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
+import { type FakeDocument, type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
@@ -471,7 +471,7 @@ describe('sync: rate limits and transport faults', () => {
       };
     `);
     const engineEnv: Record<string, string> = env({});
-    const actionEnv = Object.fromEntries(INPUT_NAMES.map((name) => [`INPUT_${name.toUpperCase()}`, engineEnv[environmentName(name)] ?? '']));
+    const actionEnv = { ...Object.fromEntries(INPUT_NAMES.map((name) => [`INPUT_${name.toUpperCase()}`, engineEnv[environmentName(name)] ?? ''])), 'INPUT_APP-SLUG': FAKE_APP_SLUG };
     const summary = join(fixture.root, 'action-summary.md');
     await writeFile(summary, '');
     await writeFile(join(fixture.root, 'action-state'), '');
