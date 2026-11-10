@@ -64,7 +64,7 @@ First prepare the repository:
 - map a folder to Linear: `linear-team` and `linear-project` in the front
   matter of its `README.md` ([folder mapping](docs/usage.md#folder-mapping));
 - add the `linear-format` hook to `.pre-commit-config.yaml`, pinned to a
-  release ([pins](docs/usage.md#pre-release-builds-and-pins)), and mark your
+  release ([pins](docs/usage.md#release-builds-and-pins)), and mark your
   security hooks `alias: security`;
 - in the repository settings, turn on **Allow merge commits**.
 

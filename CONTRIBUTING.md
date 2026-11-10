@@ -20,7 +20,7 @@ pre-commit run --all-files
 ```
 
 To generate the test corpus with a released hook, pass its release commit
-SHA (see [Pre-release builds and pins](docs/usage.md#pre-release-builds-and-pins));
+SHA (see [Release builds and pins](docs/usage.md#release-builds-and-pins));
 the generator keeps the `corpus/` and `corpus-slices/` layout:
 
 ```sh
