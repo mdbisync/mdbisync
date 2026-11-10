@@ -26,6 +26,8 @@ export interface Owner {
   since: string;
   /** A lock kept for its run's UI session: it outlives the process until then, epoch milliseconds, while the run is held. */
   holdUntil?: number;
+  /** A kept lock that a take-up of its run is working with: it also lives while that process does. */
+  active?: boolean;
 }
 
 export function processAlive(pid: number): boolean {
@@ -39,8 +41,9 @@ export function processAlive(pid: number): boolean {
 
 function ownerAlive(owner: Owner | null, stateDir: string): boolean {
   if (owner === null) return false;
-  // A kept lock lives by its hold alone, even while the process that kept it goes on with other scenarios.
-  if (owner.holdUntil !== undefined) return heldLock(owner, stateDir);
+  // A kept lock lives by its hold, not by the process that kept it, which may go on with other scenarios.
+  // A take-up working with it holds it while it runs, also past the hold.
+  if (owner.holdUntil !== undefined) return heldLock(owner, stateDir) || (owner.active === true && owner.host === hostname() && processAlive(owner.pid));
   // A lock of another host cannot be checked; it counts as alive.
   return owner.host !== hostname() || processAlive(owner.pid);
 }
@@ -130,7 +133,7 @@ export async function acquireLock(name: string, options: LockOptions): Promise<L
     if (options.takeOverHeld === true && holder !== null && holder.runId === options.runId && holder.host === owner.host && heldLock(holder, options.stateDir)) {
       // The run's own kept lock: its take-up for the UI session's answers goes on holding the zone. The hold
       // stays on the lock, so a take-up that dies before it ends still leaves the zone kept.
-      const takeUp: Owner = { ...owner, holdUntil: holder.holdUntil as number };
+      const takeUp: Owner = { ...owner, holdUntil: holder.holdUntil as number, active: true };
       try {
         writeOwner(dir, takeUp);
       } catch (error) {
@@ -177,7 +180,10 @@ function ownedLock(name: string, dir: string, owner: Owner): Lock {
     hold(untilMs: number) {
       if (done) return;
       done = true;
-      if (ours()) writeOwner(dir, { ...owner, holdUntil: untilMs });
+      if (ours()) {
+        const { active: _active, ...parked } = owner;
+        writeOwner(dir, { ...parked, holdUntil: untilMs });
+      }
     },
   };
 }

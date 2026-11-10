@@ -136,6 +136,16 @@ describe('locks', () => {
     forgetRun(stateDir, 'cccccc');
     forgetRun(stateDir, 'eeeeee');
 
+    // A take-up still working when the hold ends keeps the lock until it parks or releases it.
+    const soon = Date.now() + 300;
+    await keep('333333', soon, soon);
+    const working = await acquireLock('team-eng', { stateDir, runId: '333333', timeoutMs: 0, takeOverHeld: true });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: '444444', timeoutMs: 0 }), LockTimeoutError);
+    working.release();
+    (await acquireLock('team-eng', { stateDir, runId: '444444', timeoutMs: 0 })).release();
+    forgetRun(stateDir, '333333');
+
     // A process that kept a lock and goes on with other scenarios does not hold it past the run's hold.
     const kept = await acquireLock('team-eng', { stateDir, runId: '111111', timeoutMs: 0 });
     const registration = registerRun(stateDir, '111111', { holdUntil: later });
