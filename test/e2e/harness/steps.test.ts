@@ -14,10 +14,10 @@ import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS
 import type { LiveWorld, RunContext } from './context.ts';
 import type { RunTree } from './corpus.ts';
 import { FIXTURE_PREPARATION } from './runner.ts';
-import { DOCUMENT_FIXTURES, fixtureEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
+import { DOCUMENT_FIXTURES, fixtureEdit, paragraphEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
 import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
-import { burst, soak, type SoakDriver } from './load.ts';
+import { burst, burstDocuments, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { bodyOf, compare, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -413,6 +413,43 @@ describe('load', () => {
     assert.equal(result.gitPushes, 15);
     assert.ok(result.syncRuns > 0);
     assert.equal(edits.filter((actor) => actor === 'editor-b').length, 375);
+  });
+
+  it('keeps the full burst off near-limit documents on either side', async () => {
+    const options = { durationMs: 900_000, linearEditsPerMinute: 50, gitPushesPerMinute: 1 };
+    const nearLimit = 'a'.repeat(249_999);
+    const versions = new Map([
+      ['near-linear.md', ['Small file.', nearLimit]],
+      ['near-git.md', [nearLimit, 'Small document.']],
+      ['notes.md', ['# Notes\n', '# Notes\n']],
+    ]);
+    const documents = burstDocuments(versions, options, 'abcdef-9999');
+    assert.deepEqual(documents, ['notes.md']);
+    const texts = new Map([...versions].map(([path, values]) => [path, values[0] as string]));
+    const tokens: string[] = [];
+    const edit = async (path: string) => {
+      const token = `abcdef-${String(tokens.length + 1).padStart(3, '0')}`;
+      tokens.push(token);
+      const text = paragraphEdit(texts.get(path) as string, undefined, token);
+      assert.ok(text.length <= 250_000);
+      texts.set(path, text);
+    };
+    const clock = fakeClock();
+    const result = await burst({ ...clock, linearEdit: async (_, path) => edit(path), gitEdit: async ([path]) => edit(path as string), sync: async () => void clock.sleep(60_000) }, { ...options, documents });
+    assert.equal(result.linearEdits, 750);
+    assert.equal(result.gitPushes, 15);
+    assert.ok(tokens.every((token) => texts.get('notes.md')?.includes(token)));
+    assert.equal(texts.get('near-git.md'), nearLimit);
+  });
+
+  it('reserves exact append headroom and refuses an exhausted candidate set', () => {
+    const options = { durationMs: 60_000, linearEditsPerMinute: 1, gitPushesPerMinute: 1 };
+    const token = 'abcdef-1000';
+    const growth = 2 * paragraphEdit('', undefined, token).length;
+    const fitting = 'a'.repeat(250_000 - growth);
+    assert.deepEqual(burstDocuments(new Map([['fits.md', [fitting, fitting]], ['full.md', [fitting + 'a']]]), options, token), ['fits.md']);
+    assert.throws(() => burstDocuments(new Map([['full.md', ['a'.repeat(250_000)]]]), options, token), /no document has room/);
+    assert.throws(() => burstDocuments(new Map(), options, token), /no document has room/);
   });
 
   it('runs a soak with hourly checks and a repeatable schedule', async () => {

@@ -4,6 +4,8 @@
 // and engine runs.
 
 import { setTimeout as delay } from 'node:timers/promises';
+import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
+import { paragraphEdit } from './fixtures.ts';
 import { Rng } from '../../corpus/rng.ts';
 
 export type Actor = 'editor-a' | 'editor-b' | 'git';
@@ -26,6 +28,20 @@ export interface BurstOptions {
   linearEditsPerMinute: number;
   gitPushesPerMinute: number;
   documents: readonly string[];
+}
+
+/** Reserve the entire burst's append budget on every candidate, even if all edits land there. */
+export function burstDocuments(
+  documents: ReadonlyMap<string, readonly string[]>,
+  options: Omit<BurstOptions, 'documents'>,
+  lastToken: string,
+): string[] {
+  const count = (rate: number) => Math.ceil(Math.max(0, rate) * options.durationMs / 60_000);
+  const edits = count(options.linearEditsPerMinute) + count(options.gitPushesPerMinute);
+  const growth = paragraphEdit('', undefined, lastToken).length * edits;
+  const paths = [...documents].filter(([, versions]) => versions.length > 0 && versions.every((text) => text.length + growth <= CONTENT_LIMIT)).map(([path]) => path);
+  if (paths.length === 0) throw new Error('no document has room for the burst edits');
+  return paths;
 }
 
 export interface BurstResult {
