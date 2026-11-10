@@ -1958,6 +1958,89 @@ describe('subjects', () => {
     assert.deepEqual(await INVARIANT_CHECKS.I7(ctx, async () => both), { name: 'I7', ok: true });
   });
 
+  it('honor the annotation READMEs the engine keeps in I1 and I7, and still fail on missing or changed ones', async () => {
+    const { ctx, ids } = await fakeRun();
+    // An initial sync from Linear: the annotation READMEs stay in git, body included, with no document and no id.
+    const git = await ctx.person();
+    const ENG = `---\nlinear-project: ${PROJECT.name}\n---\n\nWhat the platform team owns.\n`;
+    const DOCS = `---\nlinear-project: ${OTHER.name}\n---\n\nHow the handbook is kept.\n`;
+    const commitReadmes = async (texts: Record<string, string>, message: string) => {
+      for (const [path, text] of Object.entries(texts)) writeFileSync(join(git.dir, path), text);
+      await git.run(['commit', '--quiet', '-am', message]);
+      await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    };
+    await commitReadmes({ 'eng/platform/README.md': ENG, 'docs/handbook/README.md': DOCS }, 'Describe the folders');
+    // The engine's `linear` record holds the tree it recorded, kept READMEs with their bodies included.
+    const recordLinear = async () => git.run(['push', '--quiet', 'origin', `HEAD:${ctx.names.refPrefix}/linear`]);
+    const recordIds = async (entries: Record<string, { id: string }>, message: string) => {
+      const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(entries) })).trim();
+      const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tids.json\n` })).trim();
+      const parent = (await git.text(['ls-remote', 'origin', `${ctx.names.refPrefix}/ids`])).split('\t')[0] as string;
+      await git.run(['fetch', '--quiet', 'origin', parent]);
+      const commit = (await git.text(['commit-tree', tree, '-p', parent, '-m', message])).trim();
+      await git.run(['push', '--quiet', 'origin', `${commit}:${ctx.names.refPrefix}/ids`]);
+    };
+    const documents = Object.fromEntries(Object.entries(ids).filter(([path]) => !path.endsWith('README.md')));
+    // The same shape as a live final ids commit: subject, capture cursor, one trailer per kept README.
+    const final = (kept: string[]) => ['Initial sync: document ids', '', ['Capture-through: 2026-11-09T22:02:38.227Z', ...kept.map((path) => `Kept-annotation: ${JSON.stringify(path)}`)].join('\n')].join('\n');
+    const both = ['docs/handbook/README.md', 'eng/platform/README.md'];
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const check = async () => {
+      const sides = await readSides(ctx);
+      return [(await INVARIANT_CHECKS.I1(ctx, async () => sides)).detail, (await INVARIANT_CHECKS.I7(ctx, async () => sides)).detail];
+    };
+    const bothMissing = [
+      '2 files differ from their documents: docs/handbook/README.md (no document), eng/platform/README.md (no document)',
+      '2 problems: docs/handbook/README.md has no id; eng/platform/README.md has no id',
+    ];
+
+    await recordLinear();
+
+    // A trailer on a commit that is not a final initial sync's names nothing: READMEs with a body fail.
+    await recordIds(documents, ['Initial sync: progress', '', ...both.map((path) => `Kept-annotation: ${JSON.stringify(path)}`)].join('\n'));
+    assert.deepEqual((await readSides(ctx)).kept, new Set());
+    assert.deepEqual(await check(), bothMissing);
+
+    // Both named by the final ids commit and unchanged since the record: kept, bodies and annotations intact.
+    await recordIds(documents, final(both));
+    const sides = await readSides(ctx);
+    assert.deepEqual([...sides.kept].sort(), both);
+    assert.equal(sides.files.get('eng/platform/README.md'), ENG);
+    assert.deepEqual(await check(), [undefined, undefined]);
+
+    // Named, but no `linear` record holds them: the engine would create their documents.
+    await git.run(['push', '--quiet', 'origin', `:${ctx.names.refPrefix}/linear`]);
+    assert.deepEqual(await check(), bothMissing);
+    await recordLinear();
+
+    // Only one named: the other README is genuinely without a document.
+    await recordIds(documents, final(['eng/platform/README.md']));
+    assert.deepEqual(await check(), ['1 files differ from their documents: docs/handbook/README.md (no document)', '1 problems: docs/handbook/README.md has no id']);
+
+    // A trailer never excuses a synchronized file that is not an annotation README, nor a mapped document Linear lacks.
+    const { 'eng/platform/notes.md': _notes, ...withoutNotes } = documents;
+    await recordIds({ ...withoutNotes, 'docs/handbook/start.md': { id: 'gone' } }, final([...both, 'eng/platform/notes.md', 'docs/handbook/start.md']));
+    assert.deepEqual(await check(), [
+      '2 files differ from their documents: docs/handbook/start.md (no document), eng/platform/notes.md (no document)',
+      '2 problems: docs/handbook/start.md: its document is not in Linear; eng/platform/notes.md has no id',
+    ]);
+
+    // A kept README that later gained an id is checked like any mapped file: its document must exist.
+    await recordIds({ ...documents, 'eng/platform/README.md': { id: 'gone' } }, final(both));
+    assert.deepEqual(await check(), ['1 files differ from their documents: eng/platform/README.md (no document)', '1 problems: eng/platform/README.md: its document is not in Linear']);
+
+    // A body edited on the tracked branch after the record is a new document: without one it fails, named or not.
+    await recordIds(documents, final(both));
+    await commitReadmes({ 'eng/platform/README.md': ENG.replace('owns', 'runs') }, 'Edit the platform README');
+    assert.deepEqual(await check(), ['1 files differ from their documents: eng/platform/README.md (no document)', '1 problems: eng/platform/README.md has no id']);
+
+    // An annotation-only README the record holds needs no trailer: the engine keeps it, as capture does after its document leaves.
+    await commitReadmes({ 'eng/platform/README.md': `---\nlinear-project: ${PROJECT.name}\n---\n` }, 'Only the annotation');
+    await recordLinear();
+    await recordIds(documents, final(['docs/handbook/README.md']));
+    assert.deepEqual(await check(), [undefined, undefined]);
+  });
+
   it('honor a file the run itself left out at lint in I1, keeping the check of its mapped document in I7', async () => {
     const { ctx, linear, ids } = await fakeRun();
     // A synchronized file gains a footnote: its run leaves it out, and its document stays as it was.

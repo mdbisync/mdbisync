@@ -33,7 +33,7 @@ import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts
 import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
-import { owningFolder, type Folder } from './corpus.ts';
+import { annotationPath, owningFolder, type Folder } from './corpus.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
 import { canaryIsolated, type CanaryFacts } from './security-canary.ts';
 import { isAppBot } from './workflows.ts';
@@ -535,7 +535,7 @@ function linearTree(ctx: RunContext, view: View): Map<string, string> {
 function keptAnnotationReadmes(view: View, documents: ReadonlyMap<string, string> = new Map()): Map<string, string> {
   const result = new Map<string, string>();
   for (const folder of view.folders) {
-    const path = folder.folder === '' ? 'README.md' : `${folder.folder}/README.md`;
+    const path = annotationPath(folder);
     const text = view.files.get(path);
     if (text !== undefined && !documents.has(path)) result.set(path, text);
   }
