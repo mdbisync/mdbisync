@@ -42,6 +42,7 @@ import { parse, stringify } from 'yaml';
 import { HOOK_REPOSITORY } from '../../corpus/tree.ts';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
+import { lfsEndpoint, lfsUrlEnv, startLfsFaultProxy } from './lfs-fault-proxy.ts';
 import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
 import {
   commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
@@ -1449,6 +1450,8 @@ const FAULT: Record<string, Executor> = {
   'fault.clear': async (ctx) => {
     ctx.proxy?.clearFaults();
     ctx.engine.env = {};
+    await ctx.engine.lfsProxy?.close();
+    delete ctx.engine.lfsProxy;
     delete ctx.engine.badCredential;
     delete ctx.engine.trigger;
     for (const restore of ctx.engine.restores.splice(0).reverse()) await restore();
@@ -1555,19 +1558,25 @@ const FAULT: Record<string, Executor> = {
     }
   },
   'fault.missing-lfs-object': async (ctx) => {
-    // The image's LFS pointer names an object the server never received.
+    // The image changes to an LFS object the engine cannot download. GitHub refuses a push whose pointer names an
+    // object it never received, so the object is uploaded with the push and the engine's clone reaches the LFS
+    // server through a local proxy that answers 404 for that one object.
+    const world = live(ctx);
     const image = ctx.observations.get('git.imagePath') as string | undefined;
     if (image === undefined) throw new Error('fault.missing-lfs-object needs git.image-add first');
-    const oid = sha256(`missing ${nextToken(ctx)}`);
-    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize 4096\n`;
-    const git = await ctx.person();
-    await pull(git, ctx);
-    mkdirSync(join(git.dir, image, '..'), { recursive: true });
-    writeFileSync(join(git.dir, image), pointer);
-    await git.run(['add', '--', image]);
-    await git.run(['commit', '--quiet', '--no-verify', '-m', 'Update the diagram']);
-    await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
-    ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
+    const bytes = seededPng(`missing ${nextToken(ctx)}`);
+    const oid = sha256(bytes);
+    const commit = await commitAsPerson(ctx, new Map([[image, bytes]]), 'Update the diagram', true);
+    const pointer = await (await ctx.person()).run(['cat-file', 'blob', `${commit}:${image}`]);
+    if (!pointer.stdout.toString('latin1').includes(`oid sha256:${oid}\n`)) throw new Error(`${image} is not stored in LFS`);
+    const engine = new Git(await ctx.engineClone());
+    const upstream = await lfsEndpoint(engine);
+    if (upstream === null) throw new EnvBlockedError('the sandbox has no LFS server to pass on to');
+    const authorization = `basic ${Buffer.from(`x-access-token:${world.githubToken}`).toString('base64')}`;
+    await ctx.engine.lfsProxy?.close();
+    ctx.engine.lfsProxy = await startLfsFaultProxy(upstream, authorization, new Set([oid]));
+    ctx.engine.env = { ...ctx.engine.env, ...lfsUrlEnv(ctx.engine.lfsProxy.url, ctx.engine.env) };
+    ctx.observations.set('fault.missingLfsOid', oid);
   },
   'fault.golden-drift': async (ctx, args) => {
     // A recorded Linear form edited by hand, in a copy of the bank, so the next probe must report drift.

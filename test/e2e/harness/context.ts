@@ -12,6 +12,7 @@ import type { RunNames } from './isolation.ts';
 import type { LinearWorld, Project, Team } from './linear-world.ts';
 import type { OwnershipLedger } from './ownership.ts';
 import type { Sandbox } from './sandbox.ts';
+import type { LfsFaultProxy } from './lfs-fault-proxy.ts';
 import type { Scenario } from './spec.ts';
 
 export type Editor = 'editor-a' | 'editor-b';
@@ -76,6 +77,8 @@ export interface RunContext {
     pausedAt?: Checkpoint;
     /** Extra environment for the engine set by faults (test hooks only). */
     env: Record<string, string>;
+    /** The LFS proxy a fault put between the engine's clone and the LFS server; closed with the run. */
+    lfsProxy?: LfsFaultProxy;
     /** Credentials override set by a credentials fault. */
     badCredential?: 'linear' | 'github';
     /** Something the harness does while the next run waits at a checkpoint (a fault in the middle of a run). */

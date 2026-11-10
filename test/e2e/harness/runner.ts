@@ -804,6 +804,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     }
     if (!heldForUi) cleanupOutcome = await cleanupAndCount(ctx);
     await ctx.proxy?.close();
+    await ctx.engine.lfsProxy?.close();
     locks.splice(0).reverse().forEach((lock) => lock.release());
     if (grant !== undefined) for (const { entry } of remoteRequests(ctx)) {
       if (isGraphql(entry) && deps.config.linearApps[0] !== undefined) {

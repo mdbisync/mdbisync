@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { LinearGraphQLError, LinearHttpError, LinearNetworkError, LinearStoppedError, LinearTokenError, type LinearDocument } from '../../../src/linear/index.ts';
-import { Git, GitError } from '../../../src/state/index.ts';
+import { Git, GitError, lfsReader, parseLfsPointer } from '../../../src/state/index.ts';
+import { fakeLfsServer } from '../../../src/state/test-helpers.ts';
 import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
@@ -1382,11 +1383,46 @@ describe('git executors', () => {
     for (const move of moves) assert.ok(listing.includes(move.to), move.to);
   });
 
-  it('point an image at an LFS object the server never got', async () => {
-    const { ctx, remoteFile } = await fakeRun();
-    ctx.observations.set('git.imagePath', 'eng/platform/media/diagram.png');
-    await runStep(ctx, { kind: 'fault', action: 'missing-lfs-object', args: {} });
-    assert.match(await remoteFile('eng/platform/media/diagram.png'), /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:[0-9a-f]{64}\nsize 4096$/);
+  it('point an image at an LFS object the engine cannot download, pushed with its object', async () => {
+    const { ctx, remoteFile, remoteGit } = await fakeRun();
+    const kept = seededPng('kept');
+    // The sandbox's LFS server as the engine reaches it; it holds another object, which must still come through.
+    const server = await fakeLfsServer([kept]);
+    try {
+      const image = 'eng/platform/media/diagram.png';
+      await commitAsPerson(ctx, new Map([['.gitattributes', '*.png filter=lfs diff=lfs merge=lfs -text\n']]), 'Store images in LFS', true);
+      const engineDir = join(ctx.runDir, 'engine');
+      await (await ctx.sandbox!.clone(ctx.names, engineDir)).run(['config', 'lfs.url', server.url]);
+      ctx.engineClone = async () => engineDir;
+      ctx.live!.githubToken = 'sandbox-token';
+      ctx.observations.set('git.imagePath', image);
+      await runStep(ctx, { kind: 'fault', action: 'missing-lfs-object', args: {} });
+      const oid = ctx.observations.get('fault.missingLfsOid') as string;
+
+      // The push names the object and carries it: the remote holds the object, so GitHub accepts the push.
+      const pointer = parseLfsPointer(Buffer.from(`${await remoteFile(image)}\n`));
+      assert.equal(pointer?.oid, oid);
+      assert.ok(existsSync(join(remoteGit.dir, 'lfs', 'objects', oid.slice(0, 2), oid.slice(2, 4), oid)));
+
+      // The engine's clone, with the engine's extra environment: that one object is missing, others download.
+      const read = await lfsReader(new Git(engineDir, { ...IDENTITY, ...ctx.engine.env }), 'origin');
+      const missing = await read(pointer!, image);
+      assert.equal(missing.ok, false);
+      const keptPointer = parseLfsPointer(Buffer.from(`version https://git-lfs.github.com/spec/v1\noid sha256:${createHash('sha256').update(kept).digest('hex')}\nsize ${kept.length}\n`));
+      assert.deepEqual(await read(keptPointer!, 'eng/platform/media/kept.png'), { ok: true, content: kept });
+      assert.deepEqual(ctx.engine.lfsProxy?.requests.map((request) => request.refused), [[oid], []]);
+      // Only the object the server holds was asked about, with the sandbox's credential added by the proxy; the
+      // download itself goes straight to the address the server answered with.
+      assert.deepEqual(server.requests, ['POST /info/lfs/objects/batch', `GET /objects/${keptPointer!.oid}`]);
+      assert.equal(server.authorizations[0], `basic ${Buffer.from('x-access-token:sandbox-token').toString('base64')}`);
+
+      await runStep(ctx, { kind: 'fault', action: 'clear', args: {} });
+      assert.deepEqual(ctx.engine.env, {});
+      assert.equal(ctx.engine.lfsProxy, undefined);
+    } finally {
+      await ctx.engine.lfsProxy?.close();
+      await server.close();
+    }
   });
 
   it('prepare a left-out document and make it join', async () => {
