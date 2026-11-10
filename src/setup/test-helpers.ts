@@ -102,6 +102,8 @@ export interface FakeCheck {
   url?: string;
   /** A check run's annotations, as `GET /check-runs/<id>/annotations` answers them. */
   annotations?: Array<{ path: string; start_line: number; title?: string; message: string }>;
+  /** An HTTP status the annotations endpoint answers for this check run instead of its annotations. */
+  annotationsStatus?: number;
 }
 
 export interface FakeWorld {
@@ -387,6 +389,7 @@ function checkAnnotations(world: FakeWorld, method: string, rest: string): Respo
   world.github.annotationReads = (world.github.annotationReads ?? 0) + 1;
   const check = world.github.checkRuns?.[Number(match[1]) - 1];
   if (check === undefined || check.commitStatus === true) return json(404, { message: 'Not Found' });
+  if (check.annotationsStatus !== undefined) return json(check.annotationsStatus, { message: 'Not Found' });
   const query = new URLSearchParams(match[2] ?? '');
   const page = Number(query.get('page') ?? '1');
   const size = Number(query.get('per_page') ?? '30');
@@ -470,6 +473,10 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
   }
   if (operationName === 'WorkspaceUrlKey') return json(200, { data: { organization: { urlKey: world.linear.urlKey } } });
   if (operationName === 'ListDocuments') return json(200, { data: { documents: listDocuments(world, variables) } });
+  if (operationName === 'FindComment') {
+    const id = variables.id as string;
+    return json(200, { data: { comments: { nodes: world.linear.comments.has(id) ? [{ id }] : [] } } });
+  }
   if (operationName === 'FindDocumentComment') {
     const id = variables.id as string;
     const comment = world.linear.comments.get(id);

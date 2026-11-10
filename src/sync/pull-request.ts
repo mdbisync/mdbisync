@@ -468,6 +468,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     if (counts.length > 0) lines.push(`Suspended documents in Linear: ${counts.join(', ')}.`, '');
     if (marks.deferred > 0) lines.push(`${marks.deferred} more suspended documents get their mark or comment in a later run (at most ${HOLD_MARK_LIMIT} per run).`, '');
     if (marks.removed.length > 0) lines.push(`Suspended documents in Linear's trash or archived, without a mark: ${marks.removed.map((path) => `\`${path}\``).join(', ')}.`, '');
+    if (marks.unreadAnnotations !== undefined) lines.push(`GitHub did not give the annotations of ${marks.unreadAnnotations.map((name) => `\`${name}\``).join(', ')}; the comments name those checks without them.`, '');
     if (marks.code !== undefined) lines.push(`The suspended marks did not finish (\`${marks.code}\`${marks.failure === undefined ? '' : `, ${marks.failure.operation}`}); a later run goes on.`, '');
   }
   const pr = result.pullRequest;

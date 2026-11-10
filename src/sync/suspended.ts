@@ -210,7 +210,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   if (fresh && grace === 0) return { ...result, waiting: true };
   const checks = fresh ? await waitForChecks(options.github, head, grace) : await readChecks(options.github, head);
   result.checks = checks.failed;
-  if (checks.state === 'failed') result.failure = { head, checks: checks.failures ?? checks.failed.map((name) => ({ name })) };
+  if (checks.state === 'failed') result.failure = { head, scope: 'lane', checks: checks.failures ?? checks.failed.map((name) => ({ name })) };
   result.waiting = checks.state === 'pending';
   if (checks.state !== 'passed') return result;
   if (!(await isAncestor(git, tracked, head))) return result;
@@ -287,5 +287,5 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE,
     body: `Changes on hold: ${checks.map((name) => `\`${name}\``).join(', ')}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n`,
   });
-  return { paths: [...paths].sort(), checks, failure: { head: failed, checks: failures }, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
+  return { paths: [...paths].sort(), checks, failure: { head: failed, scope: 'batch', checks: failures }, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
 }

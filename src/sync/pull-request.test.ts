@@ -513,6 +513,34 @@ describe('sync: the sync pull request', () => {
     assert.equal(again.filter((comment) => comment.resolved !== true).length, 1);
   });
 
+  it('a joining batch names its own failure on its own documents and leaves the earlier comments as they are', async () => {
+    await suspendOne();
+    const firstNote = commentsOf(await documentOf('eng/notes/plan.md'))[0]?.body;
+    await editInLinear('combined/guide.md', '# Guide\n\nSecond held edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'spelling', status: 'completed', conclusion: 'failure' }]);
+    const joined = await sync();
+    assert.deepEqual(joined.report.pullRequest?.holdMarks?.set, ['combined/guide.md']);
+    assert.deepEqual(joined.report.pullRequest?.holdMarks?.updated, []);
+    assert.equal(commentsOf(await documentOf('eng/notes/plan.md'))[0]?.body, firstNote);
+    assert.match(commentsOf(await documentOf('combined/guide.md'))[0]?.body ?? '', /Check `spelling`/);
+  });
+
+  it('a check run whose annotations GitHub refuses is named without them, and the marks go on', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nHeld Linear edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'lint', status: 'completed', conclusion: 'failure', annotationsStatus: 404, annotations: [{ path, start_line: 1, message: 'Unseen.' }] }]);
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(run.report.pullRequest?.holdMarks?.set, [path]);
+    assert.deepEqual(run.report.pullRequest?.holdMarks?.unreadAnnotations, ['lint']);
+    assert.match(run.summary, /GitHub did not give the annotations of `lint`/);
+    const note = commentsOf(await documentOf(path))[0]?.body ?? '';
+    assert.match(note, /Check `lint`: \[run\]/);
+    assert.doesNotMatch(note, /Unseen/);
+  });
+
   async function gitEdit(path: string, content: string) {
     const base = await rev('refs/heads/main');
     const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: content });

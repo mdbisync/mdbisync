@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type CheckAnnotation } from '../pull-request/index.ts';
-import { ANNOTATIONS_PER_CHECK, HOLD_FAILED, HOLD_FOOTER, HOLD_TIMED_OUT, documentRuns, holdComment, quotesDocument } from './hold.ts';
+import { ANNOTATIONS_PER_CHECK, HOLD_FAILED, HOLD_FOOTER, HOLD_TIMED_OUT, HOLD_UNNAMED, documentRuns, holdComment, quotesDocument } from './hold.ts';
 
 const RUN = 'https://github.test/owner/repo/runs/7';
 const at = (line: number, message: string, title?: string): CheckAnnotation => ({ path: 'docs/a.md', line, message, ...(title === undefined ? {} : { title }) });
@@ -60,6 +60,15 @@ describe('the suspended comment', () => {
     const both = holdComment([{ name: 'lint', url: RUN }], ['build'], new Map(), '');
     assert.ok(both.startsWith(HOLD_FAILED));
     assert.ok(both.includes('- Check `build` did not finish in time.'));
+  });
+
+  it('encodes a run link so it cannot close the Markdown link or add an image', () => {
+    const body = holdComment([{ name: 'ext', url: 'https://ci.test/x)![t](https://tracker.test/p.png' }], [], new Map(), '');
+    assert.ok(body.includes('- Check `ext`: [run](https://ci.test/x%29%21%5Bt%5D%28https://tracker.test/p.png)'), body);
+  });
+
+  it('says the checks have not passed yet when it can name none', () => {
+    assert.equal(holdComment([], [], new Map(), ''), `${HOLD_FAILED}\n\n- ${HOLD_UNNAMED}\n\n${HOLD_FOOTER}`);
   });
 
   it('never lets a check name break out of its code span', () => {

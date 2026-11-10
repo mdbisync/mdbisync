@@ -335,6 +335,16 @@ export class LinearClient {
     return comment;
   }
 
+  /** Whether a comment with this id exists (resolved or archived ones too). */
+  async commentExists(id: string): Promise<boolean> {
+    const data = await this.request<{ comments: { nodes: Array<{ id: string }> } }>(
+      'FindComment', 'query',
+      `query FindComment($id: ID!) { comments(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { id } } }`,
+      { id },
+    );
+    return data.comments.nodes.some((comment) => comment.id === id);
+  }
+
   /**
    * Resolves a comment, the way a person marks a thread resolved: it stays
    * on the document, folded. Resolving one that is already resolved is not

@@ -14,7 +14,7 @@ import { LinearError, LinearStoppedError, type LinearClient, type LinearDocument
 import { type CheckAnnotation, type CheckFailure, type GitHubRepository, PullRequestError, readAnnotations } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { type HoldNotice, type IdEntry, type Oid, type StateConfig, type StateSnapshot, pushAtomic, readIds, stateRef } from '../state/index.ts';
-import { MARKS } from './marks.ts';
+import { MARKS, resolveHold } from './marks.ts';
 import { commitLaneIds } from './suspended.ts';
 
 /** The most documents whose suspended mark or comment changes in one run; the rest follow in later runs. */
@@ -28,17 +28,25 @@ export const QUOTE_RUN = 12;
 
 export const HOLD_FAILED = 'Changes to this document are on hold: a check failed on the pull request that brings them to Git. Other documents keep syncing.';
 export const HOLD_TIMED_OUT = 'Changes to this document are on hold: a check did not finish in time on the pull request that brings them to Git. Other documents keep syncing.';
+export const HOLD_UNNAMED = 'The checks of this change have not passed yet; this comment names them once they finish.';
 export const HOLD_FOOTER = 'The failure may come from another document of the same change. If a line above names this document, edit it here to try again; the hold also clears when the check is fixed in Git.';
 
-/** What a suspended head's checks said: the failed commit, its failed checks and the ones past the deadline. */
+/** What a head's checks said: the failed commit, its failed checks and the ones past the deadline. */
 export interface HoldFailure {
   head: Oid;
+  /**
+   * `batch`: the normal head whose batch this run suspended; it describes
+   * only the documents that batch brought, never an earlier episode's.
+   * `lane`: the suspended head itself; it describes every suspended document.
+   */
+  scope: 'batch' | 'lane';
   checks: CheckFailure[];
-  /** Checks still pending at the deadline (set by the deadline's caller). */
+  /** Checks still pending at the deadline; the check deadline sets them. */
   timedOut?: string[];
 }
 
-export type HoldClient = Pick<LinearClient, 'updateDocument' | 'ensureDocumentComment' | 'updateDocumentComment' | 'resolveComment'>;
+export type HoldClient = Pick<LinearClient, 'updateDocument' | 'ensureDocumentComment' | 'updateDocumentComment' | 'resolveComment' | 'commentExists'>;
+
 
 export interface HoldMarksOptions {
   config: StateConfig;
@@ -62,13 +70,21 @@ export interface HoldMarksResult {
   deferred: number;
   /** Suspended documents in Linear's trash or archived: they hold no mark. */
   removed: string[];
-  code?: 'state-moved' | 'linear-failed' | 'github-failed';
+  /** How the step stopped short, as a write step would: the run ends partial with it. */
+  code?: 'state-moved' | 'stopped' | 'write-failed';
   failure?: { operation: string };
+  /** Failed checks whose annotations could not be read: their comment names them without annotations. */
+  unreadAnnotations?: string[];
 }
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 /** A failure's identity: its checks, their runs and the ones past the deadline. A new run of a check is a new failure. */
 const failureKey = (failure: HoldFailure) => sha256(JSON.stringify({ checks: failure.checks, timedOut: failure.timedOut ?? [] }));
+
+/** A link target that cannot close its Markdown link or start another: parentheses, brackets and the like percent-encoded. */
+function linkTarget(url: string): string {
+  return url.replace(/[()[\]<>!\s"'`\\]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
+}
 
 /** One line of plain text, Markdown's own characters escaped, so a check cannot add links or images. */
 function plainLine(text: string, limit: number): string {
@@ -121,13 +137,15 @@ export function holdComment(checks: readonly CheckFailure[], timedOut: readonly 
   const lines: string[] = [];
   for (const check of checks) {
     const name = `Check \`${checkName(check.name)}\``;
-    lines.push(check.url === undefined ? `- ${name}.` : `- ${name}: [run](${check.url})`);
+    lines.push(check.url === undefined ? `- ${name}.` : `- ${name}: [run](${linkTarget(check.url)})`);
     const own = annotations.get(check.name) ?? [];
     if (own.length > 0) runs ??= documentRuns(text);
     for (const annotation of own.slice(0, ANNOTATIONS_PER_CHECK)) lines.push(`  - ${annotationLine(annotation, runs as Set<string>)}`);
     if (own.length > ANNOTATIONS_PER_CHECK) lines.push(`  - and ${own.length - ANNOTATIONS_PER_CHECK} more.`);
   }
   for (const name of timedOut) lines.push(`- Check \`${checkName(name)}\` did not finish in time.`);
+  // A batch a person's commit brought into the lane, before its checks have answered: no check to name yet.
+  if (lines.length === 0) lines.push(`- ${HOLD_UNNAMED}`);
   const lead = checks.length === 0 && timedOut.length > 0 ? HOLD_TIMED_OUT : HOLD_FAILED;
   return `${lead}\n\n${lines.join('\n')}\n\n${HOLD_FOOTER}`;
 }
@@ -135,7 +153,8 @@ export function holdComment(checks: readonly CheckFailure[], timedOut: readonly 
 type Work =
   | { kind: 'clear'; path: string; entry: IdEntry; document: LinearDocument }
   | { kind: 'repaint'; path: string; entry: IdEntry; document: LinearDocument }
-  | { kind: 'set' | 'update'; path: string; entry: IdEntry; document: LinearDocument; body: string; failure?: string; previous?: HoldNotice };
+  | { kind: 'set'; path: string; entry: IdEntry; document: LinearDocument; body?: string; failure?: string; previous?: HoldNotice }
+  | { kind: 'update'; path: string; entry: IdEntry; document: LinearDocument; body: string; failure?: string };
 
 /**
  * Set, edit and clear the suspended marks the id map asks for. Runs after
@@ -156,12 +175,20 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
     if (annotations !== undefined) return annotations;
     annotations = new Map();
     for (const check of failure?.checks ?? []) {
-      if (check.checkRunId !== undefined) annotations.set(check.name, await readAnnotations(options.github, check.checkRunId));
+      if (check.checkRunId === undefined) continue;
+      try {
+        annotations.set(check.name, await readAnnotations(options.github, check.checkRunId));
+      } catch (error) {
+        // A run whose annotations GitHub will not give (deleted, another app's) is named without them, so it never stalls the marks.
+        if (!(error instanceof PullRequestError)) throw error;
+        result.unreadAnnotations = [...(result.unreadAnnotations ?? []), check.name];
+      }
     }
     return annotations;
   };
-  const bodyOf = async (path: string, entry: IdEntry): Promise<{ body: string; failure?: string }> => {
-    if (failure === undefined) {
+  const bodyOf = async (path: string, entry: IdEntry, describing: boolean): Promise<{ body: string; failure?: string }> => {
+    // A batch's failure is not an earlier episode's: those keep the episode's check names.
+    if (failure === undefined || !describing) {
       // No failure read this run (the head is still checking): the episode's check names, without links.
       const checks = (entry.suspended?.checks ?? []).map((name) => ({ name }));
       return { body: holdComment(checks, [], new Map(), '') };
@@ -178,45 +205,44 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
 
   const work: Work[] = [];
   const quiet: Array<{ path: string; entry: IdEntry }> = [];
-  try {
-    for (const [path, entry] of ids) {
-      const hold = entry.saved?.hold;
-      const episode = entry.suspended;
-      if (hold === undefined && episode === undefined) continue;
-      const document = options.documents.get(entry.id);
-      if (document === undefined || document.trashed || document.archivedAt !== null) {
-        if (episode !== undefined) result.removed.push(path);
-        continue;
-      }
-      if (episode === undefined) {
-        work.push({ kind: 'clear', path, entry, document });
-        continue;
-      }
-      if (hold?.id !== episode.noticeId || !hold.posted) {
-        // An earlier episode's comment that was never cleared (released and suspended again in between) is resolved first.
-        const previous = hold !== undefined && hold.id !== episode.noticeId && hold.posted ? { previous: hold } : {};
-        work.push({ kind: 'set', path, entry, document, ...previous, ...(await bodyOf(path, entry)) });
-        continue;
-      }
-      // The cross was taken off (the document came back from the trash, or a person changed its icon): put it back.
-      const repaint = document.icon !== MARKS.suspended.icon || document.color !== MARKS.suspended.color;
-      if (failure === undefined || hold.failure === failureKey(failure)) {
-        if (repaint) work.push({ kind: 'repaint', path, entry, document });
-        continue;
-      }
-      const next = await bodyOf(path, entry);
-      if (sha256(next.body) === hold.bodyHash) quiet.push({ path, entry: withHold(entry, { ...hold, ...(next.failure === undefined ? {} : { failure: next.failure }) }) });
-      else work.push({ kind: 'update', path, entry, document, ...next });
+  // Documents a `batch` failure describes: those of the batch just suspended, whose episode has no comment yet.
+  const describes = (entry: IdEntry) => failure?.scope === 'lane' || (failure !== undefined && entry.saved?.hold?.id !== entry.suspended?.noticeId);
+  for (const [path, entry] of ids) {
+    const hold = entry.saved?.hold;
+    const episode = entry.suspended;
+    if (hold === undefined && episode === undefined) continue;
+    const document = options.documents.get(entry.id);
+    if (document === undefined || document.trashed || document.archivedAt !== null) {
+      if (episode !== undefined) result.removed.push(path);
+      continue;
     }
-  } catch (error) {
-    if (error instanceof PullRequestError) return { ...result, code: 'github-failed' };
-    throw error;
+    if (episode === undefined) {
+      work.push({ kind: 'clear', path, entry, document });
+      continue;
+    }
+    if (hold?.id !== episode.noticeId || !hold.posted) {
+      // An earlier episode's comment that was never cleared (released and suspended again in between) is resolved first.
+      const previous = hold !== undefined && hold.id !== episode.noticeId && hold.posted ? { previous: hold } : {};
+      work.push({ kind: 'set', path, entry, document, ...previous });
+      continue;
+    }
+    // The cross was taken off (the document came back from the trash, or a person changed its icon): put it back.
+    const repaint = document.icon !== MARKS.suspended.icon || document.color !== MARKS.suspended.color;
+    if (failure === undefined || failure.scope !== 'lane' || hold.failure === failureKey(failure)) {
+      if (repaint) work.push({ kind: 'repaint', path, entry, document });
+      continue;
+    }
+    const next = await bodyOf(path, entry, true);
+    if (sha256(next.body) === hold.bodyHash) quiet.push({ path, entry: withHold(entry, { ...hold, ...(next.failure === undefined ? {} : { failure: next.failure }) }) });
+    else work.push({ kind: 'update', path, entry, document, ...next });
   }
   // Clearing first: a released batch's documents get their own icons back before new holds take the budget.
   const order = { clear: 0, set: 1, update: 2, repaint: 3 } as const;
   work.sort((a, b) => order[a.kind] - order[b.kind]);
   const chosen = work.slice(0, limit);
   result.deferred = work.length - chosen.length;
+  // Comments are written only for the chosen documents: the rest read nothing this run.
+  for (const item of chosen) if (item.kind === 'set') Object.assign(item, await bodyOf(item.path, item.entry, describes(item.entry)));
 
   let expected = options.state.ids;
   const persist = async () => {
@@ -231,11 +257,10 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
 
   // The saved decoration and the pending comment are durable before any mark replaces them.
   for (const { path, entry } of quiet) ids.set(path, entry);
+  // An earlier episode's comment id stays recorded until that comment is resolved (below).
   for (const item of chosen) if (item.kind === 'set') {
-    const saved = item.entry.saved ?? { icon: item.document.icon, color: item.document.color };
-    const hold: HoldNotice = { id: (item.entry.suspended as NonNullable<IdEntry['suspended']>).noticeId, bodyHash: sha256(item.body), posted: false, ...(item.failure === undefined ? {} : { failure: item.failure }) };
-    item.entry = { ...item.entry, saved: { ...saved, hold } };
-    ids.set(item.path, item.entry);
+    item.entry = withHold(item.entry, newHold(item), item.document);
+    if (item.previous === undefined) ids.set(item.path, item.entry);
   }
   if (!(await persist())) return { ...result, code: 'state-moved' };
 
@@ -244,8 +269,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
     for (const item of chosen) {
       const { document, path } = item;
       if (item.kind === 'clear') {
-        const hold = item.entry.saved?.hold as HoldNotice;
-        if (hold.posted) await linear.resolveComment(hold.id);
+        await resolveHold(linear, item.entry.saved?.hold as HoldNotice);
         const { hold: _hold, ...saved } = item.entry.saved as NonNullable<IdEntry['saved']>;
         // A conflict or blocked notice still stands: its own mark comes back. Otherwise the document's own decoration.
         const mark = saved.notice === undefined ? { icon: saved.icon, color: saved.color } : MARKS[saved.notice.kind];
@@ -260,15 +284,18 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
         result.updated.push(path);
         continue;
       }
+      if (item.kind === 'set' && item.previous !== undefined) {
+        await resolveHold(linear, item.previous);
+        ids.set(path, item.entry);
+      }
       if (!document.documentContentId) continue;
       const hold = item.entry.saved?.hold as HoldNotice;
       if (item.kind === 'set') {
-        if (item.previous !== undefined) await linear.resolveComment(item.previous.id);
         const mark = MARKS.suspended;
         if (document.icon !== mark.icon || document.color !== mark.color) await linear.updateDocument(document.id, mark);
         // The id was chosen before the suspension's push and never posted by this sync: create it directly,
         // and a create Linear refuses because the id exists finds it and updates its text.
-        await linear.ensureDocumentComment(document.documentContentId, item.body, hold.id, true, true);
+        await linear.ensureDocumentComment(document.documentContentId, item.body as string, hold.id, true, true);
         ids.set(path, withHold(item.entry, { ...hold, posted: true }));
         result.set.push(path);
       } else {
@@ -280,16 +307,22 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
     }
   } catch (error) {
     if (!(error instanceof LinearError)) throw error;
-    result.code = 'linear-failed';
+    result.code = error instanceof LinearStoppedError ? 'stopped' : 'write-failed';
     result.failure = { operation: error.operation };
-    if (error instanceof LinearStoppedError) result.failure = { operation: 'stopped' };
   }
   if (!(await persist())) result.code = 'state-moved';
   return result;
 }
 
-function withHold(entry: IdEntry, hold: HoldNotice): IdEntry {
-  return { ...entry, saved: { ...(entry.saved as NonNullable<IdEntry['saved']>), hold } };
+/** The pending comment of a new episode, its id chosen before the suspension's push. */
+function newHold(item: { entry: IdEntry; body?: string; failure?: string }): HoldNotice {
+  return { id: (item.entry.suspended as NonNullable<IdEntry['suspended']>).noticeId, bodyHash: sha256(item.body as string), posted: false, ...(item.failure === undefined ? {} : { failure: item.failure }) };
+}
+
+/** The entry with this hold; a document without a saved decoration saves its own icon and color first. */
+function withHold(entry: IdEntry, hold: HoldNotice, document?: LinearDocument): IdEntry {
+  const saved = entry.saved ?? { icon: document?.icon ?? null, color: document?.color ?? null };
+  return { ...entry, saved: { ...saved, hold } };
 }
 
 /** The number of documents whose suspended mark or comment changed: each may cost two Linear requests (I9). */

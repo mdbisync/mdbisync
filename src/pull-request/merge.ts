@@ -50,11 +50,9 @@ export interface CheckAnnotation {
  * reported as soon as it is seen.
  */
 export async function readChecks(target: GitHubRepository, sha: string): Promise<CheckState> {
-  const failed = new Set<string>();
   const pending = new Set<string>();
   const failures = new Map<string, CheckFailure>();
   const fail = (name: string, url: unknown, checkRunId?: unknown) => {
-    failed.add(name);
     if (failures.has(name)) return;
     const failure: CheckFailure = { name };
     const link = httpsLink(url);
@@ -99,9 +97,9 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
     else if (status.state !== 'success') fail(name, status.target_url);
   }
 
-  const sorted = (names: Set<string>) => [...names].sort();
-  const state: CheckState = { hasChecks: hasRuns || combined.total_count > 0, state: failed.size > 0 ? 'failed' : pending.size > 0 ? 'pending' : 'passed', failed: sorted(failed), pending: sorted(pending) };
-  if (failures.size > 0) state.failures = sorted(new Set(failures.keys())).map((name) => failures.get(name) as CheckFailure);
+  const failed = [...failures.keys()].sort();
+  const state: CheckState = { hasChecks: hasRuns || combined.total_count > 0, state: failed.length > 0 ? 'failed' : pending.size > 0 ? 'pending' : 'passed', failed, pending: [...pending].sort() };
+  if (failed.length > 0) state.failures = failed.map((name) => failures.get(name) as CheckFailure);
   return state;
 }
 

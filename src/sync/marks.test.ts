@@ -35,6 +35,10 @@ class World implements MarkClient {
     return { id, created };
   }
   resolved: string[] = [];
+  async commentExists(id: string) {
+    this.events.push('find');
+    return this.comments.has(id);
+  }
   async resolveComment(id: string) {
     this.events.push('resolve');
     this.resolved.push(id);
@@ -358,4 +362,22 @@ test('a document marked blocked while suspended keeps its suspension comment', a
   assert.deepEqual(world.entry.saved?.hold, hold);
   assert.equal(world.entry.saved?.notice?.kind, 'blocked');
   assert.deepEqual(world.resolved, []);
+});
+
+test('a released comment never confirmed posted is looked up and resolved when it exists', async () => {
+  const world = new World();
+  world.document.content = 'Plain text.\n';
+  const hold = { id: '33333333-3333-4333-8333-333333333333', bodyHash: 'a'.repeat(64), posted: false };
+  world.comments.set(hold.id, 'On hold.');
+  world.entry = { id: 'document-one', saved: { icon: ':fire:', color: '#123456', hold } };
+  await world.reconcile();
+  assert.deepEqual(world.resolved, [hold.id]);
+  // One that was never created is only looked up.
+  const other = new World();
+  other.document.content = 'Plain text.\n';
+  other.entry = { id: 'document-one', saved: { icon: ':fire:', color: '#123456', hold } };
+  await other.reconcile();
+  assert.deepEqual(other.resolved, []);
+  assert.ok(other.events.includes('find'));
+  assert.equal(other.entry.saved, undefined);
 });
