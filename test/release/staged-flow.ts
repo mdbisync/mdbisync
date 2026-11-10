@@ -111,8 +111,8 @@ function collectProcess(child: ChildProcessByStdio<null, Readable, Readable>): P
   });
 }
 
-// Keep Node launches separate from the shell's -c command: release paths are
-// arguments to Node and must never flow into a shell command string.
+// Keep distinct launch sites so static analysis can distinguish Node arguments
+// from the preparation shell's -c command. Share only output collection.
 function runNode(args: string[], cwd: string, env: Record<string, string>): Promise<{ status: number; output: string }> {
   return collectProcess(spawn(process.execPath, args, { cwd, env, shell: false, stdio: ['ignore', 'pipe', 'pipe'] }));
 }
