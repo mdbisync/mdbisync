@@ -1579,6 +1579,103 @@ describe('GraphQL HTTP fault scenario', () => {
 });
 
 describe('subjects', () => {
+  describe('setup failures (L5-01 to L5-05)', () => {
+    const FIX = 'https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#linear-oauth-app';
+    // What a live L5-01 run gave: its report, job summary and terminal stop line, as the engine wrote them.
+    const SUMMARY = [
+      '## Setup check',
+      '',
+      `Stopped before any write: \`linear-credential-failed\`. How to fix it: ${FIX}`,
+      '',
+      '| Item | State | Detail |',
+      '| --- | --- | --- |',
+      `| linear-credentials | FAILED | Linear refused the OAuth app client credentials ([how to fix](${FIX})) |`,
+      '| github-access | passed | GitHub token has contents:write, pull_requests:write, workflows:write, checks:read, statuses:read |',
+      '| merge-commits | passed | merge commits are allowed |',
+      '| linear-format-hook | passed | .pre-commit-config.yaml has the linear-format hook |',
+      '| annotations | passed | 5 annotated folders, 12 files to sync |',
+      '| annotation-targets | not checked | needs working Linear credentials |',
+      '| left-out-files | passed | no files left out |',
+      '| security-hooks | passed | security hooks present: test-secret |',
+      '',
+    ].join('\n');
+    const STDERR = [
+      '{"operation":"oauth.token","kind":"oauth","attempt":1,"status":400,"errorCodes":["unknown"]}',
+      `sync: stopped before any write (linear-credential-failed): Linear refused the OAuth app client credentials. How to fix it: ${FIX}`,
+      '',
+    ].join('\n');
+    const REPORT = {
+      operation: 'sync',
+      ok: false,
+      code: 'linear-credential-failed',
+      exitStatus: 'failure',
+      summary: null,
+      setupChecks: [
+        { name: 'linear-credentials', state: 'failed', detail: 'Linear refused the OAuth app client credentials' },
+        { name: 'github-access', state: 'passed', detail: 'GitHub token has contents:write' },
+        { name: 'annotation-targets', state: 'not-checked', detail: 'needs working Linear credentials' },
+        { name: 'security-hooks', state: 'passed', detail: 'security hooks present: test-secret' },
+      ],
+      writes: { linear: {}, git: {}, pullRequests: {} },
+    };
+    const run = (change: Partial<EngineResult> = {}): EngineResult => ({ command: 'sync', exitCode: 1, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: STDERR, summary: SUMMARY, report: structuredClone(REPORT), ...change });
+    const l501 = scenarios.find((scenario) => scenario.id === 'L5-01');
+
+    async function outcomes(result: EngineResult) {
+      const { ctx } = await fakeRun();
+      ctx.engine.results.push(result);
+      const verdicts: [string, boolean | string][] = [];
+      for (const assertion of l501?.checks.assertions ?? []) {
+        try {
+          const verdict = await evaluateAssertion(ctx, assertion);
+          verdicts.push([assertion.subject, verdict.holds]);
+        } catch (error) {
+          verdicts.push([assertion.subject, error instanceof ProductError ? `product: ${error.message}` : `harness: ${String(error)}`]);
+        }
+      }
+      return verdicts;
+    }
+
+    it('pass L5-01 on what the live run actually gave: the failed item and its fix link, from the report, summary and terminal', async () => {
+      assert.deepEqual(await outcomes(run()), [
+        ['runs.0.writes.total', true],
+        ['runs.0.summary.code', true],
+        ['runs.0.setupFailure.item', true],
+        ['runs.0.setupFailure.fixLink', true],
+      ]);
+      for (const id of ['L5-01', 'L5-02', 'L5-03', 'L5-04', 'L5-05']) {
+        const subjects = scenarios.find((scenario) => scenario.id === id)?.checks.assertions.map((assertion) => assertion.subject);
+        assert.deepEqual(subjects?.filter((subject) => subject.startsWith('runs.0.setupFailure.')), ['runs.0.setupFailure.item', 'runs.0.setupFailure.fixLink'], id);
+        assert.equal(subjectSource('runs.0.setupFailure.item'), 'harness');
+      }
+    });
+
+    it('stay red when the item or the link is wrong or missing', async () => {
+      const verdict = async (result: EngineResult) => Object.fromEntries((await outcomes(result)).filter(([subject]) => subject.startsWith('runs.0.setupFailure.')));
+      const wrongLink = FIX.replace('#linear-oauth-app', '#github-app');
+      // A wrong item, named everywhere alike.
+      const otherItem = run({ summary: SUMMARY.replace('| linear-credentials | FAILED', '| linear-credentials | passed').replace('| github-access | passed | GitHub token has contents:write, pull_requests:write, workflows:write, checks:read, statuses:read |', `| github-access | FAILED | x ([how to fix](${FIX})) |`) });
+      (otherItem.report?.['setupChecks'] as { name: string; state: string }[]).forEach((check) => (check.state = check.name === 'github-access' ? 'failed' : 'passed'));
+      assert.equal((await verdict(otherItem))['runs.0.setupFailure.item'], false);
+      // No failed item, or one the summary does not show as FAILED.
+      const none = run();
+      (none.report?.['setupChecks'] as { state: string }[]).forEach((check) => (check.state = 'passed'));
+      assert.match(String((await verdict(none))['runs.0.setupFailure.item']), /^product: .*0 failed items/);
+      assert.match(String((await verdict(run({ summary: SUMMARY.replace('| linear-credentials | FAILED', '| linear-credentials | failed') })))['runs.0.setupFailure.item']), /^product: .*no FAILED row for linear-credentials/);
+      // A wrong link given alike everywhere is a wrong value.
+      assert.equal((await verdict(run({ summary: SUMMARY.replaceAll(FIX, wrongLink), stderr: STDERR.replace(FIX, wrongLink) })))['runs.0.setupFailure.fixLink'], false);
+      // A link missing from, or different in, any one place.
+      assert.match(String((await verdict(run({ stderr: STDERR.split('\n')[0] as string })))['runs.0.setupFailure.fixLink']), /^product: .*the terminal stop line for linear-credential-failed gives no fix link/);
+      assert.match(String((await verdict(run({ stderr: STDERR.replace(FIX, wrongLink) })))['runs.0.setupFailure.fixLink']), /^product: .*different fix links/);
+      assert.match(String((await verdict(run({ summary: SUMMARY.replace(` How to fix it: ${FIX}`, '') })))['runs.0.setupFailure.fixLink']), /^product: .*the summary's stop line .* gives no fix link/);
+      assert.match(String((await verdict(run({ summary: SUMMARY.replace(` ([how to fix](${FIX}))`, '') })))['runs.0.setupFailure.fixLink']), /^product: .*the FAILED row .* gives no fix link/);
+      // A stop line for another code does not count.
+      assert.match(String((await verdict(run({ stderr: STDERR.replace('(linear-credential-failed)', '(missing-permission)') })))['runs.0.setupFailure.fixLink']), /^product: .*terminal stop line/);
+      // No report at all.
+      assert.match(String((await verdict(run({ report: null })))['runs.0.setupFailure.item']), /^product: .*wrote no report/);
+    });
+  });
+
   it('read the engine report by path and fail as a product error when it lacks a value', async () => {
     const { ctx } = await fakeRun();
     ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { summary: { code: 'initial-sync-required' } } });

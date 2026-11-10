@@ -1745,6 +1745,54 @@ async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string
   return { hashes, storage: await storageOf(head.git, [...hashes.keys()], files), links };
 }
 
+// --- setup failures -------------------------------------------------------------------------------
+
+/**
+ * The setup check that stopped run <n|last> before any write, and the link that says how to fix it
+ * (L5-01 to L5-05). The report has no field that says the item was named: the harness reads it from
+ * what the run actually gave.
+ *
+ * - `item`: the one entry of the report's `setupChecks` in state `failed`, which the job summary must
+ *   show as a FAILED row.
+ * - `fixLink`: the link in that row, which the summary's stop line and the run's terminal stop line,
+ *   both naming the report's `code`, must give alike.
+ *
+ * A missing item, row, line or link, or links that differ, fail as a product error.
+ */
+const SETUP_FAILURE_SUBJECT = /^runs\.(\d+|last)\.setupFailure\.(item|fixLink)$/;
+
+function setupFailureValue(ctx: RunContext, subject: string): string {
+  const [, which, field] = SETUP_FAILURE_SUBJECT.exec(subject) as RegExpExecArray;
+  const own = ownResults(ctx);
+  const index = which === 'last' ? own.length - 1 : Number(which);
+  const result = own[index];
+  if (result === undefined) throw new ProductError(`the scenario has no engine run ${which} for ${subject}`);
+  if (result.report === null) throw new ProductError(`engine run ${index} wrote no report, so it gives no ${subject}`);
+  const failedChecks = setupChecksOf(result.report).filter((check) => check.state === 'failed');
+  if (failedChecks.length !== 1) throw new ProductError(`engine run ${index}'s setupChecks have ${failedChecks.length} failed items, not one`);
+  const item = (failedChecks[0] as SetupCheck).name;
+  const summaryLines = result.summary.split('\n');
+  const row = summaryLines.find((line) => line.startsWith(`| ${item} | FAILED | `));
+  if (row === undefined) throw new ProductError(`engine run ${index}'s job summary has no FAILED row for ${item}`);
+  if (field === 'item') return item;
+
+  const code = reportField(result.report, 'code');
+  if (typeof code !== 'string') throw new ProductError(`engine run ${index}'s report gives no code`);
+  const summaryStop = summaryLines.find((line) => line.startsWith(`Stopped before any write: \`${code}\`.`));
+  const terminalStop = `${result.stdout}\n${result.stderr}`.split('\n').find((line) => line.startsWith(`${result.command}: stopped before any write (${code})`));
+  const links = {
+    'the FAILED row': /\(\[how to fix\]\((\S+)\)\) \|$/.exec(row)?.[1],
+    "the summary's stop line": / How to fix it: (\S+)$/.exec(summaryStop ?? '')?.[1],
+    'the terminal stop line': / How to fix it: (\S+)$/.exec(terminalStop ?? '')?.[1],
+  };
+  for (const [where, link] of Object.entries(links)) {
+    if (link === undefined) throw new ProductError(`engine run ${index}: ${where} for ${code} gives no fix link`);
+  }
+  const distinct = new Set(Object.values(links));
+  if (distinct.size !== 1) throw new ProductError(`engine run ${index} gives different fix links: ${Object.entries(links).map(([where, link]) => `${where} ${link}`).join(', ')}`);
+  return links['the FAILED row'] as string;
+}
+
 // --- resolution -----------------------------------------------------------------------------------
 
 /** Families of subjects read from the engine's run report. */
@@ -1755,7 +1803,7 @@ export type SubjectSource = 'observed' | 'harness' | 'engine' | 'ui';
 /** Where a subject's value comes from, or null when nothing provides it (a harness gap). */
 export function subjectSource(subject: string): SubjectSource | null {
   const name = subject.startsWith('before.') ? subject.slice('before.'.length) : subject;
-  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && QUIET_SUBJECT.test(name))) return 'harness';
+  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name)))) return 'harness';
   if (ENGINE_FAMILIES.some((pattern) => pattern.test(name))) return 'engine';
   if (name.startsWith('ui.')) return 'ui';
   return null;
@@ -1859,6 +1907,7 @@ function quietValue(ctx: RunContext, subject: string): string[] {
 export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
   if (ctx.observations.has(subject) && !NORMALIZED_OBSERVATIONS.has(subject)) return { known: true, value: ctx.observations.get(subject) };
   if (QUIET_SUBJECT.test(subject)) return { known: true, value: quietValue(ctx, subject) };
+  if (SETUP_FAILURE_SUBJECT.test(subject)) return { known: true, value: setupFailureValue(ctx, subject) };
   const before = subject.startsWith('before.');
   const name = before ? subject.slice('before.'.length) : subject;
   const compute = SUBJECTS[name];

@@ -81,9 +81,14 @@
         "expected": "annotation-target-not-found"
       },
       {
-        "subject": "runs.0.summary.failedItemNamed",
+        "subject": "runs.0.setupFailure.item",
         "operator": "equal",
-        "expected": true
+        "expected": "annotation-targets"
+      },
+      {
+        "subject": "runs.0.setupFailure.fixLink",
+        "operator": "equal",
+        "expected": "https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#folder-annotations"
       }
     ]
   }
