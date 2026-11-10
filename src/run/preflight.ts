@@ -18,7 +18,7 @@ import {
   renderStateRefusal,
   runSetupCheck,
 } from '../setup/index.ts';
-import { type FetchedState, type Git, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress } from '../state/index.ts';
+import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress } from '../state/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
 import { renderStoppedBeforeWriting } from './stop.ts';
@@ -34,6 +34,8 @@ export interface RunContext {
   mapping: RepositoryMapping;
   targets: ResolvedTargets;
   linear: LinearClient;
+  /** Who the run's commits are by: the App's bot account, read in the setup check. */
+  identity: CommitIdentity;
 }
 
 export interface PreflightOutcome {
@@ -132,7 +134,7 @@ export async function runPreflight(
       try {
         const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
         setup = report;
-        if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear });
+        if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear, identity: github.identity ?? NEUTRAL_IDENTITY });
         return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
       } catch (error) {
         // Linear stopped the client (a rate limit, a budget running low) outside the steps that record their progress.

@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { loadMapping } from '../../src/mapping/index.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../../src/setup/test-helpers.ts';
+import { type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../../src/setup/test-helpers.ts';
 import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef } from '../../src/state/index.ts';
 import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-helpers.ts';
 import { STAGE_FOLDER } from '../../src/sync/staged.ts';
@@ -190,6 +190,7 @@ for (const file of process.argv.slice(2)) {
       'linear-client-secret': clientSecret,
       'linear-api-url': `${bridge}/linear`,
       'github-token': appToken,
+      'app-slug': FAKE_APP_SLUG,
       'github-api-url': `${bridge}/github`,
       'merge-grace-seconds': '0',
       repository: 'example/repository',

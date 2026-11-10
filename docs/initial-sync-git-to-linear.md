@@ -59,6 +59,7 @@ action. Every input of the action, and what it means for this run:
 | `linear-api-url` | empty | Linear's API origin; leave it empty. |
 | `cleanup-tokens` | `false` | `true` revokes tokens that killed runs left behind, only when no other repository uses this Linear app ([README](../README.md#tokens-left-by-interrupted-jobs)). |
 | `github-token` | none | The GitHub App's installation token; the run pushes the state refs with it. |
+| `app-slug` | none | The App's slug, from the token step's output `app-slug`; the state refs' commits name the App's bot account as their author. |
 | `github-api-url` | empty | GitHub's REST API URL; leave it empty. |
 | `repository` | empty | The repository as `owner/name`; empty means the workflow's own. |
 | `tracked-branch` | `main` | The branch whose files Linear is made equal to. |

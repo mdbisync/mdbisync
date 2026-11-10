@@ -4,7 +4,8 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { fixText, linkedFileCheck } from './fix.ts';
+import { fixText } from './fix.ts';
+import { linkedFileCheck } from './lint.ts';
 
 const cases: Array<[string, string, string]> = [
   ['CRLF and CR line endings become LF', 'One.\r\n\r\nTwo.\rThree.', 'One.\n\nTwo.\nThree.'],

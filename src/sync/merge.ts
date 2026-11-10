@@ -7,9 +7,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readAnnotation } from '../mapping/index.ts';
-import { lintText, splitFile } from '../format/index.ts';
+import { lintInTree, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
-import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
+import { MARKDOWN_EXTENSION, type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
+import { findFileLinks } from '../initial-sync/uploads.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
 import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, checkRepoPath, commitTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
 import { SYNC_IDENTITY } from '../initial-sync/index.ts';
@@ -312,7 +313,7 @@ export function placeKey(place: Place): string {
   return place.kind === 'project' ? `project\0${place.team}\0${place.project}` : `team\0${place.team}`;
 }
 
-interface Side {
+export interface Side {
   mapping: RepositoryMapping;
   files: Map<string, SideFile>;
   leftOut: Array<{ path: string; rules: FileLeftOutRule[] }>;
@@ -331,7 +332,7 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
   const leftOut: Array<{ path: string; rules: FileLeftOutRule[] }> = [];
   const leave = (path: string, rules: FileLeftOutRule[]) => leftOut.push({ path, rules: [...new Set(rules)].sort() });
   for (const document of mapping.documents) {
-    const rules: FileLeftOutRule[] = lintText(document.path, (blobs.get(document.oid) as Buffer).toString('utf8')).map((finding) => finding.rule);
+    const rules: FileLeftOutRule[] = lintInTree(document.path, (blobs.get(document.oid) as Buffer).toString('utf8'), mapping.files).map((finding) => finding.rule);
     if (lengthRefusal({ title: document.title }, facts) !== undefined) rules.push('title-too-long');
     if (rules.length > 0) leave(document.path, rules);
     else files.set(document.path, toSideFile(document));
@@ -350,7 +351,7 @@ export async function leftOutFiles(git: Git, treeish: Oid, facts: LinearFacts = 
   return (await synchronizedFiles(git, treeish, facts)).leftOut;
 }
 
-/** Versions of the `linear` chain examined for a file's last synchronized version. */
+/** Commits of the `linear` chain examined for a file's last synchronized version: those that change it or a file it links. */
 export const BASELINE_DEPTH = 20;
 
 /**
@@ -358,16 +359,46 @@ export const BASELINE_DEPTH = 20;
  * (first parents: records and captures, never the tracked branch's), in
  * which a file was synchronized by the run's own rules (mapped, accepted by
  * the linter, a title Linear takes, no collision). That version is what
- * Linear was last given, with its title, place and linked files. Null when
- * none of the last `BASELINE_DEPTH` versions on the chain was synchronized.
+ * Linear was last given, with its title, place and linked files. A commit
+ * that changes only a linked file counts too: removing or restoring an
+ * image changes whether the file is synchronized. Null when none of the
+ * last `BASELINE_DEPTH` such commits on the chain synchronized it.
+ * Calls that share `sides` read each commit's synchronized files once.
  */
-export async function lastSynchronized(git: Git, linear: Oid, path: string, facts: LinearFacts = LINEAR_FACTS): Promise<{ commit: Oid; file: SideFile; text: string } | null> {
-  const log = await git.text(['log', '--first-parent', '--format=%H', '-n', String(BASELINE_DEPTH), linear, '--', path]);
-  for (const commit of log.split('\n').filter(Boolean)) {
-    const file = (await synchronizedFiles(git, commit, facts)).files.get(path);
+export async function lastSynchronized(
+  git: Git,
+  linear: Oid,
+  path: string,
+  facts: LinearFacts = LINEAR_FACTS,
+  sides: Map<Oid, Promise<Side>> = new Map(),
+): Promise<{ commit: Oid; file: SideFile; text: string } | null> {
+  const log = async (paths: readonly string[]) =>
+    (await git.text(['--literal-pathspecs', 'log', '--first-parent', '--format=%H', '-n', String(BASELINE_DEPTH), linear, '--', ...paths])).split('\n').filter(Boolean);
+  const versions = await log([path]);
+  // Whether a version is synchronized, and which upload its images get, changes too in a commit that changes only a
+  // file it links: an image removed, restored or replaced.
+  const linked = await linkedFiles(git, versions, path);
+  const candidates = linked.length === 0 ? versions : await log([path, ...linked]);
+  for (const commit of candidates) {
+    if (!sides.has(commit)) sides.set(commit, synchronizedFiles(git, commit, facts));
+    const file = (await (sides.get(commit) as Promise<Side>)).files.get(path);
     if (file !== undefined) return { commit, file, text: ((await readBlobs(git, [file.oid])).get(file.oid) as Buffer).toString('utf8') };
   }
   return null;
+}
+
+/** The files other than Markdown documents that the versions of `path` at `commits` link, each once. */
+async function linkedFiles(git: Git, commits: readonly Oid[], path: string): Promise<string[]> {
+  const linked = new Set<string>();
+  for (const commit of commits) {
+    const blob = await git.run(['cat-file', 'blob', `${commit}:${path}`], { okCodes: [0, 128] });
+    // The commit removed the file: that version links nothing.
+    if (blob.code !== 0) continue;
+    for (const link of findFileLinks(path, splitFile(blob.stdout.toString('utf8')).body, () => true)) {
+      if (!link.target.endsWith(MARKDOWN_EXTENSION)) linked.add(link.target);
+    }
+  }
+  return [...linked];
 }
 
 function toSideFile(document: MappedDocument): SideFile {

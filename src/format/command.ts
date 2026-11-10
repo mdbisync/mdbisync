@@ -3,8 +3,8 @@
 
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { fixText, linkedFileCheck } from './fix.ts';
-import { duplicateTitles, lintText } from './lint.ts';
+import { fixText } from './fix.ts';
+import { duplicateTitles, linkedFileCheck, lintText } from './lint.ts';
 import type { Finding } from './rules.ts';
 
 export interface CommandResult {

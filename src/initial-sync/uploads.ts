@@ -19,7 +19,7 @@ import { posix } from 'node:path';
 import type { Nodes } from 'mdast';
 import { end, parse, resolveTarget, splitFile, start, visit } from '../format/markdown.ts';
 import { LinearError, LinearStoppedError } from '../linear/index.ts';
-import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
+import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
 import {
   type Git,
   type Oid,
@@ -173,7 +173,7 @@ async function treeFiles(git: Git, tracked: Oid): Promise<{ files: Map<string, T
   const files = new Map<string, TreeEntry>();
   const markdown = new Map<string, TreeEntry>();
   for (const entry of await listTree(git, tracked)) {
-    if (entry.type !== 'blob' || entry.mode === '120000') continue;
+    if (!isRegularFile(entry)) continue;
     if (entry.path.endsWith(MARKDOWN_EXTENSION)) markdown.set(entry.path, entry);
     else files.set(entry.path, entry);
   }

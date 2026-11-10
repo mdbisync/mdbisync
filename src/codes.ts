@@ -10,6 +10,7 @@ import { type LintRule } from './format/rules.ts';
 export const CHECK_NAMES = [
   'linear-credentials',
   'github-access',
+  'github-app',
   'merge-commits',
   'linear-format-hook',
   'annotations',
@@ -24,6 +25,7 @@ export const FAILURE_CODES = [
   'linear-credential-failed',
   'github-credential-failed',
   'missing-permission',
+  'github-app-not-found',
   'merge-commits-required',
   'linear-format-hook-required',
   'invalid-annotation',

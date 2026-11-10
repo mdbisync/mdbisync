@@ -24,6 +24,27 @@ export interface LintOptions {
   linkedFileExists?: (url: string) => boolean;
 }
 
+/**
+ * The existence check of `lint`, `fix` and the sync: a link or an image names
+ * a file the sync uploads when it resolves to a repository path, as the sync
+ * resolves it, and that path is a file. It decides `image-file-missing`.
+ */
+export function linkedFileCheck(documentPath: string, isFile: (path: string) => boolean): (url: string) => boolean {
+  return (url) => {
+    const target = resolveTarget(documentPath, url);
+    return target !== null && isFile(target);
+  };
+}
+
+/**
+ * Lint findings for a document of a git tree, whose images must be files of
+ * that tree: `files` holds the tree's regular files (no symbolic links), by
+ * path. The sync lints every document it reads this way.
+ */
+export function lintInTree(file: string, text: string, files: ReadonlySet<string>): Finding[] {
+  return lintText(file, text, { linkedFileExists: linkedFileCheck(file, (path) => files.has(path)) });
+}
+
 /** Lint findings for one file's text, ordered by line. */
 export function lintText(file: string, text: string, options: LintOptions = {}): Finding[] {
   const { head, body } = splitFile(text);

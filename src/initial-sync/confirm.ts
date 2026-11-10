@@ -84,9 +84,6 @@ export async function readKeptAnnotations(git: Git, ids: Oid | null): Promise<Se
 export const RECORD_MESSAGE = "Initial sync: Linear's state";
 export const UPLOADS_MESSAGE = 'Initial sync: upload cache';
 
-/** Who the state commits are by. */
-export const SYNC_IDENTITY: CommitIdentity = Object.freeze({ name: 'mdbisync', email: 'mdbisync@sync.invalid' });
-
 /** Documents written between two progress pushes of `ids`. */
 export const PROGRESS_BATCH = 25;
 
@@ -172,7 +169,7 @@ type Work = { kind: 'create'; entry: CreateEntry } | { kind: 'overwrite'; entry:
 export async function confirmInitialSync(context: RunContext, options: ConfirmOptions): Promise<{ plan: InitialSyncPlan; result: ConfirmedResult }> {
   const { git, fetched, targets, linear } = context;
   const transforms = options.transforms ?? [];
-  const identity = options.identity ?? SYNC_IDENTITY;
+  const identity = options.identity ?? context.identity;
   const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
   const stopAfter = 'stopAfterDocuments' in options ? options.stopAfterDocuments : testStopAfterDocuments();
   const checkpoint = options.checkpoint ?? ((name: Checkpoint) => testCheckpoint(name));
