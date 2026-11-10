@@ -61,7 +61,9 @@ The class follows Linear's recorded form of the text the sync sends (the
 file without its front matter): `unchanged` only where Linear keeps that
 text, `fixable` where Linear rewrites it to an equivalent form, and
 `lint-error`, with a rule, where Linear would lose or alter content or
-refuses the text. The check enforces this against the recorded forms and
+refuses the text, and where an image is not a file of the repository (a
+URL, or a target that is missing): Linear may copy such an image, so the
+recorded form of those fixtures is not a stable target. The check enforces this against the recorded forms and
 refusals, so a new probe record cannot leave a class stale.
 
 `known_constructs` lists the constructs whose behavior is already known,
@@ -79,7 +81,8 @@ fixture by the format probe, not here.
 - An `unchanged` fixture is already in the target form, which has no final
   newline.
 - Relative links and images resolve inside the bank, unless the fixture is
-  marked `missing_target`.
+  marked `missing_target`; a fixture with a missing image is a `lint-error`
+  fixture of the rule `image-file-missing`.
 - New findings about a construct become a new fixture here.
 
 ## Check

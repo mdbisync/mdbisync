@@ -1,6 +1,7 @@
 // The normalizer against the fixture bank and Linear's recorded forms
 // (L0-01 to L0-03 offline): `fix` reaches Linear's form and is idempotent,
-// `lint` reports every lint-error fixture with its rule and line.
+// `lint` reports every lint-error fixture with its rule and line. Both check
+// linked files against the bank, as the commands check them in a repository.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -45,7 +46,7 @@ describe('front matter', () => {
 describe('lint on the fixture bank', () => {
   for (const fixture of markdown) {
     it(`${fixture.file} (${fixture.class})`, () => {
-      const findings = lintText(fixture.file, read(fixture));
+      const findings = lintText(fixture.file, read(fixture), { linkedFileExists: linkedFileResolver(fixture.file, bank.dir) });
       if (contentRules(fixture)) {
         assert.ok(findings.some((finding) => finding.rule === fixture.rule), `reports ${fixture.rule}: ${JSON.stringify(findings)}`);
         const expected = (fixture as BankFixture & { line?: number }).line;

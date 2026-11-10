@@ -121,6 +121,8 @@ export interface LinkMap {
   base: string;
   /** Path → id of every document the run synchronizes. */
   ids: ReadonlyMap<string, string>;
+  /** Id → path of ids a document did not get (superseded), which earlier text may still link; read back only. */
+  aliases?: ReadonlyMap<string, string> | undefined;
 }
 
 /**
@@ -136,6 +138,13 @@ export type LinkSpellings = Map<string, string[]>;
  */
 export function linksToLinear(body: string, fromPath: string, map: LinkMap, seen?: LinkSpellings): string {
   const remember = (url: string, raw: string) => seen?.set(url, [...(seen.get(url) ?? []), raw]);
+  /** Path → the superseded ids that name it: a link by one of them comes back with the same spelling. */
+  const aliasesOf = new Map<string, string[]>();
+  for (const [id, path] of map.aliases ?? []) aliasesOf.set(path, [...(aliasesOf.get(path) ?? []), id]);
+  const urlOf = (id: string, fragment: string | undefined) => {
+    const raw = `<${map.base}/${id}${fragment === undefined ? '' : `#${encodeFragment(fragment)}`}>`;
+    return { raw, url: destinationUrl(raw) ?? raw.slice(1, -1) };
+  };
   return rewrite(body, (destination) => {
     const original = body.slice(destination.from, destination.to);
     // A document URL the file already has comes back as it is.
@@ -147,8 +156,9 @@ export function linksToLinear(body: string, fromPath: string, map: LinkMap, seen
     if (target === undefined) return undefined;
     const id = map.ids.get(target.path);
     if (id === undefined) return undefined;
-    const raw = `<${map.base}/${id}${target.fragment === undefined ? '' : `#${encodeFragment(target.fragment)}`}>`;
-    remember(destinationUrl(raw) ?? raw.slice(1, -1), original);
+    const { raw, url } = urlOf(id, target.fragment);
+    remember(url, original);
+    for (const alias of aliasesOf.get(target.path) ?? []) remember(urlOf(alias, target.fragment).url, original);
     return raw;
   });
 }
@@ -191,7 +201,7 @@ export function linksFromLinear(content: string, fromPath: string, map: LinkMap,
     const rest = destination.url.slice(prefix.length);
     const hash = rest.indexOf('#');
     const id = hash === -1 ? rest : rest.slice(0, hash);
-    const path = paths.get(id);
+    const path = paths.get(id) ?? map.aliases?.get(id);
     if (path === undefined) return undefined;
     return `<${relativeLink(fromPath, path)}${hash === -1 ? '' : rest.slice(hash)}>`;
   });

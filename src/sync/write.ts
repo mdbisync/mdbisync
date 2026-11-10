@@ -30,6 +30,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
 import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, SYNC_IDENTITY, type WriteStop, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from '../initial-sync/transform.ts';
+import { linkDestinations, resolveRelative } from '../initial-sync/links.ts';
 import {
   type CommitIdentity,
   type IdEntry,
@@ -45,6 +46,7 @@ import {
   readBlobs,
   readIds,
   readReservedIds,
+  readSupersededIds,
   readUploads,
   UPLOADS_REBUILT,
   uploadsRebuilding,
@@ -234,6 +236,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // Step 3.
   const ids = await readIds(git, expected.ids);
   const reserved = await readReservedIds(git, expected.ids);
+  const supersededBefore = await readSupersededIds(git, expected.ids);
   const knownId = knownIdLookup(git, expected.ids, ids);
   const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations: await readKeptAnnotations(git, expected.ids) });
   // The tracked branch has nothing new: only the documents the cache rebuild relinks are written.
@@ -344,6 +347,55 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // While the cache is filled again, the URLs it held are unknown: a document that links a file cannot be checked
   // against the tip, and its write goes ahead (see `holdsVersion`).
   const tipUploads = cacheLost ? new Map<string, string>() : new Map(uploads);
+  // A new document whose reserved id Linear already gives another one is created under a new id, but the documents an
+  // earlier run wrote link the reserved one. By superseded id, the path it named; kept from earlier runs until every
+  // document that links the path is written with its new id.
+  // A target git renamed since keeps its superseded ids under its new path.
+  const movedTo = new Map([...merge.unchanged, ...merge.changes].flatMap((change) => (change.kind === 'keep' && change.from !== change.to ? [[change.from, change.to] as const] : [])));
+  const superseded = new Map(
+    [...supersededBefore].map(([id, path]) => [id, movedTo.get(path) ?? path] as const)
+      .filter(([id, path]) => resultFiles.has(path) && documentIds.has(path) && documentIds.get(path) !== id),
+  );
+  for (const [path, id] of reserved) if (documentIds.has(path) && documentIds.get(path) !== id) superseded.set(id, path);
+  /** Documents whose text links a path with a superseded id, with those paths: each is written with the new id. */
+  const relinks = new Map<string, Set<string>>();
+  // Without transforms no link is written in Linear's form, so there is nothing to relink.
+  if (superseded.size > 0 && transforms.length > 0) {
+    const targets = new Set(superseded.values());
+    /** Records under `path` the superseded paths that `text`, the file at `from`, links. */
+    const linked = (path: string, text: string, from = path) => {
+      const found = linkDestinations(splitFile(text).body).flatMap((destination) => {
+        const target = resolveRelative(from, destination.url)?.path;
+        return target !== undefined && targets.has(target) ? [target] : [];
+      });
+      if (found.length > 0) relinks.set(path, new Set([...(relinks.get(path) ?? []), ...found]));
+    };
+    const covered = new Set<string>();
+    for (const change of [...merge.unchanged, ...merge.changes]) {
+      if (change.kind === 'trash') {
+        // Linear holds the document until the trash lands.
+        covered.add(change.path);
+        const tip = merge.linear.get(change.path);
+        if (tip !== undefined) linked(change.path, textOf(tip));
+      }
+      if (change.kind !== 'keep') continue;
+      covered.add(change.from);
+      linked(change.to, textOf(merge.result.get(change.to) as SideFile));
+      // Linear holds the tip's text until the write lands: a link git removed is still there if the write fails.
+      const tip = merge.linear.get(change.from);
+      if (tip !== undefined) linked(change.to, textOf(tip), change.from);
+    }
+    // A mapped document this run does not write (git could not merge its file, the sync leaves the file out, or its
+    // rename waits) keeps the superseded id until a later run writes it.
+    const rest = [...ids.keys()].flatMap((path) => {
+      const oid = covered.has(path) ? undefined : (resultFiles.get(path) ?? linearFiles.get(path));
+      return oid === undefined ? [] : [[path, oid] as const];
+    });
+    const blobs = await readBlobs(git, rest.map(([, oid]) => oid));
+    for (const [path, oid] of rest) linked(path, (blobs.get(oid) as Buffer).toString('utf8'));
+  }
+  /** The superseded ids to keep: a document that links the path was neither written with the new id nor trashed. */
+  const nextSuperseded = () => new Map([...superseded].filter(([, path]) => [...relinks].some(([document, paths]) => paths.has(path) && !stored.has(document) && !result.trashed.includes(document))));
 
   let written = 0;
   /** When the current batch's re-read answered. */
@@ -465,7 +517,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    * changed (an image with new bytes gets a new upload URL). Each document
    * whose text names a file that differs between the tip and the merge
    * result is compared in Linear's form, and those that differ join the
-   * changes.
+   * changes. So does each document that links a path by a superseded id.
    */
   async function findLinkedFileChanges(): Promise<void> {
     if (transforms.length === 0) return;
@@ -476,10 +528,17 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // A moved document is always compared: a relative link may now point at another file.
     // Documents with the same text: those needing nothing, and those only renamed or moved (their write must
     // carry the new link too).
-    const sameText = [...merge.unchanged, ...merge.changes.filter((change): change is KeepChange => change.kind === 'keep' && !change.content)];
+    const keptText = [...merge.unchanged, ...merge.changes.filter((change): change is KeepChange => change.kind === 'keep' && !change.content)];
+    // A document that links a path by its superseded id is written with the new one. Linear may hold either (an
+    // earlier run may have written it already): the write compares, and sends nothing when Linear holds the new text.
+    for (const change of keptText) if (relinks.has(change.to)) markContent(change);
+    const sameText = keptText.filter((change) => !relinks.has(change.to));
     /** While the cache is filled again: documents that link a cached file, with the text they get from it. */
     const relinked: Array<{ change: KeepChange; written: string }> = [];
-    if (!cacheLost && changedNames.size === 0 && !sameText.some((change) => change.from !== change.to)) return;
+    if (!cacheLost && changedNames.size === 0 && !sameText.some((change) => change.from !== change.to)) {
+      sortChanges();
+      return;
+    }
     // Comparing forms must not upload: an uncached file already needs a
     // write. Only the write loop sends its bytes and handles its failures.
     const comparisonTransforms = options.transforms?.() ?? [];
@@ -521,11 +580,15 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       }
       for (const { change, written } of relinked) if (held?.get(change.id) !== written) markContent(change);
     }
-    merge.changes.sort((a, b) => compare(changePath(a), changePath(b)));
+    sortChanges();
 
     function markContent(change: KeepChange): void {
       if (merge.changes.includes(change)) change.content = true;
       else merge.changes.push({ ...change, content: true });
+    }
+
+    function sortChanges(): void {
+      merge.changes.sort((a, b) => compare(changePath(a), changePath(b)));
     }
   }
 
@@ -573,8 +636,9 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    * seen the document as it is now. Compared in Linear's form: the tip's
    * file through the transforms (images become their cached upload URLs).
    */
-  async function unchangedSinceCapture(document: LinearDocument, path: string): Promise<boolean> {
-    if (document.trashed || document.archivedAt !== null) return false;
+  async function unchangedSinceCapture(held: LinearDocument, path: string): Promise<boolean> {
+    if (held.trashed || held.archivedAt !== null) return false;
+    const document = withCurrentIds(held);
     const synchronized = merge.linear.get(path);
     if (synchronized !== undefined) return holdsVersion(document, synchronized, textOf(synchronized), tipTransforms, true);
     // The tip does not synchronize the file (a lint finding, a collision, not text): it records the git text, and
@@ -589,6 +653,28 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       await transform.prepare?.({ git, tracked: baseline.commit, linear: withoutUploads(linear), plan, uploads: tipUploads, documentIds });
     }
     return holdsVersion(document, baseline.file, baseline.text, baselineTransforms, false);
+  }
+
+  /**
+   * The document with each link by a superseded id read as the link by its
+   * path's current id: written before the id was superseded, it is the same
+   * text. Any mix of old and new ids in one document compares the same way.
+   */
+  function withCurrentIds(document: LinearDocument): LinearDocument {
+    if (superseded.size === 0 || document.content == null) return document;
+    const held = document.content;
+    // Only link destinations: a URL quoted in code or prose is text, and stays as it is.
+    let content = '';
+    let at = 0;
+    for (const { from, to, url } of linkDestinations(held)) {
+      const id = /^https:\/\/linear\.app\/[^/]+\/document\/([^/#?]+)/.exec(url)?.[1];
+      const path = id === undefined ? undefined : superseded.get(id);
+      if (id === undefined || path === undefined) continue;
+      content += held.slice(at, from) + held.slice(from, to).replace(id, documentIds.get(path) as string);
+      at = to;
+    }
+    content += held.slice(at);
+    return content === held ? document : { ...document, content };
   }
 
   /**
@@ -794,7 +880,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   /** Pushes the id map on its own, with its lease, so a saved icon is durable before the mark replaces it. */
   async function pushIds(): Promise<void> {
     for (const path of nextIds.keys()) nextReserved.delete(path);
-    const next = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved });
+    const next = await commitIds(git, expected.ids, nextIds, identity, { message: IDS_MESSAGE, reserved: nextReserved, superseded: nextSuperseded() });
     const pushed = await pushAtomic(git, options.config, [{ ref: stateRef(options.config, 'ids'), expected: expected.ids, next }]);
     if (!pushed.ok) throw new StateMovedError();
     expected.ids = next;
@@ -871,7 +957,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         return held ? [[document.id, document.updatedAt] as const] : [];
       }),
     );
-    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: withRecorded(IDS_MESSAGE, asWritten), reserved: nextReserved, always: asWritten.size > 0 });
+    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: withRecorded(IDS_MESSAGE, asWritten), reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 });
     // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the
     // documents to relink, before they are changes) leaves the rest to the next run.
     const rebuilt = cacheLost && merged && result.stopped === undefined ? { message: UPLOADS_REBUILT, always: true } : {};

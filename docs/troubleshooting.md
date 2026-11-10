@@ -244,7 +244,8 @@ The `linear-format` hook's rules leave a file out too until it is fixed:
 `footnote`, `subscript`, `table-escaped-pipe`, `table-hash-cell`,
 `image-in-link`, `table-alignment`, `link-title`, `image-title`,
 `code-in-emphasis`, `hard-break-backslash`, `git-conflict-marker`,
-`url-in-html` and `block-first-in-list-item`. Each is described, with its fix, in
+`url-in-html`, `block-first-in-list-item`, `image-not-in-repository` and
+`image-file-missing`. Each is described, with its fix, in
 [linear-format.md](linear-format.md#lint-rules).
 
 The initial sync also lists:
@@ -391,7 +392,7 @@ content).
 - `invalid repository path "<path>"`
 - `git object <id> is missing`, `git object <id> is a <type>, not a blob`
 - `a push names the same ref twice`
-- `ids.json has an invalid entry for a path`; `reserved-ids.json`, `uploads.json` or `written.json` `has an invalid entry`
+- `ids.json has an invalid entry for a path`; `reserved-ids.json`, `superseded-ids.json`, `uploads.json` or `written.json` `has an invalid entry`
 - `<file> is missing in state commit <commit>`, `<file> in <commit> is not valid JSON`, `<file> in <commit> is not a JSON object`
 - `run initial sync first`
 - ``the sync writes to Linear only after initial sync has recorded `linear` ``
