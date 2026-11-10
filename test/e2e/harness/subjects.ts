@@ -348,6 +348,9 @@ async function syncCommits(ctx: RunContext): Promise<Map<string, string[]>> {
   return result;
 }
 
+/** The identity the repository's CI commits its fixes under (the pre-commit example): GitHub Actions' bot account. */
+export const CI_IDENTITY = 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>';
+
 /** Who a push record names, for a failure: a bot by its login, a person only as a user account. */
 function actorKind(actor: PushActivity['actor']): string {
   if (actor === null) return 'no recorded actor';
@@ -1162,14 +1165,22 @@ export const SUBJECTS: Record<string, Compute> = {
     if (merged.length === 0) return null;
     // The list endpoint omits merged_by; read each merged pull request.
     const mergers = await Promise.all(merged.map(async (pr) => (await env.ctx.live?.rest.request<{ merged_by: { login: string } | null }>('GET', `/pulls/${pr.number}`))?.merged_by?.login));
-    return mergers.every(isAppBot) ? 'app-bot' : (mergers.find((login) => !isAppBot(login)) ?? null);
+    // With the App's token the harness knows the App's exact login, so the job's own `github-actions[bot]` does not pass for it.
+    const app = env.ctx.live?.githubAppLogin;
+    const isApp = (login: string | undefined) => (app === undefined ? isAppBot(login) : login === app);
+    return mergers.every(isApp) ? 'app-bot' : (mergers.find((login) => !isApp(login)) ?? null);
   },
+  // 'merge' when every merged pull request was merged with a merge commit.
   'pullRequests.mergeKind': async (env) => {
-    const merged = (await pullRequestsSinceStart(env.ctx)).find((pr) => pr.merged_at !== null);
-    if (merged?.merge_commit_sha === undefined || merged.merge_commit_sha === null) return null;
+    const merged = (await pullRequestsSinceStart(env.ctx)).filter((pr) => pr.merged_at !== null);
+    const shas = merged.map((pr) => pr.merge_commit_sha);
+    if (shas.length === 0 || shas.some((sha) => sha === undefined || sha === null)) return null;
     const git = await person(env.ctx);
-    await git.run(['fetch', '--quiet', 'origin', merged.merge_commit_sha], { okCodes: [0, 1, 128] });
-    return (await parents(git, merged.merge_commit_sha)).length > 1 ? 'merge' : 'squash-or-rebase';
+    for (const sha of shas as string[]) {
+      await git.run(['fetch', '--quiet', 'origin', sha], { okCodes: [0, 1, 128] });
+      if ((await parents(git, sha)).length <= 1) return 'squash-or-rebase';
+    }
+    return 'merge';
   },
   // The merge commit of the one merged pull request; a run that merged it reports the same commit.
   'pullRequests.mergeCommit': async (env) => {
@@ -1450,10 +1461,21 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   // The author and committer the sync's own commits name. 'app-bot' means every one names the App the harness
   // and the workflows hold, as GitHub links a commit to it: `<slug>[bot] <<id>+<slug>[bot]@users.noreply.github.com>`.
-  // Anything else is the distinct `name <email>` lines, sorted.
+  // Anything else is the distinct `name <email>` lines, sorted. Two kinds of commit on the sync's refs are not the
+  // sync's: GitHub's merge commit of a merged sync pull request (committer GitHub), which a later run's record takes
+  // in, and a fixing commit the repository's CI pushes onto the sync branch under its own fixed identity.
   'writes.commitIdentity': async (env) => {
     const git = await person(env.ctx);
-    const commits = [...new Set([...(await syncCommits(env.ctx)).values()].flat())];
+    const merges = new Set((await pullRequestsSinceStart(env.ctx)).map((pr) => pr.merge_commit_sha).filter((sha): sha is string => typeof sha === 'string' && sha !== ''));
+    const candidates = [...new Set([...(await syncCommits(env.ctx)).values()].flat())].filter((commit) => !merges.has(commit));
+    if (candidates.length === 0) return null;
+    const ci = `${CI_IDENTITY} ${CI_IDENTITY}`;
+    const commits: string[] = [];
+    for (const line of (await git.text(['log', '--no-walk=unsorted', '--format=%H %an <%ae> %cn <%ce>', ...candidates])).split('\n')) {
+      if (line === '') continue;
+      const space = line.indexOf(' ');
+      if (line.slice(space + 1) !== ci) commits.push(line.slice(0, space));
+    }
     if (commits.length === 0) return null;
     const lines = (await git.text(['log', '--no-walk=unsorted', '--format=%an <%ae>%n%cn <%ce>', ...commits])).split('\n');
     const identities = sorted(new Set(lines.filter((line) => line !== '')));

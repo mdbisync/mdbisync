@@ -62,9 +62,10 @@ describe('sync: lost state and deleted branches', () => {
   const reportFile = () => join(fixture.root, 'report.json');
   const summaryFile = () => join(fixture.root, 'summary.md');
 
-  beforeEach(async () => {
+  /** Seeds the remote, one commit per tree, and runs initial sync and the runs that settle it. */
+  async function start(seeds: ReadonlyArray<Record<string, string | Buffer>>) {
     fixture = await createFixture();
-    await fixture.seed(TREE);
+    for (const seed of seeds) await fixture.seed(seed);
     cwd = (await fixture.clone('engine')).dir;
     personDir = join(fixture.root, 'person');
     await new Git(fixture.root).run(['clone', '--quiet', fixture.url, personDir]);
@@ -83,7 +84,9 @@ describe('sync: lost state and deleted branches', () => {
     assert.equal(initial.result.exitCode, 0, initial.result.stderr);
     // Settle: Linear's form of the initial text reaches the tracked branch and the state converges.
     await settle();
-  });
+  }
+
+  beforeEach(() => start([TREE]));
   afterEach(() => fixture.cleanup());
 
   const env = (extra: Record<string, string>) => ({
@@ -153,7 +156,7 @@ describe('sync: lost state and deleted branches', () => {
   const ids = async () => JSON.parse(await show(`${STATE('ids')}:ids.json`)) as Record<string, { id: string }>;
   const live = () => world.linear.documents.filter((document) => document.trashed !== true && document.archivedAt === undefined);
 
-  async function commit(changes: Record<string, string | null>) {
+  async function commit(changes: Record<string, string | Buffer | null>) {
     await person.run(['pull', '--quiet', '--ff-only']);
     for (const [path, content] of Object.entries(changes)) {
       if (content === null) await rm(join(personDir, path));
@@ -225,7 +228,37 @@ describe('sync: lost state and deleted branches', () => {
     await assertConverged();
   });
 
-  it('L5-13: files left out for a missing image are not matched when the ids ref is rebuilt, as the run leaves them out', async () => {
+  /** Every path of the tracked branch and the sync branch. */
+  async function paths(): Promise<string[]> {
+    const list = async (ref: string) => (await remoteRef(fixture, ref)) === null ? [] : (await fixture.remote.text(['ls-tree', '-r', '--name-only', ref])).split('\n');
+    return [...new Set([...(await list('refs/heads/main')), ...(await list(SYNC_BRANCH))])].filter(Boolean).sort();
+  }
+
+  /**
+   * Loses the ids ref and runs: every left-out file gets its document back, and no second file or document appears.
+   * `unmatched` files of the count never had a document.
+   */
+  async function assertLeftOutKeepDocuments(left: string[], unmatched = 0) {
+    await settle();
+    const before = await ids();
+    for (const path of left) assert.ok(before[path] !== undefined, `${path} keeps its id while left out`);
+    const documents = world.linear.documents.length;
+    const files = await paths();
+    await fixture.remote.run(['update-ref', '-d', STATE('ids')]);
+
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(run.writes, []);
+    assert.deepEqual(run.report.capture?.rebuiltIds, { matched: Object.keys(before).length, files: Object.keys(before).length + unmatched });
+    assert.deepEqual(await ids(), before, 'every path has its old id again');
+    await settle();
+    assert.deepEqual(await ids(), before);
+    assert.deepEqual(await paths(), files, 'no second file');
+    assert.equal(world.linear.documents.length, documents, 'no document is created');
+    return before;
+  }
+
+  it('L5-13: files left out for a missing image keep their documents when the ids ref is rebuilt, as the run keeps them', async () => {
     await commit({ 'eng/media/diagram.png': null });
     const left = await sync();
     assert.equal(left.result.exitCode, 0, left.result.stderr);
@@ -234,17 +267,97 @@ describe('sync: lost state and deleted branches', () => {
       { path: 'eng/notes/chart.md', rules: ['image-file-missing'] },
       { path: 'eng/notes/diagram.md', rules: ['image-file-missing'] },
     ]);
+    const before = await assertLeftOutKeepDocuments(['eng/notes/chart.md', 'eng/notes/diagram.md']);
+
+    // Fixed, the file updates its original document.
+    await commit({ 'eng/media/diagram.png': DIAGRAM, 'eng/notes/diagram.md': `# Diagram\n\n![Diagram](../media/diagram.png)\n\nEdited in git. ${CANARY}\n` });
+    const documents = world.linear.documents.length;
+    await settle();
+    assert.match(world.linear.documents.find((document) => document.id === before['eng/notes/diagram.md']?.id)?.content ?? '', /Edited in git\./);
+    assert.equal(world.linear.documents.length, documents);
+    assert.deepEqual(await ids(), before);
+    await assertConverged();
+  });
+
+  it('L5-13: a file left out for a footnote keeps its document when the ids ref is rebuilt; fixed, it updates that document', async () => {
+    await commit({ 'eng/backend/notes.md': `# Notes\n\nFirst paragraph.[^1] ${CANARY}\n\n[^1]: A remark.\n` });
+    const left = await sync();
+    assert.equal(left.result.exitCode, 0, left.result.stderr);
+    assert.deepEqual(left.report.sync?.leftOut, [{ path: 'eng/backend/notes.md', rules: ['footnote'] }]);
+    const before = await assertLeftOutKeepDocuments(['eng/backend/notes.md']);
+
+    await commit({ 'eng/backend/notes.md': `# Notes\n\nFirst paragraph, edited in git. ${CANARY}\n` });
+    const documents = world.linear.documents.length;
+    await settle();
+    assert.match(world.linear.documents.find((document) => document.id === before['eng/backend/notes.md']?.id)?.content ?? '', /edited in git/);
+    assert.equal(world.linear.documents.length, documents);
+    assert.deepEqual(await ids(), before);
+    await assertConverged();
+  });
+
+  it('L5-13: a file left out for a duplicate title keeps its document when the ids ref is rebuilt; the new file gets none', async () => {
+    await commit({ 'combined/Guide.md': `# Guide\n\nAnother guide. ${CANARY}\n` });
+    const left = await sync();
+    assert.equal(left.result.exitCode, 0, left.result.stderr);
+    assert.deepEqual(left.report.sync?.leftOut, [
+      { path: 'combined/Guide.md', rules: ['duplicate-title'] },
+      { path: 'combined/guide.md', rules: ['duplicate-title'] },
+    ]);
+    const before = await assertLeftOutKeepDocuments(['combined/guide.md'], 1);
+    assert.equal(before['combined/Guide.md'], undefined);
+
+    await commit({ 'combined/Guide.md': null, 'combined/guide.md': `# Guide\n\nHow to start, edited in git. ${CANARY}\n` });
+    const documents = world.linear.documents.length;
+    await settle();
+    assert.match(world.linear.documents.find((document) => document.id === before['combined/guide.md']?.id)?.content ?? '', /edited in git/);
+    assert.equal(world.linear.documents.length, documents);
+    assert.deepEqual(await ids(), before);
+    await assertConverged();
+  });
+
+  it('L5-13: a left-out file added where a removed file was gets no id from the rebuild; the trashed document stays the old file\'s', async () => {
+    const old = (await ids())['eng/backend/notes.md']!.id;
+    await commit({ 'eng/backend/notes.md': null });
+    await settle();
+    assert.equal(world.linear.documents.find((document) => document.id === old)?.trashed, true);
+    await commit({ 'eng/backend/notes.md': `# Notes\n\nA new page.[^1] ${CANARY}\n\n[^1]: A remark.\n` });
+    await settle();
     const before = await ids();
+    assert.equal(before['eng/backend/notes.md'], undefined);
+    const files = await paths();
     await fixture.remote.run(['update-ref', '-d', STATE('ids')]);
+
     const run = await sync();
     assert.equal(run.result.exitCode, 0, run.result.stderr);
-    // Every file whose images are files of the record gets its document back; the two left out are not matched.
-    assert.deepEqual(run.report.capture?.rebuiltIds, { matched: Object.keys(before).length - 2, files: Object.keys(before).length });
-    const after = await ids();
-    for (const [path, entry] of Object.entries(before)) {
-      if (path === 'eng/notes/chart.md' || path === 'eng/notes/diagram.md') assert.equal(after[path], undefined, path);
-      else assert.equal(after[path]?.id, entry.id, path);
-    }
+    assert.deepEqual(run.writes, []);
+    assert.deepEqual(await ids(), before);
+    await settle();
+    assert.deepEqual(await paths(), files, 'the new file stays');
+    assert.match(await show('refs/heads/main:eng/backend/notes.md'), /A new page/);
+  });
+
+  it('L5-13: a file left out since the initial sync gets no id from the rebuild, though it was synchronizable before it and a document has its title', async () => {
+    await fixture.cleanup();
+    // Before the initial sync the file had no footnote: the tracked history before the record does not count.
+    await start([{ ...TREE, 'combined/aside.md': `# Aside\n\nA remark. ${CANARY}\n` }, { 'combined/aside.md': `# Aside\n\nA remark.[^1] ${CANARY}\n\n[^1]: The note.\n` }]);
+    assert.equal((await ids())['combined/aside.md'], undefined);
+    // A document of that title written in Linear, never the file's: capture takes it as a file of its own.
+    world.linear.documents.push({ id: 'doc-aside', title: 'aside', projectId: 'project-handbook', createdAt: '2026-01-03T00:00:00.000Z', content: `# Aside\n\nWritten in Linear. ${CANARY}\n` });
+    await settle();
+    const before = await ids();
+    assert.equal(before['combined/aside.md'], undefined);
+    const path = Object.keys(before).find((key) => before[key]?.id === 'doc-aside');
+    assert.ok(path !== undefined, 'the document is captured as a file');
+    const files = await paths();
+    await fixture.remote.run(['update-ref', '-d', STATE('ids')]);
+
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(run.writes, []);
+    assert.deepEqual(await ids(), before, 'the left-out file stays unmapped; the document keeps its own file');
+    await settle();
+    assert.deepEqual(await paths(), files);
+    assert.equal(world.linear.documents.find((document) => document.id === 'doc-aside')?.content, `# Aside\n\nWritten in Linear. ${CANARY}\n`, 'the document is untouched');
   });
 
   it('L5-13: a document renamed in Linear while the ids ref was lost comes back as a new file with its id; the old file keeps a document of its own', async () => {

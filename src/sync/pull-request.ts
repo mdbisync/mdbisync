@@ -19,7 +19,7 @@
 // the same refusal on the same head and tracked branch reads the note back
 // and reports a setup error: nothing will change until a person does.
 
-import { RECORD_MESSAGE } from '../initial-sync/index.ts';
+import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import {
   type CheckState,
   type GitHubRepository,
@@ -290,7 +290,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 /** Whether `commit` is an initial sync's record, in either direction. */
 async function isInitialRecord(git: Git, commit: Oid): Promise<boolean> {
   const [subject] = (await git.text(['show', '-s', '--format=%s', commit])).split('\n');
-  return subject === RECORD_MESSAGE || subject === INITIAL_SYNC_FROM_LINEAR_RECORD;
+  return INITIAL_RECORD_SUBJECTS.has(subject ?? '');
 }
 
 /**

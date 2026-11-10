@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { it } from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { cleanupAndCount, createRunContext } from './runner.ts';
+import { loadScenarios } from './spec.ts';
 import { cleanupKilledTokens } from './token-cleanup.ts';
 
-it('revokes multiple killed-run tokens through a proxy in the parent process', async () => {
+it('revokes killed-run tokens and expired setup tokens through a proxy in the parent process', async () => {
   const revoked: string[] = [];
   const server = createServer(async (request, response) => {
     let body = '';
@@ -23,5 +28,44 @@ it('revokes multiple killed-run tokens through a proxy in the parent process', a
     assert.match(output, /post: revoked/);
     assert.ok(!output.includes('orphan-one') && !output.includes('orphan-two'));
     assert.ok(!output.includes('::add-mask::'));
+    const root = mkdtempSync(join(tmpdir(), 'setup-token-'));
+    try {
+      const { ctx, abort } = createRunContext(loadScenarios()[0]!, 'abcdef', root, {
+        stateDir: root, outDir: root, config: {} as never, log: () => {},
+      });
+      ctx.proxy = { tokens: () => ['setup-orphan'], url: `http://127.0.0.1:${address.port}` } as never;
+      abort.abort();
+      assert.deepEqual(await cleanupAndCount(ctx), { ok: true });
+      assert.deepEqual(revoked, ['orphan-one', 'orphan-two', 'setup-orphan']);
+    } finally { rmSync(root, { recursive: true, force: true }); }
   } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+});
+
+it('keeps aborted setup cleanup failed when post warns instead of confirming revocation', async () => {
+  for (const failure of ['rejected', 'disconnected'] as const) {
+    const server = createServer((request, response) => {
+      request.resume();
+      if (failure === 'disconnected') { request.socket.destroy(); return; }
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end('{"success":false}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const root = mkdtempSync(join(tmpdir(), 'setup-token-failed-'));
+    try {
+      const address = server.address();
+      assert.ok(address && typeof address !== 'string');
+      const { ctx, abort } = createRunContext(loadScenarios()[0]!, 'abcdef', root, {
+        stateDir: root, outDir: root, config: {} as never, log: () => {},
+      });
+      ctx.proxy = { tokens: () => ['unrevoked-token'], url: `http://127.0.0.1:${address.port}` } as never;
+      abort.abort();
+      const cleanup = await cleanupAndCount(ctx);
+      assert.equal(cleanup.ok, false, failure);
+      assert.match(cleanup.detail!, /setup tokens: token revocation was not confirmed/);
+      assert.ok(!cleanup.detail!.includes('unrevoked-token'));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }
 });
