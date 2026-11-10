@@ -1,44 +1,21 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { loadBank } from './bank.ts';
-import type { ProbeRun } from './probe.ts';
-import { findDrift } from './record.ts';
+import { goldenMarkdownPath, goldenYjsPath, loadBank, readOptional } from './bank.ts';
+import { readManifest } from './record.ts';
 
 const bank = loadBank();
+const manifest = readManifest(bank);
 
-for (const [name, href, canary] of [
-  ['audio-mp3', '../assets/clip.mp3', 'kx-c508f251'],
-  ['audio-not-uploaded', '../media/voice-note.mp3', 'kx-f7252e1b'],
-]) {
-  test(`the recorded ${name} form matches Linear's stable list-item link`, () => {
+// These fixtures have completed their live recording. The general bank
+// validator also permits fixtures still waiting for their first probe.
+for (const name of ['audio-mp3', 'audio-not-uploaded']) {
+  test(`${name} has a complete fixed-point probe record`, () => {
     const file = `list-items/${name}.md`;
-    const fixture = bank.fixtures.find((entry) => entry.file === file)!;
-    const markdown = `* [Voice note from the site visit](<${href}>)\n\nRef ${canary}`;
-    // Observed for both uploaded and unresolved MP3 links: an ordinary link
-    // inside the list paragraph, with no attachment or audio node.
-    const yjs = {
-      roots: ['prosemirror'],
-      content: [
-        { type: 'bullet_list', children: [
-          { type: 'list_item', children: [
-            { type: 'paragraph', children: [
-              { text: 'Voice note from the site visit', marks: { attribution: 'user', link: { href, noEmbed: null } } },
-            ] },
-          ] },
-        ] },
-        { type: 'paragraph', children: [{ text: `Ref ${canary}`, marks: { attribution: 'user' } }] },
-      ],
-    };
-    const run: ProbeRun = {
-      runId: 'recorded-audio', startedAt: '', facts: {}, uploads: [], cleanup: [],
-      fixtures: [{
-        ...fixture, source: readFileSync(join(bank.dir, file), 'utf8'),
-        first: markdown, second: markdown, fixedPoint: true, yjs, yjsStable: true,
-      }],
-    };
-    assert.deepEqual(findDrift(bank, run), []);
+    assert.ok(bank.fixtures.some((fixture) => fixture.file === file), `${file} is indexed`);
+    assert.deepEqual(manifest?.fixtures[file], { yjs: 'recorded', fixedPoint: true });
+    assert.notEqual(readOptional(join(bank.dir, goldenMarkdownPath(file))), undefined, 'recorded Markdown exists');
+    assert.notEqual(readOptional(join(bank.dir, goldenYjsPath(file))), undefined, 'recorded Yjs exists');
   });
 }
