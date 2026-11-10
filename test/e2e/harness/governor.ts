@@ -222,6 +222,19 @@ export class Governor {
     this.#sleep = options.sleep ?? ((ms) => sleep(ms).then(() => undefined));
   }
 
+  /**
+   * Whether two scenarios cannot hold admission at the same time, so a
+   * worker of the same batch should not wait in admission for one while the
+   * other runs. Offline scenarios are never admitted. Shared admission keeps
+   * every live scenario apart except two zone-concurrent ones; host-local
+   * admission keeps only full slices apart.
+   */
+  conflicts(a: Scenario, b: Scenario): boolean {
+    if (a.setup.state === 'offline' || b.setup.state === 'offline') return false;
+    if (this.#options.shared !== undefined) return !zoneConcurrent(a) || !zoneConcurrent(b);
+    return a.slice === 'full' && b.slice === 'full';
+  }
+
   async #admitShared(scenario: Scenario, runId: string, estimated: Estimate, appName?: string, resumeOwner?: string): Promise<Grant> {
     const options = this.#options;
     const shared = options.shared!;
