@@ -359,15 +359,35 @@ export interface CommitStateOptions {
 export const RESERVED_IDS_FILE = 'reserved-ids.json';
 export type ReservedIds = Map<string, string>;
 
-export async function readReservedIds(git: Git, commit: Oid | null): Promise<ReservedIds> {
+export function readReservedIds(git: Git, commit: Oid | null): Promise<ReservedIds> {
+  return readStringMap(git, commit, RESERVED_IDS_FILE);
+}
+
+/**
+ * Ids a path's document did not get, by id: the id reserved for a new
+ * document that Linear already gave another one (its create landed with the
+ * answer lost, and a person then trashed, archived or retitled it), so the
+ * document was created under a new id. Documents written before may still
+ * link the old id. Kept until every document that links the path has been
+ * written with the new one.
+ */
+export const SUPERSEDED_IDS_FILE = 'superseded-ids.json';
+export type SupersededIds = Map<string, string>;
+
+export function readSupersededIds(git: Git, commit: Oid | null): Promise<SupersededIds> {
+  return readStringMap(git, commit, SUPERSEDED_IDS_FILE);
+}
+
+/** A JSON object of non-empty strings beside `ids.json`; empty when the commit does not have the file. */
+async function readStringMap(git: Git, commit: Oid | null, file: string): Promise<Map<string, string>> {
   if (commit === null) return new Map();
-  const read = await git.run(['cat-file', 'blob', `${commit}:${RESERVED_IDS_FILE}`], { okCodes: [0, 128] });
+  const read = await git.run(['cat-file', 'blob', `${commit}:${file}`], { okCodes: [0, 128] });
   if (read.code !== 0) return new Map();
-  const data = await readJsonFile(git, commit, RESERVED_IDS_FILE);
-  const map: ReservedIds = new Map();
-  for (const [path, id] of Object.entries(data)) {
-    if (typeof id !== 'string' || id === '') throw new Error(`${RESERVED_IDS_FILE} has an invalid entry`);
-    map.set(path, id);
+  const data = await readJsonFile(git, commit, file);
+  const map = new Map<string, string>();
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value !== 'string' || value === '') throw new Error(`${file} has an invalid entry`);
+    map.set(key, value);
   }
   return map;
 }
@@ -394,22 +414,23 @@ export async function readWrittenHashes(git: Git, commit: Oid | null): Promise<M
 }
 
 /**
- * Commits the id map (and, when there are any, the reserved ids and the
- * written hashes) on top of `parent`. Returns `parent` when nothing
- * changed, unless `always`.
+ * Commits the id map (and, when there are any, the reserved ids, the
+ * superseded ids and the written hashes) on top of `parent`. Returns
+ * `parent` when nothing changed, unless `always`.
  */
 export function commitIds(
   git: Git,
   parent: Oid | null,
   ids: IdMap,
   identity: CommitIdentity,
-  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string> } = {},
+  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; superseded?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string> } = {},
 ): Promise<Oid> {
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
   const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry.saved === undefined ? { id: entry.id } : { id: entry.id, saved: entry.saved }]));
   const files = new Map<string, unknown>([[IDS_FILE, data]]);
   const sorted = (map: ReadonlyMap<string, string>) => Object.fromEntries([...map.entries()].sort(([a], [b]) => compareStrings(a, b)));
   if (options.reserved !== undefined && options.reserved.size > 0) files.set(RESERVED_IDS_FILE, sorted(options.reserved));
+  if (options.superseded !== undefined && options.superseded.size > 0) files.set(SUPERSEDED_IDS_FILE, sorted(options.superseded));
   if (options.written !== undefined && options.written.size > 0) files.set(WRITTEN_FILE, sorted(options.written));
   return commitJsonFiles(git, parent, files, options.message ?? 'Update document ids', identity, options.always === true);
 }
