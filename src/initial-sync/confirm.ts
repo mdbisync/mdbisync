@@ -55,7 +55,7 @@ import {
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
-import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from './transform.ts';
+import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
 import { withRecorded } from '../sync/recorded.ts';
 
 /** The subject of an `ids` commit made while an initial sync is still writing. */
@@ -317,7 +317,12 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         // content is also compared after the transforms' inverses, with the
         // file's own body. Normalize the restored text too: restoring document
         // links can put back their original spelling in otherwise formatted text.
-        if (document !== undefined && (holdsBody(document.content ?? '', body) || holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body)), source))) {
+        // That inverse comparison alone also accepts seeded relative links:
+        // require stored destinations to match what was sent before using it.
+        if (document !== undefined && (holdsBody(document.content ?? '', body) || (
+          sameLinkDestinations(document.content ?? '', body)
+          && holdsBody(fixText(restoreBody(transforms, path, document.content ?? '', body)), source)
+        ))) {
           result.unchanged.push(path);
           remember(path, document);
           continue;

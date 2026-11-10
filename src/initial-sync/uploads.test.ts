@@ -103,7 +103,7 @@ describe('uploads of linked files in an initial sync', () => {
     assert.ok(!summary.includes(CANARY), 'the job summary holds content');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined });
-    return { result, report, summary };
+    return { result, report, summary, env };
   };
 
   const show = (spec: string) => fixture.remote.text(['show', spec]);
@@ -113,6 +113,84 @@ describe('uploads of linked files in an initial sync', () => {
   };
   const document = (world: FakeWorld, title: string) => world.linear.documents.find((d) => d.title === title && d.trashed !== true);
   const uploadOf = (world: FakeWorld, content: Buffer) => world.linear.uploads.filter((upload) => upload.bytes?.equals(content));
+
+  it('resolves links in matching seeded documents before treating their restored Markdown as unchanged', async () => {
+    // Seeded images can be byte-identical to the source; a seeded PDF list
+    // can differ only in presentation. Both still need hosted destinations.
+    const image = '# Equipment\n\n![Logo][logo]\n\n[logo]: ../media/diagram.png\n\n<details>\n<summary>Why?</summary>\n\nChoose equipment before day one.\n\n</details>';
+    const attachments = '# Policy\n\n![Status](pixel.png)\n\n## Attachments\n\n* \n  [Guide](files/report%202026.pdf)';
+    await fixture.seed({ 'eng/notes/equipment.md': image, 'eng/notes/policy.md': attachments });
+    const world = fakeWorld();
+    world.linear.store = (body) => fixText(body.replaceAll(`${UPLOADS_HOST}/`, 'uploaded/')).replaceAll('uploaded/', `${UPLOADS_HOST}/`);
+    const seeded = [
+      { id: 'seed-image', title: 'equipment', content: image },
+      { id: 'seed-file', title: 'policy', content: attachments.replace('* \n  [Guide](files/report%202026.pdf)', '* [Guide](<files/report%202026.pdf>)') },
+      { id: 'seed-links', title: 'a', content: A_BODY },
+    ].map((entry) => ({ ...entry, projectId: 'project-api', createdAt: '2026-01-01T00:00:00Z' }));
+    world.linear.documents.push(...seeded);
+    for (const entry of seeded) world.linear.comments.set(`comment-${entry.id}`, { documentContentId: entry.id, body: 'Keep this discussion.' });
+    const comments = structuredClone(world.linear.comments);
+
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.deepEqual(first.report.initialSync?.overwritten, ['eng/notes/a.md', 'eng/notes/equipment.md', 'eng/notes/policy.md']);
+    const ids = JSON.parse(await show('refs/mdbisync/ids:ids.json')) as Record<string, { id: string }>;
+    for (const entry of seeded) {
+      assert.equal(document(world, entry.title), entry, 'the matched document is updated in place');
+      assert.equal(ids[`eng/notes/${entry.title}.md`]?.id, entry.id);
+      assert.equal(entry.createdAt, '2026-01-01T00:00:00Z');
+    }
+    assert.deepEqual(world.linear.comments, comments);
+    const diagram = uploadOf(world, DIAGRAM)[0] as FakeUpload;
+    const pixel = uploadOf(world, PIXEL)[0] as FakeUpload;
+    const pdf = uploadOf(world, REPORT)[0] as FakeUpload;
+    assert.equal(document(world, 'equipment')?.content, world.linear.store(image.replace('../media/diagram.png', diagram.assetUrl)));
+    assert.equal(document(world, 'policy')?.content, world.linear.store(attachments.replace('pixel.png', pixel.assetUrl).replace('files/report%202026.pdf', pdf.assetUrl)));
+    assert.ok(document(world, 'a')?.content?.includes(`<https://linear.app/${world.linear.urlKey}/document/${document(world, 'b')!.id}>`));
+    const reformatted = first.report.initialSync?.reformatted ?? [];
+    assert.deepEqual(reformatted, ['eng/notes/a.md', 'eng/notes/equipment.md']);
+    assert.equal(first.report.record?.reformattedCount, 2);
+    for (const [path, source] of [['eng/notes/equipment.md', image], ['eng/notes/policy.md', attachments]] as const) {
+      assert.equal(await show(`refs/mdbisync/linear:${path}`), fixText(source));
+    }
+    assert.equal(world.linear.uploads.length, 3, 'shared files upload once');
+    const cache = JSON.parse(await show('refs/mdbisync/uploads:uploads.json')) as Record<string, string>;
+    assert.equal(cache[sha(DIAGRAM)], diagram.assetUrl);
+    assert.equal(cache[sha(PIXEL)], pixel.assetUrl);
+    assert.equal(cache[sha(REPORT)], pdf.assetUrl);
+
+    const writes = world.linear.writes.count;
+    const before = await refs();
+    const again = await run(world);
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    assert.equal(world.linear.writes.count, writes);
+    assert.deepEqual(await refs(), before);
+    assert.equal(world.linear.uploads.length, 3);
+    assert.ok(again.report.initialSync?.unchanged.includes('eng/notes/policy.md'));
+
+    // Adopt the reported presentation changes, as after merging the form PR.
+    const formatted: Record<string, string> = {};
+    for (const path of reformatted) formatted[path] = await show(`refs/mdbisync/linear:${path}`);
+    await fixture.seed(formatted);
+    const sync = await runCli(['sync'], { env: { ...first.env, MDBISYNC_DIRECTION: '', MDBISYNC_CONFIRM: '' }, cwd, fetch: fakeFetch(world) });
+    assert.equal(sync.exitCode, 0, sync.stderr);
+    assert.equal(world.linear.writes.count, writes);
+    assert.equal(world.linear.uploads.length, 3);
+    assert.deepEqual(world.github.pullRequests, [], 'the later sync opened a pull request');
+  });
+
+  it('does not repeat writes for a relative link whose source span cannot be rewritten', async () => {
+    await fixture.seed({ 'eng/notes/quoted.md': `# Quoted\n\n> [Notes](\n> b.md)\n\n* [Guide](files/report%202026.pdf)\n\n${CANARY}` });
+    const world = fakeWorld();
+    world.linear.store = (body) => fixText(body.replaceAll(`${UPLOADS_HOST}/`, 'uploaded/')).replaceAll('uploaded/', `${UPLOADS_HOST}/`);
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    const writes = world.linear.writes.count;
+    const again = await run(world);
+    assert.equal(again.result.exitCode, 0, again.result.stderr);
+    assert.equal(world.linear.writes.count, writes);
+    assert.ok(again.report.initialSync?.unchanged.includes('eng/notes/quoted.md'));
+  });
 
   it('L1-07 and L1-08: uploads each linked file once by content hash, writes its URL and records the cache', async () => {
     const world = fakeWorld();

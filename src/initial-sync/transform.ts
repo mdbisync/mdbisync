@@ -8,6 +8,8 @@
 // document itself.
 
 import { fixText, relativeLinkUrls, sameMarkdown } from '../format/index.ts';
+import { parse, visit } from '../format/markdown.ts';
+import { normalizeUri } from 'micromark-util-sanitize-uri';
 import { type LinearClient } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap } from '../state/index.ts';
 import { type InitialSyncPlan } from './plan.ts';
@@ -85,6 +87,25 @@ export async function transformBody(transforms: readonly BodyTransform[], path: 
   let current = body;
   for (const transform of transforms) current = await transform.apply({ path, body: current });
   return current;
+}
+
+/**
+ * Stored and sent links must have the same destinations before an inverse
+ * comparison can declare a document unchanged. Expand references first and
+ * compare rendered URLs, ignoring presentation such as file blocks. Keep
+ * duplicate counts so a partly resolved set of links cannot pass.
+ */
+export function sameLinkDestinations(content: string, sent: string): boolean {
+  const destinations = (text: string): string[] => {
+    const urls: string[] = [];
+    visit(parse(fixText(text)), (node) => {
+      if (node.type === 'link' || node.type === 'image') urls.push(normalizeUri(node.url));
+    });
+    return urls.sort();
+  };
+  const actual = destinations(content);
+  const expected = destinations(sent);
+  return actual.length === expected.length && actual.every((url, index) => url === expected[index]);
 }
 
 /**
