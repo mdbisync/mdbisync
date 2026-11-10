@@ -59,10 +59,11 @@ export interface RunNames {
   /** The i-th project of the run (0-based), for the corpus's project placeholders. */
   project(index: number): string;
   /**
-   * A project no annotation names: for the harness's own helpers (an unmapped
-   * project, the project that archives team-zone documents). Its name is never
-   * a placeholder's, so the engine never maps it, however many placeholders
-   * the corpus has.
+   * A project no corpus annotation names: for the harness's own helpers (an
+   * unmapped project, the project that archives team-zone documents, the new
+   * target of a folder whose annotation a step changes). Its name is never a
+   * placeholder's, so the engine maps it only when a step names it, however
+   * many placeholders the corpus has.
    */
   helperProject(purpose: HelperPurpose): string;
 }

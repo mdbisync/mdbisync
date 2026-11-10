@@ -6,7 +6,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readIds, stateRef, resolveStateConfig, type Git, type IdMap } from '../../../src/state/index.ts';
 import { ordinalOf } from './conflicts.ts';
-import { readAnnotation } from './corpus.ts';
+import { annotatedFolders, annotationPath, inheritedTeam } from './corpus.ts';
+import type { HelperPurpose } from './isolation.ts';
+import type { Project } from './linear-world.ts';
 import { nextToken, type Editor, type RunContext } from './context.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { personCommit } from './sandbox.ts';
@@ -82,11 +84,28 @@ export function projectFolders(ctx: RunContext): Array<{ folder: string; project
  * README.md names, else the nearest one above it. Null when none names one.
  */
 export function folderTeam(dir: string, folder: string): string | null {
+  const readmes = new Map<string, string>();
   for (let current = folder; ; current = current.includes('/') ? current.slice(0, current.lastIndexOf('/')) : '') {
-    const readme = join(dir, current, 'README.md');
-    const team = existsSync(readme) ? (readAnnotation(readFileSync(readme, 'utf8'))?.team ?? null) : null;
-    if (team !== null || current === '') return team;
+    const readme = annotationPath({ folder: current });
+    if (existsSync(join(dir, readme))) readmes.set(readme, readFileSync(join(dir, readme), 'utf8'));
+    if (current === '') break;
   }
+  return inheritedTeam(folder, annotatedFolders(readmes));
+}
+
+/**
+ * Creates the run's helper project for `purpose` in a team (the workspace's first when none is named) and
+ * registers it under `key` with the run's projects: cleanup deletes it and the checks read its documents.
+ * A run holds one live project per helper name, so a second call for the same key is refused.
+ */
+export async function createHelperProject(ctx: RunContext, purpose: HelperPurpose, key: string, teamKey?: string): Promise<Project> {
+  const world = live(ctx);
+  if (world.projects.has(key)) throw new Error(`the run already has its ${purpose} helper project`);
+  const team = teamKey === undefined ? [...world.teams.values()][0] : world.teams.get(teamKey);
+  if (team === undefined) throw new EnvBlockedError(teamKey === undefined ? 'the test workspace has no team' : `the test workspace has no team ${teamKey}`);
+  const project = await world.world.createProject(ctx.names.helperProject(purpose), [team.id]);
+  world.projects.set(key, project);
+  return project;
 }
 
 /**

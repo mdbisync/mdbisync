@@ -12,7 +12,7 @@ import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
-import { annotatedFolders, CORPUS_DIR, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
+import { annotatedFolders, CORPUS_DIR, inheritedTeam, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
 import { BudgetBlockedError, budgetFromStatus, estimate, MAX_ADMISSION, type Governor } from './governor.ts';
 import { SandboxRest, githubToken, type GitHubToken } from './github.ts';
@@ -110,12 +110,7 @@ function projectTeams(readmes: ReadonlyMap<string, string>): Map<string, string>
   const teams = new Map<string, string>();
   for (const folder of folders) {
     if (folder.project === null) continue;
-    let team = folder.team;
-    let parent = folder.folder;
-    while (team === null && parent !== '') {
-      parent = parent.includes('/') ? parent.slice(0, parent.lastIndexOf('/')) : '';
-      team = folders.find((candidate) => candidate.folder === parent)?.team ?? null;
-    }
+    const team = inheritedTeam(folder.folder, folders);
     if (team !== null) teams.set(folder.project, team);
   }
   return teams;

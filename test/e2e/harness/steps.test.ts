@@ -1408,12 +1408,15 @@ describe('git executors', () => {
     // A run project like the others: the destination subject names it and cleanup deletes it.
     assert.equal(world.projects.get('ANNOTATION_TARGET')?.name, 'Spare cabinet aaaaaa');
     assert.deepEqual(await resolveSubject(ctx, 'expected.destination'), { known: true, value: ['project:Spare cabinet aaaaaa'] });
+    // One live project per helper name: a second move in the same run is refused before it creates another.
+    await assert.rejects(runStep(ctx, { kind: 'git', action: 'annotation', args: {} }), /already has its annotation-target helper project/);
+    assert.equal(created.length, 1);
   });
 
   it('end env-blocked when the workspace has no team for the folder', async () => {
     const { ctx } = await fakeRun();
     // No team annotation above the project folders at all.
-    await assert.rejects(runStep(ctx, { kind: 'git', action: 'annotation', args: {} }), (error: Error) => error instanceof EnvBlockedError && /no team \(none\) for docs\/handbook/.test(error.message));
+    await assert.rejects(runStep(ctx, { kind: 'git', action: 'annotation', args: {} }), (error: Error) => error instanceof EnvBlockedError && error.message === 'no annotation names the team of docs/handbook');
   });
 
   it('read a folder\'s team from its own annotation, else the nearest one above it', () => {
@@ -2746,17 +2749,23 @@ describe('the setup check step (run.check)', () => {
   const FAILED_REPORT = { ...CHECK_REPORT, ok: false, code: 'setup-failed', exitStatus: 'setup-failed', setupChecks: FAILED_CHECKS };
   const DRY_RUN_REPORT = { operation: 'initial-sync', ok: true, code: null, complete: true, changed: false, summary: { plan: { paths: ['guides/start.md'] } }, writes: { linear: {}, git: {}, pullRequests: {} } };
 
-  /** Runs `steps` with a fake engine that answers each command from `answers` and records how it was called. */
-  /** With `seen`, the calls are also there when a step throws. */
-  async function withEngine(answers: Record<string, { report?: unknown; summary?: string; stderr?: string; exitCode: number }>, steps: Array<{ action: string; args: Record<string, unknown> }>, seen: { calls: Array<{ command: string }> } = { calls: [] }) {
+  type Answer = { report?: unknown; summary?: string; stderr?: string; exitCode: number };
+  /**
+   * Runs `steps` with a fake engine that answers each command from `answers` and records how it was called.
+   * A list answers a command's runs in turn, its last entry every later run. With `seen`, the calls are
+   * also there when a step throws.
+   */
+  async function withEngine(answers: Record<string, Answer | Answer[]>, steps: Array<{ action: string; args: Record<string, unknown> }>, seen: { calls: Array<{ command: string }> } = { calls: [] }) {
     const { ctx } = await fakeRun();
     mkdirSync(await ctx.engineClone(), { recursive: true });
     const calls = join(ctx.runDir, 'engine-calls.jsonl');
     const driver = join(ctx.runDir, 'fake-engine.mjs');
     writeFileSync(driver, `
-      import { appendFileSync, writeFileSync } from 'node:fs';
+      import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
       const command = process.argv[2];
-      const answer = ${JSON.stringify(answers)}[command];
+      const before = existsSync(${JSON.stringify(calls)}) ? readFileSync(${JSON.stringify(calls)}, 'utf8').split('\\n').filter((line) => line.includes(JSON.stringify(command))).length : 0;
+      const answers = [${JSON.stringify(answers)}[command]].flat();
+      const answer = answers[Math.min(before, answers.length - 1)];
       const inputs = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith('MDBISYNC_') && !/SECRET|TOKEN/.test(name)));
       appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ command, cwd: process.cwd(), inputs }) + '\\n');
       if (answer.report !== undefined) writeFileSync(process.env.MDBISYNC_REPORT_FILE, JSON.stringify(answer.report));
@@ -2771,7 +2780,8 @@ describe('the setup check step (run.check)', () => {
     } finally {
       if (previous === undefined) delete process.env['MDBISYNC_ENGINE'];
       else process.env['MDBISYNC_ENGINE'] = previous;
-      seen.calls = existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { command: string }) : [];
+      // A partial line from a killed fake engine must not hide the step's own error.
+      seen.calls = existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n').flatMap((line) => { try { return [JSON.parse(line) as { command: string }]; } catch { return []; } }) : [];
     }
     return { ctx, calls: seen.calls as Array<{ command: string; cwd: string; inputs: Record<string, string> }> };
   }
@@ -2816,26 +2826,45 @@ describe('the setup check step (run.check)', () => {
     await assert.rejects(resolveSubject(ctx, 'summary.plan.paths'), (error: Error) => error instanceof ProductError);
   });
 
-  it('stops resuming at a failed setup check and names it', async () => {
-    const targets = [{ name: 'annotation-targets', state: 'failed', detail: 'not found in Linear: project "Library index aaaaaa" of team "ENG"' }];
-    const stopped = { ...CHECK_REPORT, operation: 'sync', ok: false, code: 'annotation-target-not-found', exitStatus: 'failure', complete: false, setupChecks: targets };
+  const TARGETS_FAILED = [{ name: 'annotation-targets', state: 'failed', detail: 'not found in Linear: project "Library index aaaaaa" of team "ENG"' }];
+  const SETUP_STOP = { ...CHECK_REPORT, operation: 'sync', ok: false, code: 'annotation-target-not-found', exitStatus: 'failure', complete: false, setupChecks: TARGETS_FAILED };
+  const COMPLETE = { ...CHECK_REPORT, operation: 'sync', ok: true, code: null, exitStatus: 'success', complete: true, changed: true };
+
+  /** Runs resume-until-complete against these sync answers; the error it ends with (or null) and the engine runs. */
+  async function resume(answers: Answer[]) {
     const seen = { calls: [] as Array<{ command: string }> };
-    await assert.rejects(
-      withEngine({ sync: { report: stopped, exitCode: 3 } }, [{ action: 'resume-until-complete', args: {} }], seen),
-      (error: Error) => error instanceof ProductError && error.message === 'the run stopped at the setup check annotation-targets (annotation-target-not-found): not found in Linear: project "Library index aaaaaa" of team "ENG"; resuming cannot clear it',
-    );
-    // One run: the stop is the same on every resume.
-    assert.deepEqual(seen.calls.map((call) => call.command), ['sync']);
+    const error = await withEngine({ sync: answers }, [{ action: 'resume-until-complete', args: {} }], seen).then(() => null, (failure: Error) => failure);
+    return { error, runs: seen.calls.length };
+  }
+
+  it('stops resuming when a setup check fails the same way twice in a row, and names it', async () => {
+    const { error, runs } = await resume([{ report: SETUP_STOP, exitCode: 3 }]);
+    assert.ok(error instanceof ProductError);
+    assert.equal(error.message, 'the run failed twice in a row at the setup check annotation-targets (annotation-target-not-found): not found in Linear: project "Library index aaaaaa" of team "ENG"; resuming cannot clear it');
+    assert.equal(runs, 2);
+  });
+
+  it('stops resuming when the sync is refused the same way twice in a row', async () => {
+    const refused = { ...SETUP_STOP, code: 'initial-pull-request-pending', setupChecks: SETUP_CHECKS };
+    const { error, runs } = await resume([{ report: refused, exitCode: 3 }]);
+    assert.equal(error?.message, 'the run failed twice in a row with initial-pull-request-pending; resuming cannot clear it');
+    assert.equal(runs, 2);
+  });
+
+  it('resumes past a setup check that failed once', async () => {
+    const teamsHidden = { ...SETUP_STOP, code: 'linear-teams-not-visible', setupChecks: [{ name: 'annotation-targets', state: 'failed', detail: 'the token sees no team' }] };
+    // A passing failure, then a different one, then the run completes: no failure repeated.
+    const { error, runs } = await resume([{ report: teamsHidden, exitCode: 3 }, { report: SETUP_STOP, exitCode: 3 }, { report: COMPLETE, exitCode: 0 }]);
+    assert.equal(error, null);
+    assert.equal(runs, 3);
   });
 
   it('keeps resuming a run that stopped part-way, up to 20 runs', async () => {
     const partial = { ...CHECK_REPORT, operation: 'sync', ok: true, code: 'rate-limited', exitStatus: 'warning', complete: false, setupChecks: SETUP_CHECKS };
-    const seen = { calls: [] as Array<{ command: string }> };
-    await assert.rejects(
-      withEngine({ sync: { report: partial, exitCode: 0 } }, [{ action: 'resume-until-complete', args: {} }], seen),
-      (error: Error) => error instanceof ProductError && error.message === 'the run did not complete after 20 resumes',
-    );
-    assert.equal(seen.calls.length, 20);
+    const { error, runs } = await resume([{ report: partial, exitCode: 0 }]);
+    assert.ok(error instanceof ProductError);
+    assert.equal(error.message, 'the run did not complete after 20 resumes');
+    assert.equal(runs, 20);
   });
 
   it('stops the scenario when the engine does not implement the check', async () => {
