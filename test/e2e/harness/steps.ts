@@ -1307,6 +1307,9 @@ const LINEAR: Record<string, Executor> = {
     ctx.observations.set('linear.trashed', path);
     const trashed = (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined) ?? new Map<string, string>();
     trashed.set(path, id);
+    const prior = (ctx.observations.get('linear.editsBeforeTrash') as Map<string, Set<string>> | undefined) ?? new Map<string, Set<string>>();
+    prior.set(path, new Set(ctx.edits.filter((edit) => edit.path === path).map((edit) => edit.token)));
+    ctx.observations.set('linear.editsBeforeTrash', prior);
     ctx.observations.set('linear.trashedDocuments', trashed);
   },
   'linear.restore': async (ctx, args) => {
@@ -1317,6 +1320,7 @@ const LINEAR: Record<string, Executor> = {
     setTarget(ctx, path, id);
     await world.editors[editorOf(args)].restoreDocument(id);
     (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined)?.delete(path);
+    (ctx.observations.get('linear.editsBeforeTrash') as Map<string, Set<string>> | undefined)?.delete(path);
   },
   'linear.create': async (ctx, args) => {
     const world = live(ctx);

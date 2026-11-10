@@ -761,7 +761,7 @@ export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documen
     // An explicit user deletion supersedes earlier edits only after both sides
     // show that deletion. A restore removes this intent and checks the edits again.
     const deletedId = (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined)?.get(edit.path);
-    if (deletedId !== undefined && !sides.files.has(edit.path) && sides.documents.get(deletedId)?.trashed === true) return false;
+    if (deletedId !== undefined && (ctx.observations.get('linear.editsBeforeTrash') as Map<string, Set<string>> | undefined)?.get(edit.path)?.has(edit.token) === true && !sides.files.has(edit.path) && sides.documents.get(deletedId)?.trashed === true) return false;
     const inGit = gitText.includes(edit.token);
     const inLinear = linearText.includes(edit.token);
     return edit.removal === true ? inGit || inLinear : !(inGit && inLinear);

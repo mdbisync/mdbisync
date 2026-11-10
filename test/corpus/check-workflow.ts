@@ -3,7 +3,7 @@ export const CHECK_WORKFLOW_PATH = '.github/workflows/harness-check.yml';
 export const CHECK_MARKER = '.harness-check';
 export const CHECK_NAME = 'format';
 
-/** A read-only PR check; a new head cancels the previous head's pending job. */
+/** A read-only marker check; a new head cancels the previous head's pending job. */
 export const CHECK_WORKFLOW = `name: Harness check
 on:
   push:
@@ -45,7 +45,12 @@ jobs:
           esac
           # The fixture selects the annotated document; never quote document content.
           while IFS= read -r -d '' file; do
-            echo "::error file=$file,line=1,title=Review required::Check the review status."
+            property="\${file//'%'/'%25'}"
+            property="\${property//$'\\r'/'%0D'}"
+            property="\${property//$'\\n'/'%0A'}"
+            property="\${property//':'/'%3A'}"
+            property="\${property//','/'%2C'}"
+            echo "::error file=$property,line=1,title=Review required::Check the review status."
           done < <(git --literal-pathspecs ls-files -z -- "$(cat .harness-check-target)")
           exit 1
 `;

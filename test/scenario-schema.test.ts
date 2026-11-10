@@ -87,3 +87,18 @@ test('a run.check step cannot sit between a checkpoint pause and its asynchronou
   scenario.steps.splice(pause + 1, 0, { kind: 'run', action: 'check', args: {} });
   assert.throws(() => validateScenario(scenario, 'L4-02.yaml'), /run.check cannot take an armed checkpoint pause/);
 });
+
+test('check fixture modes reject contradictory states', () => {
+  const original = JSON.parse(readFileSync(join(scenarioDirectory, 'L5-26.yaml'), 'utf8'));
+  for (const args of [
+    { status: 'pending', flaky: true },
+    { status: 'passed', document: true },
+    { status: 'failed', flaky: true, document: true },
+    { status: 'failed', reset: true, lane: 'tracked' },
+    { status: 'passed', reset: true, lane: 'normal' },
+  ]) {
+    const scenario = structuredClone(original);
+    scenario.steps[2].args = args;
+    assert.throws(() => validateScenario(scenario, 'L5-26.yaml'));
+  }
+});

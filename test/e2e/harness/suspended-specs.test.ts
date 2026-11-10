@@ -57,8 +57,9 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           return Response.json(data);
         }
         if (url.includes('/actions/workflows/harness-check.yml/runs')) {
+          assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
           const sha = new URL(url).searchParams.get('head_sha')!;
-          return Response.json({ workflow_runs: [{ id: 1, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'completed' }] });
+          return Response.json({ workflow_runs: [{ id: 1, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'completed', conclusion: 'failure' }] });
         }
         if (url.endsWith('/actions/runs/1/rerun-failed-jobs')) {
           assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
@@ -89,9 +90,14 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         if (init?.body && url.endsWith('/graphql')) {
           const body = JSON.parse(String(init.body));
           if (['DocumentComments', 'SuspendedComments'].includes(body.operationName)) {
-            const id = `content-${body.variables.id}`;
-            const nodes = [...world.linear.comments].filter(([, c]) => c.documentContentId === id).map(([id, c]) => ({ id, body: c.body, resolvedAt: c.resolved ? new Date().toISOString() : null, createdAt: new Date().toISOString() }));
-            return Response.json({ data: { document: { comments: { nodes } } } });
+            const commentsFor = (documentId: string) => {
+              const id = `content-${documentId}`;
+              const nodes = [...world.linear.comments].filter(([, c]) => c.documentContentId === id).map(([id, c]) => ({ id, body: c.body, resolvedAt: c.resolved ? new Date().toISOString() : null, createdAt: new Date().toISOString() }));
+              return { comments: { nodes } };
+            };
+            const data = body.operationName === 'DocumentComments' ? { document: commentsFor(body.variables.id) }
+              : Object.fromEntries(Object.entries(body.variables).map(([key, id]) => [key.replace('id', 'd'), commentsFor(String(id))]));
+            return Response.json({ data });
           }
         }
         return transport(String(input).replace('https://api.github.com', GITHUB_API), init);
@@ -153,6 +159,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
       };
       await sync('initial-sync');
       ctx.engine.setupRuns = 1;
+      if (scenario.id === 'L5-24') world.linear.comments.set('ordinary-comment', { documentContentId: `content-${world.linear.documents[0]!.id}`, body: 'Looks good to me.' });
       const history = [await snapshotRefs(ctx)];
       ctx.observations.set('refHistory', history);
       ctx.observations.set('start.refs', history[0]);

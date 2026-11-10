@@ -31,6 +31,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
+import { HOLD_FAILED, HOLD_TIMED_OUT } from '../../../src/sync/hold.ts';
 import { MARKS } from '../../../src/sync/marks.ts';
 import type { PullRequest } from './github.ts';
 import type { LinearDocument } from '../../../src/linear/index.ts';
@@ -80,19 +81,28 @@ export async function takeView(ctx: RunContext, withComments: boolean, options: 
     const held = (ctx.observations.get('suspended.documents') as Set<string> | undefined) ?? new Set<string>();
     for (const entry of view.ids.values()) if (entry.suspended !== undefined) held.add(entry.id);
     ctx.observations.set('suspended.documents', held);
-    if (ctx.live !== null) for (const id of held) {
-      const data = await ctx.live.app.request<{ document: { comments: { nodes: Array<{ id: string; body: string; resolvedAt: string | null }> } } | null }>(
-        'SuspendedComments', 'query',
-        'query SuspendedComments($id: String!) { document(id: $id) { comments(first: 100) { nodes { id body resolvedAt } } } }', { id },
+    const commentIds = new Set([...held, ...ctx.edits.flatMap((edit) => {
+      const id = view.ids.get(edit.path)?.id;
+      return id === undefined ? [] : [id];
+    })]);
+    // Keep each query comfortably below Linear's complexity limit.
+    const commentList = [...commentIds];
+    if (ctx.live !== null) for (let start = 0; start < commentList.length; start += 10) {
+      const page = commentList.slice(start, start + 10);
+      const variables = Object.fromEntries(page.map((id, i) => [`id${i}`, id]));
+      const declarations = page.map((_, i) => `$id${i}: String!`).join(', ');
+      const fields = page.map((_, i) => `d${i}: document(id: $id${i}) { comments(first: 100) { nodes { id body resolvedAt } } }`).join(' ');
+      const data = await ctx.live.app.request<Record<string, { comments: { nodes: Array<{ id: string; body: string; resolvedAt: string | null }> } } | null>>(
+        'SuspendedComments', 'query', `query SuspendedComments(${declarations}) { ${fields} }`, variables,
       );
-      view.holdComments.set(id, data.document?.comments.nodes ?? []);
+      for (const [i, id] of page.entries()) view.holdComments.set(id, data[`d${i}`]?.comments.nodes ?? []);
     }
     const git = await person(ctx);
     const branch = suspendedBranch(resolveStateConfig(ctx.names));
     const tip = await fetchRef(git, `refs/heads/${branch}`);
     view.suspendedFiles = tip === null ? new Map() : new Map([...await treeFiles(git, tip, (p) => p.endsWith('.md'))].map(([p, bytes]) => [p, bytes.toString('utf8')]));
     view.pullRequests = [];
-    for (const pr of await pullRequestsSinceStart(ctx)) view.pullRequests.push({ ...pr, empty: (await pullRequestFiles(ctx, pr.number)).length === 0 });
+    for (const pr of await pullRequestsSinceStart(ctx)) view.pullRequests.push({ ...pr, empty: pr.head.ref === ctx.names.syncBranch && pr.state === 'closed' && pr.merged_at === null && (await pullRequestFiles(ctx, pr.number)).length === 0 });
   }
   return view;
 }
@@ -1209,22 +1219,26 @@ export const SUBJECTS: Record<string, Compute> = {
     const view = await env.view();
     return [...view.ids.values()].filter((entry) => entry.suspended !== undefined && view.documents.get(entry.id)?.icon === MARKS.suspended.icon && view.documents.get(entry.id)?.color === MARKS.suspended.color).length;
   },
-  'suspended.commentCount': async (env) => [...(await env.view()).holdComments?.values() ?? []].flat().filter((c) => c.body.includes('Check `')).length,
+  'suspended.commentCount': async (env) => [...(await env.view()).holdComments?.values() ?? []].flat().filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT)).length,
   'suspended.commentsDetailed': async (env) => {
     const view = await env.view();
     const held = [...view.ids.values()].filter((entry) => entry.suspended !== undefined);
     return held.length > 0 && held.every((entry) => {
-      const comments = view.holdComments?.get(entry.id) ?? [];
+      const comments = (view.holdComments?.get(entry.id) ?? []).filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT));
       return comments.length === 1 && comments.every((c) => c.body.includes('Check `format`') && /\[run\]\(https:\/\/github\.com\//.test(c.body) && /Line 1/.test(c.body) && c.resolvedAt === null);
     });
   },
   'suspended.commentsTimedOut': async (env) => {
-    const comments = [...(await env.view()).holdComments?.values() ?? []].flat();
+    const comments = [...(await env.view()).holdComments?.values() ?? []].flat().filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT));
     return comments.length > 0 && comments.every((c) => c.body.includes('did not finish in time'));
   },
   'suspended.commentsResolved': async (env) => {
-    const comments = [...(await env.view()).holdComments?.values() ?? []].flat();
-    return comments.length > 0 && comments.every((c) => typeof c.resolvedAt === 'string');
+    const view = await env.view();
+    const held = env.ctx.observations.get('suspended.documents') as Set<string> | undefined;
+    return held !== undefined && held.size > 0 && [...held].every((id) => {
+      const comments = (view.holdComments?.get(id) ?? []).filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT));
+      return comments.length > 0 && comments.every((c) => typeof c.resolvedAt === 'string');
+    });
   },
   'suspended.marksRestored': async (env) => {
     const view = await env.view();

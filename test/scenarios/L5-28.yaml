@@ -32,19 +32,19 @@
       }
     },
     {
+      "kind": "git",
+      "action": "edit",
+      "args": {
+        "target": "other-document"
+      }
+    },
+    {
       "kind": "fault",
       "action": "checks",
       "args": {
         "status": "failed",
         "name": "format",
         "lane": "tracked"
-      }
-    },
-    {
-      "kind": "git",
-      "action": "edit",
-      "args": {
-        "target": "other-document"
       }
     },
     {

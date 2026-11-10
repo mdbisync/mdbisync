@@ -25,17 +25,17 @@ function corpus(): ReturnType<typeof buildCorpus> {
   return defaultCorpus;
 }
 
-test("every published slice carries the PR-only marker workflow template", () => {
+test("every published slice carries the marker workflow for pull requests and tracked branches", () => {
   const data = corpus();
   const workflow = data.files.find((file) => file.path === CHECK_WORKFLOW_PATH)!;
   assert.equal(workflow.synced, false);
   assert.equal(workflow.content.toString(), CHECK_WORKFLOW);
   const yaml = parse(CHECK_WORKFLOW);
-  assert.deepEqual(yaml.on, { pull_request: { branches: ['t/*/main'], types: ['opened', 'synchronize', 'reopened', 'closed'] } });
+  assert.deepEqual(yaml.on, { push: { branches: ['t/*/main'] }, pull_request: { branches: ['t/*/main'], types: ['opened', 'synchronize', 'reopened', 'closed'] } });
   assert.equal(yaml.jobs.format['runs-on'], 'self-hosted');
   assert.equal(yaml.jobs.format.name, 'format');
   assert.equal(yaml.concurrency['cancel-in-progress'], true);
-  assert.equal(yaml.concurrency.group, 'harness-check-${{ github.event.pull_request.number }}');
+  assert.equal(yaml.concurrency.group, 'harness-check-${{ github.event.pull_request.number || github.ref }}');
   assert.match(yaml.jobs.format.if, /github\.event\.action != 'closed'/);
   assert.deepEqual(yaml.permissions, { contents: 'read' });
   for (const [slice, paths] of Object.entries(data.slices)) {
@@ -48,15 +48,36 @@ test("the workflow passes without a marker, fails on failure or invalid markers,
   try {
     const yaml = parse(CHECK_WORKFLOW);
     const script = yaml.jobs.format.steps.at(-1).run;
-    const run = () => {
-      try { return { status: 0, output: execFileSync('bash', ['-e', '-c', script], { cwd: dir, encoding: 'utf8' }) }; }
+    execFileSync('git', ['init', '--quiet'], { cwd: dir });
+    writeFileSync(join(dir, 'notes.md'), '# Notes\n\nReview required.\n');
+    writeFileSync(join(dir, '.harness-check-target'), 'notes.md\n');
+    execFileSync('git', ['add', '--', 'notes.md'], { cwd: dir });
+    const run = (attempt = 1) => {
+      try { return { status: 0, output: execFileSync('bash', ['-e', '-c', script], { cwd: dir, encoding: 'utf8', env: { ...process.env, CHECK_ATTEMPT: String(attempt) } }) }; }
       catch (error) { return error as { status: number; stdout: string }; }
     };
     assert.equal(run().status, 0);
     writeFileSync(join(dir, CHECK_MARKER), 'failed\n');
     assert.equal(run().status, 1);
+    writeFileSync(join(dir, CHECK_MARKER), 'flaky\n');
+    assert.equal(run(1).status, 1);
+    assert.equal(run(2).status, 0);
+    writeFileSync(join(dir, CHECK_MARKER), 'document\n');
+    assert.equal(run().status, 1);
+    writeFileSync(join(dir, 'notes.md'), '# Notes\n\nApproved for review.\n');
+    assert.equal(run().status, 0);
+    writeFileSync(join(dir, CHECK_MARKER), 'failed\n');
+    writeFileSync(join(dir, '.harness-check-fixed'), 'approved\n');
+    assert.equal(run().status, 0);
+    rmSync(join(dir, '.harness-check-fixed'));
     writeFileSync(join(dir, CHECK_MARKER), 'invalid\n');
     assert.equal(run().status, 1);
+    const unusual = 'notes,:%.md';
+    writeFileSync(join(dir, unusual), '# Notes\n');
+    execFileSync('git', ['add', '--', unusual], { cwd: dir });
+    writeFileSync(join(dir, '.harness-check-target'), `${unusual}\n`);
+    writeFileSync(join(dir, CHECK_MARKER), 'failed\n');
+    assert.match((run() as { stdout: string }).stdout, /file=notes%2C%3A%25\.md,line=1/);
     writeFileSync(join(dir, CHECK_MARKER), 'pending\n');
     // Observe the long hold without sleeping: replace only sleep in this shell.
     assert.throws(() => execFileSync('bash', ['-e', '-c', `sleep() { echo "hold:$1"; }; ${script}`], { cwd: dir, encoding: 'utf8' }), (error: unknown) => {

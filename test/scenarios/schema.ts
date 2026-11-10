@@ -8,7 +8,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "fault.budget": ["stopAfterDocuments"],
   "fault.budget-headers": ["includeEndpointLimits", "remaining"],
   "fault.check-age": ["minutes"],
-  "fault.checks": ["name", "status", "lane", "flaky", "document", "reset"],
+  "fault.checks": ["name", "status", "lane", "flaky", "document", "reset", "target"],
   "fault.clear": [],
   "fault.credentials": ["service", "valid"],
   "fault.golden-drift": ["construct"],
@@ -157,6 +157,12 @@ function validateArguments(kind: string, action: string, args: ObjectValue): voi
   for (const field of requiredArguments[`${kind}.${action}`] ?? []) assert.ok(Object.hasOwn(args, field), `missing argument ${field}`);
   if (kind === 'fault' && action === 'checks') {
     oneOf(args.status, ['pending', 'passed', 'failed'], 'check status');
+    assert.ok(!(args.flaky === true && args.document === true), 'check fixture modes are mutually exclusive');
+    if (args.flaky === true || args.document === true) assert.equal(args.status, 'failed', 'check fixture mode requires failed status');
+    if (args.reset === true) {
+      assert.equal(args.status, 'passed', 'check reset requires passed status');
+      assert.equal(args.lane, 'tracked', 'check reset requires tracked lane');
+    }
     if (args.lane !== undefined) oneOf(args.lane, ['normal', 'suspended', 'tracked'], 'check lane');
   }
   if (kind === 'fault' && action === 'http') {

@@ -1012,11 +1012,14 @@ describe('intentional deletion in I2', () => {
     assert.deepEqual(lostEdits(ctx, sides), [edit], 'the file must leave Git too');
     sides.files.clear();
     assert.deepEqual(lostEdits(ctx, sides), []);
+    const later = { side: 'git' as const, path, token: 'aaaaaa-after-trash' };
+    ctx.edits.push(later);
+    assert.deepEqual(lostEdits(ctx, sides), [later], 'an edit after the trash must still win');
     const unrelated = { side: 'linear' as const, path: 'other.md', token: 'aaaaaa-other-edit' };
     ctx.edits.push(unrelated);
-    assert.deepEqual(lostEdits(ctx, sides), [unrelated], 'another document is still checked');
+    assert.deepEqual(lostEdits(ctx, sides), [later, unrelated], 'another document is still checked');
     await runStep(ctx, { kind: 'linear', action: 'restore', args: { actor: 'editor-a', target: path } });
-    assert.deepEqual(lostEdits(ctx, sides), [edit, unrelated], 'restore reactivates the original edit');
+    assert.deepEqual(lostEdits(ctx, sides), [edit, later, unrelated], 'restore reactivates the original edit');
   });
 });
 

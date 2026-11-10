@@ -59,7 +59,7 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
     const workflow = await git.run(['cat-file', '-e', `HEAD:${CHECK_WORKFLOW_PATH}`], { okCodes: [0, 128] });
     if (workflow.code !== 0) throw new EnvBlockedError('the run tree has no marker check workflow; publish the updated corpus first');
     {
-      const path = targetPath(ctx);
+      const path = typeof args.target === 'string' ? targetPath(ctx, args.target) : (ctx.observations.get('target.path') as string | undefined) ?? targetPath(ctx);
       writeFileSync(join(dir, '.harness-check-target'), `${path}\n`);
       await git.run(['add', '--', '.harness-check-target']);
     }
@@ -111,11 +111,20 @@ export async function rerunCheckAsPerson(ctx: RunContext, person: SandboxRest): 
   const sha = (await git.text(['rev-parse', 'FETCH_HEAD'])).trim();
   ctx.log(`waiting up to 5 minutes for the suspended head's first failed check`);
   await waitForCheck(world.rest, sha, 'failed', { signal: ctx.signal });
-  const { workflow_runs: runs } = await world.rest.request<{ workflow_runs: Array<{ id: number; head_sha: string; path: string; status: string }> }>(
-    'GET', `/actions/workflows/harness-check.yml/runs?head_sha=${sha}&per_page=100`,
-  );
-  const run = runs.find((run) => run.head_sha === sha && run.path === CHECK_WORKFLOW_PATH && run.status === 'completed');
-  if (run === undefined) throw new ProductError('no completed marker workflow on the suspended head to rerun');
+  // Workflow reads need Actions permission too: keep them on the person's
+  // credential, and allow the workflow to finish after its failed check job.
+  const deadline = Date.now() + 5 * 60_000;
+  let run: { id: number; head_sha: string; path: string; status: string; conclusion: string | null } | undefined;
+  for (;;) {
+    ctx.signal.throwIfAborted();
+    const { workflow_runs: runs } = await person.request<{ workflow_runs: Array<{ id: number; head_sha: string; path: string; status: string; conclusion: string | null }> }>(
+      'GET', `/actions/workflows/${encodeURIComponent(CHECK_WORKFLOW_PATH.split('/').at(-1)!)}/runs?head_sha=${sha}&per_page=100`,
+    );
+    run = runs.find((candidate) => candidate.head_sha === sha && candidate.path === CHECK_WORKFLOW_PATH && candidate.status === 'completed' && candidate.conclusion === 'failure');
+    if (run?.status === 'completed') break;
+    if (Date.now() >= deadline) throw new EnvBlockedError('the marker workflow did not complete within 5 minutes after its failed check');
+    await sleep(2_000, undefined, { signal: ctx.signal });
+  }
   await person.request('POST', `/actions/runs/${run.id}/rerun-failed-jobs`);
   ctx.log(`waiting up to 5 minutes for the person-rerun ${CHECK_NAME} check`);
   await waitForCheck(world.rest, sha, 'passed', { signal: ctx.signal });
