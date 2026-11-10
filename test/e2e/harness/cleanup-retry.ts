@@ -4,6 +4,7 @@ import { LinearGraphQLError, LinearHttpError } from '../../../src/linear/index.t
 export async function retryCleanup<T>(
   action: () => Promise<T>,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  canRetry: () => boolean = () => true,
 ): Promise<T> {
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -12,8 +13,9 @@ export async function retryCleanup<T>(
       const transient = (error instanceof LinearHttpError && error.httpStatus >= 500)
         || (error instanceof LinearGraphQLError && (error.httpStatus >= 500
           || error.code === 'DEADLOCK_DETECTED' || error.code === 'INTERNAL_SERVER_ERROR'));
-      if (!transient || attempt === 3) throw error;
+      if (!transient || attempt === 3 || !canRetry()) throw error;
       await sleep(1000);
+      if (!canRetry()) throw error;
     }
   }
 }

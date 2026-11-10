@@ -4,7 +4,7 @@
 // Fixture projects and anything else that is no run's are never written.
 
 import { randomUUID } from 'node:crypto';
-import { LinearClient, GraphQLTransport, type LinearDocument } from '../../../src/linear/index.ts';
+import { LinearClient, GraphQLTransport, LinearGraphQLError, type LinearDocument } from '../../../src/linear/index.ts';
 import { runOfProject, runOfTeamTitle } from './isolation.ts';
 import { observingFetch, type OwnershipLedger, type WriteObserver } from './ownership.ts';
 import { retryCleanup } from './cleanup-retry.ts';
@@ -109,7 +109,18 @@ export class LinearWorld {
   /** Deletes a run project (its documents go with it). Refuses any other project. */
   async deleteProject(project: Pick<Project, 'id' | 'name'>, runId: string): Promise<void> {
     if (runOfProject(project.name) !== runId) throw new RunWorldError(`refusing to delete project ${project.name}: not a project of run ${runId}`);
-    const data = await retryCleanup(() => this.client.request<{ projectDelete: { success: boolean } }>('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id: project.id }));
+    let attempts = 0;
+    const data = await retryCleanup(async () => {
+      attempts += 1;
+      try {
+        return await this.client.request<{ projectDelete: { success: boolean } }>('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id: project.id });
+      } catch (error) {
+        // A server error can arrive after the delete was applied. Only a retry's
+        // not-found confirms that the project is now gone; the first still fails.
+        if (attempts > 1 && error instanceof LinearGraphQLError && error.notFound) return { projectDelete: { success: true } };
+        throw error;
+      }
+    }, undefined, () => this.client.stopped === undefined);
     if (data.projectDelete?.success !== true) throw new RunWorldError(`Linear did not delete project ${project.name}`);
   }
 
