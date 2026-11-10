@@ -14,7 +14,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { CANARY_TOKEN_OBSERVER, CANARY_TOKEN_OBSERVER_FILE, CANARY_EVIDENCE, CANARY_FILE, CANARY_HOOK_STEP, CANARY_PREPARE_STEP, canaryScript, canaryFacts, canaryIsolated } from '../e2e/harness/security-canary.ts';
 import { renderForRun } from '../e2e/harness/workflow-files.ts';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { type Readable } from 'node:stream';
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { type AddressInfo } from 'node:net';
@@ -100,9 +101,8 @@ async function serve(world: FakeWorld): Promise<{ url: string; close: () => Prom
   };
 }
 
-function runProcess(command: string, args: string[], cwd: string, env: Record<string, string>): Promise<{ status: number; output: string }> {
+function collectProcess(child: ChildProcessByStdio<null, Readable, Readable>): Promise<{ status: number; output: string }> {
   return new Promise((done, fail) => {
-    const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
     child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
@@ -111,13 +111,19 @@ function runProcess(command: string, args: string[], cwd: string, env: Record<st
   });
 }
 
+// Keep Node launches separate from the shell's -c command: release paths are
+// arguments to Node and must never flow into a shell command string.
+function runNode(args: string[], cwd: string, env: Record<string, string>): Promise<{ status: number; output: string }> {
+  return collectProcess(spawn(process.execPath, args, { cwd, env, shell: false, stdio: ['ignore', 'pipe', 'pipe'] }));
+}
+
 /** Verify the stage outputs, then launch trusted paths rather than environment values. */
 export async function runHooksStep(release: string, cwd: string, env: Record<string, string>): Promise<{ status: number; output: string }> {
   // Node resolves the action's module URL through directory symlinks too.
   const script = join(await realpath(release), 'dist/action-hooks.js');
   assert.equal(env['MDBISYNC_NODE'], process.execPath, 'unexpected Node executable from stage');
   assert.equal(env['MDBISYNC_HOOKS'], script, 'unexpected hooks script from stage');
-  return runProcess(process.execPath, [script], cwd, env);
+  return runNode([script], cwd, env);
 }
 
 interface Job {
@@ -242,14 +248,14 @@ async function runTemplate(release: string, template: string, inputs: Record<str
     const ran: Array<{ name: string; step: Step; state: string }> = [];
     const runAction = async (name: string, step: Step) => {
       const runner = await runnerEnv(name);
-      const result = await runProcess(process.execPath, [join(release, main!)], workspace, { ...runner, ...actionInputs(step), ...Object.fromEntries(Object.entries(step.env ?? {}).map(([key, value]) => [key, expand(value, context)])) });
+      const result = await runNode([join(release, main!)], workspace, { ...runner, ...actionInputs(step), ...Object.fromEntries(Object.entries(step.env ?? {}).map(([key, value]) => [key, expand(value, context)])) });
       assert.equal(result.status, 0, `${template} ${name}:\n${result.output}`);
       ran.push({ name, step, state: runner.GITHUB_STATE as string });
       return fileCommands(runner.GITHUB_OUTPUT as string);
     };
     if (prepare) {
       const env = { ...(await runnerEnv('prepare')), ...Object.fromEntries(Object.entries(prepare.env ?? {}).map(([key, value]) => [key, expand(value, context)])) };
-      const result = await runProcess('bash', ['-e', '-c', prepare.run!], workspace, env);
+      const result = await collectProcess(spawn('bash', ['-e', '-c', prepare.run!], { cwd: workspace, env, shell: false, stdio: ['ignore', 'pipe', 'pipe'] }));
       assert.equal(result.status, 0, result.output);
     }
     for (const [output, value] of Object.entries(await runAction('stage', stage))) context[`steps.stage.outputs.${output}`] = value;
@@ -273,7 +279,7 @@ async function runTemplate(release: string, template: string, inputs: Record<str
     // At the end of the job the runner runs each step's post entry, last first, with that step's inputs and saved state.
     for (const { name, step, state } of ran.reverse()) {
       const saved = Object.fromEntries(Object.entries(await fileCommands(state)).map(([key, value]) => [`STATE_${key}`, value]));
-      const result = await runProcess(process.execPath, [join(release, post!)], workspace, { ...(await runnerEnv(`${name}-post`)), ...actionInputs(step), ...saved });
+      const result = await runNode([join(release, post!)], workspace, { ...(await runnerEnv(`${name}-post`)), ...actionInputs(step), ...saved });
       assert.equal(result.status, 0, `${template} ${name} post:\n${result.output}`);
     }
     return printed;
