@@ -55,6 +55,8 @@ import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments }
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
 import { withRecorded } from './recorded.ts';
+import { message } from '../messages.ts';
+import { type SkipReason, type WriteCode } from '../codes.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
 export const PARTIAL_RECORD_MESSAGE = "Sync: Linear's state, part of the tracked branch taken in";
@@ -97,8 +99,7 @@ export interface WriteOptions {
   captured?: ReadonlyMap<string, LinearDocument>;
 }
 
-/** Why a document was not written. */
-export type SkipReason = 'edited-in-linear' | 'missing-in-linear' | 'conflict' | 'renamed-to-unwritable';
+export type { SkipReason } from '../codes.ts';
 
 export interface WriteResult {
   capacity?: ContainerCapacity[];
@@ -108,7 +109,7 @@ export interface WriteResult {
   changed: boolean;
   /** The run went on from a partial record that an earlier run left on `linear`. */
   resumed: boolean;
-  code?: 'stopped' | 'write-failed' | 'state-moved' | 'container-cap';
+  code?: WriteCode;
   /** Content written to existing documents (a rename or move may come with it). */
   updated: string[];
   /** Documents renamed (new title) or moved to another project or team: from → to. */
@@ -168,7 +169,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const expected: StateSnapshot = { ...options.state };
   const tracked = fetched.tracked;
   const linearTip = expected.linear;
-  if (linearTip === null) throw new Error('the sync writes to Linear only after initial sync has recorded `linear`');
+  if (linearTip === null) throw new Error(message('sync.write-before-record'));
 
   const result: WriteResult = {
     complete: false,
@@ -904,7 +905,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
  */
 export class UploadRefusedError extends LinearError {
   constructor() {
-    super('FileUpload', 'a linked file is not in the upload cache');
+    super('FileUpload', message('linear.not-in-upload-cache'));
   }
 }
 

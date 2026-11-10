@@ -4,9 +4,10 @@
 import { type WriteStop } from '../initial-sync/index.ts';
 import { describeStop } from '../linear/index.ts';
 import { cell } from './summary.ts';
+import { message } from '../messages.ts';
 
 /** The words every partial sync run ends with, in its summary and its last message. */
-export const PARTIAL = 'partial, will continue';
+export const PARTIAL = message('run.partial');
 
 /**
  * Why the run stopped, and Linear's rate-limit headers of the answer that

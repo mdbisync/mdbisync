@@ -10,6 +10,8 @@
 import { fixUrl } from '../setup/fixes.ts';
 import { type PullRequestFailure, pullRequestFailure } from '../sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
+import { message } from '../messages.ts';
+import { type HeldCode } from '../codes.ts';
 
 export { PARTIAL } from './stop.ts';
 
@@ -19,7 +21,7 @@ export type ExitStatus = 'success' | 'warning' | 'failure';
 export type PartialCode =
   | NonNullable<NonNullable<OperationOutcome['captured']>['code']>
   | Exclude<NonNullable<NonNullable<NonNullable<OperationOutcome['sync']>['write']>['code']>, 'container-cap'>
-  | 'removal-held';
+  | HeldCode;
 
 /**
  * Why a sync run is partial, or undefined when it is not: Linear stopped it
@@ -67,14 +69,14 @@ export function stoppedBeforeWritingMessage(command: string, outcome: OperationO
   const detail = outcome.setup?.detail ?? outcome.refusal?.message;
   const fix = fixUrl(outcome.code);
   // Names from README front matter may hold line breaks; one line keeps them from reading as further log lines.
-  const explained = `${command}: stopped before any write (${outcome.code})${detail === undefined ? '' : `: ${detail.replace(/\s*[\r\n]+\s*/g, ' ')}`}`;
-  return fix === undefined ? explained : `${explained.replace(/\.$/, '')}. How to fix it: ${fix}`;
+  const explained = message('run.stopped-before-write', { command, code: String(outcome.code), detail: detail === undefined ? '' : message('run.stopped-detail', { detail: detail.replace(/\s*[\r\n]+\s*/g, ' ') }) });
+  return fix === undefined ? explained : message('run.how-to-fix', { message: explained.replace(/\.$/, ''), url: fix });
 }
 
 /** The message of a run that is not a sync, stopped by Linear before any write. */
 export function stoppedMessage(outcome: OperationOutcome): string | undefined {
   if (outcome.stopped === undefined || partialCode(outcome) !== undefined) return undefined;
-  return `${outcome.operation}: stopped by Linear before any write; run it again once the limit has reset`;
+  return message('run.stopped-by-linear', { command: outcome.operation });
 }
 
 /** Why a sync run is partial on Linear's side, before the sync pull request is weighed. */

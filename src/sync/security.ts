@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Git, type Oid, listTree, readBlobs, checkRepoPath } from '../state/index.ts';
 import { readHookConfig, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
+import { message } from '../messages.ts';
 
 export interface SecurityFinding { hook: string; line: number }
 export interface SecurityGate {
@@ -46,7 +47,7 @@ export interface SecurityGateOptions {
 export async function securityHookIds(git: Git, tracked: Oid): Promise<string[]> {
   const read = await git.run(['cat-file', 'blob', `${tracked}:${PRE_COMMIT_CONFIG}`], { okCodes: [0, 128] });
   const config = readHookConfig(read.code === 0 ? read.stdout.toString('utf8') : null);
-  if (config.invalid !== undefined) throw new Error('invalid security hook configuration');
+  if (config.invalid !== undefined) throw new Error(message('sync.invalid-security-config'));
   return config.hooks.filter((hook) => hook.alias === SECURITY_ALIAS).map((hook) => hook.id);
 }
 
@@ -54,7 +55,7 @@ export async function securityHookIds(git: Git, tracked: Oid): Promise<string[]>
 export async function securityGate(git: Git, tracked: Oid, options: SecurityGateOptions = {}): Promise<SecurityGate> {
   const env = options.env ?? { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8' };
   const hooks = await securityHookIds(git, tracked);
-  if (hooks.length > 0 && (await runHooks(git.dir, ['--version'], env)).code !== 0) throw new Error('security hooks require pre-commit on PATH; install pre-commit before capture');
+  if (hooks.length > 0 && (await runHooks(git.dir, ['--version'], env)).code !== 0) throw new Error(message('sync.needs-pre-commit'));
   let dir: string | undefined;
   let scratch: Git;
   let baseline: string;

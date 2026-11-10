@@ -22,6 +22,7 @@ import { Git } from "../state/index.ts";
 import { SECURITY_STEPS, type SecurityStep, stageFolder } from "../sync/staged.ts";
 import { cleanupAppTokens } from "../linear/cleanup.ts";
 import { LINEAR_TOKEN_STATE } from "./state.ts";
+import { message } from "../messages.ts";
 
 export const OPERATIONS = ["sync", "initial-sync"] as const;
 export type Operation = (typeof OPERATIONS)[number];
@@ -31,7 +32,7 @@ export function parseOperation(value: string): Operation {
   if ((OPERATIONS as readonly string[]).includes(operation)) {
     return operation as Operation;
   }
-  throw new Error(`unknown operation: ${operation} (expected one of: ${OPERATIONS.join(", ")})`);
+  throw new Error(message('action.unknown-operation', { operation, operations: OPERATIONS.join(', ') }));
 }
 
 /**
@@ -61,7 +62,7 @@ export function parseSecurityStep(value: string): SecurityStep | undefined {
   const step = value.trim();
   if (step === "") return undefined;
   if ((SECURITY_STEPS as readonly string[]).includes(step)) return step as SecurityStep;
-  throw new Error(`unknown security-step: ${step} (expected one of: ${SECURITY_STEPS.join(", ")}, or empty)`);
+  throw new Error(message('action.unknown-security-step', { step, steps: SECURITY_STEPS.join(', ') }));
 }
 
 /** The hooks step's script, beside this one: the bundle in a release, the source in tests. */
@@ -86,7 +87,7 @@ export async function run(options: RunOptions = {}): Promise<void> {
     const cleanupValue = core.getInput("cleanup-tokens");
     const cleanupTokens = cleanupValue === "" ? false : core.getBooleanInput("cleanup-tokens");
     const step = parseSecurityStep(core.getInput("security-step"));
-    if (cleanupTokens && step === "apply") throw new Error("cleanup-tokens belongs before the stage step, not apply");
+    if (cleanupTokens && step === "apply") throw new Error(message('action.cleanup-before-stage'));
     const security = step === undefined ? undefined : { step, folder: stageFolder() };
     const serverUrl = process.env["GITHUB_SERVER_URL"] || "https://github.com";
     const auth = gitAuthEnv(inputs.github.token, serverUrl);
@@ -104,7 +105,7 @@ export async function run(options: RunOptions = {}): Promise<void> {
         exclusive: true,
         baseUrl: inputs.linear.apiUrl,
         lifecycle: tokenLifecycle,
-        onRevokeError: () => { throw new Error("token cleanup revocation failed"); },
+        onRevokeError: () => { throw new Error(message('action.cleanup-revocation-failed')); },
         ...(options.fetch ? { fetch: options.fetch } : {}),
       });
       core.info("token cleanup: replaced stale app tokens and restored read/write scopes");
@@ -153,7 +154,7 @@ export async function run(options: RunOptions = {}): Promise<void> {
     }
     if (outcome.confirmed?.code === 'container-cap' || outcome.sync?.write?.code === 'container-cap') {
       core.setOutput("code", "container-cap");
-      core.setFailed(`${operation}: stopped before any write (container-cap); reduce additions or check document-cap`);
+      core.setFailed(message('run.container-cap', { command: operation }));
       return;
     }
     const unfinished = outcome.confirmed ?? outcome.reverse;

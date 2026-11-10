@@ -1,3 +1,4 @@
+import { message } from '../messages.ts';
 // Errors raised by the Linear client. Messages carry operation names, HTTP
 // statuses and Linear's error codes only, never document content or tokens.
 
@@ -38,7 +39,7 @@ export class LinearStoppedError extends LinearError {
   readonly reason: StopReason;
 
   constructor(operation: string, reason: StopReason) {
-    super(operation, `${operation}: Linear client stopped (${describeStop(reason)})`);
+    super(operation, message('linear.stopped', { operation, reason: describeStop(reason) }));
     this.reason = reason;
   }
 }
@@ -58,7 +59,7 @@ export class LinearGraphQLError extends LinearError {
     const type = stringOrUndefined(error.extensions?.type);
     super(
       operation,
-      `${operation}: Linear error ${code ?? 'unknown'} (HTTP ${httpStatus}, request ${requestId ?? 'unknown'}): ${error.message ?? ''}`.trim(),
+      message('linear.error', { operation, code: code ?? 'unknown', status: httpStatus, request: requestId ?? 'unknown', detail: error.message ?? '' }).trim(),
     );
     this.code = code;
     this.type = type;
@@ -74,7 +75,7 @@ export class LinearHttpError extends LinearError {
   readonly requestId: string | undefined;
 
   constructor(operation: string, httpStatus: number, requestId?: string) {
-    super(operation, `${operation}: Linear answered HTTP ${httpStatus} (request ${requestId ?? 'unknown'})`);
+    super(operation, message('linear.answered', { operation, status: httpStatus, request: requestId ?? 'unknown' }));
     this.httpStatus = httpStatus;
     this.requestId = requestId;
   }
@@ -86,7 +87,7 @@ export class LinearHttpError extends LinearError {
  */
 export class LinearNetworkError extends LinearError {
   constructor(operation: string, cause: unknown) {
-    super(operation, `${operation}: request to Linear failed (${causeName(cause)})`, { cause });
+    super(operation, message('linear.request-failed', { operation, cause: causeName(cause) }), { cause });
   }
 }
 
@@ -117,7 +118,7 @@ export class DocumentTooLongError extends LinearError {
   readonly limit: number;
 
   constructor(operation: string, refusal: { field: 'title' | 'content'; length: number; limit: number }) {
-    super(operation, `${operation}: ${refusal.field} is ${refusal.length} characters, Linear accepts at most ${refusal.limit}`);
+    super(operation, message('linear.too-long', { operation, field: refusal.field, length: refusal.length, limit: refusal.limit }));
     this.field = refusal.field;
     this.length = refusal.length;
     this.limit = refusal.limit;
@@ -133,7 +134,7 @@ export class LinearReadBackError extends LinearError {
   readonly document: { id: string };
 
   constructor(operation: string, document: { id: string }, cause?: unknown) {
-    super(operation, `${operation}: written, but reading back the stored record failed`, { cause });
+    super(operation, message('linear.read-back-failed', { operation }), { cause });
     this.document = document;
   }
 }
@@ -170,10 +171,10 @@ export function isTransientLinearError(error: LinearError): boolean {
 export function describeStop(reason: StopReason): string {
   if (reason.kind === 'rate-limited') {
     return reason.retryAfterSeconds === undefined
-      ? 'rate limited'
-      : `rate limited, retry after ${reason.retryAfterSeconds} s`;
+      ? message('linear.rate-limited')
+      : message('linear.rate-limited-retry', { seconds: reason.retryAfterSeconds });
   }
-  return `${reason.header} is ${reason.remaining}, below ${reason.threshold}`;
+  return message('linear.budget-low', { header: reason.header, remaining: reason.remaining, threshold: reason.threshold });
 }
 
 function stringOrUndefined(value: unknown): string | undefined {

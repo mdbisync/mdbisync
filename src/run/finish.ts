@@ -12,6 +12,7 @@ import { type ExitStatus, exitStatusOf, partialCode, pullRequestEnding } from '.
 import { cell } from './summary.ts';
 import { type OperationOutcome, type RunWrites } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
+import { message } from '../messages.ts';
 
 export interface RunReport {
   capacity: ContainerCapacity[];
@@ -375,9 +376,9 @@ function toConfirmedReport(result: ConfirmedResult): ConfirmedReport {
 /** The one-line failure of an initial sync that did not finish: why, and what to do next. */
 export function unfinishedMessage(command: string, code: string | undefined): string {
   if (code === 'sync-branch-changed') {
-    return `${command}: not finished (${code}); merge or close the pull request of the sync branch and delete the branch, then run it again`;
+    return message('run.not-finished-sync-branch', { command, code });
   }
-  return `${command}: not finished (${code}); run it again with the same inputs`;
+  return message('run.not-finished', { command, code: String(code) });
 }
 
 export async function writeRunReport(path: string, outcome: OperationOutcome): Promise<void> {

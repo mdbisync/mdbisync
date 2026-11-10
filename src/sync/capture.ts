@@ -25,6 +25,8 @@ import { lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, type CapturedAssets } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
+import { message } from '../messages.ts';
+import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
 
 export interface CaptureOptions {
   config: StateConfig;
@@ -42,7 +44,7 @@ export interface CaptureOptions {
 
 export interface CaptureResult {
   ok: boolean;
-  code?: 'state-moved' | 'stopped' | 'linear-failed';
+  code?: CaptureCode;
   /** Linear failed a request (a server error, a lost connection, an error answer): its operation and error, no content. */
   failure?: { operation: string; error: string };
   /** A resumable client budget stop; state is the last successful push. */
@@ -60,11 +62,11 @@ export interface CaptureResult {
    * later capture finds them gone again while some place lists documents.
    */
   heldRemovals: string[];
-  leftOut: Array<{ id: string; rule: string }>;
+  leftOut: Array<{ id: string; rule: CaptureLeftOutRule }>;
   /** The `ids` ref was lost: how many of the recorded files got their document back by title, of how many. */
   rebuiltIds?: { matched: number; files: number };
   /** Captured content that exceeds Linear's write limit; paths and counts only. */
-  writeBackWarnings: Array<{ path: string; code: 'linear-content-too-large-to-write-back'; length: number; limit: number }>;
+  writeBackWarnings: Array<{ path: string; code: WriteBackWarningCode; length: number; limit: number }>;
   summary: string;
   /**
    * The run's annotated containers as this capture listed them (trash
@@ -112,7 +114,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   let targets = context.targets;
   const state = { ...options.state };
   const base = state.linear;
-  if (base === null) throw new Error('run initial sync first');
+  if (base === null) throw new Error(message('sync.needs-initial-sync'));
   const identity = options.identity ?? SYNC_IDENTITY;
   const ids = await readIds(git, state.ids);
   const uploads = await readUploads(git, state.uploads);
@@ -135,7 +137,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     if (changedPlace) {
       mapping = {...mapping, zones};
       const resolved = await resolveTargets(linear, zones.values());
-      if (resolved.targets === undefined) throw new Error('the previously recorded document places could not be resolved');
+      if (resolved.targets === undefined) throw new Error(message('sync.places-unresolved'));
       targets = resolved.targets;
     }
     if (state.ids === null) {
@@ -449,7 +451,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // A place that listed nothing may have left out changes too: the cursor holds while a removal is held.
     const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
     const trailers = [...(through === null ? [] : [captureCursorTrailer(through)]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
-    const message = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
+    const commitMessage = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
     // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
@@ -461,7 +463,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // only holds back, which rereads more and loses nothing.
     const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
     const always = held.size > 0 || heldBefore.size > 0 || (through !== cursor && recordsChange);
-    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always, reserved });
+    const idsCommit = await commitIds(git, state.ids, ids, identity, { message: commitMessage, always, reserved });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.
     if (prepared.oids.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...prepared.oids]);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
@@ -474,7 +476,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const refusal = lengthRefusal({content: candidate.doc.content ?? ''}, linear.facts);
         if (refusal !== undefined) result.writeBackWarnings.push({path: candidate.path, code: 'linear-content-too-large-to-write-back', length: refusal.length, limit: refusal.limit});
       }
-      const lostLease = new Error('state moved while recording document marks');
+      const lostLease = new Error(message('sync.lost-lease'));
       const marked = [
         ...[...candidates.values()].filter(({doc}) => !unmarked.has(doc.id)).map(({doc, path}) => ({doc, path, blocked: [] as SecurityFinding[]})),
         ...result.blocked.map(({id, path, findings}) => ({doc: documents.get(id)!, path, blocked: findings})),
@@ -606,7 +608,7 @@ export async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: 
       if (attributes.stdout.toString('utf8').split('\0')[2] !== 'lfs') continue;
       const cleaned = await git.run(['lfs', 'clean', '--', path], { input: content });
       const hash = /\noid sha256:([a-f0-9]{64})\n/.exec(cleaned.stdout.toString('utf8'))?.[1];
-      if (hash === undefined) throw new Error('LFS did not return a pointer');
+      if (hash === undefined) throw new Error(message('sync.no-lfs-pointer'));
       oids.push(hash);
       result.set(path, cleaned.stdout);
     }

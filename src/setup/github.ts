@@ -6,6 +6,7 @@
 // same way (they are visible to a token with write access).
 
 import { type CheckResult, failed, notChecked, passed } from './report.ts';
+import { message } from '../messages.ts';
 
 export const DEFAULT_GITHUB_API_URL = 'https://api.github.com';
 
@@ -56,14 +57,14 @@ export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
   const request = requester(target);
   const repository = await request('GET', '');
   if (repository.status === 403 && isRateLimited(repository)) {
-    throw new Error('GitHub rate-limited the setup check while reading the repository (HTTP 403); run again later');
+    throw new Error(message('setup.github-rate-limited'));
   }
   if (repository.status === 401 || repository.status === 403 || repository.status === 404) {
-    const why = repository.status === 401 ? 'was refused' : 'cannot see the repository';
-    const access = failed('github-access', 'github-credential-failed', `the GitHub token ${why} (HTTP ${repository.status})`);
+    const why = repository.status === 401 ? message('setup.github-refused', { status: repository.status }) : message('setup.github-cannot-see', { status: repository.status });
+    const access = failed('github-access', 'github-credential-failed', why);
     return { access, mergeCommits: notChecked('merge-commits', 'needs a working GitHub token') };
   }
-  ensureAnswered(repository.status, 'reading the repository');
+  ensureAnswered(repository.status, message('setup.github-reading-repository'));
 
   const missing: string[] = [];
   const unknown: string[] = [];
@@ -75,11 +76,11 @@ export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
     const answer = await request(probe.method, probe.path(target.commit), probe.body);
     const { status } = answer;
     if (status === 403 && isRateLimited(answer)) {
-      throw new Error(`GitHub rate-limited the setup check while checking ${probe.permission} (HTTP 403); run again later`);
+      throw new Error(message('setup.github-rate-limited-permission', { permission: probe.permission }));
     }
     if (status === 403) missing.push(probe.permission);
     else if (!(status >= 200 && status < 300) && status !== 422) {
-      throw new Error(`GitHub answered HTTP ${status} while checking ${probe.permission}`);
+      throw new Error(message('setup.github-answered-permission', { status, permission: probe.permission }));
     }
   }
   const access = missing.length === 0
@@ -87,17 +88,17 @@ export async function checkGitHub(target: GitHubTarget): Promise<GitHubCheck> {
     : failed(
         'github-access',
         'missing-permission',
-        `the GitHub token lacks ${missing.join(', ')}${unknown.length > 0 ? ` (${unknown.join(', ')} not checked without it)` : ''}`,
+        message('setup.github-lacks', { permissions: missing.join(', '), unchecked: unknown.length > 0 ? message('setup.github-lacks-unchecked', { permissions: unknown.join(', ') }) : '' }),
       );
 
   const allow = (repository.json as { allow_merge_commit?: unknown } | null)?.allow_merge_commit;
   const mergeCommits = typeof allow !== 'boolean'
     ? (missing.includes('contents:write')
         ? notChecked('merge-commits', 'needs contents:write to read the merge setting')
-        : failed('merge-commits', 'merge-commits-required', 'GitHub did not show whether merge commits are allowed'))
+        : failed('merge-commits', 'merge-commits-required', message('setup.merge-commits-unknown')))
     : allow
       ? passed('merge-commits', 'merge commits are allowed')
-      : failed('merge-commits', 'merge-commits-required', 'merge commits are not allowed in the repository settings');
+      : failed('merge-commits', 'merge-commits-required', message('setup.merge-commits-off'));
   return { access, mergeCommits };
 }
 
@@ -146,5 +147,5 @@ function isRateLimited(answer: Answer): boolean {
 }
 
 function ensureAnswered(status: number, what: string): void {
-  if (status < 200 || status >= 300) throw new Error(`GitHub answered HTTP ${status} while ${what}`);
+  if (status < 200 || status >= 300) throw new Error(message('setup.github-answered', { status, action: what }));
 }

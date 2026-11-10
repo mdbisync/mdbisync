@@ -4,6 +4,7 @@
 
 import { DIRECTIONS, type Direction } from '../initial-sync/summary.ts';
 import { type StateConfig, StateConfigError, resolveStateConfig } from '../state/index.ts';
+import { message } from '../messages.ts';
 
 export const INPUT_NAMES = [
   'linear-client-id',
@@ -53,14 +54,14 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   const value = (name: InputName): string => get(name).trim();
   const required = (name: InputName): string => {
     const given = value(name);
-    if (given === '') throw new InputError(`the input ${name} is required`);
+    if (given === '') throw new InputError(message('inputs.required', { name }));
     return given;
   };
   const linear = { clientId: required('linear-client-id'), clientSecret: required('linear-client-secret') };
   const token = required('github-token');
   const repository = value('repository') || (env.GITHUB_REPOSITORY ?? '').trim();
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
-    throw new InputError('the input repository must be "owner/name" (it defaults to the workflow\'s repository)');
+    throw new InputError(message('inputs.repository'));
   }
   const inputs: RunInputs = {
     linear,
@@ -75,12 +76,12 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
   if (reportFile !== '') inputs.reportFile = reportFile;
   const cap = value('document-cap');
   if (cap !== '') {
-    if (!/^[1-9][0-9]*$/.test(cap) || !Number.isSafeInteger(Number(cap))) throw new InputError('the input document-cap must be a positive safe integer');
+    if (!/^[1-9][0-9]*$/.test(cap) || !Number.isSafeInteger(Number(cap))) throw new InputError(message('inputs.document-cap'));
     inputs.documentCap = Number(cap);
   }
   const grace = value('merge-grace-seconds');
   if (grace !== '') {
-    if (!/^(0|[1-9][0-9]*)$/.test(grace) || Number(grace) > 120) throw new InputError('the input merge-grace-seconds must be an integer from 0 to 120');
+    if (!/^(0|[1-9][0-9]*)$/.test(grace) || Number(grace) > 120) throw new InputError(message('inputs.merge-grace'));
     inputs.mergeGraceSeconds = Number(grace);
   }
   return inputs;
@@ -106,8 +107,8 @@ export interface InitialSyncInputs {
 export function readInitialSyncInputs(get: (name: InputName) => string): InitialSyncInputs {
   const direction = get('direction').trim();
   if (!(DIRECTIONS as readonly string[]).includes(direction)) {
-    const given = direction === '' ? 'is required' : `must be one of ${DIRECTIONS.join(', ')}, not "${direction}"`;
-    throw new InputError(`the input direction ${given} (initial sync never picks a direction itself)`);
+    const problem = direction === '' ? message('inputs.direction-missing') : message('inputs.direction-unknown', { directions: DIRECTIONS.join(', '), direction });
+    throw new InputError(message('inputs.direction', { problem }));
   }
   return { direction: direction as Direction, confirm: get('confirm').trim() === 'true' };
 }

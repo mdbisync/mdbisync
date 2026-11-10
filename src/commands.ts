@@ -1,3 +1,4 @@
+import { message } from './messages.ts';
 // The commands of the command-line entry and their exit codes.
 // `sync`, `initial-sync` and `check` run the preflight (the sync's state and
 // the setup check). A command that is not built yet reports "not implemented"
@@ -47,5 +48,5 @@ export function isCommandName(value: string): value is CommandName {
 export const IMPLEMENTED: ReadonlySet<CommandName> = new Set(["lint", "fix", "init"]);
 
 export function notImplementedMessage(command: string): string {
-  return `${command}: not implemented`;
+  return message('cli.not-implemented', { command });
 }

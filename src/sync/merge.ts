@@ -4,11 +4,13 @@
 // it holds the merge result: a write, a rename or move, a create or a trash.
 
 import { readAnnotation } from '../mapping/index.ts';
-import { lintText, splitFile } from '../format/index.ts';
+import { lintText, splitFile, type LintRule } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
 import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
+import { message } from '../messages.ts';
+import { type LeftOutRule } from '../codes.ts';
 
 /** A synchronized file of one side: its path, blob, Linear title and place. */
 export interface SideFile {
@@ -259,7 +261,7 @@ export async function mergeWithMarkers(git: Git, linearSide: Oid, gitSide: Oid, 
   const base = await git.text(['merge-base', linearSide, gitSide]);
   const merged = await git.run(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', linearSide, gitSide], { okCodes: [0, 1] });
   const [gitTree, ...rest] = merged.stdout.toString('utf8').split('\0');
-  if (gitTree === undefined || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error('git merge-tree gave no tree');
+  if (gitTree === undefined || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error(message('sync.no-merge-tree'));
   const unmerged = [...new Set(rest.filter((path) => path !== ''))].sort(compare);
   const renames = await renamesBetween(git, base, gitSide);
   const resolved = await resolveConflicts(git, { base, linear: linearSide, tracked: gitSide, tree: gitTree, unmerged, renames, ids, knownId });
@@ -294,7 +296,7 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
   const leftOut: Array<{ path: string; rules: string[] }> = [];
   const leave = (path: string, rules: string[]) => leftOut.push({ path, rules: [...new Set(rules)].sort() });
   for (const document of mapping.documents) {
-    const rules: string[] = lintText(document.path, (blobs.get(document.oid) as Buffer).toString('utf8')).map((finding) => finding.rule);
+    const rules: Array<LintRule | LeftOutRule> = lintText(document.path, (blobs.get(document.oid) as Buffer).toString('utf8')).map((finding) => finding.rule);
     if (lengthRefusal({ title: document.title }, facts) !== undefined) rules.push('title-too-long');
     if (rules.length > 0) leave(document.path, rules);
     else files.set(document.path, toSideFile(document));
