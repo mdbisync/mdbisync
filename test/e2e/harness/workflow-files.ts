@@ -145,7 +145,9 @@ function guarded(guard: string, condition: unknown): string {
 // `request` job takes one run's request (the branch t/<run>/schedule, which
 // it deletes, so a request is served once) and its sync jobs run the
 // template's steps for that run's branches, state refs and concurrency group.
-// A tick without a request runs only the `request` job. The workflow is
+// A tick without a request runs only the `request` job. A dispatch of the
+// workflow on the default branch is a tick by hand: the same jobs, under its
+// own event (steps.ts, scheduleTick). The workflow is
 // installed once, by hand (`cli.ts scheduler --install`); a run never changes
 // the default branch, and refuses to ask a scheduled workflow that is not
 // this template's rendering for the release under test.
@@ -239,6 +241,8 @@ export function renderScheduler(template: string, actionSha?: string): string {
   const on = doc.get('on');
   if (!isMap(on) || !on.has('schedule')) throw new Error('the template has no schedule');
   for (const event of on.items.map((pair) => String(pair.key))) if (event !== 'schedule') on.delete(event);
+  // A tick by hand (MDBISYNC_TEST_SCHEDULE_TICK=dispatch) when GitHub starts no schedule: the same jobs, recorded as a dispatch.
+  on.set('workflow_dispatch', null);
   if (doc.getIn(['concurrency', 'group']) !== SCHEDULER_GROUP) throw new Error('the template has no shared concurrency group');
   const concurrency = top.items.find((pair) => isScalar(pair.key) && pair.key.value === 'concurrency')?.key;
   if (isScalar(concurrency)) concurrency.commentBefore = ' One tick at a time; a newer tick replaces a waiting one.';

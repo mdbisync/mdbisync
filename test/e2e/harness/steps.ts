@@ -63,6 +63,22 @@ export const SYNC_WORKFLOW = WORKFLOW_FILES.sync;
 /** The release commit actions mode runs, in place of the templates' pin. */
 export const ACTION_SHA_ENV = 'MDBISYNC_TEST_ACTION_SHA';
 
+/** `dispatch` makes the harness start the sandbox's scheduled workflow by hand instead of waiting for GitHub's schedule. */
+export const SCHEDULE_TICK_ENV = 'MDBISYNC_TEST_SCHEDULE_TICK';
+
+/**
+ * How a scheduled sync starts: `schedule`, GitHub's own tick, or
+ * `workflow_dispatch`, a tick by hand for a sandbox where GitHub starts no
+ * schedule. A tick by hand runs the same jobs and is recorded with its true
+ * event, so a scenario that asserts the `schedule` event still fails.
+ */
+export function scheduleTick(env: NodeJS.ProcessEnv = process.env): 'schedule' | 'workflow_dispatch' {
+  const value = env[SCHEDULE_TICK_ENV]?.trim() ?? '';
+  if (value === '') return 'schedule';
+  if (value === 'dispatch') return 'workflow_dispatch';
+  throw new Error(`${SCHEDULE_TICK_ENV} must be empty or "dispatch", not "${value}"`);
+}
+
 /** The release commit named by `MDBISYNC_TEST_ACTION_SHA`, or undefined for the templates' own pin. */
 export function actionShaUnderTest(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const actionSha = env[ACTION_SHA_ENV]?.trim() ?? '';
@@ -351,7 +367,7 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
     run = await waitForRun(world.rest, { branch: ctx.names.syncBranch, event, after: pr.openedAt, exclude: seenRuns(ctx) });
   } else if (event === 'schedule') {
     const after = await requestScheduledRun(ctx);
-    run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after, exclude: seenRuns(ctx) });
+    run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after, event: scheduleTick(), exclude: seenRuns(ctx) });
   } else {
     throw new Error(`run.workflow cannot start a ${event} run`);
   }
@@ -380,6 +396,11 @@ async function requestScheduledRun(ctx: RunContext): Promise<number> {
   const after = Date.now();
   await world.rest.createBranch(ctx.names.scheduleRequest, tip);
   try {
+    if (scheduleTick() === 'workflow_dispatch') {
+      const id = await world.rest.workflowId(SCHEDULER_FILE);
+      if (id === undefined) throw new EnvBlockedError(`the sandbox's scheduled workflow ${SCHEDULER_FILE} is not registered`);
+      await world.rest.dispatchWorkflow(id, (await world.rest.request<{ default_branch: string }>('GET', '')).default_branch, {});
+    }
     await waitForRequestTaken(world.rest, ctx.names.scheduleRequest);
   } catch (error) {
     // A request no tick took must not start a sync after the step. When a tick took it just now, the deletion
@@ -586,7 +607,7 @@ const RUN: Record<string, Executor> = {
     }));
     const runs = [];
     if (scheduledAfter !== undefined) {
-      const run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after: scheduledAfter, exclude: seenRuns(ctx) });
+      const run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after: scheduledAfter, event: scheduleTick(), exclude: seenRuns(ctx) });
       runs.push(run);
       recordWorkflowRun(ctx, run);
     }

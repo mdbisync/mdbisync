@@ -120,18 +120,19 @@ export async function waitForRequestTaken(rest: SandboxRest, branch: string, opt
 }
 
 /**
- * The scheduled run of `workflow` that ran a job for run `runId` (a job
+ * The scheduled run of `workflow` (or, for a tick by hand, its run of
+ * `event` workflow_dispatch) that ran a job for run `runId` (a job
  * named `<job> <runId>`), once it has completed. Call it once the request
  * is taken: that run exists by then. The tick that took it may have been
  * created before the request (it waited for the runner or for the tick
  * before it), so only runs that finished before `after` are left out.
  */
-export async function waitForScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; after: number; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number }): Promise<WorkflowRun> {
+export async function waitForScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; after: number; event?: 'schedule' | 'workflow_dispatch'; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number }): Promise<WorkflowRun> {
   const started = Date.now();
   // Runs that served another run, or none: they never become this run's.
   const others = new Set<number>(options.exclude ?? []);
   for (;;) {
-    const candidates = (await rest.workflowFileRuns(options.workflow, 'schedule'))
+    const candidates = (await rest.workflowFileRuns(options.workflow, options.event ?? 'schedule'))
       .filter((run) => !others.has(run.id) && (run.status !== 'completed' || Date.parse(run.updated_at ?? run.created_at) >= options.after - 5_000))
       .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
     for (const run of candidates) {

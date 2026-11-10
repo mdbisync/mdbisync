@@ -225,6 +225,7 @@ environment wins. Values are never written to a report or a log.
 | `MDBISYNC_TEST_SANDBOX_GIT_URL` | optional | where Git reads and pushes instead, for example a local mirror |
 | `SYNC_APP_CLIENT_ID` and the App's private key (`SYNC_APP_PRIVATE_KEY`, `SYNC_APP_PRIVATE_KEY_FILE`, or `sync-app.pem` in the configuration folder) | `actions` mode; optional for `local` | a GitHub App installed on the test repository; without it, local runs use your Git credential for the repository |
 | `MDBISYNC_TEST_ACTION_SHA` | optional, `actions` mode; environment only, not read from `secrets.env` | a full release commit SHA the workflows run instead of the version their templates pin |
+| `MDBISYNC_TEST_SCHEDULE_TICK` | optional, `actions` mode; environment only | `dispatch` starts the scheduled sync workflow by hand instead of waiting for GitHub's schedule (see below) |
 
 The test workspace needs two teams with the keys `ENG` and `DOCS`; the
 corpus's folders map to them. The free plan is enough, with two limits to
@@ -256,7 +257,12 @@ uploaded:
   (without `--install` it prints the file). A run never changes the default
   branch: when the workflow there is missing, differs or is disabled, the
   scenario is env-blocked with that reason. GitHub may start a tick late or
-  skip it; a request no tick takes within an hour blocks the run.
+  skip it; a request no tick takes within an hour blocks the run. Where
+  GitHub starts no schedule at all, `MDBISYNC_TEST_SCHEDULE_TICK=dispatch`
+  (environment only) makes the harness dispatch the workflow on the default
+  branch right after the request: a tick by hand that runs the same jobs and
+  is recorded as `workflow_dispatch`, so a scenario that asserts the
+  `schedule` event still fails.
 
 `ui` mode is a checklist for a person or a browser session signed in as
 the two members.

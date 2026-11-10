@@ -11,6 +11,7 @@ import { describe, it } from 'node:test';
 import { parse } from 'yaml';
 import { runNames } from './isolation.ts';
 import { EnvBlockedError } from './results.ts';
+import { SCHEDULE_TICK_ENV, scheduleTick } from './steps.ts';
 import {
   ACTION_REPOSITORY, pinnedActionSha, readTemplate, renderScheduler, requestScript, runGroup, SANDBOX_RUNNER, scheduledJobName, SCHEDULER_FILE, SCHEDULER_GROUP, WORKFLOW_FILES,
 } from './workflow-files.ts';
@@ -25,10 +26,10 @@ const scheduler = (actionSha?: string) =>
   parse(renderScheduler(readTemplate(WORKFLOW_FILES.sync), actionSha)) as { name: string; on: Record<string, unknown>; concurrency: Record<string, unknown>; jobs: Record<string, Job> };
 
 describe('the scheduled sync on the sandbox\'s default branch', () => {
-  it('runs on the template\'s schedule only, one tick at a time', () => {
+  it('runs on the template\'s schedule and by hand, one tick at a time', () => {
     const parsed = scheduler();
     const template = parse(readTemplate(WORKFLOW_FILES.sync)) as { on: Record<string, unknown> };
-    assert.deepEqual(parsed.on, { schedule: template.on['schedule'] });
+    assert.deepEqual(parsed.on, { schedule: template.on['schedule'], workflow_dispatch: null });
     assert.deepEqual(parsed.concurrency, { group: SCHEDULER_GROUP, 'cancel-in-progress': false });
     assert.equal(parsed.name, 'mdbisync (scheduled)');
     assert.equal(SCHEDULER_FILE, 'mdbisync-scheduled.yml');
@@ -165,6 +166,27 @@ describe('waiting for a scheduled run', () => {
     // A run that finished before the request is never read; a tick that took another run's request is read once.
     assert.deepEqual(jobsRead, [4, 3, 4]);
     await assert.rejects(waitForScheduledRun(rest as never, { workflow: SCHEDULER_FILE, runId: 'ffffff', after: now, timeoutMs: 0, pollMs: 1 }), EnvBlockedError);
+  });
+
+  it('reads the runs of a tick by hand under their own event', async () => {
+    const events: string[] = [];
+    const rest = {
+      workflowFileRuns: async (_file: string, event: string) => {
+        events.push(event);
+        return [{ id: 7, status: 'completed', conclusion: 'success', event, created_at: new Date().toISOString() }];
+      },
+      runJobs: async () => [{ name: 'request', completed_at: null }, { name: 'sync a1b2c3', completed_at: null }],
+    };
+    const run = await waitForScheduledRun(rest as never, { workflow: SCHEDULER_FILE, runId: 'a1b2c3', after: 0, event: 'workflow_dispatch', pollMs: 1 });
+    assert.equal(run.event, 'workflow_dispatch');
+    assert.deepEqual(events, ['workflow_dispatch']);
+  });
+
+  it('starts a tick by hand only when asked', () => {
+    assert.equal(scheduleTick({}), 'schedule');
+    assert.equal(scheduleTick({ [SCHEDULE_TICK_ENV]: '' }), 'schedule');
+    assert.equal(scheduleTick({ [SCHEDULE_TICK_ENV]: 'dispatch' }), 'workflow_dispatch');
+    assert.throws(() => scheduleTick({ [SCHEDULE_TICK_ENV]: 'schedule' }), /must be empty or "dispatch"/);
   });
 });
 
