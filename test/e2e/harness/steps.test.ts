@@ -1581,7 +1581,8 @@ describe('GraphQL HTTP fault scenario', () => {
 describe('subjects', () => {
   describe('setup failures (L5-01 to L5-05)', () => {
     const FIX = 'https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#linear-oauth-app';
-    // What a live L5-01 run gave: its report, job summary and terminal stop line, as the engine wrote them.
+    // From a live L5-01 run: its job summary and terminal stop line as the engine wrote them, and its report
+    // trimmed to the fields these subjects read (four of its eight setup checks, other request log lines dropped).
     const SUMMARY = [
       '## Setup check',
       '',
@@ -1612,7 +1613,7 @@ describe('subjects', () => {
       summary: null,
       setupChecks: [
         { name: 'linear-credentials', state: 'failed', detail: 'Linear refused the OAuth app client credentials' },
-        { name: 'github-access', state: 'passed', detail: 'GitHub token has contents:write' },
+        { name: 'github-access', state: 'passed', detail: 'GitHub token has contents:write, pull_requests:write, workflows:write, checks:read, statuses:read' },
         { name: 'annotation-targets', state: 'not-checked', detail: 'needs working Linear credentials' },
         { name: 'security-hooks', state: 'passed', detail: 'security hooks present: test-secret' },
       ],
@@ -1643,10 +1644,17 @@ describe('subjects', () => {
         ['runs.0.setupFailure.item', true],
         ['runs.0.setupFailure.fixLink', true],
       ]);
+      assert.equal(subjectSource('runs.0.setupFailure.item'), 'harness');
+      assert.equal(subjectSource('runs.last.setupFailure.fixLink'), 'harness');
+    });
+
+    it('expect in L5-01 to L5-05 a known item and the fix link the engine gives for the expected code', async () => {
+      const { CHECK_NAMES } = await import('../../../src/setup/report.ts');
+      const { fixUrl } = await import('../../../src/setup/fixes.ts');
       for (const id of ['L5-01', 'L5-02', 'L5-03', 'L5-04', 'L5-05']) {
-        const subjects = scenarios.find((scenario) => scenario.id === id)?.checks.assertions.map((assertion) => assertion.subject);
-        assert.deepEqual(subjects?.filter((subject) => subject.startsWith('runs.0.setupFailure.')), ['runs.0.setupFailure.item', 'runs.0.setupFailure.fixLink'], id);
-        assert.equal(subjectSource('runs.0.setupFailure.item'), 'harness');
+        const expected = new Map(scenarios.find((scenario) => scenario.id === id)?.checks.assertions.map((assertion) => [assertion.subject, assertion.expected]));
+        assert.ok((CHECK_NAMES as readonly unknown[]).includes(expected.get('runs.0.setupFailure.item')), id);
+        assert.equal(expected.get('runs.0.setupFailure.fixLink'), fixUrl(String(expected.get('runs.0.summary.code'))), id);
       }
     });
 
@@ -1657,10 +1665,17 @@ describe('subjects', () => {
       const otherItem = run({ summary: SUMMARY.replace('| linear-credentials | FAILED', '| linear-credentials | passed').replace('| github-access | passed | GitHub token has contents:write, pull_requests:write, workflows:write, checks:read, statuses:read |', `| github-access | FAILED | x ([how to fix](${FIX})) |`) });
       (otherItem.report?.['setupChecks'] as { name: string; state: string }[]).forEach((check) => (check.state = check.name === 'github-access' ? 'failed' : 'passed'));
       assert.equal((await verdict(otherItem))['runs.0.setupFailure.item'], false);
+      // Several failed items: the first is the one the report's code names; a later one does not stand in for it.
+      const several = run({ summary: SUMMARY.replace('| github-access | passed | GitHub token has contents:write, pull_requests:write, workflows:write, checks:read, statuses:read |', `| github-access | FAILED | x ([how to fix](${wrongLink})) |`) });
+      (several.report?.['setupChecks'] as { name: string; state: string }[])[1]!.state = 'failed';
+      assert.deepEqual(await verdict(several), { 'runs.0.setupFailure.item': true, 'runs.0.setupFailure.fixLink': true });
+      const swapped = structuredClone(several);
+      (swapped.report?.['setupChecks'] as { name: string; state: string }[])[0]!.state = 'passed';
+      assert.equal((await verdict(swapped))['runs.0.setupFailure.item'], false);
       // No failed item, or one the summary does not show as FAILED.
       const none = run();
       (none.report?.['setupChecks'] as { state: string }[]).forEach((check) => (check.state = 'passed'));
-      assert.match(String((await verdict(none))['runs.0.setupFailure.item']), /^product: .*0 failed items/);
+      assert.match(String((await verdict(none))['runs.0.setupFailure.item']), /^product: .*no failed item/);
       assert.match(String((await verdict(run({ summary: SUMMARY.replace('| linear-credentials | FAILED', '| linear-credentials | failed') })))['runs.0.setupFailure.item']), /^product: .*no FAILED row for linear-credentials/);
       // A wrong link given alike everywhere is a wrong value.
       assert.equal((await verdict(run({ summary: SUMMARY.replaceAll(FIX, wrongLink), stderr: STDERR.replace(FIX, wrongLink) })))['runs.0.setupFailure.fixLink'], false);

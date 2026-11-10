@@ -1752,8 +1752,9 @@ async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string
  * (L5-01 to L5-05). The report has no field that says the item was named: the harness reads it from
  * what the run actually gave.
  *
- * - `item`: the one entry of the report's `setupChecks` in state `failed`, which the job summary must
- *   show as a FAILED row.
+ * - `item`: the first entry of the report's `setupChecks` in state `failed`: the engine stops on the
+ *   first failure and gives its code as the report's `code`; later independent checks may fail too.
+ *   The job summary must show it as a FAILED row.
  * - `fixLink`: the link in that row, which the summary's stop line and the run's terminal stop line,
  *   both naming the report's `code`, must give alike.
  *
@@ -1768,9 +1769,9 @@ function setupFailureValue(ctx: RunContext, subject: string): string {
   const result = own[index];
   if (result === undefined) throw new ProductError(`the scenario has no engine run ${which} for ${subject}`);
   if (result.report === null) throw new ProductError(`engine run ${index} wrote no report, so it gives no ${subject}`);
-  const failedChecks = setupChecksOf(result.report).filter((check) => check.state === 'failed');
-  if (failedChecks.length !== 1) throw new ProductError(`engine run ${index}'s setupChecks have ${failedChecks.length} failed items, not one`);
-  const item = (failedChecks[0] as SetupCheck).name;
+  const first = setupChecksOf(result.report).find((check) => check.state === 'failed');
+  if (first === undefined) throw new ProductError(`engine run ${index}'s setupChecks have no failed item`);
+  const item = first.name;
   const summaryLines = result.summary.split('\n');
   const row = summaryLines.find((line) => line.startsWith(`| ${item} | FAILED | `));
   if (row === undefined) throw new ProductError(`engine run ${index}'s job summary has no FAILED row for ${item}`);

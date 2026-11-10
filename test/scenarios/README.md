@@ -138,6 +138,15 @@ only write a quiet run may make: `changed: true` with no state ref moved is not
 quiet. The harness snapshots the world before and after every run of a scenario
 that asserts `quiet`; an unwatched run gives no verdict.
 
+`runs.<n|last>.setupFailure.item` and `runs.<n|last>.setupFailure.fixLink` are
+computed by the harness, not read from the report, although they start with
+`runs.`. `item` is the first entry of the report's `setupChecks` in state
+`failed` (the one whose code the report gives), and the job summary must show
+it as a `FAILED` row. `fixLink` is the fix link of that row; the summary's stop
+line and the run's terminal stop line, both naming the report's `code`, must
+give the same link. A missing item, row, stop line or link, or links that
+differ, are product errors.
+
 Same-run merge scenarios set a positive merge grace with
 `run.sync.args.mergeGraceSeconds` (0 to 120; the harness otherwise passes 0,
 deferring every merge). A starting tree holds the pull request check workflow
