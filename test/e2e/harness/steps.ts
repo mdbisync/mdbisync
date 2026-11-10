@@ -34,13 +34,13 @@ import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
-import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
+import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, runFailure } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
 import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG, readHookConfig } from '../../../src/setup/hooks.ts';
 import { validateSha } from '../../../src/release/package.ts';
 import { parse, stringify } from 'yaml';
 import { HOOK_REPOSITORY } from '../../corpus/tree.ts';
-import type { Scenario, Step } from './spec.ts';
+import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
 import { lfsEndpoint, lfsUrlEnv, startLfsFaultProxy } from './lfs-fault-proxy.ts';
 import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
@@ -124,6 +124,7 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
     repository: world.repository,
     extraEnv: { ...ctx.engine.env },
     hooksDir: ctx.checkpoints.dir,
+    ...(ctx.engine.badCredential === undefined ? {} : { credentialFault: ctx.engine.badCredential }),
     reportFile: join(dir, 'report.json'),
     summaryFile: join(dir, 'summary.md'),
     linearUrl: ctx.proxy?.url ?? 'https://api.linear.app',
@@ -498,46 +499,6 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
     },
     sync,
   };
-}
-
-/**
- * How a run failed: at its failed setup check (named with the code and detail) or with its code. Null for a
- * run that did not fail (a partial run is `ok`, and the next one goes on) or failed without a code.
- */
-export function runFailure(report: Record<string, unknown> | null | undefined): string | null {
-  if (report?.['ok'] !== false || typeof report['code'] !== 'string') return null;
-  const checks = Array.isArray(report['setupChecks']) ? (report['setupChecks'] as Array<{ name?: unknown; state?: unknown; detail?: unknown }>) : [];
-  const check = checks.find((candidate) => candidate.state === 'failed');
-  return check === undefined ? `with ${report['code']}` : `at the setup check ${String(check.name)} (${report['code']}): ${String(check.detail)}`;
-}
-
-/** The setup stops that come from the credentials a run was given: on the test environment's own, they say nothing about the scenario. */
-const CREDENTIAL_STOPS: ReadonlySet<string> = new Set(['linear-credential-failed', 'github-credential-failed', 'missing-permission', 'github-app-not-found']);
-
-/**
- * The first engine run that stopped at its setup check on its credentials when the scenario does not expect
- * that stop, as the reason the scenario is env-blocked; null when there is none. A scenario expects the stop
- * of its run <n> when an assertion reads `runs.<n>.summary.code` or `runs.<n>.setupFailure.…` (`last` is
- * its last run): it armed the fault itself (L5-01, L5-02). Setup's runs (the first `setupRuns`) are never
- * expected. Such a stop on the environment's credentials (a GitHub token without `checks:read`, say) leaves
- * nothing synced, so the checks that follow would otherwise fail for want of a sync.
- */
-export function unexpectedSetupStop(scenario: Scenario, results: readonly EngineResult[], setupRuns: number): string | null {
-  const own = results.length - setupRuns;
-  const expected = new Set<number>();
-  for (const { subject } of scenario.checks.assertions) {
-    const which = /^runs\.(\d+|last)\.(?:summary\.code|setupFailure\.)/.exec(subject)?.[1];
-    if (which !== undefined) expected.add(which === 'last' ? own - 1 : Number(which));
-  }
-  for (const [index, result] of results.entries()) {
-    const n = index - setupRuns;
-    const code = result.report?.['code'];
-    if (typeof code !== 'string' || !CREDENTIAL_STOPS.has(code) || expected.has(n)) continue;
-    const stop = runFailure(result.report);
-    if (stop === null) continue;
-    return `the engine's ${n < 0 ? `setup run ${index}` : `run ${n}`} (${result.command}) stopped ${stop}; the test environment's credentials do not let the scenario run`;
-  }
-  return null;
 }
 
 /** Each tracked document's file and Linear content, the versions a load test's edit budget is measured on. */

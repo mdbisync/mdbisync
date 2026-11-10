@@ -29,7 +29,7 @@ import { githubToken } from './github.ts';
 import { forgetHeldRun, heldRunOf, loadHeldRun, saveHeldRun, type HeldRun } from './held-run.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { readLatest, updateStatusPage, writeEvidence, writeRunReport, type HarnessReport } from './report.ts';
-import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
+import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import {
   captureCanaryEvidence,
   claimEditorBudgets,
@@ -295,7 +295,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   release(false);
   forgetHeldRun(runDir);
   cleanClones(runDir);
-  const outcome = classify(error, deps.expectedRed.has(scenario.id));
+  const outcome = classify(blockedBySetupStop(error, ctx.engine.results, ctx.engine.setupRuns), deps.expectedRed.has(scenario.id));
   ctx.log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   appendFileSync(join(runDir, 'harness.log'), `\n${logLines.join('\n')}`);
   rmSync(join(runDir, 'canary-pending'), { force: true });
