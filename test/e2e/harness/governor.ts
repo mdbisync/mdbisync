@@ -129,6 +129,11 @@ export interface Grant {
   release(): void | Promise<void>;
 }
 
+/** Whether a scenario's shared reservation excludes every other one: all but the audited zone-concurrent contracts. */
+export function holdsFullSlot(scenario: Scenario): boolean {
+  return !zoneConcurrent(scenario);
+}
+
 export class BudgetBlockedError extends Error {
   constructor(message: string) {
     super(message);
@@ -222,6 +227,19 @@ export class Governor {
     this.#sleep = options.sleep ?? ((ms) => sleep(ms).then(() => undefined));
   }
 
+  /**
+   * Whether two scenarios cannot hold admission at the same time, so a
+   * worker of the same batch should not wait in admission for one while the
+   * other runs. Offline scenarios are never admitted. Shared admission keeps
+   * every live scenario apart except two zone-concurrent ones; host-local
+   * admission keeps only full slices apart.
+   */
+  conflicts(a: Scenario, b: Scenario): boolean {
+    if (a.setup.state === 'offline' || b.setup.state === 'offline') return false;
+    if (this.#options.shared !== undefined) return holdsFullSlot(a) || holdsFullSlot(b);
+    return a.slice === 'full' && b.slice === 'full';
+  }
+
   async #admitShared(scenario: Scenario, runId: string, estimated: Estimate, appName?: string, resumeOwner?: string): Promise<Grant> {
     const options = this.#options;
     const shared = options.shared!;
@@ -234,7 +252,7 @@ export class Governor {
     for (;;) {
       let retryAt = Infinity;
       for (const app of apps) {
-        const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: !zoneConcurrent(scenario), ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
+        const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: holdsFullSlot(scenario), ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
           readBudget: async () => {
             const at = this.#now();
             return this.#withObserved(app.name, await app.readBudget(), at);

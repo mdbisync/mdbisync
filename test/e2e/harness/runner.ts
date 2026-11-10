@@ -14,6 +14,7 @@ import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, CORPUS_DIR, inheritedTeam, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
+import { runScheduled } from './schedule.ts';
 import { BudgetBlockedError, budgetFromStatus, estimate, MAX_ADMISSION, type Governor } from './governor.ts';
 import { SandboxRest, githubToken, type GitHubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
@@ -815,6 +816,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   if (deps.teams !== undefined) ctx.observations.set('corpus.teams', [...deps.teams]);
   const locks: Lock[] = [];
   let grant: Awaited<ReturnType<Governor['admit']>> | undefined;
+  let released = false;
   let error: unknown;
   let checks: CheckOutcome[] = [];
   let cleanupOutcome: { ok: boolean; detail?: string } = { ok: true };
@@ -900,7 +902,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       }
     }
     if (grant !== undefined && (grant.owner === undefined || (cleanupOutcome.ok && !heldForUi && !setupStuck))) {
-      try { await grant.release(); }
+      try { await grant.release(); released = true; }
       catch { cleanupOutcome = { ok: false, detail: 'shared reservation could not be released; retry cleanup before reuse' }; }
     }
     clearInterval(heartbeat);
@@ -913,7 +915,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   writeFileSync(join(runDir, 'harness.log'), logLines.join('\n'));
   rmSync(join(runDir, 'canary-pending'), { force: true });
-  return resultOf(ctx, outcome, { startedAt: started, budgetWaitMs: grant?.waitedMs ?? 0, checks, cleanup: cleanupOutcome });
+  const result = resultOf(ctx, outcome, { startedAt: started, budgetWaitMs: grant?.waitedMs ?? 0, checks, cleanup: cleanupOutcome });
+  return grant?.owner !== undefined && !released ? { ...result, sharedReservationKept: true } : result;
 }
 
 /** A check that does not hold fails the scenario as a product error; the outcomes stay in the result either way. */
@@ -944,17 +947,20 @@ export async function runScenarios(
 ): Promise<ScenarioResult[]> {
   const results: ScenarioResult[] = new Array(scenarios.length);
   const ordinary = scenarios.map((_, index) => index).filter((index) => scenarios[index]?.id !== 'L5-21');
-  let next = 0;
-  const worker = async () => {
-    for (;;) {
-      const index = ordinary[next++];
-      if (index === undefined) return;
-      const scenario = scenarios[index];
-      if (scenario === undefined) return;
-      results[index] = stop.requested ? skippedResult(scenario, 'the harness was stopped before this scenario') : await runScenario(scenario, deps);
-    }
+  const governor = deps.governor;
+  const memo = new Map<number, boolean>();
+  const conflicting = (a: number, b: number) => {
+    const key = a * scenarios.length + b;
+    if (!memo.has(key)) memo.set(key, governor !== null && governor.conflicts(scenarios[a]!, scenarios[b]!));
+    return memo.get(key)!;
   };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(workers, scenarios.length)) }, worker));
+  // A stopped batch only reports the rest skipped, which conflicts with nothing.
+  const conflicts = (a: number, b: number) => !stop.requested && conflicting(a, b);
+  await runScheduled(ordinary, workers, conflicts, async (index) => {
+    const scenario = scenarios[index]!;
+    results[index] = stop.requested ? skippedResult(scenario, 'the harness was stopped before this scenario') : await runScenario(scenario, deps);
+    return results[index]!.sharedReservationKept === true ? 'kept' : 'released';
+  });
   // The batch scan runs after all producer workers and their cleanup finish.
   for (let index = 0; index < scenarios.length; index++) {
     const scenario = scenarios[index]!;
