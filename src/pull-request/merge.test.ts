@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type FakeCheck, GITHUB_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { PullRequestError } from './github.ts';
-import { mergePullRequest, readChecks, waitForChecks } from './merge.ts';
+import { mergePullRequest, readAnnotations, readChecks, waitForChecks } from './merge.ts';
 
 const SHA = 'a'.repeat(40);
 
@@ -28,7 +28,7 @@ describe('readChecks', () => {
     const checks: FakeCheck[] = Array.from({ length: 150 }, (_, i) => ({ name: `check-${i}`, status: 'completed', conclusion: 'success' }));
     checks.push({ name: 'late', status: 'completed', conclusion: 'timed_out' });
     const { world, repo } = target(checks);
-    assert.deepEqual(await readChecks(repo, SHA), { hasChecks: true, state: 'failed', failed: ['late'], pending: [] });
+    assert.deepEqual(await readChecks(repo, SHA), { hasChecks: true, state: 'failed', failed: ['late'], pending: [], failures: [{ name: 'late', url: 'https://github.test/owner/repo/runs/151', checkRunId: 151 }] });
     assert.equal(world.requests.filter((request) => request.includes('/check-runs')).length, 2);
   });
 
@@ -39,7 +39,42 @@ describe('readChecks', () => {
     ];
     assert.deepEqual(await readChecks(target(pending).repo, SHA), { hasChecks: true, state: 'pending', failed: [], pending: ['ext', 'queued'] });
     const failed: FakeCheck[] = [...pending, { name: 'cancelled', status: 'completed', conclusion: 'cancelled' }];
-    assert.deepEqual(await readChecks(target(failed).repo, SHA), { hasChecks: true, state: 'failed', failed: ['cancelled'], pending: ['ext', 'queued'] });
+    assert.deepEqual(await readChecks(target(failed).repo, SHA), { hasChecks: true, state: 'failed', failed: ['cancelled'], pending: ['ext', 'queued'], failures: [{ name: 'cancelled', url: 'https://github.test/owner/repo/runs/2', checkRunId: 2 }] });
+  });
+
+  it('names each failed check with its run link, a commit status with its https link only', async () => {
+    const checks: FakeCheck[] = [
+      { name: 'lint', status: 'completed', conclusion: 'failure' },
+      { name: 'ci/external', status: 'completed', conclusion: 'error', commitStatus: true, url: 'https://ci.example.test/build/7' },
+      { name: 'ci/plain', status: 'completed', conclusion: 'failure', commitStatus: true, url: 'http://ci.example.test/build/8' },
+      { name: 'ci/secret', status: 'completed', conclusion: 'failure', commitStatus: true, url: 'https://user:pass@ci.example.test/build/9' },
+    ];
+    const state = await readChecks(target(checks).repo, SHA);
+    assert.deepEqual(state.failures, [
+      { name: 'ci/external', url: 'https://ci.example.test/build/7' },
+      { name: 'ci/plain' },
+      { name: 'ci/secret' },
+      { name: 'lint', url: 'https://github.test/owner/repo/runs/1', checkRunId: 1 },
+    ]);
+  });
+});
+
+describe('readAnnotations', () => {
+  it('reads a check run\'s annotations page by page, path, line, title and message only', async () => {
+    const annotations = Array.from({ length: 130 }, (_, i) => ({ path: 'docs/a.md', start_line: i + 1, message: `Problem ${i}.`, ...(i === 0 ? { title: 'Heading' } : {}) }));
+    const { world, repo } = target([{ name: 'lint', status: 'completed', conclusion: 'failure', annotations }]);
+    const [failure] = (await readChecks(repo, SHA)).failures ?? [];
+    const read = await readAnnotations(repo, failure?.checkRunId as number);
+    assert.equal(read.length, 130);
+    assert.deepEqual(read[0], { path: 'docs/a.md', line: 1, title: 'Heading', message: 'Problem 0.' });
+    assert.deepEqual(read[1], { path: 'docs/a.md', line: 2, message: 'Problem 1.' });
+    assert.equal(world.github.annotationReads, 2);
+  });
+
+  it('fails as a GitHub error when the annotations cannot be read', async () => {
+    const { world, repo } = target([{ name: 'lint', status: 'completed', conclusion: 'failure' }]);
+    world.github.missing.add('checks:read');
+    await assert.rejects(readAnnotations(repo, 1), PullRequestError);
   });
 
   it('never reads unlisted commit statuses or check runs as passed', async () => {

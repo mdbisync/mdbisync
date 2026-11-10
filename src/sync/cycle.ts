@@ -16,6 +16,7 @@ import { type StateConfig } from '../state/index.ts';
 import { type SecurityGate } from './security.ts';
 import { type PullRequestResult, syncPullRequest } from './pull-request.ts';
 import { type WriteResult, writeTrackedToLinear } from './write.ts';
+import { holdChanges, reconcileHoldMarks } from './hold.ts';
 
 export interface CycleOptions {
   documentCap?: number | undefined;
@@ -57,9 +58,15 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds });
   // Writing Linear from the tracked branch while that pull request waits would leave it to be merged over the new state.
   if (pullRequest.code === 'initial-pull-request-pending') return { complete: false, changed, trackedTip, capture: captured, pullRequest };
-  const moved = pullRequest.suspended?.changed === true || pullRequest.branchMoved || pullRequest.merged !== null || pullRequest.pullRequest?.opened === true;
+  // The suspended marks follow the lane's push: set for new episodes, edited for a new failure, cleared at release.
+  if (pullRequest.code !== 'state-moved') {
+    const marks = await reconcileHoldMarks(context, { config: options.config, state: captured.state, documents: captured.documents, github: options.github, failure: pullRequest.suspended?.failure, batchFailure: pullRequest.suspended?.batchFailure, linear: context.linear });
+    if (holdChanges(marks) > 0 || marks.deferred > 0 || marks.removed.length > 0 || marks.code !== undefined) pullRequest.holdMarks = marks;
+  }
+  const marksDone = pullRequest.holdMarks === undefined || (pullRequest.holdMarks.code === undefined && pullRequest.holdMarks.deferred === 0);
+  const moved = holdChanges(pullRequest.holdMarks) > 0 || pullRequest.suspended?.changed === true || pullRequest.branchMoved || pullRequest.merged !== null || pullRequest.pullRequest?.opened === true;
   const createSyncBranch = context.fetched.sync === null && !pullRequest.branchMoved;
   const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, containers: captured.containers, createSyncBranch, state:captured.state, captured:captured.documents, ...(options.transforms ? { transforms: options.transforms } : {}) });
   // A held removal waits for the next run to confirm it.
-  return {complete:write.complete && pullRequest.code === undefined && captured.heldRemovals.length === 0, changed:changed || moved || write.changed, trackedTip, capture:captured, pullRequest, write};
+  return {complete:write.complete && marksDone && pullRequest.code === undefined && captured.heldRemovals.length === 0, changed:changed || moved || write.changed, trackedTip, capture:captured, pullRequest, write};
 }

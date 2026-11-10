@@ -166,6 +166,7 @@ export const MESSAGES = {
   'github.closing': 'closing a pull request',
   'github.sending': 'sending {method} to the pull request API',
   'github.reading-check-runs': 'reading the check runs of the sync pull request',
+  'github.reading-annotations': 'reading the annotations of a failed check run',
   'github.reading-statuses': 'reading the commit statuses of the sync pull request',
   'github.merging': 'merging the sync pull request',
 
