@@ -38,7 +38,7 @@ export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
 export const ZONE_CAP = 1_000;
 /** The harness warns from here on. */
 export const ZONE_TRASH_WARNING = 900;
-/** Default setup deadline, including team-lock waits. */
+/** Default setup deadline. A wait for a team zone that another live run holds does not count: it has its own bound. */
 export const SETUP_TIMEOUT_MS = 15 * 60_000;
 /** Full setup can include initial sync of thousands of documents. */
 export function setupTimeoutMs(slice: Scenario['slice']): number {
@@ -80,6 +80,68 @@ export async function withDeadline<T>(work: Promise<T>, ms: number, onTimeout: (
     return await Promise.race([work, deadline]);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * Setup's deadline. Time spent waiting for a team zone that another live run
+ * holds is given back (`credit`): that wait has its own bound, and a run that
+ * waits its turn is not stuck. Everything else counts, a stalled request
+ * during such a wait too, since only a wait that ended is given back.
+ */
+export class SetupDeadline {
+  #left: number;
+  #since = 0;
+  #timer: NodeJS.Timeout | undefined;
+  #expire: (() => void) | undefined;
+  #credited = 0;
+  readonly #now: () => number;
+
+  constructor(ms: number, now: () => number = () => performance.now()) {
+    this.#left = ms;
+    this.#now = now;
+  }
+
+  /** How long, in milliseconds, waits for held zones took that the deadline did not count. */
+  get creditedMs(): number {
+    return this.#credited;
+  }
+
+  /** Rejects with `onTimeout()` when `work` has not settled before the deadline. The work itself goes on unobserved. */
+  async race<T>(work: Promise<T>, onTimeout: () => Error): Promise<T> {
+    const deadline = new Promise<never>((_, reject) => {
+      this.#expire = () => reject(onTimeout());
+    });
+    this.#start();
+    try {
+      return await Promise.race([work, deadline]);
+    } finally {
+      this.#stop();
+      this.#expire = undefined;
+    }
+  }
+
+  /** Gives back `ms` that setup spent waiting for a team zone another live run holds. */
+  credit(ms: number): void {
+    if (!(ms > 0)) return;
+    this.#credited += ms;
+    if (this.#timer === undefined) return;
+    this.#stop();
+    this.#left += ms;
+    this.#start();
+  }
+
+  #start(): void {
+    if (this.#expire === undefined || this.#timer !== undefined) return;
+    this.#since = this.#now();
+    this.#timer = setTimeout(this.#expire, Math.max(0, this.#left));
+  }
+
+  #stop(): void {
+    if (this.#timer === undefined) return;
+    clearTimeout(this.#timer);
+    this.#timer = undefined;
+    this.#left -= this.#now() - this.#since;
   }
 }
 /** How long a run that reached its UI steps keeps its resources. */
@@ -196,7 +258,7 @@ export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnT
   }
 }
 
-async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
+async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], deadline: SetupDeadline, grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
   const { config } = deps;
   if (config.missing.length > 0) throw new EnvBlockedError(`test configuration is missing: ${config.missing.join(', ')}`);
   let token;
@@ -244,9 +306,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     if (team === undefined) throw new EnvBlockedError(`the test workspace has no team ${key}`);
     return team.id;
   });
-  try { await grant?.claimZones?.(zoneIds, ctx.signal); }
-  catch { throw new EnvBlockedError('shared team zone is held or unavailable'); }
-  await takeTeamLocks(ctx, deps.stateDir, tree.teamZones.keys(), locks);
+  await takeTeamZones(ctx, deps.stateDir, grant, { ids: zoneIds, lockKeys: tree.teamZones.keys() }, locks, deadline);
 
   const readmes = new Map<string, string>();
   for (const [target, source] of tree.paths) {
@@ -658,8 +718,27 @@ export async function cleanupAndCount(ctx: RunContext): Promise<{ ok: boolean; d
   return outcome;
 }
 
+/**
+ * Claims the run's team zones in the shared admission and takes their team locks. Waiting while another live
+ * run holds a zone does not count toward the setup deadline: each of those waits keeps its own bound. A team
+ * lock whose run died on this host is taken over at once; a shared claim stays until that run is recovered.
+ */
+export async function takeTeamZones(
+  ctx: RunContext,
+  stateDir: string,
+  grant: Pick<Awaited<ReturnType<Governor['admit']>>, 'claimZones'> | undefined,
+  zones: { ids: readonly string[]; lockKeys: Iterable<string> },
+  locks: Lock[],
+  deadline: SetupDeadline,
+): Promise<void> {
+  const onHeld = (ms: number) => deadline.credit(ms);
+  try { await grant?.claimZones?.(zones.ids, ctx.signal, onHeld); }
+  catch { throw new EnvBlockedError('shared team zone is held or unavailable'); }
+  await takeTeamLocks(ctx, stateDir, zones.lockKeys, locks, onHeld);
+}
+
 /** Takes the team locks of the run's team zones, when the scenario asks for them. */
-export async function takeTeamLocks(ctx: RunContext, stateDir: string, teams: Iterable<string>, locks: Lock[]): Promise<void> {
+export async function takeTeamLocks(ctx: RunContext, stateDir: string, teams: Iterable<string>, locks: Lock[], onHeld?: (waitedMs: number) => void): Promise<void> {
   if (!ctx.scenario.setup.teamZoneLock) return;
   for (const team of [...teams].sort()) {
     try {
@@ -671,6 +750,7 @@ export async function takeTeamLocks(ctx: RunContext, stateDir: string, teams: It
         // A held run's take-up goes on with the team locks the run kept.
         takeOverHeld: true,
         onWait: (holder) => ctx.log(`waiting for team ${team} (held by run ${holder?.runId ?? 'unknown'})`),
+        ...(onHeld === undefined ? {} : { onHeld }),
       }));
     } catch (error) {
       if (error instanceof LockTimeoutError) throw new EnvBlockedError(`team lock ${team}: ${error.message}`);
@@ -750,11 +830,12 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       ctx.proxy = await startFaultProxy('https://api.linear.app', { observer: ctx.owned });
       // A setup that does not finish must not hold a worker and its locks forever. On the deadline it is
       // told to stop; cleanup waits until it has stopped, so nothing is created after the cleanup.
-      const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks, grant);
       const timeoutMs = setupTimeoutMs(scenario.slice);
+      const deadline = new SetupDeadline(timeoutMs);
+      const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks, deadline, grant);
       try {
-        await withDeadline(setup, timeoutMs, () =>
-          new EnvBlockedError(`setup did not finish within ${timeoutMs / 60_000} minutes (last phase: ${phase()})`));
+        await deadline.race(setup, () =>
+          new EnvBlockedError(`setup did not finish within ${timeoutMs / 60_000} minutes (last phase: ${phase()}${deadline.creditedMs >= 60_000 ? `; not counted: ${Math.round(deadline.creditedMs / 60_000)} minutes waiting for held team zones` : ''})`));
       } catch (late) {
         abort.abort();
         setupStuck = !(await settlesWithin(setup, SETUP_STOP_MS));

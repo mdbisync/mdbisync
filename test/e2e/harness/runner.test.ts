@@ -567,4 +567,39 @@ describe('setup deadline', () => {
     held.release();
     assert.equal(await settlesWithin(new Promise(() => {}), 20), false);
   });
+
+  it('does not count the waits for a held team zone, but counts the rest of setup', async (t) => {
+    const { SetupDeadline } = await import('./runner.ts');
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    const pending = () => {
+      let settle!: () => void;
+      return { settle: () => settle(), promise: new Promise<void>((resolve) => { settle = resolve; }) };
+    };
+    const start = () => {
+      const deadline = new SetupDeadline(15 * 60_000, () => Date.now());
+      const done = pending();
+      const setup = deadline.race(done.promise.then(() => 'ready'), () => new EnvBlockedError(`setup did not finish (not counted: ${deadline.creditedMs / 60_000} minutes)`));
+      t.mock.timers.tick(10 * 60_000);
+      return { deadline, done, setup };
+    };
+    // An hour's wait for a zone that another live run holds: each attempt that found it held is given back.
+    const heldForAnHour = (deadline: InstanceType<typeof SetupDeadline>) => {
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        t.mock.timers.tick(30_000);
+        deadline.credit(30_000);
+      }
+    };
+
+    const finishes = start();
+    heldForAnHour(finishes.deadline);
+    t.mock.timers.tick(4 * 60_000);
+    finishes.done.settle();
+    assert.equal(await finishes.setup, 'ready', 'ten minutes before the wait and four after are within the limit');
+
+    const late = start();
+    heldForAnHour(late.deadline);
+    const rejected = assert.rejects(late.setup, /setup did not finish \(not counted: 60 minutes\)/, 'the time before and after the wait still counts');
+    t.mock.timers.tick(5 * 60_000);
+    await rejected;
+  });
 });
