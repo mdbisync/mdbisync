@@ -1,7 +1,9 @@
 // `fix`: rewrites Markdown into the form Linear stores, so a round trip
 // through Linear changes nothing. Block structure is written the way Linear
 // writes it; inline text is copied from the source with a few targeted
-// rewrites. A file with a lint finding is left as it is: the author decides.
+// rewrites. A text with a construct Linear would lose or alter is left as it
+// is: the author decides. The image place rules do not stop `fixText` (see
+// IMAGE_PLACE_RULES); the `fix` command leaves a file with any finding.
 
 import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from 'mdast';
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';

@@ -17,7 +17,7 @@ export const LINT_RULES = {
   'git-conflict-marker': 'Git conflict marker lines are rewritten as headings, quotes or collapsible sections.',
   'url-in-html': 'A URL inside raw HTML is turned into a Markdown link.',
   'block-first-in-list-item': 'A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item.',
-  'image-not-in-repository': 'An image must be a relative path to a file of the repository, not a URL or an absolute path.',
+  'image-not-in-repository': 'An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it.',
   'image-file-missing': 'An image must name a file that exists in the repository, not a folder or a Markdown document.',
 } as const;
 

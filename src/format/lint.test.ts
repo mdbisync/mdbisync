@@ -45,7 +45,10 @@ const cases: Array<[LintRule, string, number]> = [
   ['image-not-in-repository', '[![status](https://example.com/badge.svg)](https://example.com/build)', 1],
   ['image-not-in-repository', '| A |\n| -- |\n| ![x](https://example.com/x.png) |', 3],
   ['image-file-missing', '![Notes](notes.md)', 1],
-  ['image-file-missing', '![Notes](../Guide.MD#intro)', 1],
+  ['image-file-missing', '![Notes](notes/Guide.MD#intro)', 1],
+  ['image-not-in-repository', '![Outside](../logo.png)', 1],
+  ['image-not-in-repository', '![Folder](img/)', 1],
+  ['image-not-in-repository', '![Query](?raw=1)', 1],
 ];
 
 describe('lint rules', () => {
@@ -194,22 +197,29 @@ describe('lint and fix commands', () => {
       '![Document](good.md)',
       '[![Badge](https://example.com/badge.svg)](https://example.com/build)',
       '* Item\n\n  ![Gone](img/gone.png)',
+      '![Linked](img/link.png)',
+      '![Case](IMG/here.png)',
+      '![First definition][r]\n\n[r]: https://example.com/x.png\n[r]: img/here.png',
     ].join('\n\n');
     try {
       writeFileSync(join(folder, 'img', 'here.png'), 'png');
       writeFileSync(join(folder, 'img', 'large.png'), lfsPointer);
       writeFileSync(join(folder, 'img', 'two words.png'), 'png');
+      symlinkSync('here.png', join(folder, 'img', 'link.png'));
       writeFileSync(join(folder, 'good.md'), good);
       writeFileSync(join(folder, 'bad.md'), bad);
       const expected = [
         'pictures/bad.md:3: image-not-in-repository',
         'pictures/bad.md:5: image-file-missing',
         'pictures/bad.md:7: image-file-missing',
-        'pictures/bad.md:9: image-file-missing',
+        'pictures/bad.md:9: image-not-in-repository',
         'pictures/bad.md:11: image-file-missing',
         'pictures/bad.md:13: image-in-link',
         'pictures/bad.md:13: image-not-in-repository',
         'pictures/bad.md:17: image-file-missing',
+        'pictures/bad.md:19: image-file-missing',
+        'pictures/bad.md:21: image-file-missing',
+        'pictures/bad.md:23: image-not-in-repository',
       ];
       const lint = runLint(['pictures'], dir);
       assert.equal(lint.exitCode, 1);

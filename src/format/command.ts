@@ -1,7 +1,7 @@
 // The `lint` and `fix` commands: Markdown files given as paths (folders are
 // searched for `.md` files), checked or rewritten into Linear's form.
 
-import { existsSync, lstatSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fixText, linkedFileCheck } from './fix.ts';
 import { duplicateTitles, lintText } from './lint.ts';
@@ -63,13 +63,19 @@ function describe(findings: readonly Finding[]): string {
  * sync resolves it, and must name a file there.
  */
 export function linkedFileResolver(file: string, root: string): (url: string) => boolean {
-  return linkedFileCheck(file.split(sep).join('/'), (path) => isFileAt(join(root, path)));
+  return linkedFileCheck(file.split(sep).join('/'), (path) => isFileAt(root, path));
 }
 
-/** Whether a regular file is there; a path the file system cannot hold (a NUL byte) names none. */
-function isFileAt(path: string): boolean {
+/**
+ * Whether a regular file is at `path` under `root`, as the repository would
+ * store it: reached through no symbolic link, and spelled with the exact case
+ * of its name. A path the file system cannot hold (a NUL byte) names none.
+ */
+function isFileAt(root: string, path: string): boolean {
+  const absolute = join(root, path);
   try {
-    return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+    if (statSync(absolute, { throwIfNoEntry: false })?.isFile() !== true) return false;
+    return realpathSync.native(absolute) === join(realpathSync.native(root), path);
   } catch {
     return false;
   }
@@ -97,7 +103,8 @@ export function runFix(paths: readonly string[], cwd: string = process.cwd()): C
   if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
   // A file with a lint finding, a colliding title included, is left as it is: its author decides.
-  const failing = new Set(lintAll(files, cwd).map((finding) => finding.file));
+  const before = lintAll(files, cwd);
+  const failing = new Set(before.map((finding) => finding.file));
   const changed: string[] = [];
   for (const file of files) {
     if (failing.has(file)) continue;
@@ -109,7 +116,8 @@ export function runFix(paths: readonly string[], cwd: string = process.cwd()): C
       changed.push(file);
     }
   }
-  const findings = lintAll(files, cwd);
+  // Only the rewritten files, which had no finding, are linted again.
+  const findings = [...before, ...lintAll(changed, cwd)];
   const stdout = changed.map((file) => `${file}: fixed\n`).join('') + describe(findings);
   return { exitCode: stdout === '' ? 0 : 1, stdout, stderr: '' };
 }

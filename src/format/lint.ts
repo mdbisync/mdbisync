@@ -5,23 +5,21 @@
 
 import type { Definition, Root } from 'mdast';
 import { CONTENT_LIMIT, LINT_RULES, type Finding, type LintRule } from './rules.ts';
-import { end, line, lineCount, parse, splitFile, start, visit } from './markdown.ts';
+import { end, line, lineCount, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 
 const GIT_MARKER = /^ {0,3}(?:<{7}|>{7})(?: |$)/;
 const QUOTE_PREFIX = /^ {0,3}> ?/;
 const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
 const URL_OR_LINK_ATTRIBUTE = /[a-z][a-z0-9+.-]*:\/\/|\b(?:src|href)\s*=/i;
-// A destination that names no file of the repository whatever the document's
-// place: a scheme (`https:`, `data:`), an absolute path, only a fragment, nothing.
-const NOT_A_RELATIVE_PATH = /^(?:[a-z][a-z0-9+.-]*:|\/|#|$)/i;
 
 /** What `lint` may know about the file beyond its text. */
 export interface LintOptions {
   /**
    * Whether a relative destination names a file of the repository, resolved
    * from the document's place (`linkedFileCheck`). Without it, only what the
-   * text alone shows is checked: an image that is a URL or an absolute path,
-   * or that names a Markdown document.
+   * text and the document's path show is checked: an image that is a URL, an
+   * absolute path or a path outside the repository, or that names a
+   * Markdown document.
    */
   linkedFileExists?: (url: string) => boolean;
 }
@@ -39,17 +37,18 @@ export function lintText(file: string, text: string, options: LintOptions = {}):
   const content = body.replace(/\r\n?/g, '\n');
   if ([...content].length > CONTENT_LIMIT) report('content-too-long', 1);
   const tree = parse(content);
-  lintTree(tree, content, report, options);
+  lintTree(file, tree, content, report, options);
   return findings.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));
 }
 
-function lintTree(tree: Root, body: string, report: (rule: LintRule, line: number) => void, options: LintOptions): void {
+function lintTree(file: string, tree: Root, body: string, report: (rule: LintRule, line: number) => void, options: LintOptions): void {
   const definitions = new Map<string, Definition>();
   visit(tree, (node) => {
-    if (node.type === 'definition') definitions.set(node.identifier, node);
+    // The first definition of a label is the one Markdown uses.
+    if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node);
   });
   const image = (url: string, at: number): void => {
-    const rule = imageProblem(url, options);
+    const rule = imageProblem(file, url, options);
     if (rule !== undefined) report(rule, at);
   };
   const codeLines = new Set<number>();
@@ -146,23 +145,17 @@ function lintTree(tree: Root, body: string, report: (rule: LintRule, line: numbe
   });
 }
 
-/** The rule an image destination breaks, or undefined for a file of the repository. */
-function imageProblem(url: string, options: LintOptions): LintRule | undefined {
-  if (NOT_A_RELATIVE_PATH.test(url)) return 'image-not-in-repository';
-  if (/\.md$/i.test(pathOf(url))) return 'image-file-missing';
+/**
+ * The rule an image destination breaks, or undefined for a file of the
+ * repository. The destination resolves from the document's place as the
+ * sync resolves it.
+ */
+function imageProblem(file: string, url: string, options: LintOptions): LintRule | undefined {
+  const target = resolveTarget(file, url);
+  if (target === null) return 'image-not-in-repository';
+  if (/\.md$/i.test(target)) return 'image-file-missing';
   if (options.linkedFileExists !== undefined && !options.linkedFileExists(url)) return 'image-file-missing';
   return undefined;
-}
-
-/** The path part of a relative destination, without query or fragment, decoded where it can be. */
-function pathOf(url: string): string {
-  const cut = url.search(/[?#]/);
-  const path = cut === -1 ? url : url.slice(0, cut);
-  try {
-    return decodeURIComponent(path);
-  } catch {
-    return path;
-  }
 }
 
 /** Paths whose document titles collide: same path apart from case or Unicode normalization. */

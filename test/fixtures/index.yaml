@@ -65,7 +65,7 @@ rules:
   - id: table-hash-cell
     title: "A table body cell starting with # becomes a heading."
   - id: image-not-in-repository
-    title: "An image must be a relative path to a file of the repository, not a URL or an absolute path."
+    title: "An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it."
   - id: image-file-missing
     title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
 known_constructs:
@@ -2460,7 +2460,7 @@ fixtures:
     group: list-items
     construct: corpus-task-code
     class: lint-error
-    rule: image-file-missing
+    rule: image-not-in-repository
     line: 8
     basis: known
     canary: kx-750b1a3b

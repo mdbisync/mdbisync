@@ -346,12 +346,13 @@ Instead, start the item with a line of text and put the block below it.
 
 ### `image-not-in-repository`
 
-An image must be a relative path to a file of the repository, not a URL or
-an absolute path. The sync uploads the files a document's images name; an
-image anywhere else would depend on the reader's network and on whether
-Linear keeps or copies it. The rule covers every image: inline,
-reference-style and inside a link, with any URL (`https:`, `data:`) and any
-path that starts with `/`. Plain links to URLs are not affected.
+An image must be a relative path to a file of the repository, not a URL,
+an absolute path or a path outside it. The sync uploads the files a
+document's images name; an image anywhere else would depend on the reader's
+network and on whether Linear keeps or copies it. The rule covers every
+image: inline, reference-style and inside a link, with any URL (`https:`,
+`data:`), any path that starts with `/` and any path that leaves the
+repository. Plain links to URLs are not affected.
 
 ```markdown
 ![Revenue chart](https://example.com/charts/revenue.png)
@@ -364,9 +365,11 @@ A file stored with Git LFS counts like any other.
 ### `image-file-missing`
 
 An image must name a file that exists in the repository, not a folder or a
-Markdown document. The path is resolved from the document's folder, and it
-must stay inside the repository. `lint` and `fix` check that the file is
-there, so a broken image never reaches Linear.
+Markdown document. The path is resolved from the document's folder. `lint`
+and `fix` check that the file is there, as the repository stores it: a
+symbolic link does not count, and the case of each name must match. They
+take the folder they run in as the repository's top folder, as the hook
+does, so run them from there.
 
 ```markdown
 ![Logo](images/logo.md)
