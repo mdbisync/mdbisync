@@ -39,6 +39,7 @@ import {
   type RefUpdate,
   type StateConfig,
   type StateSnapshot,
+  INITIAL_SYNC_FROM_LINEAR_RECORD,
   INITIAL_SYNC_PROGRESS,
   commitIds,
   initialSyncProgressMessage,
@@ -99,6 +100,8 @@ export async function readKeptAnnotations(git: Git, ids: Oid | null): Promise<Se
   return new Set([...log.matchAll(KEPT_ANNOTATION)].map((match) => JSON.parse(match[1] as string) as string));
 }
 export const RECORD_MESSAGE = "Initial sync: Linear's state";
+/** The subjects of an initial sync's record, in either direction. */
+export const INITIAL_RECORD_SUBJECTS: ReadonlySet<string> = new Set([RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD]);
 export const UPLOADS_MESSAGE = 'Initial sync: upload cache';
 
 /** Documents written between two progress pushes of `ids`. */
