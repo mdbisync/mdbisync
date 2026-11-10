@@ -68,3 +68,11 @@ test('operation arguments and step ordering reject invalid contracts', () => {
   rejects('L4-02', s => { s.steps.splice(5, 1); }, /unjoined async run/);
   rejects('L4-02', s => { s.steps[5] = { kind: 'kill', action: 'engine', args: { checkpoint: 'wrong' } }; }, /kill checkpoint does not match/);
 });
+
+test('a run.check step before the initial sync is a valid step without arguments', () => {
+  const scenario = JSON.parse(readFileSync(join(scenarioDirectory, 'L1-03.yaml'), 'utf8'));
+  scenario.steps.unshift({ kind: 'run', action: 'check', args: {} });
+  validateScenario(scenario, 'L1-03.yaml');
+  scenario.steps[0].args.confirm = true;
+  assert.throws(() => validateScenario(scenario, 'L1-03.yaml'), /unknown argument confirm for run.check/);
+});

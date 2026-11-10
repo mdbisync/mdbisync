@@ -412,6 +412,12 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
 const RUN: Record<string, Executor> = {
   'run.sync': (ctx, args) => runCommand(ctx, 'sync', args),
   'run.initial-sync': (ctx, args) => runCommand(ctx, 'initial-sync', args),
+  // The setup check a deployer runs before the first sync: it reads Linear and the repository and writes nothing.
+  // It is a run like the others (`runs.<n>.exitCode`, `runs.<n>.setupChecks`); a failed check is its result, not a stop.
+  'run.check': (ctx) => {
+    live(ctx);
+    return runCommand(ctx, 'check', {});
+  },
   'run.settle': (ctx) => settle(ctx),
   'run.capture': (ctx) => runCommand(ctx, 'sync', {}),
   'run.lint': (ctx, args) => runCommand(ctx, 'lint', args),

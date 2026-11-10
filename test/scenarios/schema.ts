@@ -68,6 +68,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "merge.pull-request": ["actor"],
   "run.burst": ["durationSeconds", "gitPushesPerMinute", "linearEditsPerMinute"],
   "run.capture": [],
+  "run.check": [],
   "run.cleanup": [],
   "run.fix": ["input", "passes"],
   "run.initial-sync": ["confirm", "direction", "wait"],
