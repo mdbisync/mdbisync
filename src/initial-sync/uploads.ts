@@ -91,8 +91,8 @@ interface LinkedFile {
   lfs: boolean;
   /** An LFS pointer that names LFS extensions: its object cannot be read. */
   extensions: boolean;
-  /** An LFS object the remote's LFS server will not give: found by the dry run only, which asks the server. */
-  missing?: boolean;
+  /** An LFS object the remote's LFS server does not have: known to the dry run only, which asks the server. */
+  absent: boolean;
 }
 
 /** A document the uploads would leave out, found before anything is uploaded. */
@@ -140,23 +140,86 @@ export async function predictUploadLeaveOuts(
   // The LFS objects the upload may read: within the limit, without extensions, and not in the cache.
   const asked = targets.filter((target) => file(target).lfs && !file(target).extensions && file(target).size <= limit && !uploaded.has(file(target).hash));
   const absent = await missingLfsObjects(git, options.remote, asked.map((target) => (files.get(target) as TreeEntry).oid));
-  for (const target of asked) if (absent.has(file(target).hash)) file(target).missing = true;
-  if (targets.some((target) => (file(target).extensions || file(target).missing === true) && !uploaded.has(file(target).hash))) {
-    // Whether an earlier document uploads the same content needs the hash of every file the run would upload.
-    for (const target of targets) if (file(target).hash === '' && file(target).size <= limit) linked.delete(target);
-    await hashLinkedFiles(git, files, linked, targets, Math.max(limit, MAX_POINTER_SIZE));
+  for (const target of asked) if (absent.has(file(target).hash)) file(target).absent = true;
+  const unreadable = (target: string) => file(target).extensions || file(target).absent;
+  if (!targets.some((target) => unreadable(target) && !uploaded.has(file(target).hash))) {
+    // Every file the upload reads can be read: only a file over the limit leaves a document out.
+    return judgeAll(planned, linked, limit, uploaded);
   }
+  // Whether an earlier upload request sends the same content needs the hash of every file the run would upload.
+  for (const target of targets) if (file(target).hash === '' && file(target).size <= limit) linked.delete(target);
+  await hashLinkedFiles(git, files, linked, targets, Math.max(limit, MAX_POINTER_SIZE));
+
+  const order = [...planned.keys()].sort(compare);
   const result: UploadLeaveOut[] = [];
-  for (const path of [...planned.keys()].sort(compare)) {
+  for (const [position, path] of order.entries()) {
     const own = planned.get(path) as string[];
     const leaveOut = judgeLinkedFiles(own, linked, limit, uploaded);
+    if (leaveOut !== null) {
+      result.push({ path, rule: leaveOut.rule, files: leaveOut.files });
+      continue;
+    }
     // The upload reads the document's files in order and stops at the first it cannot read.
-    const unread = leaveOut === null ? [...filesToRead(own, linked, uploaded).values()].find((target) => file(target).missing === true) : undefined;
-    if (leaveOut !== null) result.push({ path, rule: leaveOut.rule, files: leaveOut.files });
-    else if (unread !== undefined) result.push({ path, rule: UPLOAD_UNREADABLE, files: [unread] });
-    else for (const target of own) uploaded.add(file(target).hash);
+    const toRead = filesToRead(own, linked, uploaded);
+    const unread = [...toRead.values()].find(unreadable);
+    if (unread !== undefined) {
+      result.push({ path, rule: UPLOAD_UNREADABLE, files: [unread] });
+      continue;
+    }
+    if (toRead.size === 0) continue;
+    // The same upload request carries files of the documents written next, as the run sends it.
+    const batch = { hashes: new Set(toRead.keys()), bytes: [...toRead.values()].reduce((sum, target) => sum + file(target).size, 0) };
+    const later = order.slice(position + 1).map((next) => planned.get(next) as string[]);
+    await fillBatch(batch, later, linked, limit, uploaded, async () => {}, async (pending) => ![...pending.values()].some(unreadable));
+    for (const hash of batch.hashes) uploaded.add(hash);
   }
   return result;
+}
+
+/** The documents a file over the limit leaves out, in write order. */
+function judgeAll(planned: ReadonlyMap<string, string[]>, linked: ReadonlyMap<string, LinkedFile>, limit: number, uploaded: { has(hash: string): boolean }): UploadLeaveOut[] {
+  const result: UploadLeaveOut[] = [];
+  for (const path of [...planned.keys()].sort(compare)) {
+    const leaveOut = judgeLinkedFiles(planned.get(path) as string[], linked, limit, uploaded);
+    if (leaveOut !== null) result.push({ path, rule: leaveOut.rule, files: leaveOut.files });
+  }
+  return result;
+}
+
+/**
+ * Adds to an upload request (`batch`, the content hashes it sends and their
+ * size) the files of the documents written after its own (`later`, each
+ * document's linked files, in write order), so the run spends far fewer
+ * requests than one per file: up to UPLOAD_BATCH_FILES files and
+ * UPLOAD_BATCH_BYTES. A later document joins when none of its files is over
+ * the limit, it has files that neither `uploaded` nor the batch holds, they
+ * fit, and `read` can read them all (it gets them by hash); a document that
+ * does not fit ends the request.
+ *
+ * @param prepare called with a document's files before they are judged, to hash them
+ */
+async function fillBatch(
+  batch: { hashes: Set<string>; bytes: number },
+  later: Iterable<readonly string[]>,
+  linked: ReadonlyMap<string, LinkedFile>,
+  limit: number,
+  uploaded: { has(hash: string): boolean },
+  prepare: (targets: readonly string[]) => Promise<void>,
+  read: (pending: ReadonlyMap<string, string>) => Promise<boolean>,
+): Promise<void> {
+  const file = (target: string) => linked.get(target) as LinkedFile;
+  for (const targets of later) {
+    if (batch.hashes.size >= UPLOAD_BATCH_FILES) break;
+    await prepare(targets);
+    if (targets.some((target) => file(target).size > limit)) continue;
+    const pending = new Map([...filesToRead(targets, linked, uploaded)].filter(([hash]) => !batch.hashes.has(hash)));
+    if (pending.size === 0) continue;
+    const pendingBytes = [...pending.values()].reduce((sum, target) => sum + file(target).size, 0);
+    if (batch.hashes.size + pending.size > UPLOAD_BATCH_FILES || batch.bytes + pendingBytes > UPLOAD_BATCH_BYTES) break;
+    if (!(await read(pending))) continue;
+    for (const hash of pending.keys()) batch.hashes.add(hash);
+    batch.bytes += pendingBytes;
+  }
 }
 
 /**
@@ -234,7 +297,7 @@ async function hashLinkedFiles(git: Git, files: ReadonlyMap<string, TreeEntry>, 
   for (const path of new Set(paths)) {
     if (linked.has(path)) continue;
     const entry = files.get(path) as TreeEntry;
-    if (entry.size !== null && entry.size > readUpTo) linked.set(path, { hash: '', size: entry.size, lfs: false, extensions: false });
+    if (entry.size !== null && entry.size > readUpTo) linked.set(path, { hash: '', size: entry.size, lfs: false, extensions: false, absent: false });
     else toRead.push(entry);
   }
   let index = 0;
@@ -255,8 +318,8 @@ async function hashLinkedFiles(git: Git, files: ReadonlyMap<string, TreeEntry>, 
       linked.set(
         entry.path,
         pointer !== null
-          ? { hash: pointer.oid, size: pointer.size, lfs: true, extensions: pointer.extensions }
-          : { hash: sha256(blob), size: blob.length, lfs: false, extensions: false },
+          ? { hash: pointer.oid, size: pointer.size, lfs: true, extensions: pointer.extensions, absent: false }
+          : { hash: sha256(blob), size: blob.length, lfs: false, extensions: false, absent: false },
       );
     }
   }
@@ -280,8 +343,6 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
   const isFile = (path: string) => files.has(path);
   // A blob over the limit is too large to be a pointer and is never read: only its size matters, since its document is left out.
   const hashFiles = (git: Git, paths: readonly string[]) => hashLinkedFiles(git, files, linked, paths, Math.max(limit, MAX_POINTER_SIZE));
-
-  const missing = (targets: Iterable<string>): Map<string, string> => filesToRead(targets, linked, (context as TransformContext).uploads);
 
   /** Reads files by hash, from LFS when they are stored there; an unreadable one gets its reason. */
   const readContents = async (byHash: ReadonlyMap<string, string>): Promise<Map<string, Buffer | { unreadable: string }>> => {
@@ -317,10 +378,8 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
 
   type Upload = { hash: string; target: string; content: Buffer };
 
-  /** A document's files not in the cache and not already in `batch`, read; null when one cannot be read. */
-  const readDocumentFiles = async (targets: readonly string[], batch: readonly Upload[]): Promise<Upload[] | { unreadable: string; target: string }> => {
-    const taken = new Set(batch.map((item) => item.hash));
-    const byHash = new Map([...missing(targets)].filter(([hash]) => !taken.has(hash)));
+  /** Files to upload, by hash, read; the first that cannot be read instead. */
+  const readFiles = async (byHash: ReadonlyMap<string, string>): Promise<Upload[] | { unreadable: string; target: string }> => {
     if (byHash.size === 0) return [];
     const contents = await readContents(byHash);
     const result: Upload[] = [];
@@ -338,33 +397,28 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
    * UPLOAD_BATCH_FILES files and UPLOAD_BATCH_BYTES), so the run spends far
    * fewer requests than one per file: the budget is 1.5 requests per written
    * document. The uploads land between writes, so the run's progress pushes
-   * record them as it goes. A later document joins the batch only when it is
-   * within the limit and all its files can be read. When the batch fails for
+   * record them as it goes. A later document joins the batch as `fillBatch`
+   * says: only when it is within the limit and all its files can be read,
+   * which the dry run predicts the same way. When the batch fails for
    * a reason other than a stop, the document's own files are sent alone, so
    * another document's file never fails this one.
    */
   const uploadMissing = async (path: string, targets: readonly string[]) => {
-    const own = await readDocumentFiles(targets, []);
+    const { git, uploads } = context as TransformContext;
+    const own = await readFiles(filesToRead(targets, linked, uploads));
     if (!Array.isArray(own)) throw new LeaveOutError(UPLOAD_UNREADABLE, message('initial-sync.upload-unreadable', { file: own.target, reason: own.unreadable }), [own.target]);
     if (own.length === 0) return;
 
     const batch = [...own];
-    let bytes = batch.reduce((sum, item) => sum + item.content.length, 0);
     const position = order.indexOf(path);
-    for (const next of position === -1 ? [] : order.slice(position + 1)) {
-      if (batch.length >= UPLOAD_BATCH_FILES) break;
-      const nextTargets = planned.get(next) as string[];
-      await hashFiles((context as TransformContext).git, nextTargets);
-      if (nextTargets.some((target) => (linked.get(target) as LinkedFile).size > limit)) continue;
-      const pending = [...missing(nextTargets)].filter(([hash]) => !batch.some((item) => item.hash === hash));
-      const pendingBytes = pending.reduce((sum, [, target]) => sum + (linked.get(target) as LinkedFile).size, 0);
-      if (pending.length === 0) continue;
-      if (batch.length + pending.length > UPLOAD_BATCH_FILES || bytes + pendingBytes > UPLOAD_BATCH_BYTES) break;
-      const files = await readDocumentFiles(nextTargets, batch);
-      if (!Array.isArray(files)) continue;
+    const later = (position === -1 ? [] : order.slice(position + 1)).map((next) => planned.get(next) as string[]);
+    const taken = { hashes: new Set(batch.map((item) => item.hash)), bytes: batch.reduce((sum, item) => sum + item.content.length, 0) };
+    await fillBatch(taken, later, linked, limit, uploads, (next) => hashFiles(git, next), async (pending) => {
+      const files = await readFiles(pending);
+      if (!Array.isArray(files)) return false;
       batch.push(...files);
-      bytes += pendingBytes;
-    }
+      return true;
+    });
 
     try {
       await uploadAll(batch);

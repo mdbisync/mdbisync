@@ -44,6 +44,38 @@ const TREE = {
   '.pre-commit-config.yaml': PRE_COMMIT,
 };
 
+/** Runs the initial sync from git to Linear in `clone` and returns its report and job summary. */
+async function runGitToLinear(fixture: Fixture, clone: Git, world: FakeWorld, confirm: boolean): Promise<{ report: RunReport; summary: string }> {
+  const reportFile = join(fixture.root, 'report.json');
+  const summaryFile = join(fixture.root, 'summary.md');
+  await rm(reportFile, { force: true });
+  await rm(summaryFile, { force: true });
+  const env = {
+    PATH: process.env.PATH ?? '',
+    HOME: process.env.HOME ?? '',
+    MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
+    MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
+    MDBISYNC_LINEAR_API_URL: LINEAR_API,
+    MDBISYNC_GITHUB_TOKEN: 'gh-token',
+    MDBISYNC_GITHUB_API_URL: GITHUB_API,
+    MDBISYNC_REPOSITORY: 'owner/repo',
+    MDBISYNC_REPORT_FILE: reportFile,
+    MDBISYNC_DIRECTION: 'git-to-linear',
+    MDBISYNC_CONFIRM: String(confirm),
+    GITHUB_STEP_SUMMARY: summaryFile,
+  };
+  const result = await runCli(['initial-sync'], { env, cwd: clone.dir, fetch: fakeFetch(world) });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
+  return { report: JSON.parse(await readFile(reportFile, 'utf8')) as RunReport, summary: await readFile(summaryFile, 'utf8') };
+}
+
+/** The text of a Git LFS pointer to `content`, or to an object of that id and size. */
+function lfsPointer(content: Buffer | { oid: string; size: number }, extension = ''): string {
+  const { oid, size } = Buffer.isBuffer(content) ? { oid: createHash('sha256').update(content).digest('hex'), size: content.length } : content;
+  return `version https://git-lfs.github.com/spec/v1\n${extension}oid sha256:${oid}\nsize ${size}\n`;
+}
+
 describe('initial sync dry run', () => {
   let fixture: Fixture;
   let cwd: string;
@@ -193,7 +225,7 @@ describe('initial sync dry run', () => {
 describe('initial sync dry run: documents the uploads would leave out', () => {
   const MB = 1024 * 1024;
   /** A pointer to an LFS object the remote does not have: only the pointer can tell its size. */
-  const pointer = (size: number, oid: string, extension = '') => `version https://git-lfs.github.com/spec/v1\n${extension}oid sha256:${oid}\nsize ${size}\n`;
+  const pointer = (size: number, oid: string, extension = '') => lfsPointer({ oid, size }, extension);
   const EXTENSION = `ext-0-foo sha256:${'ef'.repeat(32)}\n`;
   const LOGO = Buffer.alloc(2048, 3);
   const MARK = Buffer.alloc(1500, 5);
@@ -242,30 +274,7 @@ describe('initial sync dry run: documents the uploads would leave out', () => {
 
   const refs = () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
 
-  const run = async (world: FakeWorld, confirm: boolean) => {
-    const reportFile = join(fixture.root, 'report.json');
-    const summaryFile = join(fixture.root, 'summary.md');
-    await rm(reportFile, { force: true });
-    await rm(summaryFile, { force: true });
-    const env = {
-      PATH: process.env.PATH ?? '',
-      HOME: process.env.HOME ?? '',
-      MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
-      MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
-      MDBISYNC_LINEAR_API_URL: LINEAR_API,
-      MDBISYNC_GITHUB_TOKEN: 'gh-token',
-      MDBISYNC_GITHUB_API_URL: GITHUB_API,
-      MDBISYNC_REPOSITORY: 'owner/repo',
-      MDBISYNC_REPORT_FILE: reportFile,
-      MDBISYNC_DIRECTION: 'git-to-linear',
-      MDBISYNC_CONFIRM: String(confirm),
-      GITHUB_STEP_SUMMARY: summaryFile,
-    };
-    const result = await runCli(['initial-sync'], { env, cwd: clone.dir, fetch: fakeFetch(world) });
-    assert.equal(result.exitCode, 0, result.stderr);
-    assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
-    return { report: JSON.parse(await readFile(reportFile, 'utf8')) as RunReport, summary: await readFile(summaryFile, 'utf8') };
-  };
+  const run = (world: FakeWorld, confirm: boolean) => runGitToLinear(fixture, clone, world, confirm);
 
   /** Linear holds the document of the file over the limit. */
   const linearWithBig = () => {
@@ -315,18 +324,18 @@ describe('initial sync dry run: documents the uploads would leave out', () => {
 });
 
 describe('initial sync dry run: documents linking LFS objects missing from the remote', () => {
-  const pointer = (content: Buffer | { oid: string; size: number }) =>
-    Buffer.isBuffer(content)
-      ? `version https://git-lfs.github.com/spec/v1\noid sha256:${createHash('sha256').update(content).digest('hex')}\nsize ${content.length}\n`
-      : `version https://git-lfs.github.com/spec/v1\noid sha256:${content.oid}\nsize ${content.size}\n`;
+  const pointer = lfsPointer;
   /** On the LFS server. */
   const DIAGRAM = Buffer.from('diagram bytes on the server\n');
   /** Not on the LFS server: the pointers name them, nothing holds their content. */
   const LOST = { oid: 'cd'.repeat(32), size: 4096 };
   const GONE_A = { oid: 'ce'.repeat(32), size: 100 };
   const GONE_B = { oid: 'cf'.repeat(32), size: 200 };
-  /** In git as a plain file, and as a pointer to an object the server does not have. */
+  /** Each in git as a plain file, and as a pointer to an object the server does not have. */
   const COPY = Buffer.alloc(3000, 9);
+  const LATER = Buffer.alloc(3100, 10);
+  const POINTER_FIRST = Buffer.alloc(3200, 11);
+  const PLAIN_FIRST = Buffer.alloc(3300, 12);
   const TREE = {
     '.pre-commit-config.yaml': PRE_COMMIT,
     'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
@@ -347,6 +356,18 @@ describe('initial sync dry run: documents linking LFS objects missing from the r
     'eng/files/copy.bin': COPY,
     'eng/b-copy.md': `# Copy again\n\n[Data](media/copy.bin)\n\n${CANARY}\n`,
     'eng/media/copy.bin': pointer(COPY),
+    // The content of a missing object that a later document has in git: an earlier upload request carries it, so the run never reads the object.
+    'eng/c-lost.md': `# Later copy\n\n[Data](media/later.bin)\n\n${CANARY}\n`,
+    'eng/media/later.bin': pointer(LATER),
+    'eng/c-plain.md': `# Later copy in git\n\n[Data](files/later.bin)\n\n${CANARY}\n`,
+    'eng/files/later.bin': LATER,
+    // One document links a missing object and the same content in git: the upload reads the file linked first.
+    'eng/f-pointer-first.md': `# Pointer first\n\n[Data](media/f.bin) [Data](files/f.bin)\n\n${CANARY}\n`,
+    'eng/media/f.bin': pointer(POINTER_FIRST),
+    'eng/files/f.bin': POINTER_FIRST,
+    'eng/g-plain-first.md': `# Plain first\n\n[Data](files/g.bin) [Data](media/g.bin)\n\n${CANARY}\n`,
+    'eng/files/g.bin': PLAIN_FIRST,
+    'eng/media/g.bin': pointer(PLAIN_FIRST),
   };
 
   let fixture: Fixture;
@@ -367,37 +388,15 @@ describe('initial sync dry run: documents linking LFS objects missing from the r
 
   const refs = () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
 
-  const run = async (world: FakeWorld, confirm: boolean) => {
-    const reportFile = join(fixture.root, 'report.json');
-    const summaryFile = join(fixture.root, 'summary.md');
-    await rm(reportFile, { force: true });
-    await rm(summaryFile, { force: true });
-    const env = {
-      PATH: process.env.PATH ?? '',
-      HOME: process.env.HOME ?? '',
-      MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
-      MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
-      MDBISYNC_LINEAR_API_URL: LINEAR_API,
-      MDBISYNC_GITHUB_TOKEN: 'gh-token',
-      MDBISYNC_GITHUB_API_URL: GITHUB_API,
-      MDBISYNC_REPOSITORY: 'owner/repo',
-      MDBISYNC_REPORT_FILE: reportFile,
-      MDBISYNC_DIRECTION: 'git-to-linear',
-      MDBISYNC_CONFIRM: String(confirm),
-      GITHUB_STEP_SUMMARY: summaryFile,
-    };
-    const result = await runCli(['initial-sync'], { env, cwd: clone.dir, fetch: fakeFetch(world) });
-    assert.equal(result.exitCode, 0, result.stderr);
-    assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
-    return { report: JSON.parse(await readFile(reportFile, 'utf8')) as RunReport, summary: await readFile(summaryFile, 'utf8') };
-  };
+  const run = (world: FakeWorld, confirm: boolean) => runGitToLinear(fixture, clone, world, confirm);
 
   const LEFT_OUT = [
     { path: 'eng/both.md', rule: 'upload-unreadable', files: ['eng/media/photo.png'] },
+    { path: 'eng/f-pointer-first.md', rule: 'upload-unreadable', files: ['eng/media/f.bin'] },
     { path: 'eng/lost.md', rule: 'upload-unreadable', files: ['eng/media/photo.png'] },
     { path: 'eng/two.md', rule: 'upload-unreadable', files: ['eng/media/gone-b.zip'] },
   ];
-  const WRITTEN = ['eng/README.md', 'eng/a-copy.md', 'eng/b-copy.md', 'eng/kept.md'];
+  const WRITTEN = ['eng/README.md', 'eng/a-copy.md', 'eng/b-copy.md', 'eng/c-lost.md', 'eng/c-plain.md', 'eng/g-plain-first.md', 'eng/kept.md'];
 
   it('lists a document linking an LFS object missing from the remote as left out with upload-unreadable and the file; downloads and writes nothing', async () => {
     const world = fakeWorld();
@@ -424,6 +423,6 @@ describe('initial sync dry run: documents linking LFS objects missing from the r
     const { report } = await run(world, true);
     assert.deepEqual(report.initialSync?.created, WRITTEN);
     assert.deepEqual(report.initialSync?.leftOutAtWrite, LEFT_OUT);
-    assert.deepEqual(world.linear.uploads.map((upload) => upload.filename).sort(), ['copy.bin', 'diagram.png']);
+    assert.deepEqual(world.linear.uploads.map((upload) => upload.filename).sort(), ['copy.bin', 'diagram.png', 'g.bin', 'later.bin']);
   });
 });

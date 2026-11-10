@@ -76,9 +76,13 @@ export async function lfsReader(git: Git, remote: string): Promise<LfsRead> {
  * transfers no content; objects already in the local LFS store are not asked
  * about, since they can be read. The pointer files are put into one tree of
  * their own (a small object in the local repository), so the request names
- * only them. An object counts as missing when the server answers it with an
- * error. When the request fails as a whole (no server, no access), no object
- * is known to be missing: the run's read finds them.
+ * only them; the repository's fetch include, exclude and recent settings are
+ * turned off for the request. An object counts as missing when the server
+ * answers that it does not have it (404) or no longer has it (410); another
+ * error for an object (a rate limit, a server error) may pass, so the
+ * object is not counted. When the request fails as a whole (no server, no
+ * access, git-lfs not installed), no object is known to be missing: the
+ * run's read finds them.
  *
  * A remote reached as a local path or `file://` URL has no batch API: git-lfs
  * reports nothing for it, so none of its objects counts as missing.
@@ -90,9 +94,16 @@ export async function missingLfsObjects(git: Git, remote: string, blobs: readonl
   if (blobs.length === 0) return missing;
   const entries = [...new Set(blobs)].map((blob, index) => `100644 blob ${blob}\t${index}\n`).join('');
   const tree = await git.text(['mktree'], { input: entries });
-  const result = await git.run(['lfs', 'fetch', '--dry-run', remote, tree], { okCodes: [0, 1, 2] });
-  // git-lfs names each object the server refused with its id in brackets: `[<oid>] Object does not exist: [404] …`.
-  for (const match of result.stderr.matchAll(/^\[([0-9a-f]{64})\] /gm)) missing.add(match[1] as string);
+  const settings = ['-c', 'lfs.fetchinclude=', '-c', 'lfs.fetchexclude=', '-c', 'lfs.fetchrecentalways=false'];
+  let stderr: string;
+  try {
+    stderr = (await git.run([...settings, 'lfs', 'fetch', '--dry-run', remote, tree], { okCodes: [0, 2] })).stderr;
+  } catch (error) {
+    if (error instanceof GitError) return missing;
+    throw error;
+  }
+  // git-lfs names each object the server refused with its id and the status: `[<oid>] Object does not exist: [404] …`.
+  for (const match of stderr.matchAll(/^\[([0-9a-f]{64})\] [^\n]*\[(404|410)\]/gm)) missing.add(match[1] as string);
   return missing;
 }
 

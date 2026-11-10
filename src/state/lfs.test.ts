@@ -84,6 +84,35 @@ describe('LFS objects missing from the remote', () => {
     assert.deepEqual(server.requests, []);
   });
 
+  it('counts an object the server no longer has (410), not one it refuses for another reason', async () => {
+    server.objectErrors.set(GONE, 410).set(ALSO_GONE, 503);
+    try {
+      assert.deepEqual(await ask(['gone.bin', 'also gone, [1].bin']), new Set([GONE]));
+    } finally {
+      server.objectErrors.clear();
+    }
+  });
+
+  it("ignores the repository's fetch include and exclude settings", async () => {
+    await clone.run(['config', 'lfs.fetchinclude', 'docs/**']);
+    await clone.run(['config', 'lfs.fetchexclude', '*']);
+    try {
+      assert.deepEqual(await ask(['gone.bin']), new Set([GONE]));
+    } finally {
+      await clone.run(['config', '--unset', 'lfs.fetchinclude']);
+      await clone.run(['config', '--unset', 'lfs.fetchexclude']);
+    }
+  });
+
+  it('names no object when git-lfs fails as a whole', async () => {
+    await clone.run(['config', 'lfs.url', 'http://127.0.0.1:1/info/lfs']);
+    try {
+      assert.deepEqual(await ask(['gone.bin']), new Set());
+    } finally {
+      await clone.run(['config', 'lfs.url', server.url]);
+    }
+  });
+
   it('names no object when the server refuses the whole request', async () => {
     server.failBatch = 500;
     try {

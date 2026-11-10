@@ -93,6 +93,8 @@ export interface FakeLfsServer {
   requests: string[];
   /** An HTTP status the batch API answers the whole request with, instead of an answer per object. */
   failBatch?: number;
+  /** HTTP statuses the batch API answers single objects with, by LFS object id, instead of its usual answer. */
+  objectErrors: Map<string, number>;
   close(): Promise<void>;
 }
 
@@ -117,7 +119,9 @@ export async function fakeLfsServer(contents: readonly Buffer[]): Promise<FakeLf
         }
         const batch = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { objects: Array<{ oid: string; size: number }> };
         const objects = batch.objects.map(({ oid, size }) =>
-          held.has(oid)
+          fake.objectErrors.has(oid)
+            ? { oid, size, error: { code: fake.objectErrors.get(oid), message: 'Object refused' } }
+            : held.has(oid)
             ? { oid, size, authenticated: true, actions: { download: { href: `${base}/objects/${oid}` } } }
             : { oid, size, error: { code: 404, message: 'Object does not exist' } },
         );
@@ -135,6 +139,7 @@ export async function fakeLfsServer(contents: readonly Buffer[]): Promise<FakeLf
   const fake: FakeLfsServer = {
     url: `${base}/info/lfs`,
     requests: [],
+    objectErrors: new Map(),
     close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
   };
   return fake;
