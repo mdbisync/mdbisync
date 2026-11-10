@@ -32,7 +32,7 @@ import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineC
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
-import { burst, burstDocuments, burstEditCounts, realClock, soak, soakDocuments, soakEditCounts, type Actor, type LoadDriver } from './load.ts';
+import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
@@ -746,9 +746,9 @@ const RUN: Record<string, Executor> = {
       actors: Array.isArray(args.actors) ? (args.actors as Actor[]) : (['editor-a', 'editor-b', 'git'] as Actor[]),
       seed: String(args.randomSeed ?? ctx.names.runId),
     };
-    const counts = soakEditCounts(options);
-    const lastToken = lastLoadToken(ctx, counts['editor-a'] + counts['editor-b'], counts.git);
-    const result = await soak(driver, { ...options, documents: soakDocuments(await loadCandidates(ctx, 'soak'), lastToken) });
+    const documents = await loadCandidates(ctx, 'soak');
+    const lastToken = (edits: Record<Actor, number>) => lastLoadToken(ctx, edits['editor-a'] + edits['editor-b'], edits.git);
+    const result = await soak(driver, { ...options, documents, lastToken });
     ctx.observations.set('report.hourlyInvariantChecks', result.invariantChecks);
     const own = ctx.engine.results.slice(ctx.engine.setupRuns);
     const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};

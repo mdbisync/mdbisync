@@ -122,8 +122,10 @@ export interface SoakOptions {
   invariantIntervalMs: number;
   actors: readonly Actor[];
   seed: string;
-  /** Each document the soak may edit, with how many edits it has room for (`soakDocuments`). */
-  documents: ReadonlyMap<string, number>;
+  /** Each document the soak may edit, with its versions on both sides (`editCapacity`). */
+  documents: ReadonlyMap<string, readonly string[]>;
+  /** The widest token the scheduled edits can write, from each actor's edit count. */
+  lastToken: (edits: Record<Actor, number>) => string;
 }
 
 export interface SoakDriver extends LoadDriver {
@@ -141,10 +143,18 @@ export interface SoakResult {
   scheduleDelays: number[];
 }
 
+type SoakScheduleOptions = Omit<SoakOptions, 'documents' | 'lastToken'>;
+const ACTORS: readonly Actor[] = ['editor-a', 'editor-b', 'git'];
+
 type SoakEvent = { at: number; kind: 'edit'; actor: Actor } | { at: number; kind: 'sync' } | { at: number; kind: 'check' };
 
 /** The seeded event times, from the soak's start; the same generator then picks each edit's document. */
-function soakSchedule(options: Omit<SoakOptions, 'documents'>): { events: SoakEvent[]; rng: Rng } {
+function soakSchedule(options: SoakScheduleOptions): { events: SoakEvent[]; rng: Rng } {
+  if (![options.durationMs, options.scheduleMs, options.invariantIntervalMs].every(Number.isFinite) || options.durationMs < 0 || options.scheduleMs <= 0 || options.invariantIntervalMs <= 0) {
+    throw new Error('soak duration and intervals must be finite numbers, with a nonnegative duration and positive intervals');
+  }
+  const unknown = options.actors.filter((actor) => !ACTORS.includes(actor));
+  if (unknown.length > 0) throw new Error(`unknown soak actors: ${unknown.join(', ')}`);
   const rng = new Rng(options.seed);
   const events: SoakEvent[] = [];
   for (const actor of options.actors) {
@@ -158,31 +168,31 @@ function soakSchedule(options: Omit<SoakOptions, 'documents'>): { events: SoakEv
   return { events, rng };
 }
 
-/** How many edits each actor makes in the seeded schedule: the token width and content budget use it. */
-export function soakEditCounts(options: Omit<SoakOptions, 'documents'>): Record<Actor, number> {
+function editCounts(events: readonly SoakEvent[]): Record<Actor, number> {
   const counts: Record<Actor, number> = { 'editor-a': 0, 'editor-b': 0, git: 0 };
-  for (const event of soakSchedule(options).events) if (event.kind === 'edit') counts[event.actor] += 1;
+  for (const event of events) if (event.kind === 'edit') counts[event.actor] += 1;
   return counts;
 }
 
-/** Each candidate with room for at least one edit, with how many edits it has room for (`editCapacity`). */
-export function soakDocuments(documents: ReadonlyMap<string, readonly string[]>, lastToken: string): Map<string, number> {
-  return new Map([...documents].map(([path, versions]) => [path, editCapacity(versions, lastToken)] as const).filter(([, capacity]) => capacity > 0));
+/** How many edits each actor makes in the seeded schedule. */
+export function soakEditCounts(options: SoakScheduleOptions): Record<Actor, number> {
+  return editCounts(soakSchedule(options).events);
 }
 
 /**
  * The soak: each actor edits at random times (on average once per schedule
  * period), the sync runs on its schedule, and I1 and I2 are checked every
  * `invariantIntervalMs`. Each edit goes to a random document that still has
- * room for it, and a soak whose documents cannot take every scheduled edit
- * fails before its first edit. Random choices come from the seed, so a run
- * can be repeated.
+ * room for it (`editCapacity` at the schedule's widest token), and a soak
+ * whose documents cannot take every scheduled edit fails before its first
+ * edit. Random choices come from the seed, so a run can be repeated.
  */
 export async function soak(driver: SoakDriver, options: SoakOptions): Promise<SoakResult> {
-  const remaining = new Map([...options.documents].filter(([, capacity]) => capacity > 0));
-  if (remaining.size === 0) throw new Error('a soak needs documents to edit');
   const { events, rng } = soakSchedule(options);
-  const edits = events.filter((event) => event.kind === 'edit').length;
+  const counts = editCounts(events);
+  const lastToken = options.lastToken(counts);
+  const remaining = new Map([...options.documents].map(([path, versions]) => [path, editCapacity(versions, lastToken)] as const).filter(([, capacity]) => capacity > 0));
+  const edits = counts['editor-a'] + counts['editor-b'] + counts.git;
   const room = [...remaining.values()].reduce((sum, capacity) => sum + capacity, 0);
   if (room < edits) throw new Error(`the documents have room for ${room} of the ${edits} soak edits`);
   const start = driver.now();
