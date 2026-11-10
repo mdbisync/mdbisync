@@ -68,6 +68,8 @@ class FakeLinear {
   /** Creates of these titles are answered 503 and not applied. */
   refused503 = new Set<string>();
   failNext = new Map<string, number>();
+  errorCodes = new Map<string, string>();
+  afterDeleteFailures = new Map<string, number>();
   /** Creates of projects with these names are applied and then answered 503. */
   projectAppliedThen503 = new Set<string>();
   staleListed = new Set<string>();
@@ -116,6 +118,8 @@ class FakeLinear {
     const failures = this.failNext.get(operation) ?? 0;
     if (failures > 0) {
       this.failNext.set(operation, failures - 1);
+      const code = this.errorCodes.get(operation);
+      if (code !== undefined) return { status: 200, answer: { errors: [{ message: 'Internal server error', extensions: { code } }] } };
       return this.unavailable();
     }
     const input = (variables.input ?? {}) as Record<string, unknown>;
@@ -141,6 +145,8 @@ class FakeLinear {
         const project = this.projects.get(String(variables.id));
         if (project === undefined || project.deleted) return { status: 200, answer: { data: null, errors: [{ message: 'Entity not found: Project' }] } };
         project.deleted = true;
+        for (const [operation, count] of this.afterDeleteFailures) this.failNext.set(operation, count);
+        this.afterDeleteFailures.clear();
         for (const document of this.documents.values()) if (document.projectId === project.id && document.archivedAt === null) document.archivedAt = new Date().toISOString();
         return { status: 200, answer: { data: { projectDelete: { success: true } } } };
       }
@@ -197,6 +203,33 @@ function targets(linear: FakeLinear): SweepTargets {
 }
 
 describe('ownership record', () => {
+  it('recovers from a delete deadlock and transient archive-read errors without deleting again', async () => {
+    const linear = await new FakeLinear().start();
+    const dir = stateDir();
+    const runId = 'abc123';
+    const ledger = new OwnershipLedger(dir, runId);
+    ledger.scope(['team-eng']);
+    deadRun(dir, runId);
+    const world = new LinearWorld(editorClient('key', linear.url, ledger));
+    const project = await world.createProject('Field notes abc123', ['team-eng']);
+    const document = await world.client.createDocument({ projectId: project.id }, { title: 'Plan', content: 'Next steps.' });
+    linear.failNext.set('DeleteProject', 1);
+    linear.errorCodes.set('DeleteProject', 'DEADLOCK_DETECTED');
+    linear.errorCodes.set('GetDocuments', 'INTERNAL_SERVER_ERROR');
+    linear.afterDeleteFailures.set('GetDocuments', 1);
+    linear.afterDeleteFailures.set('RunProjects', 1);
+
+    const report = await sweep(targets(linear), dir);
+    assert.deepEqual(report.errors, []);
+    assert.equal(report.recovered[0]?.verifiedArchived, 1);
+    assert.deepEqual(report.recovered[0]?.problems, []);
+    assert.equal(linear.documents.get(document.id)?.trashed, false);
+    assert.ok(linear.documents.get(document.id)?.archivedAt);
+    assert.equal(linear.mutations.filter((m) => m.operation === 'DeleteProject').length, 2);
+    assert.equal(readOwnership(dir, runId), null);
+    assert.equal(existsSync(join(dir, 'runs', `${runId}.json`)), false);
+  });
+
   it('recovers a cleanup that failed half way from the record alone, and leaves everything else as it is', async () => {
     const linear = await new FakeLinear().start();
     const dir = stateDir();
@@ -238,7 +271,7 @@ describe('ownership record', () => {
     });
 
     // Cleanup fails half way: the project's deletion answers 503 and the team zone is never archived.
-    linear.failNext.set('DeleteProject', 1);
+    linear.failNext.set('DeleteProject', 3);
     await assert.rejects(world.deleteProject(project, runId));
     assert.equal(linear.projects.get(project.id)?.deleted, false);
 
