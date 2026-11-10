@@ -112,3 +112,10 @@ test('a stop during the read-back stops the create without another try', async (
   await assert.rejects(linear.createDocument(place, { id, title: 'Plans', content: 'Body' }), LinearStoppedError);
   assert.equal(sent('CreateDocument').length, 1);
 });
+
+test('a read-back that fails outside Linear is thrown as it is, not as the create', async (t) => {
+  const { fake, linear } = await world(t, () => ({ apply: false, reply: { reset: true } }));
+  // A payload the client cannot read is a fault of its own, not a lost create.
+  fake.operations.set('GetDocuments', () => ({ body: { data: { documents: { nodes: [null] } } } }));
+  await assert.rejects(linear.createDocument(place, { id, title: 'Plans', content: 'Body' }), TypeError);
+});

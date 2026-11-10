@@ -262,7 +262,6 @@ export class LinearClient {
   async createDocument(place: DocumentPlace, input: CreateDocumentInput): Promise<LinearDocument> {
     this.#refuseTooLong('CreateDocument', input);
     const { id } = input;
-    let lost = false;
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await this.#createDocumentOnce(place, input);
@@ -270,7 +269,7 @@ export class LinearClient {
         if (id === undefined || !(error instanceof LinearError) || error instanceof LinearStoppedError || error instanceof LinearReadBackError) throw error;
         const transient = isTransientLinearError(error);
         // A refusal of the first try is an answer: nothing was created.
-        if (!transient && !lost) throw error;
+        if (!transient && attempt === 1) throw error;
         // A lost try may have been applied; after one, a refusal may be Linear refusing the id that try took.
         const found = await this.#findCreated(id, place, input.title, error);
         if (found !== undefined) {
@@ -278,13 +277,12 @@ export class LinearClient {
           return found;
         }
         if (!transient || attempt >= CREATE_ATTEMPTS) throw error;
-        lost = true;
       }
     }
   }
 
   async #createDocumentOnce(place: DocumentPlace, input: CreateDocumentInput): Promise<LinearDocument> {
-    const data =await this.request<{ documentCreate: { success: boolean; document: RawDocument } }>(
+    const data = await this.request<{ documentCreate: { success: boolean; document: RawDocument } }>(
       'CreateDocument',
       'mutation',
       `mutation CreateDocument($input: DocumentCreateInput!, $withContent: Boolean!) {
@@ -514,28 +512,28 @@ export class LinearClient {
     if (refusal) throw new DocumentTooLongError(operation, refusal);
   }
 
-  /** The written document's record with its stored content: the payload, or a read-back when the payload may differ. */
   /**
    * The document a lost create made, read back with its stored content, or
    * undefined when Linear does not have the id. A document with the id in
    * another place or under another title is not this create's: the create's
-   * own error is thrown. A failed read throws that error too, so the caller
-   * reports the create, unless the client stopped.
+   * own error is thrown. A read Linear fails throws that error too, so the
+   * caller reports the create; a stop and any other failure are thrown as they are.
    */
   async #findCreated(id: string, place: DocumentPlace, title: string, createError: LinearError): Promise<LinearDocument | undefined> {
     let found: LinearDocument | undefined;
     try {
       [found] = await this.getDocuments([id], { withContent: true });
     } catch (error) {
-      if (error instanceof LinearStoppedError) throw error;
+      if (error instanceof LinearStoppedError || !(error instanceof LinearError)) throw error;
       throw createError;
     }
     if (found === undefined) return undefined;
     const samePlace = place.projectId !== undefined ? found.projectId === place.projectId : found.teamId === place.teamId && found.projectId === null;
-    if (found.id !== id || !samePlace || found.title !== title || found.trashed) throw createError;
+    if (!samePlace || found.title !== title || found.trashed) throw createError;
     return found;
   }
 
+  /** The written document's record with its stored content: the payload, or a read-back when the payload may differ. */
   async #storedRecord(operation: string, written: LinearDocument): Promise<LinearDocument> {
     if (this.facts.mutationsReturnStoredContent) return written;
     let stored: LinearDocument | undefined;
