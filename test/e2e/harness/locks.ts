@@ -98,6 +98,8 @@ export interface LockOptions {
   pollMs?: number;
   /** Told once per new holder while waiting. */
   onWait?: (holder: Owner | null) => void;
+  /** Told, after each look that found a live holder and the pause after it, how long both took. */
+  onHeld?: (waitedMs: number) => void;
   /** Stops the wait when aborted. */
   signal?: AbortSignal;
   /** Takes over this run's own kept lock (a held run's take-up); it stays kept until `hold` or `release`. */
@@ -121,6 +123,7 @@ export async function acquireLock(name: string, options: LockOptions): Promise<L
   let lastHolder: string | undefined;
   for (;;) {
     options.signal?.throwIfAborted();
+    const look = Date.now();
     const owner: Owner = { pid: process.pid, host: hostname(), runId: options.runId, since: new Date().toISOString() };
     try {
       mkdirSync(dir);
@@ -161,6 +164,7 @@ export async function acquireLock(name: string, options: LockOptions): Promise<L
     }
     if (Date.now() >= deadline) throw new LockTimeoutError(name, holder);
     await sleep(options.pollMs ?? 500);
+    options.onHeld?.(Date.now() - look);
   }
 }
 

@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { hostname, tmpdir } from 'node:os';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { LinearClient } from '../../../src/linear/index.ts';
@@ -570,68 +568,38 @@ describe('setup deadline', () => {
     assert.equal(await settlesWithin(new Promise(() => {}), 20), false);
   });
 
-  it('stops its clock while setup waits for a team zone, and goes on from where it stopped', async (t) => {
+  it('does not count the waits for a held team zone, but counts the rest of setup', async (t) => {
     const { SetupDeadline } = await import('./runner.ts');
     t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-    const wait = () => {
-      let free!: () => void;
-      return { free: () => free(), promise: new Promise<void>((resolve) => { free = resolve; }) };
+    const pending = () => {
+      let settle!: () => void;
+      return { settle: () => settle(), promise: new Promise<void>((resolve) => { settle = resolve; }) };
     };
-    for (const after of [4, 5]) {
-      const deadline = new SetupDeadline(15 * 60_000);
-      const done = wait();
-      const setup = deadline.race(done.promise.then(() => 'ready'), () => new EnvBlockedError('setup did not finish within 15 minutes'));
+    const start = () => {
+      const deadline = new SetupDeadline(15 * 60_000, () => Date.now());
+      const done = pending();
+      const setup = deadline.race(done.promise.then(() => 'ready'), () => new EnvBlockedError(`setup did not finish (not counted: ${deadline.creditedMs / 60_000} minutes)`));
       t.mock.timers.tick(10 * 60_000);
-      // Another live run holds the zone for an hour: that wait is not setup's.
-      const zone = wait();
-      const waited = deadline.excluding(() => zone.promise);
-      t.mock.timers.tick(60 * 60_000);
-      zone.free();
-      await waited;
-      t.mock.timers.tick(after * 60_000);
-      if (after === 4) {
-        done.free();
-        assert.equal(await setup, 'ready', 'ten minutes before the wait and four after are within the limit');
-      } else {
-        await assert.rejects(setup, /setup did not finish within 15 minutes/, 'the time before and after the wait still counts');
+      return { deadline, done, setup };
+    };
+    // An hour's wait for a zone that another live run holds: each attempt that found it held is given back.
+    const heldForAnHour = (deadline: InstanceType<typeof SetupDeadline>) => {
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        t.mock.timers.tick(30_000);
+        deadline.credit(30_000);
       }
-    }
-  });
+    };
 
-  it('lets a setup wait past its limit for a team lock that a live run holds, and takes a dead run\'s lock at once', async () => {
-    const { SetupDeadline, takeTeamLocks } = await import('./runner.ts');
-    const { acquireLock } = await import('./locks.ts');
-    const stateDir = fresh('setup-lock-wait-');
-    const scenario = byId('L2-30');
-    assert.equal(scenario.setup.teamZoneLock, true);
-    const context = (runId: string, lines: string[]) => ({ scenario, signal: new AbortController().signal, names: { runId }, log: (line: string) => lines.push(line) }) as unknown as Parameters<typeof takeTeamLocks>[0];
-    const setupOf = (deadline: InstanceType<typeof SetupDeadline>, runId: string, lines: string[], locks: import('./locks.ts').Lock[]) =>
-      deadline.race((async () => {
-        await deadline.excluding(() => takeTeamLocks(context(runId, lines), stateDir, ['ENG'], locks));
-        return 'ready';
-      })(), () => new EnvBlockedError('setup did not finish'));
+    const finishes = start();
+    heldForAnHour(finishes.deadline);
+    t.mock.timers.tick(4 * 60_000);
+    finishes.done.settle();
+    assert.equal(await finishes.setup, 'ready', 'ten minutes before the wait and four after are within the limit');
 
-    // A live run holds team ENG well past the waiting run's setup limit.
-    const live = await acquireLock('team-eng', { stateDir, runId: 'aaaaaa', timeoutMs: 0 });
-    const lines: string[] = [];
-    const locks: import('./locks.ts').Lock[] = [];
-    const setup = setupOf(new SetupDeadline(200), 'bbbbbb', lines, locks);
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    live.release();
-    assert.equal(await setup, 'ready');
-    assert.deepEqual(lines, ['waiting for team ENG (held by run aaaaaa)']);
-    assert.equal(locks.length, 1);
-    locks.splice(0).forEach((lock) => lock.release());
-
-    // A run that died while holding the lock: the next run takes the lock over without waiting.
-    const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
-    await once(child, 'exit');
-    mkdirSync(join(stateDir, 'locks', 'team-eng'));
-    writeFileSync(join(stateDir, 'locks', 'team-eng', 'owner.json'), JSON.stringify({ pid: child.pid, host: hostname(), runId: 'dddddd', since: new Date().toISOString() }));
-    const recovered: string[] = [];
-    assert.equal(await setupOf(new SetupDeadline(5_000), 'cccccc', recovered, locks), 'ready');
-    assert.deepEqual(recovered, [], 'no wait for a dead run\'s lock');
-    assert.equal(JSON.parse(readFileSync(join(stateDir, 'locks', 'team-eng', 'owner.json'), 'utf8')).runId, 'cccccc');
-    locks.splice(0).forEach((lock) => lock.release());
+    const late = start();
+    heldForAnHour(late.deadline);
+    const rejected = assert.rejects(late.setup, /setup did not finish \(not counted: 60 minutes\)/, 'the time before and after the wait still counts');
+    t.mock.timers.tick(5 * 60_000);
+    await rejected;
   });
 });

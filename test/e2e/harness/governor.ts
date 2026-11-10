@@ -117,7 +117,11 @@ export interface Grant {
   owner?: string;
   /** Waits at most `maxWaitMs` (default: the governor's longest wait) for the accounts' budgets. */
   claimBudgets?(accounts: readonly AccountBudget[], signal?: AbortSignal, maxWaitMs?: number): Promise<void>;
-  claimZones?(zones: readonly string[], signal?: AbortSignal): Promise<void>;
+  /**
+   * Waits at most the governor's longest wait for the zones. After each attempt that found a zone held by
+   * another run, and the pause after it, `onHeld` is told how long both took: a setup deadline does not count it.
+   */
+  claimZones?(zones: readonly string[], signal?: AbortSignal, onHeld?: (waitedMs: number) => void): Promise<void>;
   release(): void | Promise<void>;
 }
 
@@ -252,15 +256,18 @@ export class Governor {
               await sleep(Math.max(0, wake - this.#now()), undefined, signal === undefined ? {} : { signal });
             }
           },
-          claimZones: async (zones, signal) => {
+          claimZones: async (zones, signal, onHeld) => {
             const until = this.#now() + (options.maxWaitMs ?? MAX_BUDGET_WAIT_MS);
             for (;;) {
               signal?.throwIfAborted();
+              const attempt = this.#now();
               try { await shared.claim(runId, owner, zones); return; }
               catch (error) {
                 if (!(error instanceof ZoneBusyError)) throw error;
                 if (this.#now() >= until) throw new BudgetBlockedError('shared team zone remained held');
                 await sleep(500, undefined, signal === undefined ? {} : { signal });
+                // Only an attempt that ended with the zone held is a wait: a stalled attempt never reaches here.
+                onHeld?.(this.#now() - attempt);
               }
             }
           },
