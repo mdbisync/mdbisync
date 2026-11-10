@@ -68,3 +68,13 @@ it('validates the bounded merge grace, including zero for deferred merging', () 
     assert.equal(readInputs(given({ ...REQUIRED, repository: 'o/r', 'merge-grace-seconds': grace }), {}).mergeGraceSeconds, Number(grace));
   }
 });
+
+it('validates the check deadline from 10 to 1440 minutes, and leaves it to the default when not given', () => {
+  for (const minutes of ['0', '9', '-10', '10.5', '1441', 'NaN', '060']) {
+    assert.throws(() => readInputs(given({ ...REQUIRED, repository: 'o/r', 'check-deadline-minutes': minutes }), {}), /check-deadline-minutes must be an integer from 10 to 1440/);
+  }
+  for (const minutes of ['10', '60', '1440']) {
+    assert.equal(readInputs(given({ ...REQUIRED, repository: 'o/r', 'check-deadline-minutes': minutes }), {}).checkDeadlineMinutes, Number(minutes));
+  }
+  assert.equal(readInputs(given({ ...REQUIRED, repository: 'o/r' }), {}).checkDeadlineMinutes, undefined);
+});
