@@ -11,7 +11,8 @@ export interface RemoteRequests {
 
 export function diagnosticRequests(logs: ReadonlyMap<string, string>): LogEntry[] {
   const unique = new Map<string, LogEntry>();
-  for (const log of logs.values()) for (const line of log.split('\n')) {
+  const withoutId = new Map<string, { entry: LogEntry; overview: number; steps: number }>();
+  for (const [file, log] of logs) for (const line of log.split('\n')) {
     const start = line.indexOf('{');
     if (start < 0) continue;
     let entry: LogEntry;
@@ -29,11 +30,22 @@ export function diagnosticRequests(logs: ReadonlyMap<string, string>): LogEntry[
       startedAt: entry.startedAt, finishedAt: entry.finishedAt,
       rateLimitHeaders: Object.fromEntries(Object.entries(entry.rateLimitHeaders)
         .filter(([key, value]) => /^x-(?:ratelimit-[a-z0-9-]+|complexity)$/i.test(key) && typeof value === 'string')),
+      ...(Array.isArray(entry.errorCodes) ? { errorCodes: entry.errorCodes.filter((code) => typeof code === 'string') } : {}),
       ...(typeof entry.requestId === 'string' ? { requestId: entry.requestId } : {}),
     };
-    unique.set(requestKey(safe), safe);
+    if (safe.requestId !== undefined) unique.set(requestKey(safe), safe);
+    else {
+      const key = requestKey(safe);
+      const count = withoutId.get(key) ?? { entry: safe, overview: 0, steps: 0 };
+      if (file.includes('/')) count.steps++;
+      else count.overview++;
+      withoutId.set(key, count);
+    }
   }
-  return [...unique.values()];
+  // Without a server id, identical concurrent attempts remain separate within
+  // a step. The overview repeats those attempts; use the larger multiplicity.
+  return [...unique.values(), ...[...withoutId.values()].flatMap(({ entry, overview, steps }) =>
+    Array.from({ length: Math.max(overview, steps) }, () => entry))];
 }
 
 function requestKey(entry: LogEntry): string {
@@ -48,12 +60,10 @@ export function remoteRequests(ctx: RunContext): Array<{ phase: 'setup' | 'scena
     const remote = result.remote;
     if (remote === undefined) return [];
     const phase = index < ctx.engine.setupRuns ? 'setup' : index >= end ? 'I6' : 'scenario';
-    return remote.requests.flatMap((entry) => {
-      const key = JSON.stringify([remote.runId, remote.runAttempt, requestKey(entry)]);
-      if (seen.has(key)) return [];
-      seen.add(key);
-      return [{ phase, entry }];
-    });
+    const key = `${remote.runId}:${remote.runAttempt}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return remote.requests.map((entry) => ({ phase, entry }));
   });
 }
 
@@ -61,19 +71,18 @@ export function isGraphql(entry: LogEntry): boolean {
   return entry.kind === 'query' || entry.kind === 'mutation';
 }
 
-export function isDocumentWrite(entry: { kind: string; operation: string; status: number | string }): boolean {
-  return entry.kind === 'mutation' && /document(Create|Update)|(Create|Update)Document/i.test(entry.operation) && entry.status === 200;
+export function isDocumentWrite(entry: { kind: string; operation: string; status: number | string; errorCodes?: string[] | undefined }): boolean {
+  return entry.kind === 'mutation' && /document(Create|Update)|(Create|Update)Document/i.test(entry.operation) && entry.status === 200 && (entry.errorCodes?.length ?? 0) === 0;
 }
 
 /** Local counting stays exactly as before; remote GraphQL includes upload URL mutations. */
-export function engineRequestCount(ctx: RunContext): number {
+export function engineRequestCount(ctx: RunContext, remote = remoteRequests(ctx)): number {
   return (ctx.proxy?.requests.filter((record) => !record.injected).length ?? 0) +
-    remoteRequests(ctx).filter(({ entry }) => isGraphql(entry)).length;
+    remote.filter(({ entry }) => isGraphql(entry)).length;
 }
 
 /** Disjoint phases and transport buckets; upload URL GraphQL is also identified as a subset. */
-export function requestBuckets(ctx: RunContext) {
-  const entries = remoteRequests(ctx);
+export function requestBuckets(ctx: RunContext, entries = remoteRequests(ctx)) {
   const phase = (name: 'setup' | 'scenario' | 'I6') => {
     const requests = entries.filter((item) => item.phase === name).map((item) => item.entry);
     return {

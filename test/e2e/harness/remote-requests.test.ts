@@ -69,7 +69,7 @@ it('deduplicates repeated settling but counts workflow retries and request attem
   const retry = { ...entry, requestId: 'retry', attempt: 2 };
   assert.equal(diagnosticRequests(logs([entry, retry])).length, 2);
   const noId = { ...entry, requestId: undefined };
-  assert.equal(diagnosticRequests(new Map([['job', [noId, noId, { ...noId, attempt: 2 }].map((e) => JSON.stringify(e)).join('\n')]])).length, 2);
+  assert.equal(diagnosticRequests(new Map([['job', [noId, noId, { ...noId, attempt: 2 }].map((e) => JSON.stringify(e)).join('\n')]])).length, 3);
 });
 
 it('keeps setup and I6 separate from the scenario and from editor traffic', async () => {
@@ -89,10 +89,12 @@ it('keeps setup and I6 separate from the scenario and from editor traffic', asyn
 it('does not claim a zero-cost successful remote run when diagnostics are missing', async () => {
   const ctx = await context();
   ctx.proxy = null;
-  ctx.engine.results = [await runResult(rest, run(3), 'initial-sync', new Map([['job', 'unrelated output']]))];
-  const check = await INVARIANT_CHECKS.I9(ctx, async () => { throw new Error('unexpected world read'); });
-  assert.equal(check.ok, false);
-  assert.match(check.detail!, /diagnostics are missing/);
+  for (const conclusion of ['success', 'failure']) {
+    ctx.engine.results = [await runResult(rest, { ...run(3), conclusion }, 'initial-sync', new Map([['job', 'unrelated output']]))];
+    const check = await INVARIANT_CHECKS.I9(ctx, async () => { throw new Error('unexpected world read'); });
+    assert.equal(check.ok, false);
+    assert.match(check.detail!, /diagnostics are missing/);
+  }
 });
 
 it('ignores unrelated or malformed log JSON and strips fields outside the diagnostic schema', () => {
@@ -126,4 +128,51 @@ it('feeds real recorded limit headers to admission without manufacturing a budge
     const grant = await governor.admit(scenario, 'abcde3', { requests: 1, complexity: 698000 });
     grant.release();
   } finally { first.release(); }
+});
+
+it('preserves identical simultaneous attempts without server ids across step and overview logs', () => {
+  const { requestId: _, ...entry } = recorded.dry[1]!;
+  const text = JSON.stringify(entry);
+  assert.equal(diagnosticRequests(new Map([
+    ['0_job.txt', `${text}\n${text}`], ['job/1_stage.txt', text], ['job/2_apply.txt', text],
+  ])).length, 2);
+  assert.equal(diagnosticRequests(new Map([
+    ['0_job.txt', `${text}\n${text}`], ['job/1_stage.txt', `${text}\n${text}`],
+  ])).length, 2);
+});
+
+it('counts rejected mutations as requests without granting a written-document allowance', async () => {
+  const ctx = await context();
+  ctx.proxy = null;
+  const rejected = Array.from({ length: 20 }, (_, index) => ({ ...recorded.confirmed[3]!, requestId: `rejected-${index}`, errorCodes: ['INPUT_ERROR'] }));
+  ctx.engine.results = [await runResult(rest, { ...run(4), conclusion: 'failure' }, 'initial-sync', logs(rejected))];
+  assert.equal(engineRequestCount(ctx), 20);
+  assert.equal((await INVARIANT_CHECKS.I9(ctx, async () => { throw new Error('unexpected world read'); })).ok, false);
+});
+
+it('admits workflows on their configured app and lets a later fresh read supersede old limits', async () => {
+  let now = Date.parse(recorded.confirmed[1]!.startedAt);
+  const root = mkdtempSync(join(tmpdir(), 'remote-app-'));
+  roots.push(root);
+  const governor = new Governor({
+    apps: ['primary', 'other'].map((name) => ({ name, readBudget: async () => ({ requestsRemaining: 5000, complexityRemaining: 2000000, resetAt: now }) })),
+    stateDir: root, now: () => now, maxWaitMs: 0,
+  });
+  // A depleted requests observation expires earlier than complexity. A fresh
+  // later read wins even before either rolling window reset.
+  governor.observeRateLimits('primary', {
+    ...recorded.confirmed[1]!.rateLimitHeaders,
+    'x-ratelimit-requests-remaining': '0', 'x-ratelimit-requests-reset': String(now + 1000),
+  });
+  const other = await governor.admit(scenario, 'abcdef1', { requests: 1, complexity: 1 }, 'other');
+  assert.equal(other.app.name, 'other');
+  other.release();
+  await assert.rejects(governor.admit(scenario, 'abcdef2', { requests: 1, complexity: 1 }, 'primary'), BudgetBlockedError);
+  now += 1;
+  const primary = await governor.admit(scenario, 'abcdef3', { requests: 1, complexity: 1 }, 'primary');
+  assert.equal(primary.app.name, 'primary');
+  primary.release();
+  now += 2000;
+  const recovered = await governor.admit(scenario, 'abcdef4', { requests: 1, complexity: 1 }, 'primary');
+  recovered.release();
 });

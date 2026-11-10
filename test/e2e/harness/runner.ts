@@ -622,6 +622,7 @@ export function resultOf(
   extra: { startedAt: number; budgetWaitMs: number; checks: CheckOutcome[]; cleanup: { ok: boolean; detail?: string } },
 ): Omit<ScenarioResult, 'harnessAppRequests'> {
   const { scenario } = ctx;
+  const remote = remoteRequests(ctx);
   return {
     id: scenario.id,
     level: levelOf(scenario.id),
@@ -631,8 +632,8 @@ export function resultOf(
     ...outcome,
     startedAt: new Date(extra.startedAt).toISOString(),
     durationMs: Date.now() - extra.startedAt,
-    engineRequests: engineRequestCount(ctx),
-    requestBuckets: requestBuckets(ctx),
+    engineRequests: engineRequestCount(ctx, remote),
+    requestBuckets: requestBuckets(ctx, remote),
     harnessRequests: ctx.live === null ? 0 : [...Object.values(ctx.live.editors)].reduce((sum, client) => sum + client.stats.total, 0),
     budgetWaitMs: extra.budgetWaitMs,
     checks: extra.checks,
@@ -667,7 +668,10 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     if (scenario.setup.state !== 'offline') {
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');
       try {
-        grant = await deps.governor.admit(scenario, runId, estimate(scenario));
+        // Rendered workflows use the primary app's repository secrets. A
+        // scenario invoking them must reserve that same app, including setup.
+        const actions = scenario.mode === 'actions' || scenario.steps.some((step) => step.kind === 'run' && step.action.startsWith('workflow'));
+        grant = await deps.governor.admit(scenario, runId, estimate(scenario), actions ? deps.config.linearApps[0]?.name : undefined);
       } catch (blocked) {
         if (blocked instanceof BudgetBlockedError) throw new EnvBlockedError(blocked.message);
         throw blocked;
@@ -723,7 +727,9 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     await ctx.proxy?.close();
     locks.splice(0).reverse().forEach((lock) => lock.release());
     if (grant !== undefined) for (const { entry } of remoteRequests(ctx)) {
-      if (isGraphql(entry)) deps.governor?.observeRateLimits(grant.app.name, entry.rateLimitHeaders);
+      if (isGraphql(entry) && deps.config.linearApps[0] !== undefined) {
+        deps.governor?.observeRateLimits(deps.config.linearApps[0].name, entry.rateLimitHeaders, Date.parse(entry.finishedAt));
+      }
     }
     grant?.release();
     clearInterval(heartbeat);
