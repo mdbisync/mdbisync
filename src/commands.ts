@@ -3,6 +3,8 @@
 // the setup check). A command that is not built yet reports "not implemented"
 // and exits with its own code, so callers and tests can tell the stubs apart.
 
+import { message } from './messages.ts';
+
 export interface CommandInfo {
   readonly summary: string;
   readonly notImplementedExitCode: number;
@@ -47,5 +49,5 @@ export function isCommandName(value: string): value is CommandName {
 export const IMPLEMENTED: ReadonlySet<CommandName> = new Set(["lint", "fix", "init"]);
 
 export function notImplementedMessage(command: string): string {
-  return `${command}: not implemented`;
+  return message('cli.not-implemented', { command });
 }

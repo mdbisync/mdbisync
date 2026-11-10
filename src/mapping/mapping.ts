@@ -16,6 +16,8 @@ import {
   readAnnotation,
   resolveZones,
 } from './annotations.ts';
+import { message } from '../messages.ts';
+import { type LeftOutRule, type UnsyncedReason } from '../codes.ts';
 
 export const MARKDOWN_EXTENSION = '.md';
 
@@ -30,7 +32,7 @@ export interface MappedDocument {
   place: Place;
 }
 
-export type UnsyncedReason = 'outside-annotations' | 'not-a-regular-file' | 'binary' | 'stored-in-lfs';
+export type { UnsyncedReason } from '../codes.ts';
 
 /** A `.md` file that is not synchronized, and why. */
 export interface UnsyncedFile {
@@ -49,7 +51,7 @@ export interface UnsyncedFile {
 export interface LeftOutFile {
   path: string;
   oid: Oid;
-  rule: 'duplicate-title';
+  rule: Extract<LeftOutRule, 'duplicate-title'>;
   title: string;
   place: Place;
   collidesWith: string[];
@@ -116,7 +118,7 @@ export function mapFiles(
       continue;
     }
     const content = contents.get(entry.oid);
-    if (content === undefined) throw new Error(`the content of ${entry.path} was not read`);
+    if (content === undefined) throw new Error(message('mapping.content-not-read', { path: entry.path }));
     const problem = contentProblem(content);
     if (problem !== null) {
       unsynced.push({ path: entry.path, reason: problem, title: titleOf(entry.path, zone), place: placeOf(zone) });

@@ -10,6 +10,7 @@ import { type GitHubCheck } from './github.ts';
 import { type HookConfig, checkLinearFormatHook, checkSecurityHooks, securityHooks } from './hooks.ts';
 import { type ResolvedTargets, checkLinearScopes, linearCredentialFailure, resolveTargets } from './linear.ts';
 import { type CheckResult, type SetupReport, buildReport, failed, notChecked, passed } from './report.ts';
+import { message } from '../messages.ts';
 
 export interface SetupInput {
   /** The tracked branch's mapping. */
@@ -70,8 +71,8 @@ function checkLeftOut(mapping: RepositoryMapping): CheckResult {
   const files = [...mapping.leftOut].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   if (files.length === 0) return passed('left-out-files', 'no files left out');
   const named = files.slice(0, LEFT_OUT_NAMED).map((file) => `${file.path} (${file.rule})`);
-  const more = files.length > LEFT_OUT_NAMED ? `, and ${files.length - LEFT_OUT_NAMED} more` : '';
-  return { name: 'left-out-files', state: 'warning', detail: `${files.length} files left out, not synced: ${named.join(', ')}${more}` };
+  const more = files.length > LEFT_OUT_NAMED ? message('setup.left-out-more', { count: files.length - LEFT_OUT_NAMED }) : '';
+  return { name: 'left-out-files', state: 'warning', detail: message('setup.left-out', { count: files.length, files: named.join(', '), more }) };
 }
 
 function checkAnnotations(mapping: RepositoryMapping): CheckResult {
@@ -79,7 +80,7 @@ function checkAnnotations(mapping: RepositoryMapping): CheckResult {
     return failed('annotations', 'invalid-annotation', mapping.problems.map((problem) => problem.message).join('; '));
   }
   if (mapping.annotations.length === 0) {
-    return failed('annotations', 'no-annotations', 'no folder has linear-team or linear-project in its README.md front matter');
+    return failed('annotations', 'no-annotations', message('setup.no-annotations'));
   }
   return passed('annotations', `${mapping.annotations.length} annotated folders, ${mapping.documents.length} files to sync`);
 }

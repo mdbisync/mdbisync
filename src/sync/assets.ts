@@ -3,6 +3,7 @@ import { posix } from 'node:path';
 import { destinations, findFileLinks, restoreFileLinks, type WrittenLink } from '../initial-sync/uploads.ts';
 import { type LinearReads, uploadReadKey } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
+import { message } from '../messages.ts';
 
 export interface CapturedAssets {
   body: string;
@@ -18,18 +19,18 @@ function isUpload(url: string): boolean {
 
 /** The caller authenticates the allowed upload host. Redirects cannot forward credentials elsewhere. */
 async function download(url: string, fetcher: typeof fetch, reads: LinearReads | undefined): Promise<{ bytes: Buffer; type: string }> {
-  if (!isUpload(url)) throw new Error('asset destination is not allowed');
+  if (!isUpload(url)) throw new Error(message('assets.not-allowed'));
   const key = uploadReadKey(url);
   const kept = reads?.take(key);
   if (kept !== undefined && kept.body.length <= LIMIT) return { bytes: kept.body, type: kept.type };
   const response = await fetcher(url, { redirect: 'manual', signal: AbortSignal.timeout(30_000) });
-  if (response.status >= 300 && response.status < 400) throw new Error('asset redirect destination is not allowed');
-  if (!response.ok || response.body === null || Number(response.headers.get('content-length') ?? 0) > LIMIT) throw new Error('asset could not be downloaded');
+  if (response.status >= 300 && response.status < 400) throw new Error(message('assets.redirect-not-allowed'));
+  if (!response.ok || response.body === null || Number(response.headers.get('content-length') ?? 0) > LIMIT) throw new Error(message('assets.download-failed'));
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of response.body) {
     size += chunk.length;
-    if (size > LIMIT) throw new Error('asset exceeds the download limit');
+    if (size > LIMIT) throw new Error(message('assets.too-large'));
     chunks.push(Buffer.from(chunk));
   }
   const asset = {bytes: Buffer.concat(chunks), type: response.headers.get('content-type')?.split(';')[0]?.trim() ?? ''};
@@ -134,7 +135,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
           const extension = posix.extname(new URL(url).pathname).toLowerCase();
           const suffix = EXTENSIONS[asset.type] ?? (/^\.[a-z0-9]{1,8}$/.test(extension) && extension !== '.md' ? extension : '.bin');
           assetPath = posix.join(posix.dirname(path), `${hash}${suffix}`);
-          if (pathHashes.has(assetPath)) throw new Error('asset destination already exists');
+          if (pathHashes.has(assetPath)) throw new Error(message('assets.destination-exists'));
         }
         // Each document owns its candidate bytes until its security check passes.
         files.set(assetPath, asset.bytes);

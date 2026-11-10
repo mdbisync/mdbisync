@@ -6,6 +6,7 @@
 import * as core from "@actions/core";
 import { revokeToken } from "../linear/index.ts";
 import { LINEAR_TOKEN_STATE } from "./state.ts";
+import { message } from "../messages.ts";
 
 export interface PostOptions {
   /** For tests: the fake Linear. */
@@ -25,7 +26,7 @@ export async function run(options: PostOptions = {}): Promise<void> {
     core.info("post: revoked the run's Linear token");
   } catch (error) {
     // Linear expires the token on its own; the job's result stays the main step's.
-    core.warning(`post: the run's Linear token could not be revoked: ${error instanceof Error ? error.message : String(error)}`);
+    core.warning(`post: ${message('run.revoke-failed', { reason: error instanceof Error ? error.message : String(error) })}`);
   }
 }
 

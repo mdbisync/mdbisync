@@ -5,6 +5,7 @@
 
 import { type StateConfig, type StateSnapshot, stateRef } from '../state/index.ts';
 import { type FailureCode } from './report.ts';
+import { message } from '../messages.ts';
 
 export interface StateRefusal {
   code: Extract<FailureCode, 'initial-sync-required' | 'initial-pull-request-pending'>;
@@ -27,19 +28,19 @@ export function checkSyncState(
   if (initialSyncUnfinished) {
     return {
       code: 'initial-sync-required',
-      message: 'An initial sync stopped before it finished: run it again with the same inputs first. The sync wrote nothing.',
+      message: message('setup.initial-sync-unfinished'),
     };
   }
   if (state.linear === null) {
     return {
       code: 'initial-sync-required',
-      message: `${stateRef(config, 'linear')} does not exist: run initial sync first. The sync wrote nothing.`,
+      message: message('setup.initial-sync-required', { ref: stateRef(config, 'linear') }),
     };
   }
   if (initialPullRequestPending) {
     return {
       code: 'initial-pull-request-pending',
-      message: `The pull request of the initial sync from Linear is not merged into ${config.trackedBranch} yet: a person reviews and merges it with a merge commit (it can remove files), then the sync runs. Closing the pull request or deleting its branch does not cancel this unmerged snapshot. To start over instead, close that pull request, delete the branch ${config.syncBranch} and run initial sync again to replace the snapshot. The sync wrote nothing.`,
+      message: message('setup.initial-pull-request-pending', { tracked: config.trackedBranch, sync: config.syncBranch }),
     };
   }
   return null;
