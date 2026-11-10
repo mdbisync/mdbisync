@@ -21,14 +21,16 @@ describe('readChecks', () => {
       { name: 'c', status: 'completed', conclusion: 'skipped' },
       { name: 'd', status: 'completed', conclusion: 'success', commitStatus: true },
     ];
-    assert.deepEqual(await readChecks(target(checks).repo, SHA), { state: 'passed', failed: [], pending: [], hasChecks: true });
+    assert.deepEqual(await readChecks(target(checks).repo, SHA), { state: 'passed', failed: [], pending: [], hasChecks: true, succeeded: ['a', 'b', 'c', 'd'] });
   });
 
   it('reads every page of check runs, so a failure past the first hundred is seen', async () => {
     const checks: FakeCheck[] = Array.from({ length: 150 }, (_, i) => ({ name: `check-${i}`, status: 'completed', conclusion: 'success' }));
     checks.push({ name: 'late', status: 'completed', conclusion: 'timed_out' });
     const { world, repo } = target(checks);
-    assert.deepEqual(await readChecks(repo, SHA), { hasChecks: true, state: 'failed', failed: ['late'], pending: [], failures: [{ name: 'late', url: 'https://github.test/owner/repo/runs/151', checkRunId: 151 }] });
+    const { succeeded, ...state } = await readChecks(repo, SHA);
+    assert.deepEqual(state, { hasChecks: true, state: 'failed', failed: ['late'], pending: [], failures: [{ name: 'late', url: 'https://github.test/owner/repo/runs/151', checkRunId: 151 }] });
+    assert.equal(succeeded?.length, 150);
     assert.equal(world.requests.filter((request) => request.includes('/check-runs')).length, 2);
   });
 
@@ -90,7 +92,8 @@ describe('readAnnotations', () => {
       const body = (await response.json()) as { statuses: unknown[]; total_count: number };
       return new Response(JSON.stringify({ ...body, statuses: body.statuses.slice(0, 100) }), { status: 200 });
     };
-    assert.deepEqual(await readChecks({ ...repo, fetch: truncated }, SHA), { hasChecks: true, state: 'pending', failed: [], pending: ['1 more commit statuses'] });
+    const { succeeded: _listed, ...truncatedState } = await readChecks({ ...repo, fetch: truncated }, SHA);
+    assert.deepEqual(truncatedState, { hasChecks: true, state: 'pending', failed: [], pending: ['1 more commit statuses'] });
 
     const empty: typeof fetch = async (input) =>
       String(input).includes('/check-runs')

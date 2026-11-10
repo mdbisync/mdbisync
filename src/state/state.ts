@@ -265,6 +265,8 @@ export interface SuspensionEpisode {
   /** Paths of this episode; one entry also holds former names and assets for the lane. */
   paths: string[];
   checks: string[];
+  /** Checks of the suspended batch that did not finish in time: a comment written from the episode alone says so. */
+  timedOut?: string[];
 }
 
 export interface IdEntry {
@@ -503,7 +505,8 @@ function isIdEntry(value: unknown): value is IdEntry {
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(episode.noticeId)
       || (episode.head !== undefined && (typeof episode.head !== 'string' || !/^[0-9a-f]{40,64}$/.test(episode.head)))
       || !Array.isArray(episode.paths) || !episode.paths.every((path) => typeof path === 'string')
-      || !Array.isArray(episode.checks) || !episode.checks.every((name) => typeof name === 'string')) return false;
+      || !Array.isArray(episode.checks) || !episode.checks.every((name) => typeof name === 'string')
+      || (episode.timedOut !== undefined && (!Array.isArray(episode.timedOut) || !episode.timedOut.every((name) => typeof name === 'string')))) return false;
   }
   if (entry.saved === undefined) return true;
   const saved = entry.saved as Record<string, unknown> | null;

@@ -10,6 +10,7 @@ import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, rea
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
 import type { CheckFailure } from '../pull-request/index.ts';
+import { DEFAULT_CHECK_DEADLINE_MINUTES, codeNames, headNote, headSince, pastDeadline, readMainVerdict } from './deadline.ts';
 
 export const SUSPENDED_TITLE = 'Suspended changes from Linear';
 export const SET_ASIDE_MESSAGE = 'Set aside suspended changes';
@@ -18,6 +19,16 @@ export const LINEAR_INTAKE_MESSAGE = "Take Linear's changes to suspended documen
 export interface SuspendedResult {
   paths: string[];
   checks: string[];
+  /** Checks still pending at the deadline: on the suspended head, or on the normal batch this run suspended. */
+  timedOut?: string[];
+  /**
+   * Checks that failed on the suspended head and also on the tracked
+   * branch's tip, with their runs there: the documents are not to blame, so
+   * their comments are not rewritten for it.
+   */
+  redMain?: CheckFailure[];
+  /** Checks that failed on the suspended head and still run on the tracked branch's tip: the comments wait for that result. */
+  mainPending?: string[];
   /** The suspended head's failure this run read, with its check runs: what the suspended documents' comments describe. */
   failure?: HoldFailure;
   /** The failure of the normal batch this run suspended: it describes only that batch's documents. */
@@ -39,6 +50,7 @@ export interface LaneOptions {
   state: StateSnapshot;
   github: GitHubRepository;
   mergeGraceSeconds?: number | undefined;
+  checkDeadlineMinutes?: number | undefined;
 }
 
 export class LaneMoved extends Error {}
@@ -124,7 +136,7 @@ async function push(context: RunContext, options: LaneOptions, ids: IdMap, head:
   return pushed.updated.length > 0;
 }
 
-async function addEpisodes(context: RunContext, options: LaneOptions, ids: IdMap, paths: ReadonlySet<string>, checks: string[]): Promise<void> {
+async function addEpisodes(context: RunContext, options: LaneOptions, ids: IdMap, paths: ReadonlySet<string>, checks: string[], timedOut: string[] = []): Promise<void> {
   // A normal batch can delete a document: capture has already removed its
   // live id entry, but its episode still needs the historical identity.
   const knownId = knownIdLookup(context.git, options.state.ids, ids);
@@ -133,7 +145,7 @@ async function addEpisodes(context: RunContext, options: LaneOptions, ids: IdMap
     if (id !== undefined && ![...ids.values()].some((entry) => entry.id === id)) ids.set(path, { id });
   }
   for (const [path, entry] of ids) if (paths.has(path) && entry.suspended === undefined) {
-    entry.suspended = { noticeId: randomUUID(), paths: [path], checks: [...checks] };
+    entry.suspended = { noticeId: randomUUID(), paths: [path], checks: [...checks], ...(timedOut.length > 0 ? { timedOut: [...timedOut] } : {}) };
     delete entry.releaseBase;
     delete entry.releasePaths;
   }
@@ -202,7 +214,9 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   const open = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
   const old = /^<!-- suspended merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m.exec(open?.body ?? '');
   const earlier = old?.[1] === head && old?.[2] === tracked ? old : null;
-  const body = `Changes on hold until their checks pass.\n\n${result.paths.map((path) => `- ${path}`).join('\n')}\n${earlier === null ? '' : `\n${earlier[0]}\n`}`;
+  // The deadline runs from the push of this head, noted in the description; a new head starts it now.
+  const since = headSince(open?.body, head, new Date());
+  const body = `Changes on hold until their checks pass.\n\n${result.paths.map((path) => `- ${path}`).join('\n')}\n${earlier === null ? '' : `\n${earlier[0]}\n`}\n${headNote(head, since)}\n`;
   const { pullRequest, opened } = await ensurePullRequest(options.github, {
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body,
   });
@@ -212,8 +226,20 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   if (fresh && grace === 0) return { ...result, waiting: true };
   const checks = fresh ? await waitForChecks(options.github, head, grace) : await readChecks(options.github, head);
   result.checks = checks.failed;
-  if (checks.state === 'failed') result.failure = { head, checks: checks.failures ?? checks.failed.map((name) => ({ name })) };
-  result.waiting = checks.state === 'pending';
+  const expired = pastDeadline(since, options.checkDeadlineMinutes ?? DEFAULT_CHECK_DEADLINE_MINUTES, new Date());
+  // A check still pending at the deadline counts as failed; the lane no longer holds the normal one for it.
+  const timedOut = checks.state === 'pending' && expired ? checks.pending : [];
+  if (timedOut.length > 0) result.timedOut = timedOut;
+  if (checks.state === 'failed' || timedOut.length > 0) {
+    const failures = checks.state === 'failed' ? checks.failures ?? checks.failed.map((name) => ({ name })) : [];
+    // The same check failing on the tracked branch's tip is not the documents' fault: their comments stay as they are.
+    // While it still runs there, the comments wait for that result, up to the deadline.
+    const verdict = await readMainVerdict(options.github, tracked, [...failures.map(({ name }) => name), ...timedOut]);
+    if (verdict.state === 'red') result.redMain = verdict.checks;
+    else if (verdict.state === 'pending' && !expired) result.mainPending = verdict.checks;
+    else if (verdict.state === 'clear' || expired) result.failure = { head, checks: failures, ...(timedOut.length > 0 ? { timedOut } : {}) };
+  }
+  result.waiting = checks.state === 'pending' && timedOut.length === 0;
   if (checks.state !== 'passed') return result;
   if (!(await isAncestor(git, tracked, head))) return result;
   const remoteTip = (await git.text(['ls-remote', '--refs', options.config.remote, branchRef(options.config.trackedBranch)])).split('\t')[0];
@@ -258,7 +284,7 @@ async function release(context: RunContext, options: LaneOptions, ids: IdMap, pa
 }
 
 /** Move a failed normal batch, its set-aside head, and episodes together or not at all. */
-export async function suspendBatch(context: RunContext, options: LaneOptions, failed: Oid, normalNumber: number, failures: CheckFailure[]): Promise<SuspendedResult> {
+export async function suspendBatch(context: RunContext, options: LaneOptions, failed: Oid, normalNumber: number, failures: CheckFailure[], timedOut: string[] = []): Promise<SuspendedResult> {
   const checks = failures.map(({ name }) => name);
   const { git } = context;
   const tracked = context.fetched.tracked;
@@ -281,7 +307,8 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
     head = await commit(context, options, await mergeTree(git, updated, batch, tracked, ids, options.state.ids), [updated, failed], 'Join suspended changes from Linear' + note(tracked, linear));
   }
   for (const path of await changedPaths(git, tracked, head)) paths.add(path);
-  await addEpisodes(context, options, ids, paths, checks);
+  // A comment written from the episode alone (a deferred mark) names the failed checks and the late ones apart.
+  await addEpisodes(context, options, ids, paths, checks, timedOut);
   const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
   if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
   const normal = await commit(context, options, await git.text(['rev-parse', `${tracked}^{tree}`]), [failed, tracked], SET_ASIDE_MESSAGE);
@@ -289,7 +316,8 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   await closePullRequest(options.github, normalNumber);
   const { pullRequest } = await ensurePullRequest(options.github, {
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE,
-    body: `Changes on hold: ${checks.map((name) => `\`${name}\``).join(', ')}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n`,
+    body: `Changes on hold: ${codeNames([...checks, ...timedOut])}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n\n${headNote(head, new Date())}\n`,
   });
-  return { paths: [...paths].sort(), checks, batchFailure: { head: failed, paths: batchPaths, checks: failures }, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
+  const late = timedOut.length > 0 ? { timedOut } : {};
+  return { paths: [...paths].sort(), checks, ...late, batchFailure: { head: failed, paths: batchPaths, checks: failures, ...late }, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
 }

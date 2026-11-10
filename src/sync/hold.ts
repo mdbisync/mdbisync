@@ -80,7 +80,7 @@ const sha256 = (text: string) => createHash('sha256').update(text).digest('hex')
 const failureKey = (failure: HoldFailure) => sha256(JSON.stringify({ checks: failure.checks, timedOut: failure.timedOut ?? [] }));
 
 /** A link target that cannot close its Markdown link or start another: parentheses, brackets and the like percent-encoded. */
-function linkTarget(url: string): string {
+export function linkTarget(url: string): string {
   return url.replace(/[()[\]<>!\s"'`\\]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
 }
 
@@ -196,7 +196,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
     if (described === undefined) {
       // No failure read this run (the head is still checking): the episode's check names, without links.
       const checks = (entry.suspended?.checks ?? []).map((name) => ({ name }));
-      return { body: holdComment(checks, [], new Map(), '') };
+      return { body: holdComment(checks, entry.suspended?.timedOut ?? [], new Map(), '') };
     }
     const failure = described;
     const all = await readAll(failure);

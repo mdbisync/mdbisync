@@ -53,6 +53,10 @@ inputs:
     description: "Seconds to wait for checks after opening or updating the sync pull request (0 to 120). Zero leaves the merge to a later run."
     required: false
     default: "60"
+  check-deadline-minutes:
+    description: "Minutes a sync pull request's checks may stay pending, queued or unstarted after the sync pushed its head (10 to 1440). A batch whose checks have not finished by then is suspended, as for a failed check."
+    required: false
+    default: "60"
   report-file:
     description: "Path to write the run's report as JSON (names and states only); the job summary goes beside it as summary.md. Leave empty for none."
     required: false
