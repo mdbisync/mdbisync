@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { LinearClient, GraphQLTransport, type LinearDocument } from '../../../src/linear/index.ts';
 import { runOfProject, runOfTeamTitle } from './isolation.ts';
 import { observingFetch, type OwnershipLedger, type WriteObserver } from './ownership.ts';
+import { retryCleanup } from './cleanup-retry.ts';
 
 /** Personal API keys go in the Authorization header as they are, without "Bearer". */
 export function apiKeyFetch(base: typeof fetch = fetch): typeof fetch {
@@ -108,7 +109,7 @@ export class LinearWorld {
   /** Deletes a run project (its documents go with it). Refuses any other project. */
   async deleteProject(project: Pick<Project, 'id' | 'name'>, runId: string): Promise<void> {
     if (runOfProject(project.name) !== runId) throw new RunWorldError(`refusing to delete project ${project.name}: not a project of run ${runId}`);
-    const data = await this.client.request<{ projectDelete: { success: boolean } }>('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id: project.id });
+    const data = await retryCleanup(() => this.client.request<{ projectDelete: { success: boolean } }>('DeleteProject', 'mutation', 'mutation DeleteProject($id: String!) { projectDelete(id: $id) { success } }', { id: project.id }));
     if (data.projectDelete?.success !== true) throw new RunWorldError(`Linear did not delete project ${project.name}`);
   }
 
