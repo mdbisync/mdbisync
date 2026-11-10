@@ -26,6 +26,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
+import { relativeLinkUrls } from '../../../src/format/index.ts';
+import { resolveTarget } from '../../../src/format/markdown.ts';
 import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, type Git } from '../../../src/state/index.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
@@ -385,8 +387,15 @@ export function linearForms(texts: ReadonlyMap<string, string>, existingPaths: I
   const dir = mkdtempSync(join(tmpdir(), 'linear-form-'));
   try {
     // `fix` only needs existence for linked files, including LFS assets; their bytes are irrelevant.
-    for (const path of existingPaths) {
-      if (texts.has(path)) continue;
+    const existing = new Set(existingPaths);
+    const linked = new Set<string>();
+    for (const [path, text] of texts) {
+      for (const url of relativeLinkUrls(text)) {
+        const target = resolveTarget(path, url);
+        if (target !== null && existing.has(target) && !texts.has(target)) linked.add(target);
+      }
+    }
+    for (const path of linked) {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), '');
     }
