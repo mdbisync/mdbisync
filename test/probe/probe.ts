@@ -4,6 +4,7 @@
 // findings, recorded in the result, never hidden.
 
 import {
+  DocumentTooLongError,
   LINEAR_FACTS,
   LinearClient,
   LinearGraphQLError,
@@ -50,6 +51,8 @@ export const PROBE_FACTS: LinearFacts = Object.freeze({
   maxTitleLength: Number.POSITIVE_INFINITY,
   maxContentLength: Number.POSITIVE_INFINITY,
 });
+/** How a refusal by the client itself, before anything was sent, is described. */
+export const PRE_SEND_REFUSAL = 'refused before sending';
 /** Documents per read-back request; content state is several times the Markdown's size. */
 export const READ_PAGE_SIZE = 20;
 
@@ -555,12 +558,16 @@ export async function findLimit(refusalAt: (value: number) => Promise<string | u
 }
 
 /**
- * Linear answered that the input is not acceptable: a GraphQL error, or an
- * HTTP client error without one (for example 413 for a very large body). A
- * server error (5xx), a network error or a stopped client says nothing about
- * the input: the run ends as unfinished instead of recording a finding.
+ * The input is not acceptable: Linear answered with a GraphQL error, or an
+ * HTTP client error without one (for example 413 for a very large body), or
+ * the client refused a title or content over Linear's known limit before
+ * sending it. The probe's own client sends everything, but a caller's client
+ * with the known limits (the test harness's) refuses first. A server error
+ * (5xx), a network error or a stopped client says nothing about the input:
+ * the run ends as unfinished instead of recording a finding.
  */
 export function isRefusal(error: unknown): boolean {
+  if (error instanceof DocumentTooLongError) return true;
   if (error instanceof LinearGraphQLError || error instanceof LinearHttpError) {
     return error.httpStatus < 500;
   }
@@ -575,5 +582,6 @@ function describe(error: unknown): string {
   }
   // Only the status: the request id differs on every call.
   if (error instanceof LinearHttpError) return `HTTP ${error.httpStatus}`;
+  if (error instanceof DocumentTooLongError) return `${PRE_SEND_REFUSAL}: ${error.message.replace(/^[^:]*: /, '')}`;
   return error instanceof Error ? error.message : String(error);
 }
