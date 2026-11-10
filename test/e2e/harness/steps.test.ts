@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import type { LinearDocument } from '../../../src/linear/index.ts';
+import { LinearGraphQLError, LinearHttpError, LinearNetworkError, LinearStoppedError, LinearTokenError, type LinearDocument } from '../../../src/linear/index.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
 import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
@@ -33,7 +33,7 @@ import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/
 import { waitForCheck } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
-import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS, watchRun } from './steps.ts';
+import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, STEP_ACTIONS, watchRun } from './steps.ts';
 import { commitAsPerson, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
@@ -143,6 +143,35 @@ function merge(base: string, ours: string, theirs: string): { conflict: boolean 
   const result = spawnSync('git', ['merge-file', '-p', join(dir, 'ours'), join(dir, 'base'), join(dir, 'theirs')], { encoding: 'utf8' });
   return { conflict: (result.status ?? 0) > 0 };
 }
+
+describe('run.probe', () => {
+  // A probe that stops at its first request with this error.
+  const probeFailingWith = (error: Error) => {
+    const app = { request: async () => { throw error; } };
+    const ctx = { observations: new Map(), live: { app }, log: () => {} } as unknown as RunContext;
+    return STEP_ACTIONS['run.probe']!(ctx, {});
+  };
+
+  it('reports env-blocked when the environment stopped the probe', async () => {
+    for (const error of [
+      new LinearStoppedError('Teams', { kind: 'rate-limited', operation: 'Teams' }),
+      new LinearNetworkError('Teams', new Error('reset')),
+      new LinearHttpError('Teams', 502),
+      new LinearTokenError('oauth.token', 'refused', { httpStatus: 401 }),
+    ]) {
+      await assert.rejects(probeFailingWith(error), (thrown: Error) => thrown instanceof EnvBlockedError && /^format probe could not finish: /.test(thrown.message), error.name);
+    }
+  });
+
+  it('lets any other error fail the scenario instead of hiding it as env-blocked', async () => {
+    const bug = new TypeError('a bug in the probe');
+    await assert.rejects(probeFailingWith(bug), (thrown: Error) => thrown === bug);
+    const refused = new LinearGraphQLError('Teams', 400, { message: 'Forbidden', extensions: { code: 'FORBIDDEN' } });
+    await assert.rejects(probeFailingWith(refused), (thrown: Error) => thrown === refused);
+    assert.equal(isProbeEnvironmentError(new LinearHttpError('Teams', 400)), false);
+    assert.equal(isProbeEnvironmentError(new Error('no team with key ENG')), false);
+  });
+});
 
 describe('edit fixtures', () => {
   const ctx = { observations: new Map(), live: null } as unknown as RunContext;

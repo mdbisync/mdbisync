@@ -17,6 +17,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, ex
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { COMMANDS, type CommandName } from '../../../src/commands.ts';
+import { LinearError, LinearStoppedError, LinearTokenError, isTransientLinearError } from '../../../src/linear/index.ts';
 import { Git } from '../../../src/state/index.ts';
 import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, readOptional } from '../../probe/bank.ts';
@@ -65,6 +66,17 @@ export const ACTION_SHA_ENV = 'MDBISYNC_TEST_ACTION_SHA';
 
 /** `dispatch` makes the harness start the sandbox's scheduled workflow by hand instead of waiting for GitHub's schedule. */
 export const SCHEDULE_TICK_ENV = 'MDBISYNC_TEST_SCHEDULE_TICK';
+
+/**
+ * The format probe stopped for a reason in the environment, not in the probe
+ * or the product: Linear stopped the client (rate limit, low budget), the
+ * app's token could not be minted, or a request did not complete or met a
+ * server error. Any other error is a finding and fails the scenario.
+ */
+export function isProbeEnvironmentError(error: unknown): boolean {
+  if (error instanceof LinearStoppedError || error instanceof LinearTokenError) return true;
+  return error instanceof LinearError && isTransientLinearError(error);
+}
 
 /**
  * How a scheduled sync starts: `schedule`, GitHub's own tick, or
@@ -536,9 +548,12 @@ const RUN: Record<string, Executor> = {
     try {
       // The probe's own run-id form, so the probe's sweeper finds a project a killed run left.
       const probeRunId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${newRunId()}`;
-      run = await runProbe({ client: world.app, bank, runId: probeRunId, facts: true, log: (line) => ctx.log(`probe: ${line}`) });
+      // No limit measurement: the app client refuses over-limit writes itself, so
+      // it cannot measure Linear's limits, and the scenarios check forms and drift only.
+      run = await runProbe({ client: world.app, bank, runId: probeRunId, facts: false, log: (line) => ctx.log(`probe: ${line}`) });
     } catch (error) {
-      throw new EnvBlockedError(`format probe could not finish: ${(error as Error).message}`);
+      if (isProbeEnvironmentError(error)) throw new EnvBlockedError(`format probe could not finish: ${(error as Error).message}`);
+      throw error;
     }
     if (run.cleanup.some((line) => line.includes('NOT deleted'))) throw new EnvBlockedError('format probe left a project behind');
     const constructOf = new Map(run.fixtures.map((fixture) => [fixture.file, fixture.construct]));

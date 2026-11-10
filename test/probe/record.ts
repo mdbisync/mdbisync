@@ -61,13 +61,31 @@ function isFlat(value: unknown): boolean {
 function entryOf(result: FixtureResult): ManifestEntry {
   const entry: ManifestEntry = { yjs: result.yjs === undefined ? 'none' : 'recorded' };
   if (result.fixedPoint !== undefined) entry.fixedPoint = result.fixedPoint;
-  if (result.refused !== undefined) entry.refused = refusalKey(result.refused);
+  if (result.refused !== undefined) entry.refused = result.refusedBeforeSending === true ? PRE_SEND_KEY : refusalKey(result.refused);
   return entry;
 }
+
+/**
+ * The key of a refusal the client made before sending: a title or content
+ * over Linear's known limit. It is not Linear's answer: the record is written
+ * by the probe's own client, which sends everything, and this key only
+ * matches the code Linear answers such a write with.
+ */
+export const PRE_SEND_KEY = 'before-sending';
+/** What Linear answers a title or content over its limit with, as recorded. */
+export const OVER_LIMIT_KEY = 'INVALID_INPUT';
 
 /** Linear's error code or HTTP status, without text that may change between runs. */
 export function refusalKey(refusal: string): string {
   return refusal.match(/^Linear error ([A-Za-z_]+)/)?.[1] ?? refusal.match(/^HTTP \d{3}/)?.[0] ?? refusal;
+}
+
+/**
+ * The recorded and observed refusals agree: the same key, or the client
+ * refused before sending a write Linear is recorded refusing as too long.
+ */
+function sameRefusal(recorded: string | undefined, observed: string | undefined): boolean {
+  return (recorded ?? '') === (observed ?? '') || (observed === PRE_SEND_KEY && recorded === OVER_LIMIT_KEY);
 }
 
 /**
@@ -84,7 +102,7 @@ export function findDrift(bank: Bank, run: ProbeRun): Drift[] {
       continue;
     }
     const observed = entryOf(result);
-    if ((recorded.refused ?? '') !== (observed.refused ?? '')) {
+    if (!sameRefusal(recorded.refused, observed.refused)) {
       drifts.push({
         file: result.file,
         kind: 'refusal',
