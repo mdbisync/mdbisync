@@ -114,7 +114,7 @@ export const MESSAGES = {
   'config.invalid-remote': 'remote "{remote}" is not a valid remote name',
   'config.invalid-branch': '{key} "{branch}" is not a valid branch name: {problem}',
   'config.starts-with-dash': 'starts with "-"',
-  'config.same-branches': 'the tracked branch and the sync branch must differ',
+  'config.same-branches': 'the tracked branch and both sync lane branches must differ',
   'config.nested-branches': 'one of the tracked branch and the sync branch is a folder of the other',
   'config.invalid-prefix': 'refPrefix "{prefix}" is not a valid ref prefix: {problem}',
   'config.prefix-outside-refs': 'refPrefix "{prefix}" must start with "refs/" and name a folder under it',

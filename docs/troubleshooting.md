@@ -305,7 +305,7 @@ step fails with the same message:
 | `the input direction is required (initial sync never picks a direction itself)`, `the input direction must be one of git-to-linear, linear-to-git, not "<value>" (initial sync never picks a direction itself)` | Choose `git-to-linear` or `linear-to-git`. |
 | `remote "<name>" is not a valid remote name` | Use a valid git remote name. |
 | `<tracked-branch or sync-branch> "<name>" is not a valid branch name: <problem>` (the problem can be `starts with "-"`) | Use a valid branch name. |
-| `the tracked branch and the sync branch must differ`, `one of the tracked branch and the sync branch is a folder of the other` | Choose two separate branch names, neither inside the other, such as `main` and `mdbisync/linear`. |
+| `the tracked branch and both sync lane branches must differ`, `one of the tracked branch and the sync branch is a folder of the other` | Choose two separate branch names, neither inside the other, such as `main` and `mdbisync/linear`. |
 | `refPrefix "<prefix>" is not a valid ref prefix: <problem>`, `refPrefix "<prefix>" must start with "refs/" and name a folder under it`, `refPrefix "<prefix>" must not be under refs/heads, refs/tags or refs/remotes` | Set `state-ref-prefix` to a folder under `refs/` of its own, such as the default `refs/mdbisync/`. |
 
 ## Errors found during the run

@@ -14,7 +14,7 @@ import { detectConflicts, MARKERS } from '../merge/index.ts';
 import { MARKS } from './marks.ts';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { type FakeCheck, type FakeDocument, type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
+import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
 import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
 import { DEFAULT_MERGE_GRACE_SECONDS, SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
@@ -503,6 +503,9 @@ describe('sync: the sync pull request', () => {
     await sync();
     assert.equal((await fixture.remote.run(['cat-file', '-e', `${SUSPENDED}:${path}`], {okCodes:[0,128]})).code, 128);
     assert.match(await show('refs/mdbisync/ids:ids.json'), /"suspended"/);
+    checksOn(await rev(SUSPENDED), FAILED);
+    const idle = await sync();
+    assert.equal(idle.report.changed, false);
     document.trashed = false;
     touch(document);
     await sync();
@@ -737,6 +740,47 @@ describe('sync: the sync pull request', () => {
     const released = await sync();
     assert.equal(released.result.exitCode, 0, released.result.stderr);
     assert.ok(released.report.pullRequest?.suspended?.released);
+  });
+
+  it('a GitHub failure for the suspended head still allows the normal lane to open', async () => {
+    await suspendOne();
+    const head = await rev(SUSPENDED);
+    await editInLinear('combined/guide.md', '# Guide\n\nAn independent page.\n');
+    const transport = fakeFetch(world);
+    fetchOverride = async (input, init) => String(input).includes(`/commits/${head}/check-runs`)
+      ? new Response('{}', {status:503}) : transport(input, init);
+    const run = await sync();
+    assert.equal(run.report.pullRequest?.suspended?.code, 'github-failed');
+    assert.equal(run.report.pullRequest?.suspended?.status, 503);
+    assert.ok(openPullRequests().some((pr) => pr.head === 'mdbisync/linear'));
+    assert.match((await documentOf('eng/notes/plan.md')).content ?? '', /Held Linear edit/);
+  });
+
+  it('authors suspended lane, intake and release commits as the configured App', async () => {
+    const initialRefs = await Promise.all(['refs/mdbisync/linear','refs/mdbisync/ids','refs/mdbisync/uploads','refs/heads/main'].map(rev));
+    const extra = {MDBISYNC_APP_SLUG:FAKE_APP_SLUG};
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nHeld App edit.\n');
+    await cli('sync', extra);
+    checksOn(await rev(SYNC_BRANCH), FAILED);
+    await cli('sync', extra);
+    await editInLinear(path, '# Plan\n\nLater held App edit.\n');
+    await cli('sync', extra);
+    const checkAuthors = async () => {
+      const log = await fixture.remote.text(['log','--format=%s%x00%an <%ae>%x00%cn <%ce>', SUSPENDED,SYNC_BRANCH,'refs/mdbisync/linear','refs/mdbisync/ids','--not',...initialRefs,'refs/heads/main']);
+      const expected = `${FAKE_APP_IDENTITY.name} <${FAKE_APP_IDENTITY.email}>`;
+      for (const line of log.split('\n').filter(Boolean)) {
+        const [subject, author, committer] = line.split('\0');
+        assert.notEqual(subject, 'Merge input');
+        assert.equal(author, expected, subject);
+        assert.equal(committer, expected, subject);
+      }
+    };
+    await checkAuthors();
+    checksOn(await rev(SUSPENDED), PASSED);
+    const run = await cli('sync', extra);
+    assert.ok(run.report.pullRequest?.suspended?.released);
+    await checkAuthors();
   });
 
   it('L5-22: captures a huge Linear document byte for byte, warns, and never writes an oversized git edit back', async () => {

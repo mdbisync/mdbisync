@@ -12,8 +12,7 @@ import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.t
 import { MARKDOWN_EXTENSION, type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
-import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, checkRepoPath, commitTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
-import { SYNC_IDENTITY } from '../initial-sync/index.ts';
+import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, NEUTRAL_IDENTITY, buildTree, checkRepoPath, commitTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
 import { message } from '../messages.ts';
 import { type FileLeftOutRule } from '../codes.ts';
 
@@ -610,5 +609,5 @@ export async function takePaths(git: Git, into: Oid, from: Oid, paths: ReadonlyS
 
 /** A content-only side for a merge; never pushed or used as a real lane parent. */
 export function treeCommit(git: Git, tree: Oid, parent: Oid): Promise<Oid> {
-  return commitTree(git, { base: tree, changes: new Map(), parents: [parent], message: 'Merge input', identity: SYNC_IDENTITY });
+  return commitTree(git, { base: tree, changes: new Map(), parents: [parent], message: 'Merge input', identity: NEUTRAL_IDENTITY });
 }

@@ -152,7 +152,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   try { suspended = await maintainSuspended(context, options); }
   catch (error) {
     const code = error instanceof LaneMoved ? 'state-moved' : error instanceof LaneConflict ? 'conflict' : error instanceof PullRequestError ? 'github-failed' : undefined;
-    if (error instanceof PullRequestError) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], code: 'github-failed' };
+    if (error instanceof PullRequestError) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], code: 'github-failed', ...(error.status === undefined ? {} : {status:error.status}) };
     else if (error instanceof LaneConflict) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], conflicts: error.paths };
     else if (code === undefined) throw error;
     else return { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [], code, ...(error instanceof LaneConflict ? { paths: error.paths } : {}) };
@@ -160,7 +160,11 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   const tracked = fetched.tracked;
   const sync = fetched.sync;
   const linear = options.state.linear;
-  const result: PullRequestResult = { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [], ...(suspended === undefined ? {} : { suspended }), ...(suspended?.code === undefined ? {} : {code:suspended.code, ...(suspended.status === undefined ? {} : {status:suspended.status}), ...(suspended.reason === undefined ? {} : {reason:suspended.reason})}) };
+  const result: PullRequestResult = { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [] };
+  if (suspended !== undefined) result.suspended = suspended;
+  if (suspended?.code !== undefined) result.code = suspended.code;
+  if (suspended?.status !== undefined) result.status = suspended.status;
+  if (suspended?.reason !== undefined) result.reason = suspended.reason;
   if (linear === null) return result;
 
   const frozen = suspendedPaths(await readIds(git, options.state.ids));
@@ -177,7 +181,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // A sync branch is made by the first sync pull request and stays. Once `linear` holds more than initial sync's
     // record and the tracked branch, a missing branch was deleted by a person: it comes back at `linear`.
     if (sync !== null || (await isAncestor(git, linear, tracked)) || (await isInitialRecord(git, linear))) return result;
-    const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: null, next: frozen.size === 0 ? linear : await commitTree(git, {base: wanted, changes: new Map(), parents: [linear], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? SYNC_IDENTITY}) }]);
+    const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: null, next: frozen.size === 0 ? linear : await commitTree(git, {base: wanted, changes: new Map(), parents: [linear], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? context.identity}) }]);
     if (pushed.ok) return { ...result, branchMoved: true };
     // A refusal that is not a lease (a rule on branch names, missing rights) leaves the branch to the run that needs it.
     return pushed.reason === 'stale' ? { ...result, code: 'state-moved' } : result;

@@ -270,14 +270,12 @@ export interface SuspensionEpisode {
 export interface IdEntry {
   /** The Linear document id. */
   id: string;
-  /**
-   * The document's own icon and color while the sync shows a mark in their
-   * place; absent when no mark is shown.
-   */
+  /** The active hold; retained across renames and captured removals. */
   suspended?: SuspensionEpisode;
   /** First write after release must use this Linear commit as its base. */
   releaseBase?: Oid;
   releasePaths?: string[];
+  /** The document's own decoration while the sync shows a mark. */
   saved?: { icon: string | null; color: string | null; notice?: MarkNotice };
 }
 
