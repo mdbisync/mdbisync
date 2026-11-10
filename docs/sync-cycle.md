@@ -171,10 +171,10 @@ every run summary says so.
   workflow by hand to take a Linear edit in sooner.
 - **A conflict** adds no delay: both versions arrive on both sides in the
   same runs that would have carried either edit.
-- **A failing check** on the sync pull request holds both directions until
-  it passes: Linear's changes wait in the open pull request, and the
-  tracked branch's changes are not written to Linear
-  ([`check-failed`](troubleshooting.md#the-sync-pull-request)).
+- **A failing check** moves the batch to **Suspended changes from Linear**
+  on `mdbisync/suspended`. Other documents keep syncing. Suspended documents
+  are frozen until the suspended pull request passes its checks and merges.
+  Later Linear edits go only to that lane; tracked-branch edits wait for release.
 
 ## The run summary
 
@@ -224,7 +224,7 @@ What step 2 did with the sync pull request. An ordinary run says one of:
 | Added new Linear changes to the sync pull request | New captures joined the open pull request. |
 | The sync pull request waits for its checks | Nothing new; its checks are still running, and a later run merges it. |
 
-Any other line names a code (`check-failed`, `conflict`, `merge-refused`,
+Any other line names a code (`conflict`, `merge-refused`,
 `merge-blocked`, `initial-pull-request-pending`, `state-moved`,
 `github-failed`), explained in
 [the sync pull request](troubleshooting.md#the-sync-pull-request). The

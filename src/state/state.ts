@@ -4,7 +4,7 @@
 // ref, so of two runs that started from the same state exactly one wins and
 // the other changes nothing.
 
-import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef } from './config.ts';
+import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef, suspendedBranch } from './config.ts';
 import { type Git, GitError, type Oid, mapLimit } from './git.ts';
 import { type LfsPointer, type LfsReadResult, lfsReader, parseLfsPointer } from './lfs.ts';
 import { type CommitIdentity, type TreeEntry, commitTree, listTree, readBlobs } from './objects.ts';
@@ -18,6 +18,7 @@ export interface FetchedState {
   tracked: Oid;
   /** The sync branch's commit, null when it does not exist. */
   sync: Oid | null;
+  suspended?: Oid | null;
   state: StateSnapshot;
 }
 
@@ -29,7 +30,8 @@ export interface FetchedState {
 export async function fetchState(git: Git, config: StateConfig): Promise<FetchedState> {
   const tracked = branchRef(config.trackedBranch);
   const sync = branchRef(config.syncBranch);
-  const advertised = await lsRemote(git, config.remote, [tracked, sync, ...STORES.map((store) => stateRef(config, store))]);
+  const suspended = branchRef(suspendedBranch(config));
+  const advertised = await lsRemote(git, config.remote, [tracked, sync, suspended, ...STORES.map((store) => stateRef(config, store))]);
   if (!advertised.has(tracked)) {
     throw new Error(message('state.tracked-missing', { branch: config.trackedBranch, remote: config.remote }));
   }
@@ -48,7 +50,7 @@ export async function fetchState(git: Git, config: StateConfig): Promise<Fetched
 
   const state = {} as StateSnapshot;
   for (const store of STORES) state[store] = await read(stateRef(config, store));
-  return { tracked: (await read(tracked)) as Oid, sync: await read(sync), state };
+  return { tracked: (await read(tracked)) as Oid, sync: await read(sync), suspended: await read(suspended), state };
 }
 
 async function lsRemote(git: Git, remote: string, refs: readonly string[]): Promise<Map<string, Oid>> {
@@ -98,7 +100,7 @@ export function refusedPushes(git: Git): readonly RefusedPush[] {
 }
 
 /** What a moved ref is to the sync: one of the state refs, the sync branch or the tracked branch. */
-export type RefRole = Store | 'syncBranch' | 'trackedBranch' | 'other';
+export type RefRole = Store | 'suspendedBranch' | 'syncBranch' | 'trackedBranch' | 'other';
 
 const moves = new WeakMap<Git, Map<RefRole, number>>();
 
@@ -114,6 +116,7 @@ export function movedRefs(git: Git): Map<RefRole, number> {
 function refRole(config: StateConfig, ref: string): RefRole {
   const store = STORES.find((name) => stateRef(config, name) === ref);
   if (store !== undefined) return store;
+  if (ref === branchRef(suspendedBranch(config))) return 'suspendedBranch';
   if (ref === branchRef(config.syncBranch)) return 'syncBranch';
   return ref === branchRef(config.trackedBranch) ? 'trackedBranch' : 'other';
 }
@@ -254,6 +257,14 @@ export interface MarkNotice {
   posted: boolean;
 }
 
+export interface SuspensionEpisode {
+  /** Chosen before the atomic suspension push; the notice writer uses it later. */
+  noticeId: string;
+  /** All paths carried by this episode, including former names and assets. */
+  paths: string[];
+  checks: string[];
+}
+
 export interface IdEntry {
   /** The Linear document id. */
   id: string;
@@ -261,6 +272,10 @@ export interface IdEntry {
    * The document's own icon and color while the sync shows a mark in their
    * place; absent when no mark is shown.
    */
+  suspended?: SuspensionEpisode;
+  /** First write after release must use this Linear commit as its base. */
+  releaseBase?: Oid;
+  releasePaths?: string[];
   saved?: { icon: string | null; color: string | null; notice?: MarkNotice };
 }
 
@@ -274,7 +289,7 @@ export async function readIds(git: Git, commit: Oid | null): Promise<IdMap> {
   const map: IdMap = new Map();
   for (const [path, value] of Object.entries(data)) {
     if (!isIdEntry(value)) throw new Error(message('state.invalid-path-entry', { file: IDS_FILE }));
-    map.set(path, value.saved === undefined ? { id: value.id } : { id: value.id, saved: value.saved });
+    map.set(path, value);
   }
   return map;
 }
@@ -427,7 +442,7 @@ export function commitIds(
   options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; superseded?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string> } = {},
 ): Promise<Oid> {
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
-  const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry.saved === undefined ? { id: entry.id } : { id: entry.id, saved: entry.saved }]));
+  const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry]));
   const files = new Map<string, unknown>([[IDS_FILE, data]]);
   const sorted = (map: ReadonlyMap<string, string>) => Object.fromEntries([...map.entries()].sort(([a], [b]) => compareStrings(a, b)));
   if (options.reserved !== undefined && options.reserved.size > 0) files.set(RESERVED_IDS_FILE, sorted(options.reserved));
@@ -466,6 +481,14 @@ function isIdEntry(value: unknown): value is IdEntry {
   if (typeof value !== 'object' || value === null) return false;
   const entry = value as Record<string, unknown>;
   if (typeof entry.id !== 'string' || entry.id === '') return false;
+  if (entry.releasePaths !== undefined && (!Array.isArray(entry.releasePaths) || !entry.releasePaths.every((path) => typeof path === 'string'))) return false;
+  if (entry.releaseBase !== undefined && (typeof entry.releaseBase !== 'string' || !/^[0-9a-f]{40,64}$/.test(entry.releaseBase))) return false;
+  if (entry.suspended !== undefined) {
+    const episode = entry.suspended as SuspensionEpisode | null;
+    if (episode === null || typeof episode !== 'object' || typeof episode.noticeId !== 'string'
+      || !Array.isArray(episode.paths) || !episode.paths.every((path) => typeof path === 'string')
+      || !Array.isArray(episode.checks) || !episode.checks.every((name) => typeof name === 'string')) return false;
+  }
   if (entry.saved === undefined) return true;
   const saved = entry.saved as Record<string, unknown> | null;
   return (

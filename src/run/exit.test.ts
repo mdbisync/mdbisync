@@ -27,7 +27,7 @@ function sync(pullRequestCode: string | undefined, writeCode: string | undefined
 describe('the ending of a sync run', () => {
   const cases: Array<[string, string | undefined, string | undefined, string | undefined, string, string | undefined]> = [
     // name, pull request code, write code, partial code, exit status, pull request ending
-    ['a failed check on the sync pull request beats a partial write', 'check-failed', 'stopped', undefined, 'failure', 'check-failed'],
+    ['a suspended batch allows a partial write', undefined, 'stopped', 'stopped', 'warning', undefined],
     ['an initial pull request waiting for a person beats a partial write', 'initial-pull-request-pending', 'write-failed', undefined, 'failure', 'initial-pull-request-pending'],
     ['a GitHub server error yields to a partial write', 'github-failed', 'stopped', 'stopped', 'warning', undefined],
     ['a lost pull request lease yields to a partial write', 'state-moved', 'write-failed', 'write-failed', 'warning', undefined],

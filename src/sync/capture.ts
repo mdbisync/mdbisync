@@ -280,7 +280,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     for (const id of gone) {
       const old = byId.get(id)!;
       removeBody(old.path);
-      ids.delete(old.path);
+      if (old.entry.suspended === undefined && old.entry.releaseBase === undefined) ids.delete(old.path);
       documentIds.delete(old.path);
       result.removed.push(old.path);
     }
@@ -308,9 +308,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(doc.id);
       if (!live(doc)) {
         if (old !== undefined) {
-          if (old.entry.saved !== undefined && options.stageOnly !== true) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
+          if (old.entry.suspended === undefined && old.entry.saved !== undefined && options.stageOnly !== true) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
           removeBody(old.path);
-          ids.delete(old.path);
+          if (old.entry.suspended === undefined && old.entry.releaseBase === undefined) ids.delete(old.path);
           documentIds.delete(old.path);
           result.removed.push(old.path);
         }
@@ -385,7 +385,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         }
         if (findings.length > 0) {
           const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-          ids.set(old?.path ?? path, {id, saved});
+          ids.set(old?.path ?? path, {...old?.entry, id, saved});
           result.blocked.push({id, path: old?.path ?? path, findings});
           candidates.delete(id);
           resetTarget(id);

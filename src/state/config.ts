@@ -52,13 +52,15 @@ export function resolveStateConfig(input: Partial<StateConfig> = {}): StateConfi
     const problem = refNameProblem(`refs/heads/${config[key]}`) ?? (config[key].startsWith('-') ? message('config.starts-with-dash') : null);
     if (problem !== null) throw new StateConfigError(message('config.invalid-branch', { key, branch: config[key], problem }));
   }
-  if (config.trackedBranch === config.syncBranch) {
+  const suspended = suspendedBranch(config);
+  if (config.trackedBranch === config.syncBranch || config.trackedBranch === suspended) {
     throw new StateConfigError(message('config.same-branches'));
   }
   // git cannot hold both "a" and "a/b" as refs.
   if (config.syncBranch.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${config.syncBranch}/`)) {
     throw new StateConfigError(message('config.nested-branches'));
   }
+  if (suspended.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${suspended}/`)) throw new StateConfigError(message('config.nested-branches'));
   const prefixProblem = refNameProblem(`${config.refPrefix}/linear`);
   if (prefixProblem !== null) {
     throw new StateConfigError(message('config.invalid-prefix', { prefix: config.refPrefix, problem: prefixProblem }));
@@ -105,4 +107,10 @@ export function refNameProblem(name: string): string | null {
     if (part.endsWith('.lock')) return 'has a part ending with ".lock"';
   }
   return null;
+}
+
+/** The second lane shares the configured namespace of the normal branch. */
+export function suspendedBranch(config: StateConfig): string {
+  return config.syncBranch.endsWith('/suspended') || config.syncBranch === 'suspended'
+    ? `${config.syncBranch}-suspended` : config.syncBranch.replace(/[^/]+$/, 'suspended');
 }

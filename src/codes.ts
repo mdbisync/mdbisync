@@ -77,7 +77,7 @@ export const STRUCTURAL_CODES = ['edit-wins-delete', 'rename-and-edit', 'git-pat
 export type StructuralCode = (typeof STRUCTURAL_CODES)[number];
 
 /** Why the sync did not write a document. */
-export const SKIP_REASONS = ['edited-in-linear', 'missing-in-linear', 'conflict', 'renamed-to-unwritable'] as const;
+export const SKIP_REASONS = ['edited-in-linear', 'missing-in-linear', 'conflict', 'renamed-to-unwritable', 'suspended'] as const;
 export type SkipReason = (typeof SKIP_REASONS)[number];
 
 /** Why the sync's capture did not finish. */
@@ -93,7 +93,7 @@ export const RECORD_CODES = ['stopped', 'state-moved', 'pull-request-failed', 's
 export type RecordCode = (typeof RECORD_CODES)[number];
 
 /** Why the sync pull request step did not finish. */
-export const PULL_REQUEST_CODES = ['check-failed', 'conflict', 'merge-refused', 'merge-blocked', 'initial-pull-request-pending', 'state-moved', 'github-failed'] as const;
+export const PULL_REQUEST_CODES = ['conflict', 'merge-refused', 'merge-blocked', 'initial-pull-request-pending', 'state-moved', 'github-failed'] as const;
 export type PullRequestCode = (typeof PULL_REQUEST_CODES)[number];
 
 /** A sync run is partial because it held a removal it could not confirm. */

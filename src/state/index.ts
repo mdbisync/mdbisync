@@ -9,6 +9,7 @@ export {
   refNameProblem,
   resolveStateConfig,
   stateRef,
+  suspendedBranch,
 } from './config.ts';
 export { Git, GitError, type Oid } from './git.ts';
 export { type LfsPointer, type LfsRead, type LfsReadResult, lfsReader, parseLfsPointer } from './lfs.ts';
@@ -34,6 +35,7 @@ export {
   type FileRead,
   IDS_FILE,
   type IdEntry,
+  type SuspensionEpisode,
   type IdMap,
   type MarkNotice,
   NotFastForwardError,

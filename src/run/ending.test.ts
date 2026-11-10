@@ -90,9 +90,9 @@ const ROWS: Row[] = [
     status: 'success', exitCode: 0, message: undefined, code: '',
   },
   {
-    name: 'a failed check on the sync pull request, before a partial write',
-    outcome: syncRun('check-failed', { complete: false, code: 'stopped', stopped: STOP }),
-    status: 'failure', exitCode: 3, message: 'sync: setup error (check-failed): a check failed on the sync pull request', code: 'check-failed',
+    name: 'a suspended batch, with a partial write',
+    outcome: syncRun(undefined, { complete: false, code: 'stopped', stopped: STOP }),
+    status: 'warning', exitCode: 5, message: 'sync: partial, will continue (stopped)', code: 'stopped',
   },
   {
     name: 'an initial sync from Linear waiting for a person to merge it',
