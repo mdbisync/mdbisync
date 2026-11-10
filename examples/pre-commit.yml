@@ -58,7 +58,7 @@ jobs:
         run: |
           # A formatter exits 1 when it edits a file. The final pass below
           # decides whether the configuration is now clean.
-          pre-commit run --all-files --show-diff-on-failure || true
+          pre-commit run --all-files --show-diff-on-failure --color=never | tee "$RUNNER_TEMP/pre-commit.log" || true
       - name: Commit fixes or show the fork patch
         id: fixes
         env:
@@ -72,9 +72,34 @@ jobs:
               git diff --cached --binary
               exit 1
             fi
+            # Use pre-commit's Python, which already has its YAML dependency.
+            # Limit untrusted output to configured ids before creating trailers.
+            read -r interpreter < "$(command -v pre-commit)" || interpreter=''
+            read -ra python_command <<< "${interpreter#\#!}"
+            if [[ "${python_command[0]##*/}" != python* ]]; then
+              python_command=(python3)
+            fi
+            "${python_command[@]}" - <<'PY' || printf 'Apply pre-commit fixes\n' > "$RUNNER_TEMP/pre-commit-message"
+          import os
+          import re
+          from pathlib import Path
+          import yaml
+          config = yaml.safe_load(Path('.pre-commit-config.yaml').read_text())
+          configured = {hook['id'] for repo in config['repos'] for hook in repo['hooks']}
+          temporary = Path(os.environ['RUNNER_TEMP'])
+          hooks = set()
+          hook = None
+          for line in (temporary / 'pre-commit.log').read_text().splitlines():
+              match = re.fullmatch(r'- hook id: (.+)', line)
+              if match:
+                  hook = match[1] if match[1] in configured else None
+              if line == '- files were modified by this hook' and hook:
+                  hooks.add(hook)
+          (temporary / 'pre-commit-message').write_text('Apply pre-commit fixes\n\n' + ''.join(f'Pre-commit-fix: {hook}\n' for hook in sorted(hooks)))
+          PY
             git -c user.name='github-actions[bot]' \
                 -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-                -c core.hooksPath=/dev/null commit -m 'Apply pre-commit fixes'
+                -c core.hooksPath=/dev/null commit -F "$RUNNER_TEMP/pre-commit-message"
             echo 'changed=true' >> "$GITHUB_OUTPUT"
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

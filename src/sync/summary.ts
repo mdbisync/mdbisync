@@ -69,6 +69,7 @@ export function renderSync(result: CycleResult): string {
   table('Renamed or moved', ['From', 'To'], write.relocated.map((entry) => [entry.from, entry.to]));
   table('Moved to trash', ['Path'], write.trashed.map((path) => [path]));
   table('Left out', ['Path', 'Rules'], [...write.leftOut.map((entry) => [entry.path, entry.rules.join(', ')]), ...write.leftOutAtWrite.map((entry) => [entry.path, entry.rule])]);
+  table('CI fixes not written', ['Path', 'Hooks on the fixing commit', 'Rules'], write.leftOut.filter((entry) => entry.hooks?.length).map((entry) => [entry.path, entry.hooks!.join(', '), entry.rules.join(', ')]));
   return lines.join('\n') + renderCapacity(write.capacity ?? []);
 }
 
