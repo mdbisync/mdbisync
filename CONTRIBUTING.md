@@ -109,6 +109,11 @@ in the repository's LFS storage.
   Apache-2.0. A pull request that adds one says why the standard library
   is not enough. Updates are proposed no sooner than 14 days after a
   release.
+- Dependency review fails when a pull request introduces a known
+  vulnerability of moderate severity or higher in a runtime, development
+  or unknown dependency scope. Update to a patched version or remove the
+  vulnerable dependency before merging; if no fix is available, use a safe
+  alternative. Report suspected advisory errors to the maintainers.
 - If your change adds, removes or updates a bundled package, run
   `npm run build -- --update-license-inventory` and commit the updated
   `third-party-licenses.json`; the build fails until the inventory matches
