@@ -14,7 +14,7 @@ import { detectConflicts, MARKERS } from '../merge/index.ts';
 import { MARKS } from './marks.ts';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
+import { type FakeCheck, type FakeDocument, type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
 import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
 import { DEFAULT_MERGE_GRACE_SECONDS, SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
@@ -441,7 +441,7 @@ describe('sync: the sync pull request', () => {
       for (const [name, value] of Object.entries(env({}))) {
         if (name.startsWith('MDBISYNC_')) process.env[`INPUT_${name.slice('MDBISYNC_'.length).replaceAll('_', '-')}`] = value;
       }
-      Object.assign(process.env, { INPUT_OPERATION: 'sync', GITHUB_WORKSPACE: cwd, GITHUB_STEP_SUMMARY: '', GITHUB_OUTPUT: '' });
+      Object.assign(process.env, { INPUT_OPERATION: 'sync', 'INPUT_APP-SLUG': FAKE_APP_SLUG, GITHUB_WORKSPACE: cwd, GITHUB_STEP_SUMMARY: '', GITHUB_OUTPUT: '' });
       process.exitCode = undefined;
       globalThis.fetch = fakeFetch(world);
       process.stdout.write = ((chunk: string | Uint8Array) => {

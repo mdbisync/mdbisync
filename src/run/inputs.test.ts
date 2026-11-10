@@ -30,6 +30,17 @@ it('names a missing input or a bad repository', () => {
   assert.throws(() => readInputs(given({ ...REQUIRED, repository: 'o/r', 'sync-branch': 'main' }), {}), (error) => error instanceof InputError && /must differ/.test(error.message));
 });
 
+it('takes the App slug, which the action requires and the command line may leave out', () => {
+  const env = { GITHUB_REPOSITORY: 'owner/repo' };
+  assert.equal(readInputs(given({ ...REQUIRED, 'app-slug': ' sync-app ' }), env).github.appSlug, 'sync-app');
+  assert.equal(readInputs(given(REQUIRED), env).github.appSlug, undefined);
+  assert.throws(() => readInputs(given(REQUIRED), env, { appSlugRequired: true }), new InputError("the input app-slug is required: give it the App token step's output app-slug"));
+  assert.equal(readInputs(given({ ...REQUIRED, 'app-slug': 'sync-app' }), env, { appSlugRequired: true }).github.appSlug, 'sync-app');
+  for (const slug of ['sync-app[bot]', 'sync app', '-sync', 'sync-', 'a/b', 'sync--app']) {
+    assert.throws(() => readInputs(given({ ...REQUIRED, 'app-slug': slug }), env), /the input app-slug must be a GitHub App slug/, slug);
+  }
+});
+
 it('maps every input to an MDBISYNC_ environment variable', () => {
   assert.equal(environmentName('linear-client-id'), 'MDBISYNC_LINEAR_CLIENT_ID');
   assert.equal(new Set(INPUT_NAMES.map(environmentName)).size, INPUT_NAMES.length);

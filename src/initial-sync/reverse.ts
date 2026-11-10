@@ -64,7 +64,7 @@ import { captureCursorTrailer, cursorTime, prepareLfs, readCaptureCursor } from 
 import { type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titlePath } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
-import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, SYNC_IDENTITY, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
+import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
@@ -286,7 +286,7 @@ export interface ReverseRecord {
 export async function confirmLinearToGit(context: RunContext, options: ReverseOptions): Promise<{ plan: ReversePlan; result: ReverseResult }> {
   const { git, fetched } = context;
   const transforms = options.transforms ?? [];
-  const identity = options.identity ?? SYNC_IDENTITY;
+  const identity = options.identity ?? context.identity;
   const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
   const stopAfter = 'stopAfterDocuments' in options ? options.stopAfterDocuments : testStopAfterDocuments();
 

@@ -12,11 +12,12 @@ import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { COMMANDS, INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { LinearClient } from '../linear/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
+import { NEUTRAL_IDENTITY } from '../setup/github.ts';
 import { commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
 import { type SecurityGate } from '../sync/security.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
@@ -168,6 +169,18 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.deepEqual(await refs(), before);
     assert.deepEqual(world.writes, []);
     assert.deepEqual(world.github.pullRequests, []);
+  });
+
+  it('names the App as author and committer of every commit it makes, given the App slug', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    const { result } = await run(world, { MDBISYNC_APP_SLUG: FAKE_APP_SLUG });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const made = await fixture.remote.text(['log', '--format=%an <%ae>%n%cn <%ce>', 'refs/mdbisync/ids', 'refs/mdbisync/uploads', 'refs/mdbisync/linear', 'refs/heads/mdbisync/linear', '--not', 'refs/heads/main']);
+    const record = await fixture.remote.text(['log', '-1', '--format=%s', 'refs/heads/mdbisync/linear']);
+    assert.ok(made.split('\n').length >= 6, made);
+    assert.deepEqual(new Set(made.split('\n')), new Set([`${FAKE_APP_IDENTITY.name} <${FAKE_APP_IDENTITY.email}>`]));
+    assert.equal(record, REVERSE_RECORD_MESSAGE);
   });
 
   it('L1R-02: confirmed, it records every id and opens one pull request a person merges', async () => {
@@ -994,7 +1007,7 @@ describe('the security gate of an initial sync from Linear', () => {
         },
       };
       const { result } = await confirmLinearToGit(
-        { git, fetched, mapping, targets, linear },
+        { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY },
         { config, github: { repository: 'owner/repo', token: 'gh-token', apiUrl: GITHUB_API, fetch: fakeFetch(world) }, security, stopAfterDocuments: undefined },
       );
       assert.equal(result.complete, true, result.code);

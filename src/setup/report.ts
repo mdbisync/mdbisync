@@ -5,6 +5,7 @@
 export const CHECK_NAMES = [
   'linear-credentials',
   'github-access',
+  'github-app',
   'merge-commits',
   'linear-format-hook',
   'annotations',
@@ -22,6 +23,7 @@ export type FailureCode =
   | 'linear-credential-failed'
   | 'github-credential-failed'
   | 'missing-permission'
+  | 'github-app-not-found'
   | 'merge-commits-required'
   | 'linear-format-hook-required'
   | 'invalid-annotation'

@@ -1443,13 +1443,22 @@ export const SUBJECTS: Record<string, Compute> = {
     }
     return byRef.size === 0 ? null : 'app-bot';
   },
-  // The author and committer the sync's own commits name, as `name <email>`, distinct and sorted.
+  // The author and committer the sync's own commits name. 'app-bot' means every one names the App the harness
+  // and the workflows hold, as GitHub links a commit to it: `<slug>[bot] <<id>+<slug>[bot]@users.noreply.github.com>`.
+  // Anything else is the distinct `name <email>` lines, sorted.
   'writes.commitIdentity': async (env) => {
     const git = await person(env.ctx);
     const commits = [...new Set([...(await syncCommits(env.ctx)).values()].flat())];
     if (commits.length === 0) return null;
     const lines = (await git.text(['log', '--no-walk=unsorted', '--format=%an <%ae>%n%cn <%ce>', ...commits])).split('\n');
-    return sorted(new Set(lines.filter((line) => line !== ''))).join(', ');
+    const identities = sorted(new Set(lines.filter((line) => line !== '')));
+    const app = env.ctx.live?.githubAppLogin;
+    if (app !== undefined) {
+      const login = app.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const linked = new RegExp(`^${login} <[1-9][0-9]*\\+${login}@users\\.noreply\\.github\\.com>$`);
+      if (identities.every((identity) => linked.test(identity))) return 'app-bot';
+    }
+    return identities.join(', ');
   },
 
   // --- writes and budget ----------------------------------------------------------------------

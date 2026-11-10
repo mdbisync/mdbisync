@@ -96,6 +96,8 @@ describe('workflow templates', () => {
         assert.equal(actions[1].with?.['cleanup-tokens'], undefined);
         for (const action of actions) {
           assert.equal(action.with?.['github-token'], '${{ steps.app-token.outputs.token }}');
+          // The App's slug from the step that minted its token, so the sync's commits name the App.
+          assert.equal(action.with?.['app-slug'], '${{ steps.app-token.outputs.app-slug }}');
           assert.equal(action.with?.['linear-client-id'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_ID }}');
           assert.equal(action.with?.['linear-client-secret'], '${{ secrets.MDBISYNC_LINEAR_CLIENT_SECRET }}');
           // The same inputs in both steps, so the apply step runs the operation the stage step staged.

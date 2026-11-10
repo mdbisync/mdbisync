@@ -28,7 +28,7 @@ import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
-import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, SYNC_IDENTITY, type WriteStop, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
+import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, type WriteStop, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from '../initial-sync/transform.ts';
 import {
   type CommitIdentity,
@@ -160,7 +160,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   const { git, fetched, targets, linear } = context;
   const transforms = options.transforms?.() ?? [];
   const tipTransforms = options.transforms?.() ?? [];
-  const identity = options.identity ?? SYNC_IDENTITY;
+  const identity = options.identity ?? context.identity;
   const rereadBatch = Math.max(1, options.rereadBatch ?? REREAD_BATCH);
   const stopAfter = 'stopAfterDocuments' in options ? options.stopAfterDocuments : testStopAfterDocuments();
   const checkpoint = options.checkpoint ?? ((name: Checkpoint) => testCheckpoint(name));

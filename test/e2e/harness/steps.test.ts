@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
-import { SYNC_IDENTITY } from '../../../src/initial-sync/confirm.ts';
+import { NEUTRAL_IDENTITY as SYNC_IDENTITY } from '../../../src/setup/github.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
@@ -2266,6 +2266,17 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
     assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
     assert.deepEqual(asked.sort(), [`${ctx.names.refPrefix}/ids`, `${ctx.names.refPrefix}/linear`]);
     assert.deepEqual(await resolveSubject(ctx, 'writes.commitIdentity'), { known: true, value: 'mdbisync <mdbisync@sync.invalid>' });
+  });
+
+  it('read the App as the commits\' author and committer only when every commit names the App as GitHub links it', async () => {
+    const appAuthor = (email: string) => ({ GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: APP, GIT_COMMITTER_EMAIL: email });
+    const { ctx: linked } = await writerCase({ ids: [app, app], linear: app }, appAuthor(`4242+${APP}@users.noreply.github.com`));
+    assert.deepEqual(await resolveSubject(linked, 'writes.commitIdentity'), { known: true, value: 'app-bot' });
+    // A bot name with an address GitHub does not link to the App is reported as it is.
+    const { ctx: unlinked } = await writerCase({ ids: [app, app], linear: app }, appAuthor(`${APP}@users.noreply.github.com`));
+    assert.deepEqual(await resolveSubject(unlinked, 'writes.commitIdentity'), { known: true, value: `${APP} <${APP}@users.noreply.github.com>` });
+    const { ctx: other } = await writerCase({ ids: [app, app], linear: app }, appAuthor('4242+other-app[bot]@users.noreply.github.com'));
+    assert.notEqual((await resolveSubject(other, 'writes.commitIdentity')).value, 'app-bot');
   });
 
   it('fail a push made with a person\'s credential, without naming the person', async () => {
