@@ -9,6 +9,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { PARTIAL } from '../run/stop.ts';
+import { DEFAULT_CHECK_DEADLINE_MINUTES, MIN_CHECK_DEADLINE_MINUTES, MAX_CHECK_DEADLINE_MINUTES } from './deadline.ts';
+import { HOLD_TIMED_OUT, holdComment } from './hold.ts';
+import { SUSPENDED_TITLE, SET_ASIDE_MESSAGE } from './suspended.ts';
 import { BLOCKED_COMMENT, MARKS } from './marks.ts';
 import { SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
 import { SKIP_REASON_TEXTS } from './summary.ts';
@@ -63,6 +66,28 @@ describe('the sync cycle page', () => {
     assert.ok(flat.includes(`Orange \`${MARKS.conflict.icon}\``), 'the conflict icon');
   });
 
+  it('names the suspended lane and quotes the comment the code posts', () => {
+    assert.ok(flat.includes(`**${SUSPENDED_TITLE}**`), 'the suspended title');
+    assert.ok(flat.includes(`\`${SET_ASIDE_MESSAGE}\``), 'the normal branch sets the batch aside');
+    assert.ok(flat.includes(`Red \`${MARKS.suspended.icon}\``), 'the suspended icon');
+    const unquoted = page.replace(/^> ?/gm, '');
+    const checks = [{ name: 'build', url: 'https://github.com/example/handbook/actions/runs/123' }];
+    const annotations = new Map([['build', [{ path: 'handbook/plan.md', line: 12, message: 'Unsupported heading.' }]]]);
+    assert.ok(unquoted.includes(holdComment(checks, [], annotations, '')), 'the complete failed-check comment');
+    assert.ok(flat.includes(HOLD_TIMED_OUT), 'the timeout comment opening');
+    const timeout = holdComment([], ['build'], new Map(), '');
+    assert.ok(timeout.includes('- Check `build` did not finish in time.'));
+    assert.ok(unquoted.includes('- Check `build` did not finish in time.'), 'the timeout check line');
+    for (const path of ['docs/usage.md', 'docs/troubleshooting.md', 'docs/quickstart.md']) {
+      const text = read(path).replace(/\s+/g, ' ');
+      assert.ok(text.includes('mdbisync/suspended'), `${path}: suspended branch`);
+      assert.ok(text.includes('check-deadline-minutes'), `${path}: deadline input`);
+      assert.ok(text.includes('never reruns a check'), `${path}: no automatic rerun`);
+    }
+    const usage = read('docs/usage.md');
+    assert.ok(usage.includes(`(default \`${DEFAULT_CHECK_DEADLINE_MINUTES}\`, range \`${MIN_CHECK_DEADLINE_MINUTES}\`–\`${MAX_CHECK_DEADLINE_MINUTES}\`)`), 'deadline default and range');
+  });
+
   it("describes every line of the capture's summary", () => {
     described('src/sync/capture.ts', ['Removal held for', 'The document id map was lost', 'Capture partial, will continue', 'Content is pushed unchecked']);
     for (const code of WRITE_BACK_WARNING_CODES) assert.ok(flat.includes(`\`${code}\``), code);
@@ -79,6 +104,20 @@ describe('the sync cycle page', () => {
       'The tracked branch already holds every change from Linear',
       'Opened the sync pull request',
       'Added new Linear changes to the sync pull request',
+      'Released the suspended batch.',
+      'GitHub refused the suspended merge',
+      'A GitHub request for the suspended lane failed; the normal lane still runs.',
+      'Suspended files waiting for a manual merge',
+      'Failed checks:',
+      'Checks that did not finish in time:',
+      "The suspended documents' comments in Linear stay as they are:",
+      "The suspended documents' comments in Linear wait:",
+      'Suspended documents in Linear:',
+      'more suspended documents get their mark or comment in a later run',
+      "Suspended documents in Linear's trash or archived, without a mark:",
+      'GitHub did not give the annotations of',
+      'The suspended marks did not finish',
+      'it merges after the suspended pull request, whose checks still run.',
     ]);
     // "The sync pull request <link> waits for <checks>": the link sits between the words.
     assert.ok(read('src/sync/pull-request.ts').includes('`The sync pull request ${link} waits for'));
