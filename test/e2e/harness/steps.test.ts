@@ -2244,7 +2244,11 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
    * push is recorded by GitHub with `actors[ref][n]` as its actor; `null` for a
    * push GitHub has no record of.
    */
-  async function writerCase(actors: { ids: [Actor | undefined, Actor | undefined]; linear: Actor | undefined }, author: Record<string, string> = ENGINE_AUTHOR) {
+  async function writerCase(
+    actors: { ids: [Actor | undefined, Actor | undefined]; linear: Actor | undefined },
+    author: Record<string, string> = ENGINE_AUTHOR,
+    extra: { onLinear?: Array<{ env: Record<string, string>; merged?: boolean; twoParents?: boolean }>; mergedBy?: string } = {},
+  ) {
     const { ctx, remoteGit } = await fakeRun();
     const idsRef = `${ctx.names.refPrefix}/ids`;
     const linearRef = `${ctx.names.refPrefix}/linear`;
@@ -2255,7 +2259,14 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
     const tree = (await engine.text(['rev-parse', `${startIds}^{tree}`])).trim();
     const progress = (await engine.text(['commit-tree', tree, '-p', startIds, '-m', 'Initial sync: progress'])).trim();
     const final = (await engine.text(['commit-tree', tree, '-p', progress, '-m', 'Initial sync: final ids'])).trim();
-    const record = (await engine.text(['commit-tree', tree, '-m', "Initial sync: Linear's state"])).trim();
+    let record = (await engine.text(['commit-tree', tree, '-m', "Initial sync: Linear's state"])).trim();
+    // Commits on top of the record that are not the engine's: a merge GitHub made, a CI fix.
+    const pulls: Array<{ number: number; head: { ref: string }; merged_at: string; merge_commit_sha: string }> = [];
+    for (const commit of extra.onLinear ?? []) {
+      const second = commit.twoParents === true ? ['-p', final] : [];
+      record = (await new Git(remoteGit.dir, commit.env).text(['commit-tree', tree, '-p', record, ...second, '-m', 'Not the engine'])).trim();
+      if (commit.merged === true) pulls.push({ number: pulls.length + 1, head: { ref: ctx.names.syncBranch }, merged_at: '2026-11-10T00:00:00Z', merge_commit_sha: record });
+    }
     await engine.run(['update-ref', idsRef, final]);
     await engine.run(['update-ref', linearRef, record]);
     const activity: Record<string, Array<{ ref: string; before: string; after: string; activity_type: string; actor: Actor }>> = { [idsRef]: [], [linearRef]: [] };
@@ -2268,6 +2279,8 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
     const asked: string[] = [];
     ctx.live!.rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async (input: string | URL | Request) => {
       const url = new URL(String(input));
+      if (url.pathname === '/repos/example/sandbox/pulls') return Response.json(pulls);
+      if (/^\/repos\/example\/sandbox\/pulls\/\d+$/.test(url.pathname)) return Response.json({ merged_by: { login: extra.mergedBy ?? APP } });
       assert.equal(url.pathname, '/repos/example/sandbox/activity');
       const ref = url.searchParams.get('ref') as string;
       asked.push(ref);
@@ -2302,6 +2315,32 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
     assert.deepEqual(await resolveSubject(unlinked, 'writes.commitIdentity'), { known: true, value: `${APP} <${APP}@users.noreply.github.com>` });
     const { ctx: other } = await writerCase({ ids: [app, app], linear: app }, appAuthor('4242+other-app[bot]@users.noreply.github.com'));
     assert.notEqual((await resolveSubject(other, 'writes.commitIdentity')).value, 'app-bot');
+  });
+
+  it('leave out of the commit identity a merge commit GitHub made and a fix CI committed under its own name', async () => {
+    const appAuthor = (email: string) => ({ GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: APP, GIT_COMMITTER_EMAIL: email });
+    const app4242 = appAuthor(`4242+${APP}@users.noreply.github.com`);
+    const githubMerge = { GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: `4242+${APP}@users.noreply.github.com`, GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@github.com' };
+    const ciFix = { GIT_AUTHOR_NAME: 'github-actions[bot]', GIT_AUTHOR_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com', GIT_COMMITTER_NAME: 'github-actions[bot]', GIT_COMMITTER_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com' };
+    const { ctx } = await writerCase({ ids: [app, app], linear: app }, app4242, { onLinear: [{ env: ciFix }, { env: githubMerge, merged: true }, { env: app4242 }] });
+    assert.deepEqual(await resolveSubject(ctx, 'writes.commitIdentity'), { known: true, value: 'app-bot' });
+    // The same merge commit, but no pull request merged it: GitHub's committer is then not the App's.
+    const { ctx: unmerged } = await writerCase({ ids: [app, app], linear: app }, app4242, { onLinear: [{ env: githubMerge }] });
+    assert.match(String((await resolveSubject(unmerged, 'writes.commitIdentity')).value), /GitHub <noreply@github\.com>/);
+  });
+
+  it('name the App as the merger only by its exact login, and the merge kind by every merged pull request', async () => {
+    const githubMerge = { GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: `4242+${APP}@users.noreply.github.com`, GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@github.com' };
+    const both = { onLinear: [{ env: githubMerge, merged: true, twoParents: true }, { env: githubMerge, merged: true, twoParents: true }] };
+    const { ctx } = await writerCase({ ids: [app, app], linear: app }, ENGINE_AUTHOR, both);
+    assert.deepEqual(await resolveSubject(ctx, 'pullRequests.merger'), { known: true, value: 'app-bot' });
+    assert.deepEqual(await resolveSubject(ctx, 'pullRequests.mergeKind'), { known: true, value: 'merge' });
+    // The job's own token merged: a bot, but not the App.
+    const { ctx: job } = await writerCase({ ids: [app, app], linear: app }, ENGINE_AUTHOR, { ...both, mergedBy: 'github-actions[bot]' });
+    assert.deepEqual(await resolveSubject(job, 'pullRequests.merger'), { known: true, value: 'github-actions[bot]' });
+    // The first merged with a merge commit, the second squashed.
+    const { ctx: mixed } = await writerCase({ ids: [app, app], linear: app }, ENGINE_AUTHOR, { onLinear: [{ env: githubMerge, merged: true, twoParents: true }, { env: githubMerge, merged: true }] });
+    assert.deepEqual(await resolveSubject(mixed, 'pullRequests.mergeKind'), { known: true, value: 'squash-or-rebase' });
   });
 
   it('fail a push made with a person\'s credential, without naming the person', async () => {
