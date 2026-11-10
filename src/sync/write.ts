@@ -350,7 +350,12 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // A new document whose reserved id Linear already gives another one is created under a new id, but the documents an
   // earlier run wrote link the reserved one. By superseded id, the path it named; kept from earlier runs until every
   // document that links the path is written with its new id.
-  const superseded = new Map([...supersededBefore].filter(([id, path]) => resultFiles.has(path) && documentIds.has(path) && documentIds.get(path) !== id));
+  // A target git renamed since keeps its superseded ids under its new path.
+  const movedTo = new Map([...merge.unchanged, ...merge.changes].flatMap((change) => (change.kind === 'keep' && change.from !== change.to ? [[change.from, change.to] as const] : [])));
+  const superseded = new Map(
+    [...supersededBefore].map(([id, path]) => [id, movedTo.get(path) ?? path] as const)
+      .filter(([id, path]) => resultFiles.has(path) && documentIds.has(path) && documentIds.get(path) !== id),
+  );
   for (const [path, id] of reserved) if (documentIds.has(path) && documentIds.get(path) !== id) superseded.set(id, path);
   /** Documents whose text links a path with a superseded id, with those paths: each is written with the new id. */
   const relinks = new Map<string, Set<string>>();
@@ -367,7 +372,12 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     };
     const covered = new Set<string>();
     for (const change of [...merge.unchanged, ...merge.changes]) {
-      if (change.kind === 'trash') covered.add(change.path);
+      if (change.kind === 'trash') {
+        // Linear holds the document until the trash lands.
+        covered.add(change.path);
+        const tip = merge.linear.get(change.path);
+        if (tip !== undefined) linked(change.path, textOf(tip));
+      }
       if (change.kind !== 'keep') continue;
       covered.add(change.from);
       linked(change.to, textOf(merge.result.get(change.to) as SideFile));
@@ -384,8 +394,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const blobs = await readBlobs(git, rest.map(([, oid]) => oid));
     for (const [path, oid] of rest) linked(path, (blobs.get(oid) as Buffer).toString('utf8'));
   }
-  /** The superseded ids to keep: a document that links the path was not written with the new id. */
-  const nextSuperseded = () => new Map([...superseded].filter(([, path]) => [...relinks].some(([document, paths]) => paths.has(path) && !stored.has(document))));
+  /** The superseded ids to keep: a document that links the path was neither written with the new id nor trashed. */
+  const nextSuperseded = () => new Map([...superseded].filter(([, path]) => [...relinks].some(([document, paths]) => paths.has(path) && !stored.has(document) && !result.trashed.includes(document))));
 
   let written = 0;
   /** When the current batch's re-read answered. */
