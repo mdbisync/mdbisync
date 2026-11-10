@@ -29,6 +29,7 @@ import { type SecurityStep, answeringGate, readsFolder, stageNothing, stagingGat
 import { type RefRole, type RefusedPush, movedRefs, refusedPushes } from '../state/index.ts';
 import { type InitialSyncInputs, type RunInputs } from './inputs.ts';
 import { type Operation, type PreflightOptions, type PreflightOutcome, type RunContext, runPreflight } from './preflight.ts';
+import { message } from '../messages.ts';
 
 export interface OperationOutcome extends PreflightOutcome {
   /** The preflight passed, but the operation is not built yet; nothing was written. */
@@ -97,7 +98,7 @@ export async function runOperation(
   security?: StagedSecurity,
 ): Promise<OperationOutcome> {
   if ((operation === 'initial-sync') !== (initialSync !== undefined)) {
-    throw new Error('the direction and confirm inputs belong to an initial sync, and only to it');
+    throw new Error(message('operation.initial-sync-inputs'));
   }
   // Only a sync and a confirmed initial sync from Linear take Linear's text; nothing else has a set for the hooks.
   if (security?.step === 'stage' && operation === 'initial-sync' && !(initialSync?.direction === 'linear-to-git' && initialSync.confirm)) {

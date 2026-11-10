@@ -8,6 +8,8 @@ import { lintText } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearDocument, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, type Zone } from '../mapping/index.ts';
 import { type ResolvedTargets, projectKey } from '../setup/index.ts';
+import { message } from '../messages.ts';
+import { type FileLeftOutRule, type LeftOutAtWriteRule } from '../codes.ts';
 
 /**
  * Why a synchronized file stays in git only: a lint rule, a title collision,
@@ -17,7 +19,7 @@ import { type ResolvedTargets, projectKey } from '../setup/index.ts';
 export interface LeftOutEntry {
   path: string;
   /** Sorted, each rule once. */
-  rules: string[];
+  rules: FileLeftOutRule[];
   /** 1-based lines of the lint findings, front matter included. */
   lines: number[];
   /** For `duplicate-title`: the other files with the same title in the same place. */
@@ -86,11 +88,11 @@ export function annotatedPlaces(zones: ReadonlyMap<string, Zone>): Array<{ place
 export function placeId(targets: ResolvedTargets, place: Place): { projectId: string } | { teamId: string } {
   if (place.kind === 'project') {
     const project = targets.projects.get(projectKey(place.team, place.project));
-    if (project === undefined) throw new Error(`project "${place.project}" of team "${place.team}" was not resolved`);
+    if (project === undefined) throw new Error(message('initial-sync.project-not-resolved', { project: place.project, team: place.team }));
     return { projectId: project.id };
   }
   const team = targets.teams.get(place.team);
-  if (team === undefined) throw new Error(`team "${place.team}" was not resolved`);
+  if (team === undefined) throw new Error(message('initial-sync.team-not-resolved', { team: place.team }));
   return { teamId: team.id };
 }
 
@@ -110,7 +112,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   const facts = input.facts ?? LINEAR_FACTS;
   const { mapping } = input;
   const leftOut = new Map<string, LeftOutEntry>();
-  const leaveOut = (path: string, rules: string[], lines: number[] = [], collidesWith?: string[]) => {
+  const leaveOut = (path: string, rules: readonly FileLeftOutRule[], lines: number[] = [], collidesWith?: string[]) => {
     const entry = leftOut.get(path) ?? { path, rules: [], lines: [] };
     entry.rules = [...new Set([...entry.rules, ...rules])].sort();
     entry.lines = [...new Set([...entry.lines, ...lines])].sort((a, b) => a - b);
@@ -120,7 +122,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
 
   const textOf = (path: string): string => {
     const text = input.texts.get(path);
-    if (text === undefined) throw new Error(`the text of ${path} was not read`);
+    if (text === undefined) throw new Error(message('initial-sync.text-not-read', { path }));
     return text;
   };
   // Every reason a file stays in git only, so that fixing one does not reveal the next.
@@ -196,7 +198,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
  * as it is, as the confirmed run leaves it. The rest of the plan (the
  * container counts) is kept as it is.
  */
-export function leaveOutAtWrite(plan: InitialSyncPlan, entries: ReadonlyArray<{ path: string; rule: string; files: readonly string[] }>): InitialSyncPlan {
+export function leaveOutAtWrite(plan: InitialSyncPlan, entries: ReadonlyArray<{ path: string; rule: LeftOutAtWriteRule; files: readonly string[] }>): InitialSyncPlan {
   if (entries.length === 0) return plan;
   const byPath = new Map(entries.map((entry) => [entry.path, entry]));
   const leftOut = [...plan.leftOut];

@@ -3,6 +3,7 @@
 // error output, never the data passed on standard input or read back.
 
 import { spawn } from 'node:child_process';
+import { message } from '../messages.ts';
 
 export type Oid = string;
 
@@ -33,7 +34,7 @@ export class GitError extends Error {
   readonly stderr: string;
 
   constructor(args: readonly string[], code: number, stderr: string) {
-    super(`git ${args.join(' ')} failed with exit code ${code}: ${stderr.trim()}`);
+    super(message('git.failed', { args: args.join(' '), code, stderr: stderr.trim() }));
     this.name = 'GitError';
     this.args = args;
     this.code = code;

@@ -3,6 +3,8 @@
 // maps to. Folders without one inherit from their parent.
 
 import { findFrontMatter, parseQuietly } from './front-matter.ts';
+import { message } from '../messages.ts';
+import { type AnnotationProblemKind } from '../codes.ts';
 
 export const ANNOTATION_FILE = 'README.md';
 export const TEAM_KEY = 'linear-team';
@@ -17,11 +19,7 @@ export interface Annotation {
   project?: string;
 }
 
-export type AnnotationProblemKind =
-  | 'invalid-annotation'
-  | 'project-without-team'
-  | 'nested-team'
-  | 'nested-project';
+export type { AnnotationProblemKind } from '../codes.ts';
 
 /** An annotation the run cannot use. The message names paths and keys, never file content. */
 export interface AnnotationProblem {
@@ -50,7 +48,7 @@ export function readAnnotation(readme: string, text: string): ReadAnnotation {
     data = parseQuietly(frontMatter.yaml);
   } catch {
     if (!MENTIONS_KEY.test(frontMatter.yaml)) return { annotation: null };
-    return { problem: { readme, kind: 'invalid-annotation', message: `${readme}: the front matter with ${TEAM_KEY} or ${PROJECT_KEY} is not valid YAML` } };
+    return { problem: { readme, kind: 'invalid-annotation', message: message('annotations.invalid-yaml', { readme, teamKey: TEAM_KEY, projectKey: PROJECT_KEY }) } };
   }
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return { annotation: null };
 
@@ -59,7 +57,7 @@ export function readAnnotation(readme: string, text: string): ReadAnnotation {
     if (!Object.hasOwn(data, key)) continue;
     const value = (data as Record<string, unknown>)[key];
     if (typeof value !== 'string' || value.trim() === '') {
-      return { problem: { readme, kind: 'invalid-annotation', message: `${readme}: ${key} must be a non-empty name` } };
+      return { problem: { readme, kind: 'invalid-annotation', message: message('annotations.empty-name', { readme, key }) } };
     }
     annotation[field] = value.trim();
   }
@@ -90,19 +88,19 @@ export function resolveZones(annotations: readonly Annotation[]): { zones: Map<s
     const inherited = nearestZone(zones, parentOf(annotation.folder));
     const { readme } = annotation;
     if (annotation.team !== undefined && inherited !== undefined) {
-      problems.push({ readme, kind: 'nested-team', message: `${readme}: names a team inside the folder of team "${inherited.team}" (${display(inherited.teamFolder)})` });
+      problems.push({ readme, kind: 'nested-team', message: message('annotations.nested-team', { readme, team: inherited.team, folder: display(inherited.teamFolder) }) });
       continue;
     }
     if (annotation.project !== undefined && inherited?.project !== undefined) {
       problems.push({
         readme,
         kind: 'nested-project',
-        message: `${readme}: names a project inside the folder of project "${inherited.project}" (${display(inherited.projectFolder ?? '')})`,
+        message: message('annotations.nested-project', { readme, project: inherited.project, folder: display(inherited.projectFolder ?? '') }),
       });
       continue;
     }
     if (annotation.team === undefined && inherited === undefined) {
-      problems.push({ readme, kind: 'project-without-team', message: `${readme}: names a project, but neither it nor a folder above names a team` });
+      problems.push({ readme, kind: 'project-without-team', message: message('annotations.project-without-team', { readme }) });
       continue;
     }
     const zone: Zone = annotation.team !== undefined

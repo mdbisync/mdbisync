@@ -6,6 +6,7 @@ import { parse, splitFile, visit } from '../format/markdown.ts';
 import { Git } from '../state/git.ts';
 import { detectConflicts, lines, lineText, markerLines, MARKERS } from './markers.ts';
 import type { Conflict } from './markers.ts';
+import { message } from '../messages.ts';
 
 export interface MergeResult {
   text: string;
@@ -30,7 +31,7 @@ function tokenize(text: string, size: number): Token[] {
     const theirs: string[] = [];
     while (++i < source.length && lineText(source[i]!) !== '='.repeat(size)) ours.push(source[i]!);
     while (++i < source.length && lineText(source[i]!) !== `${'>'.repeat(size)} linear`) theirs.push(source[i]!);
-    if (i === source.length) throw new Error('Invalid merge-file conflict output');
+    if (i === source.length) throw new Error(message('sync.merge-conflict-output'));
     tokens.push({ kind: 'conflict', ours, theirs });
   }
   return tokens;

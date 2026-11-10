@@ -34,6 +34,8 @@ import {
 } from '../state/index.ts';
 import { type InitialSyncPlan } from './plan.ts';
 import { type BodyTransform, LeaveOutError, type TransformContext } from './transform.ts';
+import { message } from '../messages.ts';
+import { type LeftOutAtWriteRule } from '../codes.ts';
 
 export { resolveTarget };
 
@@ -41,9 +43,9 @@ export { resolveTarget };
 export const DEFAULT_UPLOAD_LIMIT = 10 * 1024 * 1024;
 
 /** Rule of a document left out because a file it links is over the upload limit. */
-export const UPLOAD_TOO_LARGE = 'upload-too-large';
+export const UPLOAD_TOO_LARGE = 'upload-too-large' satisfies LeftOutAtWriteRule;
 /** Rule of a document left out because a file it links cannot be read (an LFS object that is missing). */
-export const UPLOAD_UNREADABLE = 'upload-unreadable';
+export const UPLOAD_UNREADABLE = 'upload-unreadable' satisfies LeftOutAtWriteRule;
 
 /** Bytes of blobs read per git process while hashing linked files. */
 const HASH_BATCH_BYTES = 64 * 1024 * 1024;
@@ -91,7 +93,7 @@ interface LinkedFile {
 /** A document the uploads would leave out, found before anything is uploaded. */
 export interface UploadLeaveOut {
   path: string;
-  rule: string;
+  rule: LeftOutAtWriteRule;
   /** The linked files that cause it, in the order the document first links them. */
   files: string[];
 }
@@ -154,14 +156,14 @@ function judgeLinkedFiles(
   linked: ReadonlyMap<string, LinkedFile>,
   limit: number,
   uploaded: { has(hash: string): boolean },
-): { rule: string; files: string[]; message: string } | null {
+): { rule: LeftOutAtWriteRule; files: string[]; message: string } | null {
   const file = (target: string) => linked.get(target) as LinkedFile;
   const oversize = targets.filter((target) => file(target).size > limit);
-  if (oversize.length > 0) return { rule: UPLOAD_TOO_LARGE, files: oversize, message: `${oversize.join(', ')}: over the upload limit of ${limit} bytes` };
+  if (oversize.length > 0) return { rule: UPLOAD_TOO_LARGE, files: oversize, message: message('initial-sync.over-upload-limit', { files: oversize.join(', '), limit }) };
   const readable = new Set(targets.filter((target) => !file(target).extensions).map((target) => file(target).hash));
   const unreadable = targets.filter((target) => file(target).extensions && !uploaded.has(file(target).hash) && !readable.has(file(target).hash));
   if (unreadable.length > 0) {
-    return { rule: UPLOAD_UNREADABLE, files: unreadable, message: `${unreadable.join(', ')}: stored with LFS extensions, which are not supported` };
+    return { rule: UPLOAD_UNREADABLE, files: unreadable, message: message('initial-sync.lfs-extensions', { files: unreadable.join(', ') }) };
   }
   return null;
 }
@@ -321,7 +323,7 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
    */
   const uploadMissing = async (path: string, targets: readonly string[]) => {
     const own = await readDocumentFiles(targets, []);
-    if (!Array.isArray(own)) throw new LeaveOutError(UPLOAD_UNREADABLE, `${own.target} cannot be read: ${own.unreadable}`, [own.target]);
+    if (!Array.isArray(own)) throw new LeaveOutError(UPLOAD_UNREADABLE, message('initial-sync.upload-unreadable', { file: own.target, reason: own.unreadable }), [own.target]);
     if (own.length === 0) return;
 
     const batch = [...own];
@@ -371,7 +373,7 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
     },
 
     async apply({ path, body }) {
-      if (context === undefined) throw new Error('the uploads transform was not prepared');
+      if (context === undefined) throw new Error(message('initial-sync.uploads-not-prepared'));
       const fileLinks = findFileLinks(path, body, isFile);
       if (fileLinks.length === 0) return body;
       const targets = [...new Set(fileLinks.map((link) => link.target))];
