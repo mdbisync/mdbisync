@@ -103,9 +103,10 @@ jobs:
           if-no-files-found: error
 
   tag:
-    needs: build
-    # A skipped gate (every pre-release) would skip this job under the implicit success(), so it checks the build alone.
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    needs: [gate, build]
+    # A skipped gate (every pre-release) would skip this job under the implicit success(), so the condition is explicit.
+    # It repeats the build's gate rule, so a final version is never tagged without a passed gate.
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -135,10 +136,11 @@ jobs:
 
   # A run that created no tag must not end as success, even when every job before it was skipped.
   tagged:
-    if: ${{ always() }}
-    needs: [gate, build, tag]
+    if: ${{ !cancelled() }}
+    needs: tag
     runs-on: ubuntu-latest
     timeout-minutes: 1
+    permissions: {}
     steps:
       - name: Require the new tag
         env:

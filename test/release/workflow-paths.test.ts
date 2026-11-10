@@ -11,8 +11,13 @@ import { test } from 'node:test';
 import { parse } from 'yaml';
 
 type Result = 'success' | 'failure' | 'cancelled' | 'skipped';
-interface Job { needs?: string | string[]; if?: string; steps: { run?: string; env?: Record<string, string> }[] }
-interface Context { ref: string; version: string; results: Map<string, Result>; upstream: string[] }
+interface Job {
+  needs?: string | string[];
+  if?: string;
+  permissions?: Record<string, string>;
+  steps: { run?: string; env?: Record<string, string> }[];
+}
+interface Context { ref: string; version: string; cancelled: boolean; results: Map<string, Result>; upstream: string[] }
 
 const workflow = parse(readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8'));
 const jobs = workflow.jobs as Record<string, Job>;
@@ -24,10 +29,15 @@ const upstreamOf = (name: string): string[] => needsOf(name).flatMap((need) => [
 function evaluate(expression: string, context: Context): unknown {
   const source = expression.trim().replace(/^\$\{\{([\s\S]*)\}\}$/, '$1');
   const tokens = source.match(/'[^']*'|==|!=|&&|\|\||[!(),]|[A-Za-z_][\w.-]*/g) ?? [];
-  assert.equal(tokens.join(''), source.replace(/\s+/g, ''), `unsupported expression: ${expression}`);
+  const withoutSpaces = source.replace(/'[^']*'|\s+/g, (match) => (match.startsWith("'") ? match : ''));
+  assert.equal(tokens.join(''), withoutSpaces, `unsupported expression: ${expression}`);
   let position = 0;
   const next = (): string => tokens[position++]!;
   const expect = (token: string): void => assert.equal(next(), token, `expected ${token} in ${expression}`);
+  const resultOf = (job: string): Result => {
+    assert.ok(context.results.has(job), `job ${job} is read before it ran: order the jobs after their needs`);
+    return context.results.get(job)!;
+  };
 
   function primary(): unknown {
     const token = next();
@@ -39,10 +49,10 @@ function evaluate(expression: string, context: Context): unknown {
       const args: unknown[] = [];
       while (tokens[position] !== ')') { args.push(or()); if (tokens[position] === ',') next(); }
       expect(')');
-      const upstream = context.upstream.map((job) => context.results.get(job));
+      const upstream = context.upstream.map(resultOf);
       switch (token) {
         case 'always': return true;
-        case 'cancelled': return false;
+        case 'cancelled': return context.cancelled;
         case 'success': return upstream.every((result) => result === 'success');
         case 'failure': return upstream.some((result) => result === 'failure');
         case 'contains': return String(args[0]).includes(String(args[1]));
@@ -52,7 +62,7 @@ function evaluate(expression: string, context: Context): unknown {
     if (token === 'github.ref') return context.ref;
     if (token === 'inputs.version') return context.version;
     const need = /^needs\.([\w-]+)\.result$/.exec(token);
-    if (need) return context.results.get(need[1]!);
+    if (need) return resultOf(need[1]!);
     return assert.fail(`unsupported value ${token}`);
   }
   function equality(): unknown {
@@ -70,30 +80,35 @@ function evaluate(expression: string, context: Context): unknown {
 }
 
 /**
- * Runs the job graph: each job's condition decides whether it runs, `outcomes`
- * gives the result of the jobs that do the release work, and the final check
- * job runs its own step. The run fails when any job failed.
+ * Runs the job graph in file order: each job's condition decides whether it
+ * runs, `outcomes` gives the result of the jobs that do the release work, and
+ * the final check job runs its own step. A `cancelled` outcome cancels the
+ * run from that job on. The run fails when any job failed.
  */
 function simulate(ref: string, version: string, outcomes: Partial<Record<string, Result>>) {
   const results = new Map<string, Result>();
+  let cancelled = false;
   for (const name of Object.keys(jobs)) {
     const job = jobs[name]!;
-    const upstream = upstreamOf(name);
+    const context = { ref, version, cancelled, results, upstream: upstreamOf(name) };
     const condition = job.if ?? 'success()';
     const explicit = /\b(always|success|failure|cancelled)\(\)/.test(condition);
-    const runs = (explicit || evaluate('success()', { ref, version, results, upstream })) &&
-      Boolean(evaluate(condition, { ref, version, results, upstream }));
+    const runs = (explicit || evaluate('success()', context)) && Boolean(evaluate(condition, context));
     if (!runs) { results.set(name, 'skipped'); continue; }
-    if (name in outcomes) { results.set(name, outcomes[name]!); continue; }
+    if (name in outcomes) {
+      results.set(name, outcomes[name]!);
+      cancelled ||= outcomes[name] === 'cancelled';
+      continue;
+    }
     assert.equal(name, 'tagged', `no outcome given for job ${name}`);
     const step = job.steps[0]!;
-    const env = Object.fromEntries(Object.entries(step.env ?? {}).map(([key, value]) =>
-      [key, String(evaluate(value, { ref, version, results, upstream }))]));
+    const env = Object.fromEntries(Object.entries(step.env ?? {}).map(([key, value]) => [key, String(evaluate(value, context))]));
     // GitHub's default bash shell stops at the first failed command.
     const run = spawnSync('bash', ['-e', '-c', step.run!], { env: { ...process.env, ...env } });
     results.set(name, run.status === 0 ? 'success' : 'failure');
   }
-  const conclusion = [...results.values()].includes('failure') ? 'failure' : 'success';
+  const values = [...results.values()];
+  const conclusion = values.includes('failure') ? 'failure' : cancelled ? 'cancelled' : 'success';
   return { results: Object.fromEntries(results), conclusion };
 }
 
@@ -102,7 +117,18 @@ const passing = { gate: 'success', build: 'success', tag: 'success' } as const;
 
 test('release.yml has the gate, build, tag and final check jobs in that order', () => {
   assert.deepEqual(Object.keys(jobs), ['gate', 'build', 'tag', 'tagged']);
-  assert.deepEqual(needsOf('tagged'), ['gate', 'build', 'tag']);
+  assert.deepEqual(needsOf('tagged'), ['tag']);
+  assert.deepEqual(jobs.tagged!.permissions, {});
+});
+
+test('the tag job itself requires a passed gate for a final version, whatever the build condition says', () => {
+  const tags = (version: string, gate: Result) => evaluate(jobs.tag!.if!, {
+    ref: main, version, cancelled: false, upstream: ['gate', 'build'],
+    results: new Map<string, Result>([['gate', gate], ['build', 'success']]),
+  });
+  for (const gate of ['failure', 'skipped', 'cancelled'] as const) assert.equal(tags('v0.1.0', gate), false, gate);
+  assert.equal(tags('v0.1.0', 'success'), true);
+  assert.equal(tags('v0.1.0-rc.9', 'skipped'), true);
 });
 
 test('a pre-release skips the gate, then builds and tags', () => {
@@ -137,6 +163,12 @@ test('a failed tag fails the run', () => {
     assert.equal(results.tagged, 'failure', version);
     assert.equal(conclusion, 'failure', version);
   }
+});
+
+test('a cancelled build tags nothing and the run ends cancelled, without a failed check', () => {
+  const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', { ...passing, build: 'cancelled' });
+  assert.deepEqual(results, { gate: 'skipped', build: 'cancelled', tag: 'skipped', tagged: 'skipped' });
+  assert.equal(conclusion, 'cancelled');
 });
 
 test('a run outside main skips every release job and does not end as success', () => {
