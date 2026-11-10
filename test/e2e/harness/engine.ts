@@ -47,6 +47,8 @@ export interface EngineCall {
   /** Test-hook settings for this call. */
   extraEnv: Record<string, string>;
   timeoutMs: number;
+  /** Stops a local engine when its setup or run is cancelled. */
+  signal?: AbortSignal;
 }
 
 export interface EngineResult {
@@ -119,12 +121,21 @@ export function postEntry(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.env): RunningEngine {
+  call.signal?.throwIfAborted();
   const started = Date.now();
   const child = spawn(process.execPath, [engineEntry(env), call.command], {
     cwd: call.cwd,
     env: engineEnv(call, env),
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
   });
+  // Git children must stop too, before cleanup removes their remote refs.
+  const stop = () => {
+    if (process.platform === 'win32' || child.pid === undefined) { child.kill('SIGKILL'); return; }
+    try { process.kill(-child.pid, 'SIGKILL'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+  };
+  call.signal?.addEventListener('abort', stop, { once: true });
   let stdout = '';
   let stderr = '';
   child.stdout?.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
@@ -132,7 +143,7 @@ export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.e
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill('SIGKILL');
+    stop();
   }, call.timeoutMs);
   child.on('error', (error) => {
     stderr += `could not start the engine: ${error.message}\n`;
@@ -140,6 +151,7 @@ export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.e
   const done = new Promise<EngineResult>((resolve) => {
     child.on('close', (exitCode, signal) => {
       clearTimeout(timer);
+      call.signal?.removeEventListener('abort', stop);
       const read = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8') : '');
       let report: Record<string, unknown> | null = null;
       try {
@@ -162,7 +174,7 @@ export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.e
       });
     });
   });
-  return { child, done, kill: () => child.kill('SIGKILL') };
+  return { child, done, kill: stop };
 }
 
 export async function runEngine(call: EngineCall, env?: NodeJS.ProcessEnv): Promise<EngineResult> {

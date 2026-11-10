@@ -30,6 +30,7 @@ import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtur
 import { projectFolders } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
+import { cleanupKilledTokens } from './token-cleanup.ts';
 import { heldRunOf, saveHeldRun, UI_CHECKLIST_FILE } from './held-run.ts';
 
 export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
@@ -37,8 +38,12 @@ export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
 export const ZONE_CAP = 1_000;
 /** The harness warns from here on. */
 export const ZONE_TRASH_WARNING = 900;
-/** The longest setup, team-lock wait included; a full slice alone takes under a minute. */
+/** Default setup deadline, including team-lock waits. */
 export const SETUP_TIMEOUT_MS = 15 * 60_000;
+/** Full setup can include initial sync of thousands of documents. */
+export function setupTimeoutMs(slice: Scenario['slice']): number {
+  return slice === 'full' ? 45 * 60_000 : SETUP_TIMEOUT_MS;
+}
 /** How long a setup past its deadline gets to stop before cleanup runs anyway. */
 export const SETUP_STOP_MS = 2 * 60_000;
 
@@ -468,6 +473,16 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
     delete ctx.engine.pending;
   }
   ctx.checkpoints.resumeAll();
+  const proxy = ctx.proxy;
+  if (ctx.signal.aborted && proxy !== null) {
+    await attempt('setup tokens', async () => {
+      await cleanupKilledTokens(proxy.tokens(), {
+        cwd: ctx.runDir,
+        env: { PATH: process.env['PATH'], HOME: process.env['HOME'], LANG: 'C.UTF-8' },
+        linearUrl: proxy.url,
+      });
+    });
+  }
   // Every document the run made, by id: what the harness seeded, what the run's ownership record holds (every
   // create, a team zone's README and a create whose answer was lost included) and what the engine recorded.
   // Read the ids before the refs go.
@@ -731,9 +746,10 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       // A setup that does not finish must not hold a worker and its locks forever. On the deadline it is
       // told to stop; cleanup waits until it has stopped, so nothing is created after the cleanup.
       const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks, grant);
+      const timeoutMs = setupTimeoutMs(scenario.slice);
       try {
-        await withDeadline(setup, SETUP_TIMEOUT_MS, () =>
-          new EnvBlockedError(`setup did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes (last phase: ${phase()})`));
+        await withDeadline(setup, timeoutMs, () =>
+          new EnvBlockedError(`setup did not finish within ${timeoutMs / 60_000} minutes (last phase: ${phase()})`));
       } catch (late) {
         abort.abort();
         setupStuck = !(await settlesWithin(setup, SETUP_STOP_MS));
