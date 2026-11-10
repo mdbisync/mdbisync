@@ -158,7 +158,7 @@ describe('the next scenario a worker starts', () => {
 });
 
 describe('a batch on the default workers', () => {
-  // The 11 ENG team-zone scenarios of run 2026-11-10-2c2f5a, two minutes each as there.
+  // Eleven ENG team-zone scenarios of about two minutes each, as a targeted live batch takes them.
   const eng = ['L2-29', 'L2-30', 'L2-32', 'L2-33', 'L4-01', 'L4-03', 'L4-04', 'L4-05', 'L4-06', 'L4-07', 'L4-11'].map(byId);
 
   it('runs exclusive scenarios one at a time with no worker of the batch waiting in admission', async () => {
