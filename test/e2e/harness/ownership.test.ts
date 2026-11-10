@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { hostname, tmpdir } from 'node:os';
@@ -321,6 +321,52 @@ describe('ownership record', () => {
     // The failure stays on record for a person to look at: registration and record are kept.
     assert.ok(existsSync(join(dir, 'runs', `${runId}.json`)));
     assert.ok(readOwnership(dir, runId) !== null);
+  });
+
+  it('puts a second team\'s zone in scope before the engine writes a README there, and still refuses a zone the run never wrote into', async () => {
+    const linear = await new FakeLinear().start();
+    const dir = stateDir();
+    const runId = 'cab321';
+    const ledger = new OwnershipLedger(dir, runId);
+    // Setup scopes only the zone its slice places files in.
+    ledger.scope(['team-eng']);
+    deadRun(dir, runId);
+
+    // The engine writes a plain README into a second team's zone, and asks for one more there that Linear refuses.
+    const proxy = await startFaultProxy(linear.url, { observer: ledger });
+    const engine = new LinearClient({ token: 'engine', baseUrl: proxy.url });
+    const readme = randomUUID();
+    const refused = randomUUID();
+    linear.refused503.add('cab321/refused');
+    await engine.createDocument({ teamId: 'team-docs' }, { id: readme, title: 'README', content: 'Shelf notes.\n' });
+    await assert.rejects(engine.createDocument({ teamId: 'team-plan' }, { id: refused, title: 'cab321/refused', content: 'Refused.\n' }));
+    await proxy.close();
+
+    // Each zone is on record before the write that went there, a write Linear never applied included.
+    const lines = readFileSync(join(dir, 'owned', `${runId}.jsonl`), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { kind: string; teamIds?: string[]; id?: string });
+    const at = (match: (entry: (typeof lines)[number]) => boolean) => lines.findIndex(match);
+    assert.ok(at((entry) => entry.teamIds?.includes('team-docs') === true) >= 0);
+    assert.ok(at((entry) => entry.teamIds?.includes('team-docs') === true) < at((entry) => entry.kind === 'document' && entry.id === readme));
+    assert.ok(at((entry) => entry.teamIds?.includes('team-plan') === true) < at((entry) => entry.kind === 'document' && entry.id === refused));
+    assert.deepEqual([...(readOwnership(dir, runId)?.teamIds ?? [])].sort(), ['team-docs', 'team-eng', 'team-plan']);
+
+    // A recorded document now in a team the run never wrote into is still refused, and nothing is changed.
+    linear.documents.set('moved', { id: 'moved', title: 'cab321/notes', content: '', projectId: null, teamId: 'team-ops', trashed: false, archivedAt: null });
+    ledger.record({ kind: 'document', id: 'moved', confirmed: true });
+    const mutations = linear.mutations.length;
+    const refusal = await sweep(targets(linear), dir);
+    assert.match(refusal.errors.join('\n'), /refusing to recover run cab321: document moved is in team team-ops, outside the run's team zones$/m);
+    assert.doesNotMatch(refusal.errors.join('\n'), new RegExp(readme));
+    assert.equal(linear.mutations.length, mutations);
+
+    // Back in the run's zone, the sweep recovers the run: the second zone's README is archived, not trashed.
+    linear.documents.get('moved')!.teamId = 'team-eng';
+    const report = await sweep(targets(linear), dir);
+    assert.deepEqual(report.errors, []);
+    assert.deepEqual(report.recovered[0]?.problems, []);
+    assert.equal(report.recovered[0]?.verifiedArchived, 2);
+    assert.ok(linear.documents.get(readme)?.archivedAt !== null && linear.documents.get(readme)?.trashed === false);
+    assert.equal(readOwnership(dir, runId), null);
   });
 
   it('refuses a recorded project that is not one of the run\'s', async () => {

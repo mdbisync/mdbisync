@@ -53,7 +53,7 @@ function ledgerFile(stateDir: string, runId: string): string {
   return join(ownedDir(stateDir), `${runId}.jsonl`);
 }
 
-function parse(text: string): { query?: unknown; variables?: { input?: { id?: unknown; name?: unknown } }; data?: Record<string, unknown> | null } | null {
+function parse(text: string): { query?: unknown; variables?: { input?: { id?: unknown; name?: unknown; teamId?: unknown } }; data?: Record<string, unknown> | null } | null {
   try {
     const value: unknown = JSON.parse(text);
     return value !== null && typeof value === 'object' ? (value as ReturnType<typeof parse>) : null;
@@ -108,12 +108,18 @@ export class OwnershipLedger implements WriteObserver {
     this.record({ kind: 'project-deleted', id });
   }
 
-  /** A document or project create that carries its own id is the run's before Linear sees it. */
+  /**
+   * A document or project create that carries its own id is the run's before Linear sees it. A document create
+   * or move into a team zone puts that zone in the run's scope first, so recovery can clean up what was written
+   * there; a document in a zone the run never wrote into is still refused.
+   */
   before(requestBody: string): void {
     if (!isMutation(requestBody)) return;
     const request = parse(requestBody);
     if (typeof request?.query !== 'string') return;
     const input = request.variables?.input;
+    const writesDocument = /\bdocument(?:Create|Update)\s*\(/.test(request.query);
+    if (writesDocument && typeof input?.teamId === 'string' && input.teamId !== '') this.scope([input.teamId]);
     if (typeof input?.id !== 'string' || input.id === '') return;
     if (/\bdocumentCreate\s*\(/.test(request.query)) this.record({ kind: 'document', id: input.id, confirmed: false });
     else if (/\bprojectCreate\s*\(/.test(request.query) && typeof input.name === 'string') this.record({ kind: 'project', id: input.id, name: input.name });
