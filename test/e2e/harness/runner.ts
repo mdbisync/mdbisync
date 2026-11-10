@@ -17,6 +17,7 @@ import { startFaultProxy } from './fault-proxy.ts';
 import { BudgetBlockedError, estimate, type Governor } from './governor.ts';
 import { SandboxRest, githubToken, type GitHubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
+import { engineRequestCount, requestBuckets, remoteRequests, isGraphql } from './request-accounting.ts';
 import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
@@ -622,6 +623,7 @@ export function resultOf(
   extra: { startedAt: number; budgetWaitMs: number; checks: CheckOutcome[]; cleanup: { ok: boolean; detail?: string } },
 ): Omit<ScenarioResult, 'harnessAppRequests'> {
   const { scenario } = ctx;
+  const remote = remoteRequests(ctx);
   return {
     id: scenario.id,
     level: levelOf(scenario.id),
@@ -631,7 +633,8 @@ export function resultOf(
     ...outcome,
     startedAt: new Date(extra.startedAt).toISOString(),
     durationMs: Date.now() - extra.startedAt,
-    engineRequests: ctx.proxy?.requests.filter((record) => !record.injected).length ?? 0,
+    engineRequests: engineRequestCount(ctx, remote),
+    requestBuckets: requestBuckets(ctx, remote),
     harnessRequests: ctx.live === null ? 0 : [...Object.values(ctx.live.editors)].reduce((sum, client) => sum + client.stats.total, 0),
     budgetWaitMs: extra.budgetWaitMs,
     checks: extra.checks,
@@ -666,7 +669,10 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     if (scenario.setup.state !== 'offline') {
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');
       try {
-        grant = await deps.governor.admit(scenario, runId, estimate(scenario));
+        // Rendered workflows use the primary app's repository secrets. A
+        // scenario invoking them must reserve that same app, including setup.
+        const actions = scenario.mode === 'actions' || scenario.steps.some((step) => step.kind === 'run' && step.action.startsWith('workflow'));
+        grant = await deps.governor.admit(scenario, runId, estimate(scenario), actions ? deps.config.linearApps[0]?.name : undefined);
       } catch (blocked) {
         if (blocked instanceof BudgetBlockedError) throw new EnvBlockedError(blocked.message);
         throw blocked;
@@ -721,6 +727,11 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     if (!heldForUi) cleanupOutcome = await cleanupAndCount(ctx);
     await ctx.proxy?.close();
     locks.splice(0).reverse().forEach((lock) => lock.release());
+    if (grant !== undefined) for (const { entry } of remoteRequests(ctx)) {
+      if (isGraphql(entry) && deps.config.linearApps[0] !== undefined) {
+        deps.governor?.observeRateLimits(deps.config.linearApps[0].name, entry.rateLimitHeaders, Date.parse(entry.finishedAt));
+      }
+    }
     grant?.release();
     clearInterval(heartbeat);
     if (setupStuck) cleanupOutcome = { ok: false, detail: `setup did not stop; ${cleanupOutcome.detail ?? 'cleaned up'}; the sweeper removes the rest once this process ends` };
