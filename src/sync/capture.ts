@@ -107,6 +107,9 @@ export async function readCaptureCursor(git: Git, ids: Oid | null): Promise<stri
   return CURSOR.exec(log)?.[1] ?? null;
 }
 
+/** A download the comparison with a file's last accepted version does not make. */
+class NotDownloaded extends Error {}
+
 export async function capture(context: RunContext, options: CaptureOptions): Promise<CaptureResult> {
   const {git, linear, fetched} = context;
   let mapping = context.mapping;
@@ -146,8 +149,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
       const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
-      for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, documents, files: recorded.files })) ids.set(path, entry);
-      result.rebuiltIds = { matched: ids.size, files: recorded.documents.length };
+      for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, documents, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) ids.set(path, entry);
+      // Files left out for a title another file has count too: they had a document as much as any other.
+      result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
     const cursor = await readCaptureCursor(git, state.ids);
     const entries = await listTree(git, base);
@@ -442,17 +446,19 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const asLastAccepted = async (candidate: Candidate): Promise<boolean> => {
       const baseline = excludedPath(candidate.path) ? baselines.get(candidate.path) : undefined;
       if (baseline == null || candidate.assets.files.size === 0) return false;
-      const capture = acceptedAssets.get(baseline.commit) ?? createAssetCapture(git, options.config, baseline.commit, () => Promise.reject(new Error(message('assets.download-failed'))));
-      acceptedAssets.set(baseline.commit, capture);
+      const captureAtBaseline = acceptedAssets.get(baseline.commit) ?? createAssetCapture(git, options.config, baseline.commit, () => Promise.reject(new NotDownloaded()));
+      acceptedAssets.set(baseline.commit, captureAtBaseline);
       const body = splitFile(baseline.text).body;
       let assets: CapturedAssets;
       try {
-        assets = await capture(candidate.path, candidate.doc.content ?? '', uploads, body);
-      } catch {
+        assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body);
+      } catch (error) {
         // An image that version did not have: the document changed.
-        return false;
+        if (error instanceof NotDownloaded) return false;
+        throw error;
       }
-      return assets.files.size === 0 && splitFile(textOf({doc: candidate.doc, path: candidate.path, head: candidate.head, assets, files: new Map(), ...(candidate.previousBody === undefined ? {} : {previousBody: candidate.previousBody})}, documentIds)).body === body;
+      // Linear's spelling of that version reads back as its text.
+      return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head: '', assets, files: new Map(), previousBody: body}, documentIds) === body;
     };
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);

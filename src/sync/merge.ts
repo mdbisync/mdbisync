@@ -383,8 +383,8 @@ export const BASELINE_DEPTH = 20;
  * last `BASELINE_DEPTH` such commits on the chain synchronized it.
  * Calls that share `sides` read each commit's synchronized files once.
  * With `oldest`, no commit older than it on the chain is examined, and
- * `oldest` itself always is: it holds the version the later commits
- * changed, though it may not change the file itself.
+ * `oldest` itself counts as one of those commits, the oldest: it holds the
+ * version the later commits changed, though it may not change the file.
  */
 export async function lastSynchronized(
   git: Git,

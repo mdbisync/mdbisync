@@ -19,10 +19,11 @@
 import { lintInTree } from '../format/index.ts';
 import { type DocumentPlace, type LinearClient, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place } from '../mapping/index.ts';
-import { RECORD_MESSAGE } from '../initial-sync/index.ts';
+import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import { placeId } from '../initial-sync/plan.ts';
 import { type ResolvedTargets } from '../setup/index.ts';
-import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
+import { resolveTargets } from '../setup/linear.ts';
+import { type Git, type IdMap, type Oid, isAncestor } from '../state/index.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { documentPath } from './paths.ts';
 
@@ -37,36 +38,50 @@ export interface RebuildInput {
   documents: ReadonlyArray<MappedDocument & { text: string }>;
   /** The regular files of the `linear` record's tree, which images must name (`RepositoryMapping.files`). */
   files: ReadonlySet<string>;
+  /** The record's Markdown files that are not documents: a title another file has, or outside annotated folders. */
+  unmapped: readonly string[];
 }
 
-export async function rebuildIds({ git, record, linear, facts, targets, documents, files: treeFiles }: RebuildInput): Promise<IdMap> {
+export async function rebuildIds({ git, record, linear, facts, targets, documents, files: treeFiles, unmapped }: RebuildInput): Promise<IdMap> {
   const keyOf = (place: DocumentPlace, title: string) =>
     `${'projectId' in place ? `project:${place.projectId}` : `team:${place.teamId}`}\0${title.normalize('NFC')}`;
   const files = new Map<string, string>();
   const places = new Map<string, DocumentPlace>();
   /** Files by place, for the paths capture gives: folder and path. */
   const byPlace = new Map<string, Array<{ folder: string; path: string }>>();
-  const initial = await latestInitialRecord(git, record);
+  // A synchronized file comes first: a left-out file's last title does not take its document.
+  const add = (path: string, title: string, place: DocumentPlace) => {
+    if (files.has(keyOf(place, title))) return;
+    places.set(JSON.stringify(place), place);
+    files.set(keyOf(place, title), path);
+    const folder = path.slice(0, -(title.length + '.md'.length)).replace(/\/$/, '');
+    byPlace.set(JSON.stringify(place), [...(byPlace.get(JSON.stringify(place)) ?? []), { folder, path }]);
+  };
+  // A file left out now gets the document of its last synchronized version, with the title and place Linear was given
+  // then. Several such files walk the same commits of the chain: each commit is read once.
+  let initial: Promise<Oid | undefined> | undefined;
   const sides = new Map<Oid, Promise<Side>>();
+  const leftOut: string[] = [...unmapped];
   for (const document of documents) {
-    // The title and place Linear was last given for the file.
-    let synchronized: { title: string; place: Place } = document;
     if (lintInTree(document.path, document.text, treeFiles).length > 0 || lengthRefusal({ title: document.title }, facts) !== undefined) {
-      const last = initial === undefined ? null : await lastSynchronized(git, record, document.path, facts, sides, initial);
-      if (last === null) continue;
-      synchronized = last.file;
+      leftOut.push(document.path);
+      continue;
     }
-    const { title } = synchronized;
     let place: DocumentPlace;
     try {
-      place = placeId(targets, synchronized.place);
+      place = placeId(targets, document.place);
     } catch {
       continue;
     }
-    places.set(JSON.stringify(place), place);
-    files.set(keyOf(place, title), document.path);
-    const folder = document.path.slice(0, -(title.length + '.md'.length)).replace(/\/$/, '');
-    byPlace.set(JSON.stringify(place), [...(byPlace.get(JSON.stringify(place)) ?? []), { folder, path: document.path }]);
+    add(document.path, document.title, place);
+  }
+  for (const path of leftOut) {
+    initial ??= latestInitialRecord(git, record);
+    const oldest = await lifetimeStart(git, record, path, await initial);
+    const last = oldest === undefined ? null : await lastSynchronized(git, record, path, facts, sides, oldest);
+    if (last === null) continue;
+    const place = await lastPlace(linear, targets, last.file.place);
+    if (place !== undefined) add(path, last.file.title, place);
   }
   const allPaths = new Set(documents.map((document) => document.path));
 
@@ -103,13 +118,38 @@ export async function rebuildIds({ git, record, linear, facts, targets, document
  * was never synchronized.
  */
 async function latestInitialRecord(git: Git, record: Oid): Promise<Oid | undefined> {
-  const subjects = new Set([RECORD_MESSAGE, INITIAL_SYNC_FROM_LINEAR_RECORD]);
-  const log = await git.text(['log', '--first-parent', '--format=%H %s', '--fixed-strings', ...[...subjects].map((subject) => `--grep=${subject}`), record]);
+  const log = await git.text(['log', '--first-parent', '--format=%H %s', '--fixed-strings', ...[...INITIAL_RECORD_SUBJECTS].map((subject) => `--grep=${subject}`), record]);
   for (const line of log.split('\n')) {
     const space = line.indexOf(' ');
-    if (space > 0 && subjects.has(line.slice(space + 1))) return line.slice(0, space);
+    if (space > 0 && INITIAL_RECORD_SUBJECTS.has(line.slice(space + 1))) return line.slice(0, space);
   }
   return undefined;
+}
+
+/**
+ * The oldest commit on the `linear` chain where the file at `path` is the
+ * one it is now: the latest initial record, or the commit that added it
+ * again after that. A file removed in between had a document of its own,
+ * which its removal trashed; the new file at its path never had it.
+ */
+async function lifetimeStart(git: Git, record: Oid, path: string, initial: Oid | undefined): Promise<Oid | undefined> {
+  if (initial === undefined) return undefined;
+  const added = (await git.text(['--literal-pathspecs', 'log', '--first-parent', '--diff-filter=A', '--format=%H', '-1', record, '--', path])).trim();
+  return added !== '' && added !== initial && await isAncestor(git, initial, added) ? added : initial;
+}
+
+/**
+ * The place a left-out file's last synchronized version had. An annotation
+ * changed since names another place than the record's zones: it is looked
+ * up, as capture does for that file's document.
+ */
+async function lastPlace(linear: LinearClient, targets: ResolvedTargets, place: Place): Promise<DocumentPlace | undefined> {
+  try {
+    return placeId(targets, place);
+  } catch {
+    const lookup = await resolveTargets(linear, [{ team: place.team, teamFolder: '', ...(place.kind === 'project' ? { project: place.project, projectFolder: '' } : {}) }]);
+    return lookup.targets === undefined ? undefined : placeId(lookup.targets, place);
+  }
 }
 
 function compare(a: string, b: string): number {
