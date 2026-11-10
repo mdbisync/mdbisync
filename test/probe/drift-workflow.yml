@@ -1,0 +1,80 @@
+# A daily drift check of the format probe. It runs in a test repository with
+# a self-hosted runner labeled `mdbisync-sandbox`, not in this one: copy it
+# to that repository's `.github/workflows/format-probe.yml`, from where it
+# checks out this repository. It needs the test repository's secrets
+# LINEAR_TEST_APP_CLIENT_ID and LINEAR_TEST_APP_CLIENT_SECRET (an OAuth app
+# with client credentials, read and write, in a test Linear workspace).
+#
+# The run fails on drift (exit 1) and when the probe could not finish
+# (exit 2); each drifted fixture is named in an error annotation. The report
+# is uploaded as an artifact, never committed. `ref` lets a manual run probe
+# another branch of this repository, for example one with a hand-edited
+# recorded form.
+name: Format probe
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit of mdbisync/mdbisync to probe
+        required: false
+        default: main
+permissions:
+  contents: read
+concurrency:
+  group: format-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: [self-hosted, mdbisync-sandbox]
+    # A pass without the fact measurements sends about 630 requests one at a
+    # time, in a few minutes.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mdbisync/mdbisync
+          ref: ${{ inputs.ref || 'main' }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Install dependencies (lock file only, no install scripts)
+        run: npm ci --ignore-scripts
+      - name: Probe Linear's forms against the recorded ones
+        env:
+          LINEAR_TEST_APP_CLIENT_ID: ${{ secrets.LINEAR_TEST_APP_CLIENT_ID }}
+          LINEAR_TEST_APP_CLIENT_SECRET: ${{ secrets.LINEAR_TEST_APP_CLIENT_SECRET }}
+          OUT: ${{ runner.temp }}/format-probe
+        shell: bash
+        run: |
+          mkdir -p "$OUT"
+          set +e
+          npm run probe:format -- --no-facts --report "$OUT/report.md" --json "$OUT/result.json" 2> "$OUT/probe.log"
+          code=$?
+          set -e
+          # The request diagnostics are JSON lines; the rest is the probe's own account.
+          grep -v '^{' "$OUT/probe.log" || true
+          drifted=$(grep -c '^drift: ' "$OUT/probe.log" || true)
+          case "$code:$drifted" in
+            0:*) ;;
+            1:0) echo "::error title=Format probe::exit 1 without drift: the probe failed before comparing" ;;
+            1:*) echo "::error title=Format probe::$drifted drifted fixtures" ;;
+            2:*) echo "::error title=Format probe::exit 2: the run could not finish" ;;
+            *) echo "::error title=Format probe::exit $code" ;;
+          esac
+          # The run page shows only the first annotations; the job summary lists every drifted fixture.
+          grep '^drift: ' "$OUT/probe.log" | sed -e 's/%/%25/g' -e 's/^drift: /::error title=Format drift::/' || true
+          if [ "$drifted" -gt 0 ]; then
+            { echo '### Format drift'; echo; grep '^drift: ' "$OUT/probe.log" | sed -e 's/^drift: /- /'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          fi
+          exit "$code"
+      - name: Keep the report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: format-probe-report
+          path: ${{ runner.temp }}/format-probe
+          if-no-files-found: ignore
+          retention-days: 14
