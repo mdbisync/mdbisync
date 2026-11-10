@@ -2229,6 +2229,16 @@ describe('the setup check step (run.check)', () => {
     await assert.rejects(runStep({ ...ctx, live: null }, { kind: 'run', action: 'check', args: {} }), /needs the sandbox and Linear/);
     assert.equal(ctx.engine.results.length, 0);
   });
+
+  it('leaves a mid-run fault armed for the next sync to that sync', async () => {
+    const { ctx } = await fakeRun();
+    let acted = false;
+    ctx.engine.trigger = { checkpoint: 'after-write-before-record', action: async () => { acted = true; } };
+    await assert.rejects(runStep(ctx, { kind: 'run', action: 'check', args: {} }), /checkpoint fault waits for the next sync run/);
+    assert.notEqual(ctx.engine.trigger, undefined);
+    assert.equal(acted, false);
+    assert.equal(ctx.engine.results.length, 0);
+  });
 });
 
 describe('quiet runs through the harness', () => {
