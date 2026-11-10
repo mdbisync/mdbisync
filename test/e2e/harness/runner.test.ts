@@ -528,6 +528,26 @@ describe('run cleanup on GitHub', () => {
 });
 
 describe('setup deadline', () => {
+  it('lets full convergence finish after 22 minutes while smaller slices retain their deadline', async (t) => {
+    const { setupTimeoutMs, withDeadline } = await import('./runner.ts');
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    for (const slice of ['mini', 'bank', 'mid'] as const) {
+      const smaller = withDeadline(new Promise(() => {}), setupTimeoutMs(slice), () => new EnvBlockedError('setup deadline'));
+      const rejected = assert.rejects(smaller, EnvBlockedError);
+      t.mock.timers.tick(15 * 60_000);
+      await rejected;
+    }
+    const setup = new Promise<string>((resolve) => setTimeout(() => resolve('converged'), 22 * 60_000));
+    const full = withDeadline(setup, setupTimeoutMs('full'), () => new EnvBlockedError('setup deadline'));
+    t.mock.timers.tick(22 * 60_000);
+    assert.equal(await full, 'converged');
+
+    const stuck = withDeadline(new Promise(() => {}), setupTimeoutMs('full'), () => new EnvBlockedError('full setup deadline'));
+    const rejected = assert.rejects(stuck, EnvBlockedError);
+    t.mock.timers.tick(45 * 60_000);
+    await rejected;
+  });
+
   it('gives up on work that does not settle in time, and keeps the result of work that does', async () => {
     const { withDeadline } = await import('./runner.ts');
     assert.equal(await withDeadline(Promise.resolve(7), 1_000, () => new Error('late')), 7);
