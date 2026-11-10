@@ -30,6 +30,7 @@ import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtur
 import { projectFolders } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
+import { cleanupKilledTokens } from './token-cleanup.ts';
 import { heldRunOf, saveHeldRun, UI_CHECKLIST_FILE } from './held-run.ts';
 
 export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
@@ -37,8 +38,12 @@ export const TEAM_LOCK_TIMEOUT_MS = 90 * 60_000;
 export const ZONE_CAP = 1_000;
 /** The harness warns from here on. */
 export const ZONE_TRASH_WARNING = 900;
-/** The longest setup, team-lock wait included; a full slice alone takes under a minute. */
+/** Default setup deadline, including team-lock waits. */
 export const SETUP_TIMEOUT_MS = 15 * 60_000;
+/** Full setup can include initial sync of thousands of documents. */
+export function setupTimeoutMs(slice: Scenario['slice']): number {
+  return slice === 'full' ? 45 * 60_000 : SETUP_TIMEOUT_MS;
+}
 /** How long a setup past its deadline gets to stop before cleanup runs anyway. */
 export const SETUP_STOP_MS = 2 * 60_000;
 
@@ -175,7 +180,7 @@ export async function liveWorld(
 }
 
 /** Identity is stable across API-key rotation; credentials never become ledger keys. */
-export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnType<Governor['admit']>> | undefined): Promise<void> {
+export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnType<Governor['admit']>> | undefined, maxWaitMs?: number): Promise<void> {
   if (grant?.claimBudgets === undefined || ctx.live === null) return;
   const estimated = estimate(ctx.scenario);
   const need = { requests: Math.min(estimated.requests, MAX_ADMISSION.requests), complexity: Math.min(estimated.complexity, MAX_ADMISSION.complexity) };
@@ -188,7 +193,12 @@ export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnT
     // reserve it once, including scenarios spanning several quota windows.
     accounts.set(key, { key, need, readBudget: async () => budgetFromStatus(await client.rateLimitStatus(), Date.now()) });
   }
-  await grant.claimBudgets([...accounts.values()], ctx.signal);
+  try {
+    await grant.claimBudgets([...accounts.values()], ctx.signal, maxWaitMs);
+  } catch (blocked) {
+    if (blocked instanceof BudgetBlockedError) throw new EnvBlockedError(blocked.message);
+    throw blocked;
+  }
 }
 
 async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
@@ -228,7 +238,9 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   // The team zones the run may write in, on record before anything is created there.
   ctx.owned.scope([...tree.teamZones.keys()].flatMap((key) => teams.get(key)?.id ?? []));
 
-  await claimEditorBudgets(ctx, grant);
+  // Setup ends after SETUP_TIMEOUT_MS: a key that frees up later is reported now, with its reason.
+  ctx.phase('editor budget');
+  await claimEditorBudgets(ctx, grant, SETUP_TIMEOUT_MS);
 
   // The team lock: initial sync matches every document of an annotated team zone.
   ctx.phase('team lock');
@@ -468,6 +480,16 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
     delete ctx.engine.pending;
   }
   ctx.checkpoints.resumeAll();
+  const proxy = ctx.proxy;
+  if (ctx.signal.aborted && proxy !== null) {
+    await attempt('setup tokens', async () => {
+      await cleanupKilledTokens(proxy.tokens(), {
+        cwd: ctx.runDir,
+        env: { PATH: process.env['PATH'], HOME: process.env['HOME'], LANG: 'C.UTF-8' },
+        linearUrl: proxy.url,
+      });
+    });
+  }
   // Every document the run made, by id: what the harness seeded, what the run's ownership record holds (every
   // create, a team zone's README and a create whose answer was lost included) and what the engine recorded.
   // Read the ids before the refs go.
@@ -732,9 +754,10 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       // A setup that does not finish must not hold a worker and its locks forever. On the deadline it is
       // told to stop; cleanup waits until it has stopped, so nothing is created after the cleanup.
       const setup = setupLive(ctx, deps, grant.app.name ?? appName, locks, grant);
+      const timeoutMs = setupTimeoutMs(scenario.slice);
       try {
-        await withDeadline(setup, SETUP_TIMEOUT_MS, () =>
-          new EnvBlockedError(`setup did not finish within ${SETUP_TIMEOUT_MS / 60_000} minutes (last phase: ${phase()})`));
+        await withDeadline(setup, timeoutMs, () =>
+          new EnvBlockedError(`setup did not finish within ${timeoutMs / 60_000} minutes (last phase: ${phase()})`));
       } catch (late) {
         abort.abort();
         setupStuck = !(await settlesWithin(setup, SETUP_STOP_MS));

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { RUN_ID_PATTERN, runOfProject, runOfTeamTitle, runNames } from './isolation.ts';
 import type { LinearWorld, Project } from './linear-world.ts';
+import { retryCleanup } from './cleanup-retry.ts';
 
 export type OwnedEntry =
   /** Team zones (team ids) the run may create documents in. */
@@ -237,7 +238,7 @@ export interface Recovery {
   problems: string[];
 }
 
-type Reader = Pick<LinearWorld, 'projects' | 'deleteProject' | 'archiveRunTeamDocuments'> & { client: Pick<LinearWorld['client'], 'getDocuments' | 'restoreDocument'> };
+type Reader = Pick<LinearWorld, 'projects' | 'deleteProject' | 'archiveRunTeamDocuments'> & { client: Pick<LinearWorld['client'], 'getDocuments' | 'restoreDocument'> & Partial<Pick<LinearWorld['client'], 'stopped'>> };
 
 /**
  * Finishes a run's cleanup from its record alone, then checks the result.
@@ -334,8 +335,9 @@ export async function recoverOwned(
   }
 
   // The proof: read everything again.
-  const after = new Map((await world.client.getDocuments([...ids, ...byName])).map((document) => [document.id, document]));
-  const projectsNow = await world.projects();
+  const canRetry = () => world.client.stopped === undefined;
+  const after = new Map((await retryCleanup(() => world.client.getDocuments([...ids, ...byName]), undefined, canRetry)).map((document) => [document.id, document]));
+  const projectsNow = await retryCleanup(() => world.projects(), undefined, canRetry);
   const listed = new Set(projectsNow.map((project) => project.id));
   for (const [id, confirmed] of [...owned.documents, ...byName.map((id) => [id, true] as const)]) {
     const document = after.get(id);

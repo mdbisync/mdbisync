@@ -119,6 +119,7 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
       ...(world.githubAppLogin === undefined ? {} : { appSlug: world.githubAppLogin.replace(/\[bot\]$/, '') }),
     },
     timeoutMs: ENGINE_TIMEOUT_MS,
+    signal: ctx.signal,
   };
 }
 
@@ -134,6 +135,7 @@ function recordResult(ctx: RunContext, result: EngineResult): void {
 /** Records an engine result; a "not implemented" answer stops the scenario. */
 function settleResult(ctx: RunContext, result: EngineResult): void {
   recordResult(ctx, result);
+  ctx.signal.throwIfAborted();
   if (result.notImplemented) throw new NotImplementedError(result.command, 'the engine command');
   if (result.timedOut) throw new ProductError(`${result.command} did not finish within ${ENGINE_TIMEOUT_MS / 60_000} minutes`);
 }
