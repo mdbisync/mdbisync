@@ -14,6 +14,7 @@ import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, CORPUS_DIR, inheritedTeam, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
+import type { EngineResult } from './engine.ts';
 import { BudgetBlockedError, budgetFromStatus, estimate, MAX_ADMISSION, type Governor } from './governor.ts';
 import { SandboxRest, githubToken, type GitHubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
@@ -25,7 +26,7 @@ import { OwnershipLedger, ownedDocuments, type WriteObserver } from './ownership
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
-import { runStep } from './steps.ts';
+import { runStep, unexpectedSetupStop } from './steps.ts';
 import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtures.ts';
 import { projectFolders } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
@@ -823,6 +824,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   let heldForUi = false;
   /** Set when setup did not stop after its deadline: the run stays registered, so the sweeper removes what it makes later. */
   let setupStuck = false;
+  /** Set once setup has ended: until then, every engine run so far is setup's. */
+  let setupEnded = scenario.setup.state === 'offline';
   try {
     if (scenario.setup.state !== 'offline') {
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');
@@ -850,6 +853,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
         setupStuck = !(await settlesWithin(setup, SETUP_STOP_MS));
         throw late;
       }
+      setupEnded = true;
       ctx.phase('steps');
     }
     const history: Array<Record<string, string>> = [await snapshotRefs(ctx)];
@@ -868,6 +872,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     failOnChecks(checks);
   } catch (caught) {
     error = caught;
+    error = blockedBySetupStop(caught, scenario, ctx.engine.results, setupEnded ? ctx.engine.setupRuns : ctx.engine.results.length);
   } finally {
     await retainPendingOutput(ctx);
     // Capture output before cleanup removes remote pull requests and comments,
@@ -912,6 +917,17 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   writeFileSync(join(runDir, 'harness.log'), logLines.join('\n'));
   rmSync(join(runDir, 'canary-pending'), { force: true });
   return resultOf(ctx, outcome, { startedAt: started, budgetWaitMs: grant?.waitedMs ?? 0, checks, cleanup: cleanupOutcome });
+}
+
+/**
+ * The error a scenario's run ends with, as it is classified: when an engine run stopped at its setup check
+ * on the test environment's credentials and the scenario does not expect that stop, what failed after it
+ * says nothing about the scenario, and the run is env-blocked with that setup item and its detail.
+ */
+export function blockedBySetupStop(error: unknown, scenario: Scenario, results: readonly EngineResult[], setupRuns: number): unknown {
+  if (error === undefined || error instanceof EnvBlockedError) return error;
+  const stop = unexpectedSetupStop(scenario, results, setupRuns);
+  return stop === null ? error : new EnvBlockedError(stop);
 }
 
 /** A check that does not hold fails the scenario as a product error; the outcomes stay in the result either way. */

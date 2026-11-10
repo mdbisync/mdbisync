@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { LinearClient } from '../../../src/linear/index.ts';
+import type { EngineResult } from './engine.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
 import { Git } from '../../../src/state/index.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
@@ -14,7 +15,7 @@ import { appInstallationToken, appJwt, SandboxRest } from './github.ts';
 import { registerRun } from './locks.ts';
 import { evidenceSummary, mergeLatest, readLatest, renderRunMarkdown, renderStatusPage, updateStatusPage, type HarnessReport } from './report.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, classify, loadExpectedRed, type ScenarioResult } from './results.ts';
-import { removeRunRefsAndPullRequests, runScenario, runScenarios } from './runner.ts';
+import { blockedBySetupStop, removeRunRefsAndPullRequests, runScenario, runScenarios } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios } from './spec.ts';
 import { HARNESS_GAPS } from './steps.ts';
@@ -42,6 +43,50 @@ describe('results', () => {
     assert.equal(classify(new Error('boom'), true).result, 'fail');
     assert.deepEqual(classify(undefined, false), { result: 'pass' });
     assert.equal(classify(undefined, true).unexpectedPass, true);
+  });
+
+  describe('an engine stopped at its setup check on its credentials', () => {
+    const stopped = (code: string, item: string, detail: string, command: EngineResult['command'] = 'initial-sync'): EngineResult => ({
+      command, exitCode: 3, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '',
+      report: { operation: command, ok: false, code, complete: false, setupChecks: [{ name: 'linear-credentials', state: 'passed' }, { name: item, state: 'failed', detail }] },
+    });
+    const permission = stopped('missing-permission', 'github-access', 'the GitHub token lacks checks:read, statuses:read');
+    const checksFailed = new ProductError('checks failed: I1 (no sync); I6 (no sync); I7 (no sync)');
+
+    it('reports a scenario that does not expect the stop env-blocked, with the setup item and its detail', () => {
+      const outcome = classify(blockedBySetupStop(checksFailed, byId('L1-13'), [permission], 0), false);
+      assert.deepEqual(outcome, {
+        result: 'env-blocked',
+        reason: "the engine's run 0 (initial-sync) stopped at the setup check github-access (missing-permission): the GitHub token lacks checks:read, statuses:read; the test environment's credentials do not let the scenario run",
+      });
+      // On the expected-red list too: the scenario did not run, so it is not red.
+      assert.equal(classify(blockedBySetupStop(checksFailed, byId('L1-13'), [permission], 0), true).result, 'env-blocked');
+    });
+
+    it('names a stop in setup\'s own runs, and one that broke setup before it ended', () => {
+      const ok: EngineResult = { ...permission, exitCode: 0, report: { operation: 'initial-sync', ok: true, code: null, complete: true, setupChecks: [] } };
+      const reason = (results: EngineResult[], setupRuns: number) => (blockedBySetupStop(new Error('boom'), byId('L5-02'), results, setupRuns) as Error).message;
+      assert.match(reason([permission, ok], 1), /^the engine's setup run 0 \(initial-sync\) stopped at the setup check github-access/);
+      assert.match(reason([permission], 1), /setup run 0/);
+    });
+
+    it('keeps the failure when the scenario expects that stop of that run', () => {
+      // L5-02 arms the fault for its run 0 and asserts its code and setup item.
+      const own = stopped('missing-permission', 'github-access', 'the GitHub App lacks contents:write', 'sync');
+      assert.equal(blockedBySetupStop(checksFailed, byId('L5-02'), [own], 0), checksFailed);
+      // Its settle run stopping on the environment's own credentials is not what it expects.
+      assert.match((blockedBySetupStop(checksFailed, byId('L5-02'), [own, permission], 0) as Error).message, /^the engine's run 1 \(initial-sync\) stopped at the setup check github-access/);
+    });
+
+    it('leaves other stops, passing scenarios and env-blocked runs as they are', () => {
+      const annotation = stopped('annotation-target-not-found', 'annotation-targets', 'not found in Linear');
+      assert.equal(blockedBySetupStop(checksFailed, byId('L1-13'), [annotation], 0), checksFailed);
+      const noItem: EngineResult = { ...permission, report: { operation: 'sync', ok: false, code: 'missing-permission', setupChecks: [] } };
+      assert.match((blockedBySetupStop(checksFailed, byId('L1-13'), [noItem], 0) as Error).message, /stopped with missing-permission;/);
+      assert.equal(blockedBySetupStop(undefined, byId('L1-13'), [permission], 0), undefined);
+      const budget = new EnvBlockedError('budget');
+      assert.equal(blockedBySetupStop(budget, byId('L1-13'), [permission], 0), budget);
+    });
   });
 
   it('lists only known scenarios as expected-red, and none of the offline format scenarios that pass', () => {

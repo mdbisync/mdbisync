@@ -7,7 +7,8 @@
 //   product reason: the engine answered "not implemented", a product step
 //   failed, or a check did not hold.
 // - env-blocked: the environment could not run it (budget, runner,
-//   corpus, browser, credentials), with the reason.
+//   corpus, browser, credentials; an engine stopped at its setup check on the
+//   test environment's credentials, unless the scenario expects it), with the reason.
 // - skipped: not run (stopped before its turn, or not selected for this host).
 //
 // A scenario on the expected-red list that passes is reported, so the list
