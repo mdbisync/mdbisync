@@ -26,6 +26,30 @@ export interface AccountBudget {
   readBudget(): Promise<Budget>;
 }
 export interface SharedState { version: 1; runs: Reservation[] }
+/**
+ * The most of one account's window a run reserves: the same share as the
+ * app's admission cap takes of its 5,000 requests. A larger run continues
+ * across windows. Reading the budget spends a request, so the whole window
+ * minus the reserve would never be free.
+ */
+export const ACCOUNT_WINDOW_SHARE = 0.6;
+
+/** Caps a need to the account's share of a full window, when the read reports the window. */
+export function windowNeed(need: Estimate, budget: Budget): Estimate {
+  const cap = (value: number, allowed: number | undefined) => (allowed === undefined ? value : Math.min(value, Math.floor(allowed * ACCOUNT_WINDOW_SHARE)));
+  return { requests: cap(need.requests, budget.requestsAllowed), complexity: cap(need.complexity, budget.complexityAllowed) };
+}
+
+/** Why a need can never be admitted, even on a full window; undefined when it can. */
+export function neverFits(need: Estimate, budget: Budget, reserve: Estimate): string | undefined {
+  for (const [kind, allowed, wanted, kept] of [
+    ['requests', budget.requestsAllowed, need.requests, reserve.requests],
+    ['complexity points', budget.complexityAllowed, need.complexity, reserve.complexity],
+  ] as const) {
+    if (allowed !== undefined && allowed - kept < wanted) return `an editor key allows ${allowed} ${kind} an hour, too few for ${wanted} plus the reserve of ${kept}`;
+  }
+  return undefined;
+}
 export interface StateStore {
   close?(): Promise<void>;
   read(): Promise<SharedState>;
@@ -183,7 +207,11 @@ export class SharedAdmission {
     });
   }
   /** Reserve personal editor budgets by viewer identity, across all apps. */
-  async reserveAccounts(runId: string, owner: string, accounts: readonly AccountBudget[], reserve: Estimate): Promise<{ admitted: boolean; wakeAt?: number }> {
+  /**
+   * Reserves each account's need, capped to what one window of that account
+   * can grant. `never` explains a need that no window could ever admit.
+   */
+  async reserveAccounts(runId: string, owner: string, accounts: readonly AccountBudget[], reserve: Estimate): Promise<{ admitted: boolean; wakeAt?: number; never?: string }> {
     return this.store.update(async (state) => {
       const entry = state.runs.find((run) => run.runId === runId && run.owner === owner && !run.recovering);
       if (entry === undefined) throw new Error('shared reservation ownership lost');
@@ -195,10 +223,12 @@ export class SharedAdmission {
       const resources: NonNullable<Reservation['resources']> = [];
       let admitted = true;
       let wakeAt: number | undefined;
+      let never: string | undefined;
       for (const account of grouped.values()) {
         const old = entry.resources?.find((resource) => resource.key === account.key);
-        const need = { requests: Math.max(account.need.requests, old?.requests ?? 0), complexity: Math.max(account.need.complexity, old?.complexity ?? 0) };
         const budget = await account.readBudget();
+        const need = windowNeed({ requests: Math.max(account.need.requests, old?.requests ?? 0), complexity: Math.max(account.need.complexity, old?.complexity ?? 0) }, budget);
+        never ??= neverFits(need, budget, reserve);
         const used = state.runs.filter((run) => run !== entry).flatMap((run) => run.resources ?? []).filter((resource) => resource.key === account.key).reduce((sum, resource) => ({ requests: sum.requests + resource.requests, complexity: sum.complexity + resource.complexity }), { requests: 0, complexity: 0 });
         if (budget.requestsRemaining - reserve.requests - used.requests < need.requests || budget.complexityRemaining - reserve.complexity - used.complexity < need.complexity) {
           admitted = false;
@@ -206,6 +236,7 @@ export class SharedAdmission {
         }
         resources.push({ key: account.key, ...need });
       }
+      if (never !== undefined) return { admitted: false, never };
       if (admitted) {
         entry.resources = resources;
         entry.revision = randomUUID();

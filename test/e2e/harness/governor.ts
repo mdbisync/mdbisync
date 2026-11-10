@@ -63,14 +63,17 @@ export interface Budget {
   complexityRemaining: number;
   /** When the tighter of the two limits is refilled, epoch milliseconds. */
   resetAt: number;
+  /** What a full window of this credential allows, when the read reports it. */
+  requestsAllowed?: number;
+  complexityAllowed?: number;
 }
 
 /** Reads the requests and complexity limits from `rateLimitStatus`. */
 export function budgetFromStatus(status: RateLimitStatus, now: number): Budget {
-  let requests: { remaining: number; reset: number } | undefined;
-  let complexity: { remaining: number; reset: number } | undefined;
+  let requests: { remaining: number; allowed: number; reset: number } | undefined;
+  let complexity: { remaining: number; allowed: number; reset: number } | undefined;
   for (const limit of status.limits) {
-    const entry = { remaining: limit.remainingAmount, reset: limit.reset };
+    const entry = { remaining: limit.remainingAmount, allowed: limit.allowedAmount, reset: limit.reset };
     if (/complex/i.test(limit.type)) complexity = entry;
     else if (/request/i.test(limit.type)) requests = entry;
   }
@@ -79,7 +82,10 @@ export function budgetFromStatus(status: RateLimitStatus, now: number): Budget {
   }
   // Linear gives reset as epoch milliseconds; a small number would be seconds from now.
   const at = (reset: number) => (reset > 1e12 ? reset : now + reset * 1000);
-  return { requestsRemaining: requests.remaining, complexityRemaining: complexity.remaining, resetAt: Math.max(at(requests.reset), at(complexity.reset)) };
+  return {
+    requestsRemaining: requests.remaining, complexityRemaining: complexity.remaining, resetAt: Math.max(at(requests.reset), at(complexity.reset)),
+    requestsAllowed: requests.allowed, complexityAllowed: complexity.allowed,
+  };
 }
 
 export interface App {
@@ -236,6 +242,7 @@ export class Governor {
               signal?.throwIfAborted();
               const result = await shared.reserveAccounts(runId, owner, accounts, RESERVE);
               if (result.admitted) return;
+              if (result.never !== undefined) throw new BudgetBlockedError(`editor budget can never be admitted: ${result.never}`);
               const wake = Math.max(result.wakeAt ?? this.#now() + RESERVATION_POLL_MS, this.#now() + RESERVATION_POLL_MS);
               if (wake > until) throw new BudgetBlockedError('editor budget unavailable within the longest wait');
               await sleep(Math.max(0, wake - this.#now()), undefined, signal === undefined ? {} : { signal });

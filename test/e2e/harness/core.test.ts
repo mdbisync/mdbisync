@@ -145,7 +145,7 @@ describe('budget governor', () => {
         { type: 'complexityLimit', allowedAmount: 2_000_000, remainingAmount: 1_500_000, requestedAmount: 1, period: 3600000, reset: 1_900_000_100_000 },
       ],
     }, 0);
-    assert.deepEqual(budget, { requestsRemaining: 4200, complexityRemaining: 1_500_000, resetAt: 1_900_000_100_000 });
+    assert.deepEqual(budget, { requestsRemaining: 4200, complexityRemaining: 1_500_000, resetAt: 1_900_000_100_000, requestsAllowed: 5000, complexityAllowed: 2_000_000 });
     assert.throws(() => budgetFromStatus({ identifier: null, kind: 'app', limits: [] }, 0), /lacks/);
   });
 

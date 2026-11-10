@@ -188,7 +188,12 @@ export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnT
     // reserve it once, including scenarios spanning several quota windows.
     accounts.set(key, { key, need, readBudget: async () => budgetFromStatus(await client.rateLimitStatus(), Date.now()) });
   }
-  await grant.claimBudgets([...accounts.values()], ctx.signal);
+  try {
+    await grant.claimBudgets([...accounts.values()], ctx.signal);
+  } catch (blocked) {
+    if (blocked instanceof BudgetBlockedError) throw new EnvBlockedError(blocked.message);
+    throw blocked;
+  }
 }
 
 async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
