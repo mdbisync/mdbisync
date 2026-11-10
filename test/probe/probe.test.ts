@@ -295,6 +295,22 @@ describe('format probe helpers', () => {
     assert.equal(fromLinear(linear, assets), '![a](../assets/pixel%20copy.png) ![b](../assets/pixel%20copy.png)');
   });
 
+  it('numbers the uploads Linear made of images it did not get as uploads', () => {
+    const ours = 'https://uploads.linear.app/w1/our-upload/pixel.png';
+    const assets = { urls: new Map([['assets/pixel.png', ours]]) };
+    const copy = (id: string) => `https://uploads.linear.app/w1/${id}/0f3a?signature=x-y_z`;
+    const text = `![a](${copy('one')}) ![b](${ours})\n\n| ![c](${copy('two')}) |\n\n[![d](${copy('one')})](https://example.com/build)`;
+    assert.equal(
+      fromLinear(text, assets),
+      '![a](https://uploads.linear.app/rehosted-1) ![b](../assets/pixel.png)\n\n' +
+        '| ![c](https://uploads.linear.app/rehosted-2) |\n\n[![d](https://uploads.linear.app/rehosted-1)](https://example.com/build)',
+    );
+    // A Yjs attribute holds the bare URL.
+    assert.equal(fromLinear(copy('three'), assets), 'https://uploads.linear.app/rehosted-1');
+    // Text without uploads is unchanged.
+    assert.equal(fromLinear('![r](https://example.com/chart.png)', assets), '![r](https://example.com/chart.png)');
+  });
+
   it('decodes marks and strips the y-prosemirror mark suffix', () => {
     const doc = new Y.Doc();
     const paragraph = new Y.XmlElement('paragraph');

@@ -115,7 +115,25 @@ export function toLinear(text: string, assets: AssetMap): string {
 export function fromLinear(text: string, assets: AssetMap): string {
   let result = text;
   for (const [file, url] of assets.urls) result = result.replaceAll(url, assetSpellings(file).at(-1)!);
-  return result;
+  return placeholdRehosted(result);
+}
+
+/** A Linear upload URL; it ends where a Markdown destination or a quoted value ends. */
+const UPLOAD_URL = /https:\/\/uploads\.linear\.app\/[^\s()<>"'\]\\]+/g;
+
+/**
+ * Replaces Linear upload URLs the probe did not upload itself with numbered
+ * placeholders. Linear copies an image whose URL is not one of its own
+ * uploads to a new upload, even a URL it cannot fetch, and the copy has a new
+ * URL every run. Numbering follows the order of first appearance in the text,
+ * so a URL that appears twice keeps one number.
+ */
+export function placeholdRehosted(text: string): string {
+  const numbers = new Map<string, number>();
+  return text.replace(UPLOAD_URL, (url) => {
+    if (!numbers.has(url)) numbers.set(url, numbers.size + 1);
+    return `https://uploads.linear.app/rehosted-${numbers.get(url)}`;
+  });
 }
 
 const CONTENT_TYPES: Record<string, string> = {
