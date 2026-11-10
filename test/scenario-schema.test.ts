@@ -4,17 +4,23 @@ import { join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { validateScenario } from './scenarios/schema.ts';
-import { LEFT_OUT_AT_WRITE_RULES, LEFT_OUT_RULES, UNSYNCED_REASONS } from '../src/codes.ts';
+import { LEFT_OUT_AT_WRITE_RULES, LEFT_OUT_RULES, RECORD_LEFT_OUT_RULES, UNSYNCED_REASONS } from '../src/codes.ts';
 import { LINT_RULES } from '../src/format/rules.ts';
 
 const scenarioDirectory = fileURLToPath(new URL('./scenarios/', import.meta.url));
 
 test('left-out expectations accept engine rules and reject unknown names', () => {
   const scenario = JSON.parse(readFileSync(join(scenarioDirectory, 'L5-12.yaml'), 'utf8'));
-  const assertion = scenario.checks.assertions.find((entry: any) => entry.subject === 'summary.leftOutRules');
+  const assertion: { subject: string; operator: string; expected: unknown } = {
+    subject: 'summary.leftOutRules', operator: 'contains-all', expected: [],
+  };
+  scenario.checks.assertions = [assertion];
   for (const operator of ['contains-all', 'equal']) {
     assertion.operator = operator;
-    assertion.expected = [...Object.keys(LINT_RULES), ...UNSYNCED_REASONS, ...LEFT_OUT_RULES, ...LEFT_OUT_AT_WRITE_RULES];
+    assertion.expected = [...Object.keys(LINT_RULES), ...UNSYNCED_REASONS, ...LEFT_OUT_RULES, ...LEFT_OUT_AT_WRITE_RULES, ...RECORD_LEFT_OUT_RULES];
+    validateScenario(scenario, 'L5-12.yaml');
+    // One literal from each report source also checks the choice of tables.
+    assertion.expected = ['footnote', 'stored-in-lfs', 'title-too-long', 'upload-unreadable', 'download-failed'];
     validateScenario(scenario, 'L5-12.yaml');
     for (const rule of ['lfs-object-missing', 'escaped-pipe', 'unknown-rule', 42]) {
       assertion.expected = ['upload-unreadable', rule];
@@ -22,6 +28,8 @@ test('left-out expectations accept engine rules and reject unknown names', () =>
     }
   }
   assertion.expected = [];
+  validateScenario(scenario, 'L5-12.yaml');
+  assertion.expected = null;
   validateScenario(scenario, 'L5-12.yaml');
   assertion.expected = 'upload-unreadable';
   assert.throws(() => validateScenario(scenario, 'L5-12.yaml'), /expects an array/);
