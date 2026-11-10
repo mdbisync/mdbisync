@@ -129,6 +129,11 @@ export interface Grant {
   release(): void | Promise<void>;
 }
 
+/** Whether a scenario's shared reservation excludes every other one: all but the audited zone-concurrent contracts. */
+export function holdsFullSlot(scenario: Scenario): boolean {
+  return !zoneConcurrent(scenario);
+}
+
 export class BudgetBlockedError extends Error {
   constructor(message: string) {
     super(message);
@@ -231,7 +236,7 @@ export class Governor {
    */
   conflicts(a: Scenario, b: Scenario): boolean {
     if (a.setup.state === 'offline' || b.setup.state === 'offline') return false;
-    if (this.#options.shared !== undefined) return !zoneConcurrent(a) || !zoneConcurrent(b);
+    if (this.#options.shared !== undefined) return holdsFullSlot(a) || holdsFullSlot(b);
     return a.slice === 'full' && b.slice === 'full';
   }
 
@@ -247,7 +252,7 @@ export class Governor {
     for (;;) {
       let retryAt = Infinity;
       for (const app of apps) {
-        const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: !zoneConcurrent(scenario), ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
+        const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: holdsFullSlot(scenario), ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
           readBudget: async () => {
             const at = this.#now();
             return this.#withObserved(app.name, await app.readBudget(), at);

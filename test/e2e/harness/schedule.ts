@@ -23,14 +23,20 @@ export function nextStartable(pending: readonly number[], running: ReadonlySet<n
  * Runs `run` for every index on `workers` workers. When nothing can start,
  * something is running: the first pending index has no earlier one, so only
  * a running index can hold it back.
+ *
+ * `run` says 'kept' when its admission outlives it (a UI hold, a setup that
+ * did not stop, a failed release). That slot is then held outside the batch
+ * until someone recovers it, so the rest of the batch waits in admission as
+ * workers did before: side by side, not one after another.
  */
-export async function runScheduled(indices: readonly number[], workers: number, conflicts: Conflicts, run: (index: number) => Promise<void>): Promise<void> {
+export async function runScheduled(indices: readonly number[], workers: number, conflicts: Conflicts, run: (index: number) => Promise<'kept' | 'released' | void>): Promise<void> {
   const pending = [...indices];
   const running = new Set<number>();
   let waiting: Array<() => void> = [];
+  let kept = false;
   const worker = async () => {
     while (pending.length > 0) {
-      const index = nextStartable(pending, running, conflicts);
+      const index = kept ? pending[0] : nextStartable(pending, running, conflicts);
       if (index === undefined) {
         await new Promise<void>((resolve) => waiting.push(resolve));
         continue;
@@ -38,7 +44,7 @@ export async function runScheduled(indices: readonly number[], workers: number, 
       pending.splice(pending.indexOf(index), 1);
       running.add(index);
       try {
-        await run(index);
+        if ((await run(index)) === 'kept') kept = true;
       } finally {
         running.delete(index);
         const wake = waiting;

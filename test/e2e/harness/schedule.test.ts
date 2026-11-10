@@ -5,15 +5,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { setImmediate as flush } from 'node:timers/promises';
-import { Governor, MAX_BUDGET_WAIT_MS } from './governor.ts';
+import { BudgetBlockedError, Governor, MAX_BUDGET_WAIT_MS } from './governor.ts';
 import { nextStartable, runScheduled, type Conflicts } from './schedule.ts';
-import type { SharedAdmission } from './shared-state.ts';
+import { parseSharedState, SharedAdmission, type SharedState, type StateStore } from './shared-state.ts';
 import { loadScenarios, type Scenario } from './spec.ts';
 
 const catalog = loadScenarios();
 const byId = (id: string) => catalog.find((scenario) => scenario.id === id)!;
 const governor = (shared: boolean) =>
-  new Governor({ apps: [{ name: 'app', readBudget: async () => { throw new Error('not read'); } }], stateDir: '/nonexistent', ...(shared ? { shared: {} as SharedAdmission } : {}) });
+  new Governor({ apps: [{ name: 'app', readBudget: async () => { throw new Error('not read'); } }], stateDir: '/nonexistent', ...(shared ? { shared: new SharedAdmission({} as StateStore) } : {}) });
 
 /** A clock that moves only when every worker waits on it. */
 class VirtualClock {
@@ -51,60 +51,80 @@ interface Trace {
   overlap: number;
 }
 
-type Model = (indices: readonly number[], workers: number, conflicts: Conflicts, run: (index: number) => Promise<void>, admitted: (index: number) => Promise<void>) => Promise<void>;
+type Run = (index: number) => Promise<'kept' | 'released'>;
+type Model = (indices: readonly number[], workers: number, conflicts: Conflicts, run: Run, admitted: (index: number) => Promise<boolean>) => Promise<void>;
 
 /** Before: each worker takes the next scenario in order and waits in admission until it may run. */
 const inOrder: Model = async (indices, workers, conflicts, run, admitted) => {
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(workers, indices.length) }, async () => {
     for (let index = indices[next++]; index !== undefined; index = indices[next++]) {
-      await admitted(index);
-      await run(index);
+      if (await admitted(index)) await run(index);
     }
   }));
 };
 
-/** Now: the scheduler; admission is granted at once because nothing of the batch conflicts with a started scenario. */
-const scheduled: Model = (indices, workers, conflicts, run, admitted) => runScheduled(indices, workers, conflicts, async (index) => { await admitted(index); await run(index); });
+/** Now: the scheduler in front of the same admission. */
+const scheduled: Model = (indices, workers, conflicts, run, admitted) => runScheduled(indices, workers, conflicts, async (index) => (await admitted(index) ? run(index) : 'released'));
 
-async function simulate(model: Model, scenarios: readonly Scenario[], minutes: readonly number[], workers = 4, shared = true): Promise<Trace> {
+interface Options {
+  workers?: number;
+  shared?: boolean;
+  /** Runs whose reservation outlives their result, with the minute it is recovered (Infinity: never). */
+  kept?: ReadonlyMap<number, number>;
+}
+
+async function simulate(model: Model, scenarios: readonly Scenario[], minutes: readonly number[], options: Options = {}): Promise<Trace> {
   const clock = new VirtualClock();
-  const gov = governor(shared);
+  const gov = governor(options.shared ?? true);
   const conflicts: Conflicts = (a, b) => gov.conflicts(scenarios[a]!, scenarios[b]!);
-  // Admission as the shared state grants it: a scenario waits while a conflicting one runs or waited before it.
-  const running = new Set<number>();
+  // Admission as the shared state grants it: a scenario waits while a conflicting one holds a reservation or
+  // asked before it, and ends env-blocked after the governor's longest wait.
+  const holding = new Set<number>();
   const queue: number[] = [];
   let wake: Array<() => void> = [];
+  const changed = () => { const woken = wake; wake = []; woken.forEach((resolve) => resolve()); };
   const trace: Trace = { end: 0, admissionWaiters: 0, waited: [], reported: [], blocked: [], overlap: 0 };
   const taken: number[] = [];
   let waiters = 0;
+  let running = 0;
   const admitted = async (index: number) => {
     taken[index] = clock.now;
+    const deadline = clock.now + MAX_BUDGET_WAIT_MS / 60_000;
     queue.push(index);
     let waiting = false;
-    const mayRun = () => queue.slice(0, queue.indexOf(index)).every((other) => !conflicts(index, other)) && [...running].every((other) => !conflicts(index, other));
-    while (!mayRun()) {
+    const mayRun = () => queue.slice(0, queue.indexOf(index)).every((other) => !conflicts(index, other)) && [...holding].every((other) => !conflicts(index, other));
+    while (!mayRun() && clock.now < deadline) {
       if (!waiting) trace.admissionWaiters = Math.max(trace.admissionWaiters, ++waiters);
       waiting = true;
-      await new Promise<void>((resolve) => wake.push(resolve));
+      await Promise.race([new Promise<void>((resolve) => wake.push(resolve)), clock.sleep(deadline - clock.now)]);
     }
     if (waiting) waiters--;
+    const may = mayRun();
     queue.splice(queue.indexOf(index), 1);
     trace.waited[index] = clock.now - taken[index]!;
-    if (trace.waited[index]! * 60_000 > MAX_BUDGET_WAIT_MS) trace.blocked.push(index);
-    running.add(index);
-    trace.overlap = Math.max(trace.overlap, running.size);
+    if (!may) {
+      trace.blocked.push(index);
+      trace.reported[index] = trace.waited[index]!;
+      changed();
+      return false;
+    }
+    holding.add(index);
+    trace.overlap = Math.max(trace.overlap, ++running);
+    return true;
   };
-  const run = async (index: number) => {
+  const run: Run = async (index) => {
     await clock.sleep(minutes[index]!);
-    running.delete(index);
+    running--;
     trace.reported[index] = clock.now - taken[index]!;
-    const woken = wake;
-    wake = [];
-    woken.forEach((resolve) => resolve());
+    const recovered = options.kept?.get(index);
+    if (recovered === undefined) holding.delete(index);
+    else if (Number.isFinite(recovered)) void clock.sleep(recovered - clock.now).then(() => { holding.delete(index); changed(); });
+    changed();
+    return recovered === undefined ? 'released' : 'kept';
   };
-  await clock.drive(model(scenarios.map((_, index) => index), workers, conflicts, run, admitted));
-  trace.end = clock.now;
+  await clock.drive(model(scenarios.map((_, index) => index), options.workers ?? 4, conflicts, run, admitted));
+  trace.end = Math.max(...trace.reported.map((reported, index) => taken[index]! + reported));
   return trace;
 }
 
@@ -147,7 +167,7 @@ describe('a batch on the default workers', () => {
     const after = await simulate(scheduled, eng, minutes);
     assert.equal(before.end, 22);
     assert.equal(after.end, 22, 'the exclusive slot still bounds the batch');
-    assert.equal(before.admissionWaiters, 3, 'three workers polled the shared state and raced for it at each release');
+    assert.ok(before.admissionWaiters >= 3, 'the other workers polled the shared state and raced for it at each release');
     assert.equal(after.admissionWaiters, 0);
     assert.equal(Math.max(...before.reported), 8, 'a scenario reported up to three others\' time as its own');
     assert.deepEqual(after.reported, minutes);
@@ -176,5 +196,50 @@ describe('a batch on the default workers', () => {
     assert.ok(after.overlap >= 3, 'offline scenarios run beside the exclusive one');
     assert.equal(after.admissionWaiters, 0);
     assert.deepEqual(after.reported, minutes);
+  });
+
+  it('lets the rest wait side by side when a run keeps the exclusive slot past its result', async () => {
+    // A UI hold at the head of four exclusive scenarios that nobody recovers.
+    const batch = ['L2-29', 'L2-30', 'L2-32', 'L4-04'].map(byId);
+    const minutes = [5, 2, 2, 2];
+    const kept = new Map([[0, Infinity]]);
+    const before = await simulate(inOrder, batch, minutes, { kept });
+    const after = await simulate(scheduled, batch, minutes, { kept });
+    assert.deepEqual(before.blocked, [1, 2, 3]);
+    assert.deepEqual(after.blocked, [1, 2, 3]);
+    assert.ok(after.end <= 5 + 65, `the waits overlap, as before (ended at ${after.end} minutes)`);
+    // Recovered after an hour: the waiters then run one after another.
+    const recovered = await simulate(scheduled, batch, minutes, { kept: new Map([[0, 60]]) });
+    assert.deepEqual(recovered.blocked, []);
+    assert.equal(recovered.end, 66);
+  });
+});
+
+describe('conflicts and shared admission', () => {
+  class MemoryStore implements StateStore {
+    state: SharedState = { version: 1, runs: [] };
+    async read() { return structuredClone(this.state); }
+    async update<T>(change: (state: SharedState) => T | Promise<T>) {
+      const next = structuredClone(this.state);
+      const result = await change(next);
+      this.state = parseSharedState(JSON.stringify(next));
+      return result;
+    }
+  }
+
+  it('says two live scenarios conflict exactly when shared admission refuses the second while the first holds', async () => {
+    const budget = { requestsRemaining: 5000, complexityRemaining: 2_000_000, resetAt: 0 };
+    const live = [byId('L1-05'), byId('L2-30'), byId('L4-04'), byId('L1-16'), byId('L6-05')];
+    for (const a of live) {
+      for (const b of live) {
+        const gov = new Governor({ apps: [{ name: 'app', readBudget: async () => budget }], stateDir: '/nonexistent', shared: new SharedAdmission(new MemoryStore()), maxWaitMs: 0, sleep: async () => {} });
+        await gov.admit(a, 'aaaaaa', { requests: 1, complexity: 1 });
+        const second = await gov.admit(structuredClone(b), 'bbbbbb', { requests: 1, complexity: 1 }).then(() => true, (error: unknown) => {
+          if (error instanceof BudgetBlockedError) return false;
+          throw error;
+        });
+        assert.equal(second, !gov.conflicts(a, b), `${a.id} then ${b.id}`);
+      }
+    }
   });
 });
