@@ -1726,7 +1726,9 @@ async function mermaidFences(env: Env, side: 'git' | 'linear'): Promise<Map<stri
 /**
  * The table rows of the slice's table documents: in Linear, as stored; in
  * git, the file's body with its links as the engine writes them (I1's rule),
- * since a cell's image or document link is a Linear URL there.
+ * since a cell's image or document link is a Linear URL there. Cell
+ * equality is therefore I1 restricted to table rows: it names the table
+ * documents whose cells differ.
  */
 async function tableRows(env: Env, side: 'git' | 'linear'): Promise<Array<{ path: string; separator: boolean; cells: string[] }>> {
   const view = await env.view();

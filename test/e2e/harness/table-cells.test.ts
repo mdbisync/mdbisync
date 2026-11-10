@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import { it } from 'node:test';
-import { lintText } from '../../../src/format/lint.ts';
-import { LINT_RULES } from '../../../src/format/rules.ts';
+import { planInitialSync } from '../../../src/initial-sync/plan.ts';
+import { toPlanReport } from '../../../src/initial-sync/summary.ts';
+import { collectAnnotations, mapFiles, resolveZones } from '../../../src/mapping/index.ts';
 import { buildCorpus } from '../../corpus/generate.ts';
 import type { RunContext } from './context.ts';
 import { bodyOf, compare, differingPaths } from './checks.ts';
@@ -20,13 +22,15 @@ it('compares L1-10 table cells with the file as Linear stores it, image upload U
   const cells = assertionOf('documents.tableCells');
   assert.equal(cells.operator, 'same-as');
   // A table with an image in a cell, as the mid slice has one, and an aligned table the plan leaves out.
-  const table = midEntries.find((entry) => entry.group === 'tables' && entry.class === null && entry.links.length > 0)!;
+  const isImage = (path: string) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
+  const table = midEntries.find((entry) => entry.group === 'tables' && entry.class === null && entry.links.some(isImage))!;
   const aligned = midEntries.find((entry) => entry.group === 'tables' && entry.rule === 'table-alignment')!;
   assert.ok(table !== undefined && aligned !== undefined);
-  const image = table.links[0]!;
+  const image = table.links.find(isImage)!;
   const relative = posix.relative(posix.dirname(table.path), image);
   const text = textOf(table.path);
-  assert.ok(text.includes(`](${relative})`), 'the image cell links the file by a relative path');
+  const row = text.split('\n').find((line) => line.startsWith('|') && line.includes(`](${relative})`));
+  assert.ok(row?.includes('!['), 'a table cell embeds the image by a relative path');
   const upload = 'https://uploads.linear.app/team/asset/status-icon.png';
   // What Linear stores: the file's body with the image's upload URL (I1 holds for this document).
   const stored = bodyOf(text).replace(`](${relative})`, `](${upload})`);
@@ -48,7 +52,11 @@ it('compares L1-10 table cells with the file as Linear stores it, image upload U
   const both = async () => {
     const actual = (await resolveSubject(ctx, `before.${cells.subject}`)).value;
     const expected = (await resolveSubject(ctx, `before.${String(cells.expected)}`)).value;
-    return { actual, expected, holds: compare('same-as', actual, expected), paths: differingPaths(actual, expected) };
+    return { actual, holds: compare('same-as', actual, expected), paths: differingPaths(actual, expected) };
+  };
+  const verdict = async () => {
+    const { holds, paths } = await both();
+    return { holds, paths };
   };
 
   const same = await both();
@@ -57,28 +65,34 @@ it('compares L1-10 table cells with the file as Linear stores it, image upload U
   assert.ok(JSON.stringify([...(same.actual as Map<string, unknown>)]).includes(upload));
 
   // A changed cell still fails, naming the document.
-  documents.set('doc-1', { id: 'doc-1', content: stored.replace(/ \|\n\n(?=Doc ID)/, ' changed |\n\n') });
-  assert.notEqual(documents.get('doc-1')!.content, stored);
-  assert.deepEqual((({ holds, paths }) => ({ holds, paths }))(await both()), { holds: false, paths: `differs at ${table.path}` });
+  documents.set('doc-1', { id: 'doc-1', content: stored.replace('![', '![changed ') });
+  assert.deepEqual(await verdict(), { holds: false, paths: `differs at ${table.path}` });
 
   // The expectation takes the upload URL from the run's uploads ref, not from the document: an unrecorded upload fails.
   uploadsByHash.clear();
   documents.set('doc-1', { id: 'doc-1', content: stored });
-  assert.deepEqual((({ holds, paths }) => ({ holds, paths }))(await both()), { holds: false, paths: `differs at ${table.path}` });
+  assert.deepEqual(await verdict(), { holds: false, paths: `differs at ${table.path}` });
 });
 
-it("expects L1-10's left-out rules by the names the engine reports for the mid slice", () => {
+it("expects L1-10's left-out rules among those the engine's plan reports for the mid slice", () => {
   const rules = assertionOf('summary.leftOutRules');
   assert.equal(rules.operator, 'contains-all');
-  const expected = rules.expected as string[];
-  assert.ok(expected.length > 0);
-  const reported = new Set<string>();
-  for (const entry of midEntries.filter((file) => file.class === 'lint-error')) {
-    for (const finding of lintText(entry.path, textOf(entry.path))) reported.add(finding.rule);
-  }
-  for (const rule of expected) {
-    assert.ok(Object.hasOwn(LINT_RULES, rule), `${rule} is a lint rule`);
-    assert.ok(reported.has(rule), `the mid slice has a file the engine leaves out by ${rule}`);
-  }
-  assert.ok(compare('contains-all', [...reported].sort(), expected));
+  assert.ok((rules.expected as string[]).length > 0);
+  // The initial sync's plan of the whole slice, read the way the run report's leftOutRules is.
+  const files = corpus.files.filter((file) => mid.has(file.path));
+  const readmes = new Map(files.filter((file) => /(^|\/)README\.md$/.test(file.path)).map((file) => [file.path, file.content.toString('utf8')]));
+  const blobs = new Map<string, Buffer>();
+  const texts = new Map<string, string>();
+  const entries = files.map((file) => {
+    const oid = createHash('sha1').update(file.path).update(file.content).digest('hex');
+    blobs.set(oid, file.content);
+    if (file.path.endsWith('.md')) texts.set(file.path, file.content.toString('utf8'));
+    return { path: file.path, oid, mode: '100644', type: 'blob' as const, size: file.content.length };
+  });
+  const { annotations } = collectAnnotations(readmes);
+  const { zones } = resolveZones(annotations);
+  const mapping = { annotations, problems: [], zones, ...mapFiles(entries, zones, blobs) };
+  const report = toPlanReport(planInitialSync({ mapping, texts, places: [] }), 'git-to-linear', false);
+  const reported = [...new Set(report.leftOutFiles.flatMap((entry) => entry.rules))].sort();
+  assert.ok(compare('contains-all', reported, rules.expected), `the plan reports ${reported.join(', ')}`);
 });
