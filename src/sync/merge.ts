@@ -101,7 +101,7 @@ export interface LocalMerge {
   /**
    * Documents whose file was renamed to one that cannot be written yet (a
    * conflict, or left out by a lint finding): neither renamed nor trashed.
-   * The record keeps the tip's file, and the run is not complete.
+   * The record keeps both paths as the tip has them, and the run is not complete.
    */
   held: HeldRename[];
   /** The blobs of every synchronized file of both sides, by id. */
