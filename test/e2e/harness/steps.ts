@@ -20,7 +20,7 @@ import { COMMANDS, type CommandName } from '../../../src/commands.ts';
 import { LinearError, LinearStoppedError, LinearTokenError, isTransientLinearError } from '../../../src/linear/index.ts';
 import { Git } from '../../../src/state/index.ts';
 import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
-import { BANK_DIR, goldenMarkdownPath, loadBank, readOptional } from '../../probe/bank.ts';
+import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
 import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
@@ -42,6 +42,7 @@ import { parse, stringify } from 'yaml';
 import { HOOK_REPOSITORY } from '../../corpus/tree.ts';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
+import { lfsEndpoint, lfsUrlEnv, startLfsFaultProxy } from './lfs-fault-proxy.ts';
 import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
 import {
   commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
@@ -1501,6 +1502,8 @@ const FAULT: Record<string, Executor> = {
   'fault.clear': async (ctx) => {
     ctx.proxy?.clearFaults();
     ctx.engine.env = {};
+    // An engine already started through the LFS proxy goes on through it; the run closes it at its end.
+    ctx.engine.lfsProxy?.clear();
     delete ctx.engine.badCredential;
     delete ctx.engine.trigger;
     for (const restore of ctx.engine.restores.splice(0).reverse()) await restore();
@@ -1607,27 +1610,37 @@ const FAULT: Record<string, Executor> = {
     }
   },
   'fault.missing-lfs-object': async (ctx) => {
-    // The image's LFS pointer names an object the server never received.
+    // The image changes to an LFS object the engine cannot download. GitHub refuses a push whose pointer names an
+    // object it never received, so the object is uploaded with the push and the engine's clone reaches the LFS
+    // server through a local proxy that answers 404 for that one object.
+    const world = live(ctx);
     const image = ctx.observations.get('git.imagePath') as string | undefined;
     if (image === undefined) throw new Error('fault.missing-lfs-object needs git.image-add first');
-    const oid = sha256(`missing ${nextToken(ctx)}`);
-    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize 4096\n`;
-    const git = await ctx.person();
-    await pull(git, ctx);
-    mkdirSync(join(git.dir, image, '..'), { recursive: true });
-    writeFileSync(join(git.dir, image), pointer);
-    await git.run(['add', '--', image]);
-    await git.run(['commit', '--quiet', '--no-verify', '-m', 'Update the diagram']);
-    await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
-    ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
+    const bytes = seededPng(`missing ${nextToken(ctx)}`);
+    const oid = sha256(bytes);
+    const commit = await commitAsPerson(ctx, new Map([[image, bytes]]), 'Update the diagram', true);
+    const pointer = await (await ctx.person()).run(['cat-file', 'blob', `${commit}:${image}`]);
+    if (!pointer.stdout.toString('latin1').includes(`oid sha256:${oid}\n`)) throw new Error(`${image} is not stored in LFS`);
+    const engine = new Git(await ctx.engineClone());
+    const upstream = await lfsEndpoint(engine);
+    if (upstream === null) throw new EnvBlockedError('the sandbox has no LFS server to pass on to');
+    // The engine's own GitHub credential at the time of each request, as the engine would send it.
+    const authorization = () => `basic ${Buffer.from(`x-access-token:${ctx.engine.badCredential === 'github' ? 'not-a-valid-token' : world.githubToken}`).toString('base64')}`;
+    await ctx.engine.lfsProxy?.close();
+    ctx.engine.lfsProxy = await startLfsFaultProxy(upstream, authorization, new Set([oid]));
+    ctx.engine.env = { ...ctx.engine.env, ...lfsUrlEnv(ctx.engine.lfsProxy.url, ctx.engine.env) };
+    ctx.observations.set('fault.missingLfsOid', oid);
   },
   'fault.golden-drift': async (ctx, args) => {
     // A recorded Linear form edited by hand, in a copy of the bank, so the next probe must report drift.
     const copy = join(ctx.runDir, 'bank');
     cpSync(BANK_DIR, copy, { recursive: true });
     const construct = String(args.construct ?? 'table');
-    const fixture = loadBank(copy).fixtures.find((candidate) => candidate.construct.includes(construct) && existsSync(join(copy, goldenMarkdownPath(candidate.file))));
-    if (fixture === undefined) throw new EnvBlockedError(`no recorded Linear form for a ${construct} fixture`);
+    // The probe reports drift by construct, so the edited fixture's construct must be exactly the one asked for.
+    // Only fixtures the probe writes have a recorded Linear form.
+    const fixture = probedFixtures(loadBank(copy)).find((candidate) => candidate.construct === construct && existsSync(join(copy, goldenMarkdownPath(candidate.file))));
+    // A construct no probed fixture has is a mistake in the scenario, not in the environment.
+    if (fixture === undefined) throw new Error(`no recorded Linear form for a ${construct} fixture`);
     const golden = join(copy, goldenMarkdownPath(fixture.file));
     writeFileSync(golden, `${readFileSync(golden, 'utf8')}\nEdited by hand.\n`);
     ctx.observations.set('probe.bankDir', copy);

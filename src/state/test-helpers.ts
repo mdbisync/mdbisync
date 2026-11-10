@@ -91,6 +91,8 @@ export interface FakeLfsServer {
   url: string;
   /** Requests received, as `METHOD path`: a download is a `GET`. */
   requests: string[];
+  /** The `Authorization` header of each request, empty when it had none. */
+  authorizations: string[];
   /** An HTTP status the batch API answers the whole request with, instead of an answer per object. */
   failBatch?: number;
   /** HTTP statuses the batch API answers single objects with, by LFS object id, instead of its usual answer. */
@@ -111,6 +113,7 @@ export async function fakeLfsServer(contents: readonly Buffer[]): Promise<FakeLf
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
     request.on('end', () => {
       fake.requests.push(`${request.method} ${request.url}`);
+      fake.authorizations.push(request.headers.authorization ?? '');
       if (request.method === 'POST' && request.url === '/info/lfs/objects/batch') {
         if (fake.failBatch !== undefined) {
           response.writeHead(fake.failBatch, { 'content-type': 'application/vnd.git-lfs+json' });
@@ -139,6 +142,7 @@ export async function fakeLfsServer(contents: readonly Buffer[]): Promise<FakeLf
   const fake: FakeLfsServer = {
     url: `${base}/info/lfs`,
     requests: [],
+    authorizations: [],
     objectErrors: new Map(),
     close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
   };

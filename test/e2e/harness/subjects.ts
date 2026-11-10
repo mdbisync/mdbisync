@@ -36,6 +36,7 @@ import { relativeLinkUrls } from '../../../src/format/index.ts';
 import { resolveTarget } from '../../../src/format/markdown.ts';
 import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, type Git, resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
+import { INVALID_DIAGRAM_NOTE } from '../../corpus/documents.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
 import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
@@ -414,6 +415,13 @@ function groupPaths(ctx: RunContext, group: string): string[] {
   return paths;
 }
 
+/** The slice's Mermaid documents the corpus manifest notes as holding an invalid diagram. */
+function invalidMermaidPaths(ctx: RunContext): string[] {
+  const paths = sorted([...manifestOf(ctx)].filter(([, entry]) => entry.group === 'mermaid' && entry.kind === 'markdown' && entry.note?.includes(INVALID_DIAGRAM_NOTE) === true).map(([path]) => path));
+  if (paths.length === 0) throw new Error('the slice has no Mermaid document with an invalid diagram');
+  return paths;
+}
+
 /** Runs `fix` on texts with the snapshot's file existence context: path → fixed text. */
 export function linearForms(texts: ReadonlyMap<string, string>, existingPaths: Iterable<string>): Map<string, string> {
   const dir = mkdtempSync(join(tmpdir(), 'linear-form-'));
@@ -743,11 +751,15 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'documents.mermaidBytes': async (env) => mermaidFences(env, 'linear'),
   'fixtures.mermaidBytes': async (env) => mermaidFences(env, 'git'),
+  // Each Mermaid document with an invalid diagram → whether it has a live Linear document.
   'documents.invalidMermaidIncluded': async (env) => {
     const view = await env.view();
-    const invalid = groupPaths(env.ctx, 'mermaid').filter((path) => /invalid/i.test(path) || /invalid/i.test(view.files.get(path) ?? ''));
-    return invalid.length > 0 && invalid.every((path) => view.ids.has(path) && view.documents.has(view.ids.get(path)?.id as string));
+    return new Map(invalidMermaidPaths(env.ctx).map((path) => {
+      const id = view.ids.get(path)?.id;
+      return [path, isLive(id === undefined ? undefined : view.documents.get(id))];
+    }));
   },
+  'expected.invalidMermaidIncluded': async (env) => new Map(invalidMermaidPaths(env.ctx).map((path) => [path, true])),
   'documents.tableSeparators': async (env) => {
     const rows = (await tableRows(env, 'linear')).filter((row) => row.separator).map((row) => row.cells);
     const odd = rows.find((cells) => cells.some((cell) => cell !== '--'));
@@ -1711,13 +1723,20 @@ async function mermaidFences(env: Env, side: 'git' | 'linear'): Promise<Map<stri
   return result;
 }
 
+/**
+ * The table rows of the slice's table documents: in Linear, as stored; in
+ * git, the file's body with its links as the engine writes them (I1's rule),
+ * since a cell's image or document link is a Linear URL there. Cell
+ * equality is therefore I1 restricted to table rows: it names the table
+ * documents whose cells differ.
+ */
 async function tableRows(env: Env, side: 'git' | 'linear'): Promise<Array<{ path: string; separator: boolean; cells: string[] }>> {
   const view = await env.view();
   const rows: Array<{ path: string; separator: boolean; cells: string[] }> = [];
   for (const path of groupPaths(env.ctx, 'tables')) {
     const id = view.ids.get(path)?.id;
     if (side === 'linear' && id === undefined) continue; // left out
-    const text = side === 'git' ? (fileBody(view, path) ?? '') : (view.documents.get(id as string)?.content ?? '');
+    const text = side === 'git' ? linearLinks(fileBody(view, path) ?? '', path, view) : (view.documents.get(id as string)?.content ?? '');
     for (const line of text.split('\n')) {
       if (!line.startsWith('|')) continue;
       const cells = line.replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((cell) => cell.trim());
