@@ -2233,9 +2233,16 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
       return Response.json([...(activity[ref] ?? []), { ref: 'refs/heads/main', before: final, after: record, activity_type: 'push', actor: { login: 'someone', type: 'User' } }]);
     }) as typeof fetch);
     ctx.live!.githubAppLogin = APP;
-    return { ctx, asked, progress, final, record };
+    return { ctx, asked, activity, idsRef, startIds, progress, final, record };
   }
   const app: Actor = { login: APP, type: 'Bot' };
+
+  it('fail another credential\'s push to a sync ref even when it set the ref to a commit that is not the sync\'s', async () => {
+    const { ctx, activity, idsRef, startIds, progress } = await writerCase({ ids: [app, app], linear: app });
+    // A person force-pushes ids back to its start between the App's two pushes.
+    activity[idsRef]!.splice(1, 0, { ref: idsRef, before: progress, after: startIds, activity_type: 'force_push', actor: { login: 'someone', type: 'User' } });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/ids: GitHub records a force_push to [0-9a-f]{12} by a user account/.test(error.message));
+  });
 
   it('accept the App as the writer from GitHub\'s push records while the commits name the engine as their author', async () => {
     const { ctx, asked } = await writerCase({ ids: [app, app], linear: app });
@@ -2247,12 +2254,12 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
   it('fail a push made with a person\'s credential, without naming the person', async () => {
     const { ctx } = await writerCase({ ids: [app, { login: 'someone', type: 'User' }], linear: app });
     await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError
-      && /\/ids: GitHub records the push of [0-9a-f]{12} by a user account, not by the App mdbisync-sandbox\[bot\]$/.test(error.message) && !error.message.includes('someone'));
+      && /\/ids: GitHub records a push to [0-9a-f]{12} by a user account, not by the App mdbisync-sandbox\[bot\]$/.test(error.message) && !error.message.includes('someone'));
   });
 
   it('fail a run that asked for the App\'s token but pushed with the job\'s own token', async () => {
     const { ctx } = await writerCase({ ids: [app, app], linear: { login: 'github-actions[bot]', type: 'Bot' } });
-    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/linear: GitHub records the push of [0-9a-f]{12} by github-actions\[bot\], not by the App/.test(error.message));
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/linear: GitHub records a push to [0-9a-f]{12} by github-actions\[bot\], not by the App/.test(error.message));
   });
 
   it('fail a user account that took the App\'s login as its name', async () => {

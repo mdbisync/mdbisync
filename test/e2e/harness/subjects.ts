@@ -314,11 +314,10 @@ async function isAncestor(git: Git, ancestor: string, descendant: string | null)
 }
 
 /** Commits on `tip` that the scenario's start did not have. */
-async function newCommits(git: Git, tip: string | null, startTips: readonly string[], more: readonly string[] = []): Promise<string[]> {
-  const tips = [...(tip === null ? [] : [tip]), ...more];
-  if (tips.length === 0) return [];
+async function newCommits(git: Git, tip: string | null, startTips: readonly string[]): Promise<string[]> {
+  if (tip === null) return [];
   const not = (await present(git, startTips)).map((oid) => `^${oid}`);
-  return (await git.text(['rev-list', ...tips, ...not])).split('\n').filter(Boolean);
+  return (await git.text(['rev-list', tip, ...not])).split('\n').filter(Boolean);
 }
 
 function startTips(ctx: RunContext): string[] {
@@ -1405,9 +1404,9 @@ export const SUBJECTS: Record<string, Compute> = {
   'workflows.events': async (env) => sorted(new Set(((env.ctx.observations.get('workflows.runs') as Array<{ event: string }> | undefined) ?? []).map((run) => run.event))),
   // Who authenticated the pushes of the sync's commits, from GitHub's own push records, never from a commit's
   // author: the engine writes that name itself, whatever credential pushes. 'app-bot' means every recorded push
-  // that set a run ref to one of the sync's commits was made by the App the harness and the workflows hold (its
-  // exact bot login, not any `[bot]` such as the job's own token), and every one of those commits reached GitHub
-  // through such a push. Anything else fails and names the ref and why.
+  // to a run ref the sync wrote was made by the App the harness and the workflows hold (its exact bot login, not
+  // any `[bot]` such as the job's own token; in actions mode the harness's own pushes are the App's too), and
+  // every one of the sync's commits reached GitHub through such a push. Anything else fails and names the ref.
   'writes.githubActor': async (env) => {
     const live = env.ctx.live;
     if (live === null) throw new EnvBlockedError('who pushed is read from GitHub, and the run has no sandbox');
@@ -1416,11 +1415,13 @@ export const SUBJECTS: Record<string, Compute> = {
     const git = await person(env.ctx);
     const byRef = await syncCommits(env.ctx);
     for (const [ref, commits] of byRef) {
-      const pushes = (await live.rest.pushActivities(ref)).filter((push) => commits.includes(push.after));
+      const pushes = await live.rest.pushActivities(ref);
       const other = pushes.find((push) => push.actor?.login !== app || push.actor.type !== 'Bot');
-      if (other !== undefined) throw new ProductError(`${ref}: GitHub records the push of ${other.after.slice(0, 12)} by ${actorKind(other.actor)}, not by the App ${app}`);
-      const afters = await present(git, pushes.map((push) => push.after));
-      const reached = new Set(await newCommits(git, null, startTips(env.ctx), afters));
+      if (other !== undefined) throw new ProductError(`${ref}: GitHub records a ${other.activity_type} to ${other.after.slice(0, 12)} by ${actorKind(other.actor)}, not by the App ${app}`);
+      const sync = new Set(commits);
+      const afters = pushes.map((push) => push.after).filter((after) => sync.has(after));
+      const not = (await present(git, startTips(env.ctx))).map((oid) => `^${oid}`);
+      const reached = new Set(afters.length === 0 ? [] : (await git.text(['rev-list', ...afters, ...not])).split('\n').filter(Boolean));
       const unproven = commits.filter((commit) => !reached.has(commit));
       if (unproven.length > 0) throw new ProductError(`${ref}: GitHub has no push record for ${unproven.length} of the sync's ${commits.length} commits (${unproven[0]!.slice(0, 12)} first), so their writer is unproven`);
     }
@@ -1429,13 +1430,10 @@ export const SUBJECTS: Record<string, Compute> = {
   // The author and committer the sync's own commits name, as `name <email>`, distinct and sorted.
   'writes.commitIdentity': async (env) => {
     const git = await person(env.ctx);
-    const identities = new Set<string>();
-    for (const commits of (await syncCommits(env.ctx)).values()) {
-      for (const commit of commits) {
-        for (const line of (await git.text(['show', '-s', '--format=%an <%ae>%n%cn <%ce>', commit])).split('\n')) if (line !== '') identities.add(line);
-      }
-    }
-    return identities.size === 0 ? null : sorted(identities).join(', ');
+    const commits = [...new Set([...(await syncCommits(env.ctx)).values()].flat())];
+    if (commits.length === 0) return null;
+    const lines = (await git.text(['log', '--no-walk=unsorted', '--format=%an <%ae>%n%cn <%ce>', ...commits])).split('\n');
+    return sorted(new Set(lines.filter((line) => line !== ''))).join(', ');
   },
 
   // --- writes and budget ----------------------------------------------------------------------
