@@ -270,11 +270,16 @@ describe('sync: the sync pull request', () => {
       const reason = 'Repository rule violations found Required status check "lint" is expected.';
       world.github.merge = async () => ({ status: 405, message: missing });
 
+      const requestsBefore = githubRequests.length;
       const refused = await sync(deadline);
       assert.equal(refused.result.exitCode, 0, refused.result.stderr);
       assert.equal(refused.report.pullRequest?.code, 'merge-refused');
       assert.equal(refused.report.pullRequest?.reason, reason);
-      assert.ok(githubRequests.includes(`PUT ${GITHUB_API}/repos/owner/repo/pulls/1/merge`), 'the sync tried the merge');
+      assert.equal(refused.report.pullRequest?.suspended, undefined);
+      assert.ok(githubRequests.slice(requestsBefore).some((request) => request.startsWith('PUT ') && request.endsWith('/pulls/1/merge')), 'the sync tried the merge');
+      // The refusal is noted on the pull request, which is what lets the next run call it repeated.
+      assert.deepEqual(refused.writes, ['PATCH /pulls/1']);
+      assert.ok(openPullRequests()[0]?.body.includes('Required status check "lint" is expected.'), 'the pull request names the refusal');
 
       backdate('mdbisync/linear', 11);
       const blocked = await sync(deadline);
@@ -282,6 +287,7 @@ describe('sync: the sync pull request', () => {
       assert.equal(blocked.report.pullRequest?.code, 'merge-blocked');
       assert.equal(blocked.report.pullRequest?.suspended, undefined);
       assert.ok(blocked.summary.includes(reason), blocked.summary);
+      assert.match(blocked.summary, /make that check run on the sync pull request/);
       assert.deepEqual(blocked.writes, []);
       assert.deepEqual(openPullRequests().map((pr) => pr.head), ['mdbisync/linear']);
       assert.equal(await rev('refs/heads/main'), start);

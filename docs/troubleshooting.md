@@ -225,7 +225,7 @@ Its step reports:
 | Code | Meaning | What to do |
 | --- | --- | --- |
 | `merge-refused` | GitHub did not merge the sync pull request this time: `GitHub did not merge the sync pull request (<reason>); a later run tries again.` | Nothing; a later run tries again. |
-| `merge-blocked` | GitHub refused to merge again, on the same head and for the same reason (exit code 3). | Let the sync's GitHub App merge into the tracked branch, for example by adjusting the branch's rules. A later run merges. |
+| `merge-blocked` | GitHub refused to merge again, on the same head and for the same reason (exit code 3). | When GitHub names a required check that is expected, make that check run on the sync pull request: check workflow filters and the required check's name. Otherwise let the sync's GitHub App merge into the tracked branch, for example by adjusting the branch's rules. A later run merges. |
 | `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. For documents the sync merges with conflict markers: this run into Linear's state, a later run into the sync branch. | Resolve the markers on either side ([conflicts.md](conflicts.md#resolving-a-conflict)). A conflicting file that is not a document waits: merge both the tracked branch and the `linear` state ref (`refs/mdbisync/linear` by default) into the sync branch and resolve it there; the sync keeps those commits. |
 | `initial-pull-request-pending` | The sync branch holds an initial sync from Linear that no one has merged yet (exit code 4). | Review and merge it with a merge commit. |
 | `state-moved` | The sync branch moved while the run worked. | Nothing; the next run updates the pull request. |
