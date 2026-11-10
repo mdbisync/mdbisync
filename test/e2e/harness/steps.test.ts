@@ -34,7 +34,7 @@ import { waitForCheck } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, STEP_ACTIONS, watchRun } from './steps.ts';
-import { commitAsPerson, readRunIds, setTarget } from './step-helpers.ts';
+import { commitAsPerson, folderTeam, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
@@ -538,7 +538,7 @@ describe('team-zone cleanup', () => {
     const { PROJECT_PLACEHOLDERS } = await import('./corpus.ts');
     const names = runNames('aaaaaa');
     const placeholderProjects = PROJECT_PLACEHOLDERS.map((_, index) => names.project(index));
-    const helpers = (['archive', 'unmapped', 'archived-copy'] as const).map((purpose) => names.helperProject(purpose));
+    const helpers = (['archive', 'unmapped', 'archived-copy', 'annotation-target'] as const).map((purpose) => names.helperProject(purpose));
     // One name per purpose, so a run never holds two live projects with one name.
     assert.equal(new Set(helpers).size, helpers.length);
     for (const helper of helpers) {
@@ -1387,6 +1387,49 @@ describe('git executors', () => {
     ctx.observations.set('git.imagePath', 'eng/platform/media/diagram.png');
     await runStep(ctx, { kind: 'fault', action: 'missing-lfs-object', args: {} });
     assert.match(await remoteFile('eng/platform/media/diagram.png'), /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:[0-9a-f]{64}\nsize 4096$/);
+  });
+
+  it('move a folder by its annotation to a new project of the folder\'s own team (L2-08)', async () => {
+    const { ctx, remoteFile } = await fakeRun();
+    const world = ctx.live as LiveWorld;
+    // The team annotations above the project folders, as the corpus has them: each project folder inherits its team.
+    await commitAsPerson(ctx, new Map([['eng/README.md', '---\nlinear-team: ENG\n---\n'], ['docs/README.md', '---\nlinear-team: DOCS\n---\n']]), 'Name the teams');
+    world.teams.set('DOCS', { id: 'team-docs', key: 'DOCS', name: 'Documentation' });
+    const created: Array<{ name: string; teamIds: readonly string[] }> = [];
+    Object.assign(world, { world: { createProject: async (name: string, teamIds: readonly string[]) => { created.push({ name, teamIds }); return { id: `project-${name}`, name, createdAt: '' }; } } });
+    const before = await remoteFile('eng/platform/README.md');
+    await runStep(ctx, { kind: 'git', action: 'annotation', args: { project: 'other-project' } });
+    // The longest project folder moves; the project is new, so no other folder maps it, and it is in DOCS, the
+    // team docs/handbook inherits, not ENG, where the engine would not find it.
+    assert.deepEqual(created, [{ name: 'Spare cabinet aaaaaa', teamIds: ['team-docs'] }]);
+    assert.match(await remoteFile('docs/handbook/README.md'), /^linear-project: Spare cabinet aaaaaa$/m);
+    assert.equal(await remoteFile('eng/platform/README.md'), before);
+    assert.deepEqual(ctx.observations.get('git.annotation'), { folder: 'docs/handbook', project: 'Spare cabinet aaaaaa' });
+    // A run project like the others: the destination subject names it and cleanup deletes it.
+    assert.equal(world.projects.get('ANNOTATION_TARGET')?.name, 'Spare cabinet aaaaaa');
+    assert.deepEqual(await resolveSubject(ctx, 'expected.destination'), { known: true, value: ['project:Spare cabinet aaaaaa'] });
+  });
+
+  it('end env-blocked when the workspace has no team for the folder', async () => {
+    const { ctx } = await fakeRun();
+    // No team annotation above the project folders at all.
+    await assert.rejects(runStep(ctx, { kind: 'git', action: 'annotation', args: {} }), (error: Error) => error instanceof EnvBlockedError && /no team \(none\) for docs\/handbook/.test(error.message));
+  });
+
+  it('read a folder\'s team from its own annotation, else the nearest one above it', () => {
+    const dir = fresh('folder-team-');
+    const write = (path: string, text: string) => {
+      mkdirSync(join(dir, path, '..'), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    };
+    write('README.md', '# Repository\n');
+    write('eng/README.md', '---\nlinear-team: ENG\n---\n');
+    write('eng/platform/README.md', '---\nlinear-project: Field notes aaaaaa\n---\n');
+    write('support/README.md', '---\nlinear-team: DOCS\nlinear-project: Garden plans aaaaaa\n---\n');
+    assert.equal(folderTeam(dir, 'eng/platform'), 'ENG');
+    assert.equal(folderTeam(dir, 'eng/platform/deep/er'), 'ENG');
+    assert.equal(folderTeam(dir, 'support'), 'DOCS');
+    assert.equal(folderTeam(dir, 'other'), null);
   });
 
   it('prepare a left-out document and make it join', async () => {
@@ -2704,7 +2747,8 @@ describe('the setup check step (run.check)', () => {
   const DRY_RUN_REPORT = { operation: 'initial-sync', ok: true, code: null, complete: true, changed: false, summary: { plan: { paths: ['guides/start.md'] } }, writes: { linear: {}, git: {}, pullRequests: {} } };
 
   /** Runs `steps` with a fake engine that answers each command from `answers` and records how it was called. */
-  async function withEngine(answers: Record<string, { report?: unknown; summary?: string; stderr?: string; exitCode: number }>, steps: Array<{ action: string; args: Record<string, unknown> }>) {
+  /** With `seen`, the calls are also there when a step throws. */
+  async function withEngine(answers: Record<string, { report?: unknown; summary?: string; stderr?: string; exitCode: number }>, steps: Array<{ action: string; args: Record<string, unknown> }>, seen: { calls: Array<{ command: string }> } = { calls: [] }) {
     const { ctx } = await fakeRun();
     mkdirSync(await ctx.engineClone(), { recursive: true });
     const calls = join(ctx.runDir, 'engine-calls.jsonl');
@@ -2727,9 +2771,9 @@ describe('the setup check step (run.check)', () => {
     } finally {
       if (previous === undefined) delete process.env['MDBISYNC_ENGINE'];
       else process.env['MDBISYNC_ENGINE'] = previous;
+      seen.calls = existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { command: string }) : [];
     }
-    const recorded = existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { command: string; cwd: string; inputs: Record<string, string> }) : [];
-    return { ctx, calls: recorded };
+    return { ctx, calls: seen.calls as Array<{ command: string; cwd: string; inputs: Record<string, string> }> };
   }
 
   it('runs the engine check in the run clone with the run isolation and records it as the first run', async () => {
@@ -2770,6 +2814,28 @@ describe('the setup check step (run.check)', () => {
     assert.deepEqual(ctx.observations.get('runs.0.setupChecks'), FAILED_CHECKS);
     // An assertion on the dry run's plan cannot pass on the failed setup.
     await assert.rejects(resolveSubject(ctx, 'summary.plan.paths'), (error: Error) => error instanceof ProductError);
+  });
+
+  it('stops resuming at a failed setup check and names it', async () => {
+    const targets = [{ name: 'annotation-targets', state: 'failed', detail: 'not found in Linear: project "Library index aaaaaa" of team "ENG"' }];
+    const stopped = { ...CHECK_REPORT, operation: 'sync', ok: false, code: 'annotation-target-not-found', exitStatus: 'failure', complete: false, setupChecks: targets };
+    const seen = { calls: [] as Array<{ command: string }> };
+    await assert.rejects(
+      withEngine({ sync: { report: stopped, exitCode: 3 } }, [{ action: 'resume-until-complete', args: {} }], seen),
+      (error: Error) => error instanceof ProductError && error.message === 'the run stopped at the setup check annotation-targets (annotation-target-not-found): not found in Linear: project "Library index aaaaaa" of team "ENG"; resuming cannot clear it',
+    );
+    // One run: the stop is the same on every resume.
+    assert.deepEqual(seen.calls.map((call) => call.command), ['sync']);
+  });
+
+  it('keeps resuming a run that stopped part-way, up to 20 runs', async () => {
+    const partial = { ...CHECK_REPORT, operation: 'sync', ok: true, code: 'rate-limited', exitStatus: 'warning', complete: false, setupChecks: SETUP_CHECKS };
+    const seen = { calls: [] as Array<{ command: string }> };
+    await assert.rejects(
+      withEngine({ sync: { report: partial, exitCode: 0 } }, [{ action: 'resume-until-complete', args: {} }], seen),
+      (error: Error) => error instanceof ProductError && error.message === 'the run did not complete after 20 resumes',
+    );
+    assert.equal(seen.calls.length, 20);
   });
 
   it('stops the scenario when the engine does not implement the check', async () => {

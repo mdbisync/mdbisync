@@ -2,10 +2,11 @@
 // which document a step targets, commits as a person, edits as an editor,
 // and the run's view of its ids map.
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readIds, stateRef, resolveStateConfig, type Git, type IdMap } from '../../../src/state/index.ts';
 import { ordinalOf } from './conflicts.ts';
+import { readAnnotation } from './corpus.ts';
 import { nextToken, type Editor, type RunContext } from './context.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { personCommit } from './sandbox.ts';
@@ -74,6 +75,18 @@ export function projectFolders(ctx: RunContext): Array<{ folder: string; project
     if (name !== undefined) result.push({ folder: readme.replace(/\/?README\.md$/, ''), project: name });
   }
   return result.sort((a, b) => b.folder.length - a.folder.length || a.folder.localeCompare(b.folder));
+}
+
+/**
+ * The team a folder's documents go to, read from a checkout: the team its own
+ * README.md names, else the nearest one above it. Null when none names one.
+ */
+export function folderTeam(dir: string, folder: string): string | null {
+  for (let current = folder; ; current = current.includes('/') ? current.slice(0, current.lastIndexOf('/')) : '') {
+    const readme = join(dir, current, 'README.md');
+    const team = existsSync(readme) ? (readAnnotation(readFileSync(readme, 'utf8'))?.team ?? null) : null;
+    if (team !== null || current === '') return team;
+  }
 }
 
 /**

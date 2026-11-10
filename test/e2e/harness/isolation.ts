@@ -33,10 +33,10 @@ const PROJECT_WORDS = [
 
 /**
  * Names of the run's helper projects, one per purpose so a run never holds two live projects with one name.
- * None is one of PROJECT_WORDS, so no annotation names a helper; each matches the run-project pattern, so
- * cleanup and the sweeper find it.
+ * None is one of PROJECT_WORDS, so no corpus annotation names a helper (only a scenario step that moves a
+ * folder to `annotation-target`); each matches the run-project pattern, so cleanup and the sweeper find it.
  */
-const HELPER_PROJECT_WORDS = { archive: 'Spare shelf', unmapped: 'Spare drawer', 'archived-copy': 'Spare binder' } as const;
+const HELPER_PROJECT_WORDS = { archive: 'Spare shelf', unmapped: 'Spare drawer', 'archived-copy': 'Spare binder', 'annotation-target': 'Spare cabinet' } as const;
 export type HelperPurpose = keyof typeof HELPER_PROJECT_WORDS;
 
 export function newRunId(): string {

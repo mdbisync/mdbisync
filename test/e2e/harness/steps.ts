@@ -44,7 +44,7 @@ import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
 import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
 import {
-  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
+  commitAsPerson, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import type { WorkflowRun } from './github.ts';
 import { environmentBlocker, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun } from './workflows.ts';
@@ -498,6 +498,15 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
   };
 }
 
+/** The failed setup check of a run report, named with its code and detail; null when every check passed. */
+export function setupStop(report: Record<string, unknown> | null | undefined): string | null {
+  const checks = Array.isArray(report?.['setupChecks']) ? (report['setupChecks'] as Array<{ name?: unknown; state?: unknown; detail?: unknown }>) : [];
+  const check = checks.find((candidate) => candidate.state === 'failed');
+  if (check === undefined) return null;
+  const code = typeof report?.['code'] === 'string' ? ` (${report['code']})` : '';
+  return `${String(check.name)}${code}: ${String(check.detail)}`;
+}
+
 const RUN: Record<string, Executor> = {
   'run.sync': (ctx, args) => runCommand(ctx, 'sync', args),
   'run.initial-sync': (ctx, args) => runCommand(ctx, 'initial-sync', args),
@@ -518,7 +527,11 @@ const RUN: Record<string, Executor> = {
     const command = args.command === 'initial-sync' ? 'initial-sync' : 'sync';
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await runCommand(ctx, command, args);
-      if (ctx.engine.results.at(-1)?.report?.['complete'] === true) return;
+      const report = ctx.engine.results.at(-1)?.report;
+      if (report?.['complete'] === true) return;
+      // A failed setup check stops every run before it writes, with the same inputs each time: resuming cannot clear it.
+      const failed = setupStop(report);
+      if (failed !== null) throw new ProductError(`the run stopped at the setup check ${failed}; resuming cannot clear it`);
     }
     throw new ProductError('the run did not complete after 20 resumes');
   },
@@ -924,14 +937,22 @@ const GIT: Record<string, Executor> = {
     ctx.observations.set('git.movedFolder', folder.documents.map((path) => ({ from: path, to: `${renamed}${path.slice(folder.path.length)}` })));
   },
   'git.annotation': async (ctx) => {
-    const folders = projectFolders(ctx);
-    const [own, other] = [folders[0], folders.find((candidate) => candidate.project !== folders[0]?.project)];
-    if (own === undefined || other === undefined) throw new EnvBlockedError('the slice needs two project folders');
+    // The folder moves to a project of its own team that no folder maps yet: the engine refuses a project
+    // of another team (annotation-target-not-found, the folder still inherits its team) and one that another
+    // folder already maps (annotation-target-shared). The project is a run helper, so cleanup deletes it.
+    const world = live(ctx);
+    const own = projectFolders(ctx)[0];
+    if (own === undefined) throw new EnvBlockedError('the slice has no project folder');
     const git = await ctx.person();
     await pull(git, ctx);
+    const key = folderTeam(git.dir, own.folder);
+    const team = key === null ? undefined : world.teams.get(key);
+    if (team === undefined) throw new EnvBlockedError(`the test workspace has no team ${key ?? '(none)'} for ${own.folder}`);
+    const target = await world.world.createProject(ctx.names.helperProject('annotation-target'), [team.id]);
+    world.projects.set('ANNOTATION_TARGET', target);
     const readme = `${own.folder}/README.md`;
-    await commitAsPerson(ctx, new Map([[readme, (await readWorking(git, readme)).split(own.project).join(other.project)]]), 'Move the folder to the other project');
-    ctx.observations.set('git.annotation', { folder: own.folder, project: other.project });
+    await commitAsPerson(ctx, new Map([[readme, (await readWorking(git, readme)).split(own.project).join(target.name)]]), 'Move the folder to the other project');
+    ctx.observations.set('git.annotation', { folder: own.folder, project: target.name });
   },
   'git.image-add': async (ctx, args) => {
     const storage = args.storage === 'regular' ? 'regular' : 'lfs';
