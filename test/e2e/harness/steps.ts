@@ -20,7 +20,7 @@ import { COMMANDS, type CommandName } from '../../../src/commands.ts';
 import { LinearError, LinearStoppedError, LinearTokenError, isTransientLinearError } from '../../../src/linear/index.ts';
 import { Git } from '../../../src/state/index.ts';
 import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
-import { BANK_DIR, goldenMarkdownPath, loadBank, readOptional } from '../../probe/bank.ts';
+import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
 import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
@@ -1609,8 +1609,10 @@ const FAULT: Record<string, Executor> = {
     cpSync(BANK_DIR, copy, { recursive: true });
     const construct = String(args.construct ?? 'table');
     // The probe reports drift by construct, so the edited fixture's construct must be exactly the one asked for.
-    const fixture = loadBank(copy).fixtures.find((candidate) => candidate.construct === construct && existsSync(join(copy, goldenMarkdownPath(candidate.file))));
-    if (fixture === undefined) throw new EnvBlockedError(`no recorded Linear form for a ${construct} fixture`);
+    // Only fixtures the probe writes have a recorded Linear form.
+    const fixture = probedFixtures(loadBank(copy)).find((candidate) => candidate.construct === construct && existsSync(join(copy, goldenMarkdownPath(candidate.file))));
+    // A construct no probed fixture has is a mistake in the scenario, not in the environment.
+    if (fixture === undefined) throw new Error(`no recorded Linear form for a ${construct} fixture`);
     const golden = join(copy, goldenMarkdownPath(fixture.file));
     writeFileSync(golden, `${readFileSync(golden, 'utf8')}\nEdited by hand.\n`);
     ctx.observations.set('probe.bankDir', copy);

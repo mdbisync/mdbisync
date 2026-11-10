@@ -21,7 +21,7 @@ import { burst, burstDocuments, burstEditCounts, soak, type SoakDriver } from '.
 import { EnvBlockedError, ProductError } from './results.ts';
 import { bodyOf, compare, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
-import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, readFixture } from '../../probe/bank.ts';
+import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, probedFixtures, readFixture } from '../../probe/bank.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
 import { mintAppToken, revokeToken } from '../../../src/linear/token.ts';
 import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
@@ -182,12 +182,26 @@ describe('fault.golden-drift', () => {
       const ctx = { observations: new Map(), runDir, log: () => {} } as unknown as RunContext;
       await STEP_ACTIONS['fault.golden-drift']!(ctx, { construct: 'table' });
       const copy = ctx.observations.get('probe.bankDir') as string;
-      const edited = loadBank(copy).fixtures.filter((fixture) => {
+      const edited = probedFixtures(loadBank(copy)).filter((fixture) => {
         const golden = join(copy, goldenMarkdownPath(fixture.file));
         return existsSync(golden) && readFileSync(golden, 'utf8') !== readFileSync(join(BANK_DIR, goldenMarkdownPath(fixture.file)), 'utf8');
       });
       assert.deepEqual(edited.map((fixture) => fixture.construct), ['table']);
-      assert.ok(loadBank().fixtures.some((fixture) => fixture.construct !== 'table' && fixture.construct.includes('table')), 'the bank still has constructs that only contain the name');
+      // The case only proves something while a recorded fixture whose construct merely contains the name comes first.
+      const recorded = probedFixtures(loadBank()).filter((fixture) => existsSync(join(BANK_DIR, goldenMarkdownPath(fixture.file))));
+      const exact = recorded.findIndex((fixture) => fixture.construct === 'table');
+      const partial = recorded.findIndex((fixture) => fixture.construct !== 'table' && fixture.construct.includes('table'));
+      assert.ok(partial !== -1 && partial < exact, 'a fixture whose construct only contains "table" comes before the table fixture');
+    } finally {
+      rmSync(runDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails the scenario, not the environment, for a construct no probed fixture has', async () => {
+    const runDir = mkdtempSync(join(tmpdir(), 'golden-drift-'));
+    try {
+      const ctx = { observations: new Map(), runDir, log: () => {} } as unknown as RunContext;
+      await assert.rejects(STEP_ACTIONS['fault.golden-drift']!(ctx, { construct: 'tables' }), (thrown: Error) => !(thrown instanceof EnvBlockedError) && /no recorded Linear form for a tables fixture/.test(thrown.message));
     } finally {
       rmSync(runDir, { recursive: true, force: true });
     }
