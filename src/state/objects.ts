@@ -7,6 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type Git, type Oid, mapLimit } from './git.ts';
+import { message } from '../messages.ts';
 
 export interface TreeEntry {
   path: string;
@@ -22,6 +23,13 @@ export interface CommitIdentity {
   name: string;
   email: string;
 }
+
+/**
+ * Who the sync's commits are by when the run has no App slug (the command
+ * line run by hand): a name that is no person's and an address that cannot
+ * receive mail. With an App slug they are by the App's bot account.
+ */
+export const NEUTRAL_IDENTITY: CommitIdentity = Object.freeze({ name: 'mdbisync', email: 'mdbisync@sync.invalid' });
 
 /** Lists every file of a commit or tree, recursively. */
 export async function listTree(git: Git, treeish: string): Promise<TreeEntry[]> {
@@ -55,9 +63,9 @@ export async function readBlobs(git: Git, oids: readonly Oid[]): Promise<Map<Oid
     const header = stdout.subarray(offset, end).toString('utf8');
     const [, type, size] = header.split(' ');
     if (type === 'missing' || type === undefined || size === undefined) {
-      throw new Error(`git object ${oid} is missing`);
+      throw new Error(message('objects.missing', { oid }));
     }
-    if (type !== 'blob') throw new Error(`git object ${oid} is a ${type}, not a blob`);
+    if (type !== 'blob') throw new Error(message('objects.not-blob', { oid, type: String(type) }));
     const start = end + 1;
     const length = Number(size);
     result.set(oid, stdout.subarray(start, start + length));
@@ -77,10 +85,10 @@ export async function writeBlob(git: Git, content: Buffer | string): Promise<Oid
  */
 export function checkRepoPath(path: string): void {
   const parts = path.split('/');
-  if (path === '' || path.includes('\0') || path.includes('\\')) throw new Error(`invalid repository path ${JSON.stringify(path)}`);
+  if (path === '' || path.includes('\0') || path.includes('\\')) throw new Error(message('objects.invalid-path', { path: JSON.stringify(path) }));
   for (const part of parts) {
     if (part === '' || part === '.' || part === '..' || part.toLowerCase() === '.git') {
-      throw new Error(`invalid repository path ${JSON.stringify(path)}`);
+      throw new Error(message('objects.invalid-path', { path: JSON.stringify(path) }));
     }
   }
 }

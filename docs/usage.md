@@ -13,6 +13,8 @@ and what each run's summary says is in [sync-cycle.md](sync-cycle.md). What
 each message means and how to recover is in
 [troubleshooting.md](troubleshooting.md).
 
+The engine requires Node.js 24 and [Git 2.40 or later](https://github.com/git/git/blob/master/Documentation/RelNotes/2.40.0.adoc).
+
 ## Generate repository files
 
 Run the released CLI at your repository root. Supply the full release commit
@@ -134,6 +136,9 @@ the other steps, and a hook that rewrites files there can reach a later
 step that holds the secrets. Use only hooks you trust. Each workflow mints the GitHub App's installation token with
 `actions/create-github-app-token`, checks out without stored credentials,
 and gives the App token and the Linear secrets to the mdbisync steps only.
+The mdbisync steps also take the token step's output `app-slug`: the sync's
+commits name the App's bot account as author and committer, read from
+GitHub by that slug, so GitHub shows them as the App's.
 Without `security-step` (as from the command line), the hooks run in a
 child process of the mdbisync step whose environment holds only `PATH`,
 `HOME` and `LANG`.
@@ -267,15 +272,27 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   synchronized document, which cannot hold markers, still waits for you to
   merge the tracked branch into the sync branch.
 
-## Pre-release builds and pins
+## Release builds and pins
 
-Maintainers dispatch **Build pre-release** on `main`, supplying a new
+Maintainers dispatch **Build release** on `main`, supplying a new
 pre-release tag such as `v0.1.0-rc.1` and a full source SHA already on `main`.
 The workflow tests and bundles that source, verifies the CLI can install
 offline, and pushes a new annotated tag pointing to an isolated release
 commit. Its summary prints the release SHA. No generated files are added to
 `main`, no existing tag is replaced, and no GitHub Release is published.
 A failed build leaves existing pins unchanged.
+
+A final version such as `v0.1.0` is built the same way, but only after a
+security gate passes. The gate refuses the build unless the source commit
+has a `security-gate` commit status of `success`, `main` has no open code
+scanning alert of medium or higher severity (or of severity error), no open
+Dependabot alert of medium or higher, and no open secret scanning alert, and
+CodeQL's latest analysis of each category on `main` succeeded and includes
+the source commit. It names every reason it refuses. The workflow token cannot read
+secret scanning alerts, so the gate reads them with the repository secret
+`SECRET_SCANNING_READ_TOKEN`, a fine-grained token with read-only access to
+secret scanning alerts; without it the gate refuses. Pre-release builds do
+not run the gate.
 
 Use the **release commit SHA**, which differs from the source SHA, in both
 configuration files. Replace the placeholder with the summary's 40-character
@@ -312,7 +329,7 @@ are described in [linear-format.md](linear-format.md).
 Enable Dependabot's
 `github-actions` ecosystem in your repository to propose action SHA updates,
 then copy the proposed release SHA into the hook's `rev` in the same change.
-To update to a specific pre-release, resolve its annotated tag and use the
+To update to a specific release, resolve its annotated tag and use the
 first column as both pins:
 
 ```sh

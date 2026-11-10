@@ -113,7 +113,11 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
     reportFile: join(dir, 'report.json'),
     summaryFile: join(dir, 'summary.md'),
     linearUrl: ctx.proxy?.url ?? 'https://api.linear.app',
-    credentials: { ...linear, githubToken: ctx.engine.badCredential === 'github' ? 'not-a-valid-token' : world.githubToken },
+    credentials: {
+      ...linear,
+      githubToken: ctx.engine.badCredential === 'github' ? 'not-a-valid-token' : world.githubToken,
+      ...(world.githubAppLogin === undefined ? {} : { appSlug: world.githubAppLogin.replace(/\[bot\]$/, '') }),
+    },
     timeoutMs: ENGINE_TIMEOUT_MS,
   };
 }

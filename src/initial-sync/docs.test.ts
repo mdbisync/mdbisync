@@ -10,7 +10,7 @@ import { describe, it } from 'node:test';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE, USAGE_EXIT_CODE } from '../commands.ts';
 import { PROGRESS_BATCH } from './confirm.ts';
 import { PULL_REQUEST_TITLE, RECORD_LEFT_OUT_RULES } from './reverse.ts';
-import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from './uploads.ts';
+import { LEFT_OUT_AT_WRITE_RULES, LEFT_OUT_RULES, UNSYNCED_REASONS, WRITE_CODES } from '../codes.ts';
 
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 const PAGE = 'docs/initial-sync-linear-to-git.md';
@@ -104,21 +104,15 @@ describe('the initial sync from git to Linear page', () => {
   });
 
   it('names every rule the plan and the write leave a file out by', () => {
-    const mapping = read('src/mapping/mapping.ts');
-    const unsynced = /type UnsyncedReason = ([^;]+);/.exec(mapping)?.[1] ?? '';
     // A file above every annotation has no title in Linear, so the plan does not list it.
-    const reasons = [...unsynced.matchAll(/'([a-z-]+)'/g)].map((match) => match[1]!).filter((reason) => reason !== 'outside-annotations');
-    assert.ok(reasons.length >= 3);
-    for (const rule of [...reasons, 'duplicate-title', 'title-too-long', 'content-too-long', UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE]) {
+    const reasons = UNSYNCED_REASONS.filter((reason) => reason !== 'outside-annotations');
+    for (const rule of [...reasons, ...LEFT_OUT_RULES, ...LEFT_OUT_AT_WRITE_RULES]) {
       assert.ok(gitFlat.includes(`\`${rule}\``), `the rule ${rule}`);
     }
   });
 
   it('explains every way a confirmed run ends unfinished, and the exit codes', () => {
-    const confirm = read('src/initial-sync/confirm.ts');
-    const codes = [...(/\n {2}code\?: ([^;]+);/.exec(confirm)?.[1] ?? '').matchAll(/'([a-z-]+)'/g)].map((match) => match[1]!);
-    assert.ok(codes.length >= 4, `found only ${codes.join(', ')}`);
-    for (const code of codes) assert.ok(gitFlat.includes(`\`${code}\``), `the code ${code}`);
+    for (const code of WRITE_CODES) assert.ok(gitFlat.includes(`\`${code}\``), `the code ${code}`);
     assert.ok(gitFlat.includes(`exits with code 0 (code ${SETUP_FAILED_EXIT_CODE} when the setup check fails, code ${USAGE_EXIT_CODE} when an input is missing or wrong, code ${INCOMPLETE_EXIT_CODE} when`), 'the dry run');
     assert.ok(gitFlat.includes(`exits with code ${INCOMPLETE_EXIT_CODE}`), 'a stopped run');
     assert.ok(gitFlat.includes(`\`initial-sync-required\` and exit code ${NO_STATE_EXIT_CODE}`), 'the sync before the record');

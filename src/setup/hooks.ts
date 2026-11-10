@@ -4,6 +4,7 @@
 
 import { parseQuietly } from '../mapping/front-matter.ts';
 import { type CheckResult, failed, passed } from './report.ts';
+import { message } from '../messages.ts';
 
 export const PRE_COMMIT_CONFIG = '.pre-commit-config.yaml';
 export const SECURITY_ALIAS = 'security';
@@ -25,10 +26,10 @@ export function readHookConfig(text: string | null): HookConfig {
   try {
     data = parseQuietly(text);
   } catch {
-    return { hooks: [], invalid: `${PRE_COMMIT_CONFIG} is not valid YAML` };
+    return { hooks: [], invalid: message('setup.hooks-invalid-yaml', { file: PRE_COMMIT_CONFIG }) };
   }
   const repos = isRecord(data) ? data.repos : undefined;
-  if (!Array.isArray(repos)) return { hooks: [], invalid: `${PRE_COMMIT_CONFIG} has no "repos" list` };
+  if (!Array.isArray(repos)) return { hooks: [], invalid: message('setup.hooks-no-repos', { file: PRE_COMMIT_CONFIG }) };
   const hooks: HookConfig['hooks'] = [];
   for (const repo of repos) {
     if (!isRecord(repo) || !Array.isArray(repo.hooks)) continue;
@@ -49,7 +50,7 @@ export function securityHooks(config: HookConfig): string[] {
 export function checkSecurityHooks(config: HookConfig): CheckResult {
   const ids = securityHooks(config);
   if (ids.length > 0) return passed('security-hooks', `security hooks present: ${ids.join(', ')}`);
-  return { name: 'security-hooks', state: 'warning', detail: `no pre-commit hook marked "alias: ${SECURITY_ALIAS}": content is pushed unchecked` };
+  return { name: 'security-hooks', state: 'warning', detail: message('setup.security-hooks-missing', { alias: SECURITY_ALIAS }) };
 }
 
 /**
@@ -62,7 +63,7 @@ export function checkLinearFormatHook(config: HookConfig): CheckResult {
   const configured = config.hooks.some((hook) => hook.id === LINEAR_FORMAT_HOOK && !LOCAL_REPOS.has(hook.repo));
   return configured
     ? passed('linear-format-hook', `${PRE_COMMIT_CONFIG} has the ${LINEAR_FORMAT_HOOK} hook`)
-    : failed('linear-format-hook', 'linear-format-hook-required', `${PRE_COMMIT_CONFIG} has no ${LINEAR_FORMAT_HOOK} hook`);
+    : failed('linear-format-hook', 'linear-format-hook-required', message('setup.format-hook-missing', { file: PRE_COMMIT_CONFIG, hook: LINEAR_FORMAT_HOOK }));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

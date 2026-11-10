@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
-import { SYNC_IDENTITY } from '../../../src/initial-sync/confirm.ts';
+import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
@@ -993,17 +993,17 @@ describe('marker-driven checks', () => {
     assert.equal(await holds(moved, linear), true);
   });
 
-  it('keeps the L5-17 setup error visible to scenario assertions', async () => {
+  it('keeps the L5-17 suspension and unrelated write visible to scenario assertions', async () => {
     const { ctx } = await fakeRun();
     ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: { pullRequest: { pullRequest: { number: 1, opened: true } } } });
-    ctx.engine.results.push({ command: 'sync', exitCode: 1, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: {
-      summary: null, code: 'check-failed', pullRequest: { code: 'check-failed', checks: { failed: ['format'] }, merged: null }, writtenCount: 0,
+    ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: {
+      summary: null, code: null, exitStatus: 'success', pullRequest: { suspended: { checks: ['format'] }, merged: null }, writtenCount: 1,
     } });
     const scenario = scenarios.find((item) => item.id === 'L5-17')!;
     for (const assertion of scenario.checks.assertions.filter((item) => item.subject.startsWith('runs.1.'))) {
       const subject = await resolveSubject(ctx, assertion.subject);
       assert.equal(subject.known, true);
-      assert.deepEqual(subject.value, assertion.expected, assertion.subject);
+      assert.equal((await evaluateAssertion(ctx, assertion)).holds, true, assertion.subject);
     }
   });
 });
@@ -2210,7 +2210,7 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
   // As recorded in the actions run of L1-20: the engine names itself as the author of its state commits, and
   // GitHub names the sandbox's App as the author of the sync pull request it opened.
   const APP = 'mdbisync-sandbox[bot]';
-  const ENGINE_AUTHOR = { GIT_AUTHOR_NAME: SYNC_IDENTITY.name, GIT_AUTHOR_EMAIL: SYNC_IDENTITY.email, GIT_COMMITTER_NAME: SYNC_IDENTITY.name, GIT_COMMITTER_EMAIL: SYNC_IDENTITY.email };
+  const ENGINE_AUTHOR = { GIT_AUTHOR_NAME: NEUTRAL_IDENTITY.name, GIT_AUTHOR_EMAIL: NEUTRAL_IDENTITY.email, GIT_COMMITTER_NAME: NEUTRAL_IDENTITY.name, GIT_COMMITTER_EMAIL: NEUTRAL_IDENTITY.email };
   type Actor = { login: string; type: string } | null;
 
   /**
@@ -2266,6 +2266,17 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
     assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
     assert.deepEqual(asked.sort(), [`${ctx.names.refPrefix}/ids`, `${ctx.names.refPrefix}/linear`]);
     assert.deepEqual(await resolveSubject(ctx, 'writes.commitIdentity'), { known: true, value: 'mdbisync <mdbisync@sync.invalid>' });
+  });
+
+  it('read the App as the commits\' author and committer only when every commit names the App as GitHub links it', async () => {
+    const appAuthor = (email: string) => ({ GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: APP, GIT_COMMITTER_EMAIL: email });
+    const { ctx: linked } = await writerCase({ ids: [app, app], linear: app }, appAuthor(`4242+${APP}@users.noreply.github.com`));
+    assert.deepEqual(await resolveSubject(linked, 'writes.commitIdentity'), { known: true, value: 'app-bot' });
+    // A bot name with an address GitHub does not link to the App is reported as it is.
+    const { ctx: unlinked } = await writerCase({ ids: [app, app], linear: app }, appAuthor(`${APP}@users.noreply.github.com`));
+    assert.deepEqual(await resolveSubject(unlinked, 'writes.commitIdentity'), { known: true, value: `${APP} <${APP}@users.noreply.github.com>` });
+    const { ctx: other } = await writerCase({ ids: [app, app], linear: app }, appAuthor('4242+other-app[bot]@users.noreply.github.com'));
+    assert.notEqual((await resolveSubject(other, 'writes.commitIdentity')).value, 'app-bot');
   });
 
   it('fail a push made with a person\'s credential, without naming the person', async () => {

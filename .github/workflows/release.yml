@@ -1,10 +1,10 @@
-name: Build pre-release
+name: Build release
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: New pre-release tag (for example v0.1.0-rc.1)
+        description: New release tag, a pre-release such as v0.1.0-rc.1 or a final version such as v0.1.0 (gated)
         required: true
         type: string
       source-sha:
@@ -20,8 +20,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A final version (no pre-release part, so no hyphen) is public: it is built
+  # only after the security gate passes. Pre-releases skip the gate.
+  gate:
+    if: github.ref == 'refs/heads/main' && !contains(inputs.version, '-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: read
+      security-events: read
+      vulnerability-alerts: read
+    env:
+      SOURCE_SHA: ${{ inputs.source-sha }}
+    steps:
+      # The gate runs from main's current workflow commit, never from the source being released.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Check the security gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # The workflow token cannot read secret scanning alerts; without this read-only token the gate refuses.
+          SECRET_SCANNING_TOKEN: ${{ secrets.SECRET_SCANNING_READ_TOKEN }}
+        run: node src/release/gate.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA"
+
   build:
-    if: github.ref == 'refs/heads/main'
+    needs: gate
+    # Builds after a passed gate, or without one only for a pre-release.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}
     runs-on: ubuntu-latest
     # The full test suite needs headroom alongside setup, bundling and release smoke tests.
     timeout-minutes: 20

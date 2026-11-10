@@ -16,6 +16,8 @@ import {
   readAnnotation,
   resolveZones,
 } from './annotations.ts';
+import { message } from '../messages.ts';
+import { type LeftOutRule, type UnsyncedReason } from '../codes.ts';
 
 export const MARKDOWN_EXTENSION = '.md';
 
@@ -30,7 +32,7 @@ export interface MappedDocument {
   place: Place;
 }
 
-export type UnsyncedReason = 'outside-annotations' | 'not-a-regular-file' | 'binary' | 'stored-in-lfs';
+export type { UnsyncedReason } from '../codes.ts';
 
 /** A `.md` file that is not synchronized, and why. */
 export interface UnsyncedFile {
@@ -49,7 +51,7 @@ export interface UnsyncedFile {
 export interface LeftOutFile {
   path: string;
   oid: Oid;
-  rule: 'duplicate-title';
+  rule: Extract<LeftOutRule, 'duplicate-title'>;
   title: string;
   place: Place;
   collidesWith: string[];
@@ -64,6 +66,11 @@ export interface RepositoryMapping {
   documents: MappedDocument[];
   unsynced: UnsyncedFile[];
   leftOut: LeftOutFile[];
+  /**
+   * Every regular file of the tree, by path: what a document's image may
+   * name. Symbolic links and submodules are not files here.
+   */
+  files: ReadonlySet<string>;
 }
 
 /** Files that hold annotations: every `README.md`. */
@@ -96,7 +103,7 @@ export function mapFiles(
   entries: readonly TreeEntry[],
   zones: ReadonlyMap<string, Zone>,
   contents: ReadonlyMap<Oid, Buffer>,
-): Pick<RepositoryMapping, 'documents' | 'unsynced' | 'leftOut'> {
+): Pick<RepositoryMapping, 'documents' | 'unsynced' | 'leftOut' | 'files'> {
   const mapped: MappedDocument[] = [];
   const unsynced: UnsyncedFile[] = [];
   for (const entry of entries) {
@@ -111,7 +118,7 @@ export function mapFiles(
       continue;
     }
     const content = contents.get(entry.oid);
-    if (content === undefined) throw new Error(`the content of ${entry.path} was not read`);
+    if (content === undefined) throw new Error(message('mapping.content-not-read', { path: entry.path }));
     const problem = contentProblem(content);
     if (problem !== null) {
       unsynced.push({ path: entry.path, reason: problem, title: titleOf(entry.path, zone), place: placeOf(zone) });
@@ -120,7 +127,8 @@ export function mapFiles(
     mapped.push({ path: entry.path, oid: entry.oid, title: titleOf(entry.path, zone), place: placeOf(zone) });
   }
   const { documents, leftOut } = separateCollisions(mapped);
-  return { documents, unsynced, leftOut };
+  const files = new Set(entries.filter(isRegularFile).map((entry) => entry.path));
+  return { documents, unsynced, leftOut, files };
 }
 
 /** Maps the files of a commit, reading only `README.md` files and the `.md` files under annotations. */
@@ -196,7 +204,7 @@ function isMarkdown(entry: TreeEntry): boolean {
 }
 
 /** A file whose bytes git stores as they are: not a symlink or a submodule. */
-function isRegularFile(entry: TreeEntry): boolean {
+export function isRegularFile(entry: TreeEntry): boolean {
   return entry.type === 'blob' && (entry.mode === '100644' || entry.mode === '100755');
 }
 

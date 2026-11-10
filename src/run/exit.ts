@@ -20,6 +20,8 @@ import { fixUrl } from '../setup/fixes.ts';
 import { type PullRequestFailure, pullRequestFailure } from '../sync/index.ts';
 import { type OperationOutcome } from './operation.ts';
 import { PARTIAL } from './stop.ts';
+import { type HeldCode } from '../codes.ts';
+import { message } from '../messages.ts';
 
 export type ExitStatus = 'success' | 'warning' | 'failure';
 
@@ -27,7 +29,7 @@ export type ExitStatus = 'success' | 'warning' | 'failure';
 export type PartialCode =
   | NonNullable<NonNullable<OperationOutcome['captured']>['code']>
   | Exclude<NonNullable<NonNullable<NonNullable<OperationOutcome['sync']>['write']>['code']>, 'container-cap'>
-  | 'removal-held';
+  | HeldCode;
 
 /**
  * Why a sync run is partial, or undefined when it is not: Linear stopped it
@@ -122,26 +124,26 @@ export function stoppedBeforeWritingMessage(command: string, outcome: OperationO
   const detail = outcome.setup?.detail ?? outcome.refusal?.message;
   const fix = fixUrl(outcome.code);
   // Names from README front matter may hold line breaks; one line keeps them from reading as further log lines.
-  const explained = `${command}: stopped before any write (${outcome.code})${detail === undefined ? '' : `: ${detail.replace(/\s*[\r\n]+\s*/g, ' ')}`}`;
-  return fix === undefined ? explained : `${explained.replace(/\.$/, '')}. How to fix it: ${fix}`;
+  const explained = message('run.stopped-before-write', { command, code: String(outcome.code), detail: detail === undefined ? '' : message('run.stopped-detail', { detail: detail.replace(/\s*[\r\n]+\s*/g, ' ') }) });
+  return fix === undefined ? explained : message('run.how-to-fix', { message: explained.replace(/\.$/, ''), url: fix });
 }
 
 /** The message of a run that is not a sync, stopped by Linear before any write. */
 function stoppedMessage(command: string): string {
-  return `${command}: stopped by Linear before any write; run it again once the limit has reset`;
+  return message('run.stopped-by-linear', { command });
 }
 
 /** The message of a run whose container would go over its document cap. */
 function containerCapMessage(command: string): string {
-  return `${command}: stopped before any write (container-cap); reduce additions or check document-cap`;
+  return message('run.container-cap', { command });
 }
 
 /** The one-line failure of an initial sync that did not finish: why, and what to do next. */
 export function unfinishedMessage(command: string, code: string | undefined): string {
   if (code === 'sync-branch-changed') {
-    return `${command}: not finished (${code}); merge or close the pull request of the sync branch and delete the branch, then run it again`;
+    return message('run.not-finished-sync-branch', { command, code });
   }
-  return `${command}: not finished (${code}); run it again with the same inputs`;
+  return message('run.not-finished', { command, code: String(code) });
 }
 
 /** Why a sync run is partial on Linear's side, before the sync pull request is weighed. */

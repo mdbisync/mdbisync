@@ -18,10 +18,11 @@ import {
   renderStateRefusal,
   runSetupCheck,
 } from '../setup/index.ts';
-import { type FetchedState, type Git, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress } from '../state/index.ts';
+import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress } from '../state/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
 import { renderStoppedBeforeWriting } from './stop.ts';
+import { message } from '../messages.ts';
 
 /** The operations that start with the preflight. */
 export type Operation = (typeof PREFLIGHT_COMMANDS)[number];
@@ -33,6 +34,8 @@ export interface RunContext {
   mapping: RepositoryMapping;
   targets: ResolvedTargets;
   linear: LinearClient;
+  /** Who the run's commits are by: the App's bot account, read in the setup check. */
+  identity: CommitIdentity;
 }
 
 export interface PreflightOutcome {
@@ -111,7 +114,7 @@ export async function runPreflight(
   const tokenOptions = { hooks: requestHooks, baseUrl: inputs.linear.apiUrl, stats, ...(options.fetch ? { fetch: options.fetch } : {}) };
   const credentials = { clientId: inputs.linear.clientId, clientSecret: inputs.linear.clientSecret };
   const onRevokeError = (error: unknown) =>
-    options.warn(`the run's Linear token could not be revoked: ${error instanceof Error ? error.message : String(error)}`);
+    options.warn(message('run.revoke-failed', { reason: error instanceof Error ? error.message : String(error) }));
   let minted = false;
   const reads = options.reads;
   const runOptions = { ...tokenOptions, onRevokeError, ...(options.tokenLifecycle ? { lifecycle: options.tokenLifecycle } : {}) };
@@ -131,7 +134,7 @@ export async function runPreflight(
       try {
         const { report, targets } = await runSetupCheck({ mapping, hooks, github, linear: { client: linear, scope: token.scope } });
         setup = report;
-        if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear });
+        if (report.ok && targets !== undefined && work !== undefined) await work({ git, fetched, mapping, targets, linear, identity: github.identity ?? NEUTRAL_IDENTITY });
         return { ...outcome(operation, report), writesAfterStop: stats.writesAfterStop, linearWrites: stats.writes };
       } catch (error) {
         // Linear stopped the client (a rate limit, a budget running low) outside the steps that record their progress.
@@ -143,7 +146,7 @@ export async function runPreflight(
     // Only Linear's refusal of the credentials is a setup failure; an outage or
     // a lost request is an error of the run.
     if (minted || !isCredentialError(error)) throw error;
-    const { report } = await runSetupCheck({ mapping, hooks, github, linear: { error: 'Linear refused the OAuth app client credentials' } });
+    const { report } = await runSetupCheck({ mapping, hooks, github, linear: { error: message('setup.linear-refused-credentials') } });
     return outcome(operation, report);
   }
 }

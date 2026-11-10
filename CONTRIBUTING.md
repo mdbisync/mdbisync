@@ -20,7 +20,7 @@ pre-commit run --all-files
 ```
 
 To generate the test corpus with a released hook, pass its release commit
-SHA (see [Pre-release builds and pins](docs/usage.md#pre-release-builds-and-pins));
+SHA (see [Release builds and pins](docs/usage.md#release-builds-and-pins));
 the generator keeps the `corpus/` and `corpus-slices/` layout:
 
 ```sh
@@ -36,6 +36,15 @@ are skipped unless you set the variables below.
 The scenario harness (building the corpus, running scenarios, reading their
 reports and the credentials of live runs) is described in
 [test/README.md](test/README.md).
+
+## Error messages and codes
+
+A message a run prints when it fails, stops or warns takes its text from
+[src/messages.ts](src/messages.ts) through `message(key, values)`, and a
+code it reports is in a table of [src/codes.ts](src/codes.ts). Add a new
+one there and explain it in
+[docs/troubleshooting.md](docs/troubleshooting.md): the page's test fails
+until the page names every code and gives every message.
 
 ## Live tests with your own Linear workspace
 
@@ -100,6 +109,11 @@ in the repository's LFS storage.
   Apache-2.0. A pull request that adds one says why the standard library
   is not enough. Updates are proposed no sooner than 14 days after a
   release.
+- Dependency review fails when a pull request introduces a known
+  vulnerability of moderate severity or higher in a runtime, development
+  or unknown dependency scope. Update to a patched version or remove the
+  vulnerable dependency before merging; if no fix is available, use a safe
+  alternative. Report suspected advisory errors to the maintainers.
 - If your change adds, removes or updates a bundled package, run
   `npm run build -- --update-license-inventory` and commit the updated
   `third-party-licenses.json`; the build fails until the inventory matches

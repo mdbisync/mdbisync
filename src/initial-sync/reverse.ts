@@ -45,6 +45,7 @@ import {
   type StateSnapshot,
   type UploadMap,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
+  NEUTRAL_IDENTITY,
   branchRef,
   parseLfsPointer,
   isAncestor,
@@ -64,11 +65,13 @@ import { captureCursorTrailer, cursorTime, prepareLfs, readCaptureCursor } from 
 import { type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titlePath } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
-import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, SYNC_IDENTITY, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
+import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
+import { message } from '../messages.ts';
+import { type RecordCode, type RecordLeftOutRule } from '../codes.ts';
 
 /**
  * The subject of a `linear` record made by an initial sync from Linear to
@@ -80,8 +83,7 @@ export const REVERSE_RECORD_MESSAGE = INITIAL_SYNC_FROM_LINEAR_RECORD;
 export const PULL_REQUEST_TITLE = 'Initial sync from Linear';
 
 /** Why a confirmed run leaves out a planned file once its text is known (`ReverseResult.leftOutAtRecord`). */
-export const RECORD_LEFT_OUT_RULES = ['download-failed', 'front-matter-boundary', 'title-not-a-path', 'security-hook', 'security-unchecked'] as const;
-export type RecordLeftOutRule = (typeof RECORD_LEFT_OUT_RULES)[number];
+export { RECORD_LEFT_OUT_RULES, type RecordLeftOutRule } from '../codes.ts';
 
 /** A document and the file it is, or becomes. */
 export interface ReverseEntry {
@@ -235,7 +237,7 @@ export interface ReverseResult {
    * `sync-branch-changed`: the sync branch holds commits this sync did not
    * make (a person's, on the open pull request); nothing was recorded.
    */
-  code?: 'stopped' | 'state-moved' | 'pull-request-failed' | 'sync-branch-changed';
+  code?: RecordCode;
   /** The run continued an unfinished one. */
   resumed: boolean;
   overwritten: string[];
@@ -286,7 +288,7 @@ export interface ReverseRecord {
 export async function confirmLinearToGit(context: RunContext, options: ReverseOptions): Promise<{ plan: ReversePlan; result: ReverseResult }> {
   const { git, fetched } = context;
   const transforms = options.transforms ?? [];
-  const identity = options.identity ?? SYNC_IDENTITY;
+  const identity = options.identity ?? context.identity;
   const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
   const stopAfter = 'stopAfterDocuments' in options ? options.stopAfterDocuments : testStopAfterDocuments();
 
@@ -549,7 +551,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       } else if (attempt === 1 && newPaths.length > 0) {
         leaveOut(newPaths, 'title-not-a-path');
       } else {
-        throw new Error(`the recorded tree maps ${misplaced.length} files to other documents`);
+        throw new Error(message('initial-sync.misplaced', { count: misplaced.length }));
       }
       commit = await build(entries);
     }
@@ -656,10 +658,14 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     return (await describe(a)) === (await describe(b));
   }
 
-  /** A record an initial sync from Linear made: its subject, the sync's identity, one parent. */
+  /**
+   * A record an initial sync from Linear made: its subject, one parent, and
+   * the sync's identity, this run's or the neutral one, since the run that
+   * made it may have had no App slug, or come from a release before it.
+   */
   async function isOwnRecord(oid: Oid): Promise<boolean> {
     const [subject, email, parents] = (await git.text(['show', '-s', '--format=%s%n%ae%n%P', oid])).split('\n');
-    return subject === REVERSE_RECORD_MESSAGE && email === identity.email && (parents ?? '').split(' ').filter(Boolean).length === 1;
+    return subject === REVERSE_RECORD_MESSAGE && (email === identity.email || email === NEUTRAL_IDENTITY.email) && (parents ?? '').split(' ').filter(Boolean).length === 1;
   }
 }
 

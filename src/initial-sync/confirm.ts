@@ -57,6 +57,8 @@ import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, p
 import { readPlanSources } from './run.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
 import { withRecorded } from '../sync/recorded.ts';
+import { message } from '../messages.ts';
+import { type LeftOutAtWriteRule, type WriteCode } from '../codes.ts';
 
 /** The subject of an `ids` commit made while an initial sync is still writing. */
 export const PROGRESS_MESSAGE = INITIAL_SYNC_PROGRESS;
@@ -72,18 +74,32 @@ export function keptAnnotationTrailer(path: string): string {
   return `Kept-annotation: ${JSON.stringify(path)}`;
 }
 
-/** The READMEs the latest initial sync kept without a document, from its final `ids` commit. */
+/**
+ * The trailer of a sync's `ids` commit that records the kept READMEs anew,
+ * after the tracked branch moved one (its folder renamed): the
+ * `Kept-annotation:` trailers of that commit are the whole set.
+ */
+export const KEPT_ANNOTATIONS_RECORDED = 'Kept-annotations: recorded';
+
+/** The trailers that record `kept` as the whole set of kept READMEs, in path order. */
+export function keptAnnotationsTrailers(kept: Iterable<string>): string[] {
+  return [KEPT_ANNOTATIONS_RECORDED, ...[...kept].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map(keptAnnotationTrailer)];
+}
+
+/**
+ * The READMEs kept without a document: named by the latest initial sync's
+ * final `ids` commit, or by a later sync's `ids` commit that recorded the set
+ * after one moved.
+ */
 export async function readKeptAnnotations(git: Git, ids: Oid | null): Promise<Set<string>> {
   if (ids === null) return new Set();
-  const log = await git.text(['log', '--format=%B', '--fixed-strings', `--grep=${FINAL_IDS_MESSAGE}`, '-1', ids]);
-  if (log.split('\n')[0] !== FINAL_IDS_MESSAGE) return new Set();
+  const log = await git.text(['log', '--format=%B', '--fixed-strings', `--grep=${FINAL_IDS_MESSAGE}`, `--grep=${KEPT_ANNOTATIONS_RECORDED}`, '-1', ids]);
+  const lines = log.split('\n');
+  if (lines[0] !== FINAL_IDS_MESSAGE && !lines.includes(KEPT_ANNOTATIONS_RECORDED)) return new Set();
   return new Set([...log.matchAll(KEPT_ANNOTATION)].map((match) => JSON.parse(match[1] as string) as string));
 }
 export const RECORD_MESSAGE = "Initial sync: Linear's state";
 export const UPLOADS_MESSAGE = 'Initial sync: upload cache';
-
-/** Who the state commits are by. */
-export const SYNC_IDENTITY: CommitIdentity = Object.freeze({ name: 'mdbisync', email: 'mdbisync@sync.invalid' });
 
 /** Documents written between two progress pushes of `ids`. */
 export const PROGRESS_BATCH = 25;
@@ -107,7 +123,7 @@ export type WriteStop = StopReason | { kind: 'test-threshold'; documents: number
 /** A file a transform left out while writing: its rule, and the files that caused it when there are any. */
 export interface LeftOutAtWrite {
   path: string;
-  rule: string;
+  rule: LeftOutAtWriteRule;
   files?: string[];
 }
 
@@ -122,7 +138,7 @@ export interface ConfirmedResult {
   /** Every document written, every extra one trashed and the state recorded. */
   complete: boolean;
   /** Why not complete. */
-  code?: 'stopped' | 'write-failed' | 'state-moved' | 'container-cap';
+  code?: WriteCode;
   /** The run continued an unfinished one: documents it had recorded were skipped. */
   resumed: boolean;
   created: string[];
@@ -160,7 +176,7 @@ export interface RecordResult {
 
 class StateMovedError extends Error {
   constructor() {
-    super('a state ref moved while the run was writing');
+    super(message('initial-sync.state-moved'));
     this.name = 'StateMovedError';
   }
 }
@@ -170,7 +186,7 @@ type Work = { kind: 'create'; entry: CreateEntry } | { kind: 'overwrite'; entry:
 export async function confirmInitialSync(context: RunContext, options: ConfirmOptions): Promise<{ plan: InitialSyncPlan; result: ConfirmedResult }> {
   const { git, fetched, targets, linear } = context;
   const transforms = options.transforms ?? [];
-  const identity = options.identity ?? SYNC_IDENTITY;
+  const identity = options.identity ?? context.identity;
   const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
   const stopAfter = 'stopAfterDocuments' in options ? options.stopAfterDocuments : testStopAfterDocuments();
   const checkpoint = options.checkpoint ?? ((name: Checkpoint) => testCheckpoint(name));
@@ -294,7 +310,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       }
 
       const document = item.kind === 'overwrite' ? sources.documents.get(item.entry.documentId) : undefined;
-      if (item.kind === 'overwrite' && document === undefined) throw new Error(`the planned document for ${path} was not listed`);
+      if (item.kind === 'overwrite' && document === undefined) throw new Error(message('initial-sync.document-not-listed', { path }));
 
       try {
         const source = splitFile(texts.get(path) as string).body;

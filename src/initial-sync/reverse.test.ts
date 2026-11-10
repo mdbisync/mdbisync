@@ -12,11 +12,12 @@ import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { COMMANDS, INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
-import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { LinearClient } from '../linear/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
+import { NEUTRAL_IDENTITY } from '../state/index.ts';
 import { commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
 import { type SecurityGate } from '../sync/security.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
@@ -170,6 +171,18 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.deepEqual(world.github.pullRequests, []);
   });
 
+  it('names the App as author and committer of every commit it makes, given the App slug', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    const { result } = await run(world, { MDBISYNC_APP_SLUG: FAKE_APP_SLUG });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const made = await fixture.remote.text(['log', '--format=%an <%ae>%n%cn <%ce>', 'refs/mdbisync/ids', 'refs/mdbisync/uploads', 'refs/mdbisync/linear', 'refs/heads/mdbisync/linear', '--not', 'refs/heads/main']);
+    const record = await fixture.remote.text(['log', '-1', '--format=%s', 'refs/heads/mdbisync/linear']);
+    assert.ok(made.split('\n').length >= 6, made);
+    assert.deepEqual(new Set(made.split('\n')), new Set([`${FAKE_APP_IDENTITY.name} <${FAKE_APP_IDENTITY.email}>`]));
+    assert.equal(record, REVERSE_RECORD_MESSAGE);
+  });
+
   it('L1R-02: confirmed, it records every id and opens one pull request a person merges', async () => {
     const world = fakeWorld();
     world.linear.documents = linearDocuments();
@@ -318,6 +331,56 @@ describe('initial sync from Linear to the tracked branch', () => {
       assert.notEqual((await refs())['refs/heads/mdbisync/linear'], undefined);
     });
   }
+
+  it('a kept folder annotation with a body stays kept when its folder is renamed, until its body changes', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments().filter((d) => d.id !== 'doc-handbook');
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    await merge(world);
+    const handbook = () => world.linear.documents.filter((d) => d.projectId === 'project-handbook');
+    const person = { name: 'A person', email: 'person@example.com' };
+    const commitOnMain = async (changes: Map<string, string | null>, message: string) => {
+      const main = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
+      const next = await commitTree(fixture.remote, { parents: [main], base: main, changes, message, identity: person });
+      await fixture.remote.run(['update-ref', 'refs/heads/main', next]);
+    };
+
+    // The folder is renamed without an edit, and another file is edited in the same push.
+    const moved = new Map<string, string | null>();
+    for (const path of ['combined/README.md', 'combined/Guide.md', 'combined/guide.md']) {
+      moved.set(path, null);
+      moved.set(path.replace(/^combined\//, 'handbook/'), TREE[path] as string);
+    }
+    moved.set('eng/notes/plan.md', `---\nowner: platform\n---\n\n# Plan\n\nEdited in git. ${CANARY}`);
+    await commitOnMain(moved, 'Rename a folder');
+    const renamed = await run(world, {}, 'sync');
+    assert.equal(renamed.result.exitCode, 0, renamed.result.stderr);
+    assert.equal(world.linear.documents.find((d) => d.id === 'doc-plan')?.content, `# Plan\n\nEdited in git. ${CANARY}`);
+    assert.deepEqual(handbook(), [], 'the rename created a document for the kept README');
+    assert.equal(await show('refs/mdbisync/linear:handbook/README.md'), TREE['combined/README.md']);
+    const message = await fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/ids']);
+    assert.match(message, /^Kept-annotations: recorded$/m);
+    assert.match(message, /^Kept-annotation: "handbook\/README\.md"$/m);
+    assert.doesNotMatch(message, /^Kept-annotation: "combined\/README\.md"$/m);
+
+    // The later runs leave it kept at its new path.
+    await commitOnMain(new Map([['eng/notes/plan.md', `---\nowner: platform\n---\n\n# Plan\n\nEdited again. ${CANARY}`]]), 'Edit in git');
+    const later = await run(world, {}, 'sync');
+    assert.equal(later.result.exitCode, 0, later.result.stderr);
+    assert.equal(world.linear.documents.find((d) => d.id === 'doc-plan')?.content, `# Plan\n\nEdited again. ${CANARY}`);
+    assert.deepEqual(handbook(), [], 'a later run created a document for the kept README');
+    const quiet = await run(world, {}, 'sync');
+    assert.equal(quiet.result.exitCode, 0, quiet.result.stderr);
+    assert.deepEqual(handbook(), [], 'a quiet run created a document for the kept README');
+
+    // A body edit still makes it a document.
+    await commitOnMain(new Map([['handbook/README.md', `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\nNow a document. ${CANARY}`]]), 'Edit the README');
+    const edited = await run(world, {}, 'sync');
+    assert.equal(edited.result.exitCode, 0, edited.result.stderr);
+    assert.deepEqual(handbook().map((d) => [d.title, d.content]), [['README', `# Handbook\n\nNow a document. ${CANARY}`]]);
+    assert.equal((await readIds())['handbook/README.md'], handbook()[0]?.id);
+  });
 
   it('L1R-04: downloads the files documents embed next to them, stored as .gitattributes decides, linked relatively and cached', async () => {
     await fixture.seed({ '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n' });
@@ -837,6 +900,18 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal((await run(world, {}, 'sync')).report.code, 'initial-pull-request-pending');
   });
 
+  it('a rerun with the App slug takes a record made without it as its own and moves the pull request on', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    assert.equal((await run(world)).result.exitCode, 0);
+    world.linear.documents = world.linear.documents.filter((d) => d.id !== 'doc-plan');
+    const { result, report } = await run(world, { MDBISYNC_APP_SLUG: FAKE_APP_SLUG });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.notEqual(report.code, 'sync-branch-changed');
+    assert.equal((await refs())['refs/heads/mdbisync/linear'], report.linearToGit?.record?.commit);
+    assert.equal(await fixture.remote.text(['log', '-1', '--format=%ae', 'refs/heads/mdbisync/linear']), FAKE_APP_IDENTITY.email);
+  });
+
   it('a rerun after Linear changed moves the pull request to the new record and rewrites its description', async () => {
     const world = fakeWorld();
     world.linear.documents = linearDocuments();
@@ -893,6 +968,7 @@ describe('planning an initial sync from Linear', () => {
       documents: Object.keys(files).map((path) => ({ path, oid: path, title: path.slice('notes/'.length, -3), place })),
       unsynced: [],
       leftOut: [],
+      files: new Set(['notes/README.md', ...Object.keys(files)]),
     },
     texts: new Map(Object.entries(files)),
     places: [{ place, documents }],
@@ -994,7 +1070,7 @@ describe('the security gate of an initial sync from Linear', () => {
         },
       };
       const { result } = await confirmLinearToGit(
-        { git, fetched, mapping, targets, linear },
+        { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY },
         { config, github: { repository: 'owner/repo', token: 'gh-token', apiUrl: GITHUB_API, fetch: fakeFetch(world) }, security, stopAfterDocuments: undefined },
       );
       assert.equal(result.complete, true, result.code);

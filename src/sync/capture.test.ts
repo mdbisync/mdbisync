@@ -44,7 +44,7 @@ describe('capture from Linear', () => {
       uploads: await commitUploads(git, null, new Map(), IDENTITY),
     };
     assert.equal((await pushAtomic(git, config, Object.entries(initial).map(([store, next]) => ({ ref: stateRef(config, store as 'ids' | 'linear' | 'uploads'), expected: null, next })))).ok, true);
-    context = { git, fetched: await fetchState(git, config), mapping, targets, linear };
+    context = { git, fetched: await fetchState(git, config), mapping, targets, linear, identity: IDENTITY };
   });
   afterEach(() => fixture.cleanup());
   const run = () => capture(context, { config, state: context.fetched.state, identity: IDENTITY });

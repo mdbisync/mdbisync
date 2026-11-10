@@ -7,7 +7,7 @@ import { isMap, parseDocument, stringify } from 'yaml';
 import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
-import { lintText, sameMarkdown, splitFile } from '../format/index.ts';
+import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
@@ -15,16 +15,17 @@ import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
-import { SYNC_IDENTITY } from '../initial-sync/confirm.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { reconcileDocumentMark } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
-import { lastSynchronized } from './merge.ts';
+import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, type CapturedAssets } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
+import { message } from '../messages.ts';
+import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
 
 export interface CaptureOptions {
   config: StateConfig;
@@ -42,7 +43,7 @@ export interface CaptureOptions {
 
 export interface CaptureResult {
   ok: boolean;
-  code?: 'state-moved' | 'stopped' | 'linear-failed';
+  code?: CaptureCode;
   /** Linear failed a request (a server error, a lost connection, an error answer): its operation and error, no content. */
   failure?: { operation: string; error: string };
   /** A resumable client budget stop; state is the last successful push. */
@@ -60,11 +61,11 @@ export interface CaptureResult {
    * later capture finds them gone again while some place lists documents.
    */
   heldRemovals: string[];
-  leftOut: Array<{ id: string; rule: string }>;
+  leftOut: Array<{ id: string; rule: CaptureLeftOutRule }>;
   /** The `ids` ref was lost: how many of the recorded files got their document back by title, of how many. */
   rebuiltIds?: { matched: number; files: number };
   /** Captured content that exceeds Linear's write limit; paths and counts only. */
-  writeBackWarnings: Array<{ path: string; code: 'linear-content-too-large-to-write-back'; length: number; limit: number }>;
+  writeBackWarnings: Array<{ path: string; code: WriteBackWarningCode; length: number; limit: number }>;
   summary: string;
   /**
    * The run's annotated containers as this capture listed them (trash
@@ -112,8 +113,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   let targets = context.targets;
   const state = { ...options.state };
   const base = state.linear;
-  if (base === null) throw new Error('run initial sync first');
-  const identity = options.identity ?? SYNC_IDENTITY;
+  if (base === null) throw new Error(message('sync.needs-initial-sync'));
+  const identity = options.identity ?? context.identity;
   const ids = await readIds(git, state.ids);
   const uploads = await readUploads(git, state.uploads);
   const reserved = await readReservedIds(git, state.ids);
@@ -138,14 +139,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     if (changedPlace) {
       mapping = {...mapping, zones};
       const resolved = await resolveTargets(linear, zones.values());
-      if (resolved.targets === undefined) throw new Error('the previously recorded document places could not be resolved');
+      if (resolved.targets === undefined) throw new Error(message('sync.places-unresolved'));
       targets = resolved.targets;
     }
     if (state.ids === null) {
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
       const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
-      for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents })) ids.set(path, entry);
+      for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents, files: recorded.files })) ids.set(path, entry);
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length };
     }
     const cursor = await readCaptureCursor(git, state.ids);
@@ -210,16 +211,18 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Git-only exclusions keep their last accepted identity and place. A
     // collision or an annotation recorded for other files is not a Linear move.
     const baselines = new Map<string, Awaited<ReturnType<typeof lastSynchronized>>>();
+    // Several excluded files walk the same commits of the chain: each commit is read once.
+    const sides = new Map<string, Promise<Side>>();
     const excludedPath = (path: string) => {
       const mapped = recorded.documents.find((document) => document.path === path);
       const prior = previous.get(path);
-      return mapped === undefined || (prior !== undefined && lintText(path, prior.toString('utf8')).length > 0)
+      return mapped === undefined || (prior !== undefined && lintInTree(path, prior.toString('utf8'), recorded.files).length > 0)
         || lengthRefusal({title: mapped.title}, linear.facts) !== undefined;
     };
     const retained = new Map<string, string>();
     for (const [id, old] of byId) {
       if (!excludedPath(old.path)) continue;
-      const baseline = await lastSynchronized(git, base, old.path, linear.facts);
+      const baseline = await lastSynchronized(git, base, old.path, linear.facts, sides);
       baselines.set(old.path, baseline);
       const doc = listed.get(id);
       if (baseline === null || doc === undefined || doc.title.normalize('NFC') !== baseline.file.title.normalize('NFC')) continue;
@@ -269,7 +272,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
     result.documents = documents;
     const changes = new Map<string, Buffer | string | null>();
-    const removeBody = (path: string) => changes.set(path, annotationHead(path) ?? null);
+    const removeBody = (path: string): boolean => {
+      const next = annotationHead(path) ?? null;
+      changes.set(path, next);
+      return next === null ? previous.has(path) : previous.get(path)?.equals(Buffer.from(next)) !== true;
+    };
     // Only files already present in the branch are link targets until their
     // candidates pass. A blocked rename continues to point at its old file.
     const documentIds = new Map([...ids].filter(([path]) => previous.has(path)).map(([path, entry]) => [path, entry.id]));
@@ -277,10 +284,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     for (const [id, path] of reservedById) if (!documentIds.has(path)) documentIds.set(path, id);
     for (const id of gone) {
       const old = byId.get(id)!;
-      removeBody(old.path);
-      ids.delete(old.path);
+      const changedFile = removeBody(old.path);
+      const retained = old.entry.suspended !== undefined || old.entry.releaseBase !== undefined;
+      if (!retained) ids.delete(old.path);
       documentIds.delete(old.path);
-      result.removed.push(old.path);
+      if (!retained || changedFile) result.removed.push(old.path);
     }
     for (const id of held) result.heldRemovals.push(byId.get(id)!.path);
     const paths = new Map<string, string>();
@@ -307,10 +315,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (!live(doc)) {
         if (old !== undefined) {
           if (old.entry.saved !== undefined && options.stageOnly !== true) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
-          removeBody(old.path);
-          ids.delete(old.path);
+          const changedFile = removeBody(old.path);
+          const retained = old.entry.suspended !== undefined || old.entry.releaseBase !== undefined;
+          if (!retained) ids.delete(old.path);
           documentIds.delete(old.path);
-          result.removed.push(old.path);
+          if (!retained || changedFile) result.removed.push(old.path);
         }
         continue;
       }
@@ -383,7 +392,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         }
         if (findings.length > 0) {
           const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-          ids.set(old?.path ?? path, {id, saved});
+          ids.set(old?.path ?? path, {...old?.entry, id, saved});
           result.blocked.push({id, path: old?.path ?? path, findings});
           candidates.delete(id);
           resetTarget(id);
@@ -455,7 +464,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // A place that listed nothing may have left out changes too: the cursor holds while a removal is held.
     const through = result.leftOut.length > 0 || held.size > 0 ? cursor : [...listed.values()].map(normalizedTime).sort().at(-1) ?? cursor;
     const trailers = [...(through === null ? [] : [captureCursorTrailer(through)]), ...[...held].sort().map((id) => `Removal-held: ${id}`)];
-    const message = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
+    const commitMessage = trailers.length === 0 ? 'Capture document ids' : `Capture document ids\n\n${trailers.join('\n')}`;
     // Without the cache (lost, or never recorded yet), the write step uploads every linked file again; this mark tells it.
     const uploadsCommit = await commitUploads(git, state.uploads, uploads, identity, state.uploads === null ? { message: UPLOADS_REBUILDING, always: true } : {});
     const prepared = await prepareLfs(git, fetched.tracked, changes);
@@ -467,7 +476,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // only holds back, which rereads more and loses nothing.
     const recordsChange = linearCommit !== base || uploadsCommit !== state.uploads;
     const always = held.size > 0 || heldBefore.size > 0 || (through !== cursor && recordsChange);
-    const idsCommit = await commitIds(git, state.ids, ids, identity, { message, always, reserved, superseded });
+    const idsCommit = await commitIds(git, state.ids, ids, identity, { message: commitMessage, always, reserved, superseded });
     // Upload accepted LFS objects before publishing pointers; no blocked bytes reach this step.
     if (prepared.oids.length > 0) await git.run(['lfs', 'push', '--object-id', options.config.remote, ...prepared.oids]);
     const next = { linear: linearCommit, ids: idsCommit, uploads: uploadsCommit };
@@ -480,7 +489,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const refusal = lengthRefusal({content: candidate.doc.content ?? ''}, linear.facts);
         if (refusal !== undefined) result.writeBackWarnings.push({path: candidate.path, code: 'linear-content-too-large-to-write-back', length: refusal.length, limit: refusal.limit});
       }
-      const lostLease = new Error('state moved while recording document marks');
+      const lostLease = new Error(message('sync.lost-lease'));
       const marked = [
         ...[...candidates.values()].filter(({doc}) => !unmarked.has(doc.id)).map(({doc, path}) => ({doc, path, blocked: [] as SecurityFinding[]})),
         ...result.blocked.map(({id, path, findings}) => ({doc: documents.get(id)!, path, blocked: findings})),
@@ -612,7 +621,7 @@ export async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: 
       if (attributes.stdout.toString('utf8').split('\0')[2] !== 'lfs') continue;
       const cleaned = await git.run(['lfs', 'clean', '--', path], { input: content });
       const hash = /\noid sha256:([a-f0-9]{64})\n/.exec(cleaned.stdout.toString('utf8'))?.[1];
-      if (hash === undefined) throw new Error('LFS did not return a pointer');
+      if (hash === undefined) throw new Error(message('sync.no-lfs-pointer'));
       oids.push(hash);
       result.set(path, cleaned.stdout);
     }

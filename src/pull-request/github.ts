@@ -3,6 +3,7 @@
 // opens one. Merging is in merge.ts, for the callers that may merge.
 
 import { DEFAULT_GITHUB_API_URL } from '../setup/github.ts';
+import { message } from '../messages.ts';
 
 export interface GitHubRepository {
   /** `owner/name`. */
@@ -49,7 +50,7 @@ export class PullRequestError extends Error {
   readonly status: number | undefined;
 
   constructor(what: string, status: number | undefined, cause?: unknown) {
-    super(status === undefined ? `GitHub did not answer while ${what}` : `GitHub answered HTTP ${status} while ${what}`, cause === undefined ? undefined : { cause });
+    super(status === undefined ? message('github.no-answer', { action: what }) : message('github.answered', { status, action: what }), cause === undefined ? undefined : { cause });
     this.name = 'PullRequestError';
     this.status = status;
   }
@@ -60,7 +61,7 @@ export async function findOpenPullRequest(target: GitHubRepository, head: string
   const owner = target.repository.split('/')[0] as string;
   const query = new URLSearchParams({ state: 'open', head: `${owner}:${head}`, base, per_page: '10' });
   const answer = await request(target, 'GET', `/pulls?${query.toString()}`);
-  if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError('listing open pull requests', answer.status);
+  if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message('github.listing'), answer.status);
   const found = (answer.json as unknown[]).map(toPullRequest).find((pr) => pr !== null && pr.head === head && pr.base === base);
   return found ?? null;
 }
@@ -69,7 +70,7 @@ export async function findOpenPullRequest(target: GitHubRepository, head: string
 export async function openPullRequest(target: GitHubRepository, spec: NewPullRequest): Promise<PullRequest> {
   const answer = await request(target, 'POST', '/pulls', { title: spec.title, head: spec.head, base: spec.base, body: spec.body, maintainer_can_modify: false }, { kind: 'opened', accepted: 201 });
   const opened = answer.status === 201 ? toPullRequest(answer.json) : null;
-  if (opened === null) throw new PullRequestError('opening a pull request', answer.status);
+  if (opened === null) throw new PullRequestError(message('github.opening'), answer.status);
   return opened;
 }
 
@@ -77,14 +78,14 @@ export async function openPullRequest(target: GitHubRepository, spec: NewPullReq
 export async function updatePullRequest(target: GitHubRepository, number: number, text: { title: string; body: string }): Promise<PullRequest> {
   const answer = await request(target, 'PATCH', `/pulls/${number}`, { title: text.title, body: text.body }, { kind: 'updated', accepted: 200 });
   const updated = answer.status === 200 ? toPullRequest(answer.json) : null;
-  if (updated === null) throw new PullRequestError('updating a pull request', answer.status);
+  if (updated === null) throw new PullRequestError(message('github.updating'), answer.status);
   return updated;
 }
 
 /** Closes a pull request without merging it. */
 export async function closePullRequest(target: GitHubRepository, number: number): Promise<void> {
   const answer = await request(target, 'PATCH', `/pulls/${number}`, { state: 'closed' }, { kind: 'closed', accepted: 200 });
-  if (answer.status !== 200) throw new PullRequestError('closing a pull request', answer.status);
+  if (answer.status !== 200) throw new PullRequestError(message('github.closing'), answer.status);
 }
 
 /**
@@ -148,7 +149,7 @@ export async function request(target: GitHubRepository, method: string, path: st
     // treat it as failed and a later run reads back what happened. Anything
     // else is not GitHub's doing and is not hidden.
     if (!isTransportError(error)) throw error;
-    throw new PullRequestError(`sending ${method} to the pull request API`, undefined, error);
+    throw new PullRequestError(message('github.sending', { method }), undefined, error);
   }
   let json: unknown = null;
   try {

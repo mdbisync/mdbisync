@@ -13,7 +13,7 @@
 // reserved for documents not created yet, and a marked document's own icon
 // and color.
 
-import { lintText } from '../format/index.ts';
+import { lintInTree } from '../format/index.ts';
 import { type DocumentPlace, type LinearClient, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument } from '../mapping/index.ts';
 import { placeId } from '../initial-sync/plan.ts';
@@ -27,9 +27,11 @@ export interface RebuildInput {
   targets: ResolvedTargets;
   /** The synchronized files of the `linear` record, with their text. */
   documents: ReadonlyArray<MappedDocument & { text: string }>;
+  /** The regular files of the `linear` record's tree, which images must name (`RepositoryMapping.files`). */
+  files: ReadonlySet<string>;
 }
 
-export async function rebuildIds({ linear, facts, targets, documents }: RebuildInput): Promise<IdMap> {
+export async function rebuildIds({ linear, facts, targets, documents, files: treeFiles }: RebuildInput): Promise<IdMap> {
   const keyOf = (place: DocumentPlace, title: string) =>
     `${'projectId' in place ? `project:${place.projectId}` : `team:${place.teamId}`}\0${title.normalize('NFC')}`;
   const files = new Map<string, string>();
@@ -37,7 +39,7 @@ export async function rebuildIds({ linear, facts, targets, documents }: RebuildI
   /** Files by place, for the paths capture gives: folder and path. */
   const byPlace = new Map<string, Array<{ folder: string; path: string }>>();
   for (const document of documents) {
-    if (lintText(document.path, document.text).length > 0 || lengthRefusal({ title: document.title }, facts) !== undefined) continue;
+    if (lintInTree(document.path, document.text, treeFiles).length > 0 || lengthRefusal({ title: document.title }, facts) !== undefined) continue;
     let place: DocumentPlace;
     try {
       place = placeId(targets, document.place);

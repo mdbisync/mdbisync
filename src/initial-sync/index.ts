@@ -50,10 +50,10 @@ export {
   FINAL_IDS_MESSAGE,
   PROGRESS_BATCH,
   keptAnnotationTrailer,
+  keptAnnotationsTrailers,
   readKeptAnnotations,
   PROGRESS_MESSAGE,
   RECORD_MESSAGE,
-  SYNC_IDENTITY,
   confirmInitialSync,
 } from './confirm.ts';
 export { type BodyTransform, LeaveOutError, type TransformContext, type TransformInput, restoreBody, transformBody } from './transform.ts';

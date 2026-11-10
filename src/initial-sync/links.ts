@@ -23,6 +23,7 @@ import { fixText } from '../format/index.ts';
 import { parse, visit } from '../format/markdown.ts';
 import { type LinearClient } from '../linear/index.ts';
 import { type BodyTransform, type TransformContext } from './transform.ts';
+import { message } from '../messages.ts';
 
 /** Where a destination sits in the text and what it means. */
 interface Destination {
@@ -305,7 +306,7 @@ export function documentLinks(): BodyTransform {
       context = run;
     },
     async apply({ path, body }) {
-      if (context === undefined) throw new Error('document-links: apply before prepare');
+      if (context === undefined) throw new Error(message('initial-sync.links-not-prepared'));
       if (map === undefined) {
         if (!hasDocumentLinks(body, path, context.documentIds)) return body;
         map = { base: documentUrlBase(await workspaceUrlKey(context.linear)), ids: context.documentIds };

@@ -46,7 +46,9 @@ name.
 ## GitHub App
 
 The sync pushes, opens and merges its pull request and reads checks as a
-GitHub App that you create and own. A repository admin creates it.
+GitHub App that you create and own. A repository admin creates it. The
+sync's own commits name the App's bot account (`<app>[bot]`) as their
+author, so GitHub shows them with the App's name and avatar.
 
 [Create the App under your account](https://github.com/settings/apps/new?description=Two-way+sync+between+Linear+documents+and+Markdown+in+this+repository.&url=https%3A%2F%2Fgithub.com%2Fmdbisync%2Fmdbisync&public=false&webhook_active=false&contents=write&pull_requests=write&workflows=write&checks=read&statuses=read):
 the link opens GitHub's new-App form with these settings filled in. For an
@@ -106,7 +108,7 @@ that its installation accepted them.
 Files reach Linear only in the form Linear keeps
 ([linear-format.md](linear-format.md)); the `linear-format` pre-commit hook
 puts them in that form. Add it to `.pre-commit-config.yaml`, pinned to a
-release ([pins](usage.md#pre-release-builds-and-pins)). It must come from
+release ([pins](usage.md#release-builds-and-pins)). It must come from
 this project's repository, not a `local` hook. `mdbisync init` writes it.
 
 Mark your security hooks `alias: security`: changes from Linear pass them

@@ -59,6 +59,7 @@ action. Every input of the action, and what it means for this run:
 | `linear-api-url` | empty | Linear's API origin; leave it empty. |
 | `cleanup-tokens` | `false` | `true` revokes tokens that killed runs left behind, only when no other repository uses this Linear app ([README](../README.md#tokens-left-by-interrupted-jobs)). |
 | `github-token` | none | The GitHub App's installation token; the run pushes the state refs with it. |
+| `app-slug` | none | The App's slug, from the token step's output `app-slug`; the state refs' commits name the App's bot account as their author. |
 | `github-api-url` | empty | GitHub's REST API URL; leave it empty. |
 | `repository` | empty | The repository as `owner/name`; empty means the workflow's own. |
 | `tracked-branch` | `main` | The branch whose files Linear is made equal to. |
@@ -130,12 +131,16 @@ reasons:
 - a `.md` file git does not store as text (`binary`, `stored-in-lfs`,
   `not-a-regular-file`);
 - a linked file over Linear's 10 MB upload limit (`upload-too-large`) or one
-  the run cannot read (`upload-unreadable`). The dry run judges a file in
-  Git LFS by its pointer and downloads nothing.
+  the run cannot read (`upload-unreadable`), such as an LFS object the
+  remote's LFS server does not have. The dry run judges a file in Git LFS by
+  its pointer and asks the LFS server only whether it holds the object; it
+  downloads nothing.
 
 The confirmed run can leave out a few more: a file whose text grows past
 Linear's length limit when its links are rewritten (`content-too-long`), or
-whose LFS object turns out to be missing (`upload-unreadable`). Each rule and
+whose LFS object still cannot be read (`upload-unreadable`), for example
+because the LFS server could not be reached during the dry run or answered
+with an error other than not having the object. Each rule and
 what to do about it is in
 [troubleshooting.md](troubleshooting.md#files-left-out).
 

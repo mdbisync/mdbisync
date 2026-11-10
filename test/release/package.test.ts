@@ -10,10 +10,11 @@ import { createReleaseCommit, releasePackage, stageRelease, validateAction, vali
 
 const action = { runs: { using: 'node24', main: 'dist/action-main.js', post: 'dist/action-post.js', 'post-if': 'always()' } };
 
-test('release version must be an explicit semantic pre-release', () => {
+test('release version must be an explicit semantic version', () => {
   assert.equal(validateVersion('v0.1.0-rc.1'), '0.1.0-rc.1');
-  for (const value of ['v1.0.0', '1.0.0-rc.1', 'v01.0.0-rc.1', 'v1.0.0-01', 'v1.0.0-rc/1', '--help', 'v1.0.0-rc.1\n', 'v1.0.0-rc.1\r']) {
-    assert.throws(() => validateVersion(value), /pre-release/);
+  assert.equal(validateVersion('v1.0.0'), '1.0.0');
+  for (const value of ['1.0.0-rc.1', 'v01.0.0-rc.1', 'v1.0.0-01', 'v1.0.0-rc/1', '--help', 'v1.0.0-rc.1\n', 'v1.0.0-rc.1\r']) {
+    assert.throws(() => validateVersion(value), /semantic version/);
   }
 });
 

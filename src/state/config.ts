@@ -2,6 +2,8 @@
 // the prefix of the three state refs. The defaults are the names the sync
 // uses in a real repository; tests give each run its own names.
 
+import { message } from '../messages.ts';
+
 export const STORES = ['linear', 'ids', 'uploads'] as const;
 export type Store = (typeof STORES)[number];
 
@@ -44,28 +46,30 @@ export function resolveStateConfig(input: Partial<StateConfig> = {}): StateConfi
   };
 
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(config.remote)) {
-    throw new StateConfigError(`remote "${config.remote}" is not a valid remote name`);
+    throw new StateConfigError(message('config.invalid-remote', { remote: config.remote }));
   }
   for (const key of ['trackedBranch', 'syncBranch'] as const) {
-    const problem = refNameProblem(`refs/heads/${config[key]}`) ?? (config[key].startsWith('-') ? 'starts with "-"' : null);
-    if (problem !== null) throw new StateConfigError(`${key} "${config[key]}" is not a valid branch name: ${problem}`);
+    const problem = refNameProblem(`refs/heads/${config[key]}`) ?? (config[key].startsWith('-') ? message('config.starts-with-dash') : null);
+    if (problem !== null) throw new StateConfigError(message('config.invalid-branch', { key, branch: config[key], problem }));
   }
-  if (config.trackedBranch === config.syncBranch) {
-    throw new StateConfigError('the tracked branch and the sync branch must differ');
+  const suspended = suspendedBranch(config);
+  if (config.trackedBranch === config.syncBranch || config.trackedBranch === suspended) {
+    throw new StateConfigError(message('config.same-branches'));
   }
   // git cannot hold both "a" and "a/b" as refs.
   if (config.syncBranch.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${config.syncBranch}/`)) {
-    throw new StateConfigError('one of the tracked branch and the sync branch is a folder of the other');
+    throw new StateConfigError(message('config.nested-branches'));
   }
+  if (suspended.startsWith(`${config.trackedBranch}/`) || config.trackedBranch.startsWith(`${suspended}/`)) throw new StateConfigError(message('config.nested-branches'));
   const prefixProblem = refNameProblem(`${config.refPrefix}/linear`);
   if (prefixProblem !== null) {
-    throw new StateConfigError(`refPrefix "${config.refPrefix}" is not a valid ref prefix: ${prefixProblem}`);
+    throw new StateConfigError(message('config.invalid-prefix', { prefix: config.refPrefix, problem: prefixProblem }));
   }
   if (!/^refs\/[^/]/.test(config.refPrefix)) {
-    throw new StateConfigError(`refPrefix "${config.refPrefix}" must start with "refs/" and name a folder under it`);
+    throw new StateConfigError(message('config.prefix-outside-refs', { prefix: config.refPrefix }));
   }
   if (/^refs\/(heads|tags|remotes)(\/|$)/.test(config.refPrefix)) {
-    throw new StateConfigError(`refPrefix "${config.refPrefix}" must not be under refs/heads, refs/tags or refs/remotes`);
+    throw new StateConfigError(message('config.prefix-reserved', { prefix: config.refPrefix }));
   }
   return config;
 }
@@ -103,4 +107,10 @@ export function refNameProblem(name: string): string | null {
     if (part.endsWith('.lock')) return 'has a part ending with ".lock"';
   }
   return null;
+}
+
+/** The second lane shares the configured namespace of the normal branch. */
+export function suspendedBranch(config: StateConfig): string {
+  return !config.syncBranch.includes('/') || config.syncBranch.endsWith('/suspended')
+    ? `${config.syncBranch}-suspended` : config.syncBranch.replace(/[^/]+$/, 'suspended');
 }

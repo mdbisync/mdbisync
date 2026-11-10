@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DEFAULT_STATE_CONFIG, StateConfigError, localRef, refNameProblem, resolveStateConfig, stateRef } from './index.ts';
+import { DEFAULT_STATE_CONFIG, StateConfigError, localRef, refNameProblem, resolveStateConfig, stateRef, suspendedBranch } from './index.ts';
 
 describe('state config', () => {
   it('uses the default names when nothing is given', () => {
@@ -14,6 +14,12 @@ describe('state config', () => {
     assert.equal(config.refPrefix, 'refs/mdbisync-t/4f1a9c');
     assert.equal(stateRef(config, 'ids'), 'refs/mdbisync-t/4f1a9c/ids');
     assert.equal(stateRef(config, 'uploads'), 'refs/mdbisync-t/4f1a9c/uploads');
+  });
+
+  it('keeps custom suspended lane names in the configured namespace', () => {
+    assert.equal(suspendedBranch(resolveStateConfig()), 'mdbisync/suspended');
+    assert.equal(suspendedBranch(resolveStateConfig({syncBranch:'linear-sync'})), 'linear-sync-suspended');
+    assert.equal(suspendedBranch(resolveStateConfig({syncBranch:'suspended'})), 'suspended-suspended');
   });
 
   it('maps branches to remote-tracking refs and keeps state refs as they are', () => {
@@ -33,6 +39,7 @@ describe('state config', () => {
     ['a branch starting with "-"', { trackedBranch: '-main' }],
     ['a branch with "@{"', { syncBranch: 'a@{1}' }],
     ['the same tracked and sync branch', { trackedBranch: 'main', syncBranch: 'main' }],
+    ['a tracked branch using the suspended lane name', { trackedBranch: 'mdbisync/suspended' }],
     ['a remote with a slash', { remote: 'a/b' }],
     ['a sync branch inside the tracked branch', { trackedBranch: 'main', syncBranch: 'main/sync' }],
     ['a tracked branch that is the sync branch folder', { trackedBranch: 'mdbisync' }],

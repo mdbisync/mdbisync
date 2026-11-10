@@ -4,10 +4,11 @@
 // ref, so of two runs that started from the same state exactly one wins and
 // the other changes nothing.
 
-import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef } from './config.ts';
+import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef, suspendedBranch } from './config.ts';
 import { type Git, GitError, type Oid, mapLimit } from './git.ts';
 import { type LfsPointer, type LfsReadResult, lfsReader, parseLfsPointer } from './lfs.ts';
 import { type CommitIdentity, type TreeEntry, commitTree, listTree, readBlobs } from './objects.ts';
+import { message } from '../messages.ts';
 
 /** The state refs as last fetched from the remote; null when a ref does not exist. */
 export type StateSnapshot = Record<Store, Oid | null>;
@@ -17,6 +18,7 @@ export interface FetchedState {
   tracked: Oid;
   /** The sync branch's commit, null when it does not exist. */
   sync: Oid | null;
+  suspended?: Oid | null;
   state: StateSnapshot;
 }
 
@@ -28,9 +30,10 @@ export interface FetchedState {
 export async function fetchState(git: Git, config: StateConfig): Promise<FetchedState> {
   const tracked = branchRef(config.trackedBranch);
   const sync = branchRef(config.syncBranch);
-  const advertised = await lsRemote(git, config.remote, [tracked, sync, ...STORES.map((store) => stateRef(config, store))]);
+  const suspended = branchRef(suspendedBranch(config));
+  const advertised = await lsRemote(git, config.remote, [tracked, sync, suspended, ...STORES.map((store) => stateRef(config, store))]);
   if (!advertised.has(tracked)) {
-    throw new Error(`the tracked branch "${config.trackedBranch}" does not exist on remote "${config.remote}"`);
+    throw new Error(message('state.tracked-missing', { branch: config.trackedBranch, remote: config.remote }));
   }
 
   // Fetch only refs that exist (a missing one would fail the fetch), and
@@ -47,7 +50,7 @@ export async function fetchState(git: Git, config: StateConfig): Promise<Fetched
 
   const state = {} as StateSnapshot;
   for (const store of STORES) state[store] = await read(stateRef(config, store));
-  return { tracked: (await read(tracked)) as Oid, sync: await read(sync), state };
+  return { tracked: (await read(tracked)) as Oid, sync: await read(sync), suspended: await read(suspended), state };
 }
 
 async function lsRemote(git: Git, remote: string, refs: readonly string[]): Promise<Map<string, Oid>> {
@@ -97,7 +100,7 @@ export function refusedPushes(git: Git): readonly RefusedPush[] {
 }
 
 /** What a moved ref is to the sync: one of the state refs, the sync branch or the tracked branch. */
-export type RefRole = Store | 'syncBranch' | 'trackedBranch' | 'other';
+export type RefRole = Store | 'suspendedBranch' | 'syncBranch' | 'trackedBranch' | 'other';
 
 const moves = new WeakMap<Git, Map<RefRole, number>>();
 
@@ -113,6 +116,7 @@ export function movedRefs(git: Git): Map<RefRole, number> {
 function refRole(config: StateConfig, ref: string): RefRole {
   const store = STORES.find((name) => stateRef(config, name) === ref);
   if (store !== undefined) return store;
+  if (ref === branchRef(suspendedBranch(config))) return 'suspendedBranch';
   if (ref === branchRef(config.syncBranch)) return 'syncBranch';
   return ref === branchRef(config.trackedBranch) ? 'trackedBranch' : 'other';
 }
@@ -128,7 +132,7 @@ function logMoves(git: Git, config: StateConfig, refs: readonly string[]): void 
 
 export class NotFastForwardError extends Error {
   constructor(ref: string) {
-    super(`refusing to move ${ref} to a commit that does not descend from its current value`);
+    super(message('state.not-fast-forward', { ref }));
     this.name = 'NotFastForwardError';
   }
 }
@@ -142,7 +146,7 @@ export class NotFastForwardError extends Error {
  */
 export async function pushAtomic(git: Git, config: StateConfig, updates: readonly RefUpdate[]): Promise<PushResult> {
   if (new Set(updates.map((update) => update.ref)).size !== updates.length) {
-    throw new Error('a push names the same ref twice');
+    throw new Error(message('state.same-ref-twice'));
   }
   const changing = updates.filter((update) => update.next !== update.expected);
   if (changing.length === 0) return { ok: true, updated: [] };
@@ -253,13 +257,25 @@ export interface MarkNotice {
   posted: boolean;
 }
 
+export interface SuspensionEpisode {
+  /** Chosen before the atomic suspension push; the notice writer uses it later. */
+  noticeId: string;
+  /** Last durable head, also used if GitHub deletes the branch after merging. */
+  head?: Oid;
+  /** Paths of this episode; one entry also holds former names and assets for the lane. */
+  paths: string[];
+  checks: string[];
+}
+
 export interface IdEntry {
   /** The Linear document id. */
   id: string;
-  /**
-   * The document's own icon and color while the sync shows a mark in their
-   * place; absent when no mark is shown.
-   */
+  /** The active hold; retained across renames and captured removals. */
+  suspended?: SuspensionEpisode;
+  /** First write after release must use this Linear commit as its base. */
+  releaseBase?: Oid;
+  releasePaths?: string[];
+  /** The document's own decoration while the sync shows a mark. */
   saved?: { icon: string | null; color: string | null; notice?: MarkNotice };
 }
 
@@ -272,8 +288,8 @@ export async function readIds(git: Git, commit: Oid | null): Promise<IdMap> {
   const data = await readJsonFile(git, commit, IDS_FILE);
   const map: IdMap = new Map();
   for (const [path, value] of Object.entries(data)) {
-    if (!isIdEntry(value)) throw new Error(`${IDS_FILE} has an invalid entry for a path`);
-    map.set(path, value.saved === undefined ? { id: value.id } : { id: value.id, saved: value.saved });
+    if (!isIdEntry(value)) throw new Error(message('state.invalid-path-entry', { file: IDS_FILE }));
+    map.set(path, value);
   }
   return map;
 }
@@ -282,7 +298,7 @@ export async function readUploads(git: Git, commit: Oid | null): Promise<UploadM
   const data = await readJsonFile(git, commit, UPLOADS_FILE);
   const map: UploadMap = new Map();
   for (const [hash, url] of Object.entries(data)) {
-    if (!/^[0-9a-f]{64}$/.test(hash) || typeof url !== 'string') throw new Error(`${UPLOADS_FILE} has an invalid entry`);
+    if (!/^[0-9a-f]{64}$/.test(hash) || typeof url !== 'string') throw new Error(message('state.invalid-entry', { file: UPLOADS_FILE }));
     map.set(hash, url);
   }
   return map;
@@ -386,7 +402,7 @@ async function readStringMap(git: Git, commit: Oid | null, file: string): Promis
   const data = await readJsonFile(git, commit, file);
   const map = new Map<string, string>();
   for (const [key, value] of Object.entries(data)) {
-    if (typeof value !== 'string' || value === '') throw new Error(`${file} has an invalid entry`);
+    if (typeof value !== 'string' || value === '') throw new Error(message('state.invalid-entry', { file }));
     map.set(key, value);
   }
   return map;
@@ -407,7 +423,7 @@ export async function readWrittenHashes(git: Git, commit: Oid | null): Promise<M
   const data = await readJsonFile(git, commit, WRITTEN_FILE);
   const map = new Map<string, string>();
   for (const [path, hash] of Object.entries(data)) {
-    if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) throw new Error(`${WRITTEN_FILE} has an invalid entry`);
+    if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) throw new Error(message('state.invalid-entry', { file: WRITTEN_FILE }));
     map.set(path, hash);
   }
   return map;
@@ -426,7 +442,7 @@ export function commitIds(
   options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; superseded?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string> } = {},
 ): Promise<Oid> {
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
-  const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry.saved === undefined ? { id: entry.id } : { id: entry.id, saved: entry.saved }]));
+  const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry]));
   const files = new Map<string, unknown>([[IDS_FILE, data]]);
   const sorted = (map: ReadonlyMap<string, string>) => Object.fromEntries([...map.entries()].sort(([a], [b]) => compareStrings(a, b)));
   if (options.reserved !== undefined && options.reserved.size > 0) files.set(RESERVED_IDS_FILE, sorted(options.reserved));
@@ -465,6 +481,16 @@ function isIdEntry(value: unknown): value is IdEntry {
   if (typeof value !== 'object' || value === null) return false;
   const entry = value as Record<string, unknown>;
   if (typeof entry.id !== 'string' || entry.id === '') return false;
+  if (entry.releasePaths !== undefined && (!Array.isArray(entry.releasePaths) || !entry.releasePaths.every((path) => typeof path === 'string'))) return false;
+  if (entry.releaseBase !== undefined && (typeof entry.releaseBase !== 'string' || !/^[0-9a-f]{40,64}$/.test(entry.releaseBase))) return false;
+  if (entry.suspended !== undefined) {
+    const episode = entry.suspended as SuspensionEpisode | null;
+    if (episode === null || typeof episode !== 'object' || typeof episode.noticeId !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(episode.noticeId)
+      || (episode.head !== undefined && (typeof episode.head !== 'string' || !/^[0-9a-f]{40,64}$/.test(episode.head)))
+      || !Array.isArray(episode.paths) || !episode.paths.every((path) => typeof path === 'string')
+      || !Array.isArray(episode.checks) || !episode.checks.every((name) => typeof name === 'string')) return false;
+  }
   if (entry.saved === undefined) return true;
   const saved = entry.saved as Record<string, unknown> | null;
   return (
@@ -490,15 +516,15 @@ async function readJsonFile(git: Git, commit: Oid | null, file: string): Promise
   // A state commit without its file is damaged state, not an empty map:
   // reading it as empty would make the sync forget every id.
   const read = await git.run(['cat-file', 'blob', `${commit}:${file}`], { okCodes: [0, 128] });
-  if (read.code !== 0) throw new Error(`${file} is missing in state commit ${commit}`);
+  if (read.code !== 0) throw new Error(message('state.file-missing', { file, commit }));
   const blob = read.stdout;
   let data: unknown;
   try {
     data = JSON.parse(blob.toString('utf8'));
   } catch {
-    throw new Error(`${file} in ${commit} is not valid JSON`);
+    throw new Error(message('state.invalid-json', { file, commit }));
   }
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new Error(`${file} in ${commit} is not a JSON object`);
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new Error(message('state.not-object', { file, commit }));
   return data as Record<string, unknown>;
 }
 

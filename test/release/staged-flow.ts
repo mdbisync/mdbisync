@@ -23,7 +23,7 @@ import { basename, join, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { loadMapping } from '../../src/mapping/index.ts';
 import { validateAction } from '../../src/release/package.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../../src/setup/test-helpers.ts';
+import { FAKE_APP_SLUG, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../../src/setup/test-helpers.ts';
 import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef } from '../../src/state/index.ts';
 import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-helpers.ts';
 
@@ -216,6 +216,7 @@ async function runTemplate(release: string, template: string, inputs: Record<str
     'secrets.MDBISYNC_LINEAR_CLIENT_ID': 'client',
     'secrets.MDBISYNC_LINEAR_CLIENT_SECRET': 'client-secret',
     'steps.app-token.outputs.token': 'app-token',
+    'steps.app-token.outputs.app-slug': FAKE_APP_SLUG,
     'secrets.LINEAR_TEST_APP_CLIENT_ID': 'client',
     'secrets.LINEAR_TEST_APP_CLIENT_SECRET': 'client-secret',
     'secrets.CANARY_HOOK_KEY': 'offline-hook-key',

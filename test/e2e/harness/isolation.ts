@@ -7,8 +7,8 @@
 import { randomBytes } from 'node:crypto';
 
 export const RUN_ID_PATTERN = /^[0-9a-f]{6}$/;
-/** Branches of runs: t/<run>/main, t/<run>/sync and the scheduled-run request t/<run>/schedule. */
-export const RUN_BRANCH_PATTERN = /^refs\/heads\/t\/([0-9a-f]{6})\/(?:main|sync|schedule)$/;
+/** Branches of runs: t/<run>/main, t/<run>/sync, t/<run>/suspended and the scheduled-run request t/<run>/schedule. */
+export const RUN_BRANCH_PATTERN = /^refs\/heads\/t\/([0-9a-f]{6})\/(?:main|sync|suspended|schedule)$/;
 /** State refs of runs: refs/mdbisync-t/<run>/<store>. */
 export const RUN_STATE_REF_PATTERN = /^refs\/mdbisync-t\/([0-9a-f]{6})\/[a-z]+$/;
 /** Run projects: "<two words> <run>". */
