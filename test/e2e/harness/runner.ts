@@ -258,6 +258,19 @@ export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnT
   }
 }
 
+/**
+ * The ids of every team the run's slice annotates: the zones the run locks and the scope of its ownership record.
+ * A team zone whose only file is its own README is not in `tree.teamZones`, yet the engine syncs that README into
+ * the zone, so the scope is every annotated team, not only the zones the run places files below.
+ */
+export function runTeamIds(tree: Pick<RunTree, 'teams'>, teams: ReadonlyMap<string, Pick<Team, 'id'>>): string[] {
+  return [...tree.teams].map((key) => {
+    const team = teams.get(key);
+    if (team === undefined) throw new EnvBlockedError(`the test workspace has no team ${key}`);
+    return team.id;
+  });
+}
+
 async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], deadline: SetupDeadline, grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
   const { config } = deps;
   if (config.missing.length > 0) throw new EnvBlockedError(`test configuration is missing: ${config.missing.join(', ')}`);
@@ -293,7 +306,8 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   const { teams, world } = live;
   ctx.live = live;
   // The team zones the run may write in, on record before anything is created there.
-  ctx.owned.scope([...tree.teamZones.keys()].flatMap((key) => teams.get(key)?.id ?? []));
+  const zoneIds = runTeamIds(tree, teams);
+  ctx.owned.scope(zoneIds);
 
   // Setup ends after SETUP_TIMEOUT_MS: a key that frees up later is reported now, with its reason.
   ctx.phase('editor budget');
@@ -301,11 +315,6 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
 
   // The team lock: initial sync matches every document of an annotated team zone.
   ctx.phase('team lock');
-  const zoneIds = [...tree.teams].map((key) => {
-    const team = teams.get(key);
-    if (team === undefined) throw new EnvBlockedError(`the test workspace has no team ${key}`);
-    return team.id;
-  });
   await takeTeamZones(ctx, deps.stateDir, grant, { ids: zoneIds, lockKeys: tree.teamZones.keys() }, locks, deadline);
 
   const readmes = new Map<string, string>();
