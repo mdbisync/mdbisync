@@ -44,6 +44,19 @@ describe('the ending of a sync run', () => {
       assert.equal(pullRequestEnding(outcome)?.code, ending);
     });
   }
+
+  it('suspended marks that stopped part way make the run partial with their code', () => {
+    for (const code of ['write-failed', 'stopped', 'state-moved'] as const) {
+      const outcome = sync(undefined, undefined);
+      (outcome.sync as unknown as { pullRequest: unknown }).pullRequest = { holdMarks: { set: [], updated: [], cleared: [], deferred: 0, removed: [], code } };
+      assert.equal(partialCode(outcome), code);
+      assert.equal(exitStatusOf(outcome), 'warning');
+    }
+    // A write step's own failure names the run first.
+    const both = sync(undefined, 'stopped');
+    (both.sync as unknown as { pullRequest: unknown }).pullRequest = { holdMarks: { set: [], updated: [], cleared: [], deferred: 0, removed: [], code: 'write-failed' } };
+    assert.equal(partialCode(both), 'stopped');
+  });
 });
 
 describe('the message of a run stopped before any write', () => {

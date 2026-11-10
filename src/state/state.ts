@@ -276,7 +276,21 @@ export interface IdEntry {
   releaseBase?: Oid;
   releasePaths?: string[];
   /** The document's own decoration while the sync shows a mark. */
-  saved?: { icon: string | null; color: string | null; notice?: MarkNotice };
+  saved?: { icon: string | null; color: string | null; notice?: MarkNotice; hold?: HoldNotice };
+}
+
+/**
+ * The comment of a suspension episode, beside a conflict or blocked notice:
+ * its id is the episode's `noticeId`, and it is resolved when the episode
+ * ends, whatever other mark the document shows by then.
+ */
+export interface HoldNotice {
+  id: string;
+  /** Hash of the comment text, which names checks and the repository's annotations. */
+  bodyHash: string;
+  posted: boolean;
+  /** Hash of the failure the text describes (its checks and their runs); another failure is read before the text changes. */
+  failure?: string;
 }
 
 /** Path → Linear document. */
@@ -498,8 +512,18 @@ function isIdEntry(value: unknown): value is IdEntry {
     saved !== null &&
     (saved.icon === null || typeof saved.icon === 'string') &&
     (saved.color === null || typeof saved.color === 'string') &&
-    (saved.notice === undefined || isMarkNotice(saved.notice))
+    (saved.notice === undefined || isMarkNotice(saved.notice)) &&
+    (saved.hold === undefined || isHoldNotice(saved.hold))
   );
+}
+
+function isHoldNotice(value: unknown): value is HoldNotice {
+  if (typeof value !== 'object' || value === null) return false;
+  const notice = value as Record<string, unknown>;
+  return typeof notice.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(notice.id)
+    && typeof notice.bodyHash === 'string' && /^[0-9a-f]{64}$/.test(notice.bodyHash)
+    && typeof notice.posted === 'boolean'
+    && (notice.failure === undefined || (typeof notice.failure === 'string' && /^[0-9a-f]{64}$/.test(notice.failure)));
 }
 
 function isMarkNotice(value: unknown): value is MarkNotice {

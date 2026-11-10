@@ -7,7 +7,7 @@ import { LinearClient } from '../../../src/linear/index.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
 import { Git } from '../../../src/state/index.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
-import { budgetHolds, compare, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
+import { budgetHolds, reportedHoldChanges, compare, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
 import { parseEnvFile, parseRepoUrl } from './config.ts';
 import { appInstallationToken, appJwt, SandboxRest } from './github.ts';
@@ -154,6 +154,18 @@ describe('check helpers', () => {
   it('hold I9 at 1.5 requests per written document plus 5 per run', () => {
     assert.ok(budgetHolds(155, 100, 1));
     assert.ok(!budgetHolds(156, 100, 1));
+  });
+
+  it('allows I9 2 more requests per document whose suspended mark or comment changed', () => {
+    assert.ok(budgetHolds(105, 0, 1, 50));
+    assert.ok(!budgetHolds(106, 0, 1, 50));
+    const reports = [
+      { pullRequest: { holdMarks: { set: ['a.md', 'b.md'], updated: ['c.md'], cleared: [], deferred: 3, removed: ['d.md'] } } },
+      { pullRequest: null },
+      null,
+      { pullRequest: { holdMarks: { set: [], updated: [], cleared: ['a.md'], deferred: 0, removed: [] } } },
+    ];
+    assert.equal(reportedHoldChanges(reports), 4);
   });
 
   it('evaluate every assertion operator', () => {

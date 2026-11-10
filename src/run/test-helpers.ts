@@ -16,7 +16,7 @@ const REFS = {
 } as const;
 
 /** The Linear mutations that write a document or a comment; uploads are compared by the bytes storage took. */
-const DOCUMENT_WRITES = new Set(['CreateDocument', 'UpdateDocument', 'TrashDocument', 'RestoreDocument', 'CommentOnDocument', 'UpdateDocumentComment']);
+const DOCUMENT_WRITES = new Set(['CreateDocument', 'UpdateDocument', 'TrashDocument', 'RestoreDocument', 'CommentOnDocument', 'UpdateDocumentComment', 'ResolveComment']);
 const PULL_REQUEST_WRITE = /^(POST \/pulls|PATCH \/pulls\/\d+|PUT \/pulls\/\d+\/merge)$/;
 
 export interface WorldMark {

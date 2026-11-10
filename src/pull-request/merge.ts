@@ -22,6 +22,25 @@ export interface CheckState {
   hasChecks: boolean;
   /** Names of the checks that have not finished, sorted. */
   pending: string[];
+  /** The failed checks with their runs, sorted by name; absent when nothing failed. */
+  failures?: CheckFailure[];
+}
+
+/** A failed check run or commit status: its name, its page on GitHub and, for a check run, its id. */
+export interface CheckFailure {
+  name: string;
+  /** An https link to the run, or absent when GitHub gave none. */
+  url?: string;
+  /** A check run's id, which its annotations are read by; commit statuses have none. */
+  checkRunId?: number;
+}
+
+/** A check run's annotation on one file: its line and text, never a log. */
+export interface CheckAnnotation {
+  path: string;
+  line: number;
+  title?: string;
+  message: string;
 }
 
 /**
@@ -31,8 +50,16 @@ export interface CheckState {
  * reported as soon as it is seen.
  */
 export async function readChecks(target: GitHubRepository, sha: string): Promise<CheckState> {
-  const failed = new Set<string>();
   const pending = new Set<string>();
+  const failures = new Map<string, CheckFailure>();
+  const fail = (name: string, url: unknown, checkRunId?: unknown) => {
+    if (failures.has(name)) return;
+    const failure: CheckFailure = { name };
+    const link = httpsLink(url);
+    if (link !== undefined) failure.url = link;
+    if (Number.isSafeInteger(checkRunId) && (checkRunId as number) > 0) failure.checkRunId = checkRunId as number;
+    failures.set(name, failure);
+  };
 
   let seen = 0;
   let hasRuns = false;
@@ -43,10 +70,10 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
       throw new PullRequestError(message('github.reading-check-runs'), answer.status);
     }
     hasRuns ||= body.total_count > 0;
-    for (const run of body.check_runs as Array<{ name?: unknown; status?: unknown; conclusion?: unknown }>) {
+    for (const run of body.check_runs as Array<{ id?: unknown; name?: unknown; status?: unknown; conclusion?: unknown; html_url?: unknown }>) {
       const name = typeof run.name === 'string' ? run.name : 'unnamed check';
       if (run.status !== 'completed') pending.add(name);
-      else if (typeof run.conclusion !== 'string' || !PASSING_CONCLUSIONS.has(run.conclusion)) failed.add(name);
+      else if (typeof run.conclusion !== 'string' || !PASSING_CONCLUSIONS.has(run.conclusion)) fail(name, run.html_url, run.id);
     }
     seen += body.check_runs.length;
     if (seen >= body.total_count) break;
@@ -64,14 +91,50 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
   }
   // The combined status lists at most one page of contexts; ones it does not show are never read as passed.
   if (combined.total_count > combined.statuses.length) pending.add(`${combined.total_count - combined.statuses.length} more commit statuses`);
-  for (const status of combined.statuses as Array<{ context?: unknown; state?: unknown }>) {
+  for (const status of combined.statuses as Array<{ context?: unknown; state?: unknown; target_url?: unknown }>) {
     const name = typeof status.context === 'string' ? status.context : 'unnamed status';
     if (status.state === 'pending') pending.add(name);
-    else if (status.state !== 'success') failed.add(name);
+    else if (status.state !== 'success') fail(name, status.target_url);
   }
 
-  const sorted = (names: Set<string>) => [...names].sort();
-  return { hasChecks: hasRuns || combined.total_count > 0, state: failed.size > 0 ? 'failed' : pending.size > 0 ? 'pending' : 'passed', failed: sorted(failed), pending: sorted(pending) };
+  const failed = [...failures.keys()].sort();
+  const state: CheckState = { hasChecks: hasRuns || combined.total_count > 0, state: failed.length > 0 ? 'failed' : pending.size > 0 ? 'pending' : 'passed', failed, pending: [...pending].sort() };
+  if (failed.length > 0) state.failures = failed.map((name) => failures.get(name) as CheckFailure);
+  return state;
+}
+
+/** A link GitHub gave, kept only when it is an https URL without credentials. */
+function httpsLink(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 2000) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.username === '' && url.password === '' ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Enough annotations for a comment; a check run with more is cut, never paged without end. */
+const MAX_ANNOTATION_PAGES = 5;
+
+/**
+ * The annotations of one check run (`checks: read`): path, line, title and
+ * message, as the check put them on the files. Never the run's logs.
+ */
+export async function readAnnotations(target: GitHubRepository, checkRunId: number): Promise<CheckAnnotation[]> {
+  const annotations: CheckAnnotation[] = [];
+  for (let page = 1; page <= MAX_ANNOTATION_PAGES; page += 1) {
+    const answer = await request(target, 'GET', `/check-runs/${checkRunId}/annotations?per_page=${PAGE_SIZE}&page=${page}`);
+    if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message('github.reading-annotations'), answer.status);
+    const items = answer.json as Array<{ path?: unknown; start_line?: unknown; title?: unknown; message?: unknown }>;
+    for (const item of items) {
+      if (typeof item.path !== 'string' || typeof item.message !== 'string') continue;
+      const line = Number.isSafeInteger(item.start_line) && (item.start_line as number) > 0 ? item.start_line as number : 0;
+      annotations.push({ path: item.path, line, message: item.message, ...(typeof item.title === 'string' && item.title !== '' ? { title: item.title } : {}) });
+    }
+    if (items.length < PAGE_SIZE) break;
+  }
+  return annotations;
 }
 
 /**
