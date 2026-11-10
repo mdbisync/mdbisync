@@ -224,7 +224,8 @@ describe('ownership record', () => {
     await engine.createDocument({ teamId: 'team-eng' }, { id: ids.readme, title: 'README', content: 'Team notes.\n' });
     await engine.createDocument({ teamId: 'team-eng' }, { id: ids.notes, title: 'abc123/notes', content: 'Notes.\n' });
     await engine.createDocument({ projectId: project.id }, { id: ids.plan, title: 'plan', content: 'Plan.\n' });
-    await assert.rejects(engine.createDocument({ teamId: 'team-eng' }, { id: ids.lost, title: 'abc123/lost', content: 'Lost.\n' }));
+    // The client reads the lost create back by its id and takes it as created; its answer was still a 503.
+    assert.equal((await engine.createDocument({ teamId: 'team-eng' }, { id: ids.lost, title: 'abc123/lost', content: 'Lost.\n' })).id, ids.lost);
     await assert.rejects(engine.createDocument({ teamId: 'team-eng' }, { id: ids.refused, title: 'abc123/refused', content: 'Refused.\n' }));
     await proxy.close();
 
