@@ -21,7 +21,7 @@ import { engineRequestCount, requestBuckets, remoteRequests, isGraphql } from '.
 import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
-import { OwnershipLedger, readOwnership, type WriteObserver } from './ownership.ts';
+import { OwnershipLedger, ownedDocuments, type WriteObserver } from './ownership.ts';
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
@@ -429,7 +429,7 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
   // Every document the run made, by id: what the harness seeded, what the run's ownership record holds (every
   // create, a team zone's README and a create whose answer was lost included) and what the engine recorded.
   // Read the ids before the refs go.
-  const created = new Set([...(ctx.live?.seededDocuments ?? []), ...(readOwnership(ctx.owned.stateDir, ctx.names.runId)?.documents.keys() ?? [])]);
+  const created = new Set([...(ctx.live?.seededDocuments ?? []), ...ownedDocuments(ctx.owned).keys()]);
   if (ctx.live !== null) {
     await attempt('ids', async () => {
       for (const id of await recordedIds(ctx)) created.add(id);
