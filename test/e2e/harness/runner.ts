@@ -483,7 +483,8 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
   const proxy = ctx.proxy;
   if (ctx.signal.aborted && proxy !== null) {
     await attempt('setup tokens', async () => {
-      await cleanupKilledTokens(proxy.tokens(), {
+      // The engine revoked its own tokens through the proxy; another revocation of one would be refused.
+      await cleanupKilledTokens(proxy.unrevokedTokens(), {
         cwd: ctx.runDir,
         env: { PATH: process.env['PATH'], HOME: process.env['HOME'], LANG: 'C.UTF-8' },
         linearUrl: proxy.url,

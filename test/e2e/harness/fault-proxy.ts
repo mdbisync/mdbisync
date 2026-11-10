@@ -110,6 +110,8 @@ export interface FaultProxy {
   readonly requests: readonly ProxyRequestRecord[];
   /** Bearer tokens the engine used, kept in memory only so token hygiene can be checked (L5-20); never logged. */
   tokens(): readonly string[];
+  /** The tokens of `tokens()` whose revocation through this proxy Linear has not confirmed. */
+  unrevokedTokens(): readonly string[];
   setFaults(faults: readonly Fault[]): void;
   clearFaults(): void;
   /** How many faults are armed now. */
@@ -152,6 +154,15 @@ export function withoutDocuments(payload: Buffer, ids: ReadonlySet<string>): Buf
   return Buffer.from(JSON.stringify(prune(value)));
 }
 
+/** Whether a revocation answer says `success: false`, which `revokeToken` treats as not revoked. */
+function revocationRefused(payload: Buffer): boolean {
+  try {
+    return (JSON.parse(payload.toString('utf8')) as { success?: unknown } | null)?.success === false;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether the request's text names a target id or title; the body itself is not kept. */
 function names(body: string, target: string): boolean {
   return body.includes(JSON.stringify(target).slice(1, -1));
@@ -172,6 +183,8 @@ export async function startFaultProxy(
   const requests: ProxyRequestRecord[] = [...(options.history ?? [])];
   let counter = requests.reduce((highest, record) => Math.max(highest, record.n), 0);
   const tokens = new Set<string>();
+  // Linear answers 401 to a second revocation of a token, so cleanup must know which ones it already confirmed.
+  const revoked = new Set<string>();
 
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const chunks: Buffer[] = [];
@@ -294,6 +307,10 @@ export async function startFaultProxy(
       request.socket.destroy();
       return;
     }
+    if (path === '/oauth/revoke' && upstreamResponse.ok && !revocationRefused(payload)) {
+      const token = new URLSearchParams(text).get('token');
+      if (token !== null) revoked.add(token);
+    }
     const gone = faults.flatMap((fault) => (fault.kind === 'document-gone' ? [fault.id] : []));
     if (gone.length > 0 && isGraphql) payload = withoutDocuments(payload, new Set(gone));
     response.writeHead(upstreamResponse.status, out).end(payload);
@@ -313,6 +330,7 @@ export async function startFaultProxy(
     url: `http://127.0.0.1:${port}`,
     requests,
     tokens: () => [...tokens],
+    unrevokedTokens: () => [...tokens].filter((token) => !revoked.has(token)),
     setFaults(next) {
       faults = next.map((fault) => ({ ...fault, used: 0, matched: 0 }));
     },
