@@ -17,6 +17,7 @@ import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { INPUT_NAMES, environmentName } from '../run/inputs.ts';
+import { CREATE_ATTEMPTS } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { Git } from '../state/index.ts';
 import { type FakeDocument, type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
@@ -66,6 +67,13 @@ interface Faults {
   writeError?: 'server-error' | 'reset-before' | 'reset-after';
   /** Only this write operation gets `writeError`; any document write when absent. */
   writeErrorOn?: 'CreateDocument' | 'UpdateDocument';
+  /** How many writes in a row get `writeError`; 1 when absent. */
+  writeErrorTimes?: number;
+  /**
+   * While armed, a read of exactly the id of a create that got `writeError`
+   * fails with a 500: the engine cannot check whether its lost create was applied.
+   */
+  hideFaultedCreate?: boolean;
   /** Refuse every write of this document id, as Linear does with an input it will not take. */
   rejectId?: string;
   /** Answer the `occurrence`-th request of `operation` with this status; with `ids`, only a request for exactly those ids. */
@@ -84,10 +92,21 @@ function resetError(): TypeError {
   return new TypeError('fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) });
 }
 
+/**
+ * A create that fails for the whole run: each try of a create that was not
+ * applied, or the one applied try whose answer is lost and whose document
+ * cannot be read back. A single lost try is retried by the client within the run.
+ */
+function lostCreate(variant: NonNullable<Faults['writeError']>): Faults {
+  return variant === 'reset-after'
+    ? { writeError: variant, writeErrorOn: 'CreateDocument', hideFaultedCreate: true }
+    : { writeError: variant, writeErrorOn: 'CreateDocument', writeErrorTimes: CREATE_ATTEMPTS };
+}
+
 /** A transport in front of the fake Linear that injects `faults` and keeps a log of GraphQL exchanges. */
 function faultyFetch(world: FakeWorld) {
   const inner = fakeFetch(world);
-  const state = { faults: {} as Faults, armedAt: 0, count: 0, exchanges: [] as Exchange[], seen: new Map<string, number>() };
+  const state = { faults: {} as Faults, armedAt: 0, count: 0, exchanges: [] as Exchange[], seen: new Map<string, number>(), faultedCreates: new Set<string>() };
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const url = String(input);
     if (url !== `${LINEAR_API}/graphql`) return inner(input, init);
@@ -106,6 +125,10 @@ function faultyFetch(world: FakeWorld) {
     const occurrence = (state.seen.get(operationName) ?? 0) + (counted ? 1 : 0);
     state.seen.set(operationName, occurrence);
 
+    if (state.faults.hideFaultedCreate === true && operationName === 'GetDocuments' && asked?.length === 1 && state.faultedCreates.has(asked[0] as string)) {
+      log(500, true);
+      return new Response(JSON.stringify({ errors: [{ message: 'injected', extensions: { code: 'INTERNAL_SERVER_ERROR' } }] }), { status: 500, headers: { 'content-type': 'application/json', ...LIMIT_HEADERS } });
+    }
     if (onOperation !== undefined && counted && onOperation.operation === operationName && onOperation.occurrence === occurrence) {
       log(onOperation.status, true);
       const code = onOperation.code ?? (onOperation.status === 429 ? 'RATELIMITED' : 'INTERNAL_SERVER_ERROR');
@@ -121,7 +144,10 @@ function faultyFetch(world: FakeWorld) {
       return new Response(JSON.stringify({ errors: [{ message: 'injected', extensions: { code } }] }), { status: http.status, headers });
     }
     if (isWrite && writeError !== undefined && (writeErrorOn === undefined || writeErrorOn === operationName)) {
-      delete state.faults.writeError;
+      state.faults.writeErrorTimes = (state.faults.writeErrorTimes ?? 1) - 1;
+      if (state.faults.writeErrorTimes <= 0) delete state.faults.writeError;
+      const createdId = (variables.input as { id?: unknown } | undefined)?.id;
+      if (operationName === 'CreateDocument' && typeof createdId === 'string') state.faultedCreates.add(createdId);
       if (writeError === 'server-error') {
         log(500, true);
         return new Response(JSON.stringify({ errors: [{ message: 'injected' }] }), { status: 500, headers: { 'content-type': 'application/json' } });
@@ -150,9 +176,11 @@ function faultyFetch(world: FakeWorld) {
       state.armedAt = state.count;
       state.exchanges.length = 0;
       state.seen.clear();
+      state.faultedCreates.clear();
     },
     clear() {
       state.faults = {};
+      state.faultedCreates.clear();
     },
     get exchanges(): readonly Exchange[] {
       return state.exchanges;
@@ -422,7 +450,7 @@ describe('sync: rate limits and transport faults', () => {
     it(`L5-09: a ${variant} on a create records no id; the next run creates or adopts it once`, async () => {
       const path = 'combined/new.md';
       await commit({ [path]: `# New\n\nA new page. ${CANARY}\n` });
-      transport.arm({ writeError: variant });
+      transport.arm(lostCreate(variant));
       const run = await sync();
       assertPartial(run);
       assert.deepEqual(run.report.sync?.failed.map((entry) => entry.path), [path]);
@@ -431,6 +459,22 @@ describe('sync: rate limits and transport faults', () => {
       assert.equal(withNewPage().length, variant === 'reset-after' ? 1 : 0);
       await assertNextRunConverges();
       assert.equal(withNewPage().length, 1, 'created once');
+    });
+
+    it(`a single ${variant} on a create is retried with its id in the same run, which completes`, async () => {
+      const path = 'combined/new.md';
+      await commit({ [path]: `# New\n\nA new page. ${CANARY}\n` });
+      transport.arm({ writeError: variant, writeErrorOn: 'CreateDocument' });
+      const run = await sync();
+      assert.equal(run.result.exitCode, 0, run.result.stderr);
+      assert.equal(run.report.complete, true, JSON.stringify({ code: run.report.code, sync: run.report.sync }));
+      assert.deepEqual(run.report.sync?.created, [path]);
+      const [created] = withNewPage();
+      assert.equal(withNewPage().length, 1, 'created once');
+      assert.equal((await ids())[path]?.id, created?.id);
+      const creates = transport.exchanges.filter((exchange) => exchange.operation === 'CreateDocument');
+      assert.equal(creates.length, variant === 'reset-after' ? 1 : 2, 'a create Linear applied is read back, not sent again');
+      await assertNextRunConverges();
     });
   }
 
@@ -563,8 +607,8 @@ describe('sync: rate limits and transport faults', () => {
   }
 
   for (const [fault, arm] of [
-    ['the create fails', async () => transport.arm({ writeError: 'server-error', writeErrorOn: 'CreateDocument' })],
-    ["the create's answer is lost after Linear applied it", async () => transport.arm({ writeError: 'reset-after', writeErrorOn: 'CreateDocument' })],
+    ['the create fails', async () => transport.arm(lostCreate('server-error'))],
+    ["the create's answer is lost after Linear applied it", async () => transport.arm(lostCreate('reset-after'))],
   ] as const) {
     it(`when ${fault}, an edit that links to the new document keeps a link that the next run's document answers`, async () => {
       await editAll(0, '', {
@@ -593,7 +637,7 @@ describe('sync: rate limits and transport faults', () => {
       [pathOf(0)]: textOf(0, 'See [the new page](new.md).'),
       'combined/new.md': `# New\n\nA new page. ${CANARY}\n`,
     });
-    transport.arm({ writeError: 'reset-after', writeErrorOn: 'CreateDocument' });
+    transport.arm(lostCreate('reset-after'));
     assertPartial(await sync());
     transport.clear();
     const [created] = withNewPage();
@@ -618,7 +662,7 @@ describe('sync: rate limits and transport faults', () => {
 
   it('when the reserved ids cannot be checked, only the new documents that would use one wait', async () => {
     await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
-    transport.arm({ writeError: 'server-error', writeErrorOn: 'CreateDocument' });
+    transport.arm(lostCreate('server-error'));
     assertPartial(await sync());
     const reservedId = JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json'))['combined/new.md'] as string;
     await commit({ 'combined/other.md': `# Other\n\nAnother page. ${CANARY}\n` });
@@ -667,7 +711,7 @@ describe('sync: rate limits and transport faults', () => {
     await commit({ [pathOf(0)]: long('No link yet.', 'Last paragraph.') });
     assert.equal((await sync()).report.complete, true);
     await commit({ [pathOf(0)]: long('See [the new page](new.md).', 'Last paragraph.'), 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
-    transport.arm({ writeError: 'reset-after', writeErrorOn: 'CreateDocument' });
+    transport.arm(lostCreate('reset-after'));
     assertPartial(await sync());
     transport.clear();
     const [created] = withNewPage();
