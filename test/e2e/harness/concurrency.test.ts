@@ -4,6 +4,7 @@ import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { after, it } from 'node:test';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import type { IdMap } from '../../../src/state/index.ts';
@@ -118,8 +119,7 @@ it('interleaves two runs through production reads, content checks and assertion 
 
 it('verifies process death and never uses a stale heartbeat to steal a live writer', async () => {
   const root = mkdtempSync(join(tmpdir(), 'writer-death-')); roots.push(root);
-  const script = `import { registerRun } from ${JSON.stringify(new URL('./locks.ts', import.meta.url).href)}; registerRun(${JSON.stringify(root)}, 'aaaaaa'); process.stdout.write('ready'); setInterval(() => {}, 1000);`;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [fileURLToPath(new URL('./admission-child.ts', import.meta.url)), 'register', JSON.stringify({ root })], { stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     await once(child.stdout!, 'data');
     const file = join(root, 'runs', 'aaaaaa.json');
@@ -141,9 +141,25 @@ it('uses viewer identities for editor reservations and fails closed before write
   const ctx = { scenario, signal: new AbortController().signal, live: { editors: { 'editor-a': client, 'editor-b': { ...client } } } } as unknown as RunContext;
   const grant = { claimBudgets: async (budgets: Array<{ key: string }>) => { accounts.push(...budgets.map((item) => item.key)); } } as unknown as import('./governor.ts').Grant;
   await claimEditorBudgets(ctx, grant);
-  assert.equal(accounts.length, 2); assert.equal(accounts[0], accounts[1]);
+  assert.equal(accounts.length, 1, 'aliases reserve the whole-scenario estimate once');
   assert.match(accounts[0]!, /^editor-[0-9a-f]{64}$/);
   ctx.live!.editors['editor-b'] = { request: async () => ({ viewer: null }) } as never;
   await assert.rejects(claimEditorBudgets(ctx, grant), /editor identity unavailable/);
-  assert.equal(accounts.length, 2, 'missing identity never reserves a partial set');
+  assert.equal(accounts.length, 1, 'missing identity never reserves a partial set');
+});
+
+it('caps a full-corpus editor reservation to a usable quota window', async () => {
+  const { claimEditorBudgets } = await import('./runner.ts');
+  const { estimate, MAX_ADMISSION } = await import('./governor.ts');
+  const full = loadScenarios().find((item) => item.id === 'L1-16')!;
+  assert.ok(estimate(full).requests > 5000);
+  let needs: Array<{ requests: number; complexity: number }> = [];
+  const client = { request: async () => ({ viewer: { id: 'stable-viewer' } }) };
+  const ctx = { scenario: full, signal: new AbortController().signal, live: { editors: { 'editor-a': client, 'editor-b': client } } } as unknown as RunContext;
+  const grant = { claimBudgets: async (budgets: Array<{ need: { requests: number; complexity: number } }>) => { needs = budgets.map((item) => item.need); } } as unknown as import('./governor.ts').Grant;
+  await claimEditorBudgets(ctx, grant);
+  assert.deepEqual(needs, [MAX_ADMISSION]);
+  ctx.live!.editors['editor-b'] = { request: async () => ({ viewer: { id: 'other-viewer' } }) } as never;
+  await claimEditorBudgets(ctx, grant);
+  assert.deepEqual(needs, [MAX_ADMISSION, MAX_ADMISSION]);
 });

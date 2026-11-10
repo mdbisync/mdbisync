@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -68,13 +69,8 @@ it('excludes full slices from every ordinary run in both directions and caps wor
 it('independent processes with separate local state cannot both reserve a scarce budget', async () => {
   const { root, remote, first } = await fixture();
   const child = (runId: string) => new Promise<boolean>((resolve, reject) => {
-    const code = `
-      import { GitStateStore, SharedAdmission } from ${JSON.stringify(new URL('./shared-state.ts', import.meta.url).href)};
-      const admission = new SharedAdmission(new GitStateStore({stateDir: ${JSON.stringify(root)} + '/' + ${JSON.stringify(runId)}, url: ${JSON.stringify(remote)}}));
-      const result = await admission.reserve({...${JSON.stringify(options(runId, { need: { requests: 3000, complexity: 1 } }))}, readBudget: async () => (${JSON.stringify(budget)})});
-      process.stdout.write(JSON.stringify(result.admitted));
-    `;
-    const process = spawn(globalThis.process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const payload = { root: join(root, runId), remote, reservation: options(runId, { need: { requests: 3000, complexity: 1 } }), budget };
+    const process = spawn(globalThis.process.execPath, [fileURLToPath(new URL('./admission-child.ts', import.meta.url)), 'reserve', JSON.stringify(payload)], { stdio: ['ignore', 'pipe', 'pipe'] });
     let output = ''; let error = '';
     process.stdout.on('data', (chunk) => output += chunk);
     process.stderr.on('data', (chunk) => error += chunk);
@@ -394,16 +390,8 @@ it('keeps a killed process lease until verified recovery, fencing and cleanup le
   const { OwnershipLedger } = await import('./ownership.ts');
   const { root, remote, first, second } = await fixture();
   const entry = options('aaaaaa');
-  const script = `
-    import { registerRun } from ${JSON.stringify(new URL('./locks.ts', import.meta.url).href)};
-    import { GitStateStore, SharedAdmission } from ${JSON.stringify(new URL('./shared-state.ts', import.meta.url).href)};
-    registerRun(${JSON.stringify(root)}, 'aaaaaa');
-    const shared = new SharedAdmission(new GitStateStore({stateDir: ${JSON.stringify(root)}, url: ${JSON.stringify(remote)}}));
-    await shared.reserve({...${JSON.stringify(entry)}, readBudget: async () => (${JSON.stringify(budget)})});
-    await shared.claim('aaaaaa', ${JSON.stringify(entry.owner)}, ['zone-a']);
-    process.stdout.write('ready'); setInterval(() => {}, 1000);
-  `;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const payload = { root, remote, reservation: entry, budget };
+  const child = spawn(process.execPath, [fileURLToPath(new URL('./admission-child.ts', import.meta.url)), 'hold', JSON.stringify(payload)], { stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     await once(child.stdout!, 'data');
     const waiter = options('bbbbbb'); await second.reserve(waiter);

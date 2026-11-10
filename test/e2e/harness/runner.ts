@@ -14,7 +14,7 @@ import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, CORPUS_DIR, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
-import { BudgetBlockedError, budgetFromStatus, estimate, type Governor } from './governor.ts';
+import { BudgetBlockedError, budgetFromStatus, estimate, MAX_ADMISSION, type Governor } from './governor.ts';
 import { SandboxRest, githubToken, type GitHubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
 import { engineRequestCount, requestBuckets, remoteRequests, isGraphql } from './request-accounting.ts';
@@ -177,16 +177,18 @@ export async function liveWorld(
 /** Identity is stable across API-key rotation; credentials never become ledger keys. */
 export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnType<Governor['admit']>> | undefined): Promise<void> {
   if (grant?.claimBudgets === undefined || ctx.live === null) return;
-  const need = estimate(ctx.scenario);
-  const accounts = [];
+  const estimated = estimate(ctx.scenario);
+  const need = { requests: Math.min(estimated.requests, MAX_ADMISSION.requests), complexity: Math.min(estimated.complexity, MAX_ADMISSION.complexity) };
+  const accounts = new Map<string, import('./shared-state.ts').AccountBudget>();
   for (const client of Object.values(ctx.live.editors)) {
     const identity = await client.request<{ viewer: { id: string } }>('EditorIdentity', 'query', 'query EditorIdentity { viewer { id } }');
     if (typeof identity.viewer?.id !== 'string' || identity.viewer.id === '') throw new EnvBlockedError('editor identity unavailable for shared budget');
-    accounts.push({ key: `editor-${createHash('sha256').update(identity.viewer.id).digest('hex')}`, need,
-      readBudget: async () => budgetFromStatus(await client.rateLimitStatus(), Date.now()),
-    });
+    const key = `editor-${createHash('sha256').update(identity.viewer.id).digest('hex')}`;
+    // The estimate covers the whole scenario: aliases of one actor must
+    // reserve it once, including scenarios spanning several quota windows.
+    accounts.set(key, { key, need, readBudget: async () => budgetFromStatus(await client.rateLimitStatus(), Date.now()) });
   }
-  await grant.claimBudgets(accounts, ctx.signal);
+  await grant.claimBudgets([...accounts.values()], ctx.signal);
 }
 
 async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
