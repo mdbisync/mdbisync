@@ -11,10 +11,13 @@ import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { LinearClient } from '../../../src/linear/index.ts';
+import { buildRunTree } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
+import { runNames } from './isolation.ts';
 import { LinearWorld, editorClient } from './linear-world.ts';
 import { registerRun } from './locks.ts';
 import { OwnershipLedger, readOwnership } from './ownership.ts';
+import { runTeamIds } from './runner.ts';
 import { sweep, type SweepTargets } from './sweeper.ts';
 
 const roots: string[] = [];
@@ -321,6 +324,50 @@ describe('ownership record', () => {
     // The failure stays on record for a person to look at: registration and record are kept.
     assert.ok(existsSync(join(dir, 'runs', `${runId}.json`)));
     assert.ok(readOwnership(dir, runId) !== null);
+  });
+
+  it('scopes a second team\'s zone whose only file is its README, so the engine\'s README there is recovered, and still refuses a zone outside the slice', async () => {
+    const linear = await new FakeLinear().start();
+    const dir = stateDir();
+    const runId = 'cab321';
+    // ENG is a zone with a file below it; DOCS is a zone whose only file is its own README, which the engine syncs.
+    const annotation = (team: string) => `---\nlinear-team: ${team}\n---\n# Area\n`;
+    const readmes = new Map([['eng/README.md', annotation('ENG')], ['docs/README.md', annotation('DOCS')]]);
+    const tree = buildRunTree({ slice: 'mini', paths: [...readmes.keys(), 'eng/guides/start.md'] }, readmes, runNames(runId));
+    assert.deepEqual([...tree.teamZones.keys()], ['ENG']);
+    const teams = new Map([['ENG', { id: 'team-eng' }], ['DOCS', { id: 'team-docs' }]]);
+    assert.throws(() => runTeamIds(tree, new Map([['ENG', { id: 'team-eng' }]])), /the test workspace has no team DOCS/);
+
+    // Setup records the scope before anything is written.
+    const ledger = new OwnershipLedger(dir, runId);
+    ledger.scope(runTeamIds(tree, teams));
+    deadRun(dir, runId);
+    assert.deepEqual([...(readOwnership(dir, runId)?.teamIds ?? [])].sort(), ['team-docs', 'team-eng']);
+
+    // The engine writes the DOCS zone's plain README, as the initial sync does.
+    const proxy = await startFaultProxy(linear.url, { observer: ledger });
+    const engine = new LinearClient({ token: 'engine', baseUrl: proxy.url });
+    const readme = randomUUID();
+    await engine.createDocument({ teamId: 'team-docs' }, { id: readme, title: 'README', content: 'Shelf notes.\n' });
+    await proxy.close();
+
+    // A recorded document in a team outside the slice is still refused, and nothing is changed.
+    linear.documents.set('moved', { id: 'moved', title: 'cab321/notes', content: '', projectId: null, teamId: 'team-ops', trashed: false, archivedAt: null });
+    ledger.record({ kind: 'document', id: 'moved', confirmed: true });
+    const mutations = linear.mutations.length;
+    const refusal = await sweep(targets(linear), dir);
+    assert.match(refusal.errors.join('\n'), /refusing to recover run cab321: document moved is in team team-ops, outside the run's team zones$/m);
+    assert.doesNotMatch(refusal.errors.join('\n'), new RegExp(readme));
+    assert.equal(linear.mutations.length, mutations);
+
+    // Back in a zone of the run, the sweep recovers it: the DOCS README is archived, not trashed.
+    linear.documents.get('moved')!.teamId = 'team-eng';
+    const report = await sweep(targets(linear), dir);
+    assert.deepEqual(report.errors, []);
+    assert.deepEqual(report.recovered[0]?.problems, []);
+    assert.equal(report.recovered[0]?.verifiedArchived, 2);
+    assert.ok(linear.documents.get(readme)?.archivedAt !== null && linear.documents.get(readme)?.trashed === false);
+    assert.equal(readOwnership(dir, runId), null);
   });
 
   it('refuses a recorded project that is not one of the run\'s', async () => {
