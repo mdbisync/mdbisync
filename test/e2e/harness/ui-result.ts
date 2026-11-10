@@ -166,15 +166,15 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   const next = itemOf.get(held.stepIndex);
   if (next !== undefined && answers.items[next - 1]?.result === null) return { state: 'waiting', ran: [], nextItem: next };
 
-  const registration = registerRun(deps.stateDir, held.runId);
   // The hold stays while this process works: should it die, the run still waits for the UI session.
-  registration.hold(held.holdUntil);
+  const registration = registerRun(deps.stateDir, held.runId, { holdUntil: held.holdUntil });
   const heartbeat = setInterval(() => registration.heartbeat(), 60_000);
   const { ctx, logLines } = createRunContext(scenario, held.runId, runDir, { ...deps, outDir: reportDirOf(runDir) });
   const locks: Lock[] = [];
   let grant: Awaited<ReturnType<NonNullable<RunnerDeps['governor']>['admit']>> | undefined;
-  const release = () => {
-    locks.splice(0).reverse().forEach((lock) => lock.release());
+  /** Ends this process's part; a run that stays held keeps its team locks until its hold ends. */
+  const release = (keepHeld: boolean) => {
+    locks.splice(0).reverse().forEach((lock) => (keepHeld ? lock.hold(held.holdUntil) : lock.release()));
     if (grant?.owner === undefined) void grant?.release();
     clearInterval(heartbeat);
   };
@@ -213,7 +213,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
     await takeTeamLocks(ctx, deps.stateDir, held.live.tree.teamZones.keys(), locks);
   } catch (error) {
     await ctx.proxy?.close();
-    release();
+    release(true);
     throw error;
   }
 
@@ -272,7 +272,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
     }
     if (error === undefined) {
       await ctx.proxy?.close();
-      release();
+      release(true);
       appendFileSync(join(runDir, 'harness.log'), `\n${logLines.join('\n')}`);
       cleanClones(runDir);
       return { state: 'waiting', ran, nextItem: itemOf.get(waitingAt) as number };
@@ -292,7 +292,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   if (cleanup.ok) registration.done();
   // A run left half cleaned up is no longer held: once this process ends, the sweeper takes it as dead.
   else registration.hold(0);
-  release();
+  release(false);
   forgetHeldRun(runDir);
   cleanClones(runDir);
   const outcome = classify(error, deps.expectedRed.has(scenario.id));

@@ -103,6 +103,58 @@ describe('locks', () => {
     (await acquireLock('team-docs', { stateDir, runId: 'dddddd', timeoutMs: 1_000 })).release();
   });
 
+  it('keeps a held run\'s lock after its process ends, for its own take-up, until its hold ends', async () => {
+    const stateDir = freshStateDir();
+    /** A process of run `runId` takes the lock (or its kept lock), registers the run as held and keeps the lock, unless `dies`. */
+    const keep = async (runId: string, lockUntil: number, runUntil: number, dies = false) => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', `
+        const { acquireLock, registerRun } = await import(${JSON.stringify(new URL('./locks.ts', import.meta.url).href)});
+        const stateDir = ${JSON.stringify(stateDir)};
+        const lock = await acquireLock('team-eng', { stateDir, runId: '${runId}', timeoutMs: 0, takeOverHeld: true });
+        registerRun(stateDir, '${runId}', { holdUntil: ${runUntil} });
+        if (!${dies}) lock.hold(${lockUntil});
+      `], { stdio: ['ignore', 'inherit', 'inherit'] });
+      const [code] = await new Promise<unknown[]>((resolve) => child.once('exit', (...args) => resolve(args)));
+      assert.equal(code, 0);
+    };
+    const later = Date.now() + 3_600_000;
+    await keep('aaaaaa', later, later);
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: 'bbbbbb', timeoutMs: 0 }), LockTimeoutError, 'the holder\'s process ended, the hold did not');
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: 'aaaaaa', timeoutMs: 0 }), LockTimeoutError, 'only a take-up takes a kept lock over');
+    await keep('aaaaaa', later, later, true); // a take-up that dies before it keeps the lock again
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: 'bbbbbb', timeoutMs: 0 }), LockTimeoutError, 'the lock stays kept');
+    await keep('aaaaaa', later, later); // the run's take-up in a later process, still waiting for the UI session
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: 'bbbbbb', timeoutMs: 0 }), LockTimeoutError, 'kept again after the take-up');
+    registerRun(stateDir, 'aaaaaa').done();
+    (await acquireLock('team-eng', { stateDir, runId: 'bbbbbb', timeoutMs: 0 })).release();
+
+    await keep('cccccc', Date.now() + 200, later);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    (await acquireLock('team-eng', { stateDir, runId: 'dddddd', timeoutMs: 0 })).release();
+    await keep('eeeeee', later, Date.now() - 1);
+    (await acquireLock('team-eng', { stateDir, runId: 'ffffff', timeoutMs: 0 })).release();
+    forgetRun(stateDir, 'cccccc');
+    forgetRun(stateDir, 'eeeeee');
+
+    // A take-up still working when the hold ends keeps the lock until it parks or releases it.
+    const soon = Date.now() + 300;
+    await keep('333333', soon, soon);
+    const working = await acquireLock('team-eng', { stateDir, runId: '333333', timeoutMs: 0, takeOverHeld: true });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: '444444', timeoutMs: 0 }), LockTimeoutError);
+    working.release();
+    (await acquireLock('team-eng', { stateDir, runId: '444444', timeoutMs: 0 })).release();
+    forgetRun(stateDir, '333333');
+
+    // A process that kept a lock and goes on with other scenarios does not hold it past the run's hold.
+    const kept = await acquireLock('team-eng', { stateDir, runId: '111111', timeoutMs: 0 });
+    const registration = registerRun(stateDir, '111111', { holdUntil: later });
+    kept.hold(later);
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: '222222', timeoutMs: 0 }), LockTimeoutError);
+    registration.done();
+    (await acquireLock('team-eng', { stateDir, runId: '222222', timeoutMs: 0 })).release();
+  });
+
   it('counts slots: at most N holders of a semaphore', async () => {
     const stateDir = freshStateDir();
     const held = await Promise.all(Array.from({ length: 4 }, (_, i) => acquireSlot('app-x', 4, { stateDir, runId: `00000${i}`, timeoutMs: 0 })));

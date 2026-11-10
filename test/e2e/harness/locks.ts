@@ -6,8 +6,9 @@
 // The same folder holds the registry of live runs, which the sweeper reads
 // so it never removes what a live run uses.
 
+import { randomUUID } from 'node:crypto';
 import { hostname, tmpdir } from 'node:os';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { forgetOwnership } from './ownership.ts';
@@ -23,6 +24,10 @@ export interface Owner {
   host: string;
   runId: string;
   since: string;
+  /** A lock kept for its run's UI session: it outlives the process until then, epoch milliseconds, while the run is held. */
+  holdUntil?: number;
+  /** A kept lock that a take-up of its run is working with: it also lives while that process does. */
+  active?: boolean;
 }
 
 export function processAlive(pid: number): boolean {
@@ -34,9 +39,36 @@ export function processAlive(pid: number): boolean {
   }
 }
 
-function ownerAlive(owner: Owner | null): boolean {
+function ownerAlive(owner: Owner | null, stateDir: string): boolean {
+  if (owner === null) return false;
+  // A kept lock lives by its hold, not by the process that kept it, which may go on with other scenarios.
+  // A take-up working with it holds it while it runs, also past the hold.
+  if (owner.holdUntil !== undefined) return heldLock(owner, stateDir) || (owner.active === true && owner.host === hostname() && processAlive(owner.pid));
   // A lock of another host cannot be checked; it counts as alive.
-  return owner !== null && (owner.host !== hostname() || processAlive(owner.pid));
+  return owner.host !== hostname() || processAlive(owner.pid);
+}
+
+/** A kept lock stays while both its own hold and its run's hold last: a run that ends or is recovered early lets it go. */
+function heldLock(owner: Owner, stateDir: string, now = Date.now()): boolean {
+  if (owner.holdUntil === undefined || owner.holdUntil <= now) return false;
+  try {
+    const run = JSON.parse(readFileSync(join(stateDir, 'runs', `${owner.runId}.json`), 'utf8')) as LiveRun;
+    return run.runId === owner.runId && run.holdUntil !== undefined && run.holdUntil > now;
+  } catch {
+    return false;
+  }
+}
+
+/** Writes a whole file at once: readers never see it half written or empty. */
+export function writeAtomically(file: string, text: string): void {
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, text);
+  renameSync(temporary, file);
+}
+
+function writeOwner(dir: string, owner: Owner): void {
+  // A half-written owner would read as a lock whose owner died.
+  writeAtomically(join(dir, 'owner.json'), JSON.stringify(owner));
 }
 
 function readOwner(dir: string): Owner | null {
@@ -50,6 +82,12 @@ function readOwner(dir: string): Owner | null {
 export interface Lock {
   readonly name: string;
   release(): void;
+  /**
+   * Keeps the lock for the run's UI session instead of releasing it: it
+   * outlives this process until `untilMs`, or until the run's registered
+   * hold ends. A later process of the same run takes it over.
+   */
+  hold(untilMs: number): void;
 }
 
 export interface LockOptions {
@@ -62,6 +100,8 @@ export interface LockOptions {
   onWait?: (holder: Owner | null) => void;
   /** Stops the wait when aborted. */
   signal?: AbortSignal;
+  /** Takes over this run's own kept lock (a held run's take-up); it stays kept until `hold` or `release`. */
+  takeOverHeld?: boolean;
 }
 
 export class LockTimeoutError extends Error {
@@ -81,25 +121,28 @@ export async function acquireLock(name: string, options: LockOptions): Promise<L
   let lastHolder: string | undefined;
   for (;;) {
     options.signal?.throwIfAborted();
+    const owner: Owner = { pid: process.pid, host: hostname(), runId: options.runId, since: new Date().toISOString() };
     try {
       mkdirSync(dir);
-      const owner: Owner = { pid: process.pid, host: hostname(), runId: options.runId, since: new Date().toISOString() };
-      writeFileSync(join(dir, 'owner.json'), JSON.stringify(owner));
-      let released = false;
-      return {
-        name,
-        release() {
-          if (released) return;
-          released = true;
-          const current = readOwner(dir);
-          if (current?.pid === owner.pid && current.runId === owner.runId) rmSync(dir, { recursive: true, force: true });
-        },
-      };
+      writeOwner(dir, owner);
+      return ownedLock(name, dir, owner);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     }
     const holder = readOwner(dir);
-    if (holder !== null && !ownerAlive(holder)) {
+    if (options.takeOverHeld === true && holder !== null && holder.runId === options.runId && holder.host === owner.host && heldLock(holder, options.stateDir)) {
+      // The run's own kept lock: its take-up for the UI session's answers goes on holding the zone. The hold
+      // stays on the lock, so a take-up that dies before it ends still leaves the zone kept.
+      const takeUp: Owner = { ...owner, holdUntil: holder.holdUntil as number, active: true };
+      try {
+        writeOwner(dir, takeUp);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; // the lock went meanwhile: take it anew
+        throw error;
+      }
+      return ownedLock(name, dir, takeUp);
+    }
+    if (holder !== null && !ownerAlive(holder, options.stateDir)) {
       // The holder died. Remove its lock only if it is still that holder's.
       if (readOwner(dir)?.pid === holder.pid) rmSync(dir, { recursive: true, force: true });
       continue;
@@ -119,6 +162,30 @@ export async function acquireLock(name: string, options: LockOptions): Promise<L
     if (Date.now() >= deadline) throw new LockTimeoutError(name, holder);
     await sleep(options.pollMs ?? 500);
   }
+}
+
+function ownedLock(name: string, dir: string, owner: Owner): Lock {
+  let done = false;
+  const ours = () => {
+    const current = readOwner(dir);
+    return current?.pid === owner.pid && current.runId === owner.runId;
+  };
+  return {
+    name,
+    release() {
+      if (done) return;
+      done = true;
+      if (ours()) rmSync(dir, { recursive: true, force: true });
+    },
+    hold(untilMs: number) {
+      if (done) return;
+      done = true;
+      if (ours()) {
+        const { active: _active, ...parked } = owner;
+        writeOwner(dir, { ...parked, holdUntil: untilMs });
+      }
+    },
+  };
 }
 
 /**
@@ -151,15 +218,17 @@ export interface LiveRun extends Owner {
 /** A run counts as live while its process runs or, on another host, while its heartbeat is fresh. */
 export const HEARTBEAT_STALE_MS = 10 * 60_000;
 
-export function registerRun(stateDir: string, runId: string): { heartbeat(): void; hold(untilMs: number): void; done(): void } {
+/** Registers a live run; `options.holdUntil` registers a held run's take-up, held from the first write. */
+export function registerRun(stateDir: string, runId: string, options: { holdUntil?: number } = {}): { heartbeat(): void; hold(untilMs: number): void; done(): void } {
   const root = join(stateDir, 'runs');
   mkdirSync(root, { recursive: true });
   const file = join(root, `${runId}.json`);
   const since = new Date().toISOString();
-  let holdUntil: number | undefined;
+  let holdUntil = options.holdUntil;
   const write = () => {
     const entry: LiveRun = { pid: process.pid, host: hostname(), runId, since, heartbeatAt: new Date().toISOString(), ...(holdUntil === undefined ? {} : { holdUntil }) };
-    writeFileSync(file, JSON.stringify(entry));
+    // Kept locks read this file: a rewrite must never show a held run as unheld, even for a moment.
+    writeAtomically(file, JSON.stringify(entry));
   };
   write();
   return {

@@ -78,12 +78,12 @@ describe('confirmed initial sync from git to Linear', () => {
     ...extra,
   });
 
-  const run = async (world: FakeWorld, extra: Record<string, string> = {}) => {
+  const run = async (world: FakeWorld, extra: Record<string, string> = {}, wrap: (fetch: typeof globalThis.fetch) => typeof globalThis.fetch = (fetch) => fetch) => {
     await rm(reportFile(), { force: true });
     await rm(summaryFile(), { force: true });
     const requestsBefore = world.requests.length;
     const mark = await markWorld(world, fixture);
-    const result = await runCli(['initial-sync'], { env: env(extra), cwd, fetch: fakeFetch(world) });
+    const result = await runCli(['initial-sync'], { env: env(extra), cwd, fetch: wrap(fakeFetch(world)) });
     assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     assert.ok(!summary.includes(CANARY), 'the job summary holds content');
@@ -346,6 +346,31 @@ describe('confirmed initial sync from git to Linear', () => {
     assert.equal(second.result.exitCode, 0, second.result.stderr);
     await assertConverged(world);
   });
+
+  for (const applied of [false, true]) {
+    it(`L1-08: a create whose connection drops ${applied ? 'after' : 'before'} Linear applies it is completed in the same run, once`, async () => {
+      const world = fakeWorld();
+      let dropped: string | undefined;
+      // The first CreateDocument for one file loses its connection; every other request is answered.
+      const wrap = (fetch: typeof globalThis.fetch): typeof globalThis.fetch => async (input, init) => {
+        const request = String(input) === `${LINEAR_API}/graphql` ? JSON.parse(String(init?.body)) as { operationName?: string; variables?: { input?: { id?: string; title?: string } } } : undefined;
+        if (dropped === undefined && request?.operationName === 'CreateDocument' && request.variables?.input?.title === 'backend/notes') {
+          dropped = request.variables.input.id;
+          if (applied) await fetch(input, init);
+          throw new TypeError('fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) });
+        }
+        return fetch(input, init);
+      };
+      const { result, report } = await run(world, {}, wrap);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.ok(dropped !== undefined, 'the fault never fired');
+      assert.deepEqual(report.initialSync?.failed, []);
+      assert.deepEqual(report.initialSync?.created, SYNCED_PATHS);
+      assert.equal((await readIds())['eng/backend/notes.md']?.id, dropped, 'the document keeps the id of the lost create');
+      assert.equal(report.writes.linear['CreateDocument'], SYNCED_PATHS.length);
+      await assertConverged(world);
+    });
+  }
 
   it('a rejected write is named; the rest are written, but nothing is trashed or recorded until it succeeds', async () => {
     const world = fakeWorld();
