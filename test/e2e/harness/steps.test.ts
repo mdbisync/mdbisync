@@ -736,7 +736,7 @@ async function writeUploads(ctx: RunContext, entries: Record<string, string>): P
   refreshView(ctx);
 }
 
-async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
+async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: boolean } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
   const names = runNames('aaaaaa');
@@ -753,6 +753,8 @@ async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
     '.pre-commit-config.yaml': hookConfig,
     [CHECK_WORKFLOW_PATH]: CHECK_WORKFLOW,
     ...(options.review === undefined ? {} : { 'eng/platform/guides/weekly-plan.md': options.review }),
+    // A team-zone folder: its README's document sits in team ENG's zone with the plain title README.
+    ...(options.teamZone === true ? { 'zone/README.md': '---\nlinear-team: ENG\n---\n\n# Zone\n\nTeam notes.\n' } : {}),
   };
   for (const [path, text] of Object.entries(files)) {
     spawnSync('mkdir', ['-p', join(seed.dir, path, '..')]);
@@ -765,9 +767,9 @@ async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
   const ids: Record<string, { id: string }> = {};
   for (const [path, text] of Object.entries(files)) {
     if (!path.endsWith('.md')) continue;
-    const projectId = path.startsWith('eng/') ? PROJECT.id : OTHER.id;
-    const title = path.replace(/^(eng\/platform|docs\/handbook)\//, '').replace(/\.md$/, '');
-    ids[path] = { id: linear.add({ projectId }, title, text.replace(/^---\n[\s\S]*?\n---\n/, '')).id };
+    const place = path.startsWith('zone/') ? { teamId: 'team-eng' } : { projectId: path.startsWith('eng/') ? PROJECT.id : OTHER.id };
+    const title = path.replace(/^(eng\/platform|docs\/handbook|zone)\//, '').replace(/\.md$/, '');
+    ids[path] = { id: linear.add(place, title, text.replace(/^---\n[\s\S]*?\n---\n/, '')).id };
   }
   // The ids state ref, as the engine records it.
   const blob = (await seed.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(ids) })).trim();
@@ -782,7 +784,7 @@ async function fakeRun(options: { review?: string; hooks?: boolean } = {}) {
     paths: new Map([...Object.keys(files)].filter((path) => path.endsWith('.md')).map((path) => [path, path])),
     rewritten: new Map([['eng/platform/README.md', files['eng/platform/README.md'] as string], ['docs/handbook/README.md', files['docs/handbook/README.md'] as string]]),
     projects: new Map([['PROJECT_ENG_1', PROJECT.name], ['PROJECT_DOCS_1', OTHER.name]]),
-    teamZones: new Map(),
+    teamZones: new Map(options.teamZone === true ? [['ENG', 'zone']] : []),
     teams: new Set(['ENG', 'DOCS']),
   };
   const created: string[] = [];
@@ -2185,6 +2187,89 @@ describe('subjects', () => {
     await ctx.engine.trigger?.action();
     assert.deepEqual(await resolveSubject(ctx, 'writes.git'), { known: true, value: 1 });
     void readFileSync;
+  });
+});
+
+describe('crash-created document adoption (L1-17)', () => {
+  const CREATE = JSON.stringify({ query: 'mutation CreateDocument($input: DocumentCreateInput!) { documentCreate(input: $input) { success document { id } } }', variables: { input: { id: '', title: 'README' } } });
+  const createOf = (id: string) => CREATE.replace('"id":""', `"id":"${id}"`);
+  // The proxy's record of a create: asked for with the engine's own id, then confirmed by Linear's answer.
+  const recordCreate = (ctx: RunContext, id: string) => {
+    ctx.owned.before(createOf(id));
+    ctx.owned.after(createOf(id), Buffer.from(JSON.stringify({ data: { documentCreate: { success: true, document: { id } } } })));
+  };
+
+  // A live run's shape: the engine, paused right after its first create, had made the team zone's
+  // annotation README (plain title README, no run prefix) and was killed; the resumed run created the
+  // other documents and kept that README as its file's document.
+  async function crashed() {
+    const run = await fakeRun({ teamZone: true });
+    const { ctx, linear, ids } = run;
+    const readme = ids['zone/README.md']?.id as string;
+    // A document the harness owned before the engine started is not the engine's create.
+    ctx.owned.record({ kind: 'document', id: 'seeded-before', confirmed: true });
+    await runStep(ctx, { kind: 'fault', action: 'pause', args: { checkpoint: 'document-created-before-ids-push' } });
+    ctx.observations.set('pause.ownedBefore', new Set(['seeded-before']));
+    const killed: EngineResult = { command: 'initial-sync', exitCode: null, signal: 'SIGKILL', notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: null };
+    ctx.engine.pending = { kill: () => {}, done: Promise.resolve(killed) } as never;
+    recordCreate(ctx, readme);
+    (linear.documents.get(readme) as LinearDocument).createdAt = new Date(Date.now() - 60_000).toISOString();
+    await runStep(ctx, { kind: 'kill', action: 'engine', args: { checkpoint: 'document-created-before-ids-push' } });
+    // The resumed run's creates come after the kill. The subject reads ids, not times: these times are the live
+    // run's, under which a selection by creation time before the kill finds no document of the run's own.
+    for (const [path, entry] of Object.entries(ids)) {
+      if (path === 'zone/README.md') continue;
+      recordCreate(ctx, entry.id);
+      (linear.documents.get(entry.id) as LinearDocument).createdAt = new Date(Date.now() + 60_000).toISOString();
+    }
+    refreshView(ctx);
+    return { ...run, readme };
+  }
+
+  it('records the exact id Linear confirmed before the kill and proves the resumed run kept it', async () => {
+    const { ctx, readme } = await crashed();
+    assert.deepEqual(ctx.observations.get('kill.created'), [readme]);
+    assert.deepEqual(await resolveSubject(ctx, 'documents.adoptedUnmappedTitle'), { known: true, value: true });
+    assert.deepEqual(await resolveSubject(ctx, 'documents.duplicateCount'), { known: true, value: 0 });
+  });
+
+  it('ignore another run\'s README in the shared team zone: the ownership record decides', async () => {
+    const { ctx, linear } = await crashed();
+    linear.add({ teamId: 'team-eng' }, 'README', 'Another run\'s notes.\n');
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'documents.adoptedUnmappedTitle'), { known: true, value: true });
+    assert.deepEqual(await resolveSubject(ctx, 'documents.duplicateCount'), { known: true, value: 0 });
+  });
+
+  it('fail on a real duplicate of the crash-created README, in the subject, the count and I8', async () => {
+    const { ctx, linear } = await crashed();
+    // The resumed run created the README again instead of keeping the first one.
+    const twin = linear.add({ teamId: 'team-eng' }, 'README', 'Team notes.\n');
+    recordCreate(ctx, twin.id);
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'documents.adoptedUnmappedTitle'), { known: true, value: false });
+    assert.deepEqual(await resolveSubject(ctx, 'documents.duplicateCount'), { known: true, value: 1 });
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    assert.deepEqual(await INVARIANT_CHECKS.I8(ctx, async () => readSides(ctx)), { name: 'I8', ok: false, detail: 'duplicate titles: README' });
+  });
+
+  it('fail when the crash-created document is no longer the file\'s live document', async () => {
+    const { ctx, linear, readme } = await crashed();
+    await linear.trashDocument(readme);
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'documents.adoptedUnmappedTitle'), { known: true, value: false });
+  });
+
+  it('refuse a kill without the documents the run owned before the engine started', async () => {
+    const { ctx } = await fakeRun({ teamZone: true });
+    ctx.engine.pending = { kill: () => {}, done: new Promise(() => {}) } as never;
+    await assert.rejects(runStep(ctx, { kind: 'kill', action: 'engine', args: { checkpoint: 'document-created-before-ids-push' } }), /owned before the engine started/);
+  });
+
+  it('fail when no create was recorded before the kill', async () => {
+    const { ctx } = await crashed();
+    ctx.observations.set('kill.created', []);
+    assert.deepEqual(await resolveSubject(ctx, 'documents.adoptedUnmappedTitle'), { known: true, value: false });
   });
 });
 

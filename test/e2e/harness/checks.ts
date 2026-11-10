@@ -14,6 +14,7 @@ import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMa
 import type { RunContext } from './context.ts';
 import { annotatedFolders, annotationPath, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
+import { ownedDocuments } from './ownership.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
 import { encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
@@ -36,6 +37,16 @@ export function documentState(document: Pick<LinearDocument, 'trashed' | 'archiv
 }
 
 /** The Linear title of a synchronized file: its path below its annotated folder, without `.md`. */
+/** A document Linear still shows: not in the trash and not archived. */
+export function isLive(document: LinearDocument | undefined): document is LinearDocument {
+  return document !== undefined && !document.trashed && document.archivedAt === null;
+}
+
+/** Two live documents with the same key are duplicates: the same title in the same place (a project, else a team zone). */
+export function duplicateKey(document: LinearDocument): string {
+  return `${document.projectId ?? document.teamId}:${document.title}`;
+}
+
 export function titleOf(path: string, folderOfPath: string): string {
   const relative = folderOfPath === '' ? path : path.slice(folderOfPath.length + 1);
   return relative.replace(/\.md$/, '');
@@ -483,11 +494,15 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
 
   const allDocuments: LinearDocument[] = [];
   for (const project of world.projects.values()) allDocuments.push(...(await world.app.listDocuments({ projectId: project.id }, { withContent: true })));
+  // A team zone is shared with other runs: a document there is this run's when its title carries the run's
+  // prefix or the run's ownership record holds its id. Annotation READMEs keep their plain title (README),
+  // so only the record shows they are the run's, and a second one there is seen as a duplicate.
+  const owned = ownedDocuments(ctx.owned);
   for (const team of world.tree.teamZones.keys()) {
     const teamId = world.teams.get(team)?.id;
     if (teamId === undefined) continue;
     const documents = await world.app.listDocuments({ teamId }, { withContent: true });
-    allDocuments.push(...documents.filter((document) => document.projectId === null && document.title.startsWith(ctx.names.teamZonePrefix)));
+    allDocuments.push(...documents.filter((document) => document.projectId === null && (document.title.startsWith(ctx.names.teamZonePrefix) || owned.has(document.id))));
   }
   const documents = new Map(allDocuments.map((document) => [document.id, document]));
   const missing = [...ids.values()].map((entry) => entry.id).filter((id) => !documents.has(id));
@@ -660,8 +675,8 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     const s = await sides();
     const seen = new Map<string, number>();
     for (const document of s.allDocuments) {
-      if (document.trashed || document.archivedAt !== null) continue;
-      const key = `${document.projectId ?? document.teamId}:${document.title}`;
+      if (!isLive(document)) continue;
+      const key = duplicateKey(document);
       seen.set(key, (seen.get(key) ?? 0) + 1);
     }
     const duplicates = [...seen].filter(([, count]) => count > 1).map(([key]) => key.split(':').slice(1).join(':'));
