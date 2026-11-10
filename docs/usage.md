@@ -272,13 +272,25 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
 
 ## Pre-release builds and pins
 
-Maintainers dispatch **Build pre-release** on `main`, supplying a new
+Maintainers dispatch **Build release** on `main`, supplying a new
 pre-release tag such as `v0.1.0-rc.1` and a full source SHA already on `main`.
 The workflow tests and bundles that source, verifies the CLI can install
 offline, and pushes a new annotated tag pointing to an isolated release
 commit. Its summary prints the release SHA. No generated files are added to
 `main`, no existing tag is replaced, and no GitHub Release is published.
 A failed build leaves existing pins unchanged.
+
+A final version such as `v0.1.0` is built the same way, but only after a
+security gate passes. The gate refuses the build unless the source commit
+has a `security-gate` commit status of `success`, `main` has no open code
+scanning alert of medium or higher severity (or of severity error), no open
+Dependabot alert of medium or higher, and no open secret scanning alert, and
+CodeQL's latest analysis of each category on `main` includes the source
+commit. It names every reason it refuses. The workflow token cannot read
+secret scanning alerts, so the gate reads them with the repository secret
+`SECRET_SCANNING_READ_TOKEN`, a fine-grained token with read-only access to
+secret scanning alerts; without it the gate refuses. Pre-release builds do
+not run the gate.
 
 Use the **release commit SHA**, which differs from the source SHA, in both
 configuration files. Replace the placeholder with the summary's 40-character
