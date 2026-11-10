@@ -185,3 +185,15 @@ it('partial-corpus results never replace full catalog status, including blocked 
   assert.deepEqual(mergeLatest(previous, report), previous);
   assert.match(renderRunMarkdown(report), /Partial corpus/);
 });
+
+it('resuming a UI hold rechecks budget while keeping its zones and worker reservation', async () => {
+  const { first } = await fixture();
+  const entry = options('aaaaaa');
+  await first.reserve(entry);
+  await first.claim(entry.runId, entry.owner, ['zone-a']);
+  assert.equal((await first.reserve({ ...entry, resume: true, readBudget: async () => ({ ...budget, requestsRemaining: 0 }) })).admitted, false);
+  assert.deepEqual((await first.store.read()).runs[0]?.zones, ['zone-a']);
+  assert.ok((await first.reserve({ ...entry, resume: true })).admitted);
+  assert.equal((await first.store.read()).runs.length, 1);
+  await assert.rejects(first.reserve({ ...entry, resume: true, owner: randomUUID() }), /reservation/);
+});

@@ -170,7 +170,7 @@ async function main(argv: string[]): Promise<number> {
       const stop = { requested: false };
       const onSignal = (signal: string) => {
         if (stop.requested) {
-          log(`${signal} again: stopping now; the sweeper removes what the running scenarios leave`);
+          log(`${signal} again: stopping now; shared reservations stay held for verified recovery`);
           process.exit(130);
         }
         stop.requested = true;

@@ -101,8 +101,9 @@ node test/e2e/harness/cli.ts sweep                            # remove leftovers
 | `--evidence-dir` | a folder for a content-free summary of the run |
 
 `Ctrl-C` lets the running scenarios finish with their cleanup and skips the
-rest; a second `Ctrl-C` stops at once and leaves the leftovers to `sweep`.
-`run` exits with 1 when a scenario fails and 0 otherwise, even when
+rest; a second `Ctrl-C` stops at once and keeps shared reservations for
+verified recovery.
+`run` exits with 1 when a scenario or its cleanup fails and 0 otherwise, even when
 scenarios are env-blocked or expected-red. Any command also exits with 1
 when the harness itself stops with an error, 2 for an unknown command and
 130 after a second `Ctrl-C`.

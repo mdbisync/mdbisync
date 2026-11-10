@@ -744,7 +744,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
         saveHeldRun(runDir, heldRunOf(ctx, { stepIndex: heldAt, appName: grant?.app.name ?? appName, holdUntil, startedAt: new Date(started).toISOString(), budgetWaitMs: grant?.waitedMs ?? 0, takeUpRequests: { harness: 0, harnessApp: 0 } }));
         heldForUi = true;
         registration.hold(holdUntil);
-        cleanupOutcome = { ok: true, detail: 'kept for the UI session; the sweeper removes it after the hold' };
+        cleanupOutcome = { ok: true, detail: grant?.owner === undefined ? 'kept for the UI session; the sweeper removes it after the hold' : 'kept for the UI session; shared reservation retained until cleanup or verified recovery' };
       } catch (saveError) {
         error = new EnvBlockedError(`the run could not be kept for the UI session: ${(saveError as Error).message}`);
       }

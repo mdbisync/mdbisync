@@ -212,19 +212,12 @@ export class Governor {
     const need = { requests: Math.min(estimated.requests, MAX_ADMISSION.requests), complexity: Math.min(estimated.complexity, MAX_ADMISSION.complexity) };
     for (;;) {
       for (const app of apps) {
-        let admission: { admitted: boolean; budget: Budget };
-        if (resumeOwner !== undefined) {
-          const entry = (await shared.store.read()).runs.find((run) => run.runId === runId && run.owner === resumeOwner && run.app === (app.key ?? app.name));
-          if (entry === undefined) throw new BudgetBlockedError('held run has no matching shared reservation');
-          admission = { admitted: true, budget: await app.readBudget() };
-        } else {
-          admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: scenario.slice === 'full', need, maxWorkers: options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, reserve: RESERVE,
-            readBudget: async () => {
-              const at = this.#now();
-              return this.#withObserved(app.name, await app.readBudget(), at);
-            },
-          });
-        }
+        const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: scenario.slice === 'full', ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
+          readBudget: async () => {
+            const at = this.#now();
+            return this.#withObserved(app.name, await app.readBudget(), at);
+          },
+        });
         if (admission.admitted) return {
           app, owner, waitedMs: this.#now() - started, budgetBefore: admission.budget,
           claimZones: (zones) => shared.claim(runId, owner, zones),

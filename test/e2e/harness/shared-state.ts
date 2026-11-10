@@ -15,6 +15,7 @@ export interface Reservation extends Estimate {
   app: string;
   full: boolean;
   zones: string[];
+  revision?: string;
 }
 export interface SharedState { version: 1; runs: Reservation[] }
 export interface StateStore {
@@ -100,19 +101,31 @@ export class GitStateStore implements StateStore {
 export class SharedAdmission {
   readonly store: StateStore;
   constructor(store: StateStore) { this.store = store; }
-  async reserve(options: { runId: string; owner: string; app: string; full: boolean; need: Estimate; maxWorkers: number; reserve: Estimate; readBudget: () => Promise<Budget> }): Promise<{ admitted: boolean; budget: Budget }> {
+  async reserve(options: { runId: string; owner: string; app: string; full: boolean; resume?: boolean; need: Estimate; maxWorkers: number; reserve: Estimate; readBudget: () => Promise<Budget> }): Promise<{ admitted: boolean; budget: Budget }> {
     return this.store.update(async (state) => {
-      if (state.runs.some((entry) => entry.runId === options.runId)) throw new Error('run id already has a shared reservation');
+      const existing = state.runs.find((entry) => entry.runId === options.runId);
+      if (existing !== undefined && !(options.resume && existing.owner === options.owner && existing.app === options.app)) throw new Error('run id already has a shared reservation');
+      if (options.resume && existing === undefined) throw new Error('held run has no matching shared reservation');
       // Read afresh after every conflicting state update, including releases:
       // a stale read must not forget spending of a just-completed run.
       const budget = await options.readBudget();
-      const sameApp = state.runs.filter((entry) => entry.app === options.app);
+      const others = state.runs.filter((entry) => entry !== existing);
+      const sameApp = others.filter((entry) => entry.app === options.app);
       const used = sameApp.reduce((sum, entry) => ({ requests: sum.requests + entry.requests, complexity: sum.complexity + entry.complexity }), { requests: 0, complexity: 0 });
-      const admitted = !(options.full ? state.runs.length > 0 : state.runs.some((entry) => entry.full)) &&
+      const admitted = !(options.full ? others.length > 0 : others.some((entry) => entry.full)) &&
         sameApp.length < options.maxWorkers &&
         budget.requestsRemaining - options.reserve.requests - used.requests >= options.need.requests &&
         budget.complexityRemaining - options.reserve.complexity - used.complexity >= options.need.complexity;
-      if (admitted) state.runs.push({ runId: options.runId, owner: options.owner, app: options.app, full: options.full, zones: [], ...options.need });
+      if (admitted) {
+        if (existing === undefined) state.runs.push({ runId: options.runId, owner: options.owner, app: options.app, full: options.full, zones: [], ...options.need });
+        else {
+          existing.requests = Math.max(existing.requests, options.need.requests);
+          existing.complexity = Math.max(existing.complexity, options.need.complexity);
+          // A resume spends budget again, so it must commit even if its
+          // estimate is unchanged and retry competing updates with fresh reads.
+          existing.revision = randomUUID();
+        }
+      }
       return { admitted, budget };
     });
   }
