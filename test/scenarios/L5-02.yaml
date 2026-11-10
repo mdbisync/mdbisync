@@ -77,9 +77,14 @@
         "expected": "missing-permission"
       },
       {
-        "subject": "runs.0.summary.failedItemNamed",
+        "subject": "runs.0.setupFailure.item",
         "operator": "equal",
-        "expected": true
+        "expected": "github-access"
+      },
+      {
+        "subject": "runs.0.setupFailure.fixLink",
+        "operator": "equal",
+        "expected": "https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#github-app"
       }
     ]
   }
