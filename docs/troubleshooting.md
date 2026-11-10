@@ -391,7 +391,7 @@ content).
 - `invalid repository path "<path>"`
 - `git object <id> is missing`, `git object <id> is a <type>, not a blob`
 - `a push names the same ref twice`
-- `ids.json has an invalid entry for a path`; `reserved-ids.json`, `uploads.json` or `written.json` `has an invalid entry`
+- `ids.json has an invalid entry for a path`; `reserved-ids.json`, `superseded-ids.json`, `uploads.json` or `written.json` `has an invalid entry`
 - `<file> is missing in state commit <commit>`, `<file> in <commit> is not valid JSON`, `<file> in <commit> is not a JSON object`
 - `run initial sync first`
 - ``the sync writes to Linear only after initial sync has recorded `linear` ``

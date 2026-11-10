@@ -338,17 +338,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (linkBase !== undefined) {
         // A link by an id its target did not get (the document was created under another) reads back as the link
         // to that target, with the spelling the file had.
-        const aliases = new Map([...superseded].filter(([id, path]) => targets.has(path) && targets.get(path) !== id));
+        const aliases = superseded.size === 0 ? undefined : new Map([...superseded].filter(([id, path]) => targets.has(path) && targets.get(path) !== id));
         const map = {base: linkBase, ids: new Map(targets), aliases};
         const seen: LinkSpellings = new Map();
-        if (candidate.previousBody !== undefined) {
-          linksToLinear(candidate.previousBody, candidate.path, map, seen);
-          if (aliases.size > 0) {
-            const written = new Map(targets);
-            for (const [id, path] of aliases) written.set(path, id);
-            linksToLinear(candidate.previousBody, candidate.path, {base: linkBase, ids: written}, seen);
-          }
-        }
+        if (candidate.previousBody !== undefined) linksToLinear(candidate.previousBody, candidate.path, map, seen);
         body = linksFromLinear(body, candidate.path, map, seen);
       }
       // Linear's own spelling of the same document is no change: keep the file's text.
