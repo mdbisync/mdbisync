@@ -8,6 +8,7 @@ import { join, posix } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import type { Definition, Image, Link, Nodes } from 'mdast';
 import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
+import { readKeptAnnotations } from '../../../src/initial-sync/confirm.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../../../src/initial-sync/uploads.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
@@ -349,6 +350,12 @@ export interface Sides {
    * rule their reports gave: path → `lint: <rules>` or `write: <rule>`.
    */
   omitted: Map<string, string>;
+  /**
+   * Annotation READMEs the latest initial sync kept without a document, as
+   * the final `ids` commit of the current ids ref names them, and only
+   * those still unmapped that annotate a folder of the tracked tip.
+   */
+  kept: Set<string>;
 }
 
 /** Rules of files left out because of files they link; such an entry names those files. */
@@ -494,7 +501,19 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   }
   const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
   const omitted = deliberateOmissions(ctx.engine.results);
-  return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders, documentUrlBase: world.documentUrlBase, omitted };
+  const kept = keptAnnotations(await readKeptAnnotations(git, idsCommit), ids, folders);
+  return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders, documentUrlBase: world.documentUrlBase, omitted, kept };
+}
+
+/**
+ * The READMEs an initial sync's `Kept-annotation` trailers name that the
+ * current state still bears out: unmapped, and the annotation of a folder
+ * of the tracked tip. A named path that gained an id, or that annotates
+ * nothing, is checked like any other file.
+ */
+export function keptAnnotations(named: ReadonlySet<string>, ids: IdMap, folders: readonly Folder[]): Set<string> {
+  const annotations = new Set(folders.map((folder) => (folder.folder === '' ? 'README.md' : `${folder.folder}/README.md`)));
+  return new Set([...named].filter((path) => !ids.has(path) && annotations.has(path)));
 }
 
 // --- invariants ---------------------------------------------------------------
@@ -512,6 +531,8 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
       // A file its run left out on purpose has no document to match; its earlier document, if any, stays as it was.
       if (s.omitted.has(path)) continue;
       const entry = s.ids.get(path);
+      // An annotation README the initial sync kept, body included, has no document by design.
+      if (entry === undefined && s.kept.has(path)) continue;
       const document = entry === undefined ? undefined : s.documents.get(entry.id);
       if (document === undefined || document.trashed) {
         differing.push(`${path} (no document)`);
@@ -605,7 +626,8 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
       const entry = s.ids.get(path);
       if (entry === undefined) {
         // Left out on purpose, it needs no id; a mapped one is still checked below.
-        if (!s.omitted.has(path)) problems.push(`${path} has no id`);
+        // An annotation README the initial sync kept without a document needs no id either.
+        if (!s.omitted.has(path) && !s.kept.has(path)) problems.push(`${path} has no id`);
         continue;
       }
       const document = s.documents.get(entry.id);
