@@ -17,7 +17,7 @@ import { FIXTURE_PREPARATION } from './runner.ts';
 import { DOCUMENT_FIXTURES, fixtureEdit, paragraphEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
 import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
-import { burst, burstDocuments, soak, type SoakDriver } from './load.ts';
+import { burst, burstDocuments, burstEditCounts, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { bodyOf, compare, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -440,16 +440,37 @@ describe('load', () => {
     assert.equal(result.gitPushes, 15);
     assert.ok(tokens.every((token) => texts.get('notes.md')?.includes(token)));
     assert.equal(texts.get('near-git.md'), nearLimit);
+    assert.equal(texts.get('near-linear.md'), 'Small file.');
   });
 
   it('reserves exact append headroom and refuses an exhausted candidate set', () => {
     const options = { durationMs: 60_000, linearEditsPerMinute: 1, gitPushesPerMinute: 1 };
     const token = 'abcdef-1000';
     const growth = 2 * paragraphEdit('', undefined, token).length;
-    const fitting = 'a'.repeat(250_000 - growth);
+    const markers = 2 * `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length;
+    const fitting = 'a'.repeat(Math.floor((250_000 - markers) / 2) - growth);
     assert.deepEqual(burstDocuments(new Map([['fits.md', [fitting, fitting]], ['full.md', [fitting + 'a']]]), options, token), ['fits.md']);
     assert.throws(() => burstDocuments(new Map([['full.md', ['a'.repeat(250_000)]]]), options, token), /no document has room/);
     assert.throws(() => burstDocuments(new Map(), options, token), /no document has room/);
+  });
+
+  it('uses the budgeted count for non-divisor rates and rejects invalid options', async () => {
+    const options = { durationMs: 60_000, linearEditsPerMinute: 49, gitPushesPerMinute: 0 };
+    const counts = burstEditCounts(options);
+    let edits = 0;
+    const clock = fakeClock();
+    const result = await burst({ ...clock, linearEdit: async () => { edits += 1; }, gitEdit: async () => {}, sync: async () => void clock.sleep(60_000) }, { ...options, documents: ['notes.md'] });
+    assert.equal(result.linearEdits, counts.linear);
+    assert.equal(edits, 49);
+    assert.throws(() => burstEditCounts({ ...options, linearEditsPerMinute: NaN }), /finite numbers/);
+  });
+
+  it('reports a missing mapped document as a product failure before the burst starts', async () => {
+    const { ctx, linear } = await fakeRun();
+    linear.documents.clear();
+    await assert.rejects(runStep(ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 0 } }), ProductError);
+    assert.equal(ctx.edits.length, 0);
+    assert.equal(ctx.engine.results.length, 0);
   });
 
   it('runs a soak with hourly checks and a repeatable schedule', async () => {
