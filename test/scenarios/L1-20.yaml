@@ -86,7 +86,7 @@
       {
         "subject": "writes.commitIdentity",
         "operator": "equal",
-        "expected": "mdbisync <mdbisync@sync.invalid>"
+        "expected": "app-bot"
       }
     ]
   }

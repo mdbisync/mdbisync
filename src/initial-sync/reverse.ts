@@ -45,6 +45,7 @@ import {
   type StateSnapshot,
   type UploadMap,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
+  NEUTRAL_IDENTITY,
   branchRef,
   parseLfsPointer,
   isAncestor,
@@ -64,7 +65,7 @@ import { captureCursorTrailer, cursorTime, prepareLfs, readCaptureCursor } from 
 import { type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titlePath } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
-import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, SYNC_IDENTITY, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
+import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
@@ -287,7 +288,7 @@ export interface ReverseRecord {
 export async function confirmLinearToGit(context: RunContext, options: ReverseOptions): Promise<{ plan: ReversePlan; result: ReverseResult }> {
   const { git, fetched } = context;
   const transforms = options.transforms ?? [];
-  const identity = options.identity ?? SYNC_IDENTITY;
+  const identity = options.identity ?? context.identity;
   const batch = Math.max(1, options.progressBatch ?? PROGRESS_BATCH);
   const stopAfter = 'stopAfterDocuments' in options ? options.stopAfterDocuments : testStopAfterDocuments();
 
@@ -657,10 +658,14 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     return (await describe(a)) === (await describe(b));
   }
 
-  /** A record an initial sync from Linear made: its subject, the sync's identity, one parent. */
+  /**
+   * A record an initial sync from Linear made: its subject, one parent, and
+   * the sync's identity, this run's or the neutral one, since the run that
+   * made it may have had no App slug, or come from a release before it.
+   */
   async function isOwnRecord(oid: Oid): Promise<boolean> {
     const [subject, email, parents] = (await git.text(['show', '-s', '--format=%s%n%ae%n%P', oid])).split('\n');
-    return subject === REVERSE_RECORD_MESSAGE && email === identity.email && (parents ?? '').split(' ').filter(Boolean).length === 1;
+    return subject === REVERSE_RECORD_MESSAGE && (email === identity.email || email === NEUTRAL_IDENTITY.email) && (parents ?? '').split(' ').filter(Boolean).length === 1;
   }
 }
 

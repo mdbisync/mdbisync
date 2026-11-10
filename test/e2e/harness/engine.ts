@@ -42,7 +42,8 @@ export interface EngineCall {
   reportFile: string;
   summaryFile: string;
   linearUrl: string;
-  credentials: { linearClientId: string; linearClientSecret: string; githubToken: string };
+  /** `appSlug`: the slug of the App the GitHub token is of; absent for a token of the host's own. */
+  credentials: { linearClientId: string; linearClientSecret: string; githubToken: string; appSlug?: string };
   /** Test-hook settings for this call. */
   extraEnv: Record<string, string>;
   timeoutMs: number;
@@ -81,6 +82,8 @@ export function engineInputs(call: EngineCall): Record<string, string> {
     // Most scenarios exercise deferred merging; a run's `mergeGraceSeconds` sets a positive grace.
     'merge-grace-seconds': String(call.mergeGraceSeconds ?? 0),
   };
+  // The sync's commits name the App when the engine knows it, as in the workflows.
+  if (call.credentials.appSlug !== undefined) inputs['app-slug'] = call.credentials.appSlug;
   if (call.command === 'initial-sync') {
     inputs.direction = call.direction ?? 'git-to-linear';
     if (call.confirm === true) inputs.confirm = 'true';
