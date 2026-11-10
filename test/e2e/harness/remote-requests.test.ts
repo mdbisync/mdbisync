@@ -176,3 +176,20 @@ it('admits workflows on their configured app and lets a later fresh read superse
   const recovered = await governor.admit(scenario, 'abcdef4', { requests: 1, complexity: 1 }, 'primary');
   recovered.release();
 });
+
+it('allows the hook-only L0-09 workflow while requiring diagnostics from Linear engine workflows', async () => {
+  const ctx = await context();
+  ctx.scenario = loadScenarios().find((item) => item.id === 'L0-09')!;
+  ctx.proxy = null;
+  assert.equal(ctx.scenario.checks.invariants.I9.required, true);
+  for (const conclusion of ['success', 'failure']) {
+    for (const path of ['.github/workflows/pre-commit.yml', '.github/workflows/pre-commit.yml@refs/pull/1/merge']) {
+      ctx.engine.results = [await runResult(rest, { ...run(5), conclusion, path }, 'sync', new Map([['job', 'Formatting hooks completed']]))];
+      assert.equal((await INVARIANT_CHECKS.I9(ctx, async () => { throw new Error('unexpected world read'); })).ok, true);
+    }
+    for (const path of [undefined, '.github/workflows/mdbisync.yml', '.github/workflows/mdbisync-initial-sync.yml']) {
+      ctx.engine.results = [await runResult(rest, { ...run(6), conclusion, ...(path === undefined ? {} : { path }) }, 'sync', new Map())];
+      assert.equal((await INVARIANT_CHECKS.I9(ctx, async () => { throw new Error('unexpected world read'); })).ok, false);
+    }
+  }
+});

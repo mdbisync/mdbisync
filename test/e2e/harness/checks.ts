@@ -686,7 +686,7 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
 
   async I9(ctx) {
     const proxy = ctx.proxy;
-    const missing = ctx.engine.results.some((result) => result.remote !== undefined && result.remote.requests.length === 0 && ['sync', 'initial-sync', 'check'].includes(result.command));
+    const missing = ctx.engine.results.some((result) => result.remote !== undefined && result.remote.linearEngine !== false && result.remote.requests.length === 0 && ['sync', 'initial-sync', 'check'].includes(result.command));
     if (missing) return bad('I9', 'remote request diagnostics are missing; request cost is unknown');
     const remote = remoteRequests(ctx);
     const requests = engineRequestCount(ctx, remote);

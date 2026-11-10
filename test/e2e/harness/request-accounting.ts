@@ -6,6 +6,8 @@ import type { RunContext } from './context.ts';
 export interface RemoteRequests {
   runId: number;
   runAttempt: number;
+  /** False only for the known formatting-only workflow; unknown runs stay conservative. */
+  linearEngine: boolean;
   requests: LogEntry[];
 }
 

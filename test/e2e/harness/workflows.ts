@@ -17,6 +17,7 @@
 // scenario then stops at that run. Any other failure stays the run's result
 // for the scenario's checks.
 
+import { WORKFLOW_FILES } from './workflow-files.ts';
 import { diagnosticRequests } from './request-accounting.ts';
 import { CANARY_EVIDENCE } from './security-canary.ts';
 import { inflateRawSync } from 'node:zlib';
@@ -195,7 +196,11 @@ export async function runResult(rest: SandboxRest, run: WorkflowRun, command: Co
   const started = Date.parse(run.run_started_at ?? run.created_at);
   return {
     command,
-    remote: { runId: run.id, runAttempt: run.run_attempt ?? 1, requests: diagnosticRequests(files) },
+    remote: {
+      runId: run.id, runAttempt: run.run_attempt ?? 1,
+      linearEngine: run.path?.split('@')[0] !== `.github/workflows/${WORKFLOW_FILES['pre-commit']}`,
+      requests: diagnosticRequests(files),
+    },
     exitCode: run.conclusion === 'success' ? 0 : 1,
     signal: null,
     notImplemented: /not implemented/.test(logs) && run.conclusion !== 'success',
