@@ -68,6 +68,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "merge.pull-request": ["actor"],
   "run.burst": ["durationSeconds", "gitPushesPerMinute", "linearEditsPerMinute"],
   "run.capture": [],
+  "run.check": [],
   "run.cleanup": [],
   "run.fix": ["input", "passes"],
   "run.initial-sync": ["confirm", "direction", "wait"],
@@ -197,6 +198,10 @@ export function validateScenario(value: unknown, filename: string): void {
     if (step.kind === 'fault' && step.action === 'pause') {
       assert.ok(!pausedAt && !asynchronous, 'nested checkpoint pause');
       pausedAt = step.args.checkpoint as string;
+    }
+    if (step.kind === 'run' && step.action === 'check') {
+      assert.notEqual(value.setup.state, 'offline', 'run.check needs a live setup');
+      assert.ok(!pausedAt, 'run.check cannot take an armed checkpoint pause');
     }
     if (step.kind === 'run' && step.args.wait === false) {
       assert.ok(pausedAt && !asynchronous, 'async run needs an armed checkpoint');

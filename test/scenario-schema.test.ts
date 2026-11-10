@@ -68,3 +68,22 @@ test('operation arguments and step ordering reject invalid contracts', () => {
   rejects('L4-02', s => { s.steps.splice(5, 1); }, /unjoined async run/);
   rejects('L4-02', s => { s.steps[5] = { kind: 'kill', action: 'engine', args: { checkpoint: 'wrong' } }; }, /kill checkpoint does not match/);
 });
+
+test('a run.check step before the initial sync is a valid step without arguments', () => {
+  const scenario = JSON.parse(readFileSync(join(scenarioDirectory, 'L1-03.yaml'), 'utf8'));
+  scenario.steps.unshift({ kind: 'run', action: 'check', args: {} });
+  validateScenario(scenario, 'L1-03.yaml');
+  scenario.steps[0].args.confirm = true;
+  assert.throws(() => validateScenario(scenario, 'L1-03.yaml'), /unknown argument confirm for run.check/);
+  scenario.steps[0].args = {};
+  scenario.setup.state = 'offline';
+  assert.throws(() => validateScenario(scenario, 'L1-03.yaml'), /run.check needs a live setup/);
+});
+
+test('a run.check step cannot sit between a checkpoint pause and its asynchronous run', () => {
+  const scenario = JSON.parse(readFileSync(join(scenarioDirectory, 'L4-02.yaml'), 'utf8'));
+  const pause = scenario.steps.findIndex((step: any) => step.kind === 'fault' && step.action === 'pause');
+  assert.ok(pause >= 0);
+  scenario.steps.splice(pause + 1, 0, { kind: 'run', action: 'check', args: {} });
+  assert.throws(() => validateScenario(scenario, 'L4-02.yaml'), /run.check cannot take an armed checkpoint pause/);
+});

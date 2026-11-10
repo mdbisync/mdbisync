@@ -72,6 +72,11 @@ per-invocation evidence. `parallel` bypasses workflow serialization on purpose;
 `workflow-parallel` tests the actual concurrency group. A timeout is a failure,
 not convergence. `probe`, `lint`, `fix`, `pre-commit`, `scan-canaries`, `cleanup`,
 `burst`, `soak` and `token-lifecycle` invoke their respective test adapters.
+`check` runs the engine's setup check with the run's credentials; it counts as
+a run, and a failed check is recorded as that run's result rather than stopping
+the scenario. Its report has no sync fields and is never quiet, so a subject
+that reads the last run needs a sync after the check. It needs a live setup and
+cannot take a checkpoint pause or fault armed for the next sync.
 
 An argument named `variants` or `orderings` expands into independent subcases,
 each with a fresh copy of setup and the complete step sequence and assertions.
