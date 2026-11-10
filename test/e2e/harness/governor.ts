@@ -8,7 +8,8 @@
 // exclude all other shared reservations.
 
 import { randomUUID } from 'node:crypto';
-import { ZoneBusyError, type SharedAdmission } from './shared-state.ts';
+import { zoneConcurrent } from './concurrency.ts';
+import { ZoneBusyError, type AccountBudget, type SharedAdmission } from './shared-state.ts';
 import { readRateLimitHeaders } from '../../../src/linear/rate-limit.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { RateLimitStatus } from '../../../src/linear/index.ts';
@@ -105,6 +106,7 @@ export interface Grant {
   waitedMs: number;
   budgetBefore: Budget;
   owner?: string;
+  claimBudgets?(accounts: readonly AccountBudget[], signal?: AbortSignal): Promise<void>;
   claimZones?(zones: readonly string[], signal?: AbortSignal): Promise<void>;
   release(): void | Promise<void>;
 }
@@ -214,7 +216,7 @@ export class Governor {
     for (;;) {
       let retryAt = Infinity;
       for (const app of apps) {
-        const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: scenario.slice === 'full', ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
+        const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: !zoneConcurrent(scenario), ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
           readBudget: async () => {
             const at = this.#now();
             return this.#withObserved(app.name, await app.readBudget(), at);
@@ -228,6 +230,17 @@ export class Governor {
         }
         return {
           app, owner, waitedMs: this.#now() - started, budgetBefore: admission.budget!,
+          claimBudgets: async (accounts, signal) => {
+            const until = this.#now() + (options.maxWaitMs ?? MAX_BUDGET_WAIT_MS);
+            for (;;) {
+              signal?.throwIfAborted();
+              const result = await shared.reserveAccounts(runId, owner, accounts, RESERVE);
+              if (result.admitted) return;
+              const wake = Math.max(result.wakeAt ?? this.#now() + RESERVATION_POLL_MS, this.#now() + RESERVATION_POLL_MS);
+              if (wake > until) throw new BudgetBlockedError('editor budget unavailable within the longest wait');
+              await sleep(Math.max(0, wake - this.#now()), undefined, signal === undefined ? {} : { signal });
+            }
+          },
           claimZones: async (zones, signal) => {
             const until = this.#now() + (options.maxWaitMs ?? MAX_BUDGET_WAIT_MS);
             for (;;) {

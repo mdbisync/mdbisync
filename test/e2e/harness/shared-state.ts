@@ -13,10 +13,17 @@ export interface Reservation extends Estimate {
   runId: string;
   owner: string;
   app: string;
+  /** Global exclusion, including full slices and workspace-wide scenarios. */
   full: boolean;
   zones: string[];
   revision?: string;
   recovering?: boolean;
+  resources?: Array<Estimate & { key: string }>;
+}
+export interface AccountBudget {
+  key: string;
+  need: Estimate;
+  readBudget(): Promise<Budget>;
 }
 export interface SharedState { version: 1; runs: Reservation[] }
 export interface StateStore {
@@ -36,6 +43,14 @@ export function parseSharedState(text: string): SharedState {
         typeof entry.app !== 'string' || entry.app.length === 0 || typeof entry.full !== 'boolean' || !Array.isArray(entry.zones) ||
         !Number.isFinite(entry.requests) || entry.requests < 0 || !Number.isFinite(entry.complexity) || entry.complexity < 0) {
       throw new Error('invalid shared admission reservation');
+    }
+    const accounts = new Set<string>();
+    if (entry.resources !== undefined) {
+      if (!Array.isArray(entry.resources)) throw new Error('invalid shared account reservations');
+      for (const resource of entry.resources) {
+        if (typeof resource.key !== 'string' || resource.key === '' || accounts.has(resource.key) || !Number.isFinite(resource.requests) || resource.requests < 0 || !Number.isFinite(resource.complexity) || resource.complexity < 0) throw new Error('invalid shared account reservation');
+        accounts.add(resource.key);
+      }
     }
     ids.add(entry.runId);
     for (const zone of entry.zones) {
@@ -167,13 +182,45 @@ export class SharedAdmission {
       entry.zones = [...new Set([...entry.zones, ...wanted])].sort();
     });
   }
+  /** Reserve personal editor budgets by viewer identity, across all apps. */
+  async reserveAccounts(runId: string, owner: string, accounts: readonly AccountBudget[], reserve: Estimate): Promise<{ admitted: boolean; wakeAt?: number }> {
+    return this.store.update(async (state) => {
+      const entry = state.runs.find((run) => run.runId === runId && run.owner === owner && !run.recovering);
+      if (entry === undefined) throw new Error('shared reservation ownership lost');
+      const grouped = new Map<string, AccountBudget>();
+      for (const account of accounts) {
+        const prior = grouped.get(account.key);
+        grouped.set(account.key, { ...account, need: { requests: account.need.requests + (prior?.need.requests ?? 0), complexity: account.need.complexity + (prior?.need.complexity ?? 0) } });
+      }
+      const resources: NonNullable<Reservation['resources']> = [];
+      let admitted = true;
+      let wakeAt: number | undefined;
+      for (const account of grouped.values()) {
+        const old = entry.resources?.find((resource) => resource.key === account.key);
+        const need = { requests: Math.max(account.need.requests, old?.requests ?? 0), complexity: Math.max(account.need.complexity, old?.complexity ?? 0) };
+        const budget = await account.readBudget();
+        const used = state.runs.filter((run) => run !== entry).flatMap((run) => run.resources ?? []).filter((resource) => resource.key === account.key).reduce((sum, resource) => ({ requests: sum.requests + resource.requests, complexity: sum.complexity + resource.complexity }), { requests: 0, complexity: 0 });
+        if (budget.requestsRemaining - reserve.requests - used.requests < need.requests || budget.complexityRemaining - reserve.complexity - used.complexity < need.complexity) {
+          admitted = false;
+          if (budget.requestsRemaining - reserve.requests < need.requests || budget.complexityRemaining - reserve.complexity < need.complexity) wakeAt = Math.max(wakeAt ?? 0, budget.resetAt + 1000);
+        }
+        resources.push({ key: account.key, ...need });
+      }
+      if (admitted) {
+        entry.resources = resources;
+        entry.revision = randomUUID();
+      }
+      return { admitted, ...(wakeAt === undefined ? {} : { wakeAt }) };
+    });
+  }
   /** Only after the caller has verified the writer and all children stopped.
    * Rotate ownership so an old saved UI hold cannot resume during recovery. */
-  async beginRecovery(runId: string, previousOwner: string): Promise<string> {
+  async beginRecovery(runId: string, previousOwner: string, verifyStopped?: () => void): Promise<string> {
     const owner = randomUUID();
     await this.store.update((state) => {
       const entry = state.runs.find((run) => run.runId === runId && run.owner === previousOwner);
       if (entry === undefined) throw new Error('shared reservation changed before recovery');
+      verifyStopped?.();
       entry.owner = owner;
       entry.recovering = true;
     });

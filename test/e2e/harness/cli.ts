@@ -29,7 +29,7 @@ import { Governor, budgetFromStatus, estimate, type App } from './governor.ts';
 import { SandboxRest, githubToken } from './github.ts';
 import { newRunId, runNames, RUN_ID_PATTERN } from './isolation.ts';
 import { LinearWorld, editorClient } from './linear-world.ts';
-import { defaultStateDir, forgetRun } from './locks.ts';
+import { acquireLock, defaultStateDir, forgetRun, requireStoppedLocalRun } from './locks.ts';
 import { updateStatusPage, writeEvidence, writeRunReport, type HarnessReport } from './report.ts';
 import { loadExpectedRed } from './results.ts';
 import { runScenarios, skippedResult } from './runner.ts';
@@ -143,36 +143,40 @@ async function main(argv: string[]): Promise<number> {
       const recoveryId = command === 'recover' ? positionals[1] : undefined;
       if (command === 'recover' && (recoveryId === undefined || !RUN_ID_PATTERN.test(recoveryId) || values['writer-stopped'] !== true)) throw new Error('usage: recover <run id> --writer-stopped (verify the writer and all engine/workflow children stopped first)');
       if (recoveryId !== undefined && !ownedRuns(stateDir).includes(recoveryId)) throw new Error('recovery needs the owning run state directory and its ownership record');
-      const token = await githubToken(config, 'local');
-      const world = new LinearWorld(editorClient(config.editors['editor-a']));
-      const teams = await world.teams();
-      const admission = await sharedAdmission();
-      const entry = recoveryId === undefined ? undefined : (await admission.store.read()).runs.find((run) => run.runId === recoveryId);
-      if (recoveryId !== undefined && entry === undefined) throw new Error('run has no shared reservation; use ordinary sweep');
-      const trash: Record<string, { before: number; after?: number }> = {};
-      for (const zone of entry?.zones ?? []) trash[zone] = { before: await world.trashedInZone(zone) };
-      // Explicit operator confirmation is required; time alone cannot prove
-      // a writer stopped. Rotation fences old saved UI continuations.
-      const recoveryOwner = entry === undefined ? undefined : await admission.beginRecovery(entry.runId, entry.owner);
-      const report = await sweep(
-        {
-          sandbox: new Sandbox({ url: config.gitUrl, token: token.token, stateDir, runId: 'sweep0' }),
-          rest: new SandboxRest(config, token.token), world, teamIds: teams.map((team) => team.id), shared: admission,
-          ...(recoveryId === undefined ? {} : { recovering: recoveryId }),
-        }, stateDir,
-      );
-      for (const [zone, counts] of Object.entries(trash)) {
-        try {
-          counts.after = await world.trashedInZone(zone);
-          if (counts.after > counts.before) report.errors.push('recovery increased a zone trash count');
-        } catch { report.errors.push('recovery trash after-count unavailable'); }
-      }
-      if (report.errors.length === 0 && recoveryId !== undefined && recoveryOwner !== undefined) {
-        await admission.release(recoveryId, recoveryOwner);
-        forgetRun(stateDir, recoveryId);
-      }
-      process.stdout.write(`${JSON.stringify({ ...report, trash }, null, 2)}\n`);
-      return report.errors.length === 0 ? 0 : 1;
+      const recoveryLock = recoveryId === undefined ? undefined : await acquireLock(`ui-result-${recoveryId}`, { stateDir, runId: recoveryId, timeoutMs: 0 });
+      try {
+        if (recoveryId !== undefined) requireStoppedLocalRun(stateDir, recoveryId);
+        const token = await githubToken(config, 'local');
+        const world = new LinearWorld(editorClient(config.editors['editor-a']));
+        const teams = await world.teams();
+        const admission = await sharedAdmission();
+        const entry = recoveryId === undefined ? undefined : (await admission.store.read()).runs.find((run) => run.runId === recoveryId);
+        if (recoveryId !== undefined && entry === undefined) throw new Error('run has no shared reservation; use ordinary sweep');
+        const trash: Record<string, { before: number; after?: number }> = {};
+        for (const zone of entry?.zones ?? []) trash[zone] = { before: await world.trashedInZone(zone) };
+        // Explicit operator confirmation is required; time alone cannot prove
+        // a writer stopped. Rotation fences old saved UI continuations.
+        const recoveryOwner = entry === undefined ? undefined : await admission.beginRecovery(entry.runId, entry.owner, () => requireStoppedLocalRun(stateDir, entry.runId));
+        const report = await sweep(
+          {
+            sandbox: new Sandbox({ url: config.gitUrl, token: token.token, stateDir, runId: 'sweep0' }),
+            rest: new SandboxRest(config, token.token), world, teamIds: teams.map((team) => team.id), shared: admission,
+            ...(recoveryId === undefined ? {} : { recovering: recoveryId }),
+          }, stateDir,
+        );
+        for (const [zone, counts] of Object.entries(trash)) {
+          try {
+            counts.after = await world.trashedInZone(zone);
+            if (counts.after > counts.before) report.errors.push('recovery increased a zone trash count');
+          } catch { report.errors.push('recovery trash after-count unavailable'); }
+        }
+        if (report.errors.length === 0 && recoveryId !== undefined && recoveryOwner !== undefined) {
+          await admission.release(recoveryId, recoveryOwner);
+          forgetRun(stateDir, recoveryId);
+        }
+        process.stdout.write(`${JSON.stringify({ ...report, trash }, null, 2)}\n`);
+        return report.errors.length === 0 ? 0 : 1;
+      } finally { recoveryLock?.release(); }
     }
 
     if (command === 'run') {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -99,7 +100,7 @@ it('fails closed on malformed state and unreachable store', async () => {
 
 it('shared governor uses stable app identity and awaits release before readmission', async () => {
   const { root, first, second } = await fixture();
-  const scenario = loadScenarios().find((scenario) => scenario.id === 'L2-01')!;
+  const scenario = loadScenarios().find((scenario) => scenario.id === 'L1-05')!;
   const governor = (name: string, shared: SharedAdmission) => new Governor({ apps: [{ name, key: 'same-identity', readBudget: async () => budget }], stateDir: root, shared, maxWaitMs: 0 });
   const a = governor('first-label', first); const b = governor('different-label', second);
   const grant = await a.admit(scenario, 'aaaaaa', { requests: 3000, complexity: 1 });
@@ -228,7 +229,7 @@ it('waits for actual budget reset while polling short-lived reservations separat
   const { root, first } = await fixture();
   let now = 1_000_000; let reads = 0;
   const waits: number[] = [];
-  const scenario = loadScenarios().find((scenario) => scenario.id === 'L2-01')!;
+  const scenario = loadScenarios().find((scenario) => scenario.id === 'L1-05')!;
   const governor = new Governor({ apps: [{ name: 'one', readBudget: async () => ++reads === 1 ? { ...budget, requestsRemaining: 250, resetAt: now + 60_000 } : budget }], stateDir: root, shared: first,
     now: () => now, sleep: async (ms) => { waits.push(ms); now += ms; },
   });
@@ -239,7 +240,7 @@ it('waits for actual budget reset while polling short-lived reservations separat
 
 it('waits for a claimed team and accepts cancellation without dropping the reservation', async () => {
   const { root, first, second } = await fixture();
-  const scenario = loadScenarios().find((scenario) => scenario.id === 'L2-01')!;
+  const scenario = loadScenarios().find((scenario) => scenario.id === 'L1-05')!;
   const make = (shared: SharedAdmission) => new Governor({ apps: [{ name: 'one', readBudget: async () => budget }], stateDir: root, shared });
   const a = await make(first).admit(scenario, 'aaaaaa', { requests: 1, complexity: 1 });
   const b = await make(second).admit(scenario, 'bbbbbb', { requests: 1, complexity: 1 });
@@ -321,7 +322,7 @@ it('explicit recovery cleans only the fenced run and keeps its record until rese
 it('cleanup reports both the original failure and failed trash after-count', async () => {
   const { createRunContext, cleanupAndCount } = await import('./runner.ts');
   const { root } = await fixture();
-  const scenario = loadScenarios().find((scenario) => scenario.id === 'L2-01')!;
+  const scenario = loadScenarios().find((scenario) => scenario.id === 'L1-05')!;
   const { ctx } = createRunContext(scenario, 'aaaaaa', join(root, 'run'), { stateDir: root, outDir: root, config: {} as never, log: () => {} });
   ctx.observations.set('zone.trash', { ENG: { before: 0 } });
   ctx.live = {
@@ -339,7 +340,7 @@ it('persists an empty ownership scope before admission so pre-write crashes can 
   const { runScenario } = await import('./runner.ts');
   const { readOwnership } = await import('./ownership.ts');
   const { root } = await fixture();
-  const scenario = loadScenarios().find((scenario) => scenario.id === 'L2-01')!;
+  const scenario = loadScenarios().find((scenario) => scenario.id === 'L1-05')!;
   const result = await runScenario(scenario, {
     stateDir: root, outDir: root, appClients: new Map(), expectedRed: new Set(), log: () => {},
     config: { linearApps: [], githubApp: null, gitUrl: '', missing: ['not configured'] } as never,
@@ -350,4 +351,90 @@ it('persists an empty ownership scope before admission so pre-write crashes can 
   }, 'aaaaaa');
   assert.equal(result.result, 'env-blocked');
   assert.equal(result.cleanup.ok, true);
+});
+
+it('workspace-wide scenarios exclude otherwise disjoint audited runs', async () => {
+  const { root, first, second } = await fixture();
+  const ordinary = loadScenarios().find((item) => item.id === 'L1-05')!;
+  const global = loadScenarios().find((item) => item.id === 'L2-01')!;
+  const governor = (shared: SharedAdmission) => new Governor({ apps: [{ name: 'app', readBudget: async () => budget }], stateDir: root, shared, maxWaitMs: 0 });
+  const a = governor(first); const b = governor(second);
+  const exclusive = await a.admit(global, 'aaaaaa', { requests: 1, complexity: 1 });
+  await assert.rejects(b.admit(ordinary, 'bbbbbb', { requests: 1, complexity: 1 }), BudgetBlockedError);
+  await exclusive.release();
+  const safe = await b.admit(ordinary, 'bbbbbb', { requests: 1, complexity: 1 });
+  await assert.rejects(a.admit(global, 'aaaaaa', { requests: 1, complexity: 1 }), BudgetBlockedError);
+  await safe.release();
+});
+
+it('shares editor quotas across apps and groups aliases of the same viewer', async () => {
+  for (const need of [{ requests: 3000, complexity: 1 }, { requests: 1, complexity: 1_200_000 }]) {
+    const { first, second } = await fixture();
+    const a = options('aaaaaa'); const b = options('bbbbbb', { app: 'another-app' });
+    await Promise.all([first.reserve(a), second.reserve(b)]);
+    const accounts = [{ key: 'editor-stable-viewer', need, readBudget: async () => budget }];
+    const results = await Promise.all([first.reserveAccounts(a.runId, a.owner, accounts, a.reserve), second.reserveAccounts(b.runId, b.owner, accounts, b.reserve)]);
+    assert.equal(results.filter((result) => result.admitted).length, 1);
+  }
+  const { first } = await fixture(); const a = options('aaaaaa'); await first.reserve(a);
+  const account = { key: 'same-viewer', need: { requests: 2500, complexity: 1 }, readBudget: async () => budget };
+  assert.equal((await first.reserveAccounts(a.runId, a.owner, [account, account], a.reserve)).admitted, false);
+  assert.equal((await first.store.read()).runs[0]?.resources, undefined, 'a rejected multi-account reservation writes nothing');
+});
+
+it('refuses recovery without rotating ownership when the stopped-writer check fails', async () => {
+  const { first } = await fixture(); const a = options('aaaaaa'); await first.reserve(a);
+  await assert.rejects(first.beginRecovery(a.runId, a.owner, () => { throw new Error('writer alive'); }), /writer alive/);
+  assert.equal((await first.store.read()).runs[0]?.owner, a.owner);
+  assert.equal((await first.store.read()).runs[0]?.recovering, undefined);
+});
+
+it('keeps a killed process lease until verified recovery, fencing and cleanup let a waiting run in', async () => {
+  const { requireStoppedLocalRun } = await import('./locks.ts');
+  const { OwnershipLedger } = await import('./ownership.ts');
+  const { root, remote, first, second } = await fixture();
+  const entry = options('aaaaaa');
+  const script = `
+    import { registerRun } from ${JSON.stringify(new URL('./locks.ts', import.meta.url).href)};
+    import { GitStateStore, SharedAdmission } from ${JSON.stringify(new URL('./shared-state.ts', import.meta.url).href)};
+    registerRun(${JSON.stringify(root)}, 'aaaaaa');
+    const shared = new SharedAdmission(new GitStateStore({stateDir: ${JSON.stringify(root)}, url: ${JSON.stringify(remote)}}));
+    await shared.reserve({...${JSON.stringify(entry)}, readBudget: async () => (${JSON.stringify(budget)})});
+    await shared.claim('aaaaaa', ${JSON.stringify(entry.owner)}, ['zone-a']);
+    process.stdout.write('ready'); setInterval(() => {}, 1000);
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    await once(child.stdout!, 'data');
+    const waiter = options('bbbbbb'); await second.reserve(waiter);
+    await assert.rejects(second.claim(waiter.runId, waiter.owner, ['zone-a']), /held/);
+    await assert.rejects(first.beginRecovery(entry.runId, entry.owner, () => requireStoppedLocalRun(root, entry.runId)), /still alive/);
+    const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited;
+    await assert.rejects(second.claim(waiter.runId, waiter.owner, ['zone-a']), /held/, 'process death never frees the lease');
+    const recoveryOwner = await first.beginRecovery(entry.runId, entry.owner, () => requireStoppedLocalRun(root, entry.runId));
+    await assert.rejects(first.claim(entry.runId, entry.owner, ['zone-a']), /ownership/);
+    const ledger = new OwnershipLedger(root, entry.runId);
+    ledger.scope(['zone-a']);
+    const project = { id: 'project-a', name: runNames(entry.runId).project(0) };
+    ledger.project(project);
+    ledger.record({ kind: 'document', id: 'doc-a', confirmed: true });
+    let archived = false;
+    const document = { id: 'doc-a', projectId: project.id, teamId: null, trashed: false, archivedAt: null as string | null };
+    const report = await sweep({
+      shared: first, recovering: entry.runId, teamIds: ['zone-a'],
+      sandbox: { runRefs: async () => [], deleteRunRefs: async () => {} },
+      rest: { pullRequests: async () => [] },
+      world: { runProjects: async () => [], runTeamDocuments: async () => [], projects: async () => archived ? [] : [project],
+        client: { getDocuments: async () => [document] },
+        deleteProject: async () => { archived = true; document.archivedAt = new Date().toISOString(); },
+      },
+    } as unknown as SweepTargets, root);
+    assert.deepEqual(report.errors, []);
+    assert.ok(archived);
+    assert.equal(report.recovered[0]?.verifiedArchived, 1);
+    await assert.rejects(second.claim(waiter.runId, waiter.owner, ['zone-a']), /held/, 'cleanup alone cannot expose an unreleased lease');
+    await first.release(entry.runId, recoveryOwner);
+    await second.claim(waiter.runId, waiter.owner, ['zone-a']);
+    await second.release(waiter.runId, waiter.owner);
+  } finally { if (child.exitCode === null) child.kill('SIGKILL'); }
 });

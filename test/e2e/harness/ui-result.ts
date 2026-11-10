@@ -32,6 +32,7 @@ import { readLatest, updateStatusPage, writeEvidence, writeRunReport, type Harne
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import {
   captureCanaryEvidence,
+  claimEditorBudgets,
   cleanupAndCount,
   createRunContext,
   failOnChecks,
@@ -202,6 +203,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
     ctx.live = await (deps.attach ?? attachHeldRun)(held, deps);
     ctx.sandbox = ctx.live.sandbox;
     ctx.proxy = await startFaultProxy('https://api.linear.app', { history: held.proxyRequests, observer: ctx.owned });
+    await claimEditorBudgets(ctx, grant);
     const zoneIds = [...held.live.tree.teams].map((key) => {
       const team = ctx.live!.teams.get(key);
       if (team === undefined) throw new EnvBlockedError('held run team is unavailable');

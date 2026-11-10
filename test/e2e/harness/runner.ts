@@ -14,7 +14,7 @@ import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, CORPUS_DIR, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
-import { BudgetBlockedError, estimate, type Governor } from './governor.ts';
+import { BudgetBlockedError, budgetFromStatus, estimate, type Governor } from './governor.ts';
 import { SandboxRest, githubToken, type GitHubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
 import { engineRequestCount, requestBuckets, remoteRequests, isGraphql } from './request-accounting.ts';
@@ -174,6 +174,21 @@ export async function liveWorld(
   };
 }
 
+/** Identity is stable across API-key rotation; credentials never become ledger keys. */
+export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnType<Governor['admit']>> | undefined): Promise<void> {
+  if (grant?.claimBudgets === undefined || ctx.live === null) return;
+  const need = estimate(ctx.scenario);
+  const accounts = [];
+  for (const client of Object.values(ctx.live.editors)) {
+    const identity = await client.request<{ viewer: { id: string } }>('EditorIdentity', 'query', 'query EditorIdentity { viewer { id } }');
+    if (typeof identity.viewer?.id !== 'string' || identity.viewer.id === '') throw new EnvBlockedError('editor identity unavailable for shared budget');
+    accounts.push({ key: `editor-${createHash('sha256').update(identity.viewer.id).digest('hex')}`, need,
+      readBudget: async () => budgetFromStatus(await client.rateLimitStatus(), Date.now()),
+    });
+  }
+  await grant.claimBudgets(accounts, ctx.signal);
+}
+
 async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
   const { config } = deps;
   if (config.missing.length > 0) throw new EnvBlockedError(`test configuration is missing: ${config.missing.join(', ')}`);
@@ -210,6 +225,8 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   ctx.live = live;
   // The team zones the run may write in, on record before anything is created there.
   ctx.owned.scope([...tree.teamZones.keys()].flatMap((key) => teams.get(key)?.id ?? []));
+
+  await claimEditorBudgets(ctx, grant);
 
   // The team lock: initial sync matches every document of an annotated team zone.
   ctx.phase('team lock');
@@ -663,6 +680,7 @@ export function resultOf(
     budgetWaitMs: extra.budgetWaitMs,
     checks: extra.checks,
     cleanup: extra.cleanup,
+    ...(ctx.observations.has('isolation.snapshot') ? { isolationSnapshot: ctx.observations.get('isolation.snapshot') } : {}),
     ...(ctx.observations.has('metrics') ? { metrics: ctx.observations.get('metrics') as Record<string, unknown> } : {}),
     ...(ctx.observations.has('corpus.teams') ? { corpusTeams: ctx.observations.get('corpus.teams') as string[] } : {}),
     ...(ctx.observations.has('zone.trash') ? { teamZoneTrash: ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> } : {}),

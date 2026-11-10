@@ -164,7 +164,9 @@ node test/e2e/harness/cli.ts recover <run-id> --writer-stopped
 ```
 
 `--writer-stopped` confirms that check; the command never infers death from a
-timeout. It requires the local ownership record, rotates shared ownership so
+timeout. It verifies the registered process is dead on the current host,
+refuses remote or unreadable registrations, and locks out UI continuations
+throughout recovery. It requires the local ownership record, rotates shared ownership so
 old saved UI continuations cannot resume, and cleans only the requested run
 through the existing archival recovery. It reads trash before and after and
 releases the reservation only after cleanup and census checks pass. Failed
@@ -179,6 +181,15 @@ removes its disposable local control object cache on exit; ownership records,
 UI holds and corpus caches stay in the state folder. When a team is busy,
 ordinary runs wait with cancellation and a deadline. App-budget shortages wait
 for the upstream reset; full/worker contention does not poll Linear budget.
+
+Concurrency is opt-in for the audited local mini `L1-05` contract. Any change
+to its setup, steps or assertions returns it to exclusive admission; all
+other scenarios, including full slices and workspace-wide settings, token,
+permission, budget and webhook tests, exclude every other live reservation.
+Editor quotas are reserved atomically across apps using hashed viewer ids,
+so different keys for the same account cannot promise its budget twice.
+Concurrent results include normalized document mappings and content hashes
+for comparison with a solo run of the same selected corpus.
 
 Use one upgraded harness and the same sandbox URL for all cooperating
 processes; older harnesses and custom drivers require an exclusive window.
