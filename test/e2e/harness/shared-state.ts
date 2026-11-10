@@ -88,10 +88,15 @@ export function parseSharedState(text: string): SharedState {
 
 export class ZoneBusyError extends Error {}
 
-/** Rejection texts of a competing update of the ref; such a push is retried on a fresh read. */
+/** Rejection texts of a competing update of the ref, which may show before the competitor's update does. */
 export function isConcurrentPush(output: string): boolean {
-  return /\[rejected\].*(fetch first|non-fast-forward|stale info)|\[remote rejected\].*(failed to update ref|reference already exists|incorrect old value provided|cannot lock ref)/.test(output) ||
+  return /\[rejected\].*(fetch first|non-fast-forward|stale info)|\[remote rejected\].*(failed to update ref|reference already exists|incorrect old value provided)/.test(output) ||
     /cannot lock ref[^\n]*is at [0-9a-f]+ but expected [0-9a-f]+/.test(output);
+}
+
+/** Server or connection failures that a later push may not meet. */
+export function isTransientPush(output: string): boolean {
+  return /internal server error|returned error: 5\d\d\b|\bHTTP 5\d\d\b|remote end hung up|early EOF|RPC failed|unexpected disconnect|Connection (reset|timed out|refused)|Operation timed out|Could not resolve host/i.test(output);
 }
 
 /** Git output of a refused credential or missing access: never retried. */
@@ -163,7 +168,12 @@ export class GitStateStore implements StateStore {
     this.#url = options.url;
     this.#ready = this.#git.run(['init', '--bare', '--quiet']);
   }
-  async #auth(): Promise<Record<string, string>> { return typeof this.#env === 'function' ? this.#env() : this.#env; }
+  /** The credentials of the last successful `#auth`, kept to remove them from error output without fetching new ones. */
+  #lastEnv: Record<string, string> = {};
+  async #auth(): Promise<Record<string, string>> {
+    this.#lastEnv = typeof this.#env === 'function' ? await this.#env() : this.#env;
+    return this.#lastEnv;
+  }
   async close(): Promise<void> {
     try { await this.#ready; } finally { rmSync(this.#dir, { recursive: true, force: true }); }
   }
@@ -180,28 +190,36 @@ export class GitStateStore implements StateStore {
     await this.#git.run(['fetch', '--quiet', '--no-write-fetch-head', this.#url, tip], { env: await this.#auth() });
     return { tip, state: parseSharedState(await this.#git.text(['show', `${tip}:state.json`])) };
   }
-  async #unavailable(error: unknown): Promise<Error> {
-    let env: Record<string, string> = {};
-    try { env = await this.#auth(); } catch { /* the cause below says why */ }
-    return new Error(`shared admission state unavailable or invalid: ${redactGitOutput(gitFailure(error), env)}`);
+  #unavailable(error: unknown): Error {
+    return new Error(`shared admission state unavailable or invalid: ${redactGitOutput(gitFailure(error), this.#lastEnv)}`);
   }
   async read(): Promise<SharedState> {
     try { return (await this.#snapshot()).state; }
-    catch (error) { throw await this.#unavailable(error); }
+    catch (error) { throw this.#unavailable(error); }
+  }
+  /** Whether the ref's tip is the pushed commit or was built on it. */
+  async #landed(tip: string | null, commit: string, env: Record<string, string>): Promise<boolean> {
+    if (tip === null) return false;
+    if (tip === commit) return true;
+    await this.#git.run(['fetch', '--quiet', '--no-write-fetch-head', this.#url, tip], { env });
+    return (await this.#git.run(['merge-base', '--is-ancestor', commit, tip], { okCodes: [0, 1] })).code === 0;
   }
   /**
    * Applies `change` to a fresh read and pushes it as a child of the read tip.
-   * A push refused because another writer updated the ref first is retried on
-   * a new read, whatever form the refusal takes (exit code or thrown error):
-   * a known rejection text tells, or else the ref itself. An access failure,
-   * or a refusal that left the ref unchanged, ends at once with git's output,
-   * credentials removed.
+   * After a failed push, whatever form it takes (exit code or thrown error),
+   * the ref tells what happened: an update that landed is kept, and a ref that
+   * another writer moved means a competing update, retried on a new read. An
+   * access failure, or a refusal that left the ref unchanged, ends at once
+   * with git's output, credentials removed; only a competing-update text or a
+   * server failure with the ref unchanged gets a few retries.
    */
   async update<T>(change: (state: SharedState) => T | Promise<T>): Promise<T> {
+    let unchanged = 0;
+    let last = '';
     for (let attempt = 0; attempt < 30; attempt++) {
       let snapshot;
       try { snapshot = await this.#snapshot(); }
-      catch (error) { throw await this.#unavailable(error); }
+      catch (error) { throw this.#unavailable(error); }
       const before = JSON.stringify(snapshot.state);
       const result = await change(snapshot.state);
       const content = JSON.stringify(snapshot.state);
@@ -214,7 +232,9 @@ export class GitStateStore implements StateStore {
         // The nonce also distinguishes identical concurrent updates.
         commit = (await this.#git.text(['commit-tree', tree, ...(snapshot.tip === null ? [] : ['-p', snapshot.tip]), '-m', `Scenario admission ${randomUUID()}`])).trim();
       } catch (error) { throw new Error(`shared admission update failed: ${redactGitOutput(gitFailure(error))}`); }
-      const env = await this.#auth();
+      let env: Record<string, string>;
+      try { env = await this.#auth(); }
+      catch (error) { throw new Error(`shared admission credentials unavailable: ${redactGitOutput(gitFailure(error), this.#lastEnv)}`); }
       let output: string;
       try {
         const pushed: RunResult = await this.#git.run(['push', '--porcelain', this.#url, `${commit}:${CONTROL_REF}`], { okCodes: [0, 1], env });
@@ -222,18 +242,23 @@ export class GitStateStore implements StateStore {
         output = redactGitOutput(`git push exited with 1: ${pushed.stdout.toString()}${pushed.stderr}`, env);
       } catch (error) { output = redactGitOutput(gitFailure(error), env); }
       if (isAccessFailure(output)) throw new Error(`shared admission push refused access: ${output}`);
-      if (!isConcurrentPush(output)) {
-        let tip: string | null;
-        try { tip = await this.#tip(); }
-        catch (error) { throw new Error(`shared admission push failed: ${output}; reading the ref back failed: ${redactGitOutput(gitFailure(error), env)}`); }
-        // The update landed although the push reported a failure.
-        if (tip === commit) return result;
-        if (tip === snapshot.tip) throw new Error(`shared admission push failed: ${output}`);
-        // Any other tip: another writer moved the ref first, a competing update.
+      let tip: string | null;
+      let landed: boolean;
+      try {
+        tip = await this.#tip();
+        landed = await this.#landed(tip, commit, env);
+      } catch (error) { throw new Error(`shared admission push failed: ${output}; reading the ref back failed: ${redactGitOutput(gitFailure(error), env)}`); }
+      // The update landed although the push reported a failure (and may already carry a later update).
+      if (landed) return result;
+      // A moved ref is a competing update. An unchanged one gets a few retries
+      // only when the refusal may come from a competitor or a passing failure.
+      if (tip === snapshot.tip && (!(isConcurrentPush(output) || isTransientPush(output)) || ++unchanged > 3)) {
+        throw new Error(`shared admission push failed: ${output}`);
       }
+      last = output;
       await sleep(10 + Math.floor(Math.random() * 40));
     }
-    throw new Error('shared admission contention; retry later');
+    throw new Error(`shared admission contention; retry later; last push: ${last}`);
   }
 }
 

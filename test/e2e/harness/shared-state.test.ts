@@ -506,6 +506,8 @@ async function waitersAfterRelease(full: boolean) {
   let allBuilt!: () => void;
   const built = new Promise<void>((resolve) => { allBuilt = resolve; });
   const turns = refusals.map(() => Promise.withResolvers<void>());
+  // What each first push really did; checked outside the hook, since update() handles what the hook throws.
+  const raced: number[] = [];
   const waiters = refusals.map((refuse, index) => {
     let first = true;
     return hooked(root, remote, `waiter-${index}`, async (push) => {
@@ -516,7 +518,7 @@ async function waitersAfterRelease(full: boolean) {
       await turns[index - 1]?.promise;
       try {
         const real = await push();
-        assert.equal(real.code, index === 0 ? 0 : 1, 'only the first push of the race lands');
+        raced[index] = real.code;
         return refuse(real);
       } finally { turns[index]!.resolve(); }
     });
@@ -526,6 +528,7 @@ async function waitersAfterRelease(full: boolean) {
   assert.deepEqual(waiters.map((waiter) => waiter.pushes()), [0, 0, 0, 0], 'a refused waiter writes nothing');
   await first.release(holder.runId, holder.owner);
   const results = await Promise.all(waiters.map((waiter, index) => waiter.shared.reserve(entries[index]!)));
+  assert.deepEqual(raced, [0, 1, 1, 1], 'only the first push of the race lands');
   return { first, results, entries, pushes: waiters.map((waiter) => waiter.pushes()) };
 }
 
@@ -547,10 +550,45 @@ it('applies every waiter update after its competing push was refused, when the s
 
 it('keeps an update that landed although its push reported a thrown error', async () => {
   const { root, remote, first } = await fixture();
-  const store = hooked(root, remote, 'landed', async (push) => { assert.equal((await push()).code, 0); throw unexpectedEnd(); });
+  const codes: number[] = [];
+  const store = hooked(root, remote, 'landed', async (push) => { codes.push((await push()).code); throw unexpectedEnd(); });
   assert.ok((await store.shared.reserve(options('aaaaaa'))).admitted);
+  assert.deepEqual(codes, [0]);
   assert.deepEqual([...await first.liveRuns()], ['aaaaaa']);
   assert.equal(store.pushes(), 1);
+});
+
+it('keeps an update that landed and was built on before the ref was read back', async () => {
+  const { root, remote, first, second } = await fixture();
+  const codes: number[] = [];
+  const store = hooked(root, remote, 'built-on', async (push) => {
+    codes.push((await push()).code);
+    assert.ok((await second.reserve(options('bbbbbb'))).admitted);
+    throw unexpectedEnd();
+  });
+  assert.ok((await store.shared.reserve(options('aaaaaa'))).admitted, 'not retried into "run id already has a shared reservation"');
+  assert.deepEqual(codes, [0]);
+  assert.deepEqual([...await first.liveRuns()].sort(), ['aaaaaa', 'bbbbbb']);
+  assert.equal(store.pushes(), 1);
+});
+
+it('retries a server failure that left the ref unchanged a few times, then reports it', async () => {
+  const { root, remote, first } = await fixture();
+  let failures = 1;
+  const passing = hooked(root, remote, 'passing', async (push) => (failures-- > 0 ? Promise.reject(unexpectedEnd()) : push()));
+  assert.ok((await passing.shared.reserve(options('aaaaaa'))).admitted);
+  assert.equal(passing.pushes(), 2);
+  const lasting = hooked(root, remote, 'lasting', async () => { throw new GitError(['push'], 128, 'error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\nfatal: the remote end hung up unexpectedly'); });
+  await assert.rejects(lasting.shared.reserve(options('bbbbbb')), /^Error: shared admission push failed: git push exited with 128: error: RPC failed; HTTP 502/);
+  assert.equal(lasting.pushes(), 4);
+  assert.deepEqual([...await first.liveRuns()], ['aaaaaa']);
+});
+
+it('ends at once when credentials for the push cannot be had', async () => {
+  const { root, remote } = await fixture();
+  let calls = 0;
+  const store = new GitStateStore({ stateDir: join(root, 'no-credentials'), url: remote, env: async () => { if (++calls > 1) throw new Error('installation token: HTTP 503'); return {}; } });
+  await assert.rejects(new SharedAdmission(store).reserve(options('aaaaaa')), /^Error: shared admission credentials unavailable: installation token: HTTP 503/);
 });
 
 it('ends at once on an access failure, naming the cause without credentials', async () => {
