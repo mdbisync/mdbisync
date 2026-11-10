@@ -23,7 +23,7 @@ import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { OwnershipLedger, ownedDocuments, type WriteObserver } from './ownership.ts';
-import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
+import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
@@ -825,6 +825,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   let heldForUi = false;
   /** Set when setup did not stop after its deadline: the run stays registered, so the sweeper removes what it makes later. */
   let setupStuck = false;
+  /** Set once setup has ended: until then, every engine run so far is setup's. */
+  let setupEnded = scenario.setup.state === 'offline';
   try {
     if (scenario.setup.state !== 'offline') {
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');
@@ -852,6 +854,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
         setupStuck = !(await settlesWithin(setup, SETUP_STOP_MS));
         throw late;
       }
+      setupEnded = true;
       ctx.phase('steps');
     }
     const history: Array<Record<string, string>> = [await snapshotRefs(ctx)];
@@ -869,7 +872,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     checks = await runChecks(ctx);
     failOnChecks(checks);
   } catch (caught) {
-    error = caught;
+    // What failed after a run stopped at its setup check on the environment's credentials says nothing about the scenario.
+    error = blockedBySetupStop(caught, ctx.engine.results, setupEnded ? ctx.engine.setupRuns : ctx.engine.results.length);
   } finally {
     await retainPendingOutput(ctx);
     // Capture output before cleanup removes remote pull requests and comments,

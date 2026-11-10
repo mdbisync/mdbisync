@@ -34,7 +34,7 @@ import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
-import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
+import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, runFailure } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
 import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG, readHookConfig } from '../../../src/setup/hooks.ts';
 import { validateSha } from '../../../src/release/package.ts';
@@ -124,6 +124,7 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
     repository: world.repository,
     extraEnv: { ...ctx.engine.env },
     hooksDir: ctx.checkpoints.dir,
+    ...(ctx.engine.badCredential === undefined ? {} : { credentialFault: ctx.engine.badCredential }),
     reportFile: join(dir, 'report.json'),
     summaryFile: join(dir, 'summary.md'),
     linearUrl: ctx.proxy?.url ?? 'https://api.linear.app',
@@ -498,17 +499,6 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
     },
     sync,
   };
-}
-
-/**
- * How a run failed: at its failed setup check (named with the code and detail) or with its code. Null for a
- * run that did not fail (a partial run is `ok`, and the next one goes on) or failed without a code.
- */
-export function runFailure(report: Record<string, unknown> | null | undefined): string | null {
-  if (report?.['ok'] !== false || typeof report['code'] !== 'string') return null;
-  const checks = Array.isArray(report['setupChecks']) ? (report['setupChecks'] as Array<{ name?: unknown; state?: unknown; detail?: unknown }>) : [];
-  const check = checks.find((candidate) => candidate.state === 'failed');
-  return check === undefined ? `with ${report['code']}` : `at the setup check ${String(check.name)} (${report['code']}): ${String(check.detail)}`;
 }
 
 /** Each tracked document's file and Linear content, the versions a load test's edit budget is measured on. */
