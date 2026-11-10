@@ -32,7 +32,7 @@ import { waitForCheck } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS, watchRun } from './steps.ts';
-import { commitAsPerson, readRunIds } from './step-helpers.ts';
+import { commitAsPerson, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
@@ -2629,6 +2629,18 @@ describe('document text right after a run', () => {
     assert.equal(await holds(ctx, content.subject), true);
     // Against the files as they are now, the same correct run would fail.
     assert.equal(compare(content.operator, (await resolveSubject(ctx, content.subject)).value, (await resolveSubject(ctx, 'golden.linearForm')).value), false);
+  });
+
+  it('keeps the run\'s own target selection when a later step picks a document', async () => {
+    const { ctx, ids } = await confirmedInitialSync();
+    // A later edit step records its target, as `setTarget` does.
+    setTarget(ctx, 'eng/platform/notes.md', ids['eng/platform/notes.md']!.id);
+    const value = (await resolveSubject(ctx, content.subject)).value;
+    assert.ok(value instanceof Map && value.size > 1);
+    assert.equal(await holds(ctx, content.subject), true);
+    // The world now speaks of the picked document alone.
+    assert.equal(typeof (await resolveSubject(ctx, 'documents.content')).value, 'string');
+    assert.equal(ctx.observations.get('target.path'), 'eng/platform/notes.md');
   });
 
   it('snapshots only the run the scenario names, and never I6\'s extra run', async () => {

@@ -1840,6 +1840,19 @@ function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {
   return { indices, last };
 }
 
+/**
+ * The observations that choose which document a subject speaks of
+ * (`target`, `perTarget`). A run's snapshot keeps them as they were at the
+ * run's end, so a later step that picks a target changes no earlier run.
+ */
+const TARGET_SELECTION = ['target.path', 'target.id', 'git.moved', 'fixture.document'] as const;
+
+/** The world right after a run, with the target selection of that moment. */
+interface RunView {
+  view: View;
+  selection: ReadonlyArray<readonly [string, unknown]>;
+}
+
 /** The scenario asserts on the world right after some run, so its runs are snapshotted. */
 export function watchesRunViews(ctx: RunContext): boolean {
   const { indices, last } = viewedRuns(ctx);
@@ -1855,7 +1868,9 @@ export async function recordRunView(ctx: RunContext, n: number): Promise<void> {
   if (ctx.observations.has('scenario.runsEnd')) return;
   const { indices, last } = viewedRuns(ctx);
   if (!last && !indices.has(n)) return;
-  ctx.observations.set(`harness.runView.${n}`, await takeView(ctx, false, { allowNoIds: true }));
+  const selection = TARGET_SELECTION.filter((key) => ctx.observations.has(key)).map((key) => [key, ctx.observations.get(key)] as const);
+  const record: RunView = { view: await takeView(ctx, false, { allowNoIds: true }), selection };
+  ctx.observations.set(`harness.runView.${n}`, record);
   if (last && !indices.has(n - 1)) ctx.observations.delete(`harness.runView.${n - 1}`);
 }
 
@@ -1982,9 +1997,14 @@ function quietValue(ctx: RunContext, subject: string): string[] {
 async function runViewValue(ctx: RunContext, subject: string): Promise<unknown> {
   const [, which, name] = RUN_VIEW_SUBJECT.exec(subject) as RegExpExecArray;
   const index = ownRunIndex(ctx, which as string, subject);
-  const view = ctx.observations.get(`harness.runView.${index}`) as View | undefined;
-  if (view === undefined) throw new Error(`engine run ${index} has no snapshot of the world right after it for ${subject}`);
-  return (SUBJECTS[name as string] as Compute)({ ctx, which: 'run', view: async () => view });
+  const record = ctx.observations.get(`harness.runView.${index}`) as RunView | undefined;
+  if (record === undefined) throw new Error(`engine run ${index} has no snapshot of the world right after it for ${subject}`);
+  // The run's own target selection, not one a later step recorded.
+  const observations = new Map(ctx.observations);
+  for (const key of TARGET_SELECTION) observations.delete(key);
+  for (const [key, value] of record.selection) observations.set(key, value);
+  const atRun: RunContext = Object.assign(Object.create(ctx) as RunContext, { observations });
+  return (SUBJECTS[name as string] as Compute)({ ctx: atRun, which: 'run', view: async () => record.view });
 }
 
 export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
