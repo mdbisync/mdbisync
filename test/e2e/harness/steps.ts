@@ -46,9 +46,9 @@ import {
   commitAsPerson, documentId, documentPaths, editorEdit, editorOf, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import type { WorkflowRun } from './github.ts';
-import { environmentBlocker, jobSpans, maxOverlap, runLogs, runResult, SCHEDULE_BLOCKED, waitForRegistration, waitForRun } from './workflows.ts';
+import { environmentBlocker, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun } from './workflows.ts';
 import { CANARY_FIXTURE, canaryFacts } from './security-canary.ts';
-import { prerequisiteErrors, runWorkflows, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
+import { prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 
 export { documentId, documentPaths, resolveDestination, sibling, targetPath };
 
@@ -62,6 +62,29 @@ const execFileAsync = promisify(execFile);
 export const SYNC_WORKFLOW = WORKFLOW_FILES.sync;
 /** The release commit actions mode runs, in place of the templates' pin. */
 export const ACTION_SHA_ENV = 'MDBISYNC_TEST_ACTION_SHA';
+
+/** `dispatch` makes the harness start the sandbox's scheduled workflow by hand instead of waiting for GitHub's schedule. */
+export const SCHEDULE_TICK_ENV = 'MDBISYNC_TEST_SCHEDULE_TICK';
+
+/**
+ * How a scheduled sync starts: `schedule`, GitHub's own tick, or
+ * `workflow_dispatch`, a tick by hand for a sandbox where GitHub starts no
+ * schedule. A tick by hand runs the same jobs and is recorded with its true
+ * event, so a scenario that asserts the `schedule` event still fails.
+ */
+export function scheduleTick(env: NodeJS.ProcessEnv = process.env): 'schedule' | 'workflow_dispatch' {
+  const value = env[SCHEDULE_TICK_ENV]?.trim() ?? '';
+  if (value === '') return 'schedule';
+  if (value === 'dispatch') return 'workflow_dispatch';
+  throw new Error(`${SCHEDULE_TICK_ENV} must be empty or "dispatch", not "${value}"`);
+}
+
+/** The release commit named by `MDBISYNC_TEST_ACTION_SHA`, or undefined for the templates' own pin. */
+export function actionShaUnderTest(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const actionSha = env[ACTION_SHA_ENV]?.trim() ?? '';
+  if (actionSha !== '' && !/^[0-9a-f]{40}$/.test(actionSha)) throw new EnvBlockedError(`${ACTION_SHA_ENV} must be a full commit SHA`);
+  return actionSha === '' ? undefined : actionSha;
+}
 
 type Executor = (ctx: RunContext, args: Record<string, unknown>) => Promise<void>;
 
@@ -258,15 +281,14 @@ async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'):
   if (wanted.length === 0) return;
   const git = await ctx.person();
   await pull(git, ctx);
-  const actionSha = process.env[ACTION_SHA_ENV]?.trim() ?? '';
-  if (actionSha !== '' && !/^[0-9a-f]{40}$/.test(actionSha)) throw new EnvBlockedError(`${ACTION_SHA_ENV} must be a full commit SHA`);
+  const actionSha = actionShaUnderTest();
   const files = runWorkflows({
     trackedBranch: ctx.names.trackedBranch,
     syncBranch: ctx.names.syncBranch,
     refPrefix: ctx.names.refPrefix,
-    group: `mdbisync-${ctx.names.runId}`,
+    group: runGroup(ctx.names.runId),
     securityCanary: ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE),
-    ...(actionSha === '' ? {} : { actionSha }),
+    ...(actionSha === undefined ? {} : { actionSha }),
   }, wanted);
   if (files.size === 0) return;
   mkdirSync(join(git.dir, '.github', 'workflows'), { recursive: true });
@@ -316,12 +338,13 @@ async function trackedTipOnServer(ctx: RunContext): Promise<string> {
 async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Promise<void> {
   live(ctx);
   const event = typeof args.event === 'string' ? args.event : 'workflow_dispatch';
-  if (event === 'schedule') throw new EnvBlockedError(SCHEDULE_BLOCKED);
   const command = (typeof args.command === 'string' ? args.command : 'sync') as CommandName;
+  if (event === 'schedule' && command !== 'sync') throw new Error(`run.workflow cannot run ${command} on a schedule: only the sync workflow has one`);
   await requireWorkflows(ctx, command);
-  // Only a dispatched run starts after the snapshot before it. A push or pull request run
-  // started on an earlier step and may already have written, so it gives no quiet verdict.
-  if (event === 'workflow_dispatch') await watchRun(ctx, { throughProxy: false }, () => startWorkflowRun(ctx, event, command, args));
+  // Only a dispatched or scheduled run starts after the snapshot before it (a scheduled one once the run asks
+  // for it). A push or pull request run started on an earlier step and may already have written, so it gives
+  // no quiet verdict.
+  if (event === 'workflow_dispatch' || event === 'schedule') await watchRun(ctx, { throughProxy: false }, () => startWorkflowRun(ctx, event, command, args));
   else await startWorkflowRun(ctx, event, command, args);
 }
 
@@ -342,11 +365,47 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
     const pr = ctx.observations.get('ci.pullRequest') as { number: number; head: string; openedAt: number } | undefined;
     if (pr === undefined) throw new Error('run.workflow on pull_request needs git.open-pr first');
     run = await waitForRun(world.rest, { branch: ctx.names.syncBranch, event, after: pr.openedAt, exclude: seenRuns(ctx) });
+  } else if (event === 'schedule') {
+    const after = await requestScheduledRun(ctx);
+    run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after, exclude: seenRuns(ctx) });
   } else {
     throw new Error(`run.workflow cannot start a ${event} run`);
   }
   recordWorkflowRun(ctx, run);
   await settleWorkflowRun(ctx, run, command);
+}
+
+/**
+ * Asks the sandbox's scheduled workflow for one scheduled sync of this run
+ * and returns once a scheduled run has taken the request, with the time
+ * before the request. Its job for this run is queued or running then. The
+ * scheduled workflow on the default branch must be this template's
+ * rendering for the release under test: a run never installs it, since the
+ * default branch is every run's (workflow-files.ts).
+ */
+async function requestScheduledRun(ctx: RunContext): Promise<number> {
+  const world = live(ctx);
+  // Checked before anything is created: a wrong setting must not leave a request behind.
+  const byHand = scheduleTick() === 'workflow_dispatch';
+  const wanted = renderScheduler(readTemplate(SYNC_WORKFLOW), actionShaUnderTest());
+  const installed = await world.rest.fileText(`.github/workflows/${SCHEDULER_FILE}`);
+  if (installed !== wanted) {
+    throw new EnvBlockedError(`the sandbox's default branch holds ${installed === undefined ? 'no' : 'another'} ${SCHEDULER_FILE} than the sync template's for the release under test; install it with \`node test/e2e/harness/cli.ts scheduler --install\``);
+  }
+  const state = await world.rest.workflowState(SCHEDULER_FILE);
+  if (state !== 'active') throw new EnvBlockedError(`the sandbox's scheduled workflow ${SCHEDULER_FILE} is ${state ?? 'not registered'}, not active`);
+  const tip = await trackedTipOnServer(ctx);
+  const after = Date.now();
+  await world.rest.createBranch(ctx.names.scheduleRequest, tip);
+  try {
+    const defaultBranch = byHand ? (await world.rest.request<{ default_branch: string }>('GET', '')).default_branch : '';
+    await waitForRequestTaken(world.rest, ctx.names.scheduleRequest, byHand ? { tick: () => world.rest.dispatchWorkflow(SCHEDULER_FILE, defaultBranch, {}) } : {});
+  } catch (error) {
+    // A request no tick took must not start a sync after the step. When a tick took it just now, the deletion
+    // finds nothing: the step goes on to that tick's run rather than leave it writing behind the cleanup.
+    if (await world.rest.deleteBranch(ctx.names.scheduleRequest)) throw error;
+  }
+  return after;
 }
 
 /**
@@ -532,18 +591,24 @@ const RUN: Record<string, Executor> = {
   'run.workflow-parallel': async (ctx, args) => {
     const world = live(ctx);
     const events = Array.isArray(args.events) ? (args.events as string[]) : ['push', 'workflow_dispatch'];
-    if (events.includes('schedule')) throw new EnvBlockedError(SCHEDULE_BLOCKED);
     await requireWorkflows(ctx);
-    const after = Date.now();
     // Start every event at once, plus one more when a pending run must be replaced by a newer one.
-    const starts = [...events, ...(args.replacePending === true ? ['workflow_dispatch'] : [])];
+    const starts = [...events.filter((event) => event !== 'schedule'), ...(args.replacePending === true ? ['workflow_dispatch'] : [])];
     // The install push registered the sync workflow: its push trigger runs on the run's branch.
     const id = await waitForRegistration(world.rest, SYNC_WORKFLOW);
+    // GitHub picks a schedule's moment: the others start once a scheduled run has taken the request, beside its job.
+    const scheduledAfter = events.includes('schedule') ? await requestScheduledRun(ctx) : undefined;
+    const after = Date.now();
     await Promise.all(starts.map(async (event) => {
       if (event === 'push') await loadDriver(ctx, async () => {}).gitEdit([targetPath(ctx)]);
       else await world.rest.dispatchWorkflow(id, ctx.names.trackedBranch, workflowInputs({}));
     }));
     const runs = [];
+    if (scheduledAfter !== undefined) {
+      const run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after: scheduledAfter, exclude: seenRuns(ctx) });
+      runs.push(run);
+      recordWorkflowRun(ctx, run);
+    }
     for (const event of starts) {
       const run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: new Set([...seenRuns(ctx), ...runs.map((candidate) => candidate.id)]), workflow: SYNC_WORKFLOW });
       runs.push(run);

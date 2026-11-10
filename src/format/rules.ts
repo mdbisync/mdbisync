@@ -17,9 +17,19 @@ export const LINT_RULES = {
   'git-conflict-marker': 'Git conflict marker lines are rewritten as headings, quotes or collapsible sections.',
   'url-in-html': 'A URL inside raw HTML is turned into a Markdown link.',
   'block-first-in-list-item': 'A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item.',
+  'image-not-in-repository': 'An image must be a relative path to a file of the repository, not a URL, an absolute path or a path outside it.',
+  'image-file-missing': 'An image must name a file that exists in the repository, not a folder or a Markdown document.',
 } as const;
 
 export type LintRule = keyof typeof LINT_RULES;
+
+/**
+ * Rules about where an image's file is, not about what Linear loses. The
+ * sync rewrites a document's images into upload URLs before it brings the
+ * text into Linear's form, so `fixText` does not stop at these; the `fix`
+ * command still leaves a file with any finding to its author.
+ */
+export const IMAGE_PLACE_RULES: ReadonlySet<LintRule> = new Set<LintRule>(['image-not-in-repository', 'image-file-missing']);
 
 export interface Finding {
   readonly file: string;

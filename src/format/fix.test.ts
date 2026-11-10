@@ -84,6 +84,12 @@ describe('links to files that are not there', () => {
     assert.equal(check('media/'), false);
     assert.equal(fixText('* [Spec](/top.pdf)', { linkedFileExists: check }), '* [Spec](</top.pdf>)');
   });
+  it('rewrites a text whose images are not repository files: the sync fixes bodies after it maps images to uploads', () => {
+    const body = '- Plan\n\n![Chart](https://uploads.linear.app/a/b/chart.png)\n\n![Gone](gone.png)';
+    const fixed = '* Plan\n\n![Chart](https://uploads.linear.app/a/b/chart.png)\n\n![Gone](gone.png)';
+    assert.equal(fixText(body, { linkedFileExists: () => false }), fixed);
+  });
+
   it('without the check every linked file is taken to exist', () => {
     assert.equal(fixText('* [Report](<missing/report.pdf>)'), '* \n  [Report](missing/report.pdf)');
   });
