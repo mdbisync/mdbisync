@@ -14,7 +14,9 @@ import { Git } from '../../../src/state/git.ts';
 import type { RunContext } from './context.ts';
 import { BudgetBlockedError, Governor, estimate, type App } from './governor.ts';
 import { forgetRun, registerRun, type Lock } from './locks.ts';
-import { takeTeamLocks } from './runner.ts';
+import { buildRunTree } from './corpus.ts';
+import { runNames } from './isolation.ts';
+import { SetupDeadline, runTeamZones, takeTeamLocks, takeTeamZones } from './runner.ts';
 import { GitStateStore, SharedAdmission } from './shared-state.ts';
 import { EnvBlockedError } from './results.ts';
 import { loadScenarios, type Scenario } from './spec.ts';
@@ -198,9 +200,6 @@ it('does not let setup\'s limit expire during a pause between two looks at a hel
 });
 
 it('locks a team zone a run writes only through its README, so two such runs do not hold it at once, while runs on separate zones start together', async () => {
-  const { SetupDeadline, runTeamZones, takeTeamZones } = await import('./runner.ts');
-  const { buildRunTree } = await import('./corpus.ts');
-  const { runNames } = await import('./isolation.ts');
   const root = mkdtempSync(join(tmpdir(), 'readme-zone-'));
   roots.push(root);
   const stateDir = join(root, 'state');
@@ -224,15 +223,19 @@ it('locks a team zone a run writes only through its README, so two such runs do 
   assert.deepEqual(b.zones, { lockKeys: ['DOCS', 'OPS'], ids: ['team-docs', 'team-ops'] });
   assert.deepEqual(c.zones, { lockKeys: ['OPS'], ids: ['team-ops'] });
 
+  // The shared admission's zone claim gets the same ids as the team locks' keys.
+  const claims = new Map<string, string[]>();
   const setup = (runId: string, zones: { ids: string[]; lockKeys: string[] }, signal: AbortSignal, lines: string[], locks: Lock[]) =>
-    takeTeamZones(lockContext(scenario, runId, signal, lines), stateDir, undefined, zones, locks, new SetupDeadline(60_000));
+    takeTeamZones(lockContext(scenario, runId, signal, lines), stateDir, { claimZones: async (ids) => { claims.set(runId, [...ids]); } }, zones, locks, new SetupDeadline(60_000));
 
-  // Run A takes its zones, the README-only DOCS zone included.
+  // Run A claims and takes its zones, the README-only DOCS zone included.
   const locksA: Lock[] = [];
   await setup('aaaaaa', a.zones, new AbortController().signal, [], locksA);
+  assert.deepEqual(claims.get('aaaaaa'), ['team-docs', 'team-eng']);
   assert.equal(locksA.length, 2);
 
-  // Run B, whose slice writes the same DOCS README, waits for DOCS and holds none of its zones meanwhile.
+  // Run B, whose slice writes the same DOCS README, waits for DOCS. Team locks are taken in key order, and DOCS
+  // sorts before OPS, so here B holds none of its zones while it waits.
   const waiting = new AbortController();
   const linesB: string[] = [];
   const locksB: Lock[] = [];
