@@ -71,7 +71,7 @@
         "subject": "summary.leftOutRules",
         "operator": "contains-all",
         "expected": [
-          "lfs-object-missing"
+          "upload-unreadable"
         ]
       },
       {

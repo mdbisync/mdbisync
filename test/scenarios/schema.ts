@@ -2,6 +2,12 @@
 // schema test and by the harness, which loads only valid specs.
 
 import assert from 'node:assert/strict';
+import { LEFT_OUT_AT_WRITE_RULES, LEFT_OUT_RULES, UNSYNCED_REASONS } from '../../src/codes.ts';
+import { LINT_RULES } from '../../src/format/rules.ts';
+
+const leftOutRules = new Set<string>([
+  ...Object.keys(LINT_RULES), ...UNSYNCED_REASONS, ...LEFT_OUT_RULES, ...LEFT_OUT_AT_WRITE_RULES,
+]);
 const kinds = ['git', 'linear', 'run', 'fault', 'kill', 'merge', 'ui'];
 export const operationArguments: Record<string, readonly string[]> = {
   "fault.annotation-target": ["variants"],
@@ -250,6 +256,12 @@ export function validateScenario(value: unknown, filename: string): void {
       assert.match(assertion.expected, /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)*$/);
     }
     if (assertion.operator === 'contains-all') list(assertion.expected);
+    if (assertion.subject === 'summary.leftOutRules' && assertion.operator !== 'same-as') {
+      assert.ok(Array.isArray(assertion.expected), 'summary.leftOutRules expects an array');
+      for (const rule of assertion.expected) {
+        assert.ok(typeof rule === 'string' && leftOutRules.has(rule), `unknown summary.leftOutRules rule: ${rule}`);
+      }
+    }
     if (assertion.operator === 'at-most' || assertion.operator === 'at-least') {
       assert.ok(typeof assertion.expected === 'number' && Number.isFinite(assertion.expected));
     }
