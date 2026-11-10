@@ -494,6 +494,33 @@ describe('sync: the sync pull request', () => {
     assert.match(await show(`refs/heads/main:${path}`), /A repaired Linear edit/);
   });
 
+  it('keeps newly captured assets with their suspended document through intake and release', async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne();
+    const url = 'https://uploads.linear.app/workspace/photo.png';
+    const bytes = Buffer.from('new image bytes');
+    world.linear.uploads.push({ filename: 'photo.png', contentType: 'image/png', size: bytes.length, assetUrl: url, bytes });
+    await editInLinear(path, `# Plan\n\nA repaired edit.\n\n![Photo](${url})\n`);
+    await editInLinear('combined/guide.md', '# Guide\n\nIndependent edit.\n');
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    const captured = await show(`refs/mdbisync/linear:${path}`);
+    const link = /!\[Photo\]\(<?([^)>]+)>?\)/.exec(captured)?.[1];
+    assert.ok(link, captured);
+    const asset = `eng/notes/${link}`;
+    assert.equal(await show(`${SUSPENDED}:${asset}`), bytes.toString());
+    assert.ok((await show('refs/mdbisync/ids:ids.json')).includes(asset));
+    assert.equal((await fixture.remote.run(['cat-file', '-e', `${SYNC_BRANCH}:${asset}`], { okCodes: [0, 128] })).code, 128);
+    assert.match(await show(`${SYNC_BRANCH}:combined/guide.md`), /Independent edit/);
+    checksOn(await rev(SUSPENDED), FAILED);
+    checksOn(await rev(SYNC_BRANCH), PASSED);
+    await sync();
+    assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/heads/main:${asset}`], { okCodes: [0, 128] })).code, 128);
+    await releaseHeld();
+    assert.equal(await show(`refs/heads/main:${asset}`), bytes.toString());
+    assert.match((await documentOf(path)).content ?? '', /Photo/);
+  });
+
   it('L5-32: a suspended Linear deletion releases as a deletion, and a restore stays in the lane', async () => {
     const path = 'eng/notes/plan.md';
     await suspendOne();

@@ -1,9 +1,12 @@
 // The suspended lane keeps its own merge bases: normal merges carry the
 // failed batch's history with its tree set aside, so topology is insufficient.
 import { randomUUID } from 'node:crypto';
+import { splitFile } from '../format/index.ts';
+import { findFileLinks } from '../initial-sync/uploads.ts';
+import { MARKDOWN_EXTENSION, isRegularFile } from '../mapping/index.ts';
 import { closePullRequest, ensurePullRequest, findOpenPullRequest, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
-import { branchRef, commitIds, commitTree, isAncestor, pushAtomic, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type StateConfig, type StateSnapshot } from '../state/index.ts';
+import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readBlobs, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 
 export const SUSPENDED_TITLE = 'Suspended changes from Linear';
@@ -64,6 +67,20 @@ async function mergeTree(git: Git, linear: Oid, other: Oid, base: Oid | undefine
 
 async function changedPaths(git: Git, before: Oid, after: Oid): Promise<string[]> {
   return (await git.text(['diff', '--name-only', '--no-renames', '-z', before, after])).split('\0').filter(Boolean);
+}
+
+async function includeCapturedAssets(git: Git, linear: Oid, ids: IdMap, paths: Set<string>): Promise<void> {
+  const entries = new Map((await listTree(git, linear)).map((entry) => [entry.path, entry]));
+  const documents = [...ids].filter(([, entry]) => entry.suspended !== undefined)
+    .map(([path]) => entries.get(path)).filter((entry) => entry !== undefined).filter(isRegularFile);
+  const texts = await readBlobs(git, documents.map((entry) => entry.oid));
+  for (const document of documents) {
+    const body = splitFile((texts.get(document.oid) as Buffer).toString('utf8')).body;
+    for (const link of findFileLinks(document.path, body, (path) => {
+      const entry = entries.get(path);
+      return entry !== undefined && isRegularFile(entry);
+    })) if (!link.target.endsWith(MARKDOWN_EXTENSION)) paths.add(link.target);
+  }
 }
 
 async function persistIds(context: RunContext, options: LaneOptions, ids: IdMap): Promise<Oid> {
@@ -133,6 +150,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
       const previousBases = await recordedBases(git, releasedHead);
       return release(context, options, ids, paths, releasedHead, previousBases.linear, tracked);
     }
+    await includeCapturedAssets(git, linear, ids, paths);
     head = await commit(context, options, await takePaths(git, tracked, linear, paths), [tracked], 'Restore suspended changes' + note(tracked, linear));
     bases = { tracked, linear };
   } else {
@@ -147,6 +165,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     for (const path of await changedPaths(git, tracked, head)) paths.add(path);
     await addEpisodes(context, options, ids, paths, []);
     if (bases.linear !== linear) {
+      await includeCapturedAssets(git, linear, ids, paths);
       // The intake never carries paths outside this lane. Mask them before
       // the merge, so their unrelated image/config conflicts cannot hold it.
       const input = await treeCommit(git, await takePaths(git, head, linear, paths), linear);
