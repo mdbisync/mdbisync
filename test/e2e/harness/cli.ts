@@ -15,7 +15,7 @@
 // The test configuration comes from the environment and the test
 // configuration folder (see config.ts).
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { GitStateStore, SharedAdmission, refreshingGitEnv } from './shared-state.ts';
 import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
@@ -29,7 +29,7 @@ import { Governor, budgetFromStatus, estimate, type App } from './governor.ts';
 import { SandboxRest, githubToken } from './github.ts';
 import { newRunId, runNames, RUN_ID_PATTERN } from './isolation.ts';
 import { LinearWorld, editorClient } from './linear-world.ts';
-import { acquireLock, defaultStateDir, forgetRun, requireStoppedLocalRun } from './locks.ts';
+import { acquireLock, defaultStateDir, forgetRun, registerRun, requireStoppedLocalRun } from './locks.ts';
 import { updateStatusPage, writeEvidence, writeRunReport, type HarnessReport } from './report.ts';
 import { loadExpectedRed } from './results.ts';
 import { runScenarios, skippedResult } from './runner.ts';
@@ -38,7 +38,7 @@ import { loadScenarios, selectScenarios } from './spec.ts';
 import { actionShaUnderTest, scheduleTick } from './steps.ts';
 import { sweep } from './sweeper.ts';
 import { parseUiAnswers, renderUiChecklist } from './ui-checklist.ts';
-import { ownedRuns } from './ownership.ts';
+import { OwnershipLedger, ownedRuns } from './ownership.ts';
 import { loadHeldRun } from './held-run.ts';
 import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-result.ts';
 import { readTemplate, renderScheduler, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
@@ -144,12 +144,24 @@ async function main(argv: string[]): Promise<number> {
       if (command === 'recover' && (recoveryId === undefined || !RUN_ID_PATTERN.test(recoveryId) || values['writer-stopped'] !== true)) throw new Error('usage: recover <run id> --writer-stopped (verify the writer and all engine/workflow children stopped first)');
       if (recoveryId !== undefined && !ownedRuns(stateDir).includes(recoveryId)) throw new Error('recovery needs the owning run state directory and its ownership record');
       const recoveryLock = recoveryId === undefined ? undefined : await acquireLock(`ui-result-${recoveryId}`, { stateDir, runId: recoveryId, timeoutMs: 0 });
+      let maintenance: { runId: string; owner: string; registration: ReturnType<typeof registerRun>; admission: SharedAdmission } | undefined;
       try {
         if (recoveryId !== undefined) requireStoppedLocalRun(stateDir, recoveryId);
         const token = await githubToken(config, 'local');
         const world = new LinearWorld(editorClient(config.editors['editor-a']));
         const teams = await world.teams();
         const admission = await sharedAdmission();
+        if (recoveryId === undefined) {
+          const runId = newRunId(); const owner = randomUUID();
+          const registration = registerRun(stateDir, runId);
+          new OwnershipLedger(stateDir, runId).scope([]);
+          const result = await admission.reserve({ runId, owner, app: 'maintenance', full: true,
+            need: { requests: 0, complexity: 0 }, reserve: { requests: 0, complexity: 0 }, maxWorkers: 1,
+            readBudget: async () => budgetFromStatus(await world.client.rateLimitStatus(), Date.now()),
+          });
+          if (!result.admitted) { registration.done(); throw new Error('sweep requires exclusive admission; live reservations are still held'); }
+          maintenance = { runId, owner, registration, admission };
+        }
         const entry = recoveryId === undefined ? undefined : (await admission.store.read()).runs.find((run) => run.runId === recoveryId);
         if (recoveryId !== undefined && entry === undefined) throw new Error('run has no shared reservation; use ordinary sweep');
         const trash: Record<string, { before: number; after?: number }> = {};
@@ -176,7 +188,17 @@ async function main(argv: string[]): Promise<number> {
         }
         process.stdout.write(`${JSON.stringify({ ...report, trash }, null, 2)}\n`);
         return report.errors.length === 0 ? 0 : 1;
-      } finally { recoveryLock?.release(); }
+      } finally {
+        try {
+          // Maintenance owns no scenario data; a completed sweep may leave
+          // failed legacy cleanup for the next exclusive attempt. A crash
+          // retains this grant and its local record for verified recovery.
+          if (maintenance !== undefined) {
+            await maintenance.admission.release(maintenance.runId, maintenance.owner);
+            maintenance.registration.done();
+          }
+        } finally { recoveryLock?.release(); }
+      }
     }
 
     if (command === 'run') {

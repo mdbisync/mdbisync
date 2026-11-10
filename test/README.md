@@ -147,8 +147,9 @@ census of active and trashed team-zone documents and enough headroom for the
 planned documents. Each selected team's trash count is read before and after;
 an increased or unreadable after-count fails cleanup.
 
-`sweep` reads shared admission state before touching any remote resource and
-protects every registered run regardless of age or host. An unavailable or
+`sweep` first takes global exclusive admission, then reads shared state and
+protects every registered run regardless of age or host. It refuses while
+scenario reservations remain, so maintenance cannot alter their team counts. An unavailable or
 malformed shared state stops sweeping and new admissions. The control branch
 contains only counts, run identities and zone claims; never document content
 or credentials. Its updates use ordinary fast-forward-only pushes, without
