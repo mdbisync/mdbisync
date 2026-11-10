@@ -32,8 +32,8 @@ import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/
 import { waitForCheck } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
-import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
-import { commitAsPerson, readRunIds } from './step-helpers.ts';
+import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS, watchRun } from './steps.ts';
+import { commitAsPerson, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
@@ -2811,5 +2811,111 @@ describe('quiet runs through the harness', () => {
     const ctx = await watchedRun({ moves: ['state'], watch: false });
     await assert.rejects(resolveSubject(ctx, 'quiet.last'), /was not watched/);
     await assert.rejects(resolveSubject(ctx, 'quiet.3'), ProductError);
+  });
+});
+
+describe('document text right after a run', () => {
+  const l1_20 = scenarios.find((item) => item.id === 'L1-20')!;
+  const content = l1_20.checks.assertions.find((item) => item.subject === 'runs.1.documents.content')!;
+  const report = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, 'run-reports', `${name}.json`), 'utf8')) as Record<string, unknown>;
+
+  /** A converged world asserting L1-20's checks, its dry and confirmed initial syncs run as the harness watches them. */
+  async function confirmedInitialSync(duringConfirm: (linear: FakeLinear, ids: Record<string, { id: string }>) => Promise<void> = async () => {}) {
+    const run = await fakeRun();
+    run.ctx.scenario = { ...run.ctx.scenario, checks: l1_20.checks };
+    await watchRun(run.ctx, { throughProxy: false }, async () => void run.ctx.engine.results.push(engineRun('initial-sync', report('quiet-sync'))));
+    await watchRun(run.ctx, { throughProxy: false }, async () => {
+      // The confirmed run writes every document as Linear keeps it: without the final newline.
+      for (const document of run.linear.documents.values()) await run.linear.updateDocument(document.id, { content: (document.content ?? '').replace(/\n+$/, '') });
+      await duringConfirm(run.linear, run.ids);
+      run.ctx.engine.results.push(engineRun('initial-sync', report('initial-sync-to-linear')));
+    });
+    return run;
+  }
+  const holds = async (ctx: RunContext, subject: string) => compare(content.operator, (await resolveSubject(ctx, subject)).value, (await resolveSubject(ctx, String(content.expected))).value);
+
+  it('compares the documents the confirmed run left with their golden form, though the report has no bodies', async () => {
+    assert.equal(subjectSource(content.subject), 'harness');
+    assert.equal(subjectSource('runs.last.linear.body'), 'harness');
+    // A confirmed initial sync's report, as retained from a live run: no document bodies, by design.
+    assert.equal(Object.hasOwn(report('initial-sync-to-linear'), 'documents'), false);
+    const { ctx } = await confirmedInitialSync();
+    assert.equal(await holds(ctx, content.subject), true);
+    assert.equal(await holds(ctx, 'runs.last.documents.body'), true);
+  });
+
+  it('fails a confirmed run that wrote a wrong body, even when a later step rewrites it right', async () => {
+    const { ctx, linear, ids } = await confirmedInitialSync(async (fake, known) => {
+      await fake.updateDocument(known['eng/platform/plan.md']!.id, { content: '# Plan\n\nA paragraph the run garbled.' });
+    });
+    assert.equal(await holds(ctx, content.subject), false);
+    // A later rewrite after the run's boundary: the world at the end alone would pass.
+    await linear.updateDocument(ids['eng/platform/plan.md']!.id, { content: '# Plan\n\nThe first paragraph.\n\nThe second paragraph.' });
+    refreshView(ctx);
+    assert.equal(await holds(ctx, 'documents.content'), true);
+    assert.equal(await holds(ctx, content.subject), false);
+  });
+
+  it('keeps a correct run correct when a later step breaks a document after it', async () => {
+    const { ctx, linear, ids } = await confirmedInitialSync();
+    await linear.updateDocument(ids['eng/platform/notes.md']!.id, { content: '# Notes\n\nChanged after the run.\n' });
+    // The document is read from the snapshot, never again from Linear.
+    linear.documents.delete(ids['eng/platform/plan.md']!.id);
+    refreshView(ctx);
+    assert.equal(await holds(ctx, 'documents.content'), false);
+    assert.equal(await holds(ctx, content.subject), true);
+  });
+
+  it('refuses a run without a snapshot after it, and a run the scenario does not have', async () => {
+    const { ctx } = await confirmedInitialSync();
+    // A run recorded without being watched, such as one a fault paused: nothing stands in for that moment.
+    ctx.engine.results.push(engineRun('sync', report('quiet-sync')));
+    await assert.rejects(resolveSubject(ctx, 'runs.2.documents.content'), (error: Error) => !(error instanceof ProductError) && /engine run 2 has no snapshot of the world right after it/.test(error.message));
+    await assert.rejects(resolveSubject(ctx, 'runs.last.documents.content'), /engine run 2 has no snapshot/);
+    await assert.rejects(resolveSubject(ctx, 'runs.5.documents.content'), ProductError);
+    // Other run subjects still come from the report.
+    assert.equal(subjectSource('runs.0.documents.brokenImageUrls'), 'engine');
+  });
+
+  it('compares with the golden form of the files at the same moment, so a later git edit fails no correct run', async () => {
+    assert.equal(content.expected, 'runs.1.golden.linearForm');
+    const { ctx } = await confirmedInitialSync();
+    await commitAsPerson(ctx, new Map([['eng/platform/notes.md', '# Notes\n\nEdited in git after the run.\n']]), 'Edit after the run');
+    refreshView(ctx);
+    assert.equal(await holds(ctx, content.subject), true);
+    // Against the files as they are now, the same correct run would fail.
+    assert.equal(compare(content.operator, (await resolveSubject(ctx, content.subject)).value, (await resolveSubject(ctx, 'golden.linearForm')).value), false);
+  });
+
+  it('keeps the run\'s own target selection when a later step picks a document', async () => {
+    const { ctx, ids } = await confirmedInitialSync();
+    // A later edit step records its target, as `setTarget` does.
+    setTarget(ctx, 'eng/platform/notes.md', ids['eng/platform/notes.md']!.id);
+    const value = (await resolveSubject(ctx, content.subject)).value;
+    assert.ok(value instanceof Map && value.size > 1);
+    assert.equal(await holds(ctx, content.subject), true);
+    // The world now speaks of the picked document alone.
+    assert.equal(typeof (await resolveSubject(ctx, 'documents.content')).value, 'string');
+    assert.equal(ctx.observations.get('target.path'), 'eng/platform/notes.md');
+  });
+
+  it('snapshots only the run the scenario names, and never I6\'s extra run', async () => {
+    const { ctx } = await confirmedInitialSync();
+    assert.equal(ctx.observations.has('harness.runView.0'), false);
+    assert.equal(ctx.observations.has('harness.runView.1'), true);
+    ctx.observations.set('scenario.runsEnd', ctx.engine.results.length);
+    await watchRun(ctx, { throughProxy: false }, async () => void ctx.engine.results.push(engineRun('sync', report('quiet-sync'))));
+    assert.equal(ctx.observations.has('harness.runView.2'), false);
+    // For `last`, each run's view replaces the one before it.
+    const last = (await fakeRun()).ctx;
+    last.scenario = { ...last.scenario, checks: { ...l1_20.checks, assertions: [{ subject: 'runs.last.documents.content', operator: 'same-as', expected: 'runs.last.golden.linearForm' }] } };
+    for (let run = 0; run < 2; run += 1) await watchRun(last, { throughProxy: false }, async () => void last.engine.results.push(engineRun('sync', report('quiet-sync'))));
+    assert.deepEqual([...last.observations.keys()].filter((key) => key.startsWith('harness.runView.')), ['harness.runView.1']);
+  });
+
+  it('snapshots nothing for a scenario that asserts on no run\'s documents', async () => {
+    const { ctx } = await fakeRun();
+    await watchRun(ctx, { throughProxy: false }, async () => void ctx.engine.results.push(engineRun('sync', report('quiet-sync'))));
+    assert.equal(ctx.observations.has('harness.runView.0'), false);
   });
 });

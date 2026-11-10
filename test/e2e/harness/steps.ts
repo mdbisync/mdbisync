@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { cleanupKilledTokens } from './token-cleanup.ts';
-import { tokenActive } from './subjects.ts';
+import { recordRunView, tokenActive, watchesRunViews } from './subjects.ts';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -200,24 +200,33 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
     settleResult(ctx, await running.done);
     return;
   }
-  await watchQuiet(ctx, { throughProxy: true }, async () => settleResult(ctx, await runEngine(call)));
+  await watchRun(ctx, { throughProxy: true }, async () => settleResult(ctx, await runEngine(call)));
 }
 
 /**
- * Runs one engine invocation; in a scenario that asserts quiet, snapshots
- * the world around it and records why the run was not quiet
- * (`harness.quiet.<n>`, empty when it was), for the `quiet.<n|last>` subject.
+ * Runs one engine invocation and snapshots the world around it as the
+ * scenario's assertions need: in a scenario that asserts quiet, before and
+ * after it, recording why the run was not quiet (`harness.quiet.<n>`, empty
+ * when it was) for the `quiet.<n|last>` subject; in one that asserts on the
+ * world right after a run, the view after it (`harness.runView.<n>`) for the
+ * `runs.<n|last>.` document subjects.
  */
-async function watchQuiet(ctx: RunContext, options: { throughProxy: boolean }, run: () => Promise<void>): Promise<void> {
-  if (!watchesQuiet(ctx)) return run();
-  const before = await snapshotWorld(ctx, options);
+export async function watchRun(ctx: RunContext, options: { throughProxy: boolean }, run: () => Promise<void>): Promise<void> {
+  const quiet = watchesQuiet(ctx);
+  const views = watchesRunViews(ctx);
+  if (!quiet && !views) return run();
+  const before = quiet ? await snapshotWorld(ctx, options) : undefined;
   const count = ctx.engine.results.length;
   await run();
   const result = ctx.engine.results.at(-1);
   if (ctx.engine.results.length !== count + 1 || result === undefined) throw new Error('a watched invocation recorded no single engine run');
-  const after = await snapshotWorld(ctx, options);
   const n = ctx.engine.results.length - 1 - ctx.engine.setupRuns;
-  ctx.observations.set(`harness.quiet.${n}`, quietFailures({ exitCode: result.exitCode, report: result.report, before, after, documentWrites: writesBetween(ctx, before, after) }));
+  // The quiet window closes first: the slower full view must not widen it.
+  if (before !== undefined) {
+    const after = await snapshotWorld(ctx, options);
+    ctx.observations.set(`harness.quiet.${n}`, quietFailures({ exitCode: result.exitCode, report: result.report, before, after, documentWrites: writesBetween(ctx, before, after) }));
+  }
+  if (views) await recordRunView(ctx, n);
 }
 
 /** Runs the sync until a run changes nothing more (at most `limit` runs). */
@@ -312,7 +321,7 @@ async function workflowRun(ctx: RunContext, args: Record<string, unknown>): Prom
   await requireWorkflows(ctx, command);
   // Only a dispatched run starts after the snapshot before it. A push or pull request run
   // started on an earlier step and may already have written, so it gives no quiet verdict.
-  if (event === 'workflow_dispatch') await watchQuiet(ctx, { throughProxy: false }, () => startWorkflowRun(ctx, event, command, args));
+  if (event === 'workflow_dispatch') await watchRun(ctx, { throughProxy: false }, () => startWorkflowRun(ctx, event, command, args));
   else await startWorkflowRun(ctx, event, command, args);
 }
 

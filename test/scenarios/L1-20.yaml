@@ -76,7 +76,7 @@
       {
         "subject": "runs.1.documents.content",
         "operator": "same-as",
-        "expected": "golden.linearForm"
+        "expected": "runs.1.golden.linearForm"
       },
       {
         "subject": "writes.githubActor",
