@@ -180,7 +180,7 @@ export async function liveWorld(
 }
 
 /** Identity is stable across API-key rotation; credentials never become ledger keys. */
-export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnType<Governor['admit']>> | undefined): Promise<void> {
+export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnType<Governor['admit']>> | undefined, maxWaitMs?: number): Promise<void> {
   if (grant?.claimBudgets === undefined || ctx.live === null) return;
   const estimated = estimate(ctx.scenario);
   const need = { requests: Math.min(estimated.requests, MAX_ADMISSION.requests), complexity: Math.min(estimated.complexity, MAX_ADMISSION.complexity) };
@@ -193,7 +193,12 @@ export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnT
     // reserve it once, including scenarios spanning several quota windows.
     accounts.set(key, { key, need, readBudget: async () => budgetFromStatus(await client.rateLimitStatus(), Date.now()) });
   }
-  await grant.claimBudgets([...accounts.values()], ctx.signal);
+  try {
+    await grant.claimBudgets([...accounts.values()], ctx.signal, maxWaitMs);
+  } catch (blocked) {
+    if (blocked instanceof BudgetBlockedError) throw new EnvBlockedError(blocked.message);
+    throw blocked;
+  }
 }
 
 async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
@@ -233,7 +238,9 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   // The team zones the run may write in, on record before anything is created there.
   ctx.owned.scope([...tree.teamZones.keys()].flatMap((key) => teams.get(key)?.id ?? []));
 
-  await claimEditorBudgets(ctx, grant);
+  // Setup ends after SETUP_TIMEOUT_MS: a key that frees up later is reported now, with its reason.
+  ctx.phase('editor budget');
+  await claimEditorBudgets(ctx, grant, SETUP_TIMEOUT_MS);
 
   // The team lock: initial sync matches every document of an annotated team zone.
   ctx.phase('team lock');
