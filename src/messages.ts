@@ -18,7 +18,6 @@ export const MESSAGES = {
   'action.unknown-security-step': 'unknown security-step: {step} (expected one of: {steps}, or empty)',
   'action.cleanup-before-stage': 'cleanup-tokens belongs before the stage step, not apply',
   'action.cleanup-revocation-failed': 'token cleanup revocation failed',
-  'action.post-revoke-failed': "post: the run's Linear token could not be revoked: {reason}",
 
   // `init`.
   'init.security-twice': 'choose security hooks once',
@@ -78,7 +77,6 @@ export const MESSAGES = {
   'setup.github-refused': 'the GitHub token was refused (HTTP {status})',
   'setup.github-cannot-see': 'the GitHub token cannot see the repository (HTTP {status})',
   'setup.github-answered-permission': 'GitHub answered HTTP {status} while checking {permission}',
-  'setup.github-answered': 'GitHub answered HTTP {status} while {action}',
   'setup.github-reading-repository': 'reading the repository',
   'setup.github-lacks': 'the GitHub token lacks {permissions}{unchecked}',
   'setup.github-lacks-unchecked': ' ({permissions} not checked without it)',
@@ -88,6 +86,8 @@ export const MESSAGES = {
   'setup.hooks-invalid-yaml': '{file} is not valid YAML',
   'setup.hooks-no-repos': '{file} has no "repos" list',
   'setup.format-hook-missing': '{file} has no {hook} hook',
+  'setup.linear-refused-credentials': 'Linear refused the OAuth app client credentials',
+  'setup.linear-refused-teams': 'Linear refused the token while reading teams',
   'setup.linear-scope': 'the Linear token lacks the scope {scopes}',
   'setup.too-many-projects': 'more than 250 Linear projects share the annotated names',
   'setup.no-team-visible': 'the Linear app saw no team in two lookups, so none of the annotated teams ({teams}) can be found: check the app\'s team access in Linear',

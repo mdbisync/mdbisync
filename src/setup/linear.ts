@@ -151,7 +151,7 @@ export async function resolveTargets(
     if (!isCredentialError(error)) throw error;
     return {
       result: notChecked('annotation-targets', 'needs working Linear credentials'),
-      credentials: linearCredentialFailure('Linear refused the token while reading teams'),
+      credentials: linearCredentialFailure(message('setup.linear-refused-teams')),
     };
   }
 

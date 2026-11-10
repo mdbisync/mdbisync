@@ -4,13 +4,13 @@
 // it holds the merge result: a write, a rename or move, a create or a trash.
 
 import { readAnnotation } from '../mapping/index.ts';
-import { lintText, splitFile, type LintRule } from '../format/index.ts';
+import { lintText, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
 import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
 import { message } from '../messages.ts';
-import { type LeftOutRule } from '../codes.ts';
+import { type FileLeftOutRule } from '../codes.ts';
 
 /** A synchronized file of one side: its path, blob, Linear title and place. */
 export interface SideFile {
@@ -89,7 +89,7 @@ export interface LocalMerge {
   /** Synchronized files of the merge result, by path. */
   result: Map<string, SideFile>;
   /** Files of the merge result the sync leaves out (lint, title, collisions); their documents stay as they are. */
-  leftOut: Array<{ path: string; rules: string[] }>;
+  leftOut: Array<{ path: string; rules: FileLeftOutRule[] }>;
   /** What Linear must change, in path order; documents that need nothing are absent. */
   changes: DocumentChange[];
   /** Documents whose text, title and place stay; a file they link to may still have changed. */
@@ -280,7 +280,7 @@ export function placeKey(place: Place): string {
 interface Side {
   mapping: RepositoryMapping;
   files: Map<string, SideFile>;
-  leftOut: Array<{ path: string; rules: string[] }>;
+  leftOut: Array<{ path: string; rules: FileLeftOutRule[] }>;
   leftOutPaths: Set<string>;
 }
 
@@ -293,10 +293,10 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
   const mapping = await loadMapping(git, treeish);
   const blobs = await readBlobs(git, mapping.documents.map((document) => document.oid));
   const files = new Map<string, SideFile>();
-  const leftOut: Array<{ path: string; rules: string[] }> = [];
-  const leave = (path: string, rules: string[]) => leftOut.push({ path, rules: [...new Set(rules)].sort() });
+  const leftOut: Array<{ path: string; rules: FileLeftOutRule[] }> = [];
+  const leave = (path: string, rules: FileLeftOutRule[]) => leftOut.push({ path, rules: [...new Set(rules)].sort() });
   for (const document of mapping.documents) {
-    const rules: Array<LintRule | LeftOutRule> = lintText(document.path, (blobs.get(document.oid) as Buffer).toString('utf8')).map((finding) => finding.rule);
+    const rules: FileLeftOutRule[] = lintText(document.path, (blobs.get(document.oid) as Buffer).toString('utf8')).map((finding) => finding.rule);
     if (lengthRefusal({ title: document.title }, facts) !== undefined) rules.push('title-too-long');
     if (rules.length > 0) leave(document.path, rules);
     else files.set(document.path, toSideFile(document));
@@ -311,7 +311,7 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
  * The files of a commit or tree the sync leaves out, with their rules: the
  * list a merge gives for its result, for a run that has nothing to merge.
  */
-export async function leftOutFiles(git: Git, treeish: Oid, facts: LinearFacts = LINEAR_FACTS): Promise<Array<{ path: string; rules: string[] }>> {
+export async function leftOutFiles(git: Git, treeish: Oid, facts: LinearFacts = LINEAR_FACTS): Promise<Array<{ path: string; rules: FileLeftOutRule[] }>> {
   return (await synchronizedFiles(git, treeish, facts)).leftOut;
 }
 

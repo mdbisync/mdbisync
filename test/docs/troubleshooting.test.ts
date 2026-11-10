@@ -31,6 +31,7 @@ const PAGE = readFileSync(join(ROOT, 'docs/troubleshooting.md'), 'utf8');
 function codes(): Map<string, string> {
   const found = new Map<string, string>();
   for (const [table, values] of Object.entries(CODES)) {
+    assert.ok(Array.isArray(values), `src/codes.ts exports ${table}, which is not a table of codes`);
     for (const code of values) if (!found.has(code)) found.set(code, table);
   }
   for (const rule of Object.keys(LINT_RULES)) if (!found.has(rule)) found.set(rule, 'LINT_RULES');
@@ -99,10 +100,21 @@ describe('troubleshooting page', () => {
     assert.equal(message('init.conflicting-folders', { path: '{path}' }), 'conflicting folder options: {path}');
   });
 
-  it('takes the text of errors and warnings from the table, not from literals', () => {
-    // An error, a failed step or a warning given a literal sentence bypasses the table and so the page.
-    const site = /\b(?:new [A-Za-z]*Error|super|core\.(?:setFailed|warning)|\.warn|stderr\.write)\(\s*(?:[\w.]+,\s*)?(['"`])(?:(?!\1)[^\n$])*?[A-Za-z]{2,} [A-Za-z]/g;
-    const found = runSources().flatMap(({ path, text }) => [...text.matchAll(site)].map((match) => `${path}: ${match[0]}`));
+  it('takes the text of errors, failures and warnings from the table, not from literals', () => {
+    // A literal sentence at one of these places bypasses the table and so the page. This only looks for
+    // literals where a message is given; the codes and texts themselves come from the tables above.
+    const sites = [
+      // An error, a failed step, a warning or standard error, after any simple arguments such as an operation name.
+      String.raw`\b(?:new [A-Za-z]*Error|super|core\.(?:setFailed|warning)|\.warn|stderr\.write|failed|linearCredentialFailure)\((?:\s*(?:[\w.]+|'[^'\n]*'|"[^"\n]*"),)*\s*`,
+      // A warning's or a failed check's detail, a setup error given to the check, the command line's error output.
+      String.raw`\b(?:detail|error|stderr):\s*`,
+      // A message next to a code, kind or rule in the same object.
+      String.raw`\b(?:code|kind|rule):[^{}]*?\bmessage:\s*`,
+    ];
+    // A string or template literal with two words in its text; a template's `${…}` parts are skipped.
+    const literal = String.raw`(['"\x60])(?:\$\{(?:[^{}\n]|\{[^{}\n]*\})*\}|(?!\1|\$\{)[^\n])*?[A-Za-z]{2,} [A-Za-z]`;
+    const pattern = new RegExp(`(?:${sites.join('|')})${literal}`, 'g');
+    const found = runSources().flatMap(({ path, text }) => [...text.matchAll(pattern)].map((match) => `${path}: ${match[0].split('\n').pop()}`));
     assert.deepEqual(found, [], 'literal message text outside src/messages.ts');
   });
 });

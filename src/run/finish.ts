@@ -13,6 +13,7 @@ import { cell } from './summary.ts';
 import { type OperationOutcome, type RunWrites } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 import { message } from '../messages.ts';
+import { type RecordLeftOutRule } from '../codes.ts';
 
 export interface RunReport {
   capacity: ContainerCapacity[];
@@ -124,7 +125,7 @@ export interface ReverseReport {
   created: string[];
   skippedCompleted: string[];
   removed: string[];
-  leftOutAtRecord: Array<{ path: string; rule: string }>;
+  leftOutAtRecord: Array<{ path: string; rule: RecordLeftOutRule }>;
   notAttempted: string[];
   stopped: WriteStop | null;
   progressPushes: number;

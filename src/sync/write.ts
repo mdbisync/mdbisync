@@ -56,7 +56,7 @@ import { type CreateChange, type Decided, type DocumentChange, type KeepChange, 
 import { reconcileDocumentMark } from './marks.ts';
 import { withRecorded } from './recorded.ts';
 import { message } from '../messages.ts';
-import { type SkipReason, type WriteCode } from '../codes.ts';
+import { type FileLeftOutRule, type SkipReason, type WriteCode } from '../codes.ts';
 
 export const MERGE_RECORD_MESSAGE = "Sync: Linear's state after taking in the tracked branch";
 export const PARTIAL_RECORD_MESSAGE = "Sync: Linear's state, part of the tracked branch taken in";
@@ -127,7 +127,7 @@ export interface WriteResult {
   decided: Decided[];
   skipped: Array<{ path: string; reason: SkipReason }>;
   /** Synchronized files the sync leaves out (lint, title, collisions); their documents stay as they were. */
-  leftOut: Array<{ path: string; rules: string[] }>;
+  leftOut: Array<{ path: string; rules: FileLeftOutRule[] }>;
   /** Left out by a transform while writing. */
   leftOutAtWrite: LeftOutAtWrite[];
   failed: FailedWrite[];

@@ -9,7 +9,7 @@ import { renderPullRequest } from './pull-request.ts';
 import { type SkipReason } from './write.ts';
 
 /** Why a document was skipped, as the "Skipped" table says it. */
-export const SKIP_REASONS: Record<SkipReason, string> = {
+export const SKIP_REASON_TEXTS: Record<SkipReason, string> = {
   'edited-in-linear': 'changed in Linear since it was read; the next run takes that change in and writes again',
   'missing-in-linear': 'not found in Linear, or in its trash; the next run takes that in',
   conflict: 'changed on both sides in a way git cannot merge; it is written when the conflict is resolved',
@@ -62,7 +62,7 @@ export function renderSync(result: CycleResult): string {
     lines.push('');
   };
   table('Failed', ['Path', 'Operation', 'Error'], write.failed.map((entry) => [entry.path, entry.operation, entry.error]));
-  table('Skipped', ['Path', 'Why'], write.skipped.map((entry) => [entry.path, SKIP_REASONS[entry.reason]]));
+  table('Skipped', ['Path', 'Why'], write.skipped.map((entry) => [entry.path, SKIP_REASON_TEXTS[entry.reason]]));
   table('Conflict markers', ['Path'], write.conflicts.map((path) => [path]));
   table('Decided by the conflict rules', ['Rule', 'What happened'], write.decided.map((entry) => [entry.summary.code, entry.summary.text]));
   table('Renamed or moved', ['From', 'To'], write.relocated.map((entry) => [entry.from, entry.to]));

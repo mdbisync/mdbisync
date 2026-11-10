@@ -4,12 +4,12 @@
 // Pure: the caller reads the files and lists the documents.
 
 import { type ContainerCapacity } from '../run/capacity.ts';
-import { lintText, type LintRule } from '../format/index.ts';
+import { lintText } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearDocument, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, type Zone } from '../mapping/index.ts';
 import { type ResolvedTargets, projectKey } from '../setup/index.ts';
 import { message } from '../messages.ts';
-import { type LeftOutRule, type UnsyncedReason } from '../codes.ts';
+import { type FileLeftOutRule, type LeftOutAtWriteRule } from '../codes.ts';
 
 /**
  * Why a synchronized file stays in git only: a lint rule, a title collision,
@@ -19,7 +19,7 @@ import { type LeftOutRule, type UnsyncedReason } from '../codes.ts';
 export interface LeftOutEntry {
   path: string;
   /** Sorted, each rule once. */
-  rules: string[];
+  rules: FileLeftOutRule[];
   /** 1-based lines of the lint findings, front matter included. */
   lines: number[];
   /** For `duplicate-title`: the other files with the same title in the same place. */
@@ -112,7 +112,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   const facts = input.facts ?? LINEAR_FACTS;
   const { mapping } = input;
   const leftOut = new Map<string, LeftOutEntry>();
-  const leaveOut = (path: string, rules: ReadonlyArray<LintRule | UnsyncedReason | LeftOutRule>, lines: number[] = [], collidesWith?: string[]) => {
+  const leaveOut = (path: string, rules: readonly FileLeftOutRule[], lines: number[] = [], collidesWith?: string[]) => {
     const entry = leftOut.get(path) ?? { path, rules: [], lines: [] };
     entry.rules = [...new Set([...entry.rules, ...rules])].sort();
     entry.lines = [...new Set([...entry.lines, ...lines])].sort((a, b) => a - b);
@@ -198,7 +198,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
  * as it is, as the confirmed run leaves it. The rest of the plan (the
  * container counts) is kept as it is.
  */
-export function leaveOutAtWrite(plan: InitialSyncPlan, entries: ReadonlyArray<{ path: string; rule: string; files: readonly string[] }>): InitialSyncPlan {
+export function leaveOutAtWrite(plan: InitialSyncPlan, entries: ReadonlyArray<{ path: string; rule: LeftOutAtWriteRule; files: readonly string[] }>): InitialSyncPlan {
   if (entries.length === 0) return plan;
   const byPath = new Map(entries.map((entry) => [entry.path, entry]));
   const leftOut = [...plan.leftOut];

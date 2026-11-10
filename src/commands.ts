@@ -1,8 +1,9 @@
-import { message } from './messages.ts';
 // The commands of the command-line entry and their exit codes.
 // `sync`, `initial-sync` and `check` run the preflight (the sync's state and
 // the setup check). A command that is not built yet reports "not implemented"
 // and exits with its own code, so callers and tests can tell the stubs apart.
+
+import { message } from './messages.ts';
 
 export interface CommandInfo {
   readonly summary: string;

@@ -1,7 +1,8 @@
-import { message } from '../messages.ts';
 // Where the sync keeps its state: the tracked branch, the sync branch and
 // the prefix of the three state refs. The defaults are the names the sync
 // uses in a real repository; tests give each run its own names.
+
+import { message } from '../messages.ts';
 
 export const STORES = ['linear', 'ids', 'uploads'] as const;
 export type Store = (typeof STORES)[number];

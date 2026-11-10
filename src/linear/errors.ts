@@ -1,6 +1,7 @@
-import { message } from '../messages.ts';
 // Errors raised by the Linear client. Messages carry operation names, HTTP
 // statuses and Linear's error codes only, never document content or tokens.
+
+import { message } from '../messages.ts';
 
 /**
  * Why the client stopped sending requests for the rest of the run. `limits`

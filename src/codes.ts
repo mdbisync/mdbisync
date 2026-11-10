@@ -4,6 +4,8 @@
 // only once it is in a table. docs/troubleshooting.md explains each code;
 // its test reads these tables. The `lint` rules are in `src/format/rules.ts`.
 
+import { type LintRule } from './format/rules.ts';
+
 /** The setup check's items. */
 export const CHECK_NAMES = [
   'linear-credentials',
@@ -50,6 +52,9 @@ export type LeftOutRule = (typeof LEFT_OUT_RULES)[number];
 /** Why an initial sync to Linear leaves a document out while writing it. */
 export const LEFT_OUT_AT_WRITE_RULES = ['content-too-long', 'upload-too-large', 'upload-unreadable'] as const;
 export type LeftOutAtWriteRule = (typeof LEFT_OUT_AT_WRITE_RULES)[number];
+
+/** Every rule a synchronized file can be left out by, in a plan or a sync. */
+export type FileLeftOutRule = LintRule | UnsyncedReason | LeftOutRule | LeftOutAtWriteRule;
 
 /** Why an initial sync from Linear leaves a file out of its record, or keeps the tracked one. */
 export const RECORD_LEFT_OUT_RULES = ['download-failed', 'front-matter-boundary', 'title-not-a-path', 'security-hook', 'security-unchecked'] as const;

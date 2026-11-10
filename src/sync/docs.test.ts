@@ -11,22 +11,14 @@ import { describe, it } from 'node:test';
 import { PARTIAL } from '../run/stop.ts';
 import { BLOCKED_COMMENT, MARKS } from './marks.ts';
 import { SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
-import { SKIP_REASONS } from './summary.ts';
+import { SKIP_REASON_TEXTS } from './summary.ts';
+import { CAPTURE_LEFT_OUT_RULES, PULL_REQUEST_CODES, WRITE_BACK_WARNING_CODES } from '../codes.ts';
 
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 const PAGE = 'docs/sync-cycle.md';
 const page = read(PAGE);
 const flat = page.replace(/\n *> ?/g, ' ').replace(/\s+/g, ' ');
 const flatSource = (path: string) => read(path).replace(/\s+/g, ' ');
-
-/** The string literals of a `code?:` union in a source file, found by the interface member's line. */
-function codes(path: string, member: RegExp): string[] {
-  const line = read(path).split('\n').find((text) => member.test(text));
-  assert.ok(line !== undefined, `${path}: ${member}`);
-  const found = [...line.matchAll(/'([a-z-]+)'/g)].map((match) => match[1]!);
-  assert.ok(found.length > 0, `${path}: no code literals on the line of ${member}`);
-  return found;
-}
 
 /** GitHub's anchors for the headings outside code fences: lowercase, punctuation dropped, spaces as hyphens. */
 function anchors(markdown: string): Set<string> {
@@ -73,8 +65,8 @@ describe('the sync cycle page', () => {
 
   it("describes every line of the capture's summary", () => {
     described('src/sync/capture.ts', ['Removal held for', 'The document id map was lost', 'Capture partial, will continue', 'Content is pushed unchecked']);
-    for (const code of codes('src/sync/capture.ts', /writeBackWarnings: Array/)) assert.ok(flat.includes(`\`${code}\``), code);
-    for (const rule of ['capture-translation', 'security-unchecked']) {
+    for (const code of WRITE_BACK_WARNING_CODES) assert.ok(flat.includes(`\`${code}\``), code);
+    for (const rule of CAPTURE_LEFT_OUT_RULES) {
       assert.ok(read('src/sync/capture.ts').includes(`rule: '${rule}'`), rule);
       assert.ok(flat.includes(`\`${rule}\``), rule);
     }
@@ -91,7 +83,7 @@ describe('the sync cycle page', () => {
     // "The sync pull request <link> waits for <checks>": the link sits between the words.
     assert.ok(read('src/sync/pull-request.ts').includes('`The sync pull request ${link} waits for'));
     assert.ok(flat.includes('| The sync pull request waits for its checks |'));
-    for (const code of codes('src/sync/pull-request.ts', /^ {2}code\?: 'check-failed'/)) assert.ok(flat.includes(`\`${code}\``), code);
+    for (const code of PULL_REQUEST_CODES) assert.ok(flat.includes(`\`${code}\``), code);
   });
 
   it('describes every outcome and table of the write step', () => {
@@ -112,7 +104,7 @@ describe('the sync cycle page', () => {
   it('leaves the skip reasons to troubleshooting.md, which words them as the summary does', () => {
     // That page's own test checks that every code is there; this checks the words the "Skipped" table uses.
     const troubleshooting = read('docs/troubleshooting.md');
-    for (const [reason, text] of Object.entries(SKIP_REASONS)) {
+    for (const [reason, text] of Object.entries(SKIP_REASON_TEXTS)) {
       assert.ok(troubleshooting.includes(`| \`${reason}\` | ${text[0]!.toUpperCase()}${text.slice(1)}. |`), `the reason ${reason}`);
     }
     assert.ok(flat.includes(`\`sync: ${PARTIAL} (<code>)\``), 'the partial message');

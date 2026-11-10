@@ -147,5 +147,5 @@ function isRateLimited(answer: Answer): boolean {
 }
 
 function ensureAnswered(status: number, what: string): void {
-  if (status < 200 || status >= 300) throw new Error(message('setup.github-answered', { status, action: what }));
+  if (status < 200 || status >= 300) throw new Error(message('github.answered', { status, action: what }));
 }

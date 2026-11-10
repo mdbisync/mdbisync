@@ -26,7 +26,7 @@ export async function run(options: PostOptions = {}): Promise<void> {
     core.info("post: revoked the run's Linear token");
   } catch (error) {
     // Linear expires the token on its own; the job's result stays the main step's.
-    core.warning(message('action.post-revoke-failed', { reason: error instanceof Error ? error.message : String(error) }));
+    core.warning(`post: ${message('run.revoke-failed', { reason: error instanceof Error ? error.message : String(error) })}`);
   }
 }
 

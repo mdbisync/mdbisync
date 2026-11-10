@@ -144,7 +144,7 @@ export async function runPreflight(
     // Only Linear's refusal of the credentials is a setup failure; an outage or
     // a lost request is an error of the run.
     if (minted || !isCredentialError(error)) throw error;
-    const { report } = await runSetupCheck({ mapping, hooks, github, linear: { error: 'Linear refused the OAuth app client credentials' } });
+    const { report } = await runSetupCheck({ mapping, hooks, github, linear: { error: message('setup.linear-refused-credentials') } });
     return outcome(operation, report);
   }
 }
