@@ -44,8 +44,10 @@ import {
   branchRef,
   pushAtomic,
   readIds,
+  commitTree,
 } from '../state/index.ts';
-import { knownIdLookup, mergeWithMarkers } from './merge.ts';
+import { LaneMoved, LaneConflict, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
+import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import { message } from '../messages.ts';
 import { type PullRequestCode } from '../codes.ts';
 
@@ -69,6 +71,7 @@ export interface PullRequestOptions {
 }
 
 export interface PullRequestResult {
+  suspended?: SuspendedResult;
   /** Merging `linear` would change the tracked branch. */
   needed: boolean;
   /** The open sync pull request after this step; null when there is none. */
@@ -96,7 +99,6 @@ export interface PullRequestResult {
   /**
    * Why the step did not do all it could this run. Waiting for checks is not
    * one: a later run merges.
-   * - `check-failed`: a check on the head failed; a setup error, the repository's checks must pass Linear's form. The tracked-to-Linear write step is paused until they pass.
    * - `conflict`: `linear` and the tracked branch change the same lines, which the write step merges with markers for the next run; or a conflicting file on the sync branch is no document, so it cannot hold markers and a person merges it.
    * - `merge-refused`: GitHub would not merge (the head moved, or the pull request cannot be merged now); a later run tries again.
    * - `merge-blocked`: GitHub refused the merge for the same reason as an earlier run, on the same head and tracked branch; a setup error, a person must change what blocks it.
@@ -122,16 +124,15 @@ interface MergeRefusal {
 
 /** How a run ends because of step 2; null when step 2 leaves the run successful (waiting for checks, a conflict, a refused merge). */
 export interface PullRequestFailure {
-  /** `setup`: a failed check, the deployer fixes the configuration; `no-state`: an initial sync from Linear waits for a person; `incomplete`: run again. */
+  /** `setup`: a repeatedly refused merge; `no-state`: an initial sync from Linear waits for a person; `incomplete`: run again. */
   kind: 'setup' | 'no-state' | 'incomplete';
   code: NonNullable<PullRequestResult['code']>;
   message: string;
 }
 
 export function pullRequestFailure(result: PullRequestResult | undefined): PullRequestFailure | null {
+  if (result?.suspended?.code === 'merge-blocked') return {kind:'setup', code:'merge-blocked', message:message('pull-request.merge-blocked', {code:'merge-blocked', refusal:refusalText(result.suspended)})};
   switch (result?.code) {
-    case 'check-failed':
-      return { kind: 'setup', code: result.code, message: message('pull-request.check-failed', { code: result.code }) };
     case 'merge-blocked':
       return { kind: 'setup', code: result.code, message: message('pull-request.merge-blocked', { code: result.code, refusal: refusalText(result) }) };
     case 'initial-pull-request-pending':
@@ -147,14 +148,30 @@ export function pullRequestFailure(result: PullRequestResult | undefined): PullR
 export async function syncPullRequest(context: RunContext, options: PullRequestOptions): Promise<PullRequestResult> {
   const { git, fetched } = context;
   const { config, github } = options;
+  let suspended: SuspendedResult | undefined;
+  try { suspended = await maintainSuspended(context, options); }
+  catch (error) {
+    const code = error instanceof LaneMoved ? 'state-moved' : error instanceof LaneConflict ? 'conflict' : error instanceof PullRequestError ? 'github-failed' : undefined;
+    if (error instanceof PullRequestError) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], code: 'github-failed', ...(error.status === undefined ? {} : {status:error.status}) };
+    else if (error instanceof LaneConflict) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], conflicts: error.paths };
+    else if (code === undefined) throw error;
+    else return { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [], code, ...(error instanceof LaneConflict ? { paths: error.paths } : {}) };
+  }
   const tracked = fetched.tracked;
   const sync = fetched.sync;
   const linear = options.state.linear;
   const result: PullRequestResult = { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [] };
+  if (suspended !== undefined) result.suspended = suspended;
+  if (suspended?.code !== undefined) result.code = suspended.code;
+  if (suspended?.status !== undefined) result.status = suspended.status;
+  if (suspended?.reason !== undefined) result.reason = suspended.reason;
   if (linear === null) return result;
 
+  const frozen = suspendedPaths(await readIds(git, options.state.ids));
+  // Mask before merging, so frozen paths cannot conflict or restart normal checks.
+  const laneLinear = frozen.size === 0 ? linear : await treeCommit(git, await takePaths(git, linear, sync ?? tracked, frozen), linear);
   const trackedTree = await git.text(['rev-parse', `${tracked}^{tree}`]);
-  const wanted = await mergedTree(git, tracked, linear);
+  const wanted = await mergedTree(git, tracked, laneLinear);
   if (wanted === null) return { ...result, needed: true, code: 'conflict' };
   result.needed = wanted !== trackedTree;
 
@@ -164,7 +181,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // A sync branch is made by the first sync pull request and stays. Once `linear` holds more than initial sync's
     // record and the tracked branch, a missing branch was deleted by a person: it comes back at `linear`.
     if (sync !== null || (await isAncestor(git, linear, tracked)) || (await isInitialRecord(git, linear))) return result;
-    const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: null, next: linear }]);
+    const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: null, next: frozen.size === 0 ? linear : await commitTree(git, {base: wanted, changes: new Map(), parents: [linear], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? context.identity}) }]);
     if (pushed.ok) return { ...result, branchMoved: true };
     // A refusal that is not a lease (a rule on branch names, missing rights) leaves the branch to the run that needs it.
     return pushed.reason === 'stale' ? { ...result, code: 'state-moved' } : result;
@@ -177,7 +194,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
 
     const identity = options.identity ?? context.identity;
     // The id map is read only when a merge has documents to resolve.
-    const merger = markedMerger(git, options.state.ids, identity);
+    const merger = markedMerger(git, options.state.ids, identity, frozen);
     /** What this run's merges into the sync branch resolved; reported only once the branch has moved to them. */
     const resolved: Resolution = { marked: [], decided: [] };
     let head: Oid | null = sync;
@@ -187,9 +204,9 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       // snapshot needs a person's approval. Ordinary unmerged changes stay on the branch,
       // including a person's edits and CI fixes after a pull request closes.
       if (!result.needed) return result;
-      head = await restart(git, sync, linear, wanted, identity);
+      head = await restart(git, sync, linear, wanted, identity, frozen.size > 0);
     } else {
-      const advanced = await advance(git, merger, sync as Oid, linear);
+      const advanced = await advance(git, merger, sync as Oid, linear, frozen.size > 0);
       if (advanced === null) return { ...result, code: 'conflict' };
       if (advanced.head !== sync) {
         const now = await mergedTree(git, tracked, sync as Oid);
@@ -235,11 +252,16 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       body: pullRequestBody(result.paths, earlier),
     });
     result.pullRequest = { number: pullRequest.number, url: pullRequest.url, opened };
-    const fresh = result.branchMoved || opened;
+    const fresh = result.branchMoved || opened || suspended?.released !== undefined;
     const grace = options.mergeGraceSeconds ?? DEFAULT_MERGE_GRACE_SECONDS;
     if (fresh && grace === 0) return result;
     result.checks = fresh ? await waitForChecks(github, head, grace) : await readChecks(github, head);
-    if (result.checks.state === 'failed') return { ...result, code: 'check-failed' };
+    if (result.checks.state === 'failed') {
+      result.suspended = await suspendBatch(context, options, head, pullRequest.number, result.checks.failed);
+      result.pullRequest = null;
+      result.branchMoved = true;
+      return result;
+    }
     if (result.checks.state === 'pending') return result;
     const merge = await mergePullRequest(github, pullRequest.number, head);
     if (!merge.merged) {
@@ -258,6 +280,8 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     result.pullRequest = null;
     return result;
   } catch (error) {
+    if (error instanceof LaneMoved) return { ...result, code: 'state-moved' };
+    if (error instanceof LaneConflict) return { ...result, code: 'conflict' };
     if (error instanceof PullRequestError) return { ...result, code: 'github-failed', ...(error.status === undefined ? {} : { status: error.status }) };
     throw error;
   }
@@ -309,7 +333,8 @@ async function isAncestor(git: Git, ancestor: Oid, descendant: Oid): Promise<boo
  * branch and `linear` whose tree is `wanted`, the tracked branch with
  * `linear` merged in, so nothing else the branch held is carried on.
  */
-async function restart(git: Git, sync: Oid | null, linear: Oid, wanted: string, identity: CommitIdentity): Promise<Oid> {
+async function restart(git: Git, sync: Oid | null, linear: Oid, wanted: string, identity: CommitIdentity, masked = false): Promise<Oid> {
+  if (masked) return commitTree(git, {base: wanted, changes: new Map(), parents: sync === null ? [linear] : [sync, linear], message: SYNC_BRANCH_MERGE_MESSAGE, identity});
   if (sync === null || (await isAncestor(git, sync, linear))) return linear;
   return commitMerge(git, wanted, [sync, linear], SYNC_BRANCH_MERGE_MESSAGE, identity);
 }
@@ -342,10 +367,11 @@ function addResolution(into: Resolution, from: Resolution): void {
  */
 type Merger = (linearSide: Oid, gitSide: Oid, parents: [Oid, Oid], message: string) => Promise<Advanced | null>;
 
-function markedMerger(git: Git, idsCommit: Oid | null, identity: CommitIdentity): Merger {
+function markedMerger(git: Git, idsCommit: Oid | null, identity: CommitIdentity, frozen: ReadonlySet<string>): Merger {
   let lookup: Promise<{ ids: IdMap; knownId: (path: string) => Promise<string | undefined> }> | undefined;
   const idsOnce = () => (lookup ??= readIds(git, idsCommit).then((ids) => ({ ids, knownId: knownIdLookup(git, idsCommit, ids) })));
   return async (linearSide, gitSide, parents, message) => {
+    if (frozen.size > 0) linearSide = await treeCommit(git, await takePaths(git, linearSide, gitSide, frozen), linearSide);
     const clean = await mergedTree(git, linearSide, gitSide);
     if (clean !== null) return { head: await commitMerge(git, clean, parents, message, identity), marked: [], decided: [] };
     const { ids, knownId } = await idsOnce();
@@ -362,7 +388,8 @@ function markedMerger(git: Git, idsCommit: Oid | null, identity: CommitIdentity)
  * markers, `linear`'s text as the Linear version. Null when a conflicting
  * file cannot hold markers.
  */
-async function advance(git: Git, merge: Merger, sync: Oid, linear: Oid): Promise<Advanced | null> {
+async function advance(git: Git, merge: Merger, sync: Oid, linear: Oid, masked = false): Promise<Advanced | null> {
+  if (masked) return merge(linear, sync, [sync, linear], SYNC_BRANCH_MERGE_MESSAGE);
   if (await isAncestor(git, sync, linear)) return { head: linear, marked: [], decided: [] };
   if (await isAncestor(git, linear, sync)) return { head: sync, marked: [], decided: [] };
   return merge(linear, sync, [sync, linear], SYNC_BRANCH_MERGE_MESSAGE);
@@ -423,16 +450,19 @@ function refusalText(refusal: { status?: number | undefined; reason?: string | u
 /** The job summary's section for step 2: names, numbers and states, no content. */
 export function renderPullRequest(result: PullRequestResult): string[] {
   const lines = ['### Linear to the tracked branch', ''];
+  if (result.suspended !== undefined) {
+    const hold = result.suspended;
+    const link = hold.pullRequest === undefined ? '' : ` [#${hold.pullRequest.number}](${hold.pullRequest.url})`;
+    lines.push(hold.released ? 'Released the suspended batch.' : `Suspended changes${link}: ${hold.paths.map((path) => `\`${path}\``).join(', ')}.`, '');
+    if (hold.code === 'merge-refused' || hold.code === 'merge-blocked') lines.push(`GitHub refused the suspended merge (${refusalText(hold)}).`, '');
+    if (hold.code === 'github-failed') lines.push('A GitHub request for the suspended lane failed; the normal lane still runs.', '');
+    if (hold.conflicts !== undefined) lines.push(`Suspended files waiting for a manual merge: ${hold.conflicts.map((path) => `\`${path}\``).join(', ')}.`, '');
+    if (hold.checks.length > 0) lines.push(`Failed checks: ${hold.checks.map((name) => `\`${name}\``).join(', ')}.`, '');
+  }
   const pr = result.pullRequest;
   const link = pr === null ? '' : `[#${pr.number}](${pr.url})`;
   const names = (list: readonly string[] | undefined) => (list ?? []).map((name) => `\`${name}\``).join(', ');
   switch (result.code) {
-    case 'check-failed':
-      lines.push(
-        `Setup error: ${result.checks?.failed.length === 1 ? 'a check' : 'checks'} failed on the sync pull request ${link}: ${names(result.checks?.failed)}.`,
-        "The sync does not merge it and writes no tracked-branch changes to Linear until the checks pass. Checks on the sync pull request must pass Linear's form: fix the repository's configuration or rerun the failed check, and a later run merges once they pass.",
-      );
-      break;
     case 'conflict':
       lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");
       break;

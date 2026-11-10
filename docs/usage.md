@@ -13,6 +13,8 @@ and what each run's summary says is in [sync-cycle.md](sync-cycle.md). What
 each message means and how to recover is in
 [troubleshooting.md](troubleshooting.md).
 
+The engine requires Node.js 24 and [Git 2.40 or later](https://github.com/git/git/blob/master/Documentation/RelNotes/2.40.0.adoc).
+
 ## Generate repository files
 
 Run the released CLI at your repository root. Supply the full release commit

@@ -7,7 +7,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "fault.annotation-target": ["variants"],
   "fault.budget": ["stopAfterDocuments"],
   "fault.budget-headers": ["includeEndpointLimits", "remaining"],
-  "fault.checks": ["name", "status"],
+  "fault.checks": ["name", "status", "lane"],
   "fault.clear": [],
   "fault.credentials": ["service", "valid"],
   "fault.golden-drift": ["construct"],
@@ -117,7 +117,7 @@ function list(value: unknown): asserts value is unknown[] {
   assert.ok(Array.isArray(value) && value.length > 0, 'expected nonempty array');
 }
 
-const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name operation path project ref scope service source storage target title'.split(' '));
+const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name lane operation path project ref scope service source storage target title'.split(' '));
 const booleanArguments = new Set('allFiles bypassHook compareGolden concurrencyGroup confirm coverAllConstructs includeEndpointLimits linearFormat mergeCommits replacePending samePath scheduled valid wait workflows'.split(' '));
 const numericArguments = new Set('characters cleanEdits conflictingDocuments count documents durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
 const arrayArguments = new Set('actors constructs events fixes measure names orderings outcomes sources variants'.split(' '));
@@ -150,7 +150,10 @@ function validateArguments(kind: string, action: string, args: ObjectValue): voi
     } else assert.fail(`unknown argument ${key}`);
   }
   for (const field of requiredArguments[`${kind}.${action}`] ?? []) assert.ok(Object.hasOwn(args, field), `missing argument ${field}`);
-  if (kind === 'fault' && action === 'checks') oneOf(args.status, ['pending', 'passed', 'failed'], 'check status');
+  if (kind === 'fault' && action === 'checks') {
+    oneOf(args.status, ['pending', 'passed', 'failed'], 'check status');
+    if (args.lane !== undefined) oneOf(args.lane, ['normal', 'suspended'], 'check lane');
+  }
   if (kind === 'fault' && action === 'http') {
     assert.equal(typeof args.status, 'number', 'HTTP status must be numeric');
     if (args.target !== undefined) oneOf(args.target, ['graphql', 'oauth'], 'HTTP fault target');
