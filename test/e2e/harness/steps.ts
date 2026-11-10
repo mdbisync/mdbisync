@@ -32,6 +32,7 @@ import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { burst, realClock, soak, type LoadDriver } from './load.ts';
+import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
 import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
@@ -176,6 +177,8 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
   }
   const call = await engineCall(ctx, command, args);
   if (args.wait === false) {
+    // The documents the run owns before this engine starts: a kill takes the ones the engine created from the rest.
+    ctx.observations.set('pause.ownedBefore', new Set(ownedDocuments(ctx.owned).keys()));
     if (ctx.engine.pausedAt === undefined) {
       ctx.engine.pending = startEngine(call);
       return;
@@ -1478,8 +1481,12 @@ const OTHER: Record<string, Executor> = {
   'kill.engine': async (ctx, args) => {
     const pending = ctx.engine.pending;
     if (pending === undefined || !isCheckpoint(args.checkpoint)) throw new Error('kill needs a paused asynchronous run');
+    // The documents Linear confirmed creating for the paused engine, by their exact ids from the run's ownership
+    // record (the proxy writes each answer there before the engine sees it), read before the kill.
+    const before = ctx.observations.get('pause.ownedBefore') as Set<string> | undefined;
+    if (before === undefined) throw new Error('kill needs the documents the run owned before the engine started');
+    ctx.observations.set('kill.created', [...ownedDocuments(ctx.owned)].filter(([id, confirmed]) => confirmed && !before.has(id)).map(([id]) => id));
     pending.kill();
-    ctx.observations.set('kill.at', Date.now());
     delete ctx.engine.pending;
     ctx.checkpoints.resume(args.checkpoint as Checkpoint);
     delete ctx.engine.pausedAt;
