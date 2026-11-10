@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   contentTypeOf,
+  type Copies,
   fromLinear,
   linkedAssets,
   probedFixtures,
@@ -303,9 +304,10 @@ async function probeFixtures(
     }
     const content = document.content ?? '';
     rawFirst.set(entry.id, content);
-    entry.result.first = fromLinear(content, assets);
+    const copies: Copies = new Map();
+    entry.result.first = fromLinear(content, assets, copies);
     entry.result.createReturnedStored = entry.returned === document.content;
-    decodeInto(entry.result, document, assets, run);
+    decodeInto(entry.result, document, assets, run, copies);
     try {
       const after = await client.updateDocument(entry.id, { content });
       updated.push({ result: entry.result, id: entry.id, returned: after.content });
@@ -324,26 +326,27 @@ async function probeFixtures(
       continue;
     }
     const content = document.content ?? '';
-    entry.result.second = fromLinear(content, assets);
+    const copies: Copies = new Map();
+    entry.result.second = fromLinear(content, assets, copies);
     entry.result.fixedPoint = content === rawFirst.get(entry.id);
     entry.result.updateReturnedStored = entry.returned === document.content;
     if (entry.result.yjs) {
       const again: FixtureResult = { ...entry.result };
       delete again.yjs;
-      decodeInto(again, document, assets, run);
+      decodeInto(again, document, assets, run, copies);
       entry.result.yjsStable = again.yjs !== undefined && JSON.stringify(again.yjs) === JSON.stringify(entry.result.yjs);
     }
   }
 }
 
-function decodeInto(result: FixtureResult, document: ReadDocument, assets: AssetMap, run: ProbeRun): void {
+function decodeInto(result: FixtureResult, document: ReadDocument, assets: AssetMap, run: ProbeRun, copies: Copies): void {
   if (run.yjsBlocked) return;
   if (typeof document.contentState !== 'string' || document.contentState === '') {
     result.yjsError = 'no content state returned';
     return;
   }
   try {
-    result.yjs = summarizeContentState(document.contentState, { mapString: (value) => fromLinear(value, assets) });
+    result.yjs = summarizeContentState(document.contentState, { mapString: (value) => fromLinear(value, assets, copies) });
   } catch (error) {
     result.yjsError = `decode failed: ${error instanceof Error ? error.message : String(error)}`;
   }
