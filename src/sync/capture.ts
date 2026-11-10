@@ -16,7 +16,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
-import { reconcileDocumentMark } from './marks.ts';
+import { MARKS, reconcileDocumentMark } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
@@ -246,7 +246,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // A document still at the update time a run recorded it with is in the record as Linear holds it.
     const recordedTimes = await readRecorded(git, state.ids);
     const asRecorded = (doc: LinearDocument) => recordedTimes.get(doc.id) === normalizedTime(doc);
-    let selected = [...listed.values()].filter((doc) => !byId.has(doc.id) || byId.get(doc.id)?.entry.saved !== undefined || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor)));
+    // A marked document is read on every run, so its mark follows its text; a suspended one only when Linear
+    // reports it changed (its mark follows the lane, and a long suspension costs no reads), unless security hooks
+    // rejected it: its rejected edit is checked again on every run, so a fixed hook lets it in.
+    const marked = (doc: LinearDocument) => {
+      const entry = byId.get(doc.id)?.entry;
+      return entry?.saved !== undefined && (entry.suspended === undefined || entry.saved.notice?.kind === 'blocked');
+    };
+    let selected = [...listed.values()].filter((doc) => !byId.has(doc.id) || marked(doc) || (!asRecorded(doc) && (cursor === null || normalizedTime(doc) >= cursor)));
     const invalidZone = (doc: LinearDocument, path: string) => {
       const zone = nearestZone(mapping.zones, folderOf(path));
       if (zone === undefined) return true;
@@ -318,7 +325,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(doc.id);
       if (!live(doc)) {
         if (old !== undefined) {
-          if (old.entry.saved !== undefined && options.stageOnly !== true) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
+          // A retained entry (a suspended tombstone) keeps its saved decoration: give it back only once.
+          const saved = old.entry.saved;
+          if (saved !== undefined && options.stageOnly !== true && (doc.icon !== saved.icon || doc.color !== saved.color)) await linear.updateDocument(doc.id, {icon: saved.icon, color: saved.color});
           const changedFile = removeBody(old.path);
           const retained = old.entry.suspended !== undefined || old.entry.releaseBase !== undefined;
           if (!retained) ids.delete(old.path);
@@ -522,7 +531,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       ];
       try {
         for (const {doc, path, blocked} of marked) {
-          await reconcileDocumentMark({document: doc, entry: ids.get(path)!, linear, blocked,
+          const before = ids.get(path)!;
+          const outcome = await reconcileDocumentMark({document: doc, entry: before, linear, blocked,
             persistEntry: async (entry) => {
               ids.set(path, entry);
               const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, superseded, message:'Capture document marks'});
@@ -532,6 +542,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
               result.state = updated;
             },
           });
+          // Later steps read decorations from this map (the suspended mark saves the document's own): keep it current.
+          if (outcome.updated) {
+            const mark = outcome.state === 'clear' ? before.saved : MARKS[outcome.state];
+            const listed = documents.get(doc.id);
+            if (mark !== undefined && listed !== undefined) documents.set(doc.id, {...listed, icon: mark.icon, color: mark.color});
+          }
         }
       } catch (error) {
         if (error !== lostLease) throw error;

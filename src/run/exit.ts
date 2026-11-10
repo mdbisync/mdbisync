@@ -154,6 +154,9 @@ function linearPartialCode(outcome: OperationOutcome): PartialCode | undefined {
   if (outcome.captured !== undefined && !outcome.captured.ok) return outcome.captured.code ?? 'stopped';
   const code = outcome.sync?.write?.code;
   if (code !== undefined) return code === 'container-cap' ? undefined : code;
+  // The suspended marks stopped part way: the next run goes on with them.
+  const marks = outcome.sync?.pullRequest?.holdMarks?.code;
+  if (marks !== undefined) return marks;
   // Capture held a removal Linear's answers could not confirm; the next run decides it.
   return (outcome.captured?.heldRemovals.length ?? 0) > 0 ? 'removal-held' : undefined;
 }

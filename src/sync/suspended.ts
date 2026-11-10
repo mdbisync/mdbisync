@@ -8,6 +8,8 @@ import { closePullRequest, ensurePullRequest, findOpenPullRequest, mergePullRequ
 import { type RunContext } from '../run/preflight.ts';
 import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, readBlobs, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type CommitIdentity, type Git, type IdMap, type Oid, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
+import type { HoldFailure } from './hold.ts';
+import type { CheckFailure } from '../pull-request/index.ts';
 
 export const SUSPENDED_TITLE = 'Suspended changes from Linear';
 export const SET_ASIDE_MESSAGE = 'Set aside suspended changes';
@@ -16,6 +18,11 @@ export const LINEAR_INTAKE_MESSAGE = "Take Linear's changes to suspended documen
 export interface SuspendedResult {
   paths: string[];
   checks: string[];
+  /** The suspended head's failure this run read, with its check runs: what the suspended documents' comments describe. */
+  failure?: HoldFailure;
+  /** The failure of the normal batch this run suspended: it describes only that batch's documents. */
+  batchFailure?: HoldFailure;
+
   pullRequest?: { number: number; url: string };
   released?: Oid;
   waiting?: boolean;
@@ -84,9 +91,13 @@ async function includeCapturedAssets(git: Git, linear: Oid, ids: IdMap, paths: S
 }
 
 async function persistIds(context: RunContext, options: LaneOptions, ids: IdMap): Promise<Oid> {
+  return commitLaneIds(context, options.state.ids, ids, 'Sync: suspended document ids', options.identity);
+}
+
+/** Commits the id map on `parent`, keeping its other state files (reserved ids and the like). */
+export async function commitLaneIds(context: RunContext, parent: Oid | null, ids: IdMap, message: string, identity?: CommitIdentity): Promise<Oid> {
   const {git} = context;
-  // Preserve auxiliary state files, such as reserved ids, in every lane update.
-  return commitIds(git, options.state.ids, ids, options.identity ?? context.identity, { message: 'Sync: suspended document ids', reserved: await readReservedIds(git, options.state.ids), superseded: await readSupersededIds(git, options.state.ids), written: await readWrittenHashes(git, options.state.ids) });
+  return commitIds(git, parent, ids, identity ?? context.identity, { message, reserved: await readReservedIds(git, parent), superseded: await readSupersededIds(git, parent), written: await readWrittenHashes(git, parent) });
 }
 
 async function push(context: RunContext, options: LaneOptions, ids: IdMap, head: Oid, expected: Oid | null, normal?: { expected: Oid | null; next: Oid }, updateLane = true): Promise<boolean> {
@@ -201,6 +212,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   if (fresh && grace === 0) return { ...result, waiting: true };
   const checks = fresh ? await waitForChecks(options.github, head, grace) : await readChecks(options.github, head);
   result.checks = checks.failed;
+  if (checks.state === 'failed') result.failure = { head, checks: checks.failures ?? checks.failed.map((name) => ({ name })) };
   result.waiting = checks.state === 'pending';
   if (checks.state !== 'passed') return result;
   if (!(await isAncestor(git, tracked, head))) return result;
@@ -246,7 +258,8 @@ async function release(context: RunContext, options: LaneOptions, ids: IdMap, pa
 }
 
 /** Move a failed normal batch, its set-aside head, and episodes together or not at all. */
-export async function suspendBatch(context: RunContext, options: LaneOptions, failed: Oid, normalNumber: number, checks: string[]): Promise<SuspendedResult> {
+export async function suspendBatch(context: RunContext, options: LaneOptions, failed: Oid, normalNumber: number, failures: CheckFailure[]): Promise<SuspendedResult> {
+  const checks = failures.map(({ name }) => name);
   const { git } = context;
   const tracked = context.fetched.tracked;
   const linear = options.state.linear as Oid;
@@ -254,6 +267,8 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   const batchTree = await mergeTree(git, failed, tracked, undefined, ids, options.state.ids);
   const batch = await treeCommit(git, batchTree, failed);
   const paths = new Set(await changedPaths(git, tracked, batchTree));
+  // The batch's own paths, before the lane's earlier ones join them: its failure describes only these.
+  const batchPaths = [...paths].sort();
   const previous = context.fetched.suspended ?? null;
   let head: Oid;
   // Never adopt an unrelated pre-existing branch, even when main contains it.
@@ -276,5 +291,5 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE,
     body: `Changes on hold: ${checks.map((name) => `\`${name}\``).join(', ')}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n`,
   });
-  return { paths: [...paths].sort(), checks, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
+  return { paths: [...paths].sort(), checks, batchFailure: { head: failed, paths: batchPaths, checks: failures }, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
 }

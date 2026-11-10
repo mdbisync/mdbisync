@@ -110,3 +110,28 @@ test('changed notice text updates the existing comment instead of creating anoth
   assert.equal(fake.received.filter((request) => request.operation === 'CommentOnDocument').length, 1);
   assert.equal(fake.received.filter((request) => request.operation === 'UpdateDocumentComment').length, 1);
 });
+
+test('a fresh notice is created without a lookup, and a refused duplicate id is found and updated', async (t) => {
+  const { fake, comments, linear } = await world(t);
+  assert.deepEqual(await linear.ensureDocumentComment('content-one', 'On hold.', id, true, true), { id, created: true });
+  assert.equal(fake.received.filter((request) => request.operation === 'FindDocumentComment').length, 0);
+  // Linear's answer to an id it already holds, measured on 2026-11-10.
+  fake.operations.set('CommentOnDocument', () => ({ body: { errors: [{ message: 'conflict on insert of Comment', extensions: { code: 'INPUT_ERROR' } }], data: null } }));
+  fake.operations.set('UpdateDocumentComment', () => ({ body: { data: { commentUpdate: { success: true, comment: { id } } } } }));
+  assert.deepEqual(await linear.ensureDocumentComment('content-one', 'Still on hold.', id, true, true), { id, created: false });
+  assert.equal(comments.size, 1);
+  assert.equal(fake.received.filter((request) => request.operation === 'UpdateDocumentComment').length, 1);
+  assert.equal(linear.stats.writes.get('CommentOnDocument'), 1);
+});
+
+test('resolving a comment sends commentResolve with its id and counts one write', async (t) => {
+  const { fake, linear } = await world(t);
+  fake.operations.set('ResolveComment', (request) => {
+    assert.equal(request.variables?.id, id);
+    return { body: { data: { commentResolve: { success: true } } } };
+  });
+  await linear.resolveComment(id);
+  assert.equal(linear.stats.writes.get('ResolveComment'), 1);
+  fake.operations.set('ResolveComment', () => ({ body: { data: { commentResolve: { success: false } } } }));
+  await assert.rejects(linear.resolveComment(id));
+});
