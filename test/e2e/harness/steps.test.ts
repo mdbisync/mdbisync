@@ -530,6 +530,17 @@ describe('oracles', () => {
     assert.equal(await tokenActive('t', answer(400, { errors: [{ extensions: { code: 'AUTHENTICATION_ERROR' } }] }), 0), false);
     await assert.rejects(tokenActive('t', answer(503, {}), 0), EnvBlockedError);
   });
+
+  it('give up on a token probe Linear does not answer in time', async () => {
+    let calls = 0;
+    const stalled = (async (_url: string, init: RequestInit) => {
+      calls += 1;
+      assert.ok(init.signal instanceof AbortSignal, 'every probe has a deadline');
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    }) as unknown as typeof fetch;
+    await assert.rejects(tokenActive('t', stalled, 0), (error: Error) => error instanceof EnvBlockedError && /no answer in time/.test(error.message));
+    assert.equal(calls, 3);
+  });
 });
 
 describe('team-zone cleanup', () => {

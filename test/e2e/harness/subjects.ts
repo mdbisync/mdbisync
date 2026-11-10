@@ -1659,7 +1659,8 @@ async function checksOf(ctx: RunContext, sha: string): Promise<'passed' | 'faile
   return runs.every((run) => ['success', 'neutral', 'skipped'].includes(run.conclusion ?? '')) ? 'passed' : 'failed';
 }
 
-/** Whether a Linear access token still works. */
+const TOKEN_PROBE_TIMEOUT_MS = 15_000;
+
 /**
  * Whether a Linear access token still works: true when Linear answers as
  * the token's user, false only for an authentication refusal. Anything else
@@ -1670,11 +1671,19 @@ export async function tokenActive(token: string, fetchImpl: typeof fetch = fetch
   let last = '';
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, pauseMs));
-    const response = await fetchImpl(`${apiUrl}/graphql`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ query: '{ viewer { id } }' }),
-    });
+    // One deadline for the request and its body, so a stalled Linear cannot hold up a caller such as cleanup.
+    let response: Response;
+    try {
+      response = await fetchImpl(`${apiUrl}/graphql`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ query: '{ viewer { id } }' }),
+        signal: AbortSignal.timeout(TOKEN_PROBE_TIMEOUT_MS),
+      });
+    } catch (error) {
+      last = (error as Error).name === 'TimeoutError' ? 'no answer in time' : 'no answer';
+      continue;
+    }
     if (response.status === 401 || response.status === 403) return false;
     const body = (await response.json().catch(() => ({}))) as { data?: { viewer?: { id?: string } }; errors?: Array<{ extensions?: { code?: string; type?: string } }> };
     if (typeof body.data?.viewer?.id === 'string') return true;
