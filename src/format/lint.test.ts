@@ -34,6 +34,21 @@ const cases: Array<[LintRule, string, number]> = [
   ['url-in-html', '<img src="logo.png">', 1],
   ['url-in-html', '<a href="https://example.com">x</a>', 1],
   ['block-first-in-list-item', '* ## Heading\n* Plain', 1],
+  ['image-not-in-repository', 'Intro.\n\n![Chart](https://example.com/chart.png)', 3],
+  ['image-not-in-repository', '![Chart](https://uploads.linear.app/a/b/chart.png)', 1],
+  ['image-not-in-repository', '![Dot](data:image/png;base64,iVBORw0KGgo=)', 1],
+  ['image-not-in-repository', '![Logo](/images/logo.png)', 1],
+  ['image-not-in-repository', '![Logo](//example.com/logo.png)', 1],
+  ['image-not-in-repository', '![Logo](#top)', 1],
+  ['image-not-in-repository', '![Logo]()', 1],
+  ['image-not-in-repository', 'See ![chart][c].\n\n[c]: https://example.com/chart.png', 1],
+  ['image-not-in-repository', '[![status](https://example.com/badge.svg)](https://example.com/build)', 1],
+  ['image-not-in-repository', '| A |\n| -- |\n| ![x](https://example.com/x.png) |', 3],
+  ['image-file-missing', '![Notes](notes.md)', 1],
+  ['image-file-missing', '![Notes](notes/Guide.MD#intro)', 1],
+  ['image-not-in-repository', '![Outside](../logo.png)', 1],
+  ['image-not-in-repository', '![Folder](img/)', 1],
+  ['image-not-in-repository', '![Query](?raw=1)', 1],
 ];
 
 describe('lint rules', () => {
@@ -55,6 +70,13 @@ describe('lint rules', () => {
       assert.equal(findings.find((f) => f.rule === rule)?.message, LINT_RULES[rule]);
     });
   }
+
+  it('checks image files only through the existence check, and never plain links', () => {
+    const text = '![Here](img/here.png)\n\n![Gone](img/gone.png)\n\n[Gone](img/gone.png) and [site](https://example.com).';
+    assert.deepEqual(lintText('doc.md', text), [], 'without the check, a relative image passes');
+    const linkedFileExists = (url: string) => url === 'img/here.png';
+    assert.deepEqual(lintText('doc.md', text, { linkedFileExists }).map((f) => [f.rule, f.line]), [['image-file-missing', 3]]);
+  });
 
   it('counts front matter lines', () => {
     const findings = lintText('doc.md', '---\ntitle: x\n---\n\nH~2~O');
@@ -156,6 +178,57 @@ describe('lint and fix commands', () => {
       assert.equal(runFix(['links'], dir).exitCode, 1);
       assert.equal(readFileSync(join(folder, 'notes.md'), 'utf8'), '* [Demo](media/demo%20one.mp4)\n* \n  [Summary](media/summary.pdf)\n* [Gone](<media/gone.pdf>)\n* [Folder](<media>)\n* [Nul](<media/gone%00.pdf>)');
       assert.deepEqual(runLint(['links'], dir), { exitCode: 0, stdout: '', stderr: '' });
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts only images that are files of the repository, and fix leaves the others', () => {
+    const folder = join(dir, 'pictures');
+    mkdirSync(join(folder, 'img', 'set'), { recursive: true });
+    const lfsPointer = 'version https://git-lfs.github.com/spec/v1\noid sha256:' + '0'.repeat(64) + '\nsize 12345\n';
+    const good = '* Plan\n\n![Here](img/here.png)\n\n![Stored in LFS](img/large.png)\n\n![Spaced](img/two%20words.png)\n\n[Site](<https://example.com>)';
+    const bad = [
+      '![Here](img/here.png)',
+      '![Remote](https://example.com/chart.png)',
+      '![Gone](img/gone.png)',
+      '![Folder](img/set)',
+      '![Outside](../../outside.png)',
+      '![Document](good.md)',
+      '[![Badge](https://example.com/badge.svg)](https://example.com/build)',
+      '* Item\n\n  ![Gone](img/gone.png)',
+      '![Linked](img/link.png)',
+      '![Case](IMG/here.png)',
+      '![First definition][r]\n\n[r]: https://example.com/x.png\n[r]: img/here.png',
+    ].join('\n\n');
+    try {
+      writeFileSync(join(folder, 'img', 'here.png'), 'png');
+      writeFileSync(join(folder, 'img', 'large.png'), lfsPointer);
+      writeFileSync(join(folder, 'img', 'two words.png'), 'png');
+      symlinkSync('here.png', join(folder, 'img', 'link.png'));
+      writeFileSync(join(folder, 'good.md'), good);
+      writeFileSync(join(folder, 'bad.md'), bad);
+      const expected = [
+        'pictures/bad.md:3: image-not-in-repository',
+        'pictures/bad.md:5: image-file-missing',
+        'pictures/bad.md:7: image-file-missing',
+        'pictures/bad.md:9: image-not-in-repository',
+        'pictures/bad.md:11: image-file-missing',
+        'pictures/bad.md:13: image-in-link',
+        'pictures/bad.md:13: image-not-in-repository',
+        'pictures/bad.md:17: image-file-missing',
+        'pictures/bad.md:19: image-file-missing',
+        'pictures/bad.md:21: image-file-missing',
+        'pictures/bad.md:23: image-not-in-repository',
+      ];
+      const lint = runLint(['pictures'], dir);
+      assert.equal(lint.exitCode, 1);
+      assert.deepEqual(lint.stdout.trimEnd().split('\n').map((row) => row.split(': ').slice(0, 2).join(': ')), expected);
+      const fix = runFix(['pictures'], dir);
+      assert.equal(fix.exitCode, 1);
+      assert.equal(readFileSync(join(folder, 'bad.md'), 'utf8'), bad, 'fix leaves a file with a broken or outside image as it is');
+      assert.equal(readFileSync(join(folder, 'good.md'), 'utf8'), good);
+      assert.doesNotMatch(fix.stdout, /good\.md/);
     } finally {
       rmSync(folder, { recursive: true, force: true });
     }

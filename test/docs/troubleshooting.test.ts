@@ -108,6 +108,8 @@ describe('troubleshooting page', () => {
       String.raw`\b(?:new [A-Za-z]*Error|super|core\.(?:setFailed|warning)|\.warn|stderr\.write|failed|linearCredentialFailure)\((?:\s*(?:[\w.]+|'[^'\n]*'|"[^"\n]*"),)*\s*`,
       // A warning's or a failed check's detail, a setup error given to the check, the command line's error output.
       String.raw`\b(?:detail|error|stderr):\s*`,
+      // A returned `<command>: …` line, as a run's endings give it.
+      String.raw`\breturn (?=\x60\$\{[\w.]+\}: )`,
       // A message next to a code, kind or rule in the same object.
       String.raw`\b(?:code|kind|rule):[^{}]*?\bmessage:\s*`,
     ];
