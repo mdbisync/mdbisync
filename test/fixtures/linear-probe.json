@@ -673,6 +673,14 @@
       "yjs": "recorded",
       "fixedPoint": true
     },
+    "list-items/audio-mp3.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
+    "list-items/audio-not-uploaded.md": {
+      "yjs": "recorded",
+      "fixedPoint": true
+    },
     "list-items/file-not-uploaded.md": {
       "yjs": "recorded",
       "fixedPoint": true
