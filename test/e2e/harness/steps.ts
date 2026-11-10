@@ -367,7 +367,7 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
     run = await waitForRun(world.rest, { branch: ctx.names.syncBranch, event, after: pr.openedAt, exclude: seenRuns(ctx) });
   } else if (event === 'schedule') {
     const after = await requestScheduledRun(ctx);
-    run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after, event: scheduleTick(), exclude: seenRuns(ctx) });
+    run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after, exclude: seenRuns(ctx) });
   } else {
     throw new Error(`run.workflow cannot start a ${event} run`);
   }
@@ -385,6 +385,8 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
  */
 async function requestScheduledRun(ctx: RunContext): Promise<number> {
   const world = live(ctx);
+  // Checked before anything is created: a wrong setting must not leave a request behind.
+  const byHand = scheduleTick() === 'workflow_dispatch';
   const wanted = renderScheduler(readTemplate(SYNC_WORKFLOW), actionShaUnderTest());
   const installed = await world.rest.fileText(`.github/workflows/${SCHEDULER_FILE}`);
   if (installed !== wanted) {
@@ -396,12 +398,8 @@ async function requestScheduledRun(ctx: RunContext): Promise<number> {
   const after = Date.now();
   await world.rest.createBranch(ctx.names.scheduleRequest, tip);
   try {
-    if (scheduleTick() === 'workflow_dispatch') {
-      const id = await world.rest.workflowId(SCHEDULER_FILE);
-      if (id === undefined) throw new EnvBlockedError(`the sandbox's scheduled workflow ${SCHEDULER_FILE} is not registered`);
-      await world.rest.dispatchWorkflow(id, (await world.rest.request<{ default_branch: string }>('GET', '')).default_branch, {});
-    }
-    await waitForRequestTaken(world.rest, ctx.names.scheduleRequest);
+    const defaultBranch = byHand ? (await world.rest.request<{ default_branch: string }>('GET', '')).default_branch : '';
+    await waitForRequestTaken(world.rest, ctx.names.scheduleRequest, byHand ? { tick: () => world.rest.dispatchWorkflow(SCHEDULER_FILE, defaultBranch, {}) } : {});
   } catch (error) {
     // A request no tick took must not start a sync after the step. When a tick took it just now, the deletion
     // finds nothing: the step goes on to that tick's run rather than leave it writing behind the cleanup.
@@ -607,7 +605,7 @@ const RUN: Record<string, Executor> = {
     }));
     const runs = [];
     if (scheduledAfter !== undefined) {
-      const run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after: scheduledAfter, event: scheduleTick(), exclude: seenRuns(ctx) });
+      const run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after: scheduledAfter, exclude: seenRuns(ctx) });
       runs.push(run);
       recordWorkflowRun(ctx, run);
     }

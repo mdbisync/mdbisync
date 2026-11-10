@@ -32,7 +32,7 @@ import { loadExpectedRed } from './results.ts';
 import { runScenarios, skippedResult } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios, selectScenarios } from './spec.ts';
-import { actionShaUnderTest } from './steps.ts';
+import { actionShaUnderTest, scheduleTick } from './steps.ts';
 import { sweep } from './sweeper.ts';
 import { parseUiAnswers, renderUiChecklist } from './ui-checklist.ts';
 import { loadHeldRun } from './held-run.ts';
@@ -139,6 +139,9 @@ async function main(argv: string[]): Promise<number> {
     }
 
     if (command === 'run') {
+      // Settings read only deep in a step are checked before anything runs.
+      actionShaUnderTest();
+      scheduleTick();
       const outDir = values.out ?? join(REPO_ROOT, 'test/e2e/out', harnessRunId);
       const apps: App[] = config.linearApps.map((app) => ({
         name: app.name,

@@ -145,7 +145,8 @@ describe('waiting for a scheduled run', () => {
     const jobsRead: number[] = [];
     const rest = {
       workflowFileRuns: async (file: string, event: string) => {
-        assert.deepEqual([file, event], [SCHEDULER_FILE, 'schedule']);
+        assert.equal(file, SCHEDULER_FILE);
+        if (event === 'workflow_dispatch') return [];
         polls += 1;
         return [
           // A tick created before the request, which waited for the runner and then took it.
@@ -168,18 +169,25 @@ describe('waiting for a scheduled run', () => {
     await assert.rejects(waitForScheduledRun(rest as never, { workflow: SCHEDULER_FILE, runId: 'ffffff', after: now, timeoutMs: 0, pollMs: 1 }), EnvBlockedError);
   });
 
-  it('reads the runs of a tick by hand under their own event', async () => {
-    const events: string[] = [];
-    const rest = {
-      workflowFileRuns: async (_file: string, event: string) => {
-        events.push(event);
-        return [{ id: 7, status: 'completed', conclusion: 'success', event, created_at: new Date().toISOString() }];
-      },
-      runJobs: async () => [{ name: 'request', completed_at: null }, { name: 'sync a1b2c3', completed_at: null }],
-    };
-    const run = await waitForScheduledRun(rest as never, { workflow: SCHEDULER_FILE, runId: 'a1b2c3', after: 0, event: 'workflow_dispatch', pollMs: 1 });
-    assert.equal(run.event, 'workflow_dispatch');
-    assert.deepEqual(events, ['workflow_dispatch']);
+  it('finds the run that took the request, a tick by hand or GitHub\'s, under its own event', async () => {
+    for (const taker of ['workflow_dispatch', 'schedule']) {
+      const rest = {
+        workflowFileRuns: async (_file: string, event: string) => [
+          { id: event === 'schedule' ? 1 : 2, status: 'completed', conclusion: 'success', event, created_at: new Date().toISOString() },
+        ],
+        runJobs: async (id: number) => (id === (taker === 'schedule' ? 1 : 2) ? [{ name: 'request' }, { name: 'sync a1b2c3' }] : [{ name: 'request' }]),
+      };
+      const run = await waitForScheduledRun(rest as never, { workflow: SCHEDULER_FILE, runId: 'a1b2c3', after: 0, pollMs: 1 });
+      assert.equal(run.event, taker);
+    }
+  });
+
+  it('starts a tick by hand again while the request waits', async () => {
+    let ticks = 0;
+    let polls = 0;
+    await waitForRequestTaken({ branchExists: async () => (polls += 1) < 4 } as never, 't/a1b2c3/schedule', { tick: async () => { ticks += 1; }, retickMs: 0, pollMs: 1 });
+    assert.equal(ticks, 4);
+    await assert.rejects(waitForRequestTaken({ branchExists: async () => true } as never, 't/a1b2c3/schedule', { tick: async () => {}, timeoutMs: 0, pollMs: 1 }), /no tick started by hand took it/);
   });
 
   it('starts a tick by hand only when asked', () => {
@@ -191,14 +199,16 @@ describe('waiting for a scheduled run', () => {
 });
 
 describe('the jobs that hold a run\'s group', () => {
-  it('leave out a scheduled run\'s request job', async () => {
+  it('leave out the scheduled workflow\'s request job, however the tick started', async () => {
     const time = (seconds: number) => new Date(seconds * 1000).toISOString();
     const rest = {
       runJobs: async (id: number) => (id === 1
         ? [{ name: 'request', started_at: time(0), completed_at: time(10) }, { name: 'sync a1b2c3', started_at: time(21), completed_at: time(30) }]
         : [{ name: 'sync', started_at: time(6), completed_at: time(20) }]),
     };
-    const spans = await jobSpans(rest as never, [{ id: 1, event: 'schedule' }, { id: 2, event: 'workflow_dispatch' }] as never);
-    assert.equal(maxOverlap(spans), 1);
+    for (const event of ['schedule', 'workflow_dispatch']) {
+      const spans = await jobSpans(rest as never, [{ id: 1, event, path: `.github/workflows/${SCHEDULER_FILE}@refs/heads/main` }, { id: 2, event: 'workflow_dispatch', path: '.github/workflows/mdbisync.yml@refs/heads/t/a1b2c3/main' }] as never);
+      assert.equal(maxOverlap(spans), 1, event);
+    }
   });
 });

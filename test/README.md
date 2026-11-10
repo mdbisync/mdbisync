@@ -252,15 +252,16 @@ uploaded:
   takes one run's request (the branch `t/<run>/schedule`, which it deletes)
   and runs the template's job on that run's branches, as a job named for
   the run. A tick without a request runs only that short request job.
-  Install it once, and again when the template or `MDBISYNC_TEST_ACTION_SHA`
-  changes, with `node test/e2e/harness/cli.ts scheduler --install`
+  Install it once, and again when the template, the harness's rendering of
+  it or `MDBISYNC_TEST_ACTION_SHA` changes, with `node test/e2e/harness/cli.ts scheduler --install`
   (without `--install` it prints the file). A run never changes the default
   branch: when the workflow there is missing, differs or is disabled, the
   scenario is env-blocked with that reason. GitHub may start a tick late or
   skip it; a request no tick takes within an hour blocks the run. Where
   GitHub starts no schedule at all, `MDBISYNC_TEST_SCHEDULE_TICK=dispatch`
   (environment only) makes the harness dispatch the workflow on the default
-  branch right after the request: a tick by hand that runs the same jobs and
+  branch right after the request, and again every five minutes while the
+  request waits: a tick by hand that runs the same jobs and
   is recorded as `workflow_dispatch`, so a scenario that asserts the
   `schedule` event still fails.
 

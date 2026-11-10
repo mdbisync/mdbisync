@@ -240,9 +240,9 @@ export function renderScheduler(template: string, actionSha?: string): string {
   doc.set('name', `${String(doc.get('name') ?? 'mdbisync')} (scheduled)`);
   const on = doc.get('on');
   if (!isMap(on) || !on.has('schedule')) throw new Error('the template has no schedule');
-  for (const event of on.items.map((pair) => String(pair.key))) if (event !== 'schedule') on.delete(event);
-  // A tick by hand (MDBISYNC_TEST_SCHEDULE_TICK=dispatch) when GitHub starts no schedule: the same jobs, recorded as a dispatch.
-  on.set('workflow_dispatch', null);
+  // The template's dispatch stays: a tick by hand (MDBISYNC_TEST_SCHEDULE_TICK=dispatch) when GitHub starts no schedule.
+  if (!on.has('workflow_dispatch')) throw new Error('the template has no workflow_dispatch');
+  for (const event of on.items.map((pair) => String(pair.key))) if (event !== 'schedule' && event !== 'workflow_dispatch') on.delete(event);
   if (doc.getIn(['concurrency', 'group']) !== SCHEDULER_GROUP) throw new Error('the template has no shared concurrency group');
   const concurrency = top.items.find((pair) => isScalar(pair.key) && pair.key.value === 'concurrency')?.key;
   if (isScalar(concurrency)) concurrency.commentBefore = ' One tick at a time; a newer tick replaces a waiting one.';
