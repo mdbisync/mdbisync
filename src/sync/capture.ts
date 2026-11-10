@@ -7,7 +7,7 @@ import { isMap, parseDocument, stringify } from 'yaml';
 import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
-import { lintText, sameMarkdown, splitFile } from '../format/index.ts';
+import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
@@ -20,7 +20,7 @@ import { reconcileDocumentMark } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
-import { lastSynchronized } from './merge.ts';
+import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, type CapturedAssets } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
@@ -146,7 +146,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
       const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
-      for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents })) ids.set(path, entry);
+      for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents, files: recorded.files })) ids.set(path, entry);
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length };
     }
     const cursor = await readCaptureCursor(git, state.ids);
@@ -211,16 +211,18 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     // Git-only exclusions keep their last accepted identity and place. A
     // collision or an annotation recorded for other files is not a Linear move.
     const baselines = new Map<string, Awaited<ReturnType<typeof lastSynchronized>>>();
+    // Several excluded files walk the same commits of the chain: each commit is read once.
+    const sides = new Map<string, Promise<Side>>();
     const excludedPath = (path: string) => {
       const mapped = recorded.documents.find((document) => document.path === path);
       const prior = previous.get(path);
-      return mapped === undefined || (prior !== undefined && lintText(path, prior.toString('utf8')).length > 0)
+      return mapped === undefined || (prior !== undefined && lintInTree(path, prior.toString('utf8'), recorded.files).length > 0)
         || lengthRefusal({title: mapped.title}, linear.facts) !== undefined;
     };
     const retained = new Map<string, string>();
     for (const [id, old] of byId) {
       if (!excludedPath(old.path)) continue;
-      const baseline = await lastSynchronized(git, base, old.path, linear.facts);
+      const baseline = await lastSynchronized(git, base, old.path, linear.facts, sides);
       baselines.set(old.path, baseline);
       const doc = listed.get(id);
       if (baseline === null || doc === undefined || doc.title.normalize('NFC') !== baseline.file.title.normalize('NFC')) continue;

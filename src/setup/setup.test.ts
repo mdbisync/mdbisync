@@ -35,7 +35,7 @@ const PRE_COMMIT = `repos:
 const target = (world: ReturnType<typeof fakeWorld>) => ({ repository: 'owner/repo', token: 'gh-token', commit: 'a'.repeat(40), apiUrl: GITHUB_API, fetch: fakeFetch(world) });
 
 function mapping(annotations: RepositoryMapping['annotations']): RepositoryMapping {
-  return { annotations, zones: resolveZones(annotations).zones, problems: [], documents: [], unsynced: [], leftOut: [] };
+  return { annotations, zones: resolveZones(annotations).zones, problems: [], documents: [], unsynced: [], leftOut: [], files: new Set<string>() };
 }
 
 const MINI = mapping([

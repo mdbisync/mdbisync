@@ -156,6 +156,22 @@ describe('planInitialSync', () => {
   });
 });
 
+describe('planInitialSync: images', () => {
+  it('leaves out a document whose image is not a file of the tree, and plans one whose image is', () => {
+    const { mapping, texts } = mapTree({
+      'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
+      'eng/figure.md': `# Figure\n\n![Diagram](media/diagram.png)\n\n${CANARY}\n`,
+      'eng/shared.md': `# Shared\n\n![Logo](../assets/logo.png)\n\n${CANARY}\n`,
+      'eng/gone.md': `# Gone\n\nText first.\n\n![Gone](media/gone.png)\n\n${CANARY}\n`,
+      'eng/media/diagram.png': 'diagram bytes',
+      'assets/logo.png': 'logo bytes',
+    });
+    const plan = planInitialSync({ mapping, texts, places: [{ place: ENG, documents: [] }] });
+    assert.deepEqual(plan.leftOut, [{ path: 'eng/gone.md', rules: ['image-file-missing'], lines: [5] }]);
+    assert.deepEqual(plan.create.map((entry) => entry.path), ['eng/README.md', 'eng/figure.md', 'eng/shared.md']);
+  });
+});
+
 describe('renderDryRun', () => {
   it('escapes pipes in paths so a row stays one row', () => {
     const summary = renderDryRun({ create: [{ path: 'a|b.md', title: 'a|b', place: ENG }], overwrite: [], trash: [], leftOut: [] });

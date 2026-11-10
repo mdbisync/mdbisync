@@ -4,7 +4,7 @@
 // Pure: the caller reads the files and lists the documents.
 
 import { type ContainerCapacity } from '../run/capacity.ts';
-import { lintText } from '../format/index.ts';
+import { lintInTree } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearDocument, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, type Zone } from '../mapping/index.ts';
 import { type ResolvedTargets, projectKey } from '../setup/index.ts';
@@ -127,7 +127,7 @@ export function planInitialSync(input: PlanInput): InitialSyncPlan {
   };
   // Every reason a file stays in git only, so that fixing one does not reveal the next.
   const lint = (path: string, title: string) => {
-    const findings = lintText(path, textOf(path));
+    const findings = lintInTree(path, textOf(path), mapping.files);
     if (findings.length > 0) leaveOut(path, findings.map((f) => f.rule), findings.map((f) => f.line));
     if (lengthRefusal({ title }, facts) !== undefined) leaveOut(path, ['title-too-long']);
   };

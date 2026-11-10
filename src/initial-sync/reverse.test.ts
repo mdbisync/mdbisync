@@ -918,6 +918,7 @@ describe('planning an initial sync from Linear', () => {
       documents: Object.keys(files).map((path) => ({ path, oid: path, title: path.slice('notes/'.length, -3), place })),
       unsynced: [],
       leftOut: [],
+      files: new Set(['notes/README.md', ...Object.keys(files)]),
     },
     texts: new Map(Object.entries(files)),
     places: [{ place, documents }],
