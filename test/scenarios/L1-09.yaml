@@ -58,8 +58,8 @@
       },
       {
         "subject": "documents.invalidMermaidIncluded",
-        "operator": "equal",
-        "expected": true
+        "operator": "same-as",
+        "expected": "expected.invalidMermaidIncluded"
       }
     ]
   }

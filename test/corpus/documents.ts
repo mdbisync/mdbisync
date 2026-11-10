@@ -529,6 +529,13 @@ const DIAGRAMS: Record<string, Diagram> = {
   },
 };
 
+/**
+ * The words a Mermaid document's manifest note ends with when the document
+ * also holds a diagram Mermaid cannot parse; the live checks find those
+ * documents by them, since neither the path nor the text says "invalid".
+ */
+export const INVALID_DIAGRAM_NOTE = "an invalid diagram";
+
 function mermaid(ctx: Context): void {
   const { rng } = ctx;
   const kinds = Object.keys(DIAGRAMS);
@@ -551,7 +558,7 @@ function mermaid(ctx: Context): void {
       if (invalid) parts.push("## Draft", "", "This sketch was never finished.", "", "```mermaid", "flowchart LR\n    A --> \n    this is not a diagram ((", "```", "");
       parts.push(idLine(canary), "");
       return parts.join("\n");
-    }, { note: invalid ? `${chosen.join(", ")}, and an invalid diagram` : chosen.join(", ") });
+    }, { note: invalid ? `${chosen.join(", ")}, and ${INVALID_DIAGRAM_NOTE}` : chosen.join(", ") });
   }
 }
 
