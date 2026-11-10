@@ -1666,11 +1666,11 @@ async function checksOf(ctx: RunContext, sha: string): Promise<'passed' | 'faile
  * (a rate limit, an outage, an unexpected answer) proves neither, and after
  * three tries it is an environment problem, never a revoked token.
  */
-export async function tokenActive(token: string, fetchImpl: typeof fetch = fetch, pauseMs = 2_000): Promise<boolean> {
+export async function tokenActive(token: string, fetchImpl: typeof fetch = fetch, pauseMs = 2_000, apiUrl = 'https://api.linear.app'): Promise<boolean> {
   let last = '';
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, pauseMs));
-    const response = await fetchImpl('https://api.linear.app/graphql', {
+    const response = await fetchImpl(`${apiUrl}/graphql`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ query: '{ viewer { id } }' }),
