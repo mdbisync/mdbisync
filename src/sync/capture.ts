@@ -107,6 +107,9 @@ export async function readCaptureCursor(git: Git, ids: Oid | null): Promise<stri
   return CURSOR.exec(log)?.[1] ?? null;
 }
 
+/** A download the comparison with a file's last accepted version does not make. */
+class NotDownloaded extends Error {}
+
 export async function capture(context: RunContext, options: CaptureOptions): Promise<CaptureResult> {
   const {git, linear, fetched} = context;
   let mapping = context.mapping;
@@ -146,8 +149,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
       const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
-      for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents, files: recorded.files })) ids.set(path, entry);
-      result.rebuiltIds = { matched: ids.size, files: recorded.documents.length };
+      for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, documents, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) ids.set(path, entry);
+      // Files left out for a title another file has count too: they had a document as much as any other.
+      result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
     const cursor = await readCaptureCursor(git, state.ids);
     const entries = await listTree(git, base);
@@ -444,8 +448,30 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       for (const [id, {doc}] of candidates) if (marking.includes(id) && current.get(id)?.updatedAt !== doc.updatedAt) unmarked.add(id);
     }
+    // An excluded file's document that Linear still holds as last accepted has nothing to capture, the images it
+    // downloaded included: they are read in the commit of that version, since git may have removed one since (the
+    // reason the file is excluded). A run whose capture cursor is lost reads every document again.
+    const acceptedAssets = new Map<Oid, ReturnType<typeof createAssetCapture>>();
+    const asLastAccepted = async (candidate: Candidate): Promise<boolean> => {
+      const baseline = excludedPath(candidate.path) ? baselines.get(candidate.path) : undefined;
+      if (baseline == null || candidate.assets.files.size === 0) return false;
+      const captureAtBaseline = acceptedAssets.get(baseline.commit) ?? createAssetCapture(git, options.config, baseline.commit, () => Promise.reject(new NotDownloaded()));
+      acceptedAssets.set(baseline.commit, captureAtBaseline);
+      const body = splitFile(baseline.text).body;
+      let assets: CapturedAssets;
+      try {
+        assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body);
+      } catch (error) {
+        // An image that version did not have: the document changed.
+        if (error instanceof NotDownloaded) return false;
+        throw error;
+      }
+      // Linear's spelling of that version reads back as its text.
+      return assets.files.size === 0 && textOf({doc: candidate.doc, path: candidate.path, head: '', assets, files: new Map(), previousBody: body}, documentIds) === body;
+    };
     for (const [id, candidate] of candidates) {
       const old = byId.get(id);
+      if (old?.path === candidate.path && await asLastAccepted(candidate)) continue;
       if (old !== undefined && old.path !== candidate.path) {
         removeBody(old.path);
         ids.delete(old.path);

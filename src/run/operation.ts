@@ -147,7 +147,7 @@ async function runWithSecurity(
       confirmed = run.result;
       workSummary = renderConfirmed(run.plan, run.result);
     } else {
-      const planned = await planFromRepository(context, inputs.documentCap);
+      const planned = await planFromRepository(context, { remote: inputs.state.remote, cap: inputs.documentCap });
       plan = toPlanReport(planned, 'git-to-linear', false);
       workSummary = renderDryRun(planned);
     }

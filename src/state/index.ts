@@ -12,7 +12,7 @@ export {
   suspendedBranch,
 } from './config.ts';
 export { Git, GitError, type Oid } from './git.ts';
-export { type LfsPointer, type LfsRead, type LfsReadResult, lfsReader, parseLfsPointer } from './lfs.ts';
+export { type LfsPointer, type LfsRead, type LfsReadResult, lfsReader, missingLfsObjects, parseLfsPointer } from './lfs.ts';
 export { type CommitIdentity, type CommitSpec, NEUTRAL_IDENTITY, type TreeEntry, buildTree, checkRepoPath, commitTree, listTree, readBlobs, writeBlob } from './objects.ts';
 export {
   type CommitStateOptions,

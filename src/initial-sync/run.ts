@@ -44,12 +44,15 @@ export async function readPlanSources(context: RunContext, options: { withConten
  * The dry run's plan: what a confirmed run would do, with the container
  * counts it checks before writing and the documents its uploads would leave
  * out already listed as left out. Uploads and downloads nothing.
+ *
+ * @param options.remote the remote the run reads LFS objects from
+ * @param options.cap the document cap of the run's containers
  */
-export async function planFromRepository(context: RunContext, cap?: number): Promise<InitialSyncPlan> {
+export async function planFromRepository(context: RunContext, options: { remote: string; cap?: number | undefined }): Promise<InitialSyncPlan> {
   const sources = await readPlanSources(context);
   const plan = planInitialSync(sources.input);
   // Counted as the confirmed run counts them: before the uploads leave any document out.
-  plan.capacity = assessCapacity(context, sources.containers, plan.create, cap);
+  plan.capacity = assessCapacity(context, sources.containers, plan.create, options.cap);
   const uploads = await readUploads(context.git, context.fetched.state.uploads);
-  return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan, sources.input.texts, uploads));
+  return leaveOutAtWrite(plan, await predictUploadLeaveOuts(context.git, context.fetched.tracked, plan, sources.input.texts, uploads, { remote: options.remote }));
 }

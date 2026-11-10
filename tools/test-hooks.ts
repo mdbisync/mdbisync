@@ -91,12 +91,13 @@ try {
   git(scratch, 'add', '.');
   git(scratch, 'commit', '-m', 'Add workflow fixture');
   git(scratch, 'push', 'origin', 'HEAD:refs/heads/topic');
-  const vars = { GITHUB_OUTPUT: join(temporary, 'output'), SAME_REPOSITORY: 'true', HEAD_BRANCH: 'topic', GH_TOKEN: 'fixture' };
+  const vars = { RUNNER_TEMP: temporary, GITHUB_OUTPUT: join(temporary, 'output'), SAME_REPOSITORY: 'true', HEAD_BRANCH: 'topic', GH_TOKEN: 'fixture' };
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', collect], vars);
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', commit], vars);
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', push], vars);
   run(scratch, 'bash', ['-e', '-o', 'pipefail', '-c', check], vars);
   assert.equal(git(scratch, 'log', '-1', '--format=%s'), 'Apply pre-commit fixes');
+  assert.equal(git(scratch, 'log', '-1', '--format=%(trailers:key=Pre-commit-fix,valueonly)'), 'linear-format');
   assert.equal(git(scratch, 'rev-parse', 'HEAD'), git(scratch, 'ls-remote', 'origin', 'refs/heads/topic').split(/\s+/)[0]);
   assert.equal((await readFile(marker, 'utf8')).trim().split('\n').length, 2);
   assert.equal(await readFile(page, 'utf8'), fixed);

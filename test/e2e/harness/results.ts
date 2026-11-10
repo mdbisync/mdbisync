@@ -62,6 +62,10 @@ export interface CheckOutcome {
 }
 
 export interface ScenarioResult {
+  /** Present only for partial-corpus team-scoped runs. */
+  corpusTeams?: string[];
+  /** Content hashes and mapping for solo/parallel equivalence, without resource ids. */
+  isolationSnapshot?: unknown;
   id: string;
   level: string;
   slice: string;

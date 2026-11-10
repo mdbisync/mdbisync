@@ -3,6 +3,7 @@
 //   node test/e2e/harness/cli.ts run [--ids L1-04,L2-01] [--levels L1,L2] [--slices mini]
 //        [--modes local] [--workers 4] [--out <dir>] [--status-page <file>] [--evidence-dir <dir>]
 //   node test/e2e/harness/cli.ts plan  [same filters]   lists what would run, with budget estimates
+//   node test/e2e/harness/cli.ts recover <run id> --writer-stopped   recover only after verifying all writers stopped
 //   node test/e2e/harness/cli.ts sweep                  removes leftovers of dead or old runs
 //   node test/e2e/harness/cli.ts checklist --ids L6-05  prints a UI checklist without running
 //   node test/e2e/harness/cli.ts ui-result <run folder> <answered checklist> [--status-page <file>] [--evidence-dir <dir>]
@@ -14,6 +15,8 @@
 // The test configuration comes from the environment and the test
 // configuration folder (see config.ts).
 
+import { createHash, randomUUID } from 'node:crypto';
+import { GitStateStore, SharedAdmission, refreshingGitEnv } from './shared-state.ts';
 import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -24,9 +27,9 @@ import { loadTestConfig } from './config.ts';
 import { REPO_ROOT } from './engine.ts';
 import { Governor, budgetFromStatus, estimate, type App } from './governor.ts';
 import { SandboxRest, githubToken } from './github.ts';
-import { newRunId, runNames } from './isolation.ts';
+import { newRunId, runNames, RUN_ID_PATTERN } from './isolation.ts';
 import { LinearWorld, editorClient } from './linear-world.ts';
-import { defaultStateDir } from './locks.ts';
+import { acquireLock, defaultStateDir, forgetRun, registerRun, requireStoppedLocalRun } from './locks.ts';
 import { updateStatusPage, writeEvidence, writeRunReport, type HarnessReport } from './report.ts';
 import { loadExpectedRed } from './results.ts';
 import { runScenarios, skippedResult } from './runner.ts';
@@ -35,6 +38,7 @@ import { loadScenarios, selectScenarios } from './spec.ts';
 import { actionShaUnderTest, scheduleTick } from './steps.ts';
 import { sweep } from './sweeper.ts';
 import { parseUiAnswers, renderUiChecklist } from './ui-checklist.ts';
+import { OwnershipLedger, ownedRuns } from './ownership.ts';
 import { loadHeldRun } from './held-run.ts';
 import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-result.ts';
 import { readTemplate, renderScheduler, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
@@ -50,6 +54,8 @@ async function main(argv: string[]): Promise<number> {
       levels: { type: 'string' },
       slices: { type: 'string' },
       modes: { type: 'string' },
+      teams: { type: 'string' },
+      'writer-stopped': { type: 'boolean' },
       workers: { type: 'string', default: '4' },
       out: { type: 'string' },
       'status-page': { type: 'string' },
@@ -62,8 +68,10 @@ async function main(argv: string[]): Promise<number> {
   const log = (line: string) => process.stderr.write(`${new Date().toISOString().slice(11, 19)} ${line}\n`);
   const all = loadScenarios();
   const selection = { ids: list(values.ids), levels: list(values.levels), slices: list(values.slices), modes: list(values.modes) };
+  const teams = list(values.teams);
   const cleanSelection = Object.fromEntries(Object.entries(selection).filter(([, value]) => value !== undefined));
   const scenarios = selectScenarios(all, cleanSelection);
+  if (teams !== undefined && scenarios.some((scenario) => scenario.slice === 'full')) throw new Error('full slices cannot select teams');
   const workers = Number(values.workers);
   if (!Number.isInteger(workers) || workers < 1) throw new Error(`--workers must be a whole number of at least 1, not ${values.workers}`);
   const stateDir = defaultStateDir();
@@ -105,6 +113,16 @@ async function main(argv: string[]): Promise<number> {
   }
 
   // Live commands mint one token per OAuth app for the harness's own reads and revoke it at the end.
+  let shared: SharedAdmission | undefined;
+  const sharedAdmission = async () => {
+    if (shared === undefined) {
+      shared = new SharedAdmission(new GitStateStore({ stateDir, url: config.gitUrl, env: refreshingGitEnv(async () => {
+        const token = await githubToken(config, 'local');
+        return new Sandbox({ url: config.gitUrl, token: token.token, stateDir, runId: 'control' }).env();
+      }) }));
+    }
+    return shared;
+  };
   const appClients = new Map<string, LinearClient>();
   const tokens: Array<{ token: RunToken; hooks: LinearHooks }> = [];
   const harnessRunId = `${new Date().toISOString().slice(0, 10)}-${newRunId()}`;
@@ -113,29 +131,74 @@ async function main(argv: string[]): Promise<number> {
     log: (entry: LogEntry) => { process.stderr.write(`${JSON.stringify({ harnessRunId, app, ...entry })}\n`); },
   });
   try {
-    for (const app of command === 'run' || command === 'ui-result' ? config.linearApps : []) {
+    for (const app of (command === 'run' && scenarios.some((scenario) => scenario.setup.state !== 'offline')) || command === 'ui-result' ? config.linearApps : []) {
       const hooks = hooksFor(app.name);
       const token = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
       tokens.push({ token, hooks });
       appClients.set(app.name, new LinearClient({ token: token.accessToken, auth: token.context, hooks }));
     }
 
-    if (command === 'sweep') {
+    if (command === 'sweep' || command === 'recover') {
       if (config.missing.length > 0) throw new Error(`test configuration is missing: ${config.missing.join(', ')}`);
-      const token = await githubToken(config, 'local');
-      const world = new LinearWorld(editorClient(config.editors['editor-a']));
-      const teams = await world.teams();
-      const report = await sweep(
-        {
-          sandbox: new Sandbox({ url: config.gitUrl, token: token.token, stateDir, runId: 'sweep0' }),
-          rest: new SandboxRest(config, token.token),
-          world,
-          teamIds: teams.map((team) => team.id),
-        },
-        stateDir,
-      );
-      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-      return report.errors.length === 0 ? 0 : 1;
+      const recoveryId = command === 'recover' ? positionals[1] : undefined;
+      if (command === 'recover' && (recoveryId === undefined || !RUN_ID_PATTERN.test(recoveryId) || values['writer-stopped'] !== true)) throw new Error('usage: recover <run id> --writer-stopped (verify the writer and all engine/workflow children stopped first)');
+      if (recoveryId !== undefined && !ownedRuns(stateDir).includes(recoveryId)) throw new Error('recovery needs the owning run state directory and its ownership record');
+      const recoveryLock = recoveryId === undefined ? undefined : await acquireLock(`ui-result-${recoveryId}`, { stateDir, runId: recoveryId, timeoutMs: 0 });
+      let maintenance: { runId: string; owner: string; registration: ReturnType<typeof registerRun>; admission: SharedAdmission } | undefined;
+      try {
+        if (recoveryId !== undefined) requireStoppedLocalRun(stateDir, recoveryId);
+        const token = await githubToken(config, 'local');
+        const world = new LinearWorld(editorClient(config.editors['editor-a']));
+        const teams = await world.teams();
+        const admission = await sharedAdmission();
+        if (recoveryId === undefined) {
+          const runId = newRunId(); const owner = randomUUID();
+          const registration = registerRun(stateDir, runId);
+          new OwnershipLedger(stateDir, runId).scope([]);
+          const result = await admission.reserve({ runId, owner, app: 'maintenance', full: true,
+            need: { requests: 0, complexity: 0 }, reserve: { requests: 0, complexity: 0 }, maxWorkers: 1,
+            readBudget: async () => budgetFromStatus(await world.client.rateLimitStatus(), Date.now()),
+          });
+          if (!result.admitted) { registration.done(); throw new Error('sweep requires exclusive admission; live reservations are still held'); }
+          maintenance = { runId, owner, registration, admission };
+        }
+        const entry = recoveryId === undefined ? undefined : (await admission.store.read()).runs.find((run) => run.runId === recoveryId);
+        if (recoveryId !== undefined && entry === undefined) throw new Error('run has no shared reservation; use ordinary sweep');
+        const trash: Record<string, { before: number; after?: number }> = {};
+        for (const zone of entry?.zones ?? []) trash[zone] = { before: await world.trashedInZone(zone) };
+        // Explicit operator confirmation is required; time alone cannot prove
+        // a writer stopped. Rotation fences old saved UI continuations.
+        const recoveryOwner = entry === undefined ? undefined : await admission.beginRecovery(entry.runId, entry.owner, () => requireStoppedLocalRun(stateDir, entry.runId));
+        const report = await sweep(
+          {
+            sandbox: new Sandbox({ url: config.gitUrl, token: token.token, stateDir, runId: 'sweep0' }),
+            rest: new SandboxRest(config, token.token), world, teamIds: teams.map((team) => team.id), shared: admission,
+            ...(recoveryId === undefined ? {} : { recovering: recoveryId }),
+          }, stateDir,
+        );
+        for (const [zone, counts] of Object.entries(trash)) {
+          try {
+            counts.after = await world.trashedInZone(zone);
+            if (counts.after > counts.before) report.errors.push('recovery increased a zone trash count');
+          } catch { report.errors.push('recovery trash after-count unavailable'); }
+        }
+        if (report.errors.length === 0 && recoveryId !== undefined && recoveryOwner !== undefined) {
+          await admission.release(recoveryId, recoveryOwner);
+          forgetRun(stateDir, recoveryId);
+        }
+        process.stdout.write(`${JSON.stringify({ ...report, trash }, null, 2)}\n`);
+        return report.errors.length === 0 ? 0 : 1;
+      } finally {
+        try {
+          // Maintenance owns no scenario data; a completed sweep may leave
+          // failed legacy cleanup for the next exclusive attempt. A crash
+          // retains this grant and its local record for verified recovery.
+          if (maintenance !== undefined) {
+            await maintenance.admission.release(maintenance.runId, maintenance.owner);
+            maintenance.registration.done();
+          }
+        } finally { recoveryLock?.release(); }
+      }
     }
 
     if (command === 'run') {
@@ -143,18 +206,23 @@ async function main(argv: string[]): Promise<number> {
       actionShaUnderTest();
       scheduleTick();
       const outDir = values.out ?? join(REPO_ROOT, 'test/e2e/out', harnessRunId);
-      const apps: App[] = config.linearApps.map((app) => ({
+      const deferred = new Set(list(values.defer) ?? []);
+      const apps: App[] = (scenarios.some((scenario) => scenario.setup.state !== 'offline') ? config.linearApps : []).map((app) => ({
         name: app.name,
+        key: createHash('sha256').update(app.clientId).digest('hex'),
         readBudget: async () => budgetFromStatus(await (appClients.get(app.name) as LinearClient).rateLimitStatus(), Date.now()),
       }));
-      const governor = apps.length === 0 ? null : new Governor({ apps, stateDir, log });
+      // Validate app authentication before shared Git access can hide its
+      // safe request diagnostics behind an unrelated Git prerequisite error.
+      if (scenarios.some((scenario) => !deferred.has(scenario.id) && scenario.setup.state !== 'offline')) for (const app of apps) await app.readBudget();
+      const governor = apps.length === 0 ? null : new Governor({ apps, stateDir, log, shared: await sharedAdmission() });
       const startedAt = new Date().toISOString();
       log(`run ${harnessRunId}: ${scenarios.length} scenarios, ${values.workers} workers, output ${outDir}`);
       // SIGINT or SIGTERM: running scenarios finish with their cleanup, the rest are skipped.
       const stop = { requested: false };
       const onSignal = (signal: string) => {
         if (stop.requested) {
-          log(`${signal} again: stopping now; the sweeper removes what the running scenarios leave`);
+          log(`${signal} again: stopping now; shared reservations stay held for verified recovery`);
           process.exit(130);
         }
         stop.requested = true;
@@ -163,16 +231,15 @@ async function main(argv: string[]): Promise<number> {
       process.on('SIGINT', onSignal);
       process.on('SIGTERM', onSignal);
       // --defer: selected scenarios reported skipped (for example to keep a heavy one for a quiet budget window).
-      const deferred = new Set(list(values.defer) ?? []);
-      const ran = await runScenarios(scenarios.filter((s) => !deferred.has(s.id)), { config, governor, appClients, stateDir, outDir, expectedRed: loadExpectedRed(), log }, workers, stop);
+      const ran = await runScenarios(scenarios.filter((s) => !deferred.has(s.id)), { config, governor, appClients, stateDir, outDir, ...(teams === undefined ? {} : { teams }), expectedRed: loadExpectedRed(), log }, workers, stop);
       const byId = new Map(ran.map((result) => [result.id, result]));
       const results = scenarios.map((s) => byId.get(s.id) ?? skippedResult(s, 'deferred to a later run'));
-      const report: HarnessReport = { harnessRunId, startedAt, finishedAt: new Date().toISOString(), host: hostname(), selection: cleanSelection, results };
+      const report: HarnessReport = { harnessRunId, startedAt, finishedAt: new Date().toISOString(), host: hostname(), selection: { ...cleanSelection, ...(teams === undefined ? {} : { teams }) }, results };
       const files = writeRunReport(report, outDir);
       log(`report: ${files.markdown}`);
       if (values['status-page'] !== undefined) updateStatusPage(values['status-page'], all.map((scenario) => scenario.id), report);
       if (values['evidence-dir'] !== undefined) log(`evidence: ${writeEvidence(report, values['evidence-dir'])}`);
-      return results.some((result) => result.result === 'fail') ? 1 : 0;
+      return results.some((result) => result.result === 'fail' || !result.cleanup.ok) ? 1 : 0;
     }
 
     if (command === 'ui-result') {
@@ -186,10 +253,11 @@ async function main(argv: string[]): Promise<number> {
       // Admission on the run's own app: its engine and the harness's reads go through that app.
       const apps: App[] = config.linearApps.filter((app) => app.name === held.appName).map((app) => ({
         name: app.name,
+        key: createHash('sha256').update(app.clientId).digest('hex'),
         readBudget: async () => budgetFromStatus(await (appClients.get(app.name) as LinearClient).rateLimitStatus(), Date.now()),
       }));
       if (config.linearApps.length > 0 && apps.length === 0) throw new Error(`the held run uses app ${held.appName}, which the test configuration does not have`);
-      const governor = apps.length === 0 ? null : new Governor({ apps, stateDir, log });
+      const governor = apps.length === 0 ? null : new Governor({ apps, stateDir, log, shared: await sharedAdmission() });
       const outcome = await takeUpHeldRun(runDir, answers, all, { config, governor, appClients, stateDir, expectedRed: loadExpectedRed(), log });
       if (outcome.state === 'waiting') {
         process.stdout.write(`ran ${outcome.ran.length === 0 ? 'no harness step' : outcome.ran.join(', ')}; the run stays held: answer item ${outcome.nextItem} and the ones after it, then hand the checklist back\n`);
@@ -206,9 +274,11 @@ async function main(argv: string[]): Promise<number> {
       return result.result === 'fail' || !result.cleanup.ok ? 1 : 0;
     }
 
-    process.stdout.write('Usage: cli.ts run|plan|sweep|checklist|ui-result|scheduler [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
+    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|scheduler [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
     return command === 'help' ? 0 : 2;
   } finally {
+    try { await shared?.store.close?.(); }
+    catch { log('warning: local admission cache could not be removed'); }
     for (const { token, hooks } of tokens) {
       try {
         await revokeToken(token.accessToken, { hooks, auth: token.context });

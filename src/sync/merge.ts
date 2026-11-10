@@ -101,7 +101,7 @@ export interface LocalMerge {
   /**
    * Documents whose file was renamed to one that cannot be written yet (a
    * conflict, or left out by a lint finding): neither renamed nor trashed.
-   * The record keeps the tip's file, and the run is not complete.
+   * The record keeps both paths as the tip has them, and the run is not complete.
    */
   held: HeldRename[];
   /** The blobs of every synchronized file of both sides, by id. */
@@ -382,6 +382,9 @@ export const BASELINE_DEPTH = 20;
  * image changes whether the file is synchronized. Null when none of the
  * last `BASELINE_DEPTH` such commits on the chain synchronized it.
  * Calls that share `sides` read each commit's synchronized files once.
+ * With `oldest`, no commit older than it on the chain is examined, and
+ * `oldest` itself counts as one of those commits, the oldest: it holds the
+ * version the later commits changed, though it may not change the file.
  */
 export async function lastSynchronized(
   git: Git,
@@ -389,9 +392,13 @@ export async function lastSynchronized(
   path: string,
   facts: LinearFacts = LINEAR_FACTS,
   sides: Map<Oid, Promise<Side>> = new Map(),
+  oldest?: Oid,
 ): Promise<{ commit: Oid; file: SideFile; text: string } | null> {
-  const log = async (paths: readonly string[]) =>
-    (await git.text(['--literal-pathspecs', 'log', '--first-parent', '--format=%H', '-n', String(BASELINE_DEPTH), linear, '--', ...paths])).split('\n').filter(Boolean);
+  const range = oldest === undefined ? [linear] : [linear, '--not', `${oldest}^@`];
+  const log = async (paths: readonly string[]) => {
+    const commits = (await git.text(['--literal-pathspecs', 'log', '--first-parent', '--format=%H', '-n', String(BASELINE_DEPTH), ...range, '--', ...paths])).split('\n').filter(Boolean);
+    return oldest !== undefined && commits.length < BASELINE_DEPTH && !commits.includes(oldest) ? [...commits, oldest] : commits;
+  };
   const versions = await log([path]);
   // Whether a version is synchronized, and which upload its images get, changes too in a commit that changes only a
   // file it links: an image removed, restored or replaced.

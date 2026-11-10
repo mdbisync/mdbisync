@@ -3,9 +3,13 @@
 // the app shares it, also runs of other harness processes. Before a scenario
 // the governor reads the app's `rateLimitStatus` and waits while what is
 // left is below the scenario's estimate; it caps the workers per app with
-// slots shared by every harness process on the host, and spreads workers over
-// every app the secrets list. Only one `full` run at a time.
+// the shared Git admission store used by the live CLI. Local-only instances
+// retain host slots for offline tests and exclusive drivers. Full slices
+// exclude all other shared reservations.
 
+import { randomUUID } from 'node:crypto';
+import { zoneConcurrent } from './concurrency.ts';
+import { ZoneBusyError, type AccountBudget, type SharedAdmission } from './shared-state.ts';
 import { readRateLimitHeaders } from '../../../src/linear/rate-limit.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { RateLimitStatus } from '../../../src/linear/index.ts';
@@ -81,11 +85,14 @@ export function budgetFromStatus(status: RateLimitStatus, now: number): Budget {
 export interface App {
   /** A neutral label, never the client id. */
   name: string;
+  /** Stable identity shared across configurations, never a credential. */
+  key?: string;
   readBudget(): Promise<Budget>;
 }
 
 export interface GovernorOptions {
   apps: readonly App[];
+  shared?: SharedAdmission;
   stateDir: string;
   maxWorkersPerApp?: number;
   maxWaitMs?: number;
@@ -98,7 +105,10 @@ export interface Grant {
   app: App;
   waitedMs: number;
   budgetBefore: Budget;
-  release(): void;
+  owner?: string;
+  claimBudgets?(accounts: readonly AccountBudget[], signal?: AbortSignal): Promise<void>;
+  claimZones?(zones: readonly string[], signal?: AbortSignal): Promise<void>;
+  release(): void | Promise<void>;
 }
 
 export class BudgetBlockedError extends Error {
@@ -194,12 +204,71 @@ export class Governor {
     this.#sleep = options.sleep ?? ((ms) => sleep(ms).then(() => undefined));
   }
 
+  async #admitShared(scenario: Scenario, runId: string, estimated: Estimate, appName?: string, resumeOwner?: string): Promise<Grant> {
+    const options = this.#options;
+    const shared = options.shared!;
+    const started = this.#now();
+    const deadline = started + (options.maxWaitMs ?? MAX_BUDGET_WAIT_MS);
+    const owner = resumeOwner ?? randomUUID();
+    const apps = options.apps.filter((app) => appName === undefined || app.name === appName);
+    if (apps.length === 0) throw new Error('unknown OAuth app');
+    const need = { requests: Math.min(estimated.requests, MAX_ADMISSION.requests), complexity: Math.min(estimated.complexity, MAX_ADMISSION.complexity) };
+    for (;;) {
+      let retryAt = Infinity;
+      for (const app of apps) {
+        const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: !zoneConcurrent(scenario), ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
+          readBudget: async () => {
+            const at = this.#now();
+            return this.#withObserved(app.name, await app.readBudget(), at);
+          },
+        });
+        if (!admission.admitted) {
+          const budget = admission.budget;
+          const shortage = budget !== undefined && (budget.requestsRemaining - RESERVE.requests < need.requests || budget.complexityRemaining - RESERVE.complexity < need.complexity);
+          retryAt = Math.min(retryAt, shortage ? Math.max(budget!.resetAt + 1000, this.#now() + 5000) : this.#now() + RESERVATION_POLL_MS);
+          continue;
+        }
+        return {
+          app, owner, waitedMs: this.#now() - started, budgetBefore: admission.budget!,
+          claimBudgets: async (accounts, signal) => {
+            const until = this.#now() + (options.maxWaitMs ?? MAX_BUDGET_WAIT_MS);
+            for (;;) {
+              signal?.throwIfAborted();
+              const result = await shared.reserveAccounts(runId, owner, accounts, RESERVE);
+              if (result.admitted) return;
+              const wake = Math.max(result.wakeAt ?? this.#now() + RESERVATION_POLL_MS, this.#now() + RESERVATION_POLL_MS);
+              if (wake > until) throw new BudgetBlockedError('editor budget unavailable within the longest wait');
+              await sleep(Math.max(0, wake - this.#now()), undefined, signal === undefined ? {} : { signal });
+            }
+          },
+          claimZones: async (zones, signal) => {
+            const until = this.#now() + (options.maxWaitMs ?? MAX_BUDGET_WAIT_MS);
+            for (;;) {
+              signal?.throwIfAborted();
+              try { await shared.claim(runId, owner, zones); return; }
+              catch (error) {
+                if (!(error instanceof ZoneBusyError)) throw error;
+                if (this.#now() >= until) throw new BudgetBlockedError('shared team zone remained held');
+                await sleep(500, undefined, signal === undefined ? {} : { signal });
+              }
+            }
+          },
+          release: () => shared.release(runId, owner),
+        };
+      }
+      if (retryAt > deadline) throw new BudgetBlockedError('shared admission: budget, worker slots or full slice remained reserved');
+      options.log?.('shared admission: waiting for app budget, worker slot or exclusive full slice');
+      await this.#sleep(Math.max(0, retryAt - this.#now()));
+    }
+  }
+
   /**
    * Waits for a worker slot on some app and for that app's budget to cover
    * the estimate. The grant holds the slot (and the full-run lock) until
    * released. Throws BudgetBlockedError after the longest wait.
    */
-  async admit(scenario: Scenario, runId: string, estimated: Estimate, appName?: string): Promise<Grant> {
+  async admit(scenario: Scenario, runId: string, estimated: Estimate, appName?: string, owner?: string): Promise<Grant> {
+    if (this.#options.shared !== undefined) return this.#admitShared(scenario, runId, estimated, appName, owner);
     const options = this.#options;
     // A scenario bigger than one window (L1-16) starts on a mostly full
     // window and goes on by resume in the next ones.

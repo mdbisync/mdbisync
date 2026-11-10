@@ -691,15 +691,24 @@ describe('sync: the tracked branch to Linear', () => {
     await assertConverged();
   });
 
-  it('a file renamed to one that is left out keeps its document where it is; the run is not complete', async () => {
-    // Long enough that git still sees the rename after the footnote is added.
-    const long = `# Review\n\n${Array.from({ length: 12 }, (_, index) => `Finding number ${index} of the review, with its context.`).join('\n\n')}\n\n${CANARY}\n`;
-    await commit({ 'eng/notes/review.md': long });
+  /** Long enough that git still sees the rename after the footnote is added. */
+  const LONG_REVIEW = `# Review\n\n${Array.from({ length: 12 }, (_, index) => `Finding number ${index} of the review, with its context.`).join('\n\n')}\n\n${CANARY}\n`;
+
+  /**
+   * Syncs a long review, then renames it to `eng/notes/review-notes.md` and adds a footnote, which leaves the new
+   * file out: the rename waits. Returns the document, its record before the rename and the run that held it.
+   */
+  async function heldReview() {
+    await commit({ 'eng/notes/review.md': LONG_REVIEW });
     assert.equal((await sync()).result.exitCode, 0);
     const document = await documentOf('eng/notes/review.md');
     const recorded = await show('refs/mdbisync/linear:eng/notes/review.md');
-    await commit({ 'eng/notes/review.md': null, 'eng/notes/review-notes.md': long.replace('Finding number 0', 'Finding number 0.[^1]') + '\n[^1]: A note.\n' });
-    const { result, report, writes } = await sync();
+    await commit({ 'eng/notes/review.md': null, 'eng/notes/review-notes.md': LONG_REVIEW.replace('Finding number 0', 'Finding number 0.[^1]') + '\n[^1]: A note.\n' });
+    return { document, recorded, held: await sync() };
+  }
+
+  it('a file renamed to one that is left out keeps its document where it is; the run is not complete', async () => {
+    const { document, recorded, held: { result, report, writes } } = await heldReview();
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(writes, []);
     assert.equal(document.trashed, undefined);
@@ -723,6 +732,92 @@ describe('sync: the tracked branch to Linear', () => {
     assert.equal(figure.content, content);
     assert.equal(await show('refs/mdbisync/linear:eng/notes/figure.md'), recorded);
     assert.equal((await ids())['eng/notes/figure.md']?.id, figure.id);
+  });
+
+  it('a file renamed to one that is left out and then fixed is written at its new path, not taken for a conflict', async () => {
+    const { document, held } = await heldReview();
+    assert.deepEqual(held.report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'renamed-to-unwritable' }]);
+    const fixed = LONG_REVIEW.replace('Finding number 0', 'Finding number 0, fixed');
+    await commit({ 'eng/notes/review-notes.md': fixed });
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.updated, ['eng/notes/review-notes.md']);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.equal(report.complete, true);
+    assert.equal(document.trashed, undefined);
+    assert.equal(document.title, 'review-notes');
+    assert.ok((document.content ?? '').includes('Finding number 0, fixed'));
+    assert.deepEqual(report.sync?.conflicts, []);
+    assert.doesNotMatch(document.content ?? '', /Sync conflict/);
+    assert.equal((await ids())['eng/notes/review-notes.md']?.id, document.id);
+    assert.equal((await ids())['eng/notes/review.md'], undefined);
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
+  });
+
+  it('a Linear edit of a document whose rename waits still conflicts with the fix in git', async () => {
+    const { document, held } = await heldReview();
+    assert.deepEqual(held.report.sync?.skipped, [{ path: 'eng/notes/review.md', reason: 'renamed-to-unwritable' }]);
+    document.content = (document.content ?? '').replace('Finding number 0 of the review', 'Finding number 0, typed in Linear');
+    touch(document);
+    await commit({ 'eng/notes/review-notes.md': LONG_REVIEW.replace('Finding number 0 of the review', 'Finding number 0, fixed in git') });
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(report.capture?.changed.includes('eng/notes/review.md'));
+    assert.deepEqual(report.sync?.conflicts, ['eng/notes/review-notes.md']);
+    assert.equal((await ids())['eng/notes/review-notes.md']?.id, document.id);
+    for (const text of [document.content ?? '', await show('refs/mdbisync/linear:eng/notes/review-notes.md')]) {
+      assert.match(text, /\*\*Sync conflict: git version\*\*\n\nFinding number 0, fixed in git[^\n]+\n\n\*\*Sync conflict: Linear version\*\*\n\nFinding number 0, typed in Linear[^\n]+\n\n\*\*Sync conflict: end\*\*/);
+    }
+  });
+
+  it('files left out next to a waiting rename are written once fixed, not taken for conflicts', async () => {
+    const plan = await documentOf('eng/notes/plan.md');
+    const figure = await documentOf('eng/notes/figure.md');
+    // The move leaves the figure out, so its rename waits and the record is partial; in the same commit an
+    // existing file and a new one gain a footnote and are left out as well.
+    await commit(
+      {
+        'eng/notes/plan.md': `---\nowner: example\n---\n\n# Plan\n\nSteps one and two.[^1] ${CANARY}\n\n[^1]: A note.\n`,
+        'eng/notes/extra.md': `# Extra\n\nA claim.[^1] ${CANARY}\n\n[^1]: A source.\n`,
+      },
+      [['eng/notes/figure.md', 'eng/notes/old/figure.md']],
+    );
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.deepEqual(first.report.sync?.skipped, [{ path: 'eng/notes/figure.md', reason: 'renamed-to-unwritable' }]);
+    await commit({
+      'eng/notes/plan.md': `---\nowner: example\n---\n\n# Plan\n\nSteps one and two, fixed. ${CANARY}\n`,
+      'eng/notes/extra.md': `# Extra\n\nA claim, fixed. ${CANARY}\n`,
+    });
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.conflicts, []);
+    assert.deepEqual(report.sync?.updated, ['eng/notes/plan.md']);
+    assert.deepEqual(report.sync?.created, ['eng/notes/extra.md']);
+    assert.deepEqual(report.sync?.skipped, [{ path: 'eng/notes/figure.md', reason: 'renamed-to-unwritable' }]);
+    assert.match(plan.content ?? '', /Steps one and two, fixed\./);
+    assert.doesNotMatch(plan.content ?? '', /Sync conflict/);
+    assert.equal(figure.trashed, undefined);
+  });
+
+  it('a file moved so that its image no longer resolves and then fixed is written at its new path, not taken for a conflict', async () => {
+    const figure = await documentOf('eng/notes/figure.md');
+    await commit({}, [['eng/notes/figure.md', 'eng/notes/old/figure.md']]);
+    assert.deepEqual((await sync()).report.sync?.skipped, [{ path: 'eng/notes/figure.md', reason: 'renamed-to-unwritable' }]);
+    await commit({ 'eng/notes/old/figure.md': `# Figure\n\n![Diagram](../../media/diagram.png)\n\nWhat it shows. ${CANARY}\n` });
+    const { result, report } = await sync();
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.sync?.updated, ['eng/notes/old/figure.md']);
+    assert.deepEqual(report.sync?.skipped, []);
+    assert.equal(report.complete, true);
+    assert.equal(figure.trashed, undefined);
+    assert.deepEqual(report.sync?.conflicts, []);
+    assert.equal(uploadUrls(figure.content).length, 1);
+    assert.match(figure.content ?? '', /What it shows\./);
+    assert.doesNotMatch(figure.content ?? '', /Sync conflict/);
+    assert.equal((await ids())['eng/notes/old/figure.md']?.id, figure.id);
+    assert.equal((await ids())['eng/notes/figure.md'], undefined);
+    assert.equal(await rev('refs/mdbisync/linear^{tree}'), await rev('refs/heads/main^{tree}'));
   });
 
   it('with the upload cache lost, an edited document with an image is written, not taken for a Linear edit', async () => {

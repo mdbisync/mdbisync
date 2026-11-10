@@ -101,6 +101,16 @@
         "subject": "pullRequests.merger",
         "operator": "equal",
         "expected": "app-bot"
+      },
+      {
+        "subject": "writes.commitIdentity",
+        "operator": "equal",
+        "expected": "app-bot"
+      },
+      {
+        "subject": "pullRequests.mergeKind",
+        "operator": "equal",
+        "expected": "merge"
       }
     ]
   }

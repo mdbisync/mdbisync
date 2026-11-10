@@ -27,6 +27,10 @@ const PRE_COMMIT = `repos:
     rev: 0123456789abcdef0123456789abcdef01234567
     hooks:
       - id: linear-format
+  - repo: local
+    hooks:
+      - id: stable-fix
+      - id: aligned-table
 `;
 const MANY = 20;
 
@@ -1082,15 +1086,45 @@ describe('sync: the sync pull request', () => {
     assert.ok(failed.report.pullRequest?.suspended);
   });
 
-  async function editRef(ref: string, path: string, text: string): Promise<string> {
+  async function editRef(ref: string, path: string, text: string, message = 'Edit'): Promise<string> {
     const base = await rev(ref);
     const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: text });
-    const commit = await commitFile(base, path, blob);
+    const commit = await commitFile(base, path, blob, undefined, message);
     await fixture.remote.run(['update-ref', ref, commit, base]);
     if (ref === SYNC_BRANCH || ref === SUSPENDED) syncValues.push(commit);
     else if (ref === 'refs/heads/main') start = commit;
     return commit;
   }
+
+  it('L2-33: merges CI fixes, writes the stable file next run, and names the hook of a rejected fix', async () => {
+    const stable = 'eng/notes/plan.md';
+    const unstable = 'combined/guide.md';
+    await editInLinear(stable, '# Plan\n\nReady for review.\n');
+    await sync();
+    const before = (await documentOf(unstable)).content;
+    const fixed = '---\nowner: example\n---\n\n# Plan\n\nReviewed and corrected.\n';
+    await editRef(SYNC_BRANCH, stable, fixed, 'Apply pre-commit fixes\n\nPre-commit-fix: stable-fix');
+    const last = await editRef(SYNC_BRANCH, unstable, '# Guide\n\n| Check | Result |\n| :-- | --: |\n| Format | Ready |\n', 'Apply pre-commit fixes\n\nPre-commit-fix: aligned-table\nPre-commit-fix: unknown-output');
+    checksOn(last, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const merged = await sync();
+    assert.ok(merged.report.pullRequest?.merged);
+    assert.deepEqual(merged.writes.filter((write) => !write.startsWith('PATCH /pulls/')), ['PUT /pulls/1/merge']);
+    const written = await sync();
+    assert.equal(written.result.exitCode, 0, written.result.stderr);
+    assert.deepEqual(written.report.sync?.updated, [stable]);
+    assert.equal((await documentOf(stable)).content, '# Plan\n\nReviewed and corrected.\n');
+    assert.equal((await documentOf(unstable)).content, before);
+    assert.deepEqual(written.report.sync?.leftOut, [{ path: unstable, rules: ['table-alignment'], hooks: ['aligned-table'] }]);
+    assert.match(written.summary, /CI fixes not written/);
+    assert.match(written.summary, /aligned-table/);
+    assert.doesNotMatch(written.summary, /unknown-output/);
+    // Later runs neither repeat the write nor lose the diagnostic.
+    for (let n = 0; n < 2; n++) {
+      const quiet = await sync();
+      assert.deepEqual(quiet.writes, []);
+      assert.match(quiet.summary, /aligned-table/);
+    }
+  });
 
   it('a revert on a closed sync branch reaches Linear through a history-only merge', async () => {
     const path = 'eng/notes/plan.md';
@@ -1559,7 +1593,7 @@ describe('sync: the sync pull request', () => {
   });
 
   /** A commit on `base` with one file replaced, made on the bare remote; a merge when `other` is a second parent. */
-  async function commitFile(base: string, path: string, blob: string | null, other?: string): Promise<string> {
+  async function commitFile(base: string, path: string, blob: string | null, other?: string, message = 'Edit'): Promise<string> {
     const index = join(fixture.root, 'scratch.index');
     const env = { GIT_INDEX_FILE: index, GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' };
     await fixture.remote.run(['read-tree', base], { env });
@@ -1567,6 +1601,6 @@ describe('sync: the sync pull request', () => {
     if (blob === null) await fixture.remote.run(['update-index', '--index-info'], { env, input: `0 ${'0'.repeat(40)}\t${path}\n` });
     else await fixture.remote.run(['update-index', '--add', '--cacheinfo', `100644,${blob},${path}`], { env });
     const tree = await fixture.remote.text(['write-tree'], { env });
-    return fixture.remote.text(['commit-tree', tree, '-p', base, ...(other === undefined ? [] : ['-p', other]), '-m', 'Edit'], { env });
+    return fixture.remote.text(['commit-tree', tree, '-p', base, ...(other === undefined ? [] : ['-p', other]), '-m', message], { env });
   }
 });

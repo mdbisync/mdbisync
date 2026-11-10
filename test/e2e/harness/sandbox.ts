@@ -13,7 +13,7 @@ import { validateSha } from '../../../src/release/package.ts';
 import { CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
-import { CORPUS_DIR, SLICES_DIR, buildRunTree, parseManifest, parseSlice, type Manifest, type RunTree } from './corpus.ts';
+import { CORPUS_DIR, SLICES_DIR, buildRunTree, selectTeams, parseManifest, parseSlice, type Manifest, type RunTree } from './corpus.ts';
 import { gitAuthEnv } from './github.ts';
 import { runOfRef, type RunNames } from './isolation.ts';
 import { acquireLock } from './locks.ts';
@@ -93,7 +93,7 @@ export class Sandbox {
   }
 
   /** Builds the run's tree from a slice and pushes it as the run's tracked branch (a new root commit). */
-  async createTrackedBranch(slice: string, names: RunNames, options: { checks?: boolean } = {}): Promise<{ tree: RunTree; commit: string }> {
+  async createTrackedBranch(slice: string, names: RunNames, options: { checks?: boolean; teams?: readonly string[] } = {}): Promise<{ tree: RunTree; commit: string }> {
     const sliceText = await this.readMain(`${SLICES_DIR}/${slice}.json`);
     if (sliceText === null) throw new CorpusMissingError(`the sandbox's main has no ${SLICES_DIR}/${slice}.json (the corpus is not there yet)`);
     const list = parseSlice(sliceText, slice);
@@ -108,7 +108,9 @@ export class Sandbox {
       if (!entries.has(path)) throw new CorpusMissingError(`slice ${slice} names ${path}, which is not in ${CORPUS_DIR}/`);
       if (/(^|\/)README\.md$/.test(path)) readmes.set(path, (await this.readMain(`${CORPUS_DIR}/${path}`)) ?? '');
     }
-    const tree = buildRunTree(list, readmes, names);
+    const selected = options.teams === undefined ? list : selectTeams(list, readmes, options.teams);
+    const selectedReadmes = new Map([...readmes].filter(([path]) => selected.paths.includes(path)));
+    const tree = buildRunTree(selected, selectedReadmes, names);
     // Only check-fault scenarios opt into runner jobs. Other scenarios keep
     // their workflow-free starting tree.
     if (options.checks !== true) tree.paths.delete(CHECK_WORKFLOW_PATH);
