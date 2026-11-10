@@ -49,7 +49,7 @@ function badPaths(paths: readonly string[], cwd: string): string | undefined {
 }
 
 function lintAll(files: readonly string[], cwd: string): Finding[] {
-  const findings = files.flatMap((file) => lintText(file, readFileSync(join(cwd, file), 'utf8')));
+  const findings = files.flatMap((file) => lintText(file, readFileSync(join(cwd, file), 'utf8'), { linkedFileExists: linkedFileResolver(file, cwd) }));
   return [...findings, ...duplicateTitles(files)];
 }
 
@@ -58,7 +58,7 @@ function describe(findings: readonly Finding[]): string {
 }
 
 /**
- * The existence check for `fix` on `file`, a path relative to `root` (the
+ * The existence check for `lint` and `fix` on `file`, a path relative to `root` (the
  * repository's top folder, where the hook runs): a link resolves as the
  * sync resolves it, and must name a file there.
  */
@@ -96,11 +96,11 @@ export function runFix(paths: readonly string[], cwd: string = process.cwd()): C
   const problem = badPaths(paths, cwd);
   if (problem !== undefined) return { exitCode: USAGE_ERROR, stdout: '', stderr: `${problem}\n` };
   const files = markdownFiles(paths, cwd);
-  // A file whose title collides with another's is a lint finding too: leave it as it is.
-  const colliding = new Set(duplicateTitles(files).map((finding) => finding.file));
+  // A file with a lint finding, a colliding title included, is left as it is: its author decides.
+  const failing = new Set(lintAll(files, cwd).map((finding) => finding.file));
   const changed: string[] = [];
   for (const file of files) {
-    if (colliding.has(file)) continue;
+    if (failing.has(file)) continue;
     const path = join(cwd, file);
     const text = readFileSync(path, 'utf8');
     const fixed = fixText(text, { linkedFileExists: linkedFileResolver(file, cwd) });

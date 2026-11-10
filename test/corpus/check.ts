@@ -56,6 +56,8 @@ export function checkLintExpectations(
 ): string[] {
   const documents = manifest.files.filter((f) => f.synced && f.kind === "markdown");
   const expected = new Set(documents.filter((f) => f.class === "lint-error").map((f) => f.path));
+  // An image must name a file of the corpus, as `lint` checks it in a repository.
+  const paths = new Set(manifest.files.map((file) => file.path));
   const actual = new Map<string, Set<string>>();
   const present: string[] = [];
   const problems: string[] = [];
@@ -72,7 +74,8 @@ export function checkLintExpectations(
       continue;
     }
     present.push(file.path);
-    for (const finding of lintText(file.path, readFileSync(path, "utf8"))) record(finding);
+    const linkedFileExists = linkedFileCheck(file.path, (target) => paths.has(target));
+    for (const finding of lintText(file.path, readFileSync(path, "utf8"), { linkedFileExists })) record(finding);
   }
   for (const finding of duplicateTitles(present)) record(finding);
   for (const path of [...expected].sort()) {

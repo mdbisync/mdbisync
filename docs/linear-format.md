@@ -62,7 +62,9 @@ What both commands leave alone:
   between `+++` lines, is not recognized: it is Markdown body like the rest.
 - **Relative image and file paths.** The sync uploads the files and maps the
   paths; `fix` keeps the path as written, only encoding characters such as
-  spaces.
+  spaces. Every image must be such a path to a file of the repository (see
+  [`image-not-in-repository`](#image-not-in-repository)); links to web
+  pages and other URLs are fine.
 - **The sync's conflict markers.** A conflict the sync writes is ordinary
   bold paragraphs (`**Sync conflict: git version**` and so on) and passes
   both commands unchanged ([conflicts](conflicts.md) shows them and how to
@@ -207,10 +209,13 @@ The link around an image is dropped. A badge or a clickable picture loses
 its link.
 
 ```markdown
-[![Build status](https://example.com/badge.svg)](https://example.com/builds)
+[![Build status](images/build-status.svg)](https://example.com/builds)
 ```
 
 Instead, put the image and the link side by side or on separate lines.
+A badge served from another site is an image outside the repository, which
+[`image-not-in-repository`](#image-not-in-repository) reports as well: link
+to the page instead.
 
 ### `content-too-long`
 
@@ -323,7 +328,8 @@ any URL and any `src` or `href` attribute in an HTML block or tag.
 <img src="https://example.com/banner.png" alt="Banner" width="64">
 ```
 
-Instead, use Markdown: `![Banner](https://example.com/banner.png)`.
+Instead, use Markdown with an image file of the repository:
+`![Banner](images/banner.png)`.
 
 ### `block-first-in-list-item`
 
@@ -337,6 +343,36 @@ the indented block, so the block falls out of the list.
 ```
 
 Instead, start the item with a line of text and put the block below it.
+
+### `image-not-in-repository`
+
+An image must be a relative path to a file of the repository, not a URL or
+an absolute path. The sync uploads the files a document's images name; an
+image anywhere else would depend on the reader's network and on whether
+Linear keeps or copies it. The rule covers every image: inline,
+reference-style and inside a link, with any URL (`https:`, `data:`) and any
+path that starts with `/`. Plain links to URLs are not affected.
+
+```markdown
+![Revenue chart](https://example.com/charts/revenue.png)
+```
+
+Instead, add the image file to the repository, in the same pull request,
+and link it by its relative path: `![Revenue chart](images/revenue.png)`.
+A file stored with Git LFS counts like any other.
+
+### `image-file-missing`
+
+An image must name a file that exists in the repository, not a folder or a
+Markdown document. The path is resolved from the document's folder, and it
+must stay inside the repository. `lint` and `fix` check that the file is
+there, so a broken image never reaches Linear.
+
+```markdown
+![Logo](images/logo.md)
+```
+
+Instead, fix the path, or add the missing file in the same change.
 
 ## Install the hook
 

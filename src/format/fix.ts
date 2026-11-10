@@ -7,6 +7,7 @@ import type { BlockContent, Definition, DefinitionContent, Link, List, ListItem,
 import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import { nameToEmoji } from 'gemoji';
 import { lintText } from './lint.ts';
+import { IMAGE_PLACE_RULES } from './rules.ts';
 import { end, parse, resolveTarget, splitFile, start, visit } from './markdown.ts';
 
 /** What `fix` may know about the file beyond its text. */
@@ -32,9 +33,9 @@ export function linkedFileCheck(documentPath: string, isFile: (path: string) => 
   };
 }
 
-/** Returns the text in Linear's form, or the text itself when lint finds a problem. */
+/** Returns the text in Linear's form, or the text itself when lint finds a construct Linear would lose or alter. */
 export function fixText(text: string, options: FixOptions = {}): string {
-  if (lintText('', text).length > 0) return text;
+  if (lintText('', text).some((finding) => !IMAGE_PLACE_RULES.has(finding.rule))) return text;
   const { head, body } = splitFile(text);
   const fixed = fixBody(body.replace(/\r\n?/g, '\n'), options);
   return head + fixed;

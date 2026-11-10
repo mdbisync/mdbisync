@@ -64,6 +64,10 @@ rules:
     title: "A list item that starts with a heading, code or quote is written in a form Markdown reads as an empty item."
   - id: table-hash-cell
     title: "A table body cell starting with # becomes a heading."
+  - id: image-not-in-repository
+    title: "An image must be a relative path to a file of the repository, not a URL or an absolute path."
+  - id: image-file-missing
+    title: "An image must name a file that exists in the repository, not a folder or a Markdown document."
 known_constructs:
   - construct: sync-conflict-markers
     class: unchanged
@@ -552,7 +556,7 @@ known_constructs:
   - construct: image-empty-alt
     class: unchanged
   - construct: image-remote
-    class: unchanged
+    class: lint-error
   - construct: image-reference
     class: fixable
   - construct: image-path-spaces
@@ -564,7 +568,7 @@ known_constructs:
   - construct: image-several
     class: unchanged
   - construct: image-broken-reference
-    class: unchanged
+    class: lint-error
   - construct: attachment-pdf
     class: fixable
   - construct: attachment-csv
@@ -582,11 +586,11 @@ known_constructs:
   - construct: attachment-in-item-relative
     class: fixable
   - construct: image-in-cell-relative
-    class: unchanged
+    class: lint-error
   - construct: corpus-release-notes
     class: fixable
   - construct: corpus-task-code
-    class: unchanged
+    class: lint-error
   - construct: corpus-task-code-uploaded
     class: unchanged
   - construct: task-list-then-bullet-list
@@ -2279,7 +2283,9 @@ fixtures:
   - file: "images/remote.md"
     group: images
     construct: image-remote
-    class: unchanged
+    class: lint-error
+    rule: image-not-in-repository
+    line: 1
     basis: known
     canary: kx-2d27b0d2
   - file: "images/reference.md"
@@ -2321,7 +2327,9 @@ fixtures:
   - file: "images/broken-reference.md"
     group: images
     construct: image-broken-reference
-    class: unchanged
+    class: lint-error
+    rule: image-file-missing
+    line: 1
     basis: known
     canary: kx-cc5611cc
     missing_target: true
@@ -2423,7 +2431,9 @@ fixtures:
   - file: "list-items/image-not-uploaded-in-cell.md"
     group: list-items
     construct: image-in-cell-relative
-    class: unchanged
+    class: lint-error
+    rule: image-file-missing
+    line: 3
     basis: known
     canary: kx-7a154a39
     corpus: false
@@ -2449,7 +2459,9 @@ fixtures:
   - file: "list-items/task-code.md"
     group: list-items
     construct: corpus-task-code
-    class: unchanged
+    class: lint-error
+    rule: image-file-missing
+    line: 8
     basis: known
     canary: kx-750b1a3b
     corpus: false
