@@ -12,7 +12,7 @@ import { readKeptAnnotations } from '../../../src/initial-sync/confirm.ts';
 import { UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE } from '../../../src/initial-sync/uploads.ts';
 import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
-import { annotatedFolders, owningFolder, type Folder } from './corpus.ts';
+import { annotatedFolders, annotationPath, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
@@ -351,9 +351,10 @@ export interface Sides {
    */
   omitted: Map<string, string>;
   /**
-   * Annotation READMEs the latest initial sync kept without a document, as
-   * the final `ids` commit of the current ids ref names them, and only
-   * those still unmapped that annotate a folder of the tracked tip.
+   * Annotation READMEs the engine keeps without a document, by its own rule:
+   * unmapped, annotating a folder of the tracked tip, with the same body on
+   * the `linear` state ref, and either no body or named by a
+   * `Kept-annotation` trailer of the latest initial sync's final `ids` commit.
    */
   kept: Set<string>;
 }
@@ -501,19 +502,28 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   }
   const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
   const omitted = deliberateOmissions(ctx.engine.results);
-  const kept = keptAnnotations(await readKeptAnnotations(git, idsCommit), ids, folders);
+  const linearTip = await fetchRef(git, stateRef(config, 'linear'));
+  const named = await readKeptAnnotations(git, idsCommit);
+  const kept = new Set<string>();
+  for (const folder of folders) {
+    const path = annotationPath(folder);
+    if (ids.has(path) || linearTip === null) continue;
+    const text = readmes.get(path) as string;
+    const recorded = await git.run(['show', `${linearTip}:${path}`], { okCodes: [0, 128] });
+    if (keptAnnotation(text, recorded.code === 0 ? recorded.stdout.toString('utf8') : null, named.has(path))) kept.add(path);
+  }
   return { files, ids, uploads, documents, allDocuments, uploadsByHash, hashes, tip, folders, documentUrlBase: world.documentUrlBase, omitted, kept };
 }
 
 /**
- * The READMEs an initial sync's `Kept-annotation` trailers name that the
- * current state still bears out: unmapped, and the annotation of a folder
- * of the tracked tip. A named path that gained an id, or that annotates
- * nothing, is checked like any other file.
+ * Whether the engine keeps an unmapped annotation README without a document
+ * (its merge's rule): the `linear` state ref holds it (`recorded`) with the
+ * same body, and the body is empty or the latest initial sync named it as
+ * kept. A changed body is a new document, kept or not.
  */
-export function keptAnnotations(named: ReadonlySet<string>, ids: IdMap, folders: readonly Folder[]): Set<string> {
-  const annotations = new Set(folders.map((folder) => (folder.folder === '' ? 'README.md' : `${folder.folder}/README.md`)));
-  return new Set([...named].filter((path) => !ids.has(path) && annotations.has(path)));
+export function keptAnnotation(text: string, recorded: string | null, named: boolean): boolean {
+  if (recorded === null || bodyOf(recorded) !== bodyOf(text)) return false;
+  return bodyOf(text) === '' || named;
 }
 
 // --- invariants ---------------------------------------------------------------
@@ -530,9 +540,9 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     for (const [path, text] of s.files) {
       // A file its run left out on purpose has no document to match; its earlier document, if any, stays as it was.
       if (s.omitted.has(path)) continue;
+      // An annotation README the engine keeps without a document has none to match.
+      if (s.kept.has(path)) continue;
       const entry = s.ids.get(path);
-      // An annotation README the initial sync kept, body included, has no document by design.
-      if (entry === undefined && s.kept.has(path)) continue;
       const document = entry === undefined ? undefined : s.documents.get(entry.id);
       if (document === undefined || document.trashed) {
         differing.push(`${path} (no document)`);
@@ -626,7 +636,7 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
       const entry = s.ids.get(path);
       if (entry === undefined) {
         // Left out on purpose, it needs no id; a mapped one is still checked below.
-        // An annotation README the initial sync kept without a document needs no id either.
+        // Nor does an annotation README the engine keeps without a document.
         if (!s.omitted.has(path) && !s.kept.has(path)) problems.push(`${path} has no id`);
         continue;
       }
