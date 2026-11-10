@@ -34,6 +34,11 @@ class World implements MarkClient {
     this.comments.set(id, body);
     return { id, created };
   }
+  resolved: string[] = [];
+  async resolveComment(id: string) {
+    this.events.push('resolve');
+    this.resolved.push(id);
+  }
   async save(entry: IdEntry) {
     this.events.push('save');
     if (this.failSave) throw new Error('save unavailable');
@@ -325,4 +330,32 @@ test('resolving one of several regions keeps the document marked without another
   assert.equal(world.document.icon, 'Alert');
   assert.equal(world.comments.size, 1);
   assert.deepEqual(world.events, []);
+});
+
+test('a released suspension comment is resolved before the mark clears, and a suspended one is left to the hold step', async () => {
+  const world = new World();
+  world.document.content = 'Plain text.\n';
+  world.document.icon = 'Cross';
+  world.document.color = '#EB5757';
+  const hold = { id: '22222222-2222-4222-8222-222222222222', bodyHash: 'a'.repeat(64), posted: true };
+  world.entry = { id: 'document-one', suspended: { noticeId: hold.id, paths: ['notes.md'], checks: ['lint'] }, saved: { icon: ':fire:', color: '#123456', hold } };
+  await world.reconcile();
+  assert.deepEqual(world.events, []);
+  world.entry = { id: 'document-one', saved: { icon: ':fire:', color: '#123456', hold } };
+  await world.reconcile();
+  assert.deepEqual(world.resolved, [hold.id]);
+  assert.equal(world.document.icon, ':fire:');
+  assert.equal(world.entry.saved, undefined);
+});
+
+test('a document marked blocked while suspended keeps its suspension comment', async () => {
+  const world = new World();
+  world.document.content = 'Plain text.\n';
+  const hold = { id: '22222222-2222-4222-8222-222222222222', bodyHash: 'a'.repeat(64), posted: true };
+  world.entry = { id: 'document-one', suspended: { noticeId: hold.id, paths: ['notes.md'], checks: ['lint'] }, saved: { icon: ':fire:', color: '#123456', hold } };
+  await world.reconcile([{ hook: 'secrets', line: 2 }]);
+  assert.equal(world.document.icon, MARKS.blocked.icon);
+  assert.deepEqual(world.entry.saved?.hold, hold);
+  assert.equal(world.entry.saved?.notice?.kind, 'blocked');
+  assert.deepEqual(world.resolved, []);
 });

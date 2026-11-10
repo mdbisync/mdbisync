@@ -46,6 +46,7 @@ import {
   readIds,
   commitTree,
 } from '../state/index.ts';
+import { HOLD_MARK_LIMIT, type HoldMarksResult } from './hold.ts';
 import { LaneMoved, LaneConflict, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import { message } from '../messages.ts';
@@ -72,6 +73,8 @@ export interface PullRequestOptions {
 
 export interface PullRequestResult {
   suspended?: SuspendedResult;
+  /** The suspended marks the run set, edited and cleared in Linear after the lane's push. */
+  holdMarks?: HoldMarksResult;
   /** Merging `linear` would change the tracked branch. */
   needed: boolean;
   /** The open sync pull request after this step; null when there is none. */
@@ -257,7 +260,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     if (fresh && grace === 0) return result;
     result.checks = fresh ? await waitForChecks(github, head, grace) : await readChecks(github, head);
     if (result.checks.state === 'failed') {
-      result.suspended = await suspendBatch(context, options, head, pullRequest.number, result.checks.failed);
+      result.suspended = await suspendBatch(context, options, head, pullRequest.number, result.checks.failures ?? result.checks.failed.map((name) => ({ name })));
       result.pullRequest = null;
       result.branchMoved = true;
       return result;
@@ -458,6 +461,14 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     if (hold.code === 'github-failed') lines.push('A GitHub request for the suspended lane failed; the normal lane still runs.', '');
     if (hold.conflicts !== undefined) lines.push(`Suspended files waiting for a manual merge: ${hold.conflicts.map((path) => `\`${path}\``).join(', ')}.`, '');
     if (hold.checks.length > 0) lines.push(`Failed checks: ${hold.checks.map((name) => `\`${name}\``).join(', ')}.`, '');
+  }
+  const marks = result.holdMarks;
+  if (marks !== undefined) {
+    const counts = [[marks.set.length, 'marked'], [marks.updated.length, 'comments updated'], [marks.cleared.length, 'cleared']].filter(([count]) => (count as number) > 0).map(([count, what]) => `${count} ${what}`);
+    if (counts.length > 0) lines.push(`Suspended documents in Linear: ${counts.join(', ')}.`, '');
+    if (marks.deferred > 0) lines.push(`${marks.deferred} more suspended documents get their mark or comment in a later run (at most ${HOLD_MARK_LIMIT} per run).`, '');
+    if (marks.removed.length > 0) lines.push(`Suspended documents in Linear's trash or archived, without a mark: ${marks.removed.map((path) => `\`${path}\``).join(', ')}.`, '');
+    if (marks.code !== undefined) lines.push(`The suspended marks did not finish (\`${marks.code}\`${marks.failure === undefined ? '' : `, ${marks.failure.operation}`}); a later run goes on.`, '');
   }
   const pr = result.pullRequest;
   const link = pr === null ? '' : `[#${pr.number}](${pr.url})`;

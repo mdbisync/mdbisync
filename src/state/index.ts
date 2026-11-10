@@ -38,6 +38,7 @@ export {
   type SuspensionEpisode,
   type IdMap,
   type MarkNotice,
+  type HoldNotice,
   NotFastForwardError,
   type PushResult,
   type RefUpdate,

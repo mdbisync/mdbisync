@@ -276,9 +276,27 @@ export function scanCanaries(texts: ReadonlyMap<string, string>, canaries: Itera
   return hits;
 }
 
-/** I9: requests per written document stay at or under 1.5, plus at most 5 per run. */
-export function budgetHolds(requests: number, documentsWritten: number, runs: number): boolean {
-  return requests <= 1.5 * documentsWritten + 5 * runs;
+/**
+ * I9: requests per written document stay at or under 1.5, plus at most 5 per
+ * run, plus at most 2 per document whose suspended mark or comment was set,
+ * changed or cleared in a run.
+ */
+export function budgetHolds(requests: number, documentsWritten: number, runs: number, holdChanges = 0): boolean {
+  return requests <= budgetLimit(documentsWritten, runs, holdChanges);
+}
+
+export function budgetLimit(documentsWritten: number, runs: number, holdChanges = 0): number {
+  return 1.5 * documentsWritten + 5 * runs + 2 * holdChanges;
+}
+
+/** The documents whose suspended mark or comment changed, over the runs' reports (`pullRequest.holdMarks`). */
+export function reportedHoldChanges(reports: ReadonlyArray<Record<string, unknown> | null>): number {
+  let changes = 0;
+  for (const report of reports) {
+    const marks = (report?.['pullRequest'] as Record<string, unknown> | null | undefined)?.['holdMarks'] as Record<string, unknown> | undefined;
+    for (const key of ['set', 'updated', 'cleared']) if (Array.isArray(marks?.[key])) changes += (marks[key] as unknown[]).length;
+  }
+  return changes;
 }
 
 /**
@@ -692,9 +710,10 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     const requests = engineRequestCount(ctx, remote);
     const written = (proxy?.requests.filter(isDocumentWrite).length ?? 0) + remote.filter(({ entry }) => isDocumentWrite(entry)).length;
     const runs = ctx.engine.results.length;
-    return budgetHolds(requests, written, runs)
+    const holds = reportedHoldChanges(ctx.engine.results.map((result) => result.report));
+    return budgetHolds(requests, written, runs, holds)
       ? ok('I9')
-      : bad('I9', `${requests} requests for ${written} written documents in ${runs} runs (limit ${1.5 * written + 5 * runs})`);
+      : bad('I9', `${requests} requests for ${written} written documents and ${holds} suspended mark changes in ${runs} runs (limit ${budgetLimit(written, runs, holds)})`);
   },
 };
 

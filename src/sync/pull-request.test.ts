@@ -12,6 +12,7 @@ import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { detectConflicts, MARKERS } from '../merge/index.ts';
 import { MARKS } from './marks.ts';
+import { HOLD_MARK_LIMIT } from './hold.ts';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
@@ -56,6 +57,8 @@ describe('sync: the sync pull request', () => {
   /** Every value the sync branch held, in order: it only moves forward (I4). */
   let syncValues: string[];
   let normalValues: string[];
+  /** Every request that reached Linear (token, GraphQL, revocation), in order. */
+  const linearRequests: string[] = [];
   const reportFile = () => join(fixture.root, 'report.json');
   const summaryFile = () => join(fixture.root, 'summary.md');
 
@@ -96,13 +99,15 @@ describe('sync: the sync pull request', () => {
     const writesBefore = world.writes.length;
     deletedSuspendedDuringRun = false;
     const mark = await markWorld(world, fixture);
-    const result = await runCli([command], { env: env(extra), cwd, fetch: fetchOverride ?? fakeFetch(world) });
+    const linearBefore = linearRequests.length;
+    const counted = fetchOverride ?? fakeFetch(world);
+    const result = await runCli([command], { env: env(extra), cwd, fetch: async (input, init) => { if (String(input).startsWith(LINEAR_API)) linearRequests.push(String(input)); return counted(input, init); } });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
     for (const text of texts) assert.ok(!text.includes(CANARY), 'content reached the output or a pull request (I5)');
     await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined, movedByOthers: [...(concurrentMove ? ['ids'] as const : []), ...(deletedSuspendedDuringRun ? ['suspendedBranch'] as const : [])] });
-    return { result, report, summary, writes: world.writes.slice(writesBefore) };
+    return { result, report, summary, writes: world.writes.slice(writesBefore), linearRequests: linearRequests.length - linearBefore };
   }
 
   /** One sync run, with the invariants every run keeps. */
@@ -165,6 +170,7 @@ describe('sync: the sync pull request', () => {
     touch(document);
   }
   const checksOn = (sha: string, checks: FakeCheck[]) => world.github.checks?.set(sha, checks);
+  const commentsOf = (document: FakeDocument) => [...world.linear.comments.values()].filter((comment) => comment.documentContentId === `content-${document.id}`);
   const openPullRequests = () => world.github.pullRequests.filter((pr) => pr.state === 'open');
 
   it('keeps action and CLI merge-grace defaults aligned', async () => {
@@ -364,7 +370,12 @@ describe('sync: the sync pull request', () => {
     const path = 'eng/notes/plan.md';
     await editInLinear(path, `# Plan\n\nA new step. ${CANARY}\n`);
     await sync();
-    checksOn(await rev(SYNC_BRANCH), [{ name: CHECK_NAME, status: 'completed', conclusion: 'failure' }]);
+    const own = { icon: (await documentOf(path)).icon ?? null, color: (await documentOf(path)).color ?? null };
+    checksOn(await rev(SYNC_BRANCH), [{ name: CHECK_NAME, status: 'completed', conclusion: 'failure', annotations: [
+      { path, start_line: 3, title: 'Lists', message: 'Expected a blank line before the list.' },
+      { path, start_line: 3, message: `Found A new step. ${CANARY} here` },
+      { path: 'combined/guide.md', start_line: 1, message: 'Another file.' },
+    ] }]);
     const other = 'combined/guide.md';
     const content = `# Guide\n\nA tracked edit. ${CANARY}\n`;
     await gitEdit(other, content);
@@ -378,12 +389,128 @@ describe('sync: the sync pull request', () => {
     assert.equal((await documentOf(other)).content, content);
     assert.doesNotMatch(await show(`refs/heads/main:${path}`), /A new step/);
     assert.match(await show(`refs/heads/mdbisync/suspended:${path}`), /A new step/);
+    // The red mark and one comment: the check, a link to its run and its annotations on this file only.
+    const held = await documentOf(path);
+    assert.deepEqual({ icon: held.icon, color: held.color }, MARKS.suspended);
+    const notes = commentsOf(held);
+    assert.equal(notes.length, 1);
+    const note = notes[0]?.body ?? '';
+    assert.match(note, /^Changes to this document are on hold: a check failed/);
+    assert.ok(note.includes(`- Check \`${CHECK_NAME}\`: [run](https://github.test/owner/repo/runs/`), note);
+    assert.match(note, / {2}- Line 3: Lists: Expected a blank line before the list\./);
+    // A message that repeats the document's text is left out: only its line is shown.
+    assert.match(note, / {2}- Line 3\.\n/);
+    assert.doesNotMatch(note, /Another file/);
+    assert.deepEqual(failed.report.pullRequest?.holdMarks?.set, [path]);
     checksOn(await rev('refs/heads/mdbisync/suspended'), [{ name: CHECK_NAME, status: 'completed', conclusion: 'success' }]);
     const repaired = await sync();
     assert.equal(repaired.result.exitCode, 0, repaired.result.stderr);
     assert.ok(repaired.report.pullRequest?.suspended?.released);
     assert.equal(openPullRequests().length, 0);
     assert.match(await show(`refs/heads/main:${path}`), /A new step/);
+    // Release clears it: the document's own icon and color come back and the comment is resolved, not deleted.
+    const released = await documentOf(path);
+    assert.deepEqual({ icon: released.icon ?? null, color: released.color ?? null }, own);
+    assert.equal(commentsOf(released).length, 1);
+    assert.equal(commentsOf(released)[0]?.resolved, true);
+    assert.deepEqual(repaired.report.pullRequest?.holdMarks?.cleared, [path]);
+    assert.equal('saved' in ((await ids())[path] as object), false);
+    const quiet = await sync();
+    assert.deepEqual(quiet.writes, []);
+  });
+
+  it('L5-35: a batch of 60 suspended documents is marked 50 in one run and 10 in the next, within I9', async () => {
+    const projectId = (await documentOf('eng/notes/plan.md')).projectId as string;
+    for (let i = 0; i < MANY; i += 1) await editInLinear(`eng/notes/item-${i}.md`, `# Item ${i}\n\nClosed.\n`);
+    for (let i = 0; i < MANY; i += 1) await editInLinear(`combined/page-${i}.md`, `# Page ${i}\n\nFinal.\n`);
+    for (let i = 0; i < MANY; i += 1) {
+      world.linear.documents.push({ id: `fresh-${i}`, title: `fresh-${i}`, projectId, content: `# Fresh ${i}\n\nNew.\n`, createdAt: '2026-01-03T00:00:00Z' });
+      touch(world.linear.documents.at(-1) as FakeDocument);
+    }
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), FAILED);
+    // I9: 1.5 per written document, 5 per run, and 2 per document whose suspended mark or comment changed.
+    const withinBudget = (run: Awaited<ReturnType<typeof sync>>) => {
+      const marks = run.report.pullRequest?.holdMarks;
+      const changes = (marks?.set.length ?? 0) + (marks?.updated.length ?? 0) + (marks?.cleared.length ?? 0);
+      const written = run.writes.filter((write) => write === 'CreateDocument').length + run.writes.filter((write) => write === 'UpdateDocument').length - changes;
+      assert.ok(run.linearRequests <= 1.5 * Math.max(written, 0) + 5 + 2 * changes, `${run.linearRequests} Linear requests for ${changes} mark changes and ${written} written documents`);
+    };
+    const first = await sync();
+    assert.ok(first.report.pullRequest?.suspended);
+    assert.equal(first.report.pullRequest?.holdMarks?.set.length, HOLD_MARK_LIMIT);
+    assert.equal(first.report.pullRequest?.holdMarks?.deferred, 60 - HOLD_MARK_LIMIT);
+    assert.match(first.summary, /10 more suspended documents get their mark or comment in a later run/);
+    withinBudget(first);
+    checksOn(await rev(SUSPENDED), FAILED);
+    const second = await sync();
+    assert.equal(second.report.pullRequest?.holdMarks?.set.length, 60 - HOLD_MARK_LIMIT);
+    assert.equal(second.report.pullRequest?.holdMarks?.deferred, 0);
+    withinBudget(second);
+    const held = Object.entries(await ids()).filter(([, entry]) => (entry as { suspended?: unknown }).suspended !== undefined).map(([path]) => path);
+    assert.equal(held.length, 60);
+    for (const path of held) {
+      const document = await documentOf(path);
+      assert.equal(document.icon, MARKS.suspended.icon);
+      assert.equal(commentsOf(document).length, 1);
+    }
+    // A long suspension costs nothing per run: the held documents are not read again.
+    const idle = await sync();
+    assert.equal(idle.report.pullRequest?.holdMarks, undefined);
+    assert.ok(idle.linearRequests <= 5, `an idle suspended run made ${idle.linearRequests} Linear requests`);
+  });
+
+  it('L5-25: a Linear edit of a suspended document reaches only the suspended pull request and releases it', async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne();
+    const normal = await rev(SYNC_BRANCH);
+    const before = commentsOf(await documentOf(path)).map(({ body }) => body);
+    await editInLinear(path, '# Plan\n\nThe fixed line.\n');
+    const intake = await sync();
+    assert.equal(intake.result.exitCode, 0, intake.result.stderr);
+    assert.equal(await rev(SYNC_BRANCH), normal, 'the normal lane took a suspended edit');
+    assert.doesNotMatch(await show(`${SYNC_BRANCH}:${path}`), /The fixed line/);
+    assert.match(await show(`${SUSPENDED}:${path}`), /The fixed line/);
+    // Still held while its checks run: the mark and the one comment stay.
+    assert.deepEqual(commentsOf(await documentOf(path)).map(({ body }) => body), before);
+    assert.equal((await documentOf(path)).icon, MARKS.suspended.icon);
+    checksOn(await rev(SUSPENDED), PASSED);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.match(await show(`refs/heads/main:${path}`), /The fixed line/);
+    const document = await documentOf(path);
+    assert.notEqual(document.icon, MARKS.suspended.icon);
+    assert.equal(commentsOf(document).length, 1);
+    assert.equal(commentsOf(document)[0]?.resolved, true);
+  });
+
+  it('edits the one comment of an episode when a later head fails differently, and starts a new one for a new episode', async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne();
+    const first = commentsOf(await documentOf(path));
+    assert.equal(first.length, 1);
+    assert.match(first[0]?.body ?? '', /Check `ci`/);
+    // The suspended head fails on another check: the same comment says so, no second comment.
+    await editInLinear(path, '# Plan\n\nAnother held edit.\n');
+    await sync();
+    checksOn(await rev(SUSPENDED), [{ name: 'format', status: 'completed', conclusion: 'failure', annotations: [{ path, start_line: 1, message: 'Heading level.' }] }]);
+    const changed = await sync();
+    assert.deepEqual(changed.report.pullRequest?.holdMarks?.updated, [path]);
+    const edited = commentsOf(await documentOf(path));
+    assert.equal(edited.length, 1);
+    assert.match(edited[0]?.body ?? '', /Check `format`/);
+    assert.match(edited[0]?.body ?? '', /Line 1: Heading level\./);
+    // An unchanged failure writes nothing.
+    const idle = await sync();
+    assert.equal(idle.report.pullRequest?.holdMarks, undefined);
+    assert.deepEqual(idle.writes.filter((write) => !write.startsWith('PATCH /pulls/')), []);
+    await releaseHeld();
+    assert.equal(commentsOf(await documentOf(path))[0]?.resolved, true);
+    // Suspended again later: a new episode, a new comment.
+    await suspendOne(path, '# Plan\n\nA second episode.\n');
+    const again = commentsOf(await documentOf(path));
+    assert.equal(again.length, 2);
+    assert.equal(again.filter((comment) => comment.resolved !== true).length, 1);
   });
 
   async function gitEdit(path: string, content: string) {

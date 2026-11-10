@@ -98,6 +98,10 @@ export interface FakeCheck {
   conclusion?: string;
   /** A commit status (the statuses API) instead of a check run. */
   commitStatus?: boolean;
+  /** A commit status's link (`target_url`). */
+  url?: string;
+  /** A check run's annotations, as `GET /check-runs/<id>/annotations` answers them. */
+  annotations?: Array<{ path: string; start_line: number; title?: string; message: string }>;
 }
 
 export interface FakeWorld {
@@ -114,6 +118,10 @@ export interface FakeWorld {
     refusePullRequests?: boolean;
     /** Checks by commit; a commit without an entry has none. */
     checks?: Map<string, FakeCheck[]>;
+    /** Check runs in the order the world first listed them: a run's id is its place here, from 1. */
+    checkRuns?: FakeCheck[];
+    /** How many annotation pages the runs read. */
+    annotationReads?: number;
     /**
      * Merges a pull request as GitHub would, while its head is `sha`: the
      * test moves the base branch and answers the merge commit, or answers
@@ -149,7 +157,7 @@ export interface FakeWorld {
     urlKey: string;
     uploads: FakeUpload[];
     /** Comments on documents, by comment id. */
-    comments: Map<string, { documentContentId: string; body: string }>;
+    comments: Map<string, { documentContentId: string; body: string; resolved?: boolean }>;
     /** Projects removed with `projectDelete`; their documents stay, archived. */
     deletedProjects?: string[];
     /**
@@ -260,6 +268,8 @@ async function github(world: FakeWorld, method: string, path: string, init: Requ
   if (merged !== undefined) return merged;
   const checks = commitChecks(world, method, rest);
   if (checks !== undefined) return checks;
+  const annotations = checkAnnotations(world, method, rest);
+  if (annotations !== undefined) return annotations;
   const probe = PERMISSION_PROBES.find((candidate) => candidate.method === method && rest === candidate.path(rest.split('/')[2] ?? ''));
   if (probe === undefined) return json(404, { message: 'Not Found' });
   if (world.github.rateLimited) return json(403, { message: 'You have exceeded a secondary rate limit.' });
@@ -352,14 +362,36 @@ function commitChecks(world: FakeWorld, method: string, rest: string): Response 
   if (match[2] === 'status' && world.github.missing.has('statuses:read')) return json(403, { message: 'Resource not accessible by integration' });
   const all = world.github.checks?.get(match[1] as string) ?? [];
   if (match[2] === 'status') {
-    const statuses = all.filter((check) => check.commitStatus === true).map((check) => ({ context: check.name, state: check.status === 'completed' ? check.conclusion : 'pending' }));
+    const statuses = all.filter((check) => check.commitStatus === true).map((check) => ({ context: check.name, state: check.status === 'completed' ? check.conclusion : 'pending', target_url: check.url ?? null }));
     return json(200, { state: statuses.length === 0 ? 'pending' : 'success', total_count: statuses.length, statuses });
   }
   const runs = all.filter((check) => check.commitStatus !== true);
   const page = Number(new URLSearchParams(match[3] ?? '').get('page') ?? '1');
   const size = Number(new URLSearchParams(match[3] ?? '').get('per_page') ?? '30');
   const slice = runs.slice((page - 1) * size, page * size);
-  return json(200, { total_count: runs.length, check_runs: slice.map((check) => ({ name: check.name, status: check.status, conclusion: check.conclusion ?? null })) });
+  return json(200, { total_count: runs.length, check_runs: slice.map((check) => ({ id: checkRunId(world, check), name: check.name, status: check.status, conclusion: check.conclusion ?? null, html_url: `https://github.test/owner/repo/runs/${checkRunId(world, check)}` })) });
+}
+
+/** A check run's id: the order in which the world first listed it, from 1. */
+function checkRunId(world: FakeWorld, check: FakeCheck): number {
+  const listed = (world.github.checkRuns ??= []);
+  if (!listed.includes(check)) listed.push(check);
+  return listed.indexOf(check) + 1;
+}
+
+/** `GET /check-runs/<id>/annotations`: the annotations of the check run with that id. */
+function checkAnnotations(world: FakeWorld, method: string, rest: string): Response | undefined {
+  const match = /^\/check-runs\/(\d+)\/annotations(\?.*)?$/.exec(rest);
+  if (match === null || method !== 'GET') return undefined;
+  if (world.github.missing.has('checks:read')) return json(403, { message: 'Resource not accessible by integration' });
+  world.github.annotationReads = (world.github.annotationReads ?? 0) + 1;
+  const check = world.github.checkRuns?.[Number(match[1]) - 1];
+  if (check === undefined || check.commitStatus === true) return json(404, { message: 'Not Found' });
+  const query = new URLSearchParams(match[2] ?? '');
+  const page = Number(query.get('page') ?? '1');
+  const size = Number(query.get('per_page') ?? '30');
+  const all = (check.annotations ?? []).map((annotation) => ({ ...annotation, end_line: annotation.start_line, annotation_level: 'failure' }));
+  return json(200, all.slice((page - 1) * size, page * size));
 }
 
 /** A read of a pull request: GitHub's own close of one whose head branch was deleted lands after its open reads run out. */
@@ -414,6 +446,9 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
       // As measured: Linear refuses to restore a trashed document whose project was deleted.
       return json(200, { errors: [{ message: 'Project not found', extensions: { code: 'INPUT_ERROR' } }], data: null });
     }
+    // Linear refuses a client-chosen comment id it already holds (measured 2026-11-10: INPUT_ERROR "conflict on insert of Comment").
+    const commentId = operationName === 'CommentOnDocument' ? (variables.input as { id?: string }).id : undefined;
+    if (commentId !== undefined && world.linear.comments.has(commentId)) return json(200, { errors: [{ message: 'conflict on insert of Comment', extensions: { code: 'INPUT_ERROR' } }], data: null });
     return json(200, { data: documentMutation(world, operationName, variables) ?? {} });
   }
   world.linear.beforeQuery?.(operationName, variables);
@@ -522,6 +557,11 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
     const id = input.id ?? `comment-${world.linear.comments.size + 1}`;
     world.linear.comments.set(id, { documentContentId: input.documentContentId, body: input.body });
     return { commentCreate: { success: true, comment: { id } } };
+  }
+  if (operation === 'ResolveComment') {
+    const comment = world.linear.comments.get(variables.id as string);
+    if (comment !== undefined) comment.resolved = true;
+    return { commentResolve: { success: comment !== undefined } };
   }
   if (operation === 'UpdateDocumentComment') {
     const comment = world.linear.comments.get(variables.id as string);

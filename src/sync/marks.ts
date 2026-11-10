@@ -7,6 +7,8 @@ import { message } from '../messages.ts';
 export const MARKS = {
   conflict: { icon: 'Alert', color: '#F2994A' },
   blocked: { icon: 'Cross', color: '#EB5757' },
+  /** The same red cross as blocked: both say the document's changes do not reach Git, and the comment says why. */
+  suspended: { icon: 'Cross', color: '#EB5757' },
 } as const;
 
 export const CONFLICT_COMMENT = 'This document contains conflicting versions. Edit the document here or in Git, keep the text you want, and remove every conflict marker paragraph throughout the document. The alert clears after the next sync.';
@@ -19,7 +21,7 @@ export interface SecurityFinding {
   line: number;
 }
 
-export type MarkClient = Pick<LinearClient, 'updateDocument' | 'ensureDocumentComment'>;
+export type MarkClient = Pick<LinearClient, 'updateDocument' | 'ensureDocumentComment' | 'resolveComment'>;
 export type MarkState = 'conflict' | 'blocked' | 'clear';
 
 export interface MarkOptions {
@@ -68,6 +70,14 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
 
   // Suspension decorations are reconciled after the lane's state push.
   if (entry.suspended !== undefined && blocked.length === 0) return result;
+  // A released episode whose comment the hold step has not reached yet: resolve it here, before its mark goes.
+  if (entry.suspended === undefined && entry.saved?.hold !== undefined) {
+    if (entry.saved.hold.posted) await linear.resolveComment(entry.saved.hold.id);
+    const { hold: _hold, ...saved } = entry.saved;
+    entry = { ...entry, saved };
+    await persistEntry(entry);
+    result.entry = entry;
+  }
 
   if (state === 'clear') {
     if (entry.saved === undefined) return result;

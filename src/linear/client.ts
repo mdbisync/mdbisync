@@ -335,8 +335,28 @@ export class LinearClient {
     return comment;
   }
 
-  /** Ensure one notice exists, including recovery after a lost create response. */
-  async ensureDocumentComment(documentContentId: string, body: string, id: string, updateExisting = false): Promise<{ id: string; created: boolean }> {
+  /**
+   * Resolves a comment, the way a person marks a thread resolved: it stays
+   * on the document, folded. Resolving one that is already resolved is not
+   * an error to the caller.
+   */
+  async resolveComment(id: string): Promise<void> {
+    const data = await this.request<{ commentResolve: { success: boolean } }>(
+      'ResolveComment', 'mutation',
+      `mutation ResolveComment($id: String!) { commentResolve(id: $id) { success } }`,
+      { id },
+    );
+    succeeded('ResolveComment', data.commentResolve);
+    this.stats.wrote('ResolveComment');
+  }
+
+  /**
+   * Ensure one notice exists, including recovery after a lost create response.
+   * With `createFirst`, a notice this caller has never seen posted is created
+   * without a lookup: an id Linear already holds refuses the create, and the
+   * lookup after that refusal finds it.
+   */
+  async ensureDocumentComment(documentContentId: string, body: string, id: string, updateExisting = false, createFirst = false): Promise<{ id: string; created: boolean }> {
     const find = async (): Promise<boolean> => {
       const data = await this.request<{ comments: { nodes: Array<{ id: string; documentContentId: string | null }> } }>(
         'FindDocumentComment', 'query',
@@ -359,7 +379,7 @@ export class LinearClient {
       }
       return { id, created: false };
     };
-    if (await find()) return existing();
+    if (!createFirst && await find()) return existing();
     let comment: { id: string };
     try {
       comment = await this.commentOnDocument(documentContentId, body, id);
