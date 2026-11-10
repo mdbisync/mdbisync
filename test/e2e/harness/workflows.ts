@@ -7,8 +7,10 @@
 // logs are read for the canary scan (I5).
 //
 // Scheduled workflows run only on the repository's default branch, and a
-// run's branches never are, so a step that needs the schedule is
-// env-blocked with that reason.
+// run's branches never are. A run asks the sandbox's scheduled workflow
+// (workflow-files.ts, renderScheduler) for a scheduled sync with its request
+// branch; the scheduled run that takes the request runs the sync for the
+// run's branches as a job named for the run.
 //
 // A failed run is an environment blocker only when it is proven: its first
 // failed step installs a tool the runner must provide, and that step's own
@@ -17,7 +19,7 @@
 // scenario then stops at that run. Any other failure stays the run's result
 // for the scenario's checks.
 
-import { WORKFLOW_FILES } from './workflow-files.ts';
+import { REQUEST_JOB, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
 import { diagnosticRequests } from './request-accounting.ts';
 import { CANARY_EVIDENCE } from './security-canary.ts';
 import { inflateRawSync } from 'node:zlib';
@@ -32,7 +34,10 @@ export const RUN_WAIT_MS = 30 * 60_000;
 export const RUN_APPEAR_MS = 5 * 60_000;
 export const POLL_MS = 10_000;
 
-export const SCHEDULE_BLOCKED = 'scheduled workflows run only on the default branch; a run\'s branches are not it';
+/** How long a run's request may wait for a scheduled run to take it: GitHub starts schedules late, and may skip a tick. */
+export const SCHEDULE_TAKE_MS = 60 * 60_000;
+/** How often a tick by hand is started again while the request waits: a newer pending tick cancels an older one, and a tick serves one request. */
+export const RETICK_MS = 5 * 60_000;
 
 /** Files of a zip archive (stored or deflated entries), by name. */
 export function unzip(archive: Buffer): Map<string, Buffer> {
@@ -99,6 +104,63 @@ export async function waitForRun(rest: SandboxRest, options: WaitOptions): Promi
     if (!seen && waited > (options.appearMs ?? RUN_APPEAR_MS)) throw new ProductError(`no ${options.event} run started on the run's branch`);
     if (waited > (options.timeoutMs ?? RUN_WAIT_MS)) throw new EnvBlockedError(`the ${options.event} run did not finish within ${Math.round((options.timeoutMs ?? RUN_WAIT_MS) / 60_000)} minutes (runner busy?)`);
     await sleep(poll);
+  }
+}
+
+/**
+ * Waits until a scheduled run takes the run's request (its branch is gone).
+ * `tick`, when given, starts a tick by hand now and again every `retickMs`
+ * while the request waits. A request no tick took within `timeoutMs` blocks
+ * the run.
+ */
+export async function waitForRequestTaken(rest: SandboxRest, branch: string, options: { tick?: () => Promise<void>; retickMs?: number; timeoutMs?: number; pollMs?: number } = {}): Promise<void> {
+  const started = Date.now();
+  const timeoutMs = options.timeoutMs ?? SCHEDULE_TAKE_MS;
+  let ticked = -Infinity;
+  for (;;) {
+    if (options.tick !== undefined && Date.now() - ticked >= (options.retickMs ?? RETICK_MS)) {
+      ticked = Date.now();
+      await options.tick();
+    }
+    if (!(await rest.branchExists(branch))) return;
+    if (Date.now() - started > timeoutMs) {
+      const cause = options.tick === undefined ? 'GitHub started no tick of the schedule, or the runner was busy' : 'no tick started by hand took it: the runner was busy, or other requests went first';
+      throw new EnvBlockedError(`no scheduled run took the run's request within ${Math.round(timeoutMs / 60_000)} minutes (${cause})`);
+    }
+    await sleep(options.pollMs ?? POLL_MS);
+  }
+}
+
+/**
+ * The run of the scheduled workflow `workflow`, a scheduled tick or one by
+ * hand, that ran a job for run `runId` (a job
+ * named `<job> <runId>`), once it has completed. Call it once the request
+ * is taken: that run exists by then. The tick that took it may have been
+ * created before the request (it waited for the runner or for the tick
+ * before it), so only runs that finished before `after` are left out.
+ */
+export async function waitForScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; after: number; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number }): Promise<WorkflowRun> {
+  const started = Date.now();
+  // Runs that served another run, or none: they never become this run's.
+  const others = new Set<number>(options.exclude ?? []);
+  for (;;) {
+    // GitHub's tick or one by hand, whichever took the request; the run keeps its true event.
+    const runs = [...(await rest.workflowFileRuns(options.workflow, 'schedule')), ...(await rest.workflowFileRuns(options.workflow, 'workflow_dispatch'))];
+    const candidates = runs
+      .filter((run) => !others.has(run.id) && (run.status !== 'completed' || Date.parse(run.updated_at ?? run.created_at) >= options.after - 5_000))
+      .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+    for (const run of candidates) {
+      const jobs = await rest.runJobs(run.id);
+      const ours = jobs.some((job) => job.name.endsWith(` ${options.runId}`));
+      if (ours && run.status === 'completed') return run;
+      // A tick serves another run once a job named for that run shows. A finished request job proves nothing:
+      // the job that depends on it may not be listed yet.
+      const another = jobs.some((job) => job.name !== REQUEST_JOB && /\s[0-9a-f]{6}$/.test(job.name));
+      if (!ours && (run.status === 'completed' || another)) others.add(run.id);
+    }
+    const waited = Date.now() - started;
+    if (waited > (options.timeoutMs ?? RUN_WAIT_MS)) throw new EnvBlockedError(`the scheduled run that took the run's request did not finish within ${Math.round((options.timeoutMs ?? RUN_WAIT_MS) / 60_000)} minutes (runner busy?)`);
+    await sleep(options.pollMs ?? POLL_MS);
   }
 }
 
@@ -220,12 +282,12 @@ export interface JobSpan {
   completed: number;
 }
 
-/** When each run's jobs ran. */
+/** When each run's jobs ran; the scheduled workflow's request job holds no run's group, so it is left out. */
 export async function jobSpans(rest: SandboxRest, runs: readonly WorkflowRun[]): Promise<JobSpan[]> {
   const spans: JobSpan[] = [];
   for (const run of runs) {
     for (const job of await rest.runJobs(run.id)) {
-      if (job.started_at === null) continue;
+      if (job.started_at === null || (run.path?.split('@')[0] === `.github/workflows/${SCHEDULER_FILE}` && job.name === REQUEST_JOB)) continue;
       spans.push({ runId: run.id, started: Date.parse(job.started_at), completed: job.completed_at === null ? Date.now() : Date.parse(job.completed_at) });
     }
   }

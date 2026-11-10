@@ -7,6 +7,9 @@
 //   node test/e2e/harness/cli.ts checklist --ids L6-05  prints a UI checklist without running
 //   node test/e2e/harness/cli.ts ui-result <run folder> <answered checklist> [--status-page <file>] [--evidence-dir <dir>]
 //        takes up a run held for its UI steps with the UI session's answers
+//   node test/e2e/harness/cli.ts scheduler [--install]
+//        prints the sandbox's scheduled sync workflow for the release under test; --install commits it
+//        to the sandbox's default branch (workflow-files.ts, renderScheduler)
 //
 // The test configuration comes from the environment and the test
 // configuration folder (see config.ts).
@@ -31,10 +34,12 @@ import { loadExpectedRed } from './results.ts';
 import { runScenarios, skippedResult } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios, selectScenarios } from './spec.ts';
+import { actionShaUnderTest, scheduleTick } from './steps.ts';
 import { sweep } from './sweeper.ts';
 import { parseUiAnswers, renderUiChecklist } from './ui-checklist.ts';
 import { loadHeldRun } from './held-run.ts';
 import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-result.ts';
+import { readTemplate, renderScheduler, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
 
 const list = (value: string | undefined) => (value === undefined ? undefined : value.split(',').map((item) => item.trim()).filter(Boolean));
 
@@ -53,6 +58,7 @@ async function main(argv: string[]): Promise<number> {
       'status-page': { type: 'string' },
       'evidence-dir': { type: 'string' },
       defer: { type: 'string' },
+      install: { type: 'boolean' },
     },
   });
   const command = positionals[0] ?? 'help';
@@ -82,6 +88,24 @@ async function main(argv: string[]): Promise<number> {
       process.stdout.write(renderUiChecklist(scenario, runNames('000000'), { live: null, runDir: '<run folder>' }));
       process.stdout.write('\n');
     }
+    return 0;
+  }
+
+  if (command === 'scheduler') {
+    const text = renderScheduler(readTemplate(WORKFLOW_FILES.sync), actionShaUnderTest());
+    if (values.install !== true) {
+      process.stdout.write(text);
+      return 0;
+    }
+    if (config.missing.length > 0) throw new Error(`test configuration is missing: ${config.missing.join(', ')}`);
+    const rest = new SandboxRest(config, (await githubToken(config, 'actions')).token);
+    const path = `.github/workflows/${SCHEDULER_FILE}`;
+    if ((await rest.fileText(path)) === text) {
+      log(`${path} on the default branch is already this rendering`);
+      return 0;
+    }
+    const { commit } = await rest.putFile(path, text, 'Install the scheduled sync workflow');
+    log(`installed ${path} on the default branch in ${commit}`);
     return 0;
   }
 
@@ -130,6 +154,9 @@ async function main(argv: string[]): Promise<number> {
     }
 
     if (command === 'run') {
+      // Settings read only deep in a step are checked before anything runs.
+      actionShaUnderTest();
+      scheduleTick();
       const outDir = values.out ?? join(REPO_ROOT, 'test/e2e/out', harnessRunId);
       const apps: App[] = (scenarios.some((scenario) => scenario.setup.state !== 'offline') ? config.linearApps : []).map((app) => ({
         name: app.name,
@@ -196,7 +223,7 @@ async function main(argv: string[]): Promise<number> {
       return result.result === 'fail' || !result.cleanup.ok ? 1 : 0;
     }
 
-    process.stdout.write('Usage: cli.ts run|plan|sweep|checklist|ui-result [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
+    process.stdout.write('Usage: cli.ts run|plan|sweep|checklist|ui-result|scheduler [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
     return command === 'help' ? 0 : 2;
   } finally {
     for (const { token, hooks } of tokens) {
