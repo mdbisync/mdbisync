@@ -87,6 +87,8 @@ export interface ScenarioResult {
   budgetWaitMs: number;
   checks: CheckOutcome[];
   cleanup: { ok: boolean; detail?: string };
+  /** Set when the run's shared admission reservation outlives this result: a UI hold, a setup that did not stop or a failed release. */
+  sharedReservationKept?: boolean;
   /** Measurements the scenario records for the report (durations, budget, race windows); never content. */
   metrics?: Record<string, unknown>;
   /** Trashed documents per team zone the run used, before it and after its cleanup; a run should leave them unchanged. */
