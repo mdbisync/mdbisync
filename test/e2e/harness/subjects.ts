@@ -13,6 +13,12 @@
 //   by the harness from the world itself, never taken from the engine.
 // - `before.<subject>`: the same subject, computed on the snapshot the
 //   runner took when setup ended.
+// - `runs.<n|last>.<subject>` for the document text subjects
+//   and their golden form (`RUN_VIEW_SUBJECT`): the same subject, computed
+//   on the snapshot the harness took of the world right after that run
+//   ended, before the next step. A report holds no document bodies, so the
+//   engine cannot answer these, and the world at the end could hide a later
+//   rewrite.
 // - UI: `ui.*` values come from the UI session's checklist results.
 //
 // A subject that none of these knows is a harness gap; the scenario-set
@@ -39,6 +45,7 @@ import { annotationPath, owningFolder, type Folder } from './corpus.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
 import { canaryIsolated, type CanaryFacts } from './security-canary.ts';
 import { isAppBot } from './workflows.ts';
+import type { PushActivity } from './github.ts';
 import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { documentPaths, MOVE_SOURCE_FOLDER, projectFolders } from './step-helpers.ts';
@@ -78,7 +85,8 @@ export async function takeStartView(ctx: RunContext): Promise<View> {
 
 interface Env {
   ctx: RunContext;
-  which: 'now' | 'before';
+  /** The world now, at the start (`before.`), or right after one run (`runs.<n|last>.`). */
+  which: 'now' | 'before' | 'run';
   view(): Promise<View>;
 }
 
@@ -98,7 +106,8 @@ async function commentsOf(env: Env, id: string | undefined): Promise<string[]> {
   if (id === undefined) return [];
   const view = await env.view();
   if (!view.comments.has(id)) {
-    if (env.which === 'before') return [];
+    // Only the world now may be read again; a snapshot answers from what it holds.
+    if (env.which !== 'now') return [];
     view.comments.set(id, await documentComments(env.ctx, id));
   }
   return view.comments.get(id) as string[];
@@ -151,7 +160,8 @@ async function target(env: Env): Promise<{ path: string; id: string | undefined;
   const path = byId ?? moved?.to ?? origin;
   const id = view.ids.get(path)?.id ?? knownId;
   let document = id === undefined ? undefined : view.documents.get(id);
-  if (document === undefined && id !== undefined && ctx.live !== null) [document] = await ctx.live.app.getDocuments([id], { withContent: true });
+  // Only the world now may be read again; a snapshot answers from what it holds.
+  if (document === undefined && id !== undefined && env.which === 'now' && ctx.live !== null) [document] = await ctx.live.app.getDocuments([id], { withContent: true });
   return { path, id, document };
 }
 
@@ -323,6 +333,25 @@ function startTips(ctx: RunContext): string[] {
   const refs = (ctx.observations.get('start.refs') as Record<string, string> | undefined) ?? {};
   const tracked = ctx.observations.get('start.trackedTip') as string | undefined;
   return [...Object.values(refs), ...(tracked === undefined ? [] : [tracked])];
+}
+
+/** The run refs the sync writes, each with the commits on it that neither the start nor the scenario's own steps made. */
+async function syncCommits(ctx: RunContext): Promise<Map<string, string[]>> {
+  const git = await person(ctx);
+  const own = new Set(ctx.ownCommits);
+  const refs = [...(['linear', 'ids', 'uploads'] as const).map((store) => `${ctx.names.refPrefix}/${store}`), `refs/heads/${ctx.names.syncBranch}`];
+  const result = new Map<string, string[]>();
+  for (const ref of refs) {
+    const commits = (await newCommits(git, await fetchRef(git, ref), startTips(ctx))).filter((commit) => !own.has(commit));
+    if (commits.length > 0) result.set(ref, commits);
+  }
+  return result;
+}
+
+/** Who a push record names, for a failure: a bot by its login, a person only as a user account. */
+function actorKind(actor: PushActivity['actor']): string {
+  if (actor === null) return 'no recorded actor';
+  return actor.type === 'Bot' ? actor.login : 'a user account';
 }
 
 /** The scenario's own engine runs: after setup, before the checks' own run (I6). */
@@ -1389,18 +1418,38 @@ export const SUBJECTS: Record<string, Compute> = {
     return current === undefined ? null : checksOf(env.ctx, current.head.sha);
   },
   'workflows.events': async (env) => sorted(new Set(((env.ctx.observations.get('workflows.runs') as Array<{ event: string }> | undefined) ?? []).map((run) => run.event))),
+  // Who authenticated the pushes of the sync's commits, from GitHub's own push records, never from a commit's
+  // author: the engine writes that name itself, whatever credential pushes. 'app-bot' means every recorded push
+  // to a run ref the sync wrote was made by the App the harness and the workflows hold (its exact bot login, not
+  // any `[bot]` such as the job's own token; in actions mode the harness's own pushes are the App's too), and
+  // every one of the sync's commits reached GitHub through such a push. Anything else fails and names the ref.
   'writes.githubActor': async (env) => {
+    const live = env.ctx.live;
+    if (live === null) throw new EnvBlockedError('who pushed is read from GitHub, and the run has no sandbox');
+    const app = live.githubAppLogin;
+    if (app === undefined) throw new EnvBlockedError('who pushed is compared with the GitHub App, and the harness holds no App token');
     const git = await person(env.ctx);
-    const own = new Set(env.ctx.ownCommits);
-    const tips = [await stateTip(env.ctx, 'linear'), await stateTip(env.ctx, 'ids'), await syncTip(env.ctx)];
-    const authors = new Set<string>();
-    for (const tip of tips) {
-      for (const commit of await newCommits(git, tip, startTips(env.ctx))) {
-        if (!own.has(commit)) authors.add((await git.text(['show', '-s', '--format=%an', commit])).trim());
-      }
+    const byRef = await syncCommits(env.ctx);
+    for (const [ref, commits] of byRef) {
+      const pushes = await live.rest.pushActivities(ref);
+      const other = pushes.find((push) => push.actor?.login !== app || push.actor.type !== 'Bot');
+      if (other !== undefined) throw new ProductError(`${ref}: GitHub records a ${other.activity_type} to ${other.after.slice(0, 12)} by ${actorKind(other.actor)}, not by the App ${app}`);
+      const sync = new Set(commits);
+      const afters = pushes.map((push) => push.after).filter((after) => sync.has(after));
+      const not = (await present(git, startTips(env.ctx))).map((oid) => `^${oid}`);
+      const reached = new Set(afters.length === 0 ? [] : (await git.text(['rev-list', ...afters, ...not])).split('\n').filter(Boolean));
+      const unproven = commits.filter((commit) => !reached.has(commit));
+      if (unproven.length > 0) throw new ProductError(`${ref}: GitHub has no push record for ${unproven.length} of the sync's ${commits.length} commits (${unproven[0]!.slice(0, 12)} first), so their writer is unproven`);
     }
-    if (authors.size === 0) return null;
-    return [...authors].every(isAppBot) ? 'app-bot' : sorted(authors).join(', ');
+    return byRef.size === 0 ? null : 'app-bot';
+  },
+  // The author and committer the sync's own commits name, as `name <email>`, distinct and sorted.
+  'writes.commitIdentity': async (env) => {
+    const git = await person(env.ctx);
+    const commits = [...new Set([...(await syncCommits(env.ctx)).values()].flat())];
+    if (commits.length === 0) return null;
+    const lines = (await git.text(['log', '--no-walk=unsorted', '--format=%an <%ae>%n%cn <%ce>', ...commits])).split('\n');
+    return sorted(new Set(lines.filter((line) => line !== ''))).join(', ');
   },
 
   // --- writes and budget ----------------------------------------------------------------------
@@ -1818,6 +1867,60 @@ function setupFailureValue(ctx: RunContext, subject: string): string {
 
 // --- resolution -----------------------------------------------------------------------------------
 
+/**
+ * Subjects that also name one run, `runs.<n|last>.<subject>`: computed on the
+ * world the harness snapshotted right after that run (`harness.runView.<n>`).
+ */
+export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm)$/;
+
+/** The runs whose world the scenario asserts on (`runs.<n|last>.` document subjects): their indices, and whether the last. */
+function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {
+  const indices = new Set<number>();
+  let last = false;
+  for (const assertion of ctx.scenario.checks.assertions) {
+    for (const subject of [assertion.subject, ...(assertion.operator === 'same-as' ? [String(assertion.expected)] : [])]) {
+      const which = RUN_VIEW_SUBJECT.exec(subject)?.[1];
+      if (which === 'last') last = true;
+      else if (which !== undefined) indices.add(Number(which));
+    }
+  }
+  return { indices, last };
+}
+
+/**
+ * The observations that choose which document a subject speaks of
+ * (`target`, `perTarget`). A run's snapshot keeps them as they were at the
+ * run's end, so a later step that picks a target changes no earlier run.
+ */
+const TARGET_SELECTION = ['target.path', 'target.id', 'git.moved', 'fixture.document'] as const;
+
+/** The world right after a run, with the target selection of that moment. */
+interface RunView {
+  view: View;
+  selection: ReadonlyArray<readonly [string, unknown]>;
+}
+
+/** The scenario asserts on the world right after some run, so its runs are snapshotted. */
+export function watchesRunViews(ctx: RunContext): boolean {
+  const { indices, last } = viewedRuns(ctx);
+  return ctx.live !== null && (last || indices.size > 0);
+}
+
+/**
+ * The world right after run <n>, for its `runs.<n>.` subjects, when the
+ * scenario names that run. For `last`, only the latest run's view is kept.
+ * A run after the scenario's own (I6's extra run) is not one of its runs.
+ */
+export async function recordRunView(ctx: RunContext, n: number): Promise<void> {
+  if (ctx.observations.has('scenario.runsEnd')) return;
+  const { indices, last } = viewedRuns(ctx);
+  if (!last && !indices.has(n)) return;
+  const selection = TARGET_SELECTION.filter((key) => ctx.observations.has(key)).map((key) => [key, ctx.observations.get(key)] as const);
+  const record: RunView = { view: await takeView(ctx, false, { allowNoIds: true }), selection };
+  ctx.observations.set(`harness.runView.${n}`, record);
+  if (last && !indices.has(n - 1)) ctx.observations.delete(`harness.runView.${n - 1}`);
+}
+
 /** Families of subjects read from the engine's run report. */
 const ENGINE_FAMILIES = [/^runs\.(\d+|last)\./, /^summary\./, /^paths\.rule$/];
 
@@ -1826,7 +1929,7 @@ export type SubjectSource = 'observed' | 'harness' | 'engine' | 'ui';
 /** Where a subject's value comes from, or null when nothing provides it (a harness gap). */
 export function subjectSource(subject: string): SubjectSource | null {
   const name = subject.startsWith('before.') ? subject.slice('before.'.length) : subject;
-  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name)))) return 'harness';
+  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || RUN_VIEW_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name)))) return 'harness';
   if (ENGINE_FAMILIES.some((pattern) => pattern.test(name))) return 'engine';
   if (name.startsWith('ui.')) return 'ui';
   return null;
@@ -1913,23 +2016,48 @@ function engineValue(ctx: RunContext, subject: string): unknown {
   return found.value;
 }
 
+/** The index among the scenario's own runs that `<n|last>` names in `subject`. */
+function ownRunIndex(ctx: RunContext, which: string, subject: string): number {
+  const count = ownResults(ctx).length;
+  const index = which === 'last' ? count - 1 : Number(which);
+  if (index < 0 || index >= count) throw new ProductError(`the scenario has no engine run ${which} for ${subject}`);
+  return index;
+}
+
 /**
  * Why run <n|last> of the scenario was not quiet (quiet.ts), empty when it
  * was. The run must have been watched: a run without snapshots is no
  * evidence either way.
  */
 function quietValue(ctx: RunContext, subject: string): string[] {
-  const which = (QUIET_SUBJECT.exec(subject) as RegExpExecArray)[1] as string;
-  const index = which === 'last' ? ownResults(ctx).length - 1 : Number(which);
-  if (index < 0 || index >= ownResults(ctx).length) throw new ProductError(`the scenario has no engine run ${which} for ${subject}`);
+  const index = ownRunIndex(ctx, (QUIET_SUBJECT.exec(subject) as RegExpExecArray)[1] as string, subject);
   const failures = ctx.observations.get(`harness.quiet.${index}`) as string[] | undefined;
   if (failures === undefined) throw new Error(`engine run ${index} was not watched for ${subject}`);
   return failures;
 }
 
+/**
+ * A document text subject on the world right after run <n|last>. The run
+ * must have been snapshotted: neither the report nor the world at the end
+ * stands in for that moment.
+ */
+async function runViewValue(ctx: RunContext, subject: string): Promise<unknown> {
+  const [, which, name] = RUN_VIEW_SUBJECT.exec(subject) as RegExpExecArray;
+  const index = ownRunIndex(ctx, which as string, subject);
+  const record = ctx.observations.get(`harness.runView.${index}`) as RunView | undefined;
+  if (record === undefined) throw new Error(`engine run ${index} has no snapshot of the world right after it for ${subject}`);
+  // The run's own target selection, not one a later step recorded.
+  const observations = new Map(ctx.observations);
+  for (const key of TARGET_SELECTION) observations.delete(key);
+  for (const [key, value] of record.selection) observations.set(key, value);
+  const atRun: RunContext = Object.assign(Object.create(ctx) as RunContext, { observations });
+  return (SUBJECTS[name as string] as Compute)({ ctx: atRun, which: 'run', view: async () => record.view });
+}
+
 export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
   if (ctx.observations.has(subject) && !NORMALIZED_OBSERVATIONS.has(subject)) return { known: true, value: ctx.observations.get(subject) };
   if (QUIET_SUBJECT.test(subject)) return { known: true, value: quietValue(ctx, subject) };
+  if (RUN_VIEW_SUBJECT.test(subject)) return { known: true, value: await runViewValue(ctx, subject) };
   if (SETUP_FAILURE_SUBJECT.test(subject)) return { known: true, value: setupFailureValue(ctx, subject) };
   const before = subject.startsWith('before.');
   const name = before ? subject.slice('before.'.length) : subject;

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
+import { SYNC_IDENTITY } from '../../../src/initial-sync/confirm.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
@@ -31,8 +32,8 @@ import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/
 import { waitForCheck } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
-import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS } from './steps.ts';
-import { commitAsPerson, readRunIds } from './step-helpers.ts';
+import { editInsideMarkers, HARNESS_GAPS, retireDiscarded, runStep, STEP_ACTIONS, watchRun } from './steps.ts';
+import { commitAsPerson, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
@@ -624,6 +625,8 @@ class FakeLinear {
   documents = new Map<string, LinearDocument>();
   comments = new Map<string, string[]>();
   requests: string[] = [];
+  /** Variables of each `RunComments` query, in order. */
+  commentQueries: Array<Record<string, unknown>> = [];
   #next = 0;
   stats = { total: 0 };
 
@@ -689,6 +692,19 @@ class FakeLinear {
     this.requests.push(operation);
     if (operation === 'DocumentComments' || operation === 'BlockedComments') {
       return { document: { comments: { nodes: (this.comments.get(String(variables.id)) ?? []).map((body, index) => ({ body, createdAt: new Date(index).toISOString() })) } } } as T;
+    }
+    if (operation === 'RunComments') {
+      // The filter shapes the canary scan sends: by project, or by team with a title prefix or a list of ids.
+      const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } }; title?: { startsWith: string }; id?: { in: string[] } };
+      this.commentQueries.push(variables);
+      const nodes = [...this.documents.values()]
+        .filter((document) => variables.includeArchived === true || (!document.trashed && document.archivedAt === null))
+        .filter((document) => filter.project === undefined || document.projectId === filter.project.id.eq)
+        .filter((document) => filter.team === undefined || document.teamId === filter.team.id.eq)
+        .filter((document) => filter.title === undefined || document.title.startsWith(filter.title.startsWith))
+        .filter((document) => filter.id === undefined || filter.id.in.includes(document.id))
+        .map((document) => ({ id: document.id, project: document.projectId === null ? null : { id: document.projectId }, comments: { nodes: (this.comments.get(document.id) ?? []).map((body) => ({ body })) } }));
+      return { documents: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } as T;
     }
     if (operation === 'DeleteDocumentForGood') throw new Error('Unknown argument "permanentlyDelete"');
     throw new Error(`the fake Linear has no ${operation}`);
@@ -2190,6 +2206,118 @@ describe('subjects', () => {
   });
 });
 
+describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
+  // As recorded in the actions run of L1-20: the engine names itself as the author of its state commits, and
+  // GitHub names the sandbox's App as the author of the sync pull request it opened.
+  const APP = 'mdbisync-sandbox[bot]';
+  const ENGINE_AUTHOR = { GIT_AUTHOR_NAME: SYNC_IDENTITY.name, GIT_AUTHOR_EMAIL: SYNC_IDENTITY.email, GIT_COMMITTER_NAME: SYNC_IDENTITY.name, GIT_COMMITTER_EMAIL: SYNC_IDENTITY.email };
+  type Actor = { login: string; type: string } | null;
+
+  /**
+   * A confirmed initial sync to Linear as the workflow writes it: two pushes
+   * of `ids` (a progress commit, then the final one) and one of `linear`. Each
+   * push is recorded by GitHub with `actors[ref][n]` as its actor; `null` for a
+   * push GitHub has no record of.
+   */
+  async function writerCase(actors: { ids: [Actor | undefined, Actor | undefined]; linear: Actor | undefined }, author: Record<string, string> = ENGINE_AUTHOR) {
+    const { ctx, remoteGit } = await fakeRun();
+    const idsRef = `${ctx.names.refPrefix}/ids`;
+    const linearRef = `${ctx.names.refPrefix}/linear`;
+    const startIds = (await remoteGit.text(['rev-parse', idsRef])).trim();
+    ctx.observations.set('start.refs', { [idsRef]: startIds });
+    ctx.observations.set('start.trackedTip', (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim());
+    const engine = new Git(remoteGit.dir, author);
+    const tree = (await engine.text(['rev-parse', `${startIds}^{tree}`])).trim();
+    const progress = (await engine.text(['commit-tree', tree, '-p', startIds, '-m', 'Initial sync: progress'])).trim();
+    const final = (await engine.text(['commit-tree', tree, '-p', progress, '-m', 'Initial sync: final ids'])).trim();
+    const record = (await engine.text(['commit-tree', tree, '-m', "Initial sync: Linear's state"])).trim();
+    await engine.run(['update-ref', idsRef, final]);
+    await engine.run(['update-ref', linearRef, record]);
+    const activity: Record<string, Array<{ ref: string; before: string; after: string; activity_type: string; actor: Actor }>> = { [idsRef]: [], [linearRef]: [] };
+    const recorded = (ref: string, before: string, after: string, actor: Actor | undefined) => {
+      if (actor !== undefined) activity[ref]!.unshift({ ref, before, after, activity_type: 'push', actor });
+    };
+    recorded(idsRef, startIds, progress, actors.ids[0]);
+    recorded(idsRef, progress, final, actors.ids[1]);
+    recorded(linearRef, '0'.repeat(40), record, actors.linear);
+    const asked: string[] = [];
+    ctx.live!.rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, '/repos/example/sandbox/activity');
+      const ref = url.searchParams.get('ref') as string;
+      asked.push(ref);
+      // Another ref's push in the same answer is not this ref's.
+      return Response.json([...(activity[ref] ?? []), { ref: 'refs/heads/main', before: final, after: record, activity_type: 'push', actor: { login: 'someone', type: 'User' } }]);
+    }) as typeof fetch);
+    ctx.live!.githubAppLogin = APP;
+    return { ctx, asked, activity, idsRef, startIds, progress, final, record };
+  }
+  const app: Actor = { login: APP, type: 'Bot' };
+
+  it('fail another credential\'s push to a sync ref even when it set the ref to a commit that is not the sync\'s', async () => {
+    const { ctx, activity, idsRef, startIds, progress } = await writerCase({ ids: [app, app], linear: app });
+    // A person force-pushes ids back to its start between the App's two pushes.
+    activity[idsRef]!.splice(1, 0, { ref: idsRef, before: progress, after: startIds, activity_type: 'force_push', actor: { login: 'someone', type: 'User' } });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/ids: GitHub records a force_push to [0-9a-f]{12} by a user account/.test(error.message));
+  });
+
+  it('accept the App as the writer from GitHub\'s push records while the commits name the engine as their author', async () => {
+    const { ctx, asked } = await writerCase({ ids: [app, app], linear: app });
+    assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
+    assert.deepEqual(asked.sort(), [`${ctx.names.refPrefix}/ids`, `${ctx.names.refPrefix}/linear`]);
+    assert.deepEqual(await resolveSubject(ctx, 'writes.commitIdentity'), { known: true, value: 'mdbisync <mdbisync@sync.invalid>' });
+  });
+
+  it('fail a push made with a person\'s credential, without naming the person', async () => {
+    const { ctx } = await writerCase({ ids: [app, { login: 'someone', type: 'User' }], linear: app });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError
+      && /\/ids: GitHub records a push to [0-9a-f]{12} by a user account, not by the App mdbisync-sandbox\[bot\]$/.test(error.message) && !error.message.includes('someone'));
+  });
+
+  it('fail a run that asked for the App\'s token but pushed with the job\'s own token', async () => {
+    const { ctx } = await writerCase({ ids: [app, app], linear: { login: 'github-actions[bot]', type: 'Bot' } });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/linear: GitHub records a push to [0-9a-f]{12} by github-actions\[bot\], not by the App/.test(error.message));
+  });
+
+  it('fail a user account that took the App\'s login as its name', async () => {
+    const { ctx } = await writerCase({ ids: [app, app], linear: { login: APP, type: 'User' } });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/linear: .* by a user account/.test(error.message));
+  });
+
+  it('leave a commit unproven when GitHub has no record of the push that brought it, whatever its author is called', async () => {
+    // The final ids push has no record: the progress push alone does not reach the final commit.
+    const { ctx: missingFinal } = await writerCase({ ids: [app, undefined], linear: app });
+    await assert.rejects(resolveSubject(missingFinal, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/ids: GitHub has no push record for 1 of the sync's 2 commits/.test(error.message));
+    // A commit author that looks like the App's bot proves nothing on its own.
+    const botName = { GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: APP, GIT_COMMITTER_EMAIL: 'bot@example.com' };
+    const { ctx: named } = await writerCase({ ids: [undefined, undefined], linear: undefined }, botName);
+    await assert.rejects(resolveSubject(named, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /GitHub has no push record/.test(error.message));
+    assert.deepEqual(await resolveSubject(named, 'writes.commitIdentity'), { known: true, value: 'mdbisync-sandbox[bot] <bot@example.com>' });
+  });
+
+  it('cover the progress push through the final one, and have nothing to prove without the sync\'s commits', async () => {
+    // Only the final push is recorded for ids: its commit carries the progress commit too.
+    const { ctx } = await writerCase({ ids: [undefined, app], linear: app });
+    assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
+    const { ctx: quiet, remoteGit } = await fakeRun();
+    quiet.observations.set('start.refs', { [`${quiet.names.refPrefix}/ids`]: (await remoteGit.text(['rev-parse', `${quiet.names.refPrefix}/ids`])).trim() });
+    quiet.live!.githubAppLogin = APP;
+    assert.deepEqual(await resolveSubject(quiet, 'writes.githubActor'), { known: true, value: null });
+    assert.deepEqual(await resolveSubject(quiet, 'writes.commitIdentity'), { known: true, value: null });
+  });
+
+  it('block the check when the harness holds no App token to compare with', async () => {
+    const { ctx } = await writerCase({ ids: [app, app], linear: app });
+    delete ctx.live!.githubAppLogin;
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), EnvBlockedError);
+  });
+
+  it('refuse a full page of push records rather than read it as complete', async () => {
+    const rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async () => Response.json(Array.from({ length: 100 }, () => ({ ref: 'refs/x', before: '', after: '', activity_type: 'push', actor: null })))) as typeof fetch);
+    await assert.rejects(rest.pushActivities('refs/x'), /100 or more pushes to refs\/x/);
+  });
+});
+
 describe('crash-created document adoption (L1-17)', () => {
   const CREATE = JSON.stringify({ query: 'mutation CreateDocument($input: DocumentCreateInput!) { documentCreate(input: $input) { success document { id } } }', variables: { input: { id: '', title: 'README' } } });
   const createOf = (id: string) => CREATE.replace('"id":""', `"id":"${id}"`);
@@ -2258,6 +2386,49 @@ describe('crash-created document adoption (L1-17)', () => {
     await linear.trashDocument(readme);
     refreshView(ctx);
     assert.deepEqual(await resolveSubject(ctx, 'documents.adoptedUnmappedTitle'), { known: true, value: false });
+  });
+
+  it('scan comments on the run\'s own README in the team zone for canaries, not on another run\'s README', async () => {
+    const { ctx, linear, readme } = await crashed();
+    const other = linear.add({ teamId: 'team-eng' }, 'README', 'Another run\'s notes.\n');
+    const file = ctx.live?.manifest.files.find((entry) => entry.path === 'zone/README.md');
+    if (file === undefined) throw new Error('the zone README is not in the manifest');
+    file.canary = 'kx-zone-readme-canary';
+    await linear.commentOnDocument(`content-${readme}`, 'Quoted kx-zone-readme-canary here.');
+    await linear.commentOnDocument(`content-${other.id}`, 'Also kx-zone-readme-canary, but another run wrote it.');
+    const { canaryScan, collectCanaryEvidence } = await import('./checks.ts');
+    const evidence = await collectCanaryEvidence(ctx, { summariesOnly: false });
+    assert.equal(evidence.texts[`comments on ${readme}`], 'Quoted kx-zone-readme-canary here.');
+    assert.equal(evidence.texts[`comments on ${other.id}`], undefined);
+    ctx.observations.delete('canary.remoteTexts');
+    assert.deepEqual(await canaryScan(ctx, { summariesOnly: false }), [{ source: `comments on ${readme}`, canary: 'kx-zone-readme-canary' }]);
+  });
+
+  it('scan comments on the run\'s own README after the engine trashed it', async () => {
+    const { ctx, linear, readme } = await crashed();
+    const file = ctx.live?.manifest.files.find((entry) => entry.path === 'zone/README.md');
+    if (file === undefined) throw new Error('the zone README is not in the manifest');
+    file.canary = 'kx-zone-readme-canary';
+    await linear.commentOnDocument(`content-${readme}`, 'Quoted kx-zone-readme-canary here.');
+    await linear.trashDocument(readme);
+    const { canaryScan } = await import('./checks.ts');
+    assert.deepEqual(await canaryScan(ctx, { summariesOnly: false }), [{ source: `comments on ${readme}`, canary: 'kx-zone-readme-canary' }]);
+  });
+
+  it('ask for the owned ids in bounded queries and still reach the last one', async () => {
+    const { ctx, linear, readme } = await crashed();
+    // Owned ids Linear does not list (creates asked for but never confirmed), recorded after the README.
+    for (let index = 0; index < 60; index += 1) ctx.owned.record({ kind: 'document', id: `never-created-${index}`, confirmed: false });
+    const late = linear.add({ teamId: 'team-eng' }, 'README', 'Late notes.\n');
+    recordCreate(ctx, late.id);
+    await linear.commentOnDocument(`content-${late.id}`, 'Late kx-zone-readme-canary.');
+    const { collectCanaryEvidence } = await import('./checks.ts');
+    const evidence = await collectCanaryEvidence(ctx, { summariesOnly: false });
+    assert.equal(evidence.texts[`comments on ${late.id}`], 'Late kx-zone-readme-canary.');
+    assert.ok(`comments on ${readme}` in evidence.texts);
+    const byId = linear.commentQueries.map((variables) => (variables.filter as { id?: { in: string[] } }).id?.in).filter((ids) => ids !== undefined);
+    assert.ok(byId.length >= 2 && byId.every((ids) => ids.length <= 50), `owned ids per query: ${byId.map((ids) => ids.length).join(', ')}`);
+    assert.equal(new Set(byId.flat()).size, byId.flat().length, 'an owned id is asked for once');
   });
 
   it('refuse a kill without the documents the run owned before the engine started', async () => {
@@ -2640,5 +2811,111 @@ describe('quiet runs through the harness', () => {
     const ctx = await watchedRun({ moves: ['state'], watch: false });
     await assert.rejects(resolveSubject(ctx, 'quiet.last'), /was not watched/);
     await assert.rejects(resolveSubject(ctx, 'quiet.3'), ProductError);
+  });
+});
+
+describe('document text right after a run', () => {
+  const l1_20 = scenarios.find((item) => item.id === 'L1-20')!;
+  const content = l1_20.checks.assertions.find((item) => item.subject === 'runs.1.documents.content')!;
+  const report = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, 'run-reports', `${name}.json`), 'utf8')) as Record<string, unknown>;
+
+  /** A converged world asserting L1-20's checks, its dry and confirmed initial syncs run as the harness watches them. */
+  async function confirmedInitialSync(duringConfirm: (linear: FakeLinear, ids: Record<string, { id: string }>) => Promise<void> = async () => {}) {
+    const run = await fakeRun();
+    run.ctx.scenario = { ...run.ctx.scenario, checks: l1_20.checks };
+    await watchRun(run.ctx, { throughProxy: false }, async () => void run.ctx.engine.results.push(engineRun('initial-sync', report('quiet-sync'))));
+    await watchRun(run.ctx, { throughProxy: false }, async () => {
+      // The confirmed run writes every document as Linear keeps it: without the final newline.
+      for (const document of run.linear.documents.values()) await run.linear.updateDocument(document.id, { content: (document.content ?? '').replace(/\n+$/, '') });
+      await duringConfirm(run.linear, run.ids);
+      run.ctx.engine.results.push(engineRun('initial-sync', report('initial-sync-to-linear')));
+    });
+    return run;
+  }
+  const holds = async (ctx: RunContext, subject: string) => compare(content.operator, (await resolveSubject(ctx, subject)).value, (await resolveSubject(ctx, String(content.expected))).value);
+
+  it('compares the documents the confirmed run left with their golden form, though the report has no bodies', async () => {
+    assert.equal(subjectSource(content.subject), 'harness');
+    assert.equal(subjectSource('runs.last.linear.body'), 'harness');
+    // A confirmed initial sync's report, as retained from a live run: no document bodies, by design.
+    assert.equal(Object.hasOwn(report('initial-sync-to-linear'), 'documents'), false);
+    const { ctx } = await confirmedInitialSync();
+    assert.equal(await holds(ctx, content.subject), true);
+    assert.equal(await holds(ctx, 'runs.last.documents.body'), true);
+  });
+
+  it('fails a confirmed run that wrote a wrong body, even when a later step rewrites it right', async () => {
+    const { ctx, linear, ids } = await confirmedInitialSync(async (fake, known) => {
+      await fake.updateDocument(known['eng/platform/plan.md']!.id, { content: '# Plan\n\nA paragraph the run garbled.' });
+    });
+    assert.equal(await holds(ctx, content.subject), false);
+    // A later rewrite after the run's boundary: the world at the end alone would pass.
+    await linear.updateDocument(ids['eng/platform/plan.md']!.id, { content: '# Plan\n\nThe first paragraph.\n\nThe second paragraph.' });
+    refreshView(ctx);
+    assert.equal(await holds(ctx, 'documents.content'), true);
+    assert.equal(await holds(ctx, content.subject), false);
+  });
+
+  it('keeps a correct run correct when a later step breaks a document after it', async () => {
+    const { ctx, linear, ids } = await confirmedInitialSync();
+    await linear.updateDocument(ids['eng/platform/notes.md']!.id, { content: '# Notes\n\nChanged after the run.\n' });
+    // The document is read from the snapshot, never again from Linear.
+    linear.documents.delete(ids['eng/platform/plan.md']!.id);
+    refreshView(ctx);
+    assert.equal(await holds(ctx, 'documents.content'), false);
+    assert.equal(await holds(ctx, content.subject), true);
+  });
+
+  it('refuses a run without a snapshot after it, and a run the scenario does not have', async () => {
+    const { ctx } = await confirmedInitialSync();
+    // A run recorded without being watched, such as one a fault paused: nothing stands in for that moment.
+    ctx.engine.results.push(engineRun('sync', report('quiet-sync')));
+    await assert.rejects(resolveSubject(ctx, 'runs.2.documents.content'), (error: Error) => !(error instanceof ProductError) && /engine run 2 has no snapshot of the world right after it/.test(error.message));
+    await assert.rejects(resolveSubject(ctx, 'runs.last.documents.content'), /engine run 2 has no snapshot/);
+    await assert.rejects(resolveSubject(ctx, 'runs.5.documents.content'), ProductError);
+    // Other run subjects still come from the report.
+    assert.equal(subjectSource('runs.0.documents.brokenImageUrls'), 'engine');
+  });
+
+  it('compares with the golden form of the files at the same moment, so a later git edit fails no correct run', async () => {
+    assert.equal(content.expected, 'runs.1.golden.linearForm');
+    const { ctx } = await confirmedInitialSync();
+    await commitAsPerson(ctx, new Map([['eng/platform/notes.md', '# Notes\n\nEdited in git after the run.\n']]), 'Edit after the run');
+    refreshView(ctx);
+    assert.equal(await holds(ctx, content.subject), true);
+    // Against the files as they are now, the same correct run would fail.
+    assert.equal(compare(content.operator, (await resolveSubject(ctx, content.subject)).value, (await resolveSubject(ctx, 'golden.linearForm')).value), false);
+  });
+
+  it('keeps the run\'s own target selection when a later step picks a document', async () => {
+    const { ctx, ids } = await confirmedInitialSync();
+    // A later edit step records its target, as `setTarget` does.
+    setTarget(ctx, 'eng/platform/notes.md', ids['eng/platform/notes.md']!.id);
+    const value = (await resolveSubject(ctx, content.subject)).value;
+    assert.ok(value instanceof Map && value.size > 1);
+    assert.equal(await holds(ctx, content.subject), true);
+    // The world now speaks of the picked document alone.
+    assert.equal(typeof (await resolveSubject(ctx, 'documents.content')).value, 'string');
+    assert.equal(ctx.observations.get('target.path'), 'eng/platform/notes.md');
+  });
+
+  it('snapshots only the run the scenario names, and never I6\'s extra run', async () => {
+    const { ctx } = await confirmedInitialSync();
+    assert.equal(ctx.observations.has('harness.runView.0'), false);
+    assert.equal(ctx.observations.has('harness.runView.1'), true);
+    ctx.observations.set('scenario.runsEnd', ctx.engine.results.length);
+    await watchRun(ctx, { throughProxy: false }, async () => void ctx.engine.results.push(engineRun('sync', report('quiet-sync'))));
+    assert.equal(ctx.observations.has('harness.runView.2'), false);
+    // For `last`, each run's view replaces the one before it.
+    const last = (await fakeRun()).ctx;
+    last.scenario = { ...last.scenario, checks: { ...l1_20.checks, assertions: [{ subject: 'runs.last.documents.content', operator: 'same-as', expected: 'runs.last.golden.linearForm' }] } };
+    for (let run = 0; run < 2; run += 1) await watchRun(last, { throughProxy: false }, async () => void last.engine.results.push(engineRun('sync', report('quiet-sync'))));
+    assert.deepEqual([...last.observations.keys()].filter((key) => key.startsWith('harness.runView.')), ['harness.runView.1']);
+  });
+
+  it('snapshots nothing for a scenario that asserts on no run\'s documents', async () => {
+    const { ctx } = await fakeRun();
+    await watchRun(ctx, { throughProxy: false }, async () => void ctx.engine.results.push(engineRun('sync', report('quiet-sync'))));
+    assert.equal(ctx.observations.has('harness.runView.0'), false);
   });
 });

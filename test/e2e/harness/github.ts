@@ -23,6 +23,8 @@ export function appJwt(clientId: string, privateKey: string, nowSeconds = Math.f
 export interface GitHubToken {
   token: string;
   source: 'app' | 'host';
+  /** The App's bot login (`<slug>[bot]`), which GitHub names as the actor of what this token writes; App tokens only. */
+  appLogin?: string;
 }
 
 export class GitHubError extends Error {
@@ -53,12 +55,13 @@ async function call<T>(token: string, method: string, path: string, body?: unkno
   return (text === '' ? undefined : JSON.parse(text)) as T;
 }
 
-export async function appInstallationToken(config: TestConfig, fetchImpl: typeof fetch = fetch): Promise<string> {
+/** The App's installation token for the sandbox, and the bot login GitHub shows for what that token writes. */
+export async function appInstallationToken(config: TestConfig, fetchImpl: typeof fetch = fetch): Promise<{ token: string; appLogin: string }> {
   if (config.githubApp === null) throw new Error('the GitHub App key or client id is missing');
   const jwt = appJwt(config.githubApp.clientId, config.githubApp.privateKey);
-  const installation = await call<{ id: number }>(jwt, 'GET', `/repos/${config.owner}/${config.repo}/installation`, undefined, fetchImpl);
+  const installation = await call<{ id: number; app_slug: string }>(jwt, 'GET', `/repos/${config.owner}/${config.repo}/installation`, undefined, fetchImpl);
   const created = await call<{ token: string }>(jwt, 'POST', `/app/installations/${installation.id}/access_tokens`, { repositories: [config.repo] }, fetchImpl);
-  return created.token;
+  return { token: created.token, appLogin: `${installation.app_slug}[bot]` };
 }
 
 /** The host's git credential for the sandbox, through git's credential helper. */
@@ -74,7 +77,7 @@ export function hostToken(config: TestConfig): string | null {
 
 /** Local runs: the App when its key is present, else the host's token. Actions mode always uses the App. */
 export async function githubToken(config: TestConfig, mode: 'local' | 'actions'): Promise<GitHubToken> {
-  if (config.githubApp !== null) return { token: await appInstallationToken(config), source: 'app' };
+  if (config.githubApp !== null) return { ...(await appInstallationToken(config)), source: 'app' };
   if (mode === 'actions') throw new Error(`actions mode needs the GitHub App: ${config.githubAppMissing.join(' and ')} not in the test secrets`);
   const token = hostToken(config);
   if (token === null) throw new Error('no GitHub token: neither the App key nor a host credential for the sandbox');
@@ -119,6 +122,15 @@ export interface WorkflowRun {
   actor?: { login: string } | null;
   triggering_actor?: { login: string } | null;
   html_url?: string;
+}
+
+/** One entry of GitHub's repository activity: a push, force push, branch creation or deletion. */
+export interface PushActivity {
+  ref: string;
+  before: string;
+  after: string;
+  activity_type: string;
+  actor: { login: string; type: string } | null;
 }
 
 export interface WorkflowStep {
@@ -254,6 +266,18 @@ export class SandboxRest {
   async runJobs(runId: number): Promise<WorkflowJob[]> {
     const data = await this.request<{ jobs: WorkflowJob[] }>('GET', `/actions/runs/${runId}/jobs?per_page=100`);
     return data.jobs;
+  }
+
+  /**
+   * GitHub's own record of the pushes to one ref, newest first: who
+   * authenticated each push (`actor`) and the commit it set the ref to
+   * (`after`). A run's refs see a few pushes; a full page could hide older
+   * ones, so it is refused rather than read as complete.
+   */
+  async pushActivities(ref: string): Promise<PushActivity[]> {
+    const activities = await this.request<PushActivity[]>('GET', `/activity?ref=${encodeURIComponent(ref)}&per_page=100&direction=desc`);
+    if (activities.length >= 100) throw new Error(`GitHub lists 100 or more pushes to ${ref}; the harness reads one page`);
+    return activities.filter((activity) => activity.ref === ref);
   }
 
   async workflowRuns(branch: string): Promise<WorkflowRun[]> {

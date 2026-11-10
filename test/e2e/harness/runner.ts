@@ -15,7 +15,7 @@ import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, CORPUS_DIR, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
 import { BudgetBlockedError, estimate, type Governor } from './governor.ts';
-import { SandboxRest, githubToken } from './github.ts';
+import { SandboxRest, githubToken, type GitHubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
 import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
@@ -114,7 +114,7 @@ export async function liveWorld(
   appName: string,
   parts: {
     sandbox: Sandbox;
-    token: { token: string; source: 'app' | 'host' };
+    token: GitHubToken;
     manifest: Manifest;
     tree: RunTree;
     known?: { teams: Map<string, Team>; documentUrlBase: string };
@@ -140,6 +140,7 @@ export async function liveWorld(
     rest: new SandboxRest(config, parts.token.token),
     githubToken: parts.token.token,
     githubTokenSource: parts.token.source,
+    ...(parts.token.appLogin === undefined ? {} : { githubAppLogin: parts.token.appLogin }),
     repository: `${config.owner}/${config.repo}`,
     manifest: parts.manifest,
     tree: parts.tree,
@@ -248,7 +249,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   }
   // The scenario's own edits and runs start here: setup's edits are not the scenario's.
   ctx.engine.setupRuns = ctx.engine.results.length;
-  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.)/.test(key)) ctx.observations.delete(key);
+  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.|harness\.runView\.)/.test(key)) ctx.observations.delete(key);
   await recordStart(ctx, live);
 }
 

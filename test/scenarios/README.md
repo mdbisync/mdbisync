@@ -108,6 +108,16 @@ sync and capture before checking that it wrote nothing. A partial capture,
 stopped run or missing completion report cannot establish idempotence.
 Transient assertions such as `runs.0.writes.total` inspect that invocation,
 including failed runs; later recovery must not erase that evidence.
+Most `runs.<n|last>.*` subjects come from that run's report. The document
+text subjects `runs.<n|last>.documents.content`, `runs.<n|last>.documents.body`
+and `runs.<n|last>.linear.body` do not: a report holds no document bodies.
+The harness snapshots the world right after each run a scenario names in
+one of them, before the next step, and computes the subject on that
+snapshot alone. `runs.<n|last>.golden.linearForm` is the golden form of the
+files in that same snapshot, so both sides of the comparison describe the
+same moment. A run without such a snapshot (one a fault paused, or a push
+run started by an earlier step) gives no value, and the world at the end
+never stands in for it, since a later step could rewrite the documents.
 
 | ID | Required observation |
 | --- | --- |
