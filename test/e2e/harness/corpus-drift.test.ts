@@ -111,3 +111,16 @@ test('current linter catches drift even when bank classifications have not chang
   await assertCurrentCorpus(manifest, slice, read);
   await assert.rejects(assertCurrentCorpus(manifest, slice, async () => '# Notes'), /republish the corpus/);
 });
+
+test('sampled duplicate expectations retain corpus scope and linked files must be selected', async () => {
+  const file = { path: 'eng/Guide.md', group: 'work-documents', kind: 'markdown' as const,
+    synced: true, lfs: false, canary: null, class: 'lint-error' as const, rule: 'duplicate-title' };
+  const manifest: Manifest = { seed: 'guard', files: [file, { ...file, path: 'eng/guide.md' }] };
+  await assertCurrentCorpus(manifest, { slice: 'mini', paths: [file.path] }, async () => '# Guide');
+  manifest.files = [{ ...file, class: 'unchanged', rule: null }, {
+    ...file, path: 'docs/chart.png', kind: 'image', synced: false, class: null, rule: null,
+  }];
+  const read = async () => '# Guide\n\n![Chart](../docs/chart.png)';
+  await assert.rejects(assertCurrentCorpus(manifest, { slice: 'mini', paths: [file.path] }, read), /republish the corpus/);
+  await assertCurrentCorpus(manifest, { slice: 'mini', paths: [file.path, 'docs/chart.png'] }, read);
+});
