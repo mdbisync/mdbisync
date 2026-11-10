@@ -690,6 +690,18 @@ class FakeLinear {
     if (operation === 'DocumentComments' || operation === 'BlockedComments') {
       return { document: { comments: { nodes: (this.comments.get(String(variables.id)) ?? []).map((body, index) => ({ body, createdAt: new Date(index).toISOString() })) } } } as T;
     }
+    if (operation === 'RunComments') {
+      // The filter shapes the canary scan sends: by project, or by team with a title prefix or a list of ids.
+      const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } }; title?: { startsWith: string }; id?: { in: string[] } };
+      const nodes = [...this.documents.values()]
+        .filter((document) => !document.trashed && document.archivedAt === null)
+        .filter((document) => filter.project === undefined || document.projectId === filter.project.id.eq)
+        .filter((document) => filter.team === undefined || document.teamId === filter.team.id.eq)
+        .filter((document) => filter.title === undefined || document.title.startsWith(filter.title.startsWith))
+        .filter((document) => filter.id === undefined || filter.id.in.includes(document.id))
+        .map((document) => ({ id: document.id, project: document.projectId === null ? null : { id: document.projectId }, comments: { nodes: (this.comments.get(document.id) ?? []).map((body) => ({ body })) } }));
+      return { documents: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } as T;
+    }
     if (operation === 'DeleteDocumentForGood') throw new Error('Unknown argument "permanentlyDelete"');
     throw new Error(`the fake Linear has no ${operation}`);
   }
@@ -2258,6 +2270,22 @@ describe('crash-created document adoption (L1-17)', () => {
     await linear.trashDocument(readme);
     refreshView(ctx);
     assert.deepEqual(await resolveSubject(ctx, 'documents.adoptedUnmappedTitle'), { known: true, value: false });
+  });
+
+  it('scan comments on the run\'s own README in the team zone for canaries, not on another run\'s README', async () => {
+    const { ctx, linear, readme } = await crashed();
+    const other = linear.add({ teamId: 'team-eng' }, 'README', 'Another run\'s notes.\n');
+    const file = ctx.live?.manifest.files.find((entry) => entry.path === 'zone/README.md');
+    if (file === undefined) throw new Error('the zone README is not in the manifest');
+    file.canary = 'kx-zone-readme-canary';
+    await linear.commentOnDocument(`content-${readme}`, 'Quoted kx-zone-readme-canary here.');
+    await linear.commentOnDocument(`content-${other.id}`, 'Also kx-zone-readme-canary, but another run wrote it.');
+    const { canaryScan, collectCanaryEvidence } = await import('./checks.ts');
+    const evidence = await collectCanaryEvidence(ctx, { summariesOnly: false });
+    assert.equal(evidence.texts[`comments on ${readme}`], 'Quoted kx-zone-readme-canary here.');
+    assert.equal(evidence.texts[`comments on ${other.id}`], undefined);
+    ctx.observations.delete('canary.remoteTexts');
+    assert.deepEqual(await canaryScan(ctx, { summariesOnly: false }), [{ source: `comments on ${readme}`, canary: 'kx-zone-readme-canary' }]);
   });
 
   it('refuse a kill without the documents the run owned before the engine started', async () => {

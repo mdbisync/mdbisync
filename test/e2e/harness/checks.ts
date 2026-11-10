@@ -730,17 +730,32 @@ export async function collectCanaryEvidence(ctx: RunContext, options: { summarie
     for (const [source, text] of Object.entries(cached)) texts.set(source, text);
   } else if (world !== null && !options.summariesOnly) {
     for (const pr of await world.rest.pullRequests(`t/${ctx.names.runId}/`)) texts.set(`pull request #${pr.number}`, `${pr.title}\n${pr.body ?? ''}`);
-    // Linear comments on the run's documents: project documents, and team-zone documents with the run's prefix.
+    // Linear comments on the run's documents: project documents, and team-zone documents that carry the
+    // run's prefix or that the run's ownership record holds, as `readSides` selects them. Annotation READMEs
+    // keep their plain title, so only the record shows they are the run's; another run's README is not in it.
     for (const project of world.projects.values()) {
       for (const document of await commentsOf(world.app, { project: { id: { eq: project.id } } })) {
         texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
       }
     }
+    const scanned = new Set<string>();
     for (const team of world.tree.teamZones.keys()) {
       const teamId = world.teams.get(team)?.id;
       if (teamId === undefined) continue;
       for (const document of await commentsOf(world.app, { team: { id: { eq: teamId } }, title: { startsWith: ctx.names.teamZonePrefix } })) {
+        scanned.add(document.id);
         if (!document.inProject) texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
+      }
+    }
+    const unscanned = [...ownedDocuments(ctx.owned).keys()].filter((id) => !scanned.has(id) && !texts.has(`comments on ${id}`));
+    for (const team of world.tree.teamZones.keys()) {
+      const teamId = world.teams.get(team)?.id;
+      if (teamId === undefined) continue;
+      for (let start = 0; start < unscanned.length; start += OWNED_IDS_PER_COMMENT_QUERY) {
+        const ids = unscanned.slice(start, start + OWNED_IDS_PER_COMMENT_QUERY);
+        for (const document of await commentsOf(world.app, { team: { id: { eq: teamId } }, id: { in: ids } })) {
+          if (!document.inProject) texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
+        }
       }
     }
   }
@@ -766,6 +781,8 @@ async function trackedTip(ctx: RunContext): Promise<string | undefined> {
  * comments per document is what a query costs (250 × 50 was refused).
  */
 export const COMMENT_DOCUMENTS_PER_PAGE = 25;
+/** Owned document ids one comment query asks for by id. */
+const OWNED_IDS_PER_COMMENT_QUERY = 50;
 export const COMMENTS_PER_DOCUMENT = 50;
 
 /** The comment bodies of every document that matches `filter`, page by page. */
