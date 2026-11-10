@@ -103,6 +103,36 @@ describe('locks', () => {
     (await acquireLock('team-docs', { stateDir, runId: 'dddddd', timeoutMs: 1_000 })).release();
   });
 
+  it('keeps a held run\'s lock after its process ends, for its own take-up, until its hold ends', async () => {
+    const stateDir = freshStateDir();
+    const keep = async (runId: string, lockUntil: number, runUntil: number) => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', `
+        const { acquireLock, registerRun } = await import(${JSON.stringify(new URL('./locks.ts', import.meta.url).href)});
+        const stateDir = ${JSON.stringify(stateDir)};
+        const lock = await acquireLock('team-eng', { stateDir, runId: '${runId}', timeoutMs: 0 });
+        registerRun(stateDir, '${runId}').hold(${runUntil});
+        lock.hold(${lockUntil});
+      `], { stdio: ['ignore', 'inherit', 'inherit'] });
+      const [code] = await new Promise<unknown[]>((resolve) => child.once('exit', (...args) => resolve(args)));
+      assert.equal(code, 0);
+    };
+    const later = Date.now() + 3_600_000;
+    await keep('aaaaaa', later, later);
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: 'bbbbbb', timeoutMs: 0 }), LockTimeoutError, 'the holder\'s process ended, the hold did not');
+    await keep('aaaaaa', later, later); // the run's take-up in a later process, still waiting for the UI session
+    await assert.rejects(acquireLock('team-eng', { stateDir, runId: 'bbbbbb', timeoutMs: 0 }), LockTimeoutError, 'kept again after the take-up');
+    registerRun(stateDir, 'aaaaaa').done();
+    (await acquireLock('team-eng', { stateDir, runId: 'bbbbbb', timeoutMs: 0 })).release();
+
+    await keep('cccccc', Date.now() + 200, later);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    (await acquireLock('team-eng', { stateDir, runId: 'dddddd', timeoutMs: 0 })).release();
+    await keep('eeeeee', later, Date.now() - 1);
+    (await acquireLock('team-eng', { stateDir, runId: 'ffffff', timeoutMs: 0 })).release();
+    forgetRun(stateDir, 'cccccc');
+    forgetRun(stateDir, 'eeeeee');
+  });
+
   it('counts slots: at most N holders of a semaphore', async () => {
     const stateDir = freshStateDir();
     const held = await Promise.all(Array.from({ length: 4 }, (_, i) => acquireSlot('app-x', 4, { stateDir, runId: `00000${i}`, timeoutMs: 0 })));

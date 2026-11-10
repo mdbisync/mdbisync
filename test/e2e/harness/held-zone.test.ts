@@ -1,0 +1,114 @@
+// A run held for its UI session leaves its documents in its team zone. Until
+// the hold ends, no other zone run may start there: its initial sync would
+// take the held run's documents for documents without a file and move them
+// to the trash.
+
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, it } from 'node:test';
+import { Git } from '../../../src/state/git.ts';
+import type { RunContext } from './context.ts';
+import { BudgetBlockedError, Governor, estimate, type App } from './governor.ts';
+import { forgetRun, registerRun, type Lock } from './locks.ts';
+import { takeTeamLocks } from './runner.ts';
+import { GitStateStore, SharedAdmission } from './shared-state.ts';
+import { loadScenarios, type Scenario } from './spec.ts';
+
+const roots: string[] = [];
+after(() => roots.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+const scenarios = loadScenarios();
+const byId = (id: string) => scenarios.find((scenario) => scenario.id === id) ?? assert.fail(id);
+const app: App = { name: 'app1', key: 'app-key', readBudget: async () => ({ requestsRemaining: 5_000, complexityRemaining: 2_000_000, resetAt: 0 }) };
+const ZONE = 'team-eng';
+
+/** A Linear team zone in memory: documents by owning run, and the trash. */
+function fakeZone() {
+  const documents = new Map<string, string>();
+  let trashed = 0;
+  return {
+    get trashed() { return trashed; },
+    add(id: string, runId: string) { documents.set(id, runId); },
+    /** What a run's cleanup does: it archives its own documents, never trashing them. */
+    archiveRun(runId: string) { for (const [id, owner] of documents) if (owner === runId) documents.delete(id); },
+    /** What an initial sync does to zone documents it has no file for: it moves them to the trash. */
+    initialSync(runId: string) {
+      for (const [id, owner] of documents) if (owner !== runId) { documents.delete(id); trashed += 1; }
+    },
+  };
+}
+
+function lockContext(scenario: Scenario, runId: string, signal: AbortSignal, lines: string[]): RunContext {
+  return { scenario, signal, names: { runId }, log: (line: string) => lines.push(line) } as unknown as RunContext;
+}
+
+it('keeps a held UI run\'s team zone from the next zone run until the hold ends', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'held-zone-'));
+  roots.push(root);
+  const stateDir = join(root, 'state');
+  const remote = join(root, 'control.git');
+  await new Git(root).run(['init', '--bare', '--quiet', remote]);
+  const governor = (dir: string) => new Governor({ apps: [app], stateDir, maxWaitMs: 0, shared: new SharedAdmission(new GitStateStore({ stateDir: join(root, dir), url: remote })) });
+  const zone = fakeZone();
+  const held = byId('L6-03');
+  const next = byId('L6-04');
+  const holdUntil = Date.now() + 3_600_000;
+
+  // Run A reaches its UI step and is held, as the runner leaves it: shared
+  // reservation and zone claim retained, team lock kept, run registered as held.
+  const a = await governor('a').admit(held, 'aaaaaa', estimate(held), app.name);
+  await a.claimZones!([ZONE]);
+  zone.add('doc-a1', 'aaaaaa');
+  zone.add('doc-a2', 'aaaaaa');
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    const { registerRun } = await import(${JSON.stringify(new URL('./locks.ts', import.meta.url).href)});
+    const { takeTeamLocks } = await import(${JSON.stringify(new URL('./runner.ts', import.meta.url).href)});
+    const { loadScenarios } = await import(${JSON.stringify(new URL('./spec.ts', import.meta.url).href)});
+    const scenario = loadScenarios().find((item) => item.id === 'L6-03');
+    const stateDir = ${JSON.stringify(stateDir)};
+    const locks = [];
+    await takeTeamLocks({ scenario, signal: new AbortController().signal, names: { runId: 'aaaaaa' }, log: () => {} }, stateDir, ['ENG'], locks);
+    registerRun(stateDir, 'aaaaaa').hold(${holdUntil});
+    locks.forEach((lock) => lock.hold(${holdUntil}));
+  `], { stdio: ['ignore', 'inherit', 'inherit'] });
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0, 'the held run\'s process ended');
+
+  // Run B, another zone run: the shared admission and the team lock both keep it out.
+  await assert.rejects(governor('b').admit(next, 'bbbbbb', estimate(next), app.name), BudgetBlockedError);
+  await assert.rejects(governor('b').admit(byId('L1-05'), 'cccccc', estimate(byId('L1-05')), app.name), BudgetBlockedError, 'a zone-concurrent run waits too');
+  const waiting = new AbortController();
+  const lines: string[] = [];
+  const locksB: Lock[] = [];
+  const blocked = takeTeamLocks(lockContext(next, 'bbbbbb', waiting.signal, lines), stateDir, ['ENG'], locksB);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  waiting.abort();
+  await assert.rejects(blocked);
+  assert.deepEqual(lines, ['waiting for team ENG (held by run aaaaaa)']);
+  assert.equal(locksB.length, 0);
+  assert.equal(zone.trashed, 0);
+
+  // The UI session's answers: run A is taken up in a new process, cleaned up, and lets go.
+  const takeUp = await governor('a2').admit(held, 'aaaaaa', estimate(held), app.name, a.owner);
+  await takeUp.claimZones!([ZONE]);
+  const locksA: Lock[] = [];
+  await takeTeamLocks(lockContext(held, 'aaaaaa', new AbortController().signal, []), stateDir, ['ENG'], locksA);
+  assert.equal(locksA.length, 1, 'the take-up holds the run\'s own kept lock');
+  zone.archiveRun('aaaaaa');
+  await takeUp.release();
+  registerRun(stateDir, 'aaaaaa').done();
+  locksA.forEach((lock) => lock.release());
+
+  // Now run B starts, and its initial sync finds nothing of run A's.
+  const b = await governor('b').admit(next, 'bbbbbb', estimate(next), app.name);
+  await b.claimZones!([ZONE]);
+  await takeTeamLocks(lockContext(next, 'bbbbbb', new AbortController().signal, []), stateDir, ['ENG'], locksB);
+  zone.initialSync('bbbbbb');
+  assert.equal(zone.trashed, 0, 'the zone\'s trash is unchanged');
+  locksB.forEach((lock) => lock.release());
+  await b.release();
+  forgetRun(stateDir, 'bbbbbb');
+});
