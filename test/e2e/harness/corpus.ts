@@ -107,6 +107,11 @@ export function annotatedFolders(readmes: ReadonlyMap<string, string>): Folder[]
   return folders.sort((a, b) => a.folder.localeCompare(b.folder));
 }
 
+/** The README that annotates a folder. */
+export function annotationPath(folder: Pick<Folder, 'folder'>): string {
+  return folder.folder === '' ? 'README.md' : `${folder.folder}/README.md`;
+}
+
 function inside(path: string, folder: string): boolean {
   return folder === '' || path.startsWith(`${folder}/`);
 }
