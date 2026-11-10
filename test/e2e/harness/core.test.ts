@@ -63,6 +63,7 @@ describe('isolation names', () => {
   it('maps leftovers back to their run and ignores everything else', () => {
     assert.equal(runOfRef('refs/heads/t/4f1a9c/main'), '4f1a9c');
     assert.equal(runOfRef('refs/heads/t/4f1a9c/sync'), '4f1a9c');
+    assert.equal(runOfRef('refs/heads/t/4f1a9c/suspended'), '4f1a9c');
     assert.equal(runOfRef('refs/mdbisync-t/4f1a9c/ids'), '4f1a9c');
     for (const ref of ['refs/heads/main', 'refs/mdbisync/linear', 'refs/heads/t/4f1a9c/other', 'refs/heads/mdbisync/linear']) assert.equal(runOfRef(ref), null, ref);
     assert.equal(runOfProject('Harbor log 4f1a9c'), '4f1a9c');

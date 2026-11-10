@@ -272,7 +272,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     for (const doc of selected) if (!live(doc)) work.set(doc.id, doc);
     result.documents = documents;
     const changes = new Map<string, Buffer | string | null>();
-    const removeBody = (path: string) => changes.set(path, annotationHead(path) ?? null);
+    const removeBody = (path: string): boolean => {
+      const next = annotationHead(path) ?? null;
+      changes.set(path, next);
+      return next === null ? previous.has(path) : previous.get(path)?.equals(Buffer.from(next)) !== true;
+    };
     // Only files already present in the branch are link targets until their
     // candidates pass. A blocked rename continues to point at its old file.
     const documentIds = new Map([...ids].filter(([path]) => previous.has(path)).map(([path, entry]) => [path, entry.id]));
@@ -280,10 +284,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     for (const [id, path] of reservedById) if (!documentIds.has(path)) documentIds.set(path, id);
     for (const id of gone) {
       const old = byId.get(id)!;
-      removeBody(old.path);
-      ids.delete(old.path);
+      const changedFile = removeBody(old.path);
+      const retained = old.entry.suspended !== undefined || old.entry.releaseBase !== undefined;
+      if (!retained) ids.delete(old.path);
       documentIds.delete(old.path);
-      result.removed.push(old.path);
+      if (!retained || changedFile) result.removed.push(old.path);
     }
     for (const id of held) result.heldRemovals.push(byId.get(id)!.path);
     const paths = new Map<string, string>();
@@ -310,10 +315,11 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       if (!live(doc)) {
         if (old !== undefined) {
           if (old.entry.saved !== undefined && options.stageOnly !== true) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
-          removeBody(old.path);
-          ids.delete(old.path);
+          const changedFile = removeBody(old.path);
+          const retained = old.entry.suspended !== undefined || old.entry.releaseBase !== undefined;
+          if (!retained) ids.delete(old.path);
           documentIds.delete(old.path);
-          result.removed.push(old.path);
+          if (!retained || changedFile) result.removed.push(old.path);
         }
         continue;
       }
@@ -386,7 +392,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         }
         if (findings.length > 0) {
           const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-          ids.set(old?.path ?? path, {id, saved});
+          ids.set(old?.path ?? path, {...old?.entry, id, saved});
           result.blocked.push({id, path: old?.path ?? path, findings});
           candidates.delete(id);
           resetTarget(id);

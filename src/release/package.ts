@@ -16,8 +16,8 @@ function record(value: unknown): Record<string, unknown> {
 export function validateVersion(version: string): string {
   const number = '(?:0|[1-9][0-9]*)';
   const identifier = '(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)';
-  if (!new RegExp(`^v${number}\\.${number}\\.${number}-${identifier}(?:\\.${identifier})*$`).test(version) || version.trim() !== version) {
-    throw new Error('Expected a semantic pre-release tag such as v0.1.0-rc.1');
+  if (!new RegExp(`^v${number}\\.${number}\\.${number}(?:-${identifier}(?:\\.${identifier})*)?$`).test(version) || version.trim() !== version) {
+    throw new Error('Expected a semantic version tag such as v0.1.0 or the pre-release v0.1.0-rc.1');
   }
   return version.slice(1);
 }

@@ -74,11 +74,28 @@ export function keptAnnotationTrailer(path: string): string {
   return `Kept-annotation: ${JSON.stringify(path)}`;
 }
 
-/** The READMEs the latest initial sync kept without a document, from its final `ids` commit. */
+/**
+ * The trailer of a sync's `ids` commit that records the kept READMEs anew,
+ * after the tracked branch moved one (its folder renamed): the
+ * `Kept-annotation:` trailers of that commit are the whole set.
+ */
+export const KEPT_ANNOTATIONS_RECORDED = 'Kept-annotations: recorded';
+
+/** The trailers that record `kept` as the whole set of kept READMEs, in path order. */
+export function keptAnnotationsTrailers(kept: Iterable<string>): string[] {
+  return [KEPT_ANNOTATIONS_RECORDED, ...[...kept].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map(keptAnnotationTrailer)];
+}
+
+/**
+ * The READMEs kept without a document: named by the latest initial sync's
+ * final `ids` commit, or by a later sync's `ids` commit that recorded the set
+ * after one moved.
+ */
 export async function readKeptAnnotations(git: Git, ids: Oid | null): Promise<Set<string>> {
   if (ids === null) return new Set();
-  const log = await git.text(['log', '--format=%B', '--fixed-strings', `--grep=${FINAL_IDS_MESSAGE}`, '-1', ids]);
-  if (log.split('\n')[0] !== FINAL_IDS_MESSAGE) return new Set();
+  const log = await git.text(['log', '--format=%B', '--fixed-strings', `--grep=${FINAL_IDS_MESSAGE}`, `--grep=${KEPT_ANNOTATIONS_RECORDED}`, '-1', ids]);
+  const lines = log.split('\n');
+  if (lines[0] !== FINAL_IDS_MESSAGE && !lines.includes(KEPT_ANNOTATIONS_RECORDED)) return new Set();
   return new Set([...log.matchAll(KEPT_ANNOTATION)].map((match) => JSON.parse(match[1] as string) as string));
 }
 export const RECORD_MESSAGE = "Initial sync: Linear's state";

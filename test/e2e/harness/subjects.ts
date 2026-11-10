@@ -34,7 +34,7 @@ import { dirname, join, posix } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { relativeLinkUrls } from '../../../src/format/index.ts';
 import { resolveTarget } from '../../../src/format/markdown.ts';
-import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, type Git } from '../../../src/state/index.ts';
+import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, type Git, resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
@@ -339,7 +339,7 @@ function startTips(ctx: RunContext): string[] {
 async function syncCommits(ctx: RunContext): Promise<Map<string, string[]>> {
   const git = await person(ctx);
   const own = new Set(ctx.ownCommits);
-  const refs = [...(['linear', 'ids', 'uploads'] as const).map((store) => `${ctx.names.refPrefix}/${store}`), `refs/heads/${ctx.names.syncBranch}`];
+  const refs = [...(['linear', 'ids', 'uploads'] as const).map((store) => `${ctx.names.refPrefix}/${store}`), `refs/heads/${ctx.names.syncBranch}`, `refs/heads/${suspendedBranch(resolveStateConfig({trackedBranch:ctx.names.trackedBranch,syncBranch:ctx.names.syncBranch,refPrefix:ctx.names.refPrefix}))}`];
   const result = new Map<string, string[]>();
   for (const ref of refs) {
     const commits = (await newCommits(git, await fetchRef(git, ref), startTips(ctx))).filter((commit) => !own.has(commit));
@@ -496,9 +496,10 @@ async function gitWrites(ctx: RunContext): Promise<number> {
 
 async function pullRequestsSinceStart(ctx: RunContext) {
   if (ctx.live === null) return [];
-  const all = await ctx.live.rest.pullRequests(ctx.names.syncBranch);
+  const branch = suspendedBranch(resolveStateConfig({trackedBranch:ctx.names.trackedBranch,syncBranch:ctx.names.syncBranch,refPrefix:ctx.names.refPrefix}));
+  const all = [...await ctx.live.rest.pullRequests(ctx.names.syncBranch), ...await ctx.live.rest.pullRequests(branch)];
   const before = new Set((ctx.observations.get('start.pullRequests') as number[] | undefined) ?? []);
-  return all.filter((pr) => !before.has(pr.number));
+  return [...new Map(all.map((pr) => [pr.number, pr])).values()].filter((pr) => !before.has(pr.number));
 }
 
 async function pullRequestFiles(ctx: RunContext, number: number): Promise<Array<{ filename: string; status: string }>> {

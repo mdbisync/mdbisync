@@ -66,6 +66,9 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   const result: MarkResult = { state, entry, updated: false, commented: false };
   if (document.trashed || document.archivedAt !== null) return result;
 
+  // Suspension decorations are reconciled after the lane's state push.
+  if (entry.suspended !== undefined && blocked.length === 0) return result;
+
   if (state === 'clear') {
     if (entry.saved === undefined) return result;
     if (document.icon !== entry.saved.icon || document.color !== entry.saved.color) {

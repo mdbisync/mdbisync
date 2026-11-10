@@ -3,13 +3,16 @@
 // The result says, per synchronized path, what Linear must change so that
 // it holds the merge result: a write, a rename or move, a create or a trash.
 
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { readAnnotation } from '../mapping/index.ts';
 import { lintInTree, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { MARKDOWN_EXTENSION, type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { findFileLinks } from '../initial-sync/uploads.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
-import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, buildTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
+import { type Git, type IdMap, type Oid, INITIAL_SYNC_FROM_LINEAR_RECORD, NEUTRAL_IDENTITY, buildTree, checkRepoPath, commitTree, isAncestor, listTree, readBlobs, readIds } from '../state/index.ts';
 import { message } from '../messages.ts';
 import { type FileLeftOutRule } from '../codes.ts';
 
@@ -103,6 +106,8 @@ export interface LocalMerge {
   held: HeldRename[];
   /** The blobs of every synchronized file of both sides, by id. */
   texts: Map<Oid, Buffer>;
+  /** Kept READMEs (named by `keptAnnotations`) the tracked branch renamed: tip path to merge result path. */
+  keptMoves: Map<string, string>;
 }
 
 export interface HeldRename {
@@ -118,7 +123,27 @@ export interface HeldRename {
  * created.
  */
 export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdMap, facts: LinearFacts = LINEAR_FACTS, options: MergeOptions = {}): Promise<LocalMerge> {
-  const { base, renames, resolved } = await mergeWithMarkers(git, linear, tracked, ids, options.knownId);
+  let mergeTracked = tracked;
+  let mergeBase = options.base;
+  const frozen = new Set([...ids].flatMap(([path, entry]) => entry.suspended === undefined ? [] : [path, ...entry.suspended.paths]));
+  const released = [...ids].filter(([, entry]) => entry.releaseBase !== undefined);
+  if (frozen.size > 0 || released.length > 0) {
+    mergeBase ??= await git.text(['merge-base', linear, tracked]);
+    let baseTree = mergeBase;
+    const releaseGroups = new Map<Oid, Set<string>>();
+    for (const [path, entry] of released) {
+      const paths = releaseGroups.get(entry.releaseBase as Oid) ?? new Set<string>();
+      for (const selected of entry.releasePaths ?? [path]) paths.add(selected);
+      releaseGroups.set(entry.releaseBase as Oid, paths);
+    }
+    for (const [base, paths] of releaseGroups) baseTree = await takePaths(git, baseTree, base, paths);
+    if (frozen.size > 0) {
+      baseTree = await takePaths(git, baseTree, linear, frozen);
+      mergeTracked = await treeCommit(git, await takePaths(git, tracked, linear, frozen), tracked);
+    }
+    mergeBase = await treeCommit(git, baseTree, mergeBase);
+  }
+  const { base, renames, resolved } = await mergeWithMarkers(git, linear, mergeTracked, ids, options.knownId, mergeBase);
   const { tree, unresolved: conflicts } = resolved;
 
   const linearSide = await synchronizedFiles(git, linear, facts);
@@ -162,6 +187,17 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     claimed.add(to);
     const next = resultSide.files.get(to) as SideFile;
     const previous = linearSide.files.get(from);
+    if (previous === undefined && entry.releaseBase !== undefined) {
+      // A retained suspended id whose file survived a Linear delete is a
+      // restoration, not a keep of a still-live document.
+      const version = { path: to, text: (blobs.get(next.oid) as Buffer).toString('utf8') };
+      const input = { base: { path: from, text: '' }, git: version, linear: null };
+      const restored = await resolveStructural(input);
+      const gone = (await resolveStructural({ ...input, linearGone: true })).summary as StructuralSummary;
+      changes.push({ kind: 'create', path: to, restore: { id: entry.id, gone } });
+      if (restored.summary !== null) resolved.decided.push({ path: to, summary: restored.summary });
+      continue;
+    }
     const change: KeepChange = {
       kind: 'keep',
       id: entry.id,
@@ -176,21 +212,37 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     if (change.content || change.title || change.place) changes.push(change);
     else unchanged.push(change);
   }
+  /** The tip's README without a document that git renamed to `path`, when the merge result no longer holds it. */
+  const renamedTo = new Map([...renames].map(([from, to]) => [to, from]));
+  const renamedFrom = (path: string): string | undefined => {
+    const from = renamedTo.get(path);
+    if (from === undefined || !isReadme(from) || ids.has(from) || !linearSide.files.has(from) || resultSide.files.has(from)) return undefined;
+    return from;
+  };
+  /** Kept READMEs the tracked branch moved, from their tip path to their path in the merge result. */
+  const keptMoves = new Map<string, string>();
   for (const path of resultSide.files.keys()) {
     if (!claimed.has(path) && !conflicted.has(path)) {
       const file = resultSide.files.get(path)!;
-      const previous = linearSide.files.get(path);
       // A folder's annotation that the `linear` tip already holds without a document is repository
       // configuration, not a request to create one: the annotation-only carrier capture keeps after its
       // document leaves, and the README an initial sync from Linear keeps, body included, because Linear
       // has no document for it. Only a change to its body on the tracked branch makes it a new document.
-      // A README with a body counts only when the latest initial sync named it as kept: one left out on the
-      // way to Linear, or one whose id map was lost, is created as every other file without a document is.
+      // A README with a body counts only when the kept set names it (the latest initial sync's, or the one a
+      // later sync recorded after a kept README moved): one left out on the way to Linear, or one whose id map
+      // was lost, is created as every other file without a document is. A renamed folder takes its README
+      // along: the tip's file is found at git's rename source.
+      const source = linearSide.files.has(path) ? path : renamedFrom(path);
+      const previous = source === undefined ? undefined : linearSide.files.get(source);
       const unchanged = previous !== undefined && body(previous.oid) === body(file.oid);
-      const kept = unchanged && (body(file.oid) === '' || options.keptAnnotations?.has(path) === true);
-      if ((path === 'README.md' || path.endsWith('/README.md')) && kept) {
+      const keptByName = source !== undefined && options.keptAnnotations?.has(source) === true;
+      const kept = unchanged && (body(file.oid) === '' || keptByName);
+      if (isReadme(path) && kept) {
         const annotation = readAnnotation(path, (blobs.get(file.oid) as Buffer).toString('utf8'));
-        if ('annotation' in annotation && annotation.annotation !== null) continue;
+        if ('annotation' in annotation && annotation.annotation !== null) {
+          if (keptByName && source !== path) keptMoves.set(source as string, path);
+          continue;
+        }
       }
       const restore = resolved.restores.get(path);
       changes.push(restore === undefined ? { kind: 'create', path } : { kind: 'create', path, restore });
@@ -211,6 +263,7 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     unchanged: unchanged.sort((a, b) => compare(a.to, b.to)),
     held,
     texts: blobs,
+    keptMoves,
   };
 }
 
@@ -258,9 +311,9 @@ export interface MarkedMerge {
  * `gitSide`'s text is the git version and `linearSide`'s the Linear version.
  * `ids` maps `linearSide`'s paths to documents. It writes objects only.
  */
-export async function mergeWithMarkers(git: Git, linearSide: Oid, gitSide: Oid, ids: IdMap, knownId?: MergeOptions['knownId']): Promise<MarkedMerge> {
-  const base = await git.text(['merge-base', linearSide, gitSide]);
-  const merged = await git.run(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', linearSide, gitSide], { okCodes: [0, 1] });
+export async function mergeWithMarkers(git: Git, linearSide: Oid, gitSide: Oid, ids: IdMap, knownId?: MergeOptions['knownId'], explicitBase?: Oid): Promise<MarkedMerge> {
+  const base = explicitBase ?? await git.text(['merge-base', linearSide, gitSide]);
+  const merged = await git.run(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ...(explicitBase === undefined ? [] : [`--merge-base=${explicitBase}`]), linearSide, gitSide], { okCodes: [0, 1] });
   const [gitTree, ...rest] = merged.stdout.toString('utf8').split('\0');
   if (gitTree === undefined || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error(message('sync.no-merge-tree'));
   const unmerged = [...new Set(rest.filter((path) => path !== ''))].sort(compare);
@@ -379,6 +432,8 @@ export interface MergeOptions {
   knownId?: ((path: string) => Promise<string | undefined>) | undefined;
   /** The folder READMEs the latest initial sync kept, body included, without a document. */
   keptAnnotations?: ReadonlySet<string> | undefined;
+  /** Explicit per-run base for release; topology alone includes set-aside history. */
+  base?: Oid | undefined;
 }
 
 interface ConflictInput {
@@ -550,4 +605,32 @@ export async function filesOf(git: Git, treeish: Oid): Promise<Map<string, Oid>>
 
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Copy selected paths exactly (including absence and file modes), leaving all other paths alone. */
+export async function takePaths(git: Git, into: Oid, from: Oid, paths: ReadonlySet<string>): Promise<Oid> {
+  for (const path of paths) checkRepoPath(path);
+  const entries = new Map((await listTree(git, from)).map((entry) => [entry.path, entry]));
+  // buildTree handles blobs; copy modes through a private index so images and symlinks stay exact.
+  const dir = await mkdtemp(join(tmpdir(), 'lane-index-'));
+  const env = { GIT_INDEX_FILE: join(dir, 'index') };
+  try {
+    await git.run(['read-tree', `${into}^{tree}`], { env });
+    const zero = '0'.repeat((await git.text(['rev-parse', '--show-object-format'])) === 'sha256' ? 64 : 40);
+    const input = [...paths].map((path) => {
+      const entry = entries.get(path);
+      return entry === undefined ? `0 ${zero}\t${path}\0` : `${entry.mode} ${entry.oid}\t${path}\0`;
+    }).join('');
+    if (input) await git.run(['update-index', '-z', '--index-info'], { env, input });
+    return await git.text(['write-tree'], { env });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+}
+
+/** A content-only side for a merge; never pushed or used as a real lane parent. */
+export function treeCommit(git: Git, tree: Oid, parent: Oid): Promise<Oid> {
+  return commitTree(git, { base: tree, changes: new Map(), parents: [parent], message: 'Merge input', identity: NEUTRAL_IDENTITY });
+}
+
+function isReadme(path: string): boolean {
+  return path === 'README.md' || path.endsWith('/README.md');
 }

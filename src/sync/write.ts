@@ -28,7 +28,7 @@ import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { projectKey } from '../setup/index.ts';
-import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, type WriteStop, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
+import { type FailedWrite, type InitialSyncPlan, type LeftOutAtWrite, type WriteStop, keptAnnotationsTrailers, placeId, readKeptAnnotations } from '../initial-sync/index.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, transformBody } from '../initial-sync/transform.ts';
 import { linkDestinations, resolveRelative } from '../initial-sync/links.ts';
 import {
@@ -57,7 +57,8 @@ import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments }
 import { nameFixingHooks } from './fix-hooks.ts';
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark } from './marks.ts';
-import { withRecorded } from './recorded.ts';
+import { suspendedPaths } from './suspended.ts';
+import { recordedTrailers } from './recorded.ts';
 import { message } from '../messages.ts';
 import { type FileLeftOutRule, type SkipReason, type WriteCode } from '../codes.ts';
 
@@ -218,8 +219,12 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   // Nothing new either right after a person merged an initial sync from Linear unchanged: recording that merge
   // would move `linear` with nothing written (I6). A sync branch GitHub deleted on that merge comes back with the
   // next record, as a branch a person deleted does.
+  const ids = await readIds(git, expected.ids);
+  const frozen = suspendedPaths(ids);
+  const releasing = [...ids.values()].some((entry) => entry.releaseBase !== undefined);
+  for (const [path, entry] of ids) if (entry.suspended !== undefined) result.skipped.push({ path, reason: 'suspended' });
   const nothingNew = (await alreadyMerged(git, linearTip, tracked)) || (await mergedInitialRecord(git, linearTip, tracked));
-  if (nothingNew && !cacheLost) {
+  if (nothingNew && !cacheLost && !releasing) {
     // Nothing to write, but the files left out stay left out: the report names them on every run, not only on
     // the run that first met them. The `linear` tip holds what a merge would give.
     result.leftOut = await leftOutFiles(git, linearTip, linear.facts);
@@ -237,13 +242,16 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   }
 
   // Step 3.
-  const ids = await readIds(git, expected.ids);
   const reserved = await readReservedIds(git, expected.ids);
   const supersededBefore = await readSupersededIds(git, expected.ids);
   const knownId = knownIdLookup(git, expected.ids, ids);
-  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations: await readKeptAnnotations(git, expected.ids) });
+  const keptAnnotations = await readKeptAnnotations(git, expected.ids);
+  const merge = await mergeLocally(git, linearTip, tracked, ids, linear.facts, { knownId, keptAnnotations });
   // The tracked branch has nothing new: only the documents the cache rebuild relinks are written.
-  if (nothingNew) merge.changes.length = 0;
+  if (nothingNew && !releasing) merge.changes.length = 0;
+  // Frozen paths remain exactly as capture left them, including deletes and renames.
+  merge.changes = merge.changes.filter((change) => !pathsOf(change).some((path) => frozen.has(path)));
+  merge.unchanged = merge.unchanged.filter((change) => !frozen.has(change.from) && !frozen.has(change.to));
   result.leftOut = merge.leftOut;
   await nameFixingHooks(git, tracked, result.leftOut);
   // Anything from here may write (linked-file changes are found later too): capacity, adoption and
@@ -829,7 +837,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     });
     result.restored.push(change.path);
     stored.set(change.path, { content: document.content ?? '', sent: body, document });
-    nextIds.set(change.path, { id: document.id });
+    const previous = nextIds.get(change.path);
+    nextIds.set(change.path, previous?.id === document.id ? previous : { id: document.id });
     await reconcileMark(change.path, document);
     return true;
   }
@@ -950,6 +959,14 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const parents = merged ? [linearTip as Oid, tracked] : [linearTip as Oid];
     const message = merged ? MERGE_RECORD_MESSAGE : PARTIAL_RECORD_MESSAGE;
     const commit = await commitTree(git, { parents, base: merge.tree, changes, message, identity, skipIfUnchanged: true });
+    if (merged) {
+      for (const [path, entry] of nextIds) if (entry.releaseBase !== undefined) {
+        delete entry.releaseBase;
+        delete entry.releasePaths;
+        // A suspended Linear delete kept a tombstone until the lane released.
+        if (!resultFiles.has(path) && !linearFiles.has(path)) nextIds.delete(path);
+      }
+    }
     for (const path of nextIds.keys()) nextReserved.delete(path);
     // A written document the record holds as Linear returned it (its text, title and place; not the tip's old
     // file) is named with its update time: the next capture need not read it again. A partial record keeps files
@@ -961,7 +978,14 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         return held ? [[document.id, document.updatedAt] as const] : [];
       }),
     );
-    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: withRecorded(IDS_MESSAGE, asWritten), reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 });
+    // A kept README the merge record holds at a new path (its folder renamed) stays kept there: the set is recorded
+    // anew. A partial record keeps the tip's README where it was, and the next run follows the rename again.
+    // Only READMEs the record still holds without a document stay in the recorded set.
+    const keptMoved = merged && merge.keptMoves.size > 0;
+    const kept = [...keptAnnotations].map((path) => merge.keptMoves.get(path) ?? path).filter((path) => merge.result.has(path) && !nextIds.has(path));
+    const trailers = [...recordedTrailers(asWritten), ...(keptMoved ? keptAnnotationsTrailers(kept) : [])];
+    const idsMessage = trailers.length === 0 ? IDS_MESSAGE : `${IDS_MESSAGE}\n\n${trailers.join('\n')}`;
+    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved });
     // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the
     // documents to relink, before they are changes) leaves the rest to the next run.
     const rebuilt = cacheLost && merged && result.stopped === undefined ? { message: UPLOADS_REBUILT, always: true } : {};

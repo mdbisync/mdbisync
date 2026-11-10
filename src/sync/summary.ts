@@ -13,6 +13,7 @@ export const SKIP_REASON_TEXTS: Record<SkipReason, string> = {
   'edited-in-linear': 'changed in Linear since it was read; the next run takes that change in and writes again',
   'missing-in-linear': 'not found in Linear, or in its trash; the next run takes that in',
   conflict: 'changed on both sides in a way git cannot merge; it is written when the conflict is resolved',
+  suspended: 'waits for its suspended changes to reach the main branch',
   'renamed-to-unwritable': 'its file was renamed to one that is in conflict or left out; the document stays as it is until that is fixed',
 };
 

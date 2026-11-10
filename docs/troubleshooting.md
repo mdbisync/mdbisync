@@ -34,7 +34,7 @@ The command line's exit code:
 | 0 | Done. |
 | 1 | An error that stopped the run: the message starts with `error:`. Look it up on this page; see [Errors found during the run](#errors-found-during-the-run) and [Errors that point to a bug](#errors-that-point-to-a-bug). |
 | 2 | The command or its inputs are wrong. Nothing ran. See [Input errors](#input-errors). |
-| 3 | A setup error. Either the setup check failed and nothing was written, or a check failed (`check-failed`) or GitHub keeps refusing the merge (`merge-blocked`) on the sync pull request: then the run kept Linear's changes in its state and on the sync branch, but wrote no tracked-branch changes to Linear. |
+| 3 | A setup error. Either the setup check failed and nothing was written, or GitHub keeps refusing the merge (`merge-blocked`) on the sync pull request: then the run kept Linear's changes in its state and on the sync branch, but wrote no tracked-branch changes to Linear. |
 | 4 | The sync has no state: run an initial sync, or merge the pull request of the one that ran. Nothing was written. |
 | 5 | The run did not finish. A sync is partial and the next run goes on; run an initial sync again with the same inputs. Except `container-cap`: running again fails the same way until a person makes room (see [`container-cap`](#container-cap)). |
 | 10 to 15 | `<command>: not implemented`: this build does not have the command. |
@@ -53,7 +53,6 @@ step with the bare message, without `error:`.
 | `<command>: stopped before any write (container-cap); reduce additions or check document-cap` | See [`container-cap`](#container-cap). |
 | `<command>: not finished (<code>); run it again with the same inputs` | An initial sync stopped part way. Run it again with the same direction and `confirm`; it skips what it already did. See [Initial sync](#initial-sync). |
 | `<command>: not finished (sync-branch-changed); merge or close the pull request of the sync branch and delete the branch, then run it again` | See [`sync-branch-changed`](#initial-sync). |
-| `<command>: setup error (check-failed): a check failed on the sync pull request` | See [`check-failed`](#the-sync-pull-request). |
 | `<command>: setup error (merge-blocked): GitHub refuses again to merge the sync pull request (<reason>)` | See [`merge-blocked`](#the-sync-pull-request). |
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
 | `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
@@ -91,7 +90,7 @@ last line and the summary row give its detail, shown here:
 | `missing-permission` | `the GitHub token lacks <permissions>`, perhaps with `(<permissions> not checked without it)` | The GitHub token lacks the permissions named. | Give the GitHub App contents, pull requests and workflows write, and checks and commit statuses read, then accept the new permissions on the installation. |
 | `github-app-not-found` | `GitHub has no App account <slug>[bot]; give app-slug the App token step's output app-slug` | GitHub has no App with the slug the action was given. | Give the action's input `app-slug` the output `app-slug` of the step that mints the App token, as the example workflows do. |
 | `merge-commits-required` | `merge commits are not allowed in the repository settings`, `GitHub did not show whether merge commits are allowed` | The repository does not allow merge commits, or GitHub did not say. | Turn on **Allow merge commits** in the repository settings. |
-| `linear-format-hook-required` | `.pre-commit-config.yaml has no linear-format hook`, `.pre-commit-config.yaml is not valid YAML`, `.pre-commit-config.yaml has no "repos" list` | The hook configuration is missing or broken. | Add the hook, pinned to a release (see [usage.md](usage.md#pre-release-builds-and-pins)). |
+| `linear-format-hook-required` | `.pre-commit-config.yaml has no linear-format hook`, `.pre-commit-config.yaml is not valid YAML`, `.pre-commit-config.yaml has no "repos" list` | The hook configuration is missing or broken. | Add the hook, pinned to a release (see [usage.md](usage.md#release-builds-and-pins)). |
 | `invalid-annotation` | The problems, joined by `;` | A `README.md` front matter names a team or project in a way the run cannot use. | Fix the front matter; see [Annotation problems](#annotation-problems). |
 | `no-annotations` | `no folder has linear-team or linear-project in its README.md front matter` | Nothing is mapped. | Annotate at least one folder (see [usage.md](usage.md#folder-mapping)). |
 | `linear-teams-not-visible` | `the Linear app saw no team in two lookups, so none of the annotated teams (<teams>) can be found: check the app's team access in Linear` | The Linear app saw no team at all, twice. | In Linear, give the app access to the annotated teams. |
@@ -162,12 +161,13 @@ line) to the limit you have.
 
 ## The sync pull request
 
+A failed check moves the batch to **Suspended changes from Linear** on `mdbisync/suspended`. The run succeeds; other documents keep syncing. Suspended documents are frozen until this pull request passes and merges. A Linear edit or a new tracked-branch commit updates that lane.
+
 Linear's changes reach the tracked branch through the sync pull request
 (see [usage.md](usage.md#the-sync-pull-request)). Its step reports:
 
 | Code | Meaning | What to do |
 | --- | --- | --- |
-| `check-failed` | A check failed on the sync pull request: `Setup error: a check failed on the sync pull request`, with the check's name. The pull request stays open and the run writes no tracked-branch changes to Linear (exit code 3). | Make the repository's checks pass Linear's form of the files, or rerun the failed check on the pull request. A later run merges once they pass. |
 | `merge-refused` | GitHub did not merge the sync pull request this time: `GitHub did not merge the sync pull request (<reason>); a later run tries again.` | Nothing; a later run tries again. |
 | `merge-blocked` | GitHub refused to merge again, on the same head and for the same reason (exit code 3). | Let the sync's GitHub App merge into the tracked branch, for example by adjusting the branch's rules. A later run merges. |
 | `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. For documents the sync merges with conflict markers: this run into Linear's state, a later run into the sync branch. | Resolve the markers on either side ([conflicts.md](conflicts.md#resolving-a-conflict)). A conflicting file that is not a document waits: merge both the tracked branch and the `linear` state ref (`refs/mdbisync/linear` by default) into the sync branch and resolve it there; the sync keeps those commits. |
@@ -201,6 +201,7 @@ this time:
 | `edited-in-linear` | Changed in Linear since it was read; the next run takes that change in and writes again. |
 | `missing-in-linear` | Not found in Linear, or in its trash; the next run takes that in. |
 | `conflict` | Changed on both sides in a way git cannot merge; it is written when the conflict is resolved. |
+| `suspended` | Waits for its suspended changes to reach the main branch. |
 | `renamed-to-unwritable` | Its file was renamed to one that is in conflict or left out; the document stays as it is until that is fixed. |
 
 None needs action unless the same document stays skipped.
@@ -304,7 +305,7 @@ step fails with the same message:
 | `the input direction is required (initial sync never picks a direction itself)`, `the input direction must be one of git-to-linear, linear-to-git, not "<value>" (initial sync never picks a direction itself)` | Choose `git-to-linear` or `linear-to-git`. |
 | `remote "<name>" is not a valid remote name` | Use a valid git remote name. |
 | `<tracked-branch or sync-branch> "<name>" is not a valid branch name: <problem>` (the problem can be `starts with "-"`) | Use a valid branch name. |
-| `the tracked branch and the sync branch must differ`, `one of the tracked branch and the sync branch is a folder of the other` | Choose two separate branch names, neither inside the other, such as `main` and `mdbisync/linear`. |
+| `the tracked branch and both sync lane branches must differ`, `one of the tracked branch and the sync branch is a folder of the other` | Choose two separate branch names, neither inside the other, such as `main` and `mdbisync/linear`. |
 | `refPrefix "<prefix>" is not a valid ref prefix: <problem>`, `refPrefix "<prefix>" must start with "refs/" and name a folder under it`, `refPrefix "<prefix>" must not be under refs/heads, refs/tags or refs/remotes` | Set `state-ref-prefix` to a folder under `refs/` of its own, such as the default `refs/mdbisync/`. |
 
 ## Errors found during the run
@@ -336,7 +337,7 @@ the message. Most come from the workflow's configuration:
 | `run init at the repository root` | Run it in the folder that holds `.git`. |
 | `provide --folder with --team and/or --project` | Name at least one folder, each with a team or project. |
 | `unknown option: <flag>`, `<flag> needs a value`, `<flag> must follow --folder`, `<flag> was given twice for a folder`, `<flag> was given twice`, `choose security hooks once` | Fix the flags; `mdbisync init --help` lists them. |
-| `--release-sha must be a full 40-character commit SHA`, `--release-version must be a version such as v1.2.3` | Give the release commit SHA and version (see [usage.md](usage.md#pre-release-builds-and-pins)). |
+| `--release-sha must be a full 40-character commit SHA`, `--release-version must be a version such as v1.2.3` | Give the release commit SHA and version (see [usage.md](usage.md#release-builds-and-pins)). |
 | `paths must stay inside the repository`, `setup destinations must not contain symlinks`, `a setup folder path names a regular file` | Give folder paths inside the repository, without symbolic links. |
 | `conflicting folder options: <path>` | Give each folder its options once. |
 | `invalid YAML configuration`, `.pre-commit-config.yaml needs a repos list`, `invalid pre-commit repository entry` | Fix `.pre-commit-config.yaml` or the `README.md` front matter. |
