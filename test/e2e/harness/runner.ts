@@ -248,7 +248,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   }
   // The scenario's own edits and runs start here: setup's edits are not the scenario's.
   ctx.engine.setupRuns = ctx.engine.results.length;
-  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.)/.test(key)) ctx.observations.delete(key);
+  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.|harness\.runView\.)/.test(key)) ctx.observations.delete(key);
   await recordStart(ctx, live);
 }
 

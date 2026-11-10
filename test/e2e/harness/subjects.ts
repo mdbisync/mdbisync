@@ -13,6 +13,11 @@
 //   by the harness from the world itself, never taken from the engine.
 // - `before.<subject>`: the same subject, computed on the snapshot the
 //   runner took when setup ended.
+// - `runs.<n|last>.<subject>` for the document text subjects
+//   (`RUN_VIEW_SUBJECT`): the same subject, computed on the snapshot the
+//   harness took of the world right after that run ended, before the next
+//   step. A report holds no document bodies, so the engine cannot answer
+//   these, and the world at the end could hide a later rewrite.
 // - UI: `ui.*` values come from the UI session's checklist results.
 //
 // A subject that none of these knows is a harness gap; the scenario-set
@@ -76,7 +81,8 @@ export async function takeStartView(ctx: RunContext): Promise<View> {
 
 interface Env {
   ctx: RunContext;
-  which: 'now' | 'before';
+  /** The world now, at the start (`before.`), or right after one run (`runs.<n|last>.`). */
+  which: 'now' | 'before' | 'run';
   view(): Promise<View>;
 }
 
@@ -149,7 +155,8 @@ async function target(env: Env): Promise<{ path: string; id: string | undefined;
   const path = byId ?? moved?.to ?? origin;
   const id = view.ids.get(path)?.id ?? knownId;
   let document = id === undefined ? undefined : view.documents.get(id);
-  if (document === undefined && id !== undefined && ctx.live !== null) [document] = await ctx.live.app.getDocuments([id], { withContent: true });
+  // Only the world now may be read again; a snapshot answers from what it holds.
+  if (document === undefined && id !== undefined && env.which === 'now' && ctx.live !== null) [document] = await ctx.live.app.getDocuments([id], { withContent: true });
   return { path, id, document };
 }
 
@@ -1747,6 +1754,22 @@ async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string
 
 // --- resolution -----------------------------------------------------------------------------------
 
+/**
+ * Subjects that also name one run, `runs.<n|last>.<subject>`: computed on the
+ * world the harness snapshotted right after that run (`harness.runView.<n>`).
+ */
+export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body)$/;
+
+/** The scenario asserts on the world right after some run, so its runs are snapshotted. */
+export function watchesRunViews(ctx: RunContext): boolean {
+  return ctx.live !== null && ctx.scenario.checks.assertions.some((assertion) => RUN_VIEW_SUBJECT.test(assertion.subject) || (assertion.operator === 'same-as' && RUN_VIEW_SUBJECT.test(String(assertion.expected))));
+}
+
+/** The world right after a run, for its `runs.<n>.` subjects. */
+export async function recordRunView(ctx: RunContext, n: number): Promise<void> {
+  ctx.observations.set(`harness.runView.${n}`, await takeView(ctx, false, { allowNoIds: true }));
+}
+
 /** Families of subjects read from the engine's run report. */
 const ENGINE_FAMILIES = [/^runs\.(\d+|last)\./, /^summary\./, /^paths\.rule$/];
 
@@ -1755,7 +1778,7 @@ export type SubjectSource = 'observed' | 'harness' | 'engine' | 'ui';
 /** Where a subject's value comes from, or null when nothing provides it (a harness gap). */
 export function subjectSource(subject: string): SubjectSource | null {
   const name = subject.startsWith('before.') ? subject.slice('before.'.length) : subject;
-  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && QUIET_SUBJECT.test(name))) return 'harness';
+  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || RUN_VIEW_SUBJECT.test(name)))) return 'harness';
   if (ENGINE_FAMILIES.some((pattern) => pattern.test(name))) return 'engine';
   if (name.startsWith('ui.')) return 'ui';
   return null;
@@ -1856,9 +1879,24 @@ function quietValue(ctx: RunContext, subject: string): string[] {
   return failures;
 }
 
+/**
+ * A document text subject on the world right after run <n|last>. The run
+ * must have been snapshotted: neither the report nor the world at the end
+ * stands in for that moment.
+ */
+async function runViewValue(ctx: RunContext, subject: string): Promise<unknown> {
+  const [, which, name] = RUN_VIEW_SUBJECT.exec(subject) as RegExpExecArray;
+  const index = which === 'last' ? ownResults(ctx).length - 1 : Number(which);
+  if (index < 0 || index >= ownResults(ctx).length) throw new ProductError(`the scenario has no engine run ${which} for ${subject}`);
+  const view = ctx.observations.get(`harness.runView.${index}`) as View | undefined;
+  if (view === undefined) throw new Error(`engine run ${index} has no snapshot of the world right after it for ${subject}`);
+  return (SUBJECTS[name as string] as Compute)({ ctx, which: 'run', view: async () => view });
+}
+
 export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
   if (ctx.observations.has(subject) && !NORMALIZED_OBSERVATIONS.has(subject)) return { known: true, value: ctx.observations.get(subject) };
   if (QUIET_SUBJECT.test(subject)) return { known: true, value: quietValue(ctx, subject) };
+  if (RUN_VIEW_SUBJECT.test(subject)) return { known: true, value: await runViewValue(ctx, subject) };
   const before = subject.startsWith('before.');
   const name = before ? subject.slice('before.'.length) : subject;
   const compute = SUBJECTS[name];
