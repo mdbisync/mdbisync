@@ -57,7 +57,7 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds });
   // Writing Linear from the tracked branch while that pull request waits would leave it to be merged over the new state.
   if (pullRequest.code === 'initial-pull-request-pending') return { complete: false, changed, trackedTip, capture: captured, pullRequest };
-  const moved = pullRequest.suspended !== undefined || pullRequest.branchMoved || pullRequest.merged !== null || pullRequest.pullRequest?.opened === true;
+  const moved = pullRequest.suspended?.changed === true || pullRequest.branchMoved || pullRequest.merged !== null || pullRequest.pullRequest?.opened === true;
   const createSyncBranch = context.fetched.sync === null && !pullRequest.branchMoved;
   const write = await writeTrackedToLinear(context, { config: options.config, documentCap: options.documentCap, containers: captured.containers, createSyncBranch, state:captured.state, captured:captured.documents, ...(options.transforms ? { transforms: options.transforms } : {}) });
   // A held removal waits for the next run to confirm it.

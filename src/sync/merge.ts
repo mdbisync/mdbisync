@@ -128,7 +128,13 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
   if (frozen.size > 0 || released.length > 0) {
     mergeBase ??= await git.text(['merge-base', linear, tracked]);
     let baseTree = mergeBase;
-    for (const [path, entry] of released) baseTree = await takePaths(git, baseTree, entry.releaseBase as Oid, new Set(entry.releasePaths ?? [path]));
+    const releaseGroups = new Map<Oid, Set<string>>();
+    for (const [path, entry] of released) {
+      const paths = releaseGroups.get(entry.releaseBase as Oid) ?? new Set<string>();
+      for (const selected of entry.releasePaths ?? [path]) paths.add(selected);
+      releaseGroups.set(entry.releaseBase as Oid, paths);
+    }
+    for (const [base, paths] of releaseGroups) baseTree = await takePaths(git, baseTree, base, paths);
     if (frozen.size > 0) {
       baseTree = await takePaths(git, baseTree, linear, frozen);
       mergeTracked = await treeCommit(git, await takePaths(git, tracked, linear, frozen), tracked);
@@ -179,6 +185,17 @@ export async function mergeLocally(git: Git, linear: Oid, tracked: Oid, ids: IdM
     claimed.add(to);
     const next = resultSide.files.get(to) as SideFile;
     const previous = linearSide.files.get(from);
+    if (previous === undefined && entry.releaseBase !== undefined) {
+      // A retained suspended id whose file survived a Linear delete is a
+      // restoration, not a keep of a still-live document.
+      const version = { path: to, text: (blobs.get(next.oid) as Buffer).toString('utf8') };
+      const input = { base: { path: from, text: '' }, git: version, linear: null };
+      const restored = await resolveStructural(input);
+      const gone = (await resolveStructural({ ...input, linearGone: true })).summary as StructuralSummary;
+      changes.push({ kind: 'create', path: to, restore: { id: entry.id, gone } });
+      if (restored.summary !== null) resolved.decided.push({ path: to, summary: restored.summary });
+      continue;
+    }
     const change: KeepChange = {
       kind: 'keep',
       id: entry.id,
@@ -277,7 +294,7 @@ export interface MarkedMerge {
  */
 export async function mergeWithMarkers(git: Git, linearSide: Oid, gitSide: Oid, ids: IdMap, knownId?: MergeOptions['knownId'], explicitBase?: Oid): Promise<MarkedMerge> {
   const base = explicitBase ?? await git.text(['merge-base', linearSide, gitSide]);
-  const merged = await git.run(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', `--merge-base=${base}`, linearSide, gitSide], { okCodes: [0, 1] });
+  const merged = await git.run(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ...(explicitBase === undefined ? [] : [`--merge-base=${explicitBase}`]), linearSide, gitSide], { okCodes: [0, 1] });
   const [gitTree, ...rest] = merged.stdout.toString('utf8').split('\0');
   if (gitTree === undefined || !/^[0-9a-f]{40,64}$/.test(gitTree)) throw new Error(message('sync.no-merge-tree'));
   const unmerged = [...new Set(rest.filter((path) => path !== ''))].sort(compare);

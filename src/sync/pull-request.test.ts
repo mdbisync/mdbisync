@@ -50,6 +50,7 @@ describe('sync: the sync pull request', () => {
   let world: FakeWorld;
   let fetchOverride: typeof fetch | undefined;
   let concurrentMove = false;
+  let deletedSuspendedDuringRun = false;
   /** The tracked branch after initial sync: every later commit on it must be the scenario's own or a sync merge (I3). */
   let start: string;
   /** Every value the sync branch held, in order: it only moves forward (I4). */
@@ -93,13 +94,14 @@ describe('sync: the sync pull request', () => {
     await rm(reportFile(), { force: true });
     await rm(summaryFile(), { force: true });
     const writesBefore = world.writes.length;
+    deletedSuspendedDuringRun = false;
     const mark = await markWorld(world, fixture);
     const result = await runCli([command], { env: env(extra), cwd, fetch: fetchOverride ?? fakeFetch(world) });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
     for (const text of texts) assert.ok(!text.includes(CANARY), 'content reached the output or a pull request (I5)');
-    await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined, ...(concurrentMove ? {movedByOthers: ['ids'] as const} : {}) });
+    await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined, movedByOthers: [...(concurrentMove ? ['ids'] as const : []), ...(deletedSuspendedDuringRun ? ['suspendedBranch'] as const : [])] });
     return { result, report, summary, writes: world.writes.slice(writesBefore) };
   }
 
@@ -622,6 +624,121 @@ describe('sync: the sync pull request', () => {
     assert.equal((await ids())[path], undefined);
   });
 
+  it('advances Linear-base when Linear adopts a CI repair without changing the selected tree', async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne(path, '# Plan\n\nBad content.\n');
+    await editRef(SUSPENDED, path, '# Plan\n\nFixed content.\n');
+    await editInLinear(path, '# Plan\n\nFixed content.\n');
+    await sync();
+    checksOn(await rev(SUSPENDED), FAILED);
+    await editInLinear(path, '# Plan\n\nNew content.\n');
+    await sync();
+    const text = await show(`${SUSPENDED}:${path}`);
+    assert.equal(detectConflicts(text).length, 0);
+    assert.match(text, /New content/);
+  });
+
+  it('a suspended non-document conflict leaves the normal lane moving', async () => {
+    await suspendOne();
+    await editRef(SUSPENDED, '.pre-commit-config.yaml', PRE_COMMIT + '# lane repair\n');
+    await gitEdit('.pre-commit-config.yaml', PRE_COMMIT + '# tracked repair\n');
+    await editInLinear('combined/guide.md', '# Guide\n\nIndependent edit.\n');
+    const run = await sync();
+    assert.ok(run.report.pullRequest?.suspended?.conflicts?.includes('.pre-commit-config.yaml'));
+    assert.ok(openPullRequests().some((pr) => pr.head === 'mdbisync/linear'));
+    checksOn(await rev(SYNC_BRANCH), PASSED);
+    await sync();
+    assert.match(await show('refs/heads/main:combined/guide.md'), /Independent edit/);
+  });
+
+  it('Linear intake ignores non-document conflicts outside the suspended paths', async () => {
+    await suspendOne();
+    await gitEdit('eng/notes/image.png', 'tracked bytes');
+    await editRef('refs/mdbisync/linear', 'eng/notes/image.png', 'captured bytes');
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nLater held edit.\n');
+    const run = await sync();
+    assert.equal(run.report.pullRequest?.suspended?.conflicts, undefined);
+    assert.match(await show(`${SUSPENDED}:eng/notes/plan.md`), /Later held edit/);
+  });
+
+  it('restores a suspended Linear delete when a git edit keeps its file at release', async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne();
+    const document = await documentOf(path);
+    document.trashed = true;
+    touch(document);
+    await gitEdit(path, '# Plan\n\nGit edit while held.\n');
+    await sync();
+    const released = await releaseHeld();
+    assert.notEqual(document.trashed, true);
+    assert.match(document.content ?? '', /Git edit while held/);
+    assert.ok(released.report.sync?.restored.includes(path));
+    assert.equal((await ids())[path]?.id, document.id);
+  });
+
+  it('releases when GitHub automatically deletes the suspended branch after merging', async () => {
+    await suspendOne();
+    world.github.merge = async (pr, sha) => {
+      const outcome = await mergeOnRemote(pr, sha);
+      if ('sha' in outcome && pr.head === 'mdbisync/suspended') {
+        await fixture.remote.run(['update-ref', '-d', SUSPENDED]);
+        deletedSuspendedDuringRun = true;
+      }
+      return outcome;
+    };
+    const released = await releaseHeld();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.doesNotMatch(await show('refs/mdbisync/ids:ids.json'), /"suspended"|"releaseBase"/);
+    assert.match((await documentOf('eng/notes/plan.md')).content ?? '', /Held Linear edit/);
+  });
+
+  it('heals a release interrupted after GitHub merged and automatically deleted its branch', async () => {
+    await suspendOne();
+    const head = await rev(SUSPENDED);
+    const pr = openPullRequests().find((pr) => pr.head === 'mdbisync/suspended')!;
+    assert.ok('sha' in await mergeOnRemote(pr, head));
+    await fixture.remote.run(['update-ref', '-d', SUSPENDED]);
+    pr.state = 'closed'; pr.merged = true;
+    const run = await sync();
+    assert.ok(run.report.pullRequest?.suspended?.released);
+    assert.equal(openPullRequests().length, 0);
+    assert.doesNotMatch(await show('refs/mdbisync/ids:ids.json'), /"suspended"|"releaseBase"/);
+  });
+
+  it('reports an idle failed suspended head as unchanged', async () => {
+    await suspendOne();
+    const run = await sync();
+    assert.equal(run.report.changed, false);
+    assert.deepEqual(run.report.writes.git, {});
+    assert.deepEqual(run.writes.filter((write) => !write.startsWith('PATCH /pulls/')), []);
+  });
+
+  it('leaves a pre-existing unrelated suspended branch untouched', async () => {
+    await fixture.remote.run(['update-ref', SUSPENDED, start]);
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nA changed page.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), FAILED);
+    const run = await sync();
+    assert.equal(await rev(SUSPENDED), start);
+    assert.equal(run.report.pullRequest?.code, 'conflict');
+    assert.doesNotMatch(await show('refs/mdbisync/ids:ids.json'), /"suspended"/);
+  });
+
+  it('a repeated protection-rule refusal on the suspended lane stays a setup error', async () => {
+    await suspendOne();
+    ruleBlocks();
+    checksOn(await rev(SUSPENDED), PASSED);
+    const first = await sync();
+    assert.equal(first.report.pullRequest?.suspended?.code, 'merge-refused');
+    const second = await sync();
+    assert.equal(second.report.pullRequest?.suspended?.code, 'merge-blocked');
+    assert.equal(second.result.exitCode, SETUP_FAILED_EXIT_CODE);
+    world.github.merge = mergeOnRemote;
+    const released = await sync();
+    assert.equal(released.result.exitCode, 0, released.result.stderr);
+    assert.ok(released.report.pullRequest?.suspended?.released);
+  });
+
   it('L5-22: captures a huge Linear document byte for byte, warns, and never writes an oversized git edit back', async () => {
     const path = 'eng/notes/large.md';
     const content = `${CANARY}\n\n${'a'.repeat(260_000)}\n`;
@@ -734,8 +851,9 @@ describe('sync: the sync pull request', () => {
     await sync();
     checksOn(await rev(SYNC_BRANCH), [{ name: 'ci/external', status: 'completed', conclusion: 'error', commitStatus: true }]);
     const failed = await sync();
-    assert.equal(failed.result.exitCode, SETUP_FAILED_EXIT_CODE, failed.result.stderr);
+    assert.equal(failed.result.exitCode, 0, failed.result.stderr);
     assert.deepEqual(failed.report.pullRequest?.checks?.failed, ['ci/external']);
+    assert.ok(failed.report.pullRequest?.suspended);
   });
 
   async function editRef(ref: string, path: string, text: string): Promise<string> {
@@ -743,8 +861,8 @@ describe('sync: the sync pull request', () => {
     const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: text });
     const commit = await commitFile(base, path, blob);
     await fixture.remote.run(['update-ref', ref, commit, base]);
-    if (ref === SYNC_BRANCH) syncValues.push(commit);
-    else start = commit;
+    if (ref === SYNC_BRANCH || ref === SUSPENDED) syncValues.push(commit);
+    else if (ref === 'refs/heads/main') start = commit;
     return commit;
   }
 

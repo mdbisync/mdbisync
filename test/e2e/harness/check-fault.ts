@@ -3,7 +3,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Git } from '../../../src/state/index.ts';
+import { Git, resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import type { RunContext } from './context.ts';
 import type { SandboxRest } from './github.ts';
@@ -41,9 +41,11 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
   const state = args.status;
   if (state !== 'pending' && state !== 'failed' && state !== 'passed') throw new Error('invalid check status');
   if (args.name !== undefined && args.name !== CHECK_NAME) throw new Error(`the marker workflow provides only the ${CHECK_NAME} check`);
+  if (args.lane !== undefined && args.lane !== 'normal' && args.lane !== 'suspended') throw new Error('invalid check lane');
+  const branch = args.lane === 'suspended' ? suspendedBranch(resolveStateConfig({trackedBranch:ctx.names.trackedBranch,syncBranch:ctx.names.syncBranch,refPrefix:ctx.names.refPrefix})) : ctx.names.syncBranch;
   const world = live(ctx);
   const person = await ctx.person();
-  const ref = `refs/heads/${ctx.names.syncBranch}`;
+  const ref = `refs/heads/${branch}`;
   const refs = await world.sandbox.runRefs();
   const exists = refs.some((entry) => entry.ref === ref);
   if (!exists && state === 'passed') throw new HarnessGapError('fault.checks release without a sync branch');
@@ -67,12 +69,12 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
   } finally {
     await person.run(['worktree', 'remove', '--force', dir]);
   }
-  const prs = await world.rest.pullRequests(ctx.names.syncBranch, 'open');
-  if (!prs.some((pr) => pr.head.ref === ctx.names.syncBranch && pr.base.ref === ctx.names.trackedBranch)) {
+  const prs = await world.rest.pullRequests(branch, 'open');
+  if (!prs.some((pr) => pr.head.ref === branch && pr.base.ref === ctx.names.trackedBranch)) {
     // A check fault is a fixture of an already waiting PR. Seeding it lets
     // the workflow run before the scenario's first sync; it does not test
     // the product's ability to create a PR.
-    await world.rest.openPullRequest(ctx.names.syncBranch, ctx.names.trackedBranch, 'Update documents', 'Review the latest document changes.');
+    await world.rest.openPullRequest(branch, ctx.names.trackedBranch, 'Update documents', 'Review the latest document changes.');
   }
   ctx.log(`waiting up to 5 minutes for ${CHECK_NAME} to reach ${state}`);
   await waitForCheck(world.rest, sha, state, { signal: ctx.signal });

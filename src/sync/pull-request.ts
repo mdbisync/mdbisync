@@ -44,6 +44,7 @@ import {
   branchRef,
   pushAtomic,
   readIds,
+  commitTree,
 } from '../state/index.ts';
 import { LaneMoved, LaneConflict, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
@@ -130,6 +131,7 @@ export interface PullRequestFailure {
 }
 
 export function pullRequestFailure(result: PullRequestResult | undefined): PullRequestFailure | null {
+  if (result?.suspended?.code === 'merge-blocked') return {kind:'setup', code:'merge-blocked', message:message('pull-request.merge-blocked', {code:'merge-blocked', refusal:refusalText(result.suspended)})};
   switch (result?.code) {
     case 'merge-blocked':
       return { kind: 'setup', code: result.code, message: message('pull-request.merge-blocked', { code: result.code, refusal: refusalText(result) }) };
@@ -150,13 +152,15 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   try { suspended = await maintainSuspended(context, options); }
   catch (error) {
     const code = error instanceof LaneMoved ? 'state-moved' : error instanceof LaneConflict ? 'conflict' : error instanceof PullRequestError ? 'github-failed' : undefined;
-    if (code === undefined) throw error;
-    return { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [], code, ...(error instanceof LaneConflict ? { paths: error.paths } : {}) };
+    if (error instanceof PullRequestError) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], code: 'github-failed' };
+    else if (error instanceof LaneConflict) suspended = { paths: [...suspendedPaths(await readIds(git, options.state.ids))].sort(), checks: [], conflicts: error.paths };
+    else if (code === undefined) throw error;
+    else return { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [], code, ...(error instanceof LaneConflict ? { paths: error.paths } : {}) };
   }
   const tracked = fetched.tracked;
   const sync = fetched.sync;
   const linear = options.state.linear;
-  const result: PullRequestResult = { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [], ...(suspended === undefined ? {} : { suspended }) };
+  const result: PullRequestResult = { needed: false, pullRequest: null, branchMoved: false, checks: null, merged: null, paths: [], marked: [], decided: [], ...(suspended === undefined ? {} : { suspended }), ...(suspended?.code === undefined ? {} : {code:suspended.code, ...(suspended.status === undefined ? {} : {status:suspended.status}), ...(suspended.reason === undefined ? {} : {reason:suspended.reason})}) };
   if (linear === null) return result;
 
   const frozen = suspendedPaths(await readIds(git, options.state.ids));
@@ -173,7 +177,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // A sync branch is made by the first sync pull request and stays. Once `linear` holds more than initial sync's
     // record and the tracked branch, a missing branch was deleted by a person: it comes back at `linear`.
     if (sync !== null || (await isAncestor(git, linear, tracked)) || (await isInitialRecord(git, linear))) return result;
-    const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: null, next: laneLinear }]);
+    const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: null, next: frozen.size === 0 ? linear : await commitTree(git, {base: wanted, changes: new Map(), parents: [linear], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? SYNC_IDENTITY}) }]);
     if (pushed.ok) return { ...result, branchMoved: true };
     // A refusal that is not a lease (a rule on branch names, missing rights) leaves the branch to the run that needs it.
     return pushed.reason === 'stale' ? { ...result, code: 'state-moved' } : result;
@@ -196,7 +200,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       // snapshot needs a person's approval. Ordinary unmerged changes stay on the branch,
       // including a person's edits and CI fixes after a pull request closes.
       if (!result.needed) return result;
-      head = await restart(git, sync, laneLinear, wanted, identity);
+      head = await restart(git, sync, linear, wanted, identity, frozen.size > 0);
     } else {
       const advanced = await advance(git, merger, sync as Oid, linear, frozen.size > 0);
       if (advanced === null) return { ...result, code: 'conflict' };
@@ -325,7 +329,8 @@ async function isAncestor(git: Git, ancestor: Oid, descendant: Oid): Promise<boo
  * branch and `linear` whose tree is `wanted`, the tracked branch with
  * `linear` merged in, so nothing else the branch held is carried on.
  */
-async function restart(git: Git, sync: Oid | null, linear: Oid, wanted: string, identity: CommitIdentity): Promise<Oid> {
+async function restart(git: Git, sync: Oid | null, linear: Oid, wanted: string, identity: CommitIdentity, masked = false): Promise<Oid> {
+  if (masked) return commitTree(git, {base: wanted, changes: new Map(), parents: sync === null ? [linear] : [sync, linear], message: SYNC_BRANCH_MERGE_MESSAGE, identity});
   if (sync === null || (await isAncestor(git, sync, linear))) return linear;
   return commitMerge(git, wanted, [sync, linear], SYNC_BRANCH_MERGE_MESSAGE, identity);
 }
@@ -445,6 +450,9 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     const hold = result.suspended;
     const link = hold.pullRequest === undefined ? '' : ` [#${hold.pullRequest.number}](${hold.pullRequest.url})`;
     lines.push(hold.released ? 'Released the suspended batch.' : `Suspended changes${link}: ${hold.paths.map((path) => `\`${path}\``).join(', ')}.`, '');
+    if (hold.code === 'merge-refused' || hold.code === 'merge-blocked') lines.push(`GitHub refused the suspended merge (${refusalText(hold)}).`, '');
+    if (hold.code === 'github-failed') lines.push('A GitHub request for the suspended lane failed; the normal lane still runs.', '');
+    if (hold.conflicts !== undefined) lines.push(`Suspended files waiting for a manual merge: ${hold.conflicts.map((path) => `\`${path}\``).join(', ')}.`, '');
     if (hold.checks.length > 0) lines.push(`Failed checks: ${hold.checks.map((name) => `\`${name}\``).join(', ')}.`, '');
   }
   const pr = result.pullRequest;

@@ -47,7 +47,8 @@
       "kind": "fault",
       "action": "checks",
       "args": {
-        "status": "passed"
+        "status": "passed",
+        "lane": "suspended"
       }
     },
     {
@@ -88,16 +89,16 @@
     },
     "assertions": [
       {
-        "subject": "runs.1.pullRequest.checks.failed",
+        "subject": "runs.1.pullRequest.suspended.checks",
         "operator": "equal",
         "expected": [
           "format"
         ]
       },
       {
-        "subject": "runs.1.pullRequest.code",
+        "subject": "runs.1.exitStatus",
         "operator": "equal",
-        "expected": "check-failed"
+        "expected": "success"
       },
       {
         "subject": "runs.1.pullRequest.merged",
@@ -106,8 +107,8 @@
       },
       {
         "subject": "runs.1.writtenCount",
-        "operator": "equal",
-        "expected": 0
+        "operator": "at-least",
+        "expected": 1
       },
       {
         "subject": "pullRequests.merged",

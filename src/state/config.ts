@@ -111,6 +111,6 @@ export function refNameProblem(name: string): string | null {
 
 /** The second lane shares the configured namespace of the normal branch. */
 export function suspendedBranch(config: StateConfig): string {
-  return config.syncBranch.endsWith('/suspended') || config.syncBranch === 'suspended'
+  return !config.syncBranch.includes('/') || config.syncBranch.endsWith('/suspended')
     ? `${config.syncBranch}-suspended` : config.syncBranch.replace(/[^/]+$/, 'suspended');
 }

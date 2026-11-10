@@ -308,7 +308,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(doc.id);
       if (!live(doc)) {
         if (old !== undefined) {
-          if (old.entry.suspended === undefined && old.entry.saved !== undefined && options.stageOnly !== true) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
+          if (old.entry.saved !== undefined && options.stageOnly !== true) await linear.updateDocument(doc.id, {icon: old.entry.saved.icon, color: old.entry.saved.color});
           removeBody(old.path);
           if (old.entry.suspended === undefined && old.entry.releaseBase === undefined) ids.delete(old.path);
           documentIds.delete(old.path);

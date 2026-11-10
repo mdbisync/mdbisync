@@ -833,7 +833,8 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     });
     result.restored.push(change.path);
     stored.set(change.path, { content: document.content ?? '', sent: body, document });
-    nextIds.set(change.path, { id: document.id });
+    const previous = nextIds.get(change.path);
+    nextIds.set(change.path, previous?.id === document.id ? previous : { id: document.id });
     await reconcileMark(change.path, document);
     return true;
   }

@@ -2,7 +2,7 @@
 // failed batch's history with its tree set aside, so topology is insufficient.
 import { randomUUID } from 'node:crypto';
 import { SYNC_IDENTITY } from '../initial-sync/index.ts';
-import { closePullRequest, ensurePullRequest, findOpenPullRequest, mergePullRequest, readChecks, waitForChecks, type GitHubRepository } from '../pull-request/index.ts';
+import { closePullRequest, ensurePullRequest, findOpenPullRequest, mergePullRequest, readChecks, waitForChecks, updatePullRequest, type GitHubRepository } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { branchRef, commitIds, commitTree, isAncestor, pushAtomic, readIds, readReservedIds, readSupersededIds, readWrittenHashes, stateRef, suspendedBranch, type Git, type IdMap, type Oid, type StateConfig, type StateSnapshot } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
@@ -17,6 +17,11 @@ export interface SuspendedResult {
   pullRequest?: { number: number; url: string };
   released?: Oid;
   waiting?: boolean;
+  changed?: boolean;
+  conflicts?: string[];
+  code?: 'github-failed' | 'merge-refused' | 'merge-blocked';
+  status?: number;
+  reason?: string;
 }
 
 export interface LaneOptions {
@@ -44,7 +49,7 @@ const note = (tracked: Oid, linear: Oid) => `\n\nTracked-base: ${tracked}\nLinea
 async function recordedBases(git: Git, head: Oid): Promise<{ tracked: Oid; linear: Oid }> {
   // First-parent history ignores the batches joined as second parents and
   // also permits a person's ordinary commit at the tip of this branch.
-  const log = await git.text(['log', '--first-parent', '--format=%B', head]);
+  const log = await git.text(['log', '--first-parent', '-1', '--all-match', '--grep=^Tracked-base:', '--grep=^Linear-base:', '--format=%B', head]);
   const tracked = /^Tracked-base: ([0-9a-f]{40,64})$/m.exec(log)?.[1];
   const linear = /^Linear-base: ([0-9a-f]{40,64})$/m.exec(log)?.[1];
   if (tracked === undefined || linear === undefined) throw new LaneConflict('The suspended branch has no recorded bases');
@@ -66,18 +71,28 @@ async function persistIds(git: Git, options: LaneOptions, ids: IdMap): Promise<O
   return commitIds(git, options.state.ids, ids, SYNC_IDENTITY, { message: 'Sync: suspended document ids', reserved: await readReservedIds(git, options.state.ids), superseded: await readSupersededIds(git, options.state.ids), written: await readWrittenHashes(git, options.state.ids) });
 }
 
-async function push(context: RunContext, options: LaneOptions, ids: IdMap, head: Oid, expected: Oid | null, normal?: { expected: Oid | null; next: Oid }): Promise<void> {
+async function push(context: RunContext, options: LaneOptions, ids: IdMap, head: Oid, expected: Oid | null, normal?: { expected: Oid | null; next: Oid }, updateLane = true): Promise<boolean> {
+  // Keep one copy of the complete lane path set, rather than N copies in a batch of N documents.
+  const paths = suspendedPaths(ids);
+  let first = true;
+  for (const [path, entry] of ids) if (entry.suspended !== undefined) {
+    entry.suspended.paths = first ? [...paths].sort() : [path];
+    entry.suspended.head = head;
+    first = false;
+  }
   const idsTip = await persistIds(context.git, options, ids);
   const updates = [
     { ref: stateRef(options.config, 'ids'), expected: options.state.ids, next: idsTip },
     { ref: stateRef(options.config, 'linear'), expected: options.state.linear, next: options.state.linear as Oid },
-    { ref: branchRef(suspendedBranch(options.config)), expected, next: head },
   ];
+  if (updateLane) updates.push({ ref: branchRef(suspendedBranch(options.config)), expected, next: head });
   if (normal !== undefined) updates.push({ ref: branchRef(options.config.syncBranch), ...normal });
-  if (!(await pushAtomic(context.git, options.config, updates)).ok) throw new LaneMoved();
+  const pushed = await pushAtomic(context.git, options.config, updates);
+  if (!pushed.ok) throw new LaneMoved();
   options.state.ids = idsTip;
-  context.fetched.suspended = head;
+  if (updateLane) context.fetched.suspended = head;
   if (normal !== undefined) context.fetched.sync = normal.next;
+  return pushed.updated.length > 0;
 }
 
 async function addEpisodes(context: RunContext, options: LaneOptions, ids: IdMap, paths: ReadonlySet<string>, checks: string[]): Promise<void> {
@@ -89,8 +104,9 @@ async function addEpisodes(context: RunContext, options: LaneOptions, ids: IdMap
     if (id !== undefined && ![...ids.values()].some((entry) => entry.id === id)) ids.set(path, { id });
   }
   for (const [path, entry] of ids) if (paths.has(path) && entry.suspended === undefined) {
-    entry.suspended = { noticeId: randomUUID(), paths: [...paths].sort(), checks: [...checks] };
+    entry.suspended = { noticeId: randomUUID(), paths: [path], checks: [...checks] };
     delete entry.releaseBase;
+    delete entry.releasePaths;
   }
 }
 
@@ -101,12 +117,21 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   if (linear === null) return undefined;
   const ids = await readIds(git, options.state.ids);
   const paths = suspendedPaths(ids);
-  if (paths.size === 0) return undefined;
   const tracked = context.fetched.tracked;
   const previous = context.fetched.suspended ?? null;
+  // A batch containing only CI/non-document files still has a lane to finish.
+  if (paths.size === 0) {
+    if (previous === null || await isAncestor(git, previous, tracked)) return undefined;
+    for (const path of await changedPaths(git, tracked, previous)) paths.add(path);
+  }
   let head = previous;
   let bases: { tracked: Oid; linear: Oid };
   if (head === null) {
+    const releasedHead = [...ids.values()].find((entry) => entry.suspended?.head !== undefined)?.suspended?.head;
+    if (releasedHead !== undefined && await isAncestor(git, releasedHead, tracked)) {
+      const previousBases = await recordedBases(git, releasedHead);
+      return release(context, options, ids, paths, releasedHead, previousBases.linear, tracked);
+    }
     head = await commit(git, await takePaths(git, tracked, linear, paths), [tracked], 'Restore suspended changes' + note(tracked, linear));
     bases = { tracked, linear };
   } else {
@@ -121,25 +146,34 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     for (const path of await changedPaths(git, tracked, head)) paths.add(path);
     await addEpisodes(context, options, ids, paths, []);
     if (bases.linear !== linear) {
-      const tree = await mergeTree(git, linear, head, bases.linear, ids, options.state.ids);
+      // The intake never carries paths outside this lane. Mask them before
+      // the merge, so their unrelated image/config conflicts cannot hold it.
+      const input = await treeCommit(git, await takePaths(git, head, linear, paths), linear);
+      const base = await treeCommit(git, await takePaths(git, head, bases.linear, paths), bases.linear);
+      const tree = await mergeTree(git, input, head, base, ids, options.state.ids);
+      const linearChanged = await takePaths(git, head, linear, paths) !== await takePaths(git, head, bases.linear, paths);
       const selected = await takePaths(git, head, tree, paths);
-      if (selected !== await git.text(['rev-parse', `${head}^{tree}`])) {
+      if (linearChanged || selected !== await git.text(['rev-parse', `${head}^{tree}`])) {
         head = await commit(git, selected, [head], LINEAR_INTAKE_MESSAGE + note(tracked, linear));
         bases.linear = linear;
       }
     }
   }
-  for (const entry of ids.values()) if (entry.suspended !== undefined) entry.suspended.paths = [...paths].sort();
-  await push(context, options, ids, head, previous);
+  const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
+  if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
+  const changed = await push(context, options, ids, head, previous);
   // A previous suspension may have died between its push and closing the normal PR.
   if (context.fetched.sync !== null && await git.text(['show', '-s', '--format=%s', context.fetched.sync]) === SET_ASIDE_MESSAGE) {
     const normal = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
     if (normal !== null) await closePullRequest(options.github, normal.number);
   }
-  const result: SuspendedResult = { paths: [...paths].sort(), checks: [] };
+  const result: SuspendedResult = { paths: [...paths].sort(), checks: [], changed };
+  const open = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
+  const old = /^<!-- suspended merge refused: head=([0-9a-f]+) base=([0-9a-f]+) status=(\d+) reason=([^\s]*) -->\r?$/m.exec(open?.body ?? '');
+  const earlier = old?.[1] === head && old?.[2] === tracked ? old : null;
+  const body = `Changes on hold until their checks pass.\n\n${result.paths.map((path) => `- ${path}`).join('\n')}\n${earlier === null ? '' : `\n${earlier[0]}\n`}`;
   const { pullRequest, opened } = await ensurePullRequest(options.github, {
-    head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE,
-    body: `Changes on hold until their checks pass.\n\n${result.paths.map((path) => `- ${path}`).join('\n')}\n`,
+    head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body,
   });
   result.pullRequest = { number: pullRequest.number, url: pullRequest.url };
   const fresh = head !== previous || opened;
@@ -153,17 +187,27 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   const remoteTip = (await git.text(['ls-remote', '--refs', options.config.remote, branchRef(options.config.trackedBranch)])).split('\t')[0];
   if (remoteTip !== tracked) return { ...result, waiting: true };
   const merged = await mergePullRequest(options.github, pullRequest.number, head);
-  if (!merged.merged) return result;
+  if (!merged.merged) {
+    const repeated = earlier !== null && Number(earlier[3]) === merged.status && earlier[4] === encodeURIComponent(merged.reason);
+    const code = repeated ? 'merge-blocked' : 'merge-refused';
+    if (!repeated) await updatePullRequest(options.github, pullRequest.number, {
+      title: SUSPENDED_TITLE,
+      body: `${body}\n<!-- suspended merge refused: head=${head} base=${tracked} status=${merged.status} reason=${encodeURIComponent(merged.reason)} -->\n`,
+    });
+    return { ...result, code, status: merged.status, reason: merged.reason };
+  }
   await git.run(['fetch', '--no-tags', '--no-write-fetch-head', options.config.remote, branchRef(options.config.trackedBranch)]);
   return release(context, options, ids, paths, head, bases.linear, merged.sha);
 }
 
 async function release(context: RunContext, options: LaneOptions, ids: IdMap, paths: Set<string>, head: Oid, linearBase: Oid, tracked: Oid): Promise<SuspendedResult> {
   const { git } = context;
-  for (const entry of ids.values()) if (entry.suspended !== undefined) {
+  let first = true;
+  for (const [path, entry] of ids) if (entry.suspended !== undefined) {
     delete entry.suspended;
     entry.releaseBase = linearBase;
-    entry.releasePaths = [...paths].sort();
+    entry.releasePaths = first ? [...paths].sort() : [path];
+    first = false;
   }
   const normal = context.fetched.sync;
   let nextNormal = normal;
@@ -174,9 +218,11 @@ async function release(context: RunContext, options: LaneOptions, ids: IdMap, pa
     nextNormal = await commit(git, await takePaths(git, tree, tracked, paths), [normal, tracked], 'Take released changes from the tracked branch');
   }
   await push(context, options, ids, head, context.fetched.suspended ?? null,
-    normal === null || nextNormal === normal ? undefined : { expected: normal, next: nextNormal as Oid });
+    normal === null || nextNormal === normal ? undefined : { expected: normal, next: nextNormal as Oid }, false);
   context.fetched.tracked = tracked;
-  return { paths: [...paths].sort(), checks: [], released: tracked };
+  const advertised = await git.text(['ls-remote', '--refs', options.config.remote, branchRef(suspendedBranch(options.config))]);
+  context.fetched.suspended = advertised === '' ? null : advertised.split('\t')[0] as Oid;
+  return { paths: [...paths].sort(), checks: [], released: tracked, changed: true };
 }
 
 /** Move a failed normal batch, its set-aside head, and episodes together or not at all. */
@@ -190,6 +236,8 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   const paths = new Set(await changedPaths(git, tracked, batchTree));
   const previous = context.fetched.suspended ?? null;
   let head: Oid;
+  // Never adopt an unrelated pre-existing branch, even when main contains it.
+  if (previous !== null) await recordedBases(git, previous);
   if (previous === null || await isAncestor(git, previous, tracked)) {
     head = await commit(git, batchTree, previous === null ? [failed, tracked] : [previous, failed, tracked], 'Suspend changes from Linear' + note(tracked, linear));
   } else {
@@ -199,6 +247,8 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   }
   for (const path of await changedPaths(git, tracked, head)) paths.add(path);
   await addEpisodes(context, options, ids, paths, checks);
+  const anchor = [...ids.values()].find((entry) => entry.suspended !== undefined);
+  if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
   const normal = await commit(git, await git.text(['rev-parse', `${tracked}^{tree}`]), [failed, tracked], SET_ASIDE_MESSAGE);
   await push(context, options, ids, head, previous, { expected: failed, next: normal });
   await closePullRequest(options.github, normalNumber);
@@ -206,5 +256,5 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE,
     body: `Changes on hold: ${checks.map((name) => `\`${name}\``).join(', ')}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n`,
   });
-  return { paths: [...paths].sort(), checks, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
+  return { paths: [...paths].sort(), checks, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
 }
