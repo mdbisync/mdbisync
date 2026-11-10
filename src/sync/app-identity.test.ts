@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
-import { NEUTRAL_IDENTITY } from '../setup/github.ts';
+import { NEUTRAL_IDENTITY } from '../state/index.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { Git } from '../state/index.ts';
 

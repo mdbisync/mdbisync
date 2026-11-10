@@ -45,6 +45,7 @@ import {
   type StateSnapshot,
   type UploadMap,
   INITIAL_SYNC_FROM_LINEAR_RECORD,
+  NEUTRAL_IDENTITY,
   branchRef,
   parseLfsPointer,
   isAncestor,
@@ -657,10 +658,14 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     return (await describe(a)) === (await describe(b));
   }
 
-  /** A record an initial sync from Linear made: its subject, the sync's identity, one parent. */
+  /**
+   * A record an initial sync from Linear made: its subject, one parent, and
+   * the sync's identity, this run's or the neutral one, since the run that
+   * made it may have had no App slug, or come from a release before it.
+   */
   async function isOwnRecord(oid: Oid): Promise<boolean> {
     const [subject, email, parents] = (await git.text(['show', '-s', '--format=%s%n%ae%n%P', oid])).split('\n');
-    return subject === REVERSE_RECORD_MESSAGE && email === identity.email && (parents ?? '').split(' ').filter(Boolean).length === 1;
+    return subject === REVERSE_RECORD_MESSAGE && (email === identity.email || email === NEUTRAL_IDENTITY.email) && (parents ?? '').split(' ').filter(Boolean).length === 1;
   }
 }
 

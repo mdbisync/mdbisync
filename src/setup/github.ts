@@ -7,7 +7,7 @@
 // account, which the sync's commits name as their author, is read by the
 // App's slug.
 
-import { type CommitIdentity } from '../state/index.ts';
+import { type CommitIdentity, NEUTRAL_IDENTITY } from '../state/index.ts';
 import { type CheckResult, failed, notChecked, passed } from './report.ts';
 import { message } from '../messages.ts';
 
@@ -59,13 +59,6 @@ export interface GitHubCheck {
   /** Who the sync's commits are by: the App's bot account; absent without an App slug or when it was not found. */
   identity?: CommitIdentity;
 }
-
-/**
- * Who the sync's commits are by when the run has no App slug (the command
- * line run by hand): a name that is no person's and an address that cannot
- * receive mail.
- */
-export const NEUTRAL_IDENTITY: CommitIdentity = Object.freeze({ name: 'mdbisync', email: 'mdbisync@sync.invalid' });
 
 /**
  * Probes the token's permissions and the repository's merge setting, and
@@ -132,22 +125,12 @@ async function checkApp(target: GitHubTarget): Promise<{ app: CheckResult; ident
     return { app: passed('github-app', `no App slug given: commits name ${NEUTRAL_IDENTITY.name} <${NEUTRAL_IDENTITY.email}>`) };
   }
   const login = `${target.appSlug}[bot]`;
-  const response = await (target.fetch ?? fetch)(`${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}/users/${encodeURIComponent(login)}`, {
-    headers: { authorization: `Bearer ${target.token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
-    signal: AbortSignal.timeout(30_000),
-  });
-  let json: unknown = null;
-  try {
-    json = await response.json();
-  } catch {
-    // A body that is not JSON carries nothing the check needs.
-  }
-  const answer = { status: response.status, headers: response.headers, json };
-  if (response.status === 403 && isRateLimited(answer)) throw new Error(message('setup.github-rate-limited-app'));
+  const answer = await requester(target, '')('GET', `/users/${encodeURIComponent(login)}`);
+  if (answer.status === 403 && isRateLimited(answer)) throw new Error(message('setup.github-rate-limited-app'));
   const notFound = failed('github-app', 'github-app-not-found', message('setup.github-app-not-found', { login }));
-  if (response.status === 404) return { app: notFound };
-  ensureAnswered(response.status, message('setup.github-reading-app'));
-  const account = json as { login?: unknown; id?: unknown; type?: unknown } | null;
+  if (answer.status === 404) return { app: notFound };
+  ensureAnswered(answer.status, message('setup.github-reading-app'));
+  const account = answer.json as { login?: unknown; id?: unknown; type?: unknown } | null;
   // A user may not take a login ending in `[bot]`, but the answer is checked all the same.
   // Logins are compared without case, as GitHub does; the commits use GitHub's spelling.
   if (typeof account?.login !== 'string' || account.login.toLowerCase() !== login.toLowerCase() || account.type !== 'Bot'
@@ -156,8 +139,9 @@ async function checkApp(target: GitHubTarget): Promise<{ app: CheckResult; ident
   return { app: passed('github-app', `commits name the App ${account.login}`), identity };
 }
 
-function requester(target: GitHubTarget) {
-  const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}/repos/${target.repository}`;
+/** Requests to the API under `prefix`: the repository's paths by default. */
+function requester(target: GitHubTarget, prefix = `/repos/${target.repository}`) {
+  const base = `${(target.apiUrl ?? DEFAULT_GITHUB_API_URL).replace(/\/+$/, '')}${prefix}`;
   const fetchImpl = target.fetch ?? fetch;
   return async (method: string, path: string, body?: Record<string, unknown>): Promise<Answer> => {
     const response = await fetchImpl(`${base}${path}`, {

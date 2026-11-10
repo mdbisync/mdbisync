@@ -6,7 +6,6 @@ import { type AuthContext, LinearClient, type LinearReads, LinearStoppedError, R
 import { type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import {
   type FailureCode,
-  NEUTRAL_IDENTITY,
   PRE_COMMIT_CONFIG,
   type ResolvedTargets,
   type SetupReport,
@@ -19,7 +18,7 @@ import {
   renderStateRefusal,
   runSetupCheck,
 } from '../setup/index.ts';
-import { type CommitIdentity, type FetchedState, type Git, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress } from '../state/index.ts';
+import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress } from '../state/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
 import { renderStoppedBeforeWriting } from './stop.ts';

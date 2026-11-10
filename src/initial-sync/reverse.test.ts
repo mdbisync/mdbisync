@@ -17,7 +17,7 @@ import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { LinearClient } from '../linear/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
-import { NEUTRAL_IDENTITY } from '../setup/github.ts';
+import { NEUTRAL_IDENTITY } from '../state/index.ts';
 import { commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
 import { type SecurityGate } from '../sync/security.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
@@ -848,6 +848,18 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.deepEqual(await refs(), before);
     // The pull request with the person's commit still waits for its merge.
     assert.equal((await run(world, {}, 'sync')).report.code, 'initial-pull-request-pending');
+  });
+
+  it('a rerun with the App slug takes a record made without it as its own and moves the pull request on', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    assert.equal((await run(world)).result.exitCode, 0);
+    world.linear.documents = world.linear.documents.filter((d) => d.id !== 'doc-plan');
+    const { result, report } = await run(world, { MDBISYNC_APP_SLUG: FAKE_APP_SLUG });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.notEqual(report.code, 'sync-branch-changed');
+    assert.equal((await refs())['refs/heads/mdbisync/linear'], report.linearToGit?.record?.commit);
+    assert.equal(await fixture.remote.text(['log', '-1', '--format=%ae', 'refs/heads/mdbisync/linear']), FAKE_APP_IDENTITY.email);
   });
 
   it('a rerun after Linear changed moves the pull request to the new record and rewrites its description', async () => {

@@ -1453,12 +1453,10 @@ export const SUBJECTS: Record<string, Compute> = {
     const lines = (await git.text(['log', '--no-walk=unsorted', '--format=%an <%ae>%n%cn <%ce>', ...commits])).split('\n');
     const identities = sorted(new Set(lines.filter((line) => line !== '')));
     const app = env.ctx.live?.githubAppLogin;
-    if (app !== undefined) {
-      const login = app.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const linked = new RegExp(`^${login} <[1-9][0-9]*\\+${login}@users\\.noreply\\.github\\.com>$`);
-      if (identities.every((identity) => linked.test(identity))) return 'app-bot';
-    }
-    return identities.join(', ');
+    if (app === undefined) throw new EnvBlockedError('the commits are compared with the GitHub App, and the harness holds no App token');
+    const login = app.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const linked = new RegExp(`^${login} <[1-9][0-9]*\\+${login}@users\\.noreply\\.github\\.com>$`);
+    return identities.every((identity) => linked.test(identity)) ? 'app-bot' : identities.join(', ');
   },
 
   // --- writes and budget ----------------------------------------------------------------------

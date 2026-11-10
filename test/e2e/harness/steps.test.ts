@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
-import { NEUTRAL_IDENTITY as SYNC_IDENTITY } from '../../../src/setup/github.ts';
+import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
@@ -2210,7 +2210,7 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
   // As recorded in the actions run of L1-20: the engine names itself as the author of its state commits, and
   // GitHub names the sandbox's App as the author of the sync pull request it opened.
   const APP = 'mdbisync-sandbox[bot]';
-  const ENGINE_AUTHOR = { GIT_AUTHOR_NAME: SYNC_IDENTITY.name, GIT_AUTHOR_EMAIL: SYNC_IDENTITY.email, GIT_COMMITTER_NAME: SYNC_IDENTITY.name, GIT_COMMITTER_EMAIL: SYNC_IDENTITY.email };
+  const ENGINE_AUTHOR = { GIT_AUTHOR_NAME: NEUTRAL_IDENTITY.name, GIT_AUTHOR_EMAIL: NEUTRAL_IDENTITY.email, GIT_COMMITTER_NAME: NEUTRAL_IDENTITY.name, GIT_COMMITTER_EMAIL: NEUTRAL_IDENTITY.email };
   type Actor = { login: string; type: string } | null;
 
   /**

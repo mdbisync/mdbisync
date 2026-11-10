@@ -60,8 +60,8 @@ export interface ReadInputsOptions {
   appSlugRequired?: boolean;
 }
 
-/** A GitHub App slug: letters, digits and single hyphens between them. */
-const APP_SLUG = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
+/** A GitHub App slug: letters, digits and hyphens. GitHub itself says whether the App exists. */
+const APP_SLUG = /^[A-Za-z0-9-]+$/;
 
 /**
  * Reads and checks the inputs. `repository` falls back to the runner's

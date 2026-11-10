@@ -1,5 +1,5 @@
 export { type SetupInput, type SetupResult, runSetupCheck } from './check.ts';
-export { DEFAULT_GITHUB_API_URL, type GitHubCheck, type GitHubTarget, NEUTRAL_IDENTITY, PERMISSION_PROBES, checkGitHub } from './github.ts';
+export { DEFAULT_GITHUB_API_URL, type GitHubCheck, type GitHubTarget, PERMISSION_PROBES, checkGitHub } from './github.ts';
 export {
   type HookConfig,
   PRE_COMMIT_CONFIG,
