@@ -232,7 +232,7 @@ the reason is fixed. The summaries list each with its rules:
 | `binary` | The `.md` file does not hold text. | Fix or rename the file. |
 | `stored-in-lfs` | The Markdown file itself is stored in Git LFS. | Store Markdown files in git directly. |
 | `upload-too-large` | The document links a file over Linear's 10 MB upload limit. | Make the file smaller, or link it from somewhere else. |
-| `upload-unreadable` | The document links a file the run cannot read, such as an LFS object stored with LFS extensions. | Store the file in git or plain LFS. |
+| `upload-unreadable` | The document links a file the run cannot read, such as an LFS object stored with LFS extensions or one the LFS server does not have. | Store the file in git or plain LFS, or push its LFS object. |
 | `download-failed` | From Linear: a file the document embeds could not be downloaded (gone, over 10 MB, or redirected elsewhere). The file keeps the tracked branch's text. | Fix the embedded file in Linear, then run again. |
 | `security-hook` | From Linear: a hook marked `alias: security` flagged the document's text or a file it embeds. The file keeps the tracked branch's text. | Remove what the hook flagged from the document in Linear. |
 | `security-unchecked` | From Linear: the security hooks did not see this text, because their step did not run or the tracked branch moved after it. | Nothing; the next run checks it. If it repeats, check that the hooks step runs. |

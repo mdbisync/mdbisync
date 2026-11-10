@@ -130,12 +130,15 @@ reasons:
 - a `.md` file git does not store as text (`binary`, `stored-in-lfs`,
   `not-a-regular-file`);
 - a linked file over Linear's 10 MB upload limit (`upload-too-large`) or one
-  the run cannot read (`upload-unreadable`). The dry run judges a file in
-  Git LFS by its pointer and downloads nothing.
+  the run cannot read (`upload-unreadable`), such as an LFS object the
+  remote's LFS server does not have. The dry run judges a file in Git LFS by
+  its pointer and asks the LFS server only whether it holds the object; it
+  downloads nothing.
 
 The confirmed run can leave out a few more: a file whose text grows past
 Linear's length limit when its links are rewritten (`content-too-long`), or
-whose LFS object turns out to be missing (`upload-unreadable`). Each rule and
+whose LFS object still cannot be read (`upload-unreadable`), for example
+because the LFS server could not be reached during the dry run. Each rule and
 what to do about it is in
 [troubleshooting.md](troubleshooting.md#files-left-out).
 

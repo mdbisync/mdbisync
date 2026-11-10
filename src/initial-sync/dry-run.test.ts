@@ -13,7 +13,7 @@ import { SETUP_FAILED_EXIT_CODE, USAGE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { type Git } from '../state/index.ts';
-import { type Fixture, countLocalLfsObjects, createFixture } from '../state/test-helpers.ts';
+import { type FakeLfsServer, type Fixture, countLocalLfsObjects, createFixture, fakeLfsServer } from '../state/test-helpers.ts';
 
 const CANARY = 'kx-7a2b9c40';
 const PRE_COMMIT = `repos:
@@ -311,5 +311,119 @@ describe('initial sync dry run: documents the uploads would leave out', () => {
     const { report } = await run(linearWithBig(), true);
     assert.deepEqual(report.initialSync?.created, WRITTEN);
     assert.deepEqual(report.initialSync?.leftOutAtWrite, LEFT_OUT);
+  });
+});
+
+describe('initial sync dry run: documents linking LFS objects missing from the remote', () => {
+  const pointer = (content: Buffer | { oid: string; size: number }) =>
+    Buffer.isBuffer(content)
+      ? `version https://git-lfs.github.com/spec/v1\noid sha256:${createHash('sha256').update(content).digest('hex')}\nsize ${content.length}\n`
+      : `version https://git-lfs.github.com/spec/v1\noid sha256:${content.oid}\nsize ${content.size}\n`;
+  /** On the LFS server. */
+  const DIAGRAM = Buffer.from('diagram bytes on the server\n');
+  /** Not on the LFS server: the pointers name them, nothing holds their content. */
+  const LOST = { oid: 'cd'.repeat(32), size: 4096 };
+  const GONE_A = { oid: 'ce'.repeat(32), size: 100 };
+  const GONE_B = { oid: 'cf'.repeat(32), size: 200 };
+  /** In git as a plain file, and as a pointer to an object the server does not have. */
+  const COPY = Buffer.alloc(3000, 9);
+  const TREE = {
+    '.pre-commit-config.yaml': PRE_COMMIT,
+    'eng/README.md': `---\nlinear-team: ENG\n---\n\n# Engineering\n\n${CANARY}\n`,
+    // An LFS object the server has: its document is written.
+    'eng/kept.md': `# Kept\n\n![Diagram](media/diagram.png)\n\n${CANARY}\n`,
+    'eng/media/diagram.png': pointer(DIAGRAM),
+    // An LFS object the server does not have.
+    'eng/lost.md': `# Lost\n\n![Photo](media/photo.png)\n\n${CANARY}\n`,
+    'eng/media/photo.png': pointer(LOST),
+    // A readable file before the missing one: the upload reads both and stops at the missing one.
+    'eng/both.md': `# Both\n\n![Diagram](media/diagram.png) ![Photo](media/photo.png)\n\n${CANARY}\n`,
+    // Two missing objects: the upload stops at the first, which is the file listed.
+    'eng/two.md': `# Two\n\n[B](media/gone-b.zip) [A](media/gone-a.zip) [B again](media/gone-b.zip)\n\n${CANARY}\n`,
+    'eng/media/gone-a.zip': pointer(GONE_A),
+    'eng/media/gone-b.zip': pointer(GONE_B),
+    // The content of a missing object that an earlier document uploads from git: the run never reads the object.
+    'eng/a-copy.md': `# Copy\n\n[Data](files/copy.bin)\n\n${CANARY}\n`,
+    'eng/files/copy.bin': COPY,
+    'eng/b-copy.md': `# Copy again\n\n[Data](media/copy.bin)\n\n${CANARY}\n`,
+    'eng/media/copy.bin': pointer(COPY),
+  };
+
+  let fixture: Fixture;
+  let server: FakeLfsServer;
+  let clone: Git;
+  before(async () => {
+    fixture = await createFixture();
+    await fixture.seed(TREE);
+    server = await fakeLfsServer([DIAGRAM]);
+    clone = await fixture.clone('work');
+    // The remote is a local path, which has no LFS batch API: its objects come from the fake LFS server.
+    await clone.run(['config', 'lfs.url', server.url]);
+  });
+  after(async () => {
+    await server.close();
+    await fixture.cleanup();
+  });
+
+  const refs = () => fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)']);
+
+  const run = async (world: FakeWorld, confirm: boolean) => {
+    const reportFile = join(fixture.root, 'report.json');
+    const summaryFile = join(fixture.root, 'summary.md');
+    await rm(reportFile, { force: true });
+    await rm(summaryFile, { force: true });
+    const env = {
+      PATH: process.env.PATH ?? '',
+      HOME: process.env.HOME ?? '',
+      MDBISYNC_LINEAR_CLIENT_ID: 'client-id',
+      MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
+      MDBISYNC_LINEAR_API_URL: LINEAR_API,
+      MDBISYNC_GITHUB_TOKEN: 'gh-token',
+      MDBISYNC_GITHUB_API_URL: GITHUB_API,
+      MDBISYNC_REPOSITORY: 'owner/repo',
+      MDBISYNC_REPORT_FILE: reportFile,
+      MDBISYNC_DIRECTION: 'git-to-linear',
+      MDBISYNC_CONFIRM: String(confirm),
+      GITHUB_STEP_SUMMARY: summaryFile,
+    };
+    const result = await runCli(['initial-sync'], { env, cwd: clone.dir, fetch: fakeFetch(world) });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(!result.stdout.includes(CANARY) && !result.stderr.includes(CANARY), 'the output holds content');
+    return { report: JSON.parse(await readFile(reportFile, 'utf8')) as RunReport, summary: await readFile(summaryFile, 'utf8') };
+  };
+
+  const LEFT_OUT = [
+    { path: 'eng/both.md', rule: 'upload-unreadable', files: ['eng/media/photo.png'] },
+    { path: 'eng/lost.md', rule: 'upload-unreadable', files: ['eng/media/photo.png'] },
+    { path: 'eng/two.md', rule: 'upload-unreadable', files: ['eng/media/gone-b.zip'] },
+  ];
+  const WRITTEN = ['eng/README.md', 'eng/a-copy.md', 'eng/b-copy.md', 'eng/kept.md'];
+
+  it('lists a document linking an LFS object missing from the remote as left out with upload-unreadable and the file; downloads and writes nothing', async () => {
+    const world = fakeWorld();
+    const refsBefore = await refs();
+    server.requests.length = 0;
+    const { report, summary } = await run(world, false);
+
+    assert.deepEqual(world.writes, [], 'the dry run wrote to GitHub or Linear');
+    assert.equal(await refs(), refsBefore, 'the dry run moved a ref');
+    assert.equal(await countLocalLfsObjects(clone), 0, 'the dry run downloaded an LFS object');
+    assert.deepEqual(server.requests, ['POST /info/lfs/objects/batch'], 'the dry run did more than ask the LFS server');
+
+    assert.deepEqual(report.summary?.plan.create, WRITTEN);
+    assert.deepEqual(
+      report.summary?.leftOutFiles,
+      LEFT_OUT.map(({ path, rule, files }) => ({ path, rules: [rule], lines: [], files })),
+    );
+    assert.ok(!summary.includes(CANARY), 'the job summary holds content');
+    assert.match(summary, /^\| eng\/lost\.md \| upload-unreadable \|  \| eng\/media\/photo\.png \|$/m);
+  });
+
+  it('lists the same documents, rules and files that the confirmed run leaves out at the write', async () => {
+    const world = fakeWorld();
+    const { report } = await run(world, true);
+    assert.deepEqual(report.initialSync?.created, WRITTEN);
+    assert.deepEqual(report.initialSync?.leftOutAtWrite, LEFT_OUT);
+    assert.deepEqual(world.linear.uploads.map((upload) => upload.filename).sort(), ['copy.bin', 'diagram.png']);
   });
 });

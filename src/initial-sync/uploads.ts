@@ -12,7 +12,7 @@
 // Markdown file; links to Markdown files, to missing files, to folders and
 // to other sites are left as they are. A file over the upload limit, or one
 // whose LFS object cannot be read, leaves its document out; the dry run
-// lists those documents without uploading anything.
+// lists those documents without uploading or downloading anything.
 
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
@@ -27,6 +27,7 @@ import {
   type TreeEntry,
   type UploadMap,
   listTree,
+  missingLfsObjects,
   parseLfsPointer,
   readBlobs,
   type LfsRead,
@@ -86,8 +87,12 @@ interface LinkedFile {
   /** SHA-256 of the content, lowercase hex. */
   hash: string;
   size: number;
+  /** Stored in LFS: the file in git is a pointer, and `hash` and `size` are its object's. */
+  lfs: boolean;
   /** An LFS pointer that names LFS extensions: its object cannot be read. */
   extensions: boolean;
+  /** An LFS object the remote's LFS server will not give: found by the dry run only, which asks the server. */
+  missing?: boolean;
 }
 
 /** A document the uploads would leave out, found before anything is uploaded. */
@@ -100,16 +105,19 @@ export interface UploadLeaveOut {
 
 /**
  * The documents of the plan that the uploads would leave out, for the dry
- * run, judged as the write judges them (`judgeLinkedFiles`) and in its
- * order, by path: a linked file over the upload limit (`upload-too-large`),
- * or an LFS object with LFS extensions (`upload-unreadable`) whose content
- * is neither in the upload cache nor uploaded by an earlier document.
- * Nothing is uploaded or downloaded: a file in LFS is judged by its pointer,
- * which gives its size and hash. An LFS object missing from the remote is
- * found only when the run reads it.
+ * run, judged as the write judges them and in its order, by path: a linked
+ * file over the upload limit (`upload-too-large`), an LFS object with LFS
+ * extensions (`upload-unreadable`, `judgeLinkedFiles`), or then an LFS
+ * object the remote does not have (`upload-unreadable`, the first file the
+ * upload would read and fail on), whose content is neither in the upload
+ * cache nor uploaded by an earlier document. Nothing is uploaded or
+ * downloaded: a file in LFS is judged by its pointer, which gives its size
+ * and hash, and the remote's LFS server is asked only whether it has the
+ * objects (`missingLfsObjects`).
  *
  * @param texts the text of each planned document, by path
  * @param uploads the upload cache the run starts from
+ * @param options.remote the remote the run reads LFS objects from
  */
 export async function predictUploadLeaveOuts(
   git: Git,
@@ -117,7 +125,7 @@ export async function predictUploadLeaveOuts(
   plan: InitialSyncPlan,
   texts: ReadonlyMap<string, string>,
   uploads: UploadMap,
-  options: { limit?: number } = {},
+  options: { remote: string; limit?: number },
 ): Promise<UploadLeaveOut[]> {
   const limit = options.limit ?? DEFAULT_UPLOAD_LIMIT;
   const { files } = await treeFiles(git, tracked);
@@ -129,7 +137,11 @@ export async function predictUploadLeaveOuts(
   await hashLinkedFiles(git, files, linked, targets, MAX_POINTER_SIZE);
   const uploaded = new Set(uploads.keys());
   const file = (target: string) => linked.get(target) as LinkedFile;
-  if (targets.some((target) => file(target).extensions && !uploaded.has(file(target).hash))) {
+  // The LFS objects the upload may read: within the limit, without extensions, and not in the cache.
+  const asked = targets.filter((target) => file(target).lfs && !file(target).extensions && file(target).size <= limit && !uploaded.has(file(target).hash));
+  const absent = await missingLfsObjects(git, options.remote, asked.map((target) => (files.get(target) as TreeEntry).oid));
+  for (const target of asked) if (absent.has(file(target).hash)) file(target).missing = true;
+  if (targets.some((target) => (file(target).extensions || file(target).missing === true) && !uploaded.has(file(target).hash))) {
     // Whether an earlier document uploads the same content needs the hash of every file the run would upload.
     for (const target of targets) if (file(target).hash === '' && file(target).size <= limit) linked.delete(target);
     await hashLinkedFiles(git, files, linked, targets, Math.max(limit, MAX_POINTER_SIZE));
@@ -138,7 +150,10 @@ export async function predictUploadLeaveOuts(
   for (const path of [...planned.keys()].sort(compare)) {
     const own = planned.get(path) as string[];
     const leaveOut = judgeLinkedFiles(own, linked, limit, uploaded);
+    // The upload reads the document's files in order and stops at the first it cannot read.
+    const unread = leaveOut === null ? [...filesToRead(own, linked, uploaded).values()].find((target) => file(target).missing === true) : undefined;
     if (leaveOut !== null) result.push({ path, rule: leaveOut.rule, files: leaveOut.files });
+    else if (unread !== undefined) result.push({ path, rule: UPLOAD_UNREADABLE, files: [unread] });
     else for (const target of own) uploaded.add(file(target).hash);
   }
   return result;
@@ -166,6 +181,22 @@ function judgeLinkedFiles(
     return { rule: UPLOAD_UNREADABLE, files: unreadable, message: message('initial-sync.lfs-extensions', { files: unreadable.join(', ') }) };
   }
   return null;
+}
+
+/**
+ * The files of `targets` the upload reads, in order: those whose content is
+ * not in `uploaded`, one path per content hash, a readable one when the
+ * content has one (an LFS pointer with LFS extensions is not).
+ */
+function filesToRead(targets: Iterable<string>, linked: ReadonlyMap<string, LinkedFile>, uploaded: { has(hash: string): boolean }): Map<string, string> {
+  const byHash = new Map<string, string>();
+  for (const target of targets) {
+    const { hash, extensions } = linked.get(target) as LinkedFile;
+    if (uploaded.has(hash)) continue;
+    const chosen = byHash.get(hash);
+    if (chosen === undefined || ((linked.get(chosen) as LinkedFile).extensions && !extensions)) byHash.set(hash, target);
+  }
+  return byHash;
 }
 
 /** The tracked tree's regular files, by path: Markdown files, and the others, which documents may link. */
@@ -203,7 +234,7 @@ async function hashLinkedFiles(git: Git, files: ReadonlyMap<string, TreeEntry>, 
   for (const path of new Set(paths)) {
     if (linked.has(path)) continue;
     const entry = files.get(path) as TreeEntry;
-    if (entry.size !== null && entry.size > readUpTo) linked.set(path, { hash: '', size: entry.size, extensions: false });
+    if (entry.size !== null && entry.size > readUpTo) linked.set(path, { hash: '', size: entry.size, lfs: false, extensions: false });
     else toRead.push(entry);
   }
   let index = 0;
@@ -223,7 +254,9 @@ async function hashLinkedFiles(git: Git, files: ReadonlyMap<string, TreeEntry>, 
       const pointer = parseLfsPointer(blob);
       linked.set(
         entry.path,
-        pointer !== null ? { hash: pointer.oid, size: pointer.size, extensions: pointer.extensions } : { hash: sha256(blob), size: blob.length, extensions: false },
+        pointer !== null
+          ? { hash: pointer.oid, size: pointer.size, lfs: true, extensions: pointer.extensions }
+          : { hash: sha256(blob), size: blob.length, lfs: false, extensions: false },
       );
     }
   }
@@ -248,18 +281,7 @@ export function uploadsTransform(options: UploadsOptions): BodyTransform {
   // A blob over the limit is too large to be a pointer and is never read: only its size matters, since its document is left out.
   const hashFiles = (git: Git, paths: readonly string[]) => hashLinkedFiles(git, files, linked, paths, Math.max(limit, MAX_POINTER_SIZE));
 
-  /** The files of `targets` not in the cache, one path per content hash: a readable one when the content has one. */
-  const missing = (targets: Iterable<string>): Map<string, string> => {
-    const { uploads } = context as TransformContext;
-    const byHash = new Map<string, string>();
-    for (const target of targets) {
-      const { hash } = linked.get(target) as LinkedFile;
-      if (uploads.has(hash)) continue;
-      const chosen = byHash.get(hash);
-      if (chosen === undefined || ((linked.get(chosen) as LinkedFile).extensions && !(linked.get(target) as LinkedFile).extensions)) byHash.set(hash, target);
-    }
-    return byHash;
-  };
+  const missing = (targets: Iterable<string>): Map<string, string> => filesToRead(targets, linked, (context as TransformContext).uploads);
 
   /** Reads files by hash, from LFS when they are stored there; an unreadable one gets its reason. */
   const readContents = async (byHash: ReadonlyMap<string, string>): Promise<Map<string, Buffer | { unreadable: string }>> => {

@@ -4,7 +4,7 @@
 // store are not downloaded again.
 
 import { createHash } from 'node:crypto';
-import { type Git, GitError } from './git.ts';
+import { type Git, GitError, type Oid } from './git.ts';
 
 export interface LfsPointer {
   /** SHA-256 of the content, lowercase hex. */
@@ -67,6 +67,33 @@ export async function lfsReader(git: Git, remote: string): Promise<LfsRead> {
   const branch = await git.run(['symbolic-ref', '--quiet', '--short', 'HEAD'], { okCodes: [0, 1, 128] });
   if (branch.code === 0) remoteArgs.push('-c', `branch.${branch.stdout.toString('utf8').trim()}.remote=${remote}`);
   return (pointer, path) => readLfsObject(git, remoteArgs, pointer, path);
+}
+
+/**
+ * The LFS objects of the pointer files `blobs` that the remote's LFS server
+ * will not give, by LFS object id, for the dry run. git-lfs asks the server's
+ * batch API whether it can download them (`git lfs fetch --dry-run`) and
+ * transfers no content; objects already in the local LFS store are not asked
+ * about, since they can be read. The pointer files are put into one tree of
+ * their own (a small object in the local repository), so the request names
+ * only them. An object counts as missing when the server answers it with an
+ * error. When the request fails as a whole (no server, no access), no object
+ * is known to be missing: the run's read finds them.
+ *
+ * A remote reached as a local path or `file://` URL has no batch API: git-lfs
+ * reports nothing for it, so none of its objects counts as missing.
+ *
+ * @param blobs git blob ids of LFS pointer files
+ */
+export async function missingLfsObjects(git: Git, remote: string, blobs: readonly Oid[]): Promise<Set<string>> {
+  const missing = new Set<string>();
+  if (blobs.length === 0) return missing;
+  const entries = [...new Set(blobs)].map((blob, index) => `100644 blob ${blob}\t${index}\n`).join('');
+  const tree = await git.text(['mktree'], { input: entries });
+  const result = await git.run(['lfs', 'fetch', '--dry-run', remote, tree], { okCodes: [0, 1, 2] });
+  // git-lfs names each object the server refused with its id in brackets: `[<oid>] Object does not exist: [404] …`.
+  for (const match of result.stderr.matchAll(/^\[([0-9a-f]{64})\] /gm)) missing.add(match[1] as string);
+  return missing;
 }
 
 /** @param path the file's path, used only in git-lfs's own messages */

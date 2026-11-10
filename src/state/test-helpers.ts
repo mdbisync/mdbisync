@@ -2,7 +2,10 @@
 // file:// URL (git-lfs serves LFS objects from it without a server), a
 // seeding working copy, and clones made the way the engine makes them.
 
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -81,6 +84,60 @@ export async function countLocalLfsObjects(git: Git): Promise<number> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
     throw error;
   }
+}
+
+export interface FakeLfsServer {
+  /** The LFS endpoint, for a clone's `lfs.url`. */
+  url: string;
+  /** Requests received, as `METHOD path`: a download is a `GET`. */
+  requests: string[];
+  /** An HTTP status the batch API answers the whole request with, instead of an answer per object. */
+  failBatch?: number;
+  close(): Promise<void>;
+}
+
+/**
+ * A Git LFS server on 127.0.0.1 that holds the objects of `contents`: its
+ * batch API offers a download for each of them and answers every other
+ * object with a 404 error, and it serves the content of those it holds.
+ */
+export async function fakeLfsServer(contents: readonly Buffer[]): Promise<FakeLfsServer> {
+  const held = new Map(contents.map((content) => [createHash('sha256').update(content).digest('hex'), content]));
+  let base = '';
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => {
+      fake.requests.push(`${request.method} ${request.url}`);
+      if (request.method === 'POST' && request.url === '/info/lfs/objects/batch') {
+        if (fake.failBatch !== undefined) {
+          response.writeHead(fake.failBatch, { 'content-type': 'application/vnd.git-lfs+json' });
+          response.end(JSON.stringify({ message: 'Batch refused' }));
+          return;
+        }
+        const batch = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { objects: Array<{ oid: string; size: number }> };
+        const objects = batch.objects.map(({ oid, size }) =>
+          held.has(oid)
+            ? { oid, size, authenticated: true, actions: { download: { href: `${base}/objects/${oid}` } } }
+            : { oid, size, error: { code: 404, message: 'Object does not exist' } },
+        );
+        response.writeHead(200, { 'content-type': 'application/vnd.git-lfs+json' });
+        response.end(JSON.stringify({ transfer: 'basic', objects }));
+        return;
+      }
+      const content = request.method === 'GET' ? held.get((request.url ?? '').replace('/objects/', '')) : undefined;
+      response.writeHead(content === undefined ? 404 : 200);
+      response.end(content);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const fake: FakeLfsServer = {
+    url: `${base}/info/lfs`,
+    requests: [],
+    close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
+  return fake;
 }
 
 /** Reads a ref of the bare remote, or null. */
