@@ -672,6 +672,8 @@ export async function takeTeamLocks(ctx: RunContext, stateDir: string, teams: It
         stateDir,
         runId: ctx.names.runId,
         timeoutMs: TEAM_LOCK_TIMEOUT_MS,
+        // A held run's take-up goes on with the team locks the run kept.
+        takeOverHeld: true,
         onWait: (holder) => ctx.log(`waiting for team ${team} (held by run ${holder?.runId ?? 'unknown'})`),
       }));
     } catch (error) {
@@ -792,6 +794,9 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
         saveHeldRun(runDir, heldRunOf(ctx, { stepIndex: heldAt, appName: grant?.app.name ?? appName, holdUntil, startedAt: new Date(started).toISOString(), budgetWaitMs: grant?.waitedMs ?? 0, takeUpRequests: { harness: 0, harnessApp: 0 } }));
         heldForUi = true;
         registration.hold(holdUntil);
+        // A held run's documents stay in its team zones, so its team locks stay too: another zone run's
+        // initial sync would take them for documents without a file and move them to the trash.
+        locks.splice(0).reverse().forEach((lock) => lock.hold(holdUntil));
         cleanupOutcome = { ok: true, detail: grant?.owner === undefined ? 'kept for the UI session; the sweeper removes it after the hold' : 'kept for the UI session; shared reservation retained until cleanup or verified recovery' };
       } catch (saveError) {
         error = new EnvBlockedError(`the run could not be kept for the UI session: ${(saveError as Error).message}`);
