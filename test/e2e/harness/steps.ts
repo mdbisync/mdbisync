@@ -32,7 +32,7 @@ import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineC
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
-import { burst, burstDocuments, burstEditCounts, realClock, soak, type LoadDriver } from './load.ts';
+import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
@@ -510,6 +510,25 @@ export function runFailure(report: Record<string, unknown> | null | undefined): 
   return check === undefined ? `with ${report['code']}` : `at the setup check ${String(check.name)} (${report['code']}): ${String(check.detail)}`;
 }
 
+/** Each tracked document's file and Linear content, the versions a load test's edit budget is measured on. */
+async function loadCandidates(ctx: RunContext, test: 'burst' | 'soak'): Promise<Map<string, string[]>> {
+  const sides = await readSides(ctx);
+  const candidates = new Map<string, string[]>();
+  for (const path of documentPaths(ctx)) {
+    const file = sides.files.get(path);
+    const id = sides.ids.get(path)?.id;
+    const document = id === undefined ? undefined : sides.documents.get(id);
+    if (file === undefined || document === undefined) throw new ProductError(`a ${test} target is missing from the tracked files or recorded Linear documents`);
+    candidates.set(path, [file, document.content ?? '']);
+  }
+  return candidates;
+}
+
+/** The widest token a load test can write: git pushes can retry three times, consuming tokens even when their push fails. */
+function lastLoadToken(ctx: RunContext, linearEdits: number, gitEdits: number): string {
+  return `${ctx.names.runId}-${String(ctx.sequence + linearEdits + 4 * gitEdits).padStart(3, '0')}`;
+}
+
 /**
  * The documents left out at write for a linked file over the upload limit, when they are all that keeps an
  * incomplete sync run from completing and the run changed nothing: such a file stays out until git changes it,
@@ -714,20 +733,8 @@ const RUN: Record<string, Executor> = {
       linearEditsPerMinute: Number(args.linearEditsPerMinute ?? 50),
       gitPushesPerMinute: Number(args.gitPushesPerMinute ?? 1),
     };
-    const sides = await readSides(ctx);
-    const candidates = new Map<string, string[]>();
-    for (const path of documentPaths(ctx)) {
-      const file = sides.files.get(path);
-      const id = sides.ids.get(path)?.id;
-      const document = id === undefined ? undefined : sides.documents.get(id);
-      if (file === undefined || document === undefined) throw new ProductError('a burst target is missing from the tracked files or recorded Linear documents');
-      candidates.set(path, [file, document.content ?? '']);
-    }
-    // Git pushes can retry three times, consuming tokens even when their push fails.
     const counts = burstEditCounts(options);
-    const maxTokens = counts.linear + 4 * counts.git;
-    const lastToken = `${ctx.names.runId}-${String(ctx.sequence + maxTokens).padStart(3, '0')}`;
-    const documents = burstDocuments(candidates, options, lastToken);
+    const documents = burstDocuments(await loadCandidates(ctx, 'burst'), options, lastLoadToken(ctx, counts.linear, counts.git));
     const result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), { ...options, documents });
     ctx.observations.set('report.generatedLinearEdits', result.linearEdits);
     ctx.observations.set('report.generatedGitPushes', result.gitPushes);
@@ -750,14 +757,16 @@ const RUN: Record<string, Executor> = {
         return { lostEdits: lost };
       },
     };
-    const result = await soak(driver, {
+    const options = {
       durationMs: Number(args.durationSeconds ?? 86_400) * 1000,
       scheduleMs: Number(args.scheduleSeconds ?? 300) * 1000,
       invariantIntervalMs: Number(args.invariantIntervalSeconds ?? 3600) * 1000,
-      actors: Array.isArray(args.actors) ? (args.actors as Array<'editor-a' | 'editor-b' | 'git'>) : ['editor-a', 'editor-b', 'git'],
+      actors: Array.isArray(args.actors) ? (args.actors as Actor[]) : (['editor-a', 'editor-b', 'git'] as Actor[]),
       seed: String(args.randomSeed ?? ctx.names.runId),
-      documents: documentPaths(ctx),
-    });
+    };
+    const documents = await loadCandidates(ctx, 'soak');
+    const lastToken = (edits: Record<Actor, number>) => lastLoadToken(ctx, edits['editor-a'] + edits['editor-b'], edits.git);
+    const result = await soak(driver, { ...options, documents, lastToken });
     ctx.observations.set('report.hourlyInvariantChecks', result.invariantChecks);
     const own = ctx.engine.results.slice(ctx.engine.setupRuns);
     const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
