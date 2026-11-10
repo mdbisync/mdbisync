@@ -23,6 +23,7 @@ import { LinearWorld, editorClient, type Project, type Team } from './linear-wor
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { OwnershipLedger, ownedDocuments, type WriteObserver } from './ownership.ts';
 import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
+import { assertCurrentCorpus } from './corpus-drift.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
@@ -285,13 +286,14 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   ctx.sandbox = sandbox;
   ctx.phase('sandbox cache');
   await sandbox.refreshCache();
-  let manifest;
+  let manifest: Manifest;
   let created;
   try {
     ctx.phase('corpus manifest');
     manifest = await sandbox.manifest();
     ctx.phase('tracked branch');
     created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names, {
+      validate: (selected) => assertCurrentCorpus(manifest, selected, (path) => sandbox.readMain(`corpus/${path}`), deps.teams),
       checks: publishesCheckWorkflow(ctx.scenario),
       ...(deps.teams === undefined ? {} : { teams: deps.teams }),
     });
