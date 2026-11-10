@@ -1580,6 +1580,118 @@ describe('GraphQL HTTP fault scenario', () => {
 });
 
 describe('subjects', () => {
+  describe('setup failures (L5-01 to L5-05)', () => {
+    const FIX = 'https://github.com/mdbisync/mdbisync/blob/main/docs/quickstart.md#linear-oauth-app';
+    // From a live L5-01 run: its job summary and terminal stop line as the engine wrote them, and its report
+    // trimmed to the fields these subjects read (four of its eight setup checks, other request log lines dropped).
+    const SUMMARY = [
+      '## Setup check',
+      '',
+      `Stopped before any write: \`linear-credential-failed\`. How to fix it: ${FIX}`,
+      '',
+      '| Item | State | Detail |',
+      '| --- | --- | --- |',
+      `| linear-credentials | FAILED | Linear refused the OAuth app client credentials ([how to fix](${FIX})) |`,
+      '| github-access | passed | GitHub token has contents:write, pull_requests:write, workflows:write, checks:read, statuses:read |',
+      '| merge-commits | passed | merge commits are allowed |',
+      '| linear-format-hook | passed | .pre-commit-config.yaml has the linear-format hook |',
+      '| annotations | passed | 5 annotated folders, 12 files to sync |',
+      '| annotation-targets | not checked | needs working Linear credentials |',
+      '| left-out-files | passed | no files left out |',
+      '| security-hooks | passed | security hooks present: test-secret |',
+      '',
+    ].join('\n');
+    const STDERR = [
+      '{"operation":"oauth.token","kind":"oauth","attempt":1,"status":400,"errorCodes":["unknown"]}',
+      `sync: stopped before any write (linear-credential-failed): Linear refused the OAuth app client credentials. How to fix it: ${FIX}`,
+      '',
+    ].join('\n');
+    const REPORT = {
+      operation: 'sync',
+      ok: false,
+      code: 'linear-credential-failed',
+      exitStatus: 'failure',
+      summary: null,
+      setupChecks: [
+        { name: 'linear-credentials', state: 'failed', detail: 'Linear refused the OAuth app client credentials' },
+        { name: 'github-access', state: 'passed', detail: 'GitHub token has contents:write, pull_requests:write, workflows:write, checks:read, statuses:read' },
+        { name: 'annotation-targets', state: 'not-checked', detail: 'needs working Linear credentials' },
+        { name: 'security-hooks', state: 'passed', detail: 'security hooks present: test-secret' },
+      ],
+      writes: { linear: {}, git: {}, pullRequests: {} },
+    };
+    const run = (change: Partial<EngineResult> = {}): EngineResult => ({ command: 'sync', exitCode: 1, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: STDERR, summary: SUMMARY, report: structuredClone(REPORT), ...change });
+    const l501 = scenarios.find((scenario) => scenario.id === 'L5-01');
+
+    async function outcomes(result: EngineResult) {
+      const { ctx } = await fakeRun();
+      ctx.engine.results.push(result);
+      const verdicts: [string, boolean | string][] = [];
+      for (const assertion of l501?.checks.assertions ?? []) {
+        try {
+          const verdict = await evaluateAssertion(ctx, assertion);
+          verdicts.push([assertion.subject, verdict.holds]);
+        } catch (error) {
+          verdicts.push([assertion.subject, error instanceof ProductError ? `product: ${error.message}` : `harness: ${String(error)}`]);
+        }
+      }
+      return verdicts;
+    }
+
+    it('pass L5-01 on what the live run actually gave: the failed item and its fix link, from the report, summary and terminal', async () => {
+      assert.deepEqual(await outcomes(run()), [
+        ['runs.0.writes.total', true],
+        ['runs.0.summary.code', true],
+        ['runs.0.setupFailure.item', true],
+        ['runs.0.setupFailure.fixLink', true],
+      ]);
+      assert.equal(subjectSource('runs.0.setupFailure.item'), 'harness');
+      assert.equal(subjectSource('runs.last.setupFailure.fixLink'), 'harness');
+    });
+
+    it('expect in L5-01 to L5-05 a known item and the fix link the engine gives for the expected code', async () => {
+      const { CHECK_NAMES } = await import('../../../src/setup/report.ts');
+      const { fixUrl } = await import('../../../src/setup/fixes.ts');
+      for (const id of ['L5-01', 'L5-02', 'L5-03', 'L5-04', 'L5-05']) {
+        const expected = new Map(scenarios.find((scenario) => scenario.id === id)?.checks.assertions.map((assertion) => [assertion.subject, assertion.expected]));
+        assert.ok((CHECK_NAMES as readonly unknown[]).includes(expected.get('runs.0.setupFailure.item')), id);
+        assert.equal(expected.get('runs.0.setupFailure.fixLink'), fixUrl(String(expected.get('runs.0.summary.code'))), id);
+      }
+    });
+
+    it('stay red when the item or the link is wrong or missing', async () => {
+      const verdict = async (result: EngineResult) => Object.fromEntries((await outcomes(result)).filter(([subject]) => subject.startsWith('runs.0.setupFailure.')));
+      const wrongLink = FIX.replace('#linear-oauth-app', '#github-app');
+      // A wrong item, named everywhere alike.
+      const otherItem = run({ summary: SUMMARY.replace('| linear-credentials | FAILED', '| linear-credentials | passed').replace('| github-access | passed | GitHub token has contents:write, pull_requests:write, workflows:write, checks:read, statuses:read |', `| github-access | FAILED | x ([how to fix](${FIX})) |`) });
+      (otherItem.report?.['setupChecks'] as { name: string; state: string }[]).forEach((check) => (check.state = check.name === 'github-access' ? 'failed' : 'passed'));
+      assert.equal((await verdict(otherItem))['runs.0.setupFailure.item'], false);
+      // Several failed items: the first is the one the report's code names; a later one does not stand in for it.
+      const several = run({ summary: SUMMARY.replace('| github-access | passed | GitHub token has contents:write, pull_requests:write, workflows:write, checks:read, statuses:read |', `| github-access | FAILED | x ([how to fix](${wrongLink})) |`) });
+      (several.report?.['setupChecks'] as { name: string; state: string }[])[1]!.state = 'failed';
+      assert.deepEqual(await verdict(several), { 'runs.0.setupFailure.item': true, 'runs.0.setupFailure.fixLink': true });
+      const swapped = structuredClone(several);
+      (swapped.report?.['setupChecks'] as { name: string; state: string }[])[0]!.state = 'passed';
+      assert.equal((await verdict(swapped))['runs.0.setupFailure.item'], false);
+      // No failed item, or one the summary does not show as FAILED.
+      const none = run();
+      (none.report?.['setupChecks'] as { state: string }[]).forEach((check) => (check.state = 'passed'));
+      assert.match(String((await verdict(none))['runs.0.setupFailure.item']), /^product: .*no failed item/);
+      assert.match(String((await verdict(run({ summary: SUMMARY.replace('| linear-credentials | FAILED', '| linear-credentials | failed') })))['runs.0.setupFailure.item']), /^product: .*no FAILED row for linear-credentials/);
+      // A wrong link given alike everywhere is a wrong value.
+      assert.equal((await verdict(run({ summary: SUMMARY.replaceAll(FIX, wrongLink), stderr: STDERR.replace(FIX, wrongLink) })))['runs.0.setupFailure.fixLink'], false);
+      // A link missing from, or different in, any one place.
+      assert.match(String((await verdict(run({ stderr: STDERR.split('\n')[0] as string })))['runs.0.setupFailure.fixLink']), /^product: .*the terminal stop line for linear-credential-failed gives no fix link/);
+      assert.match(String((await verdict(run({ stderr: STDERR.replace(FIX, wrongLink) })))['runs.0.setupFailure.fixLink']), /^product: .*different fix links/);
+      assert.match(String((await verdict(run({ summary: SUMMARY.replace(` How to fix it: ${FIX}`, '') })))['runs.0.setupFailure.fixLink']), /^product: .*the summary's stop line .* gives no fix link/);
+      assert.match(String((await verdict(run({ summary: SUMMARY.replace(` ([how to fix](${FIX}))`, '') })))['runs.0.setupFailure.fixLink']), /^product: .*the FAILED row .* gives no fix link/);
+      // A stop line for another code does not count.
+      assert.match(String((await verdict(run({ stderr: STDERR.replace('(linear-credential-failed)', '(missing-permission)') })))['runs.0.setupFailure.fixLink']), /^product: .*terminal stop line/);
+      // No report at all.
+      assert.match(String((await verdict(run({ report: null })))['runs.0.setupFailure.item']), /^product: .*wrote no report/);
+    });
+  });
+
   it('read the engine report by path and fail as a product error when it lacks a value', async () => {
     const { ctx } = await fakeRun();
     ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 10, stdout: '', stderr: '', summary: '', report: { summary: { code: 'initial-sync-required' } } });
@@ -2314,6 +2426,120 @@ describe('initial sync from Linear: kept annotation READMEs (L1R-01, L1R-02, L1R
       assert.deepEqual([...both].sort(), [...failed].sort());
     });
   }
+});
+
+describe('the setup check step (run.check)', () => {
+  // The setup checks of a real `check` run on a fresh mini repository written by `init`.
+  const SETUP_CHECKS = [
+    { name: 'linear-credentials', state: 'passed', detail: 'Linear token accepted with scopes read, write' },
+    { name: 'github-access', state: 'passed', detail: 'GitHub token has contents:write, pull_requests:write, workflows:write, checks:read, statuses:read' },
+    { name: 'merge-commits', state: 'passed', detail: 'merge commits are allowed' },
+    { name: 'linear-format-hook', state: 'passed', detail: '.pre-commit-config.yaml has the linear-format hook' },
+    { name: 'annotations', state: 'passed', detail: '5 annotated folders, 12 files to sync' },
+    { name: 'annotation-targets', state: 'passed', detail: 'found in Linear: 2 teams, 3 projects' },
+    { name: 'left-out-files', state: 'passed', detail: 'no files left out' },
+    { name: 'security-hooks', state: 'warning', detail: 'no pre-commit hook marked "alias: security": content is pushed unchecked' },
+  ];
+  const CHECK_REPORT = {
+    capacity: [], operation: 'check', ok: true, code: null, exitStatus: 'success', stop: null, complete: false, changed: false,
+    setupChecks: SETUP_CHECKS, securityHooks: [], notImplemented: false, summary: null, initialSync: null, capture: null, pullRequest: null, sync: null,
+    writtenCount: 0, writtenDocuments: 0, writes: { linear: {}, git: {}, pullRequests: {} },
+  };
+  const FAILED_CHECKS = [{ name: 'linear-credentials', state: 'failed', detail: 'Linear refused the client credentials' }];
+  const FAILED_REPORT = { ...CHECK_REPORT, ok: false, code: 'setup-failed', exitStatus: 'setup-failed', setupChecks: FAILED_CHECKS };
+  const DRY_RUN_REPORT = { operation: 'initial-sync', ok: true, code: null, complete: true, changed: false, summary: { plan: { paths: ['guides/start.md'] } }, writes: { linear: {}, git: {}, pullRequests: {} } };
+
+  /** Runs `steps` with a fake engine that answers each command from `answers` and records how it was called. */
+  async function withEngine(answers: Record<string, { report?: unknown; summary?: string; stderr?: string; exitCode: number }>, steps: Array<{ action: string; args: Record<string, unknown> }>) {
+    const { ctx } = await fakeRun();
+    mkdirSync(await ctx.engineClone(), { recursive: true });
+    const calls = join(ctx.runDir, 'engine-calls.jsonl');
+    const driver = join(ctx.runDir, 'fake-engine.mjs');
+    writeFileSync(driver, `
+      import { appendFileSync, writeFileSync } from 'node:fs';
+      const command = process.argv[2];
+      const answer = ${JSON.stringify(answers)}[command];
+      const inputs = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith('MDBISYNC_') && !/SECRET|TOKEN/.test(name)));
+      appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ command, cwd: process.cwd(), inputs }) + '\\n');
+      if (answer.report !== undefined) writeFileSync(process.env.MDBISYNC_REPORT_FILE, JSON.stringify(answer.report));
+      if (answer.summary !== undefined) writeFileSync(process.env.GITHUB_STEP_SUMMARY, answer.summary);
+      if (answer.stderr !== undefined) process.stderr.write(answer.stderr);
+      process.exitCode = answer.exitCode;
+    `);
+    const previous = process.env['MDBISYNC_ENGINE'];
+    process.env['MDBISYNC_ENGINE'] = driver;
+    try {
+      for (const step of steps) await runStep(ctx, { kind: 'run', ...step });
+    } finally {
+      if (previous === undefined) delete process.env['MDBISYNC_ENGINE'];
+      else process.env['MDBISYNC_ENGINE'] = previous;
+    }
+    const recorded = existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { command: string; cwd: string; inputs: Record<string, string> }) : [];
+    return { ctx, calls: recorded };
+  }
+
+  it('runs the engine check in the run clone with the run isolation and records it as the first run', async () => {
+    const summary = '## Setup check\n\nEvery required item passed.\n';
+    const { ctx, calls } = await withEngine(
+      { check: { report: CHECK_REPORT, summary, exitCode: 0 }, 'initial-sync': { report: DRY_RUN_REPORT, exitCode: 0 } },
+      [{ action: 'check', args: {} }, { action: 'initial-sync', args: { direction: 'git-to-linear', confirm: false } }],
+    );
+    assert.deepEqual(calls.map((call) => call.command), ['check', 'initial-sync']);
+    const [check] = calls;
+    assert.equal(check!.cwd, await ctx.engineClone());
+    assert.equal(check!.inputs['MDBISYNC_TRACKED_BRANCH'], ctx.names.trackedBranch);
+    assert.equal(check!.inputs['MDBISYNC_SYNC_BRANCH'], ctx.names.syncBranch);
+    assert.equal(check!.inputs['MDBISYNC_STATE_REF_PREFIX'], ctx.names.refPrefix);
+    assert.equal(check!.inputs['MDBISYNC_LINEAR_API_URL'], ctx.proxy!.url);
+    assert.equal(check!.inputs['MDBISYNC_REPORT_FILE'], join(ctx.runDir, 'engine-0', 'report.json'));
+    assert.equal(check!.inputs['MDBISYNC_DIRECTION'], undefined);
+    assert.equal(check!.inputs['MDBISYNC_CONFIRM'], undefined);
+    // The check is the scenario's run 0; the dry run after it is run 1 and the last run.
+    assert.deepEqual(ctx.engine.results.map((result) => [result.command, result.exitCode]), [['check', 0], ['initial-sync', 0]]);
+    assert.equal(ctx.engine.results[0]!.summary, summary);
+    assert.equal(ctx.observations.get('runs.0.exitCode'), 0);
+    assert.equal(ctx.observations.get('runs.0.operation'), 'check');
+    assert.deepEqual(ctx.observations.get('runs.0.setupChecks'), SETUP_CHECKS);
+    assert.equal(ctx.observations.get('runs.1.operation'), 'initial-sync');
+    assert.deepEqual(await resolveSubject(ctx, 'runs.0.writes.total'), { known: true, value: 0 });
+    assert.deepEqual(await resolveSubject(ctx, 'summary.plan.paths'), { known: true, value: ['guides/start.md'] });
+  });
+
+  it('records a failed check as the run result and goes on to the next step', async () => {
+    const { ctx, calls } = await withEngine(
+      { check: { report: FAILED_REPORT, exitCode: 3 }, 'initial-sync': { report: { ...DRY_RUN_REPORT, ok: false, code: 'setup-failed', summary: null }, exitCode: 3 } },
+      [{ action: 'check', args: {} }, { action: 'initial-sync', args: { direction: 'git-to-linear', confirm: false } }],
+    );
+    assert.deepEqual(calls.map((call) => call.command), ['check', 'initial-sync']);
+    assert.equal(ctx.observations.get('runs.0.exitCode'), 3);
+    assert.equal(ctx.observations.get('runs.0.code'), 'setup-failed');
+    assert.deepEqual(ctx.observations.get('runs.0.setupChecks'), FAILED_CHECKS);
+    // An assertion on the dry run's plan cannot pass on the failed setup.
+    await assert.rejects(resolveSubject(ctx, 'summary.plan.paths'), (error: Error) => error instanceof ProductError);
+  });
+
+  it('stops the scenario when the engine does not implement the check', async () => {
+    await assert.rejects(
+      withEngine({ check: { stderr: 'check: not implemented\n', exitCode: 15 } }, [{ action: 'check', args: {} }]),
+      (error: Error) => error.name === 'NotImplementedError',
+    );
+  });
+
+  it('needs the sandbox and Linear: an offline scenario has no credentials to check', async () => {
+    const { ctx } = await fakeRun();
+    await assert.rejects(runStep({ ...ctx, live: null }, { kind: 'run', action: 'check', args: {} }), /needs the sandbox and Linear/);
+    assert.equal(ctx.engine.results.length, 0);
+  });
+
+  it('leaves a mid-run fault armed for the next sync to that sync', async () => {
+    const { ctx } = await fakeRun();
+    let acted = false;
+    ctx.engine.trigger = { checkpoint: 'after-write-before-record', action: async () => { acted = true; } };
+    await assert.rejects(runStep(ctx, { kind: 'run', action: 'check', args: {} }), /checkpoint fault waits for the next sync run/);
+    assert.notEqual(ctx.engine.trigger, undefined);
+    assert.equal(acted, false);
+    assert.equal(ctx.engine.results.length, 0);
+  });
 });
 
 describe('quiet runs through the harness', () => {

@@ -26,6 +26,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
+import { relativeLinkUrls } from '../../../src/format/index.ts';
+import { resolveTarget } from '../../../src/format/markdown.ts';
 import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, type Git } from '../../../src/state/index.ts';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
@@ -401,10 +403,23 @@ function groupPaths(ctx: RunContext, group: string): string[] {
   return paths;
 }
 
-/** Runs the normalizer (`fix`) on texts in a scratch folder: path → fixed text. */
-export function linearForms(texts: ReadonlyMap<string, string>): Map<string, string> {
+/** Runs `fix` on texts with the snapshot's file existence context: path → fixed text. */
+export function linearForms(texts: ReadonlyMap<string, string>, existingPaths: Iterable<string>): Map<string, string> {
   const dir = mkdtempSync(join(tmpdir(), 'linear-form-'));
   try {
+    // `fix` only needs existence for linked files, including LFS assets; their bytes are irrelevant.
+    const existing = new Set(existingPaths);
+    const linked = new Set<string>();
+    for (const [path, text] of texts) {
+      for (const url of relativeLinkUrls(text)) {
+        const target = resolveTarget(path, url);
+        if (target !== null && existing.has(target) && !texts.has(target)) linked.add(target);
+      }
+    }
+    for (const path of linked) {
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      writeFileSync(join(dir, path), '');
+    }
     for (const [path, text] of texts) {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), text);
@@ -735,7 +750,7 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'golden.typographyBytes': async (env) => {
     const view = await env.view();
-    return linearForms(new Map(groupPaths(env.ctx, 'typography-scripts').map((path) => [path, fileBody(view, path) ?? ''])));
+    return linearForms(new Map(groupPaths(env.ctx, 'typography-scripts').map((path) => [path, fileBody(view, path) ?? ''])), view.hashes.keys());
   },
   'golden.linearForm': async (env) => {
     // The form Linear keeps of every synchronized file: a bank fixture's form as the engine sends it
@@ -743,7 +758,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const view = await env.view();
     const bank = loadBank(join(REPO_ROOT, BANK_DIR));
     const fixtures = new Map(bank.fixtures.map((fixture) => [fixture.file, fixture]));
-    const fixed = linearForms(view.files);
+    const fixed = linearForms(view.files, view.hashes.keys());
     const result = new Map<string, string>();
     for (const [path, text] of view.files) {
       const fixture = path.startsWith(`${BANK_HOME}/`) ? fixtures.get(path.slice(BANK_HOME.length + 1)) : undefined;
@@ -1476,7 +1491,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const view = await env.view();
     const text = view.files.get(path);
     if (text === undefined) return null;
-    return linearForms(new Map([[path, text]])).get(path) === text ? 0 : 1;
+    return linearForms(new Map([[path, text]]), view.hashes.keys()).get(path) === text ? 0 : 1;
   },
 
   // --- the scenario report ------------------------------------------------------------------
@@ -1787,6 +1802,55 @@ async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string
   return { hashes, storage: await storageOf(head.git, [...hashes.keys()], files), links };
 }
 
+// --- setup failures -------------------------------------------------------------------------------
+
+/**
+ * The setup check that stopped run <n|last> before any write, and the link that says how to fix it
+ * (L5-01 to L5-05). The report has no field that says the item was named: the harness reads it from
+ * what the run actually gave.
+ *
+ * - `item`: the first entry of the report's `setupChecks` in state `failed`: the engine stops on the
+ *   first failure and gives its code as the report's `code`; later independent checks may fail too.
+ *   The job summary must show it as a FAILED row.
+ * - `fixLink`: the link in that row, which the summary's stop line and the run's terminal stop line,
+ *   both naming the report's `code`, must give alike.
+ *
+ * A missing item, row, line or link, or links that differ, fail as a product error.
+ */
+const SETUP_FAILURE_SUBJECT = /^runs\.(\d+|last)\.setupFailure\.(item|fixLink)$/;
+
+function setupFailureValue(ctx: RunContext, subject: string): string {
+  const [, which, field] = SETUP_FAILURE_SUBJECT.exec(subject) as RegExpExecArray;
+  const own = ownResults(ctx);
+  const index = which === 'last' ? own.length - 1 : Number(which);
+  const result = own[index];
+  if (result === undefined) throw new ProductError(`the scenario has no engine run ${which} for ${subject}`);
+  if (result.report === null) throw new ProductError(`engine run ${index} wrote no report, so it gives no ${subject}`);
+  const first = setupChecksOf(result.report).find((check) => check.state === 'failed');
+  if (first === undefined) throw new ProductError(`engine run ${index}'s setupChecks have no failed item`);
+  const item = first.name;
+  const summaryLines = result.summary.split('\n');
+  const row = summaryLines.find((line) => line.startsWith(`| ${item} | FAILED | `));
+  if (row === undefined) throw new ProductError(`engine run ${index}'s job summary has no FAILED row for ${item}`);
+  if (field === 'item') return item;
+
+  const code = reportField(result.report, 'code');
+  if (typeof code !== 'string') throw new ProductError(`engine run ${index}'s report gives no code`);
+  const summaryStop = summaryLines.find((line) => line.startsWith(`Stopped before any write: \`${code}\`.`));
+  const terminalStop = `${result.stdout}\n${result.stderr}`.split('\n').find((line) => line.startsWith(`${result.command}: stopped before any write (${code})`));
+  const links = {
+    'the FAILED row': /\(\[how to fix\]\((\S+)\)\) \|$/.exec(row)?.[1],
+    "the summary's stop line": / How to fix it: (\S+)$/.exec(summaryStop ?? '')?.[1],
+    'the terminal stop line': / How to fix it: (\S+)$/.exec(terminalStop ?? '')?.[1],
+  };
+  for (const [where, link] of Object.entries(links)) {
+    if (link === undefined) throw new ProductError(`engine run ${index}: ${where} for ${code} gives no fix link`);
+  }
+  const distinct = new Set(Object.values(links));
+  if (distinct.size !== 1) throw new ProductError(`engine run ${index} gives different fix links: ${Object.entries(links).map(([where, link]) => `${where} ${link}`).join(', ')}`);
+  return links['the FAILED row'] as string;
+}
+
 // --- resolution -----------------------------------------------------------------------------------
 
 /** Families of subjects read from the engine's run report. */
@@ -1797,7 +1861,7 @@ export type SubjectSource = 'observed' | 'harness' | 'engine' | 'ui';
 /** Where a subject's value comes from, or null when nothing provides it (a harness gap). */
 export function subjectSource(subject: string): SubjectSource | null {
   const name = subject.startsWith('before.') ? subject.slice('before.'.length) : subject;
-  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && QUIET_SUBJECT.test(name))) return 'harness';
+  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name)))) return 'harness';
   if (ENGINE_FAMILIES.some((pattern) => pattern.test(name))) return 'engine';
   if (name.startsWith('ui.')) return 'ui';
   return null;
@@ -1901,6 +1965,7 @@ function quietValue(ctx: RunContext, subject: string): string[] {
 export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
   if (ctx.observations.has(subject) && !NORMALIZED_OBSERVATIONS.has(subject)) return { known: true, value: ctx.observations.get(subject) };
   if (QUIET_SUBJECT.test(subject)) return { known: true, value: quietValue(ctx, subject) };
+  if (SETUP_FAILURE_SUBJECT.test(subject)) return { known: true, value: setupFailureValue(ctx, subject) };
   const before = subject.startsWith('before.');
   const name = before ? subject.slice('before.'.length) : subject;
   const compute = SUBJECTS[name];

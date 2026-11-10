@@ -72,6 +72,11 @@ per-invocation evidence. `parallel` bypasses workflow serialization on purpose;
 `workflow-parallel` tests the actual concurrency group. A timeout is a failure,
 not convergence. `probe`, `lint`, `fix`, `pre-commit`, `scan-canaries`, `cleanup`,
 `burst`, `soak` and `token-lifecycle` invoke their respective test adapters.
+`check` runs the engine's setup check with the run's credentials; it counts as
+a run, and a failed check is recorded as that run's result rather than stopping
+the scenario. Its report has no sync fields and is never quiet, so a subject
+that reads the last run needs a sync after the check. It needs a live setup and
+cannot take a checkpoint pause or fault armed for the next sync.
 
 An argument named `variants` or `orderings` expands into independent subcases,
 each with a fresh copy of setup and the complete step sequence and assertions.
@@ -137,6 +142,15 @@ and reports `changed: true` while staying quiet. That internal catch-up is the
 only write a quiet run may make: `changed: true` with no state ref moved is not
 quiet. The harness snapshots the world before and after every run of a scenario
 that asserts `quiet`; an unwatched run gives no verdict.
+
+`runs.<n|last>.setupFailure.item` and `runs.<n|last>.setupFailure.fixLink` are
+computed by the harness, not read from the report, although they start with
+`runs.`. `item` is the first entry of the report's `setupChecks` in state
+`failed` (the one whose code the report gives), and the job summary must show
+it as a `FAILED` row. `fixLink` is the fix link of that row; the summary's stop
+line and the run's terminal stop line, both naming the report's `code`, must
+give the same link. A missing item, row, stop line or link, or links that
+differ, are product errors.
 
 Same-run merge scenarios set a positive merge grace with
 `run.sync.args.mergeGraceSeconds` (0 to 120; the harness otherwise passes 0,
