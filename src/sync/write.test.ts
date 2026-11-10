@@ -662,7 +662,9 @@ describe('sync: the tracked branch to Linear', () => {
       });
       const first = await sync();
       assert.equal(first.result.exitCode, 0, first.result.stderr);
-      assert.equal(first.report.complete, false);
+      // A new document left out stays in git only, as the initial sync leaves it: the run is complete. A
+      // document Linear holds keeps its old text, and the run stays partial so a Linear edit merges correctly.
+      assert.equal(first.report.complete, !imageOnly);
       assert.deepEqual(first.report.sync?.leftOutAtWrite, [{ path, rule: 'upload-unreadable', files: [imageOnly ? 'eng/media/diagram.png' : 'eng/media/missing.png'] }]);
       assert.deepEqual(first.report.sync?.updated, ['eng/notes/review.md']);
       assert.match(first.summary, /upload-unreadable/);
@@ -670,10 +672,44 @@ describe('sync: the tracked branch to Linear', () => {
       else assert.equal(live().some((document) => document.title === 'new-figure'), false);
       const again = await sync();
       assert.equal(again.result.exitCode, 0, again.result.stderr);
-      assert.deepEqual(again.report.sync?.leftOutAtWrite, first.report.sync?.leftOutAtWrite);
+      assert.equal(again.report.complete, !imageOnly);
+      assert.deepEqual(again.report.sync?.leftOutAtWrite, imageOnly ? first.report.sync?.leftOutAtWrite : []);
       assert.deepEqual(again.report.sync?.updated, []);
     });
   }
+
+  it('a sync whose only remaining change is a new document over the upload limit completes, and the document joins once fixed', async () => {
+    const path = 'eng/notes/scan.md';
+    const text = `# Scan\n\n![Scan](../media/scan.png)\n\n${CANARY}\n`;
+    const oversize = `version https://git-lfs.github.com/spec/v1\noid sha256:${'cd'.repeat(32)}\nsize ${11 * 1024 * 1024}\n`;
+    await commit({ [path]: text, 'eng/media/scan.png': oversize });
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    assert.equal(first.report.complete, true, 'a file left out at write does not keep the run incomplete');
+    assert.deepEqual(first.report.sync?.leftOutAtWrite, [{ path, rule: 'upload-too-large', files: ['eng/media/scan.png'] }]);
+    assert.deepEqual(first.report.sync?.created, []);
+    assert.equal(first.writes.filter(isUpload).length, 0, 'nothing over the limit is uploaded');
+    assert.match(first.summary, /\| eng\/notes\/scan\.md \| upload-too-large \|/);
+    assert.equal(live().some((document) => document.title === 'scan'), false);
+    // The record merges the tracked branch, with the left-out file as git has it, and keeps the id the document gets.
+    assert.equal(await rev('refs/mdbisync/linear^2'), await rev('refs/heads/main'));
+    assert.equal(await show(`refs/mdbisync/linear:${path}`), text);
+    assert.equal((await ids())[path], undefined);
+    const reserved = (JSON.parse(await show('refs/mdbisync/ids:reserved-ids.json')) as Record<string, string>)[path];
+    assert.ok(reserved !== undefined, 'the left-out document keeps its id');
+    // A resume has nothing left to do: it does not try the upload again.
+    await assertIdempotent();
+
+    // Fixed in git, the file joins under the id it kept.
+    await commit({ 'eng/media/scan.png': 'scan bytes within the limit' });
+    const fixed = await sync();
+    assert.equal(fixed.result.exitCode, 0, fixed.result.stderr);
+    assert.equal(fixed.report.complete, true);
+    assert.deepEqual(fixed.report.sync?.created, [path]);
+    assert.deepEqual(fixed.report.sync?.leftOutAtWrite, []);
+    assert.equal((await documentOf(path)).id, reserved);
+    await assertIdempotent();
+  });
 
   it('a renamed project folder needs no write, and the id map follows the files', async () => {
     const before = await documentOf('eng/notes/review.md');
