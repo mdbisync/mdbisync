@@ -380,10 +380,16 @@ function groupPaths(ctx: RunContext, group: string): string[] {
   return paths;
 }
 
-/** Runs the normalizer (`fix`) on texts in a scratch folder: path → fixed text. */
-export function linearForms(texts: ReadonlyMap<string, string>): Map<string, string> {
+/** Runs `fix` on texts with the snapshot's file existence context: path → fixed text. */
+export function linearForms(texts: ReadonlyMap<string, string>, existingPaths: Iterable<string>): Map<string, string> {
   const dir = mkdtempSync(join(tmpdir(), 'linear-form-'));
   try {
+    // `fix` only needs existence for linked files, including LFS assets; their bytes are irrelevant.
+    for (const path of existingPaths) {
+      if (texts.has(path)) continue;
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      writeFileSync(join(dir, path), '');
+    }
     for (const [path, text] of texts) {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), text);
@@ -714,7 +720,7 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   'golden.typographyBytes': async (env) => {
     const view = await env.view();
-    return linearForms(new Map(groupPaths(env.ctx, 'typography-scripts').map((path) => [path, fileBody(view, path) ?? ''])));
+    return linearForms(new Map(groupPaths(env.ctx, 'typography-scripts').map((path) => [path, fileBody(view, path) ?? ''])), view.hashes.keys());
   },
   'golden.linearForm': async (env) => {
     // The form Linear keeps of every synchronized file: a bank fixture's form as the engine sends it
@@ -722,7 +728,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const view = await env.view();
     const bank = loadBank(join(REPO_ROOT, BANK_DIR));
     const fixtures = new Map(bank.fixtures.map((fixture) => [fixture.file, fixture]));
-    const fixed = linearForms(view.files);
+    const fixed = linearForms(view.files, view.hashes.keys());
     const result = new Map<string, string>();
     for (const [path, text] of view.files) {
       const fixture = path.startsWith(`${BANK_HOME}/`) ? fixtures.get(path.slice(BANK_HOME.length + 1)) : undefined;
@@ -1434,7 +1440,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const view = await env.view();
     const text = view.files.get(path);
     if (text === undefined) return null;
-    return linearForms(new Map([[path, text]])).get(path) === text ? 0 : 1;
+    return linearForms(new Map([[path, text]]), view.hashes.keys()).get(path) === text ? 0 : 1;
   },
 
   // --- the scenario report ------------------------------------------------------------------
