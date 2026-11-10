@@ -516,7 +516,7 @@ export function runFailure(report: Record<string, unknown> | null | undefined): 
  */
 export function onlyLeftOutAtWrite(report: Record<string, unknown> | null | undefined): string | null {
   const sync = report?.['sync'] as Record<string, unknown> | null | undefined;
-  if (report?.['ok'] !== true || report['changed'] !== false || sync === null || sync === undefined) return null;
+  if (report?.['ok'] !== true || report['changed'] !== false || sync === null || sync === undefined || sync['complete'] !== false) return null;
   const empty = (key: string) => !Array.isArray(sync[key]) || (sync[key] as unknown[]).length === 0;
   if (sync['stopped'] != null || !['failed', 'notAttempted', 'skipped', 'conflicts'].every(empty)) return null;
   const leftOut = Array.isArray(sync['leftOutAtWrite']) ? (sync['leftOutAtWrite'] as Array<{ path?: unknown; rule?: unknown }>) : [];

@@ -2949,6 +2949,9 @@ describe('the setup check step (run.check)', () => {
     const failed = { ...leftOut, sync: { ...sync, failed: [{ path: 'eng/notes/a.md', operation: 'UpdateDocument', error: 'timeout' }] } };
     const retried = await resume([{ report: failed, exitCode: 0 }, { report: COMPLETE, exitCode: 0 }]);
     assert.equal(retried.error, null);
+    // A write step that completed leaves another cause (a held removal, the pull request): the run resumes.
+    const heldElsewhere = await resume([{ report: { ...leftOut, sync: { ...sync, complete: true } }, exitCode: 0 }, { report: COMPLETE, exitCode: 0 }]);
+    assert.equal(heldElsewhere.error, null);
   });
 
   it('stops the scenario when the engine does not implement the check', async () => {
