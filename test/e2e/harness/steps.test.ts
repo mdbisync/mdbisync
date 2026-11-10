@@ -624,6 +624,8 @@ class FakeLinear {
   documents = new Map<string, LinearDocument>();
   comments = new Map<string, string[]>();
   requests: string[] = [];
+  /** Variables of each `RunComments` query, in order. */
+  commentQueries: Array<Record<string, unknown>> = [];
   #next = 0;
   stats = { total: 0 };
 
@@ -693,8 +695,9 @@ class FakeLinear {
     if (operation === 'RunComments') {
       // The filter shapes the canary scan sends: by project, or by team with a title prefix or a list of ids.
       const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } }; title?: { startsWith: string }; id?: { in: string[] } };
+      this.commentQueries.push(variables);
       const nodes = [...this.documents.values()]
-        .filter((document) => !document.trashed && document.archivedAt === null)
+        .filter((document) => variables.includeArchived === true || (!document.trashed && document.archivedAt === null))
         .filter((document) => filter.project === undefined || document.projectId === filter.project.id.eq)
         .filter((document) => filter.team === undefined || document.teamId === filter.team.id.eq)
         .filter((document) => filter.title === undefined || document.title.startsWith(filter.title.startsWith))
@@ -2286,6 +2289,33 @@ describe('crash-created document adoption (L1-17)', () => {
     assert.equal(evidence.texts[`comments on ${other.id}`], undefined);
     ctx.observations.delete('canary.remoteTexts');
     assert.deepEqual(await canaryScan(ctx, { summariesOnly: false }), [{ source: `comments on ${readme}`, canary: 'kx-zone-readme-canary' }]);
+  });
+
+  it('scan comments on the run\'s own README after the engine trashed it', async () => {
+    const { ctx, linear, readme } = await crashed();
+    const file = ctx.live?.manifest.files.find((entry) => entry.path === 'zone/README.md');
+    if (file === undefined) throw new Error('the zone README is not in the manifest');
+    file.canary = 'kx-zone-readme-canary';
+    await linear.commentOnDocument(`content-${readme}`, 'Quoted kx-zone-readme-canary here.');
+    await linear.trashDocument(readme);
+    const { canaryScan } = await import('./checks.ts');
+    assert.deepEqual(await canaryScan(ctx, { summariesOnly: false }), [{ source: `comments on ${readme}`, canary: 'kx-zone-readme-canary' }]);
+  });
+
+  it('ask for the owned ids in bounded queries and still reach the last one', async () => {
+    const { ctx, linear, readme } = await crashed();
+    // Owned ids Linear does not list (creates asked for but never confirmed), recorded after the README.
+    for (let index = 0; index < 60; index += 1) ctx.owned.record({ kind: 'document', id: `never-created-${index}`, confirmed: false });
+    const late = linear.add({ teamId: 'team-eng' }, 'README', 'Late notes.\n');
+    recordCreate(ctx, late.id);
+    await linear.commentOnDocument(`content-${late.id}`, 'Late kx-zone-readme-canary.');
+    const { collectCanaryEvidence } = await import('./checks.ts');
+    const evidence = await collectCanaryEvidence(ctx, { summariesOnly: false });
+    assert.equal(evidence.texts[`comments on ${late.id}`], 'Late kx-zone-readme-canary.');
+    assert.ok(`comments on ${readme}` in evidence.texts);
+    const byId = linear.commentQueries.map((variables) => (variables.filter as { id?: { in: string[] } }).id?.in).filter((ids) => ids !== undefined);
+    assert.ok(byId.length >= 2 && byId.every((ids) => ids.length <= 50), `owned ids per query: ${byId.map((ids) => ids.length).join(', ')}`);
+    assert.equal(new Set(byId.flat()).size, byId.flat().length, 'an owned id is asked for once');
   });
 
   it('refuse a kill without the documents the run owned before the engine started', async () => {
