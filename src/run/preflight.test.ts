@@ -12,7 +12,7 @@ import { type LogEntry } from '../linear/index.ts';
 import { runCli } from '../cli.ts';
 import { NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { CHECK_NAMES } from '../setup/index.ts';
-import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { commitIds, commitUploads } from '../state/index.ts';
 import { IDENTITY, type Fixture, createFixture } from '../state/test-helpers.ts';
 import { type RunReport } from './finish.ts';
@@ -198,7 +198,7 @@ describe('preflight', () => {
       `);
       await writeFile(join(fixture.root, 'action-state'), '');
       const fakeEnv: Record<string, string> = env();
-      const actionEnv = Object.fromEntries(INPUT_NAMES.map(name => [`INPUT_${name.toUpperCase()}`, fakeEnv[environmentName(name)] ?? '']));
+      const actionEnv = { ...Object.fromEntries(INPUT_NAMES.map(name => [`INPUT_${name.toUpperCase()}`, fakeEnv[environmentName(name)] ?? ''])), 'INPUT_APP-SLUG': FAKE_APP_SLUG };
       const child = spawnSync(process.execPath, ['--import', injection, fileURLToPath(new URL(entry, import.meta.url)), 'check'], {
         cwd, env: action ? { ...fakeEnv, ...actionEnv, INPUT_OPERATION: 'initial-sync', INPUT_DIRECTION: 'git-to-linear', GITHUB_WORKSPACE: cwd, GITHUB_OUTPUT: '', GITHUB_STATE: join(fixture.root, 'action-state'), GITHUB_STEP_SUMMARY: '' } : fakeEnv,
         encoding: 'utf8', timeout: 15_000,

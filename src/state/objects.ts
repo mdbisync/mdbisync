@@ -24,6 +24,13 @@ export interface CommitIdentity {
   email: string;
 }
 
+/**
+ * Who the sync's commits are by when the run has no App slug (the command
+ * line run by hand): a name that is no person's and an address that cannot
+ * receive mail. With an App slug they are by the App's bot account.
+ */
+export const NEUTRAL_IDENTITY: CommitIdentity = Object.freeze({ name: 'mdbisync', email: 'mdbisync@sync.invalid' });
+
 /** Lists every file of a commit or tree, recursively. */
 export async function listTree(git: Git, treeish: string): Promise<TreeEntry[]> {
   const { stdout } = await git.run(['ls-tree', '-r', '-z', '-l', '--full-tree', treeish]);

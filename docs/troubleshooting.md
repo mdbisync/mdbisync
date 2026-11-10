@@ -73,6 +73,7 @@ example [GitHub App](quickstart.md#github-app) for a missing permission:
 | --- | --- |
 | `linear-credentials` | The Linear app's token works and has the read and write scopes. |
 | `github-access` | The GitHub token can read the repository and has the permissions the sync needs. |
+| `github-app` | GitHub has the bot account of the App named by `app-slug`; the sync's commits name it as their author. |
 | `merge-commits` | The repository allows merge commits. |
 | `linear-format-hook` | `.pre-commit-config.yaml` has the `linear-format` hook. |
 | `annotations` | Every `linear-team` and `linear-project` in a `README.md` front matter is valid. |
@@ -88,6 +89,7 @@ last line and the summary row give its detail, shown here:
 | `linear-credential-failed` | `the Linear token lacks the scope <scopes>`, `Linear refused the OAuth app client credentials`, `Linear refused the token while reading teams`, or Linear's refusal of the token request | Linear refused the app's client ID or secret, or the token lacks a scope. | Check the `MDBISYNC_LINEAR_CLIENT_ID` and `MDBISYNC_LINEAR_CLIENT_SECRET` secrets, and that the Linear app has client credentials with read and write. |
 | `github-credential-failed` | `the GitHub token was refused (HTTP 401)`, `the GitHub token cannot see the repository (HTTP <status>)` | The GitHub token cannot read the repository. | Check the GitHub App's installation on this repository and the `MDBISYNC_APP_CLIENT_ID` variable and `MDBISYNC_APP_PRIVATE_KEY` secret. |
 | `missing-permission` | `the GitHub token lacks <permissions>`, perhaps with `(<permissions> not checked without it)` | The GitHub token lacks the permissions named. | Give the GitHub App contents, pull requests and workflows write, and checks and commit statuses read, then accept the new permissions on the installation. |
+| `github-app-not-found` | `GitHub has no App account <slug>[bot]; give app-slug the App token step's output app-slug` | GitHub has no App with the slug the action was given. | Give the action's input `app-slug` the output `app-slug` of the step that mints the App token, as the example workflows do. |
 | `merge-commits-required` | `merge commits are not allowed in the repository settings`, `GitHub did not show whether merge commits are allowed` | The repository does not allow merge commits, or GitHub did not say. | Turn on **Allow merge commits** in the repository settings. |
 | `linear-format-hook-required` | `.pre-commit-config.yaml has no linear-format hook`, `.pre-commit-config.yaml is not valid YAML`, `.pre-commit-config.yaml has no "repos" list` | The hook configuration is missing or broken. | Add the hook, pinned to a release (see [usage.md](usage.md#pre-release-builds-and-pins)). |
 | `invalid-annotation` | The problems, joined by `;` | A `README.md` front matter names a team or project in a way the run cannot use. | Fix the front matter; see [Annotation problems](#annotation-problems). |
@@ -100,10 +102,12 @@ last line and the summary row give its detail, shown here:
 The setup check can also end with:
 
 - `GitHub rate-limited the setup check while reading the repository (HTTP 403); run again later`
-  or `GitHub rate-limited the setup check while checking <permission> (HTTP 403); run again later`:
+  or `GitHub rate-limited the setup check while checking <permission> (HTTP 403); run again later`
+  or `GitHub rate-limited the setup check while reading the App's account (HTTP 403); run again later`:
   wait and run again.
-- `GitHub answered HTTP <status> while checking <permission>` or
-  `GitHub answered HTTP <status> while reading the repository`: GitHub failed
+- `GitHub answered HTTP <status> while checking <permission>`,
+  `GitHub answered HTTP <status> while reading the repository` or
+  `GitHub answered HTTP <status> while reading the App's account`: GitHub failed
   a request; run again, and if it repeats, check GitHub's status.
 - `more than 250 Linear projects share the annotated names`: name fewer
   projects with the same name, or rename them in Linear.
@@ -295,6 +299,8 @@ step fails with the same message:
 | `the input repository must be "owner/name" (it defaults to the workflow's repository)` | Give `repository` as `owner/name`, or leave it empty in a workflow. |
 | `the input document-cap must be a positive safe integer` | Give a whole number above zero. |
 | `the input merge-grace-seconds must be an integer from 0 to 120` | Give a whole number of seconds from 0 to 120. |
+| `the input app-slug is required: give it the App token step's output app-slug` | In the workflow, give the mdbisync steps `app-slug: ${{ steps.app-token.outputs.app-slug }}`, as the example workflows do. |
+| `the input app-slug must be a GitHub App slug (letters, digits and hyphens)` | Give the App's slug, not its name or its bot login (`<slug>[bot]`); the token step's output `app-slug` is it. |
 | `the input direction is required (initial sync never picks a direction itself)`, `the input direction must be one of git-to-linear, linear-to-git, not "<value>" (initial sync never picks a direction itself)` | Choose `git-to-linear` or `linear-to-git`. |
 | `remote "<name>" is not a valid remote name` | Use a valid git remote name. |
 | `<tracked-branch or sync-branch> "<name>" is not a valid branch name: <problem>` (the problem can be `starts with "-"`) | Use a valid branch name. |

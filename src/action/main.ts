@@ -81,7 +81,7 @@ export async function run(options: RunOptions = {}): Promise<void> {
   try {
     const operation = parseOperation(core.getInput("operation"));
     const get = (name: InputName) => core.getInput(name);
-    const inputs = readInputs(get);
+    const inputs = readInputs(get, process.env, { appSlugRequired: true });
     const initialSync = operation === "initial-sync" ? readInitialSyncInputs(get) : undefined;
     const cleanupValue = core.getInput("cleanup-tokens");
     const cleanupTokens = cleanupValue === "" ? false : core.getBooleanInput("cleanup-tokens");

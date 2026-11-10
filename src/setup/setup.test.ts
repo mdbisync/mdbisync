@@ -12,7 +12,7 @@ import {
   runSetupCheck,
   securityHooks,
 } from './index.ts';
-import { GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from './test-helpers.ts';
+import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld } from './test-helpers.ts';
 import { resolveTargets } from './linear.ts';
 import { DEFAULT_STATE_CONFIG } from '../state/index.ts';
 import type { Nodes } from 'mdast';
@@ -109,8 +109,77 @@ describe('GitHub access', () => {
   });
 });
 
+describe('the App account', () => {
+  const withSlug = (world: ReturnType<typeof fakeWorld>, appSlug: string) => ({ ...target(world), appSlug });
+
+  it('reads the App\'s bot account by its slug and gives the commit identity GitHub links to the App', async () => {
+    const world = fakeWorld();
+    const result = await checkGitHub(withSlug(world, FAKE_APP_SLUG));
+    assert.equal(result.app.state, 'passed');
+    assert.equal(result.app.detail, 'commits name the App sync-app[bot]');
+    assert.deepEqual(result.identity, FAKE_APP_IDENTITY);
+    assert.ok(world.requests.includes(`GET ${GITHUB_API}/users/sync-app%5Bbot%5D`));
+    assert.equal(world.requests.length, 7);
+    assert.deepEqual(world.writes, []);
+  });
+
+  it('takes GitHub\'s spelling of the login when the slug differs in case', async () => {
+    const world = fakeWorld();
+    const result = await checkGitHub(withSlug(world, 'Sync-App'));
+    assert.deepEqual(result.identity, FAKE_APP_IDENTITY);
+  });
+
+  it('fails the setup when GitHub has no such App account, and names no one', async () => {
+    const world = fakeWorld();
+    const result = await checkGitHub(withSlug(world, 'other-app'));
+    assert.equal(result.app.code, 'github-app-not-found');
+    assert.match(result.app.detail, /GitHub has no App account other-app\[bot\]; give app-slug the App token step's output app-slug/);
+    assert.equal(result.identity, undefined);
+  });
+
+  it('fails the setup when the answer is not the App\'s bot account', async () => {
+    for (const answer of [{ login: 'sync-app[bot]', id: 7, type: 'User' }, { login: 'someone', id: 7, type: 'Bot' }, { login: 'sync-app[bot]', id: '7', type: 'Bot' }, { login: 'sync-app[bot]', id: 0, type: 'Bot' }]) {
+      const fetchImpl: typeof fetch = async (input, init) => (String(input).includes('/users/')
+        ? new Response(JSON.stringify(answer), { status: 200 })
+        : fakeFetch(fakeWorld())(input, init));
+      const result = await checkGitHub({ ...target(fakeWorld()), appSlug: FAKE_APP_SLUG, fetch: fetchImpl });
+      assert.equal(result.app.code, 'github-app-not-found', JSON.stringify(answer));
+      assert.equal(result.identity, undefined);
+    }
+  });
+
+  it('treats a rate limit or an outage while reading the account as an error of the run', async () => {
+    for (const [status, body, error] of [
+      [403, { message: 'API rate limit exceeded' }, /rate-limited the setup check while reading the App's account/],
+      [503, {}, /GitHub answered HTTP 503 while reading the App's account/],
+    ] as const) {
+      const fetchImpl: typeof fetch = async (input, init) => (String(input).includes('/users/')
+        ? new Response(JSON.stringify(body), { status })
+        : fakeFetch(fakeWorld())(input, init));
+      await assert.rejects(checkGitHub({ ...target(fakeWorld()), appSlug: FAKE_APP_SLUG, fetch: fetchImpl }), error);
+    }
+  });
+
+  it('without a slug names the neutral identity and reads nothing more', async () => {
+    const world = fakeWorld();
+    const result = await checkGitHub(target(world));
+    assert.equal(result.app.state, 'passed');
+    assert.equal(result.app.detail, 'no App slug given: commits name mdbisync <mdbisync@sync.invalid>');
+    assert.equal(result.identity, undefined);
+    assert.ok(!world.requests.some((request) => request.includes('/users/')));
+  });
+
+  it('is not checked with a refused token', async () => {
+    const world = fakeWorld();
+    world.github.tokenValid = false;
+    const result = await checkGitHub(withSlug(world, FAKE_APP_SLUG));
+    assert.equal(result.app.state, 'not-checked');
+    assert.equal(result.identity, undefined);
+  });
+});
+
 describe('setup check', () => {
-  const run = async (world: ReturnType<typeof fakeWorld>, map = MINI, hooks = PRE_COMMIT) => {
+  const run =async (world: ReturnType<typeof fakeWorld>, map = MINI, hooks = PRE_COMMIT) => {
     const client = new LinearClient({ token: 'fake-token', baseUrl: LINEAR_API, fetch: fakeFetch(world) });
     return runSetupCheck({ mapping: map, hooks: readHookConfig(hooks), github: await checkGitHub(target(world)), linear: { client, scope: world.linear.scope } });
   };
