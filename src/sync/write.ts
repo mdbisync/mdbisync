@@ -937,12 +937,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         if (derived && linearFiles.get(path) !== resultFiles.get(path)) keepTip(path);
       }
     }
-    // A held rename stays where the tip has it at both paths: recording the new path's file would make it an
-    // addition of Linear's side, and the fix of that file a conflict with it in the next run.
-    for (const entry of merge.held) {
-      keepTip(entry.from);
-      keepTip(entry.to);
-    }
+    for (const entry of merge.held) keepTip(entry.from);
+    // Linear holds a left-out file as the tip has it. A partial record keeps the merge base, so recording the
+    // merge result's version would make it an edit (or addition) of Linear's side, and its fix in git a conflict
+    // with it in the next run. A held rename's new path is left out or in conflict, so it stays as the tip has it.
+    if (!merged) for (const { path } of merge.leftOut) keepTip(path);
     const tipBlobs = await readBlobs(git, [...fromTip].flatMap((path) => (linearFiles.has(path) ? [linearFiles.get(path) as Oid] : [])));
     for (const path of fromTip) {
       const oid = linearFiles.get(path);
