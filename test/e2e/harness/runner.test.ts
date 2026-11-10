@@ -10,7 +10,7 @@ import { countAppRequest, withAppRequests } from './app-reads.ts';
 import { budgetHolds, compare, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
 import { parseEnvFile, parseRepoUrl } from './config.ts';
-import { appJwt, SandboxRest } from './github.ts';
+import { appInstallationToken, appJwt, SandboxRest } from './github.ts';
 import { registerRun } from './locks.ts';
 import { evidenceSummary, mergeLatest, readLatest, renderRunMarkdown, renderStatusPage, updateStatusPage, type HarnessReport } from './report.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, classify, loadExpectedRed, type ScenarioResult } from './results.ts';
@@ -179,6 +179,19 @@ describe('configuration and GitHub App', () => {
     const [header, payload, signature] = jwt.split('.') as [string, string, string];
     assert.deepEqual(JSON.parse(Buffer.from(payload, 'base64url').toString()), { iat: 999_940, exp: 1_000_540, iss: 'Iv1.test' });
     assert.ok(createVerify('RSA-SHA256').update(`${header}.${payload}`).verify(publicKey, Buffer.from(signature, 'base64url')));
+  });
+
+  it('name the App\'s bot login, from its installation, with the installation token', async () => {
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const config = { owner: 'acme', repo: 'sandbox', githubApp: { clientId: 'Iv1.test', privateKey: privateKey.export({ type: 'pkcs8', format: 'pem' }) as string } } as TestConfig;
+    const paths: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      paths.push(path);
+      return path === '/repos/acme/sandbox/installation' ? Response.json({ id: 7, app_slug: 'sync-app' }) : Response.json({ token: 'installation-token' }, { status: 201 });
+    }) as typeof fetch;
+    assert.deepEqual(await appInstallationToken(config, fetchImpl), { token: 'installation-token', appLogin: 'sync-app[bot]' });
+    assert.deepEqual(paths, ['/repos/acme/sandbox/installation', '/app/installations/7/access_tokens']);
   });
 });
 

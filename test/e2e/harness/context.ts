@@ -32,6 +32,8 @@ export interface LiveWorld {
   rest: SandboxRest;
   githubToken: string;
   githubTokenSource: 'app' | 'host';
+  /** The bot login of the App the harness and the workflows authenticate as (`<slug>[bot]`); App tokens only. */
+  githubAppLogin?: string;
   /** owner/name of the sandbox. */
   repository: string;
   manifest: Manifest;
