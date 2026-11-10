@@ -17,6 +17,7 @@ import { startFaultProxy } from './fault-proxy.ts';
 import { BudgetBlockedError, estimate, type Governor } from './governor.ts';
 import { SandboxRest, githubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
+import { engineRequestCount, requestBuckets, remoteRequests, isGraphql } from './request-accounting.ts';
 import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
@@ -630,7 +631,8 @@ export function resultOf(
     ...outcome,
     startedAt: new Date(extra.startedAt).toISOString(),
     durationMs: Date.now() - extra.startedAt,
-    engineRequests: ctx.proxy?.requests.filter((record) => !record.injected).length ?? 0,
+    engineRequests: engineRequestCount(ctx),
+    requestBuckets: requestBuckets(ctx),
     harnessRequests: ctx.live === null ? 0 : [...Object.values(ctx.live.editors)].reduce((sum, client) => sum + client.stats.total, 0),
     budgetWaitMs: extra.budgetWaitMs,
     checks: extra.checks,
@@ -720,6 +722,9 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     if (!heldForUi) cleanupOutcome = await cleanupAndCount(ctx);
     await ctx.proxy?.close();
     locks.splice(0).reverse().forEach((lock) => lock.release());
+    if (grant !== undefined) for (const { entry } of remoteRequests(ctx)) {
+      if (isGraphql(entry)) deps.governor?.observeRateLimits(grant.app.name, entry.rateLimitHeaders);
+    }
     grant?.release();
     clearInterval(heartbeat);
     if (setupStuck) cleanupOutcome = { ok: false, detail: `setup did not stop; ${cleanupOutcome.detail ?? 'cleaned up'}; the sweeper removes the rest once this process ends` };

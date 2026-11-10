@@ -6,6 +6,7 @@
 // slots shared by every harness process on the host, and spreads workers over
 // every app the secrets list. Only one `full` run at a time.
 
+import { readRateLimitHeaders } from '../../../src/linear/rate-limit.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { RateLimitStatus } from '../../../src/linear/index.ts';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -150,6 +151,33 @@ export class Governor {
   readonly #now: () => number;
   readonly #sleep: (ms: number) => Promise<void>;
   #next = 0;
+  readonly #observed = new Map<string, Budget[]>();
+
+  /** Real remote GraphQL headers constrain admission until their window resets.
+   * OAuth endpoint limits must never be passed here. Fresh app reads still run.
+   */
+  observeRateLimits(app: string, headers: Record<string, string>): void {
+    let parsed: Headers;
+    try { parsed = new Headers(headers); } catch { return; }
+    const limit = readRateLimitHeaders(parsed);
+    const values = [limit.requestsRemaining, limit.complexityRemaining, limit.requestsReset, limit.complexityReset];
+    if (values.some((value) => value === undefined || !Number.isFinite(value) || value < 0)) return;
+    const resetAt = Math.max(limit.requestsReset!, limit.complexityReset!);
+    if (resetAt <= this.#now()) return;
+    const active = (this.#observed.get(app) ?? []).filter((budget) => budget.resetAt > this.#now());
+    active.push({ requestsRemaining: limit.requestsRemaining!, complexityRemaining: limit.complexityRemaining!, resetAt });
+    this.#observed.set(app, active);
+  }
+
+  #withObserved(app: string, fresh: Budget): Budget {
+    const active = (this.#observed.get(app) ?? []).filter((budget) => budget.resetAt > this.#now());
+    this.#observed.set(app, active);
+    return active.reduce((budget, observed) => ({
+      requestsRemaining: Math.min(budget.requestsRemaining, observed.requestsRemaining),
+      complexityRemaining: Math.min(budget.complexityRemaining, observed.complexityRemaining),
+      resetAt: Math.max(budget.resetAt, observed.resetAt),
+    }), fresh);
+  }
 
   constructor(options: GovernorOptions) {
     if (options.apps.length === 0) throw new Error('the governor needs at least one OAuth app');
@@ -198,7 +226,7 @@ export class Governor {
       held.push(slot.lock);
       let loggedReservationWait = false;
       for (;;) {
-        const budget = await slot.app.readBudget();
+        const budget = this.#withObserved(slot.app.name, await slot.app.readBudget());
         const app = slot.app;
         const admitted = await withLedger(options.stateDir, app.name, runId, (ledger) => {
           const reserved = sumLedger(ledger);

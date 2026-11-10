@@ -17,6 +17,7 @@
 // scenario then stops at that run. Any other failure stays the run's result
 // for the scenario's checks.
 
+import { diagnosticRequests } from './request-accounting.ts';
 import { CANARY_EVIDENCE } from './security-canary.ts';
 import { inflateRawSync } from 'node:zlib';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -189,10 +190,12 @@ export async function runResult(rest: SandboxRest, run: WorkflowRun, command: Co
     securityCanary = files.get(CANARY_EVIDENCE)?.toString('utf8') ?? '';
     summary = files.get('summary.md')?.toString('utf8') ?? '';
   }
-  const logs = [...(logFiles ?? await runLogs(rest, run)).values()].join('\n');
+  const files = logFiles ?? await runLogs(rest, run);
+  const logs = [...files.values()].join('\n');
   const started = Date.parse(run.run_started_at ?? run.created_at);
   return {
     command,
+    remote: { runId: run.id, runAttempt: run.run_attempt ?? 1, requests: diagnosticRequests(files) },
     exitCode: run.conclusion === 'success' ? 0 : 1,
     signal: null,
     notImplemented: /not implemented/.test(logs) && run.conclusion !== 'success',
