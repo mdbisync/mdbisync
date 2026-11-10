@@ -138,9 +138,10 @@ export async function waitForScheduledRun(rest: SandboxRest, options: { workflow
       const jobs = await rest.runJobs(run.id);
       const ours = jobs.some((job) => job.name.endsWith(` ${options.runId}`));
       if (ours && run.status === 'completed') return run;
-      // Once its request job has finished, a tick's jobs and their names are settled.
-      const settled = run.status === 'completed' || jobs.some((job) => job.name === REQUEST_JOB && job.completed_at !== null);
-      if (!ours && settled) others.add(run.id);
+      // A tick serves another run once a job named for that run shows. A finished request job proves nothing:
+      // the job that depends on it may not be listed yet.
+      const another = jobs.some((job) => job.name !== REQUEST_JOB && /\s[0-9a-f]{6}$/.test(job.name));
+      if (!ours && (run.status === 'completed' || another)) others.add(run.id);
     }
     const waited = Date.now() - started;
     if (waited > (options.timeoutMs ?? RUN_WAIT_MS)) throw new EnvBlockedError(`the scheduled run that took the run's request did not finish within ${Math.round((options.timeoutMs ?? RUN_WAIT_MS) / 60_000)} minutes (runner busy?)`);

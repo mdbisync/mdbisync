@@ -155,7 +155,9 @@ describe('waiting for a scheduled run', () => {
       },
       runJobs: async (id: number) => {
         jobsRead.push(id);
-        return id === 4 ? [{ name: 'request', completed_at: at(0) }, { name: 'sync a1b2c3', completed_at: null }] : [{ name: 'request', completed_at: at(1500) }, { name: 'sync d4e5f6', completed_at: null }];
+        // Tick 4's job for the run is listed only from the second poll on, after its request job finished.
+        if (id === 4) return [{ name: 'request', completed_at: at(0) }, ...(polls > 1 ? [{ name: 'sync a1b2c3', completed_at: null }] : [])];
+        return [{ name: 'request', completed_at: at(1500) }, { name: 'sync d4e5f6', completed_at: null }];
       },
     };
     const run = await waitForScheduledRun(rest as never, { workflow: SCHEDULER_FILE, runId: 'a1b2c3', after: now, pollMs: 1 });
