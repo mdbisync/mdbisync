@@ -4,6 +4,7 @@
 // findings, recorded in the result, never hidden.
 
 import {
+  DocumentTooLongError,
   LINEAR_FACTS,
   LinearClient,
   LinearGraphQLError,
@@ -62,8 +63,10 @@ export interface FixtureResult {
   basis: BankFixture['basis'];
   /** The fixture as stored in the bank. */
   source: string;
-  /** Linear refused the first write; the error code and message. */
+  /** Linear refused the first write, or the client did before sending it; the error code and message. */
   refused?: string;
+  /** The client refused the first write itself, before sending it: over Linear's known limit. */
+  refusedBeforeSending?: true;
   /** Linear's form after the first write, asset URLs mapped back to bank paths. */
   first?: string;
   /** Linear's form after writing `first` back. */
@@ -287,7 +290,8 @@ async function probeFixtures(
       );
       created.push({ result, id: document.id, returned: document.content });
     } catch (error) {
-      if (!isRefusal(error)) throw error;
+      if (error instanceof DocumentTooLongError) result.refusedBeforeSending = true;
+      else if (!isRefusal(error)) throw error;
       result.refused = describe(error);
     }
   }
@@ -312,7 +316,7 @@ async function probeFixtures(
       const after = await client.updateDocument(entry.id, { content });
       updated.push({ result: entry.result, id: entry.id, returned: after.content });
     } catch (error) {
-      if (!isRefusal(error)) throw error;
+      if (!(error instanceof DocumentTooLongError || isRefusal(error))) throw error;
       entry.result.secondRefused = describe(error);
     }
   }
@@ -559,6 +563,11 @@ export async function findLimit(refusalAt: (value: number) => Promise<string | u
  * HTTP client error without one (for example 413 for a very large body). A
  * server error (5xx), a network error or a stopped client says nothing about
  * the input: the run ends as unfinished instead of recording a finding.
+ *
+ * A client with Linear's known limits (the test harness's) refuses an
+ * over-limit fixture itself, before sending (`DocumentTooLongError`); the
+ * fixture writes record that as the fixture's refusal. It is not Linear's
+ * answer, so a limit measurement never counts it and stops instead.
  */
 export function isRefusal(error: unknown): boolean {
   if (error instanceof LinearGraphQLError || error instanceof LinearHttpError) {
@@ -575,5 +584,6 @@ function describe(error: unknown): string {
   }
   // Only the status: the request id differs on every call.
   if (error instanceof LinearHttpError) return `HTTP ${error.httpStatus}`;
+  if (error instanceof DocumentTooLongError) return `refused before sending: ${error.message.replace(/^[^:]*: /, '')}`;
   return error instanceof Error ? error.message : String(error);
 }

@@ -9,10 +9,10 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import * as Y from 'yjs';
 
-import { LinearClient } from '../../src/linear/index.ts';
+import { DocumentTooLongError, LINEAR_FACTS, LinearClient, LinearGraphQLError, LinearHttpError, LinearNetworkError } from '../../src/linear/index.ts';
 import { FakeLinear, fakeDocument, type ReceivedRequest } from '../linear/fake-linear.ts';
 import { fromLinear, goldenMarkdownPath, goldenYjsPath, loadBank, sentForm, toLinear } from './bank.ts';
-import { PROBE_FACTS, findLimit, isLeftover, runProbe } from './probe.ts';
+import { PROBE_FACTS, findLimit, isLeftover, isRefusal, runProbe } from './probe.ts';
 import { findDrift, refusalKey, writeRecord } from './record.ts';
 import { diffLines, keptOnlyInYjs, renderReport } from './report.ts';
 import { summarizeContentState } from './yjs-summary.ts';
@@ -138,6 +138,7 @@ function makeBank(): string {
 }
 
 describe('format probe against a fake Linear', () => {
+  const manifestRefusal = (file: string) => JSON.parse(readFileSync(join(bankDir, 'linear-probe.json'), 'utf8')).fixtures[file]?.refused;
   let fake: FakeLinear;
   let workspace: FakeWorkspace;
   let bankDir: string;
@@ -177,6 +178,33 @@ describe('format probe against a fake Linear', () => {
     const manifest = JSON.parse(readFileSync(join(bankDir, 'linear-probe.json'), 'utf8'));
     assert.equal(manifest.fixtures['size/large.md'].refused, 'INVALID_INPUT');
     assert.deepEqual(findDrift(loadBank(bankDir), await probe()), [], 'a second run matches the record');
+  });
+
+  it('records the client\'s own refusal of an over-limit content as that fixture\'s refusal, matching Linear\'s recorded one', async () => {
+    // As the test harness's app client: it knows Linear's limit and refuses before sending.
+    const client = new LinearClient({ token: 'fake', baseUrl: fake.url }, { ...LINEAR_FACTS, mutationsReturnStoredContent: true, maxContentLength: 1000 });
+    const sent: string[] = [];
+    const original = fake.operations.get('CreateDocument')!;
+    fake.operations.set('CreateDocument', (r: ReceivedRequest) => (sent.push((r.variables!.input as { title: string }).title), original(r)));
+    let run;
+    try {
+      run = await runProbe({ client, bank: loadBank(bankDir), runId: 'test-run', facts: false });
+    } finally {
+      fake.operations.set('CreateDocument', original);
+    }
+    const large = run.fixtures.find((r) => r.file === 'size/large.md')!;
+    assert.equal(large.refused, 'refused before sending: content is 2018 characters, Linear accepts at most 1000');
+    assert.ok(!sent.some((title) => title.includes('kx-00000004')), 'nothing was sent for the over-limit fixture');
+    assert.equal(large.refusedBeforeSending, true);
+    assert.equal(manifestRefusal('size/large.md'), 'INVALID_INPUT', 'the record holds Linear\'s own answer');
+    assert.deepEqual(findDrift(loadBank(bankDir), run), [], 'the pre-send refusal matches the recorded INVALID_INPUT');
+  });
+
+  it('reports drift when the client refuses before sending what Linear is recorded accepting', async () => {
+    const client = new LinearClient({ token: 'fake', baseUrl: fake.url }, { ...LINEAR_FACTS, mutationsReturnStoredContent: true, maxContentLength: 20 });
+    const drift = findDrift(loadBank(bankDir), await runProbe({ client, bank: loadBank(bankDir), runId: 'test-run', facts: false }));
+    assert.ok(drift.some((d) => d.file === 'lists/star.md' && d.kind === 'refusal' && d.detail === 'recorded accepted, now before-sending'), JSON.stringify(drift));
+    assert.ok(!drift.some((d) => d.file === 'size/large.md'), 'the fixture Linear refuses still matches');
   });
 
   it('reports drift for a recorded form edited by hand', async () => {
@@ -274,6 +302,15 @@ describe('format probe helpers', () => {
     assert.equal(isLeftover({ name: 'Format probe migration', createdAt: old, creator: own }, 'app-user', now), false, 'not a run name');
     assert.equal(isLeftover({ name: 'Format probe 20261108-a1b2c3', createdAt: old, creator: { id: 'someone' } }, 'app-user', now), false, 'made by someone else');
     assert.equal(isLeftover({ name: 'Format probe 20261108-a1b2c3', createdAt: old, creator: null }, 'app-user', now), false, 'no creator');
+  });
+
+  it('counts only Linear\'s answers about the input as refusals, so a limit measurement never takes the client\'s own limit for Linear\'s', () => {
+    assert.equal(isRefusal(new DocumentTooLongError('UpdateDocument', { field: 'content', length: 266_235, limit: 250_000 })), false);
+    assert.equal(isRefusal(new LinearGraphQLError('CreateDocument', 400, { message: 'Argument Validation Error', extensions: { code: 'INVALID_INPUT' } })), true);
+    assert.equal(isRefusal(new LinearHttpError('CreateDocument', 413)), true);
+    assert.equal(isRefusal(new LinearHttpError('CreateDocument', 502)), false);
+    assert.equal(isRefusal(new LinearNetworkError('CreateDocument', new Error('reset'))), false);
+    assert.equal(isRefusal(new Error('a bug in the probe')), false);
   });
 
   it('finds a limit by doubling and halving', async () => {
