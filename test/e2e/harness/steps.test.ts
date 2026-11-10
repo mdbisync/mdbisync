@@ -2952,6 +2952,11 @@ describe('the setup check step (run.check)', () => {
     // A write step that completed leaves another cause (a held removal, the pull request): the run resumes.
     const heldElsewhere = await resume([{ report: { ...leftOut, sync: { ...sync, complete: true } }, exitCode: 0 }, { report: COMPLETE, exitCode: 0 }]);
     assert.equal(heldElsewhere.error, null);
+    // An unreadable upload can become readable with no git change: the run resumes.
+    const unreadable = { ...leftOut, sync: { ...sync, leftOutAtWrite: [{ path: 'eng/notes/lost.md', rule: 'upload-unreadable', files: ['eng/notes/lost.png'] }] } };
+    const recovered = await resume([{ report: unreadable, exitCode: 0 }, { report: COMPLETE, exitCode: 0 }]);
+    assert.equal(recovered.error, null);
+    assert.equal(recovered.runs, 2);
   });
 
   it('stops the scenario when the engine does not implement the check', async () => {

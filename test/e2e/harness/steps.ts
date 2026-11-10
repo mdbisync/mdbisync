@@ -510,9 +510,10 @@ export function runFailure(report: Record<string, unknown> | null | undefined): 
 }
 
 /**
- * The documents left out at write, when they are all that keeps an incomplete sync run from completing and the
- * run changed nothing: a file a transform leaves out (a linked file over the upload limit, one that cannot be
- * read) stays out until git changes it, so another run leaves it out again. Null otherwise.
+ * The documents left out at write for a linked file over the upload limit, when they are all that keeps an
+ * incomplete sync run from completing and the run changed nothing: such a file stays out until git changes it,
+ * so another run leaves it out again. An unreadable file (`upload-unreadable`) can become readable with no git
+ * change, so a run that still has one resumes. Null otherwise.
  */
 export function onlyLeftOutAtWrite(report: Record<string, unknown> | null | undefined): string | null {
   const sync = report?.['sync'] as Record<string, unknown> | null | undefined;
@@ -520,7 +521,8 @@ export function onlyLeftOutAtWrite(report: Record<string, unknown> | null | unde
   const empty = (key: string) => !Array.isArray(sync[key]) || (sync[key] as unknown[]).length === 0;
   if (sync['stopped'] != null || !['failed', 'notAttempted', 'skipped', 'conflicts'].every(empty)) return null;
   const leftOut = Array.isArray(sync['leftOutAtWrite']) ? (sync['leftOutAtWrite'] as Array<{ path?: unknown; rule?: unknown }>) : [];
-  return leftOut.length === 0 ? null : leftOut.map((entry) => `${String(entry.path)} (${String(entry.rule)})`).join(', ');
+  if (leftOut.length === 0 || leftOut.some((entry) => entry.rule !== 'upload-too-large')) return null;
+  return leftOut.map((entry) => `${String(entry.path)} (${String(entry.rule)})`).join(', ');
 }
 
 const RUN: Record<string, Executor> = {
