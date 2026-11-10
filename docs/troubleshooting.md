@@ -187,7 +187,8 @@ from `merge-grace-seconds` and starts again for a new head; its push time
 is kept in a hidden HTML note in the pull request description. A check
 that never registers is invisible to the deadline: GitHub can refuse the
 merge for a missing required check instead (`merge-refused`, then
-`merge-blocked`). Check workflow filters and required-check names.
+`merge-blocked`), and nothing is suspended or marked in Linear. Check
+workflow filters and required-check names.
 
 If the same check fails on the tracked branch's tip (`main` by default),
 the normal pull request stays open and held instead: nothing is suspended,

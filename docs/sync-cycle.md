@@ -180,10 +180,15 @@ in the pull request description; it is separate from the short merge
 grace period. A new head starts a new deadline. The sync never reruns a
 check. Configure flaky-check retries in the repository's CI; a rerun by a
 person or CI counts by its latest result. No Actions permission is needed.
-A check that never registers with GitHub is invisible to this deadline.
-With no reported checks, the sync attempts to merge after its registration
-grace period; an unreported required check can instead cause
-`merge-refused` and then `merge-blocked`. Check workflow filters and the
+The deadline covers only checks GitHub has registered on the head. The
+sync does not read the branch's list of required checks: with the App's
+permissions that list is not readable for every protection setup, and a
+required check that never registers is a repository setting, not a fault
+of the batch's documents. With no reported checks, the sync attempts to
+merge after its registration grace period. If GitHub refuses the merge
+for a missing required check, the run reports `merge-refused`, and the
+next run on the same head reports the setup error `merge-blocked`;
+nothing is suspended or marked in Linear. Check workflow filters and the
 required-check names if this happens.
 
 The batch joins the one **Suspended changes from Linear** pull request.
