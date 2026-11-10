@@ -161,7 +161,43 @@ line) to the limit you have.
 
 ## The sync pull request
 
-A failed check moves the batch to **Suspended changes from Linear** on `mdbisync/suspended`. The run succeeds; other documents keep syncing. Suspended documents are frozen until this pull request passes and merges. A Linear edit or a new tracked-branch commit updates that lane.
+A failed check, or one still pending past `check-deadline-minutes`
+(default 60, range 10–1440), moves the whole batch to **Suspended changes
+from Linear** on `mdbisync/suspended`. The normal pull request closes;
+other documents continue through **Changes from Linear** on
+`mdbisync/linear`. The run succeeds. While the suspended head's checks
+are pending before the deadline, the normal lane waits to merge.
+
+Suspended documents show a red `Cross` and one comment naming the failed
+check and linking to its run when available, with annotations for that
+file, or “did not finish in time”. Later failures edit that comment.
+A blocked security-hook mark takes precedence over suspension, which
+takes precedence over conflict. Suspended documents are frozen both ways:
+Linear edits go only to the suspended lane; git edits wait for release.
+Fix the document in Linear or fix CI on the tracked branch. Either change
+updates that lane; when its head contains the current tracked tip and
+passes, it merges, comments resolve, and suspended marks clear. Both
+sides' edits then meet in the normal three-way merge.
+
+The sync never reruns a check. Configure retries for flaky checks in your
+repository's CI, or rerun them yourself; the latest result on the head
+counts. The App needs no Actions permission. The deadline is separate
+from `merge-grace-seconds` and starts again for a new head; its push time
+is kept in a hidden HTML note in the pull request description.
+
+If the same check fails on the tracked branch's tip (`main` by default),
+the normal pull request stays open and held instead: nothing is suspended,
+no documents are marked for it, and no alert is written to Linear. The run
+summary names the check and links to its run on that tip. Git-to-Linear
+writes continue for other documents. Fix CI on the tracked branch. The
+initial decision waits up to the deadline if the check still runs there;
+a recorded red-main hold waits until the held checks have actually run
+and passed there, then merges a new tip into the normal branch. If the
+head already contains that tip and still fails, it is suspended without
+restarting CI. Keep the hidden HTML notes in the description: they record
+the head's deadline and the red-main hold. See
+[suspension and release](sync-cycle.md#suspension-and-release) for the exact
+comment text and mark limits.
 
 Linear's changes reach the tracked branch through the sync pull request
 (see [usage.md](usage.md#the-sync-pull-request)). Its step reports:

@@ -151,3 +151,34 @@ The sync stops here until that is done: when no initial sync has run, when
 one stopped before it finished (run it again with the same inputs), or
 while the pull request of an initial sync from Linear waits for a person to
 merge it with a merge commit.
+
+## After setup: checks and suspended changes
+
+The normal pull request is **Changes from Linear** on `mdbisync/linear`.
+A failing batch moves to the one **Suspended changes from Linear** pull
+request on `mdbisync/suspended`, and the normal pull request closes so
+other documents can continue. A suspended document shows a red `Cross`
+and a comment naming the check, linking to its run when available, and
+listing annotations for that file or “did not finish in time”. Security
+hooks still run before push; their blocked mark takes precedence.
+
+Suspended documents are frozen both ways: Linear edits go only to the
+suspended lane, and git edits wait until release. Fix the document in
+Linear or CI on the tracked branch. That updates the suspended head;
+when it contains the current tracked tip and passes checks, it merges,
+its comments resolve, its marks clear, and the normal three-way merge
+resumes. While its checks are pending before the deadline, the normal
+lane waits to merge.
+
+`check-deadline-minutes` (default 60, range 10–1440) limits how long
+checks can stay pending after a head is pushed, including checks that
+never start. The sync never reruns a check: configure flaky-check retries
+in your own CI. The App's permissions above stay as they are; it needs no
+Actions permission.
+
+When the same check fails on the tracked branch's tip (`main` by default),
+the normal pull request is held instead: no document marks or Linear
+alert, and the GitHub run summary names the check and links to its run.
+Fix CI on the tracked branch to let the hold clear. See
+[suspension and release](sync-cycle.md#suspension-and-release) and
+[troubleshooting](troubleshooting.md#the-sync-pull-request).
