@@ -225,6 +225,28 @@ describe('sync: lost state and deleted branches', () => {
     await assertConverged();
   });
 
+  it('L5-13: files left out for a missing image are not matched when the ids ref is rebuilt, as the run leaves them out', async () => {
+    await commit({ 'eng/media/diagram.png': null });
+    const left = await sync();
+    assert.equal(left.result.exitCode, 0, left.result.stderr);
+    assert.deepEqual(left.writes, []);
+    assert.deepEqual(left.report.sync?.leftOut, [
+      { path: 'eng/notes/chart.md', rules: ['image-file-missing'] },
+      { path: 'eng/notes/diagram.md', rules: ['image-file-missing'] },
+    ]);
+    const before = await ids();
+    await fixture.remote.run(['update-ref', '-d', STATE('ids')]);
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    // Every file whose images are files of the record gets its document back; the two left out are not matched.
+    assert.deepEqual(run.report.capture?.rebuiltIds, { matched: Object.keys(before).length - 2, files: Object.keys(before).length });
+    const after = await ids();
+    for (const [path, entry] of Object.entries(before)) {
+      if (path === 'eng/notes/chart.md' || path === 'eng/notes/diagram.md') assert.notEqual(after[path]?.id, entry.id, path);
+      else assert.equal(after[path]?.id, entry.id, path);
+    }
+  });
+
   it('L5-13: a document renamed in Linear while the ids ref was lost comes back as a new file with its id; the old file keeps a document of its own', async () => {
     const before = await ids();
     const documents = world.linear.documents.length;

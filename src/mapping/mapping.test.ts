@@ -176,6 +176,17 @@ describe('folder mapping', () => {
     );
   });
 
+  it('lists every regular file of the tree, inside annotations or not, as what an image may name; a symbolic link is not one', () => {
+    const mapping = mapTree({
+      'eng/README.md': team('ENG'),
+      'eng/plan.md': '# Plan\n',
+      'eng/image.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0]),
+      'eng/linked.png': { symlink: 'image.png' },
+      'loose/data.csv': 'a,b\n',
+    });
+    assert.deepEqual([...mapping.files].sort(), ['eng/README.md', 'eng/image.png', 'eng/plan.md', 'loose/data.csv']);
+  });
+
   it('leaves out both files of a title collision: Unicode normalization or case only', () => {
     const nfc = 'café.md';
     const nfd = 'café.md';

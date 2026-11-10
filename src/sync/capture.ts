@@ -7,7 +7,7 @@ import { isMap, parseDocument, stringify } from 'yaml';
 import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
-import { lintText, sameMarkdown, splitFile } from '../format/index.ts';
+import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { type LinearDocument, type StopReason, LinearError, LinearStoppedError, describeLinearError, isTransientLinearError } from '../linear/index.ts';
 import { renderStop } from '../run/stop.ts';
 import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey, type LinkSpellings } from '../initial-sync/links.ts';
@@ -142,7 +142,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
       const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
-      for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents })) ids.set(path, entry);
+      for (const [path, entry] of await rebuildIds({ linear, facts: linear.facts, targets, documents, files: recorded.files })) ids.set(path, entry);
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length };
     }
     const cursor = await readCaptureCursor(git, state.ids);
@@ -210,7 +210,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const excludedPath = (path: string) => {
       const mapped = recorded.documents.find((document) => document.path === path);
       const prior = previous.get(path);
-      return mapped === undefined || (prior !== undefined && lintText(path, prior.toString('utf8')).length > 0)
+      return mapped === undefined || (prior !== undefined && lintInTree(path, prior.toString('utf8'), recorded.files).length > 0)
         || lengthRefusal({title: mapped.title}, linear.facts) !== undefined;
     };
     const retained = new Map<string, string>();

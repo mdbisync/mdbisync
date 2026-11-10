@@ -4,7 +4,7 @@
 // it holds the merge result: a write, a rename or move, a create or a trash.
 
 import { readAnnotation } from '../mapping/index.ts';
-import { lintText, splitFile } from '../format/index.ts';
+import { lintInTree, splitFile } from '../format/index.ts';
 import { LINEAR_FACTS, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import { type StructuralResult, type StructuralSummary, type Version, resolveStructural } from '../merge/index.ts';
@@ -294,7 +294,7 @@ async function synchronizedFiles(git: Git, treeish: Oid, facts: LinearFacts): Pr
   const leftOut: Array<{ path: string; rules: string[] }> = [];
   const leave = (path: string, rules: string[]) => leftOut.push({ path, rules: [...new Set(rules)].sort() });
   for (const document of mapping.documents) {
-    const rules: string[] = lintText(document.path, (blobs.get(document.oid) as Buffer).toString('utf8')).map((finding) => finding.rule);
+    const rules: string[] = lintInTree(document.path, (blobs.get(document.oid) as Buffer).toString('utf8'), mapping.files).map((finding) => finding.rule);
     if (lengthRefusal({ title: document.title }, facts) !== undefined) rules.push('title-too-long');
     if (rules.length > 0) leave(document.path, rules);
     else files.set(document.path, toSideFile(document));

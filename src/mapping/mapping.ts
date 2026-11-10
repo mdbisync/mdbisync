@@ -64,6 +64,11 @@ export interface RepositoryMapping {
   documents: MappedDocument[];
   unsynced: UnsyncedFile[];
   leftOut: LeftOutFile[];
+  /**
+   * Every regular file of the tree, by path: what a document's image may
+   * name. Symbolic links and submodules are not files here.
+   */
+  files: ReadonlySet<string>;
 }
 
 /** Files that hold annotations: every `README.md`. */
@@ -96,7 +101,7 @@ export function mapFiles(
   entries: readonly TreeEntry[],
   zones: ReadonlyMap<string, Zone>,
   contents: ReadonlyMap<Oid, Buffer>,
-): Pick<RepositoryMapping, 'documents' | 'unsynced' | 'leftOut'> {
+): Pick<RepositoryMapping, 'documents' | 'unsynced' | 'leftOut' | 'files'> {
   const mapped: MappedDocument[] = [];
   const unsynced: UnsyncedFile[] = [];
   for (const entry of entries) {
@@ -120,7 +125,8 @@ export function mapFiles(
     mapped.push({ path: entry.path, oid: entry.oid, title: titleOf(entry.path, zone), place: placeOf(zone) });
   }
   const { documents, leftOut } = separateCollisions(mapped);
-  return { documents, unsynced, leftOut };
+  const files = new Set(entries.filter(isRegularFile).map((entry) => entry.path));
+  return { documents, unsynced, leftOut, files };
 }
 
 /** Maps the files of a commit, reading only `README.md` files and the `.md` files under annotations. */
