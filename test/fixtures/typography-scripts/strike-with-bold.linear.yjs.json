@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"Cancelled","marks":{"attribution":"user","strike":{},"strong":{}}},{"text":" item","marks":{"attribution":"user","strike":{}}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-c346eb11","marks":{"attribution":"user"}}]}
-  ]
-}
