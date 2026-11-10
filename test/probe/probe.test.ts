@@ -186,12 +186,16 @@ describe('format probe against a fake Linear', () => {
     const sent: string[] = [];
     const original = fake.operations.get('CreateDocument')!;
     fake.operations.set('CreateDocument', (r: ReceivedRequest) => (sent.push((r.variables!.input as { title: string }).title), original(r)));
-    const run = await runProbe({ client, bank: loadBank(bankDir), runId: 'test-run', facts: false });
-    fake.operations.set('CreateDocument', original);
+    let run;
+    try {
+      run = await runProbe({ client, bank: loadBank(bankDir), runId: 'test-run', facts: false });
+    } finally {
+      fake.operations.set('CreateDocument', original);
+    }
     const large = run.fixtures.find((r) => r.file === 'size/large.md')!;
     assert.equal(large.refused, 'refused before sending: content is 2018 characters, Linear accepts at most 1000');
     assert.ok(!sent.some((title) => title.includes('kx-00000004')), 'nothing was sent for the over-limit fixture');
-    assert.equal(refusalKey(large.refused!), 'before-sending');
+    assert.equal(large.refusedBeforeSending, true);
     assert.equal(manifestRefusal('size/large.md'), 'INVALID_INPUT', 'the record holds Linear\'s own answer');
     assert.deepEqual(findDrift(loadBank(bankDir), run), [], 'the pre-send refusal matches the recorded INVALID_INPUT');
   });
@@ -300,8 +304,8 @@ describe('format probe helpers', () => {
     assert.equal(isLeftover({ name: 'Format probe 20261108-a1b2c3', createdAt: old, creator: null }, 'app-user', now), false, 'no creator');
   });
 
-  it('counts invalid input and the client\'s own length refusal as refusals, and nothing that says nothing about the input', () => {
-    assert.equal(isRefusal(new DocumentTooLongError('CreateDocument', { field: 'content', length: 266_235, limit: 250_000 })), true);
+  it('counts only Linear\'s answers about the input as refusals, so a limit measurement never takes the client\'s own limit for Linear\'s', () => {
+    assert.equal(isRefusal(new DocumentTooLongError('UpdateDocument', { field: 'content', length: 266_235, limit: 250_000 })), false);
     assert.equal(isRefusal(new LinearGraphQLError('CreateDocument', 400, { message: 'Argument Validation Error', extensions: { code: 'INVALID_INPUT' } })), true);
     assert.equal(isRefusal(new LinearHttpError('CreateDocument', 413)), true);
     assert.equal(isRefusal(new LinearHttpError('CreateDocument', 502)), false);

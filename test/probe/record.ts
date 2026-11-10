@@ -5,7 +5,7 @@
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MANIFEST_FILE, goldenMarkdownPath, goldenYjsPath, readOptional, type Bank } from './bank.ts';
-import { PRE_SEND_REFUSAL, type FixtureResult, type ProbeRun } from './probe.ts';
+import type { FixtureResult, ProbeRun } from './probe.ts';
 
 export interface ManifestEntry {
   fixedPoint?: boolean;
@@ -61,7 +61,7 @@ function isFlat(value: unknown): boolean {
 function entryOf(result: FixtureResult): ManifestEntry {
   const entry: ManifestEntry = { yjs: result.yjs === undefined ? 'none' : 'recorded' };
   if (result.fixedPoint !== undefined) entry.fixedPoint = result.fixedPoint;
-  if (result.refused !== undefined) entry.refused = refusalKey(result.refused);
+  if (result.refused !== undefined) entry.refused = result.refusedBeforeSending === true ? PRE_SEND_KEY : refusalKey(result.refused);
   return entry;
 }
 
@@ -77,7 +77,6 @@ export const OVER_LIMIT_KEY = 'INVALID_INPUT';
 
 /** Linear's error code or HTTP status, without text that may change between runs. */
 export function refusalKey(refusal: string): string {
-  if (refusal.startsWith(PRE_SEND_REFUSAL)) return PRE_SEND_KEY;
   return refusal.match(/^Linear error ([A-Za-z_]+)/)?.[1] ?? refusal.match(/^HTTP \d{3}/)?.[0] ?? refusal;
 }
 
