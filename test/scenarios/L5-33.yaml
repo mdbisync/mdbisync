@@ -140,6 +140,11 @@
         "subject": "suspended.commentsResolved",
         "operator": "equal",
         "expected": true
+      },
+      {
+        "subject": "runs.2.suspended.contentsCurrent",
+        "operator": "equal",
+        "expected": true
       }
     ]
   }

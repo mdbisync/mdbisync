@@ -129,6 +129,16 @@
         "subject": "suspended.commentsResolved",
         "operator": "equal",
         "expected": true
+      },
+      {
+        "subject": "runs.1.pullRequest.holdMarks.deferred",
+        "operator": "equal",
+        "expected": 10
+      },
+      {
+        "subject": "runs.2.pullRequest.holdMarks.set.length",
+        "operator": "equal",
+        "expected": 10
       }
     ]
   }

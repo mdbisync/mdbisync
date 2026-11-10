@@ -47,6 +47,11 @@
     },
     {
       "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "run",
       "action": "settle",
       "args": {
         "mergeGraceSeconds": 120
@@ -118,6 +123,26 @@
         "subject": "suspended.commentsResolved",
         "operator": "equal",
         "expected": true
+      },
+      {
+        "subject": "runs.2.suspended.contentsCurrent",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "runs.2.normal.open",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "normal.merged",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "pullRequests.created",
+        "operator": "equal",
+        "expected": 2
       }
     ]
   }

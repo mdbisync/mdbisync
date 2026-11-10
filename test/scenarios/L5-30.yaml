@@ -126,6 +126,16 @@
         "subject": "conflicts.markerParagraphCount",
         "operator": "at-least",
         "expected": 3
+      },
+      {
+        "subject": "runs.2.sync.skipped.0.reason",
+        "operator": "equal",
+        "expected": "suspended"
+      },
+      {
+        "subject": "conflicts.markRetained",
+        "operator": "equal",
+        "expected": true
       }
     ]
   }

@@ -20,7 +20,7 @@ import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
 import { burst, burstDocuments, burstEditCounts, soak, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { bodyOf, compare, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { bodyOf, compare, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, probedFixtures, readFixture } from '../../probe/bank.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
@@ -998,6 +998,27 @@ async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: b
   const rawFile = async (path: string) => (await remoteGit.run(['show', `${names.trackedBranch}:${path}`])).stdout.toString('utf8');
   return { ctx, linear, ids, remoteGit, remoteFile, rawFile, faults, created, docs };
 }
+
+describe('intentional deletion in I2', () => {
+  it('supersedes earlier edits only after deletion on both sides, and rechecks them on restore', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const path = 'eng/platform/plan.md';
+    const token = 'aaaaaa-intentional-edit';
+    const edit = { side: 'linear' as const, path, token };
+    ctx.edits.push(edit);
+    await runStep(ctx, { kind: 'linear', action: 'trash', args: { actor: 'editor-a', target: path } });
+    const document = linear.documents.get(ids[path]!.id)!;
+    const sides = { files: new Map([[path, 'Old text.']]), documents: new Map([[document.id, document]]) };
+    assert.deepEqual(lostEdits(ctx, sides), [edit], 'the file must leave Git too');
+    sides.files.clear();
+    assert.deepEqual(lostEdits(ctx, sides), []);
+    const unrelated = { side: 'linear' as const, path: 'other.md', token: 'aaaaaa-other-edit' };
+    ctx.edits.push(unrelated);
+    assert.deepEqual(lostEdits(ctx, sides), [unrelated], 'another document is still checked');
+    await runStep(ctx, { kind: 'linear', action: 'restore', args: { actor: 'editor-a', target: path } });
+    assert.deepEqual(lostEdits(ctx, sides), [edit, unrelated], 'restore reactivates the original edit');
+  });
+});
 
 describe('marker-driven checks', () => {
   it('writes and releases the marker on the sync branch, retaining later edits without force pushes', async () => {

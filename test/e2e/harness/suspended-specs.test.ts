@@ -10,7 +10,7 @@ import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeCheck } from '..
 import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { runChecks, snapshotRefs, budgetHolds, reportedHoldChanges } from './checks.ts';
+import { runChecks, snapshotRefs, budgetHolds } from './checks.ts';
 import { rerunCheckAsPerson } from './check-fault.ts';
 import type { RunContext } from './context.ts';
 import { engineInputs, type EngineResult } from './engine.ts';
@@ -20,7 +20,7 @@ import { OwnershipLedger } from './ownership.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios } from './spec.ts';
 import { runStep, watchRun, STEP_ACTIONS } from './steps.ts';
-import { BEFORE_VIEW, refreshView, resolveSubject, takeStartView } from './subjects.ts';
+import { BEFORE_VIEW, refreshView, takeStartView } from './subjects.ts';
 
 for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2[3-9]|3[0-5])$/.test(s.id))) {
   it(`${scenario.id}: live steps and assertions on fake services`, { timeout: 180_000, skip: scenario.id === 'L5-34' ? 'requires the engine checkpoint before-suspension-push' : false }, async (t) => {
@@ -48,12 +48,12 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           const target = (await show(sha, '.harness-check-target'))?.trim();
           const passed = marker === undefined || await show(sha, '.harness-check-fixed') !== null || (marker === 'flaky' && (attempts.get(sha) ?? 1) > 1) || (marker === 'document' && target !== undefined && (await show(sha, target))?.includes('Approved for review.'));
           const check = checks.get(sha) ?? { name: 'format', status: 'completed' };
-          Object.assign(check, { status: marker === 'pending' && !passed ? 'queued' : 'completed', conclusion: passed ? 'success' : 'failure', annotations: Object.keys(documents).map((path) => ({ path, start_line: 1, title: 'Review required', message: 'Check the review status.' })) });
+          Object.assign(check, { status: marker === 'pending' && !passed ? 'queued' : 'completed', conclusion: passed ? 'success' : 'failure', annotations: (target === undefined ? [] : [target]).map((path) => ({ path, start_line: 1, title: 'Review required', message: 'Check the review status.' })) });
           checks.set(sha, check);
           world.github.checks!.set(sha, [check]);
           const response = await transport(String(input).replace('https://api.github.com', GITHUB_API), init);
           const data = await response.json() as { check_runs: Array<Record<string, unknown>> };
-          for (const run of data.check_runs) Object.assign(run, { app: { slug: 'github-actions' }, html_url: `https://github.com/owner/repo/actions/runs/1` });
+          for (const run of data.check_runs) Object.assign(run, { app: { slug: 'github-actions' }, html_url: `https://github.com/owner/repo/actions/runs/${run.id}` });
           return Response.json(data);
         }
         if (url.includes('/actions/workflows/harness-check.yml/runs')) {
@@ -129,13 +129,25 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         await rm(summaryFile, { force: true });
         const env = engineInputs({ names, command, cwd: engine.dir, repository: 'owner/repo', credentials: { linearClientId: 'client-id', linearClientSecret: 'client-secret', githubToken: 'app-token' }, reportFile, summaryFile, hooksDir: ctx.checkpoints.dir, extraEnv: {}, timeoutMs: 30_000, linearUrl: LINEAR_API, mergeGraceSeconds: Number(args.mergeGraceSeconds ?? 0), ...(typeof args.checkDeadlineMinutes === 'number' ? { checkDeadlineMinutes: args.checkDeadlineMinutes } : {}), direction: 'git-to-linear', confirm: true });
         await watchRun(ctx, { throughProxy: false }, async () => {
+          const beforeDocuments = new Map(world.linear.documents.map((d) => [d.id, { ...d }]));
+          const beforeComments = new Map([...world.linear.comments].map(([id, c]) => [id, { ...c }]));
           const requests: LogEntry[] = [];
           const result = await runCli([command], { cwd: engine.dir, env: { ...env, PATH: process.env.PATH!, HOME: process.env.HOME!, MDBISYNC_GITHUB_API_URL: GITHUB_API, GITHUB_STEP_SUMMARY: summaryFile }, fetch: fetchImpl, log: (entry) => requests.push(entry) });
           assert.equal(result.exitCode, 0, result.stderr);
           ctx.engine.results.push({ command, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, remote: { runId: ctx.engine.results.length, runAttempt: 1, linearEngine: true, requests }, report: JSON.parse(await readFile(reportFile, 'utf8')), summary: await readFile(summaryFile, 'utf8'), signal: null, durationMs: 0, timedOut: false, notImplemented: false } as EngineResult);
           if (scenario.id === 'L5-35') {
-            const writes = requests.filter((r) => r.kind === 'mutation' && /^(Create|Update)Document$/.test(r.operation)).length;
-            assert.ok(budgetHolds(requests.filter((r) => r.kind !== 'oauth').length, writes, 1, reportedHoldChanges([ctx.engine.results.at(-1)!.report])), 'I9 per run');
+            const writes = world.linear.documents.filter((d) => {
+              const before = beforeDocuments.get(d.id);
+              return before === undefined || ['content', 'title', 'projectId', 'teamId', 'trashed'].some((key) => d[key as keyof typeof d] !== before[key as keyof typeof before]);
+            }).length;
+            // Count changed suspended documents from the service, including clears
+            // that capture finishes after the lane's own holdMarks report.
+            const changed = new Set([...world.linear.comments].flatMap(([id, c]) => {
+              const before = beforeComments.get(id);
+              return c.body.includes('Check `') && (before === undefined || before.body !== c.body || before.resolved !== c.resolved) ? [c.documentContentId] : [];
+            }));
+            const count = requests.filter((r) => r.kind !== 'oauth').length;
+            assert.ok(budgetHolds(count, writes, 1, changed.size), `I9 per run: ${count} requests, ${writes} document writes, ${changed.size} hold changes`);
           }
         });
       };
@@ -149,7 +161,10 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         t.diagnostic(`${step.kind}.${step.action} ${JSON.stringify(step.args)}`);
         if (step.kind === 'run') {
           if (step.action === 'settle') {
-            for (let i = 0; i < 4; i++) await sync();
+            for (let i = 0; i < 4; i++) {
+              await sync('sync', step.args);
+              if (ctx.engine.results.at(-1)?.report?.['changed'] === false) break;
+            }
           } else await sync('sync', step.args);
         } else if (step.action === 'rerun-suspended-check') {
           await rerunCheckAsPerson(ctx, new SandboxRest({ owner: 'owner', repo: 'repo' }, 'person-token', fetchImpl));

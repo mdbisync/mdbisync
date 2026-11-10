@@ -159,6 +159,16 @@
         "subject": "documents.state",
         "operator": "equal",
         "expected": "trash"
+      },
+      {
+        "subject": "runs.3.suspended.contentsCurrent",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "runs.3.suspended.markedCount",
+        "operator": "equal",
+        "expected": 1
       }
     ]
   }

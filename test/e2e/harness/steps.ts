@@ -1305,6 +1305,9 @@ const LINEAR: Record<string, Executor> = {
     setTarget(ctx, path, id);
     await world.editors[editorOf(args)].trashDocument(id);
     ctx.observations.set('linear.trashed', path);
+    const trashed = (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined) ?? new Map<string, string>();
+    trashed.set(path, id);
+    ctx.observations.set('linear.trashedDocuments', trashed);
   },
   'linear.restore': async (ctx, args) => {
     const world = live(ctx);
@@ -1313,6 +1316,7 @@ const LINEAR: Record<string, Executor> = {
     const id = args.fixture === 'trashed-document' && trashed !== undefined ? trashed.id : await documentId(ctx, path);
     setTarget(ctx, path, id);
     await world.editors[editorOf(args)].restoreDocument(id);
+    (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined)?.delete(path);
   },
   'linear.create': async (ctx, args) => {
     const world = live(ctx);
@@ -1653,6 +1657,7 @@ const OTHER: Record<string, Executor> = {
     const result = await pending.done;
     ctx.engine.results.push(result);
     ctx.observations.set(`runs.${ctx.engine.results.length - 1 - ctx.engine.setupRuns}.killed`, true);
+    await recordRunView(ctx, ctx.engine.results.length - 1 - ctx.engine.setupRuns);
   },
   'merge.pull-request': async (ctx) => {
     // A person merges the sync pull request (Linear → git initial sync).

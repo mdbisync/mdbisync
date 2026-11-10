@@ -60,6 +60,7 @@ import { UNSAFE_TITLES } from './fixtures.ts';
 export interface View extends Sides {
   /** Comment bodies by document id, for the documents read so far. */
   comments: Map<string, string[]>;
+  suspendedFiles?: Map<string, string>;
   holdComments?: Map<string, Array<{ id: string; body: string; resolvedAt: string | null }>>;
   pullRequests?: Array<PullRequest & { empty: boolean }>;
 }
@@ -86,6 +87,10 @@ export async function takeView(ctx: RunContext, withComments: boolean, options: 
       );
       view.holdComments.set(id, data.document?.comments.nodes ?? []);
     }
+    const git = await person(ctx);
+    const branch = suspendedBranch(resolveStateConfig(ctx.names));
+    const tip = await fetchRef(git, `refs/heads/${branch}`);
+    view.suspendedFiles = tip === null ? new Map() : new Map([...await treeFiles(git, tip, (p) => p.endsWith('.md'))].map(([p, bytes]) => [p, bytes.toString('utf8')]));
     view.pullRequests = [];
     for (const pr of await pullRequestsSinceStart(ctx)) view.pullRequests.push({ ...pr, empty: (await pullRequestFiles(ctx, pr.number)).length === 0 });
   }
@@ -1190,6 +1195,15 @@ export const SUBJECTS: Record<string, Compute> = {
     const held = [...view.ids].filter(([, entry]) => entry.suspended !== undefined);
     return held.length > 0 && held.every(([path]) => view.files.get(path) === before.files.get(path));
   },
+  'suspended.contentsCurrent': async (env) => {
+    const view = await env.view();
+    const held = [...view.ids].filter(([, entry]) => entry.suspended !== undefined);
+    return held.length > 0 && held.every(([path, entry]) => {
+      const document = view.documents.get(entry.id);
+      const text = view.suspendedFiles?.get(path);
+      return document?.trashed === true ? text === undefined : text !== undefined && document !== undefined && sameAsFile(text, document.content ?? '', path, view);
+    });
+  },
   'suspended.count': async (env) => [...(await env.view()).ids.values()].filter((entry) => entry.suspended !== undefined).length,
   'suspended.markedCount': async (env) => {
     const view = await env.view();
@@ -1995,7 +2009,7 @@ function setupFailureValue(ctx: RunContext, subject: string): string {
  * Subjects that also name one run, `runs.<n|last>.<subject>`: computed on the
  * world the harness snapshotted right after that run (`harness.runView.<n>`).
  */
-export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|suspended\.(?:count|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|marksRestored|comments)|normal\.(?:open|merged|closedEmpty))$/;
+export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|suspended\.(?:count|contentsCurrent|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|marksRestored|comments)|normal\.(?:open|merged|closedEmpty))$/;
 
 /** The runs whose world the scenario asserts on (`runs.<n|last>.` document subjects): their indices, and whether the last. */
 function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {

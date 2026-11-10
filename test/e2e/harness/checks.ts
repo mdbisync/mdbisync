@@ -513,7 +513,8 @@ export async function readRunDocuments(ctx: RunContext, ids: IdMap): Promise<Pic
     allDocuments.push(...documents.filter((document) => document.projectId === null && (document.title.startsWith(ctx.names.teamZonePrefix) || owned.has(document.id))));
   }
   const documents = new Map(allDocuments.map((document) => [document.id, accept(document)]));
-  const missing = [...ids.values()].map((entry) => entry.id).filter((id) => !documents.has(id));
+  const deleted = (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined)?.values() ?? [];
+  const missing = [...new Set([...ids.values()].map((entry) => entry.id).concat([...deleted]))].filter((id) => !documents.has(id));
   if (missing.length > 0) for (const document of await world.app.getDocuments(missing, { withContent: true })) documents.set(document.id, accept(document));
   // An id that no list and no batch read returned is read on its own, so the checks tell a trashed or
   // archived document from one Linear no longer has. Measured, the batch read returns trashed and
@@ -757,6 +758,10 @@ export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documen
   const linearText = [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n');
   return ctx.edits.filter((edit) => {
     if (edit.retired === true) return false;
+    // An explicit user deletion supersedes earlier edits only after both sides
+    // show that deletion. A restore removes this intent and checks the edits again.
+    const deletedId = (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined)?.get(edit.path);
+    if (deletedId !== undefined && !sides.files.has(edit.path) && sides.documents.get(deletedId)?.trashed === true) return false;
     const inGit = gitText.includes(edit.token);
     const inLinear = linearText.includes(edit.token);
     return edit.removal === true ? inGit || inLinear : !(inGit && inLinear);
