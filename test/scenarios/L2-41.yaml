@@ -119,6 +119,21 @@
         "subject": "securityCanary.isolated",
         "operator": "equal",
         "expected": true
+      },
+      {
+        "subject": "writes.commitIdentity",
+        "operator": "equal",
+        "expected": "app-bot"
+      },
+      {
+        "subject": "pullRequests.merger",
+        "operator": "equal",
+        "expected": "app-bot"
+      },
+      {
+        "subject": "pullRequests.mergeKind",
+        "operator": "equal",
+        "expected": "merge"
       }
     ]
   }
