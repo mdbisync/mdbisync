@@ -1563,7 +1563,7 @@ export const SUBJECTS: Record<string, Compute> = {
 
   // --- expectations from the corpus and the setup ----------------------------------------------
   'corpus.lintErrors': async (env) => env.ctx.live === null ? observed(env.ctx, 'corpus.lintErrors') : sorted([...manifestOf(env.ctx)].filter(([, entry]) => entry.class === 'lint-error').map(([path]) => path)),
-  'fixtures.bothCollisionPaths': async (env) => sorted([...manifestOf(env.ctx)].filter(([, entry]) => entry.rule === 'duplicate-title').map(([path]) => path)),
+  'fixtures.bothCollisionPaths': async (env) => sorted([...manifestOf(env.ctx)].filter(([, entry]) => entry.synced && entry.kind === 'markdown' && entry.rule === 'duplicate-title').map(([path]) => path)),
   'expected.initialPlan.paths': async (env) => sorted((await env.view()).files.keys()),
   // Every path the dry run acts on (overwrite, create, remove); the annotation READMEs it keeps are not actions.
   'expected.reversePlan.paths': async (env) => {

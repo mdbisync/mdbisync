@@ -315,7 +315,7 @@ export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): 
     expected = other.value;
   }
   if (compare(assertion.operator, actual.value, expected)) return { holds: true };
-  const paths = assertion.subject === 'summary.collisionPaths'
+  const paths = assertion.subject === 'summary.collisionPaths' && ['same-as', 'equal'].includes(assertion.operator)
     ? differingCollisionPaths(actual.value, expected)
     : differingPaths(actual.value, expected);
   return { holds: false, reason: `${assertion.operator} did not hold${paths === undefined ? '' : `: ${paths}`}` };
@@ -324,11 +324,14 @@ export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): 
 /** Collision lists preserve raw Git path spelling, including Unicode form. */
 function differingCollisionPaths(actual: unknown, expected: unknown): string | undefined {
   if (!Array.isArray(actual) || !Array.isArray(expected) || ![...actual, ...expected].every((path) => typeof path === 'string')) return undefined;
-  const describe = (label: string, paths: string[]) => `${label} ${paths.slice(0, 5).map((path) => JSON.stringify(path)).join(', ')}${paths.length > 5 ? ` and ${paths.length - 5} more` : ''}`;
+  const quote = (path: string) => JSON.stringify(path).replace(/[^\x20-\x7e]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
+  const describe = (label: string, paths: string[]) => `${label} ${paths.slice(0, 5).map(quote).join(', ')}${paths.length > 5 ? ` and ${paths.length - 5} more` : ''}`;
   const missing = expected.filter((path) => !actual.includes(path)).sort();
   const unexpected = actual.filter((path) => !expected.includes(path)).sort();
   const details = [missing.length > 0 ? describe('missing', missing) : '', unexpected.length > 0 ? describe('unexpected', unexpected) : ''].filter(Boolean);
-  return details.length === 0 ? undefined : details.join('; ');
+  if (details.length > 0) return details.join('; ');
+  const indices = Array.from({ length: Math.max(actual.length, expected.length) }, (_, index) => index).filter((index) => actual[index] !== expected[index]);
+  return indices.slice(0, 5).map((index) => `index ${index}: expected ${expected[index] === undefined ? 'end of list' : quote(expected[index])}, actual ${actual[index] === undefined ? 'end of list' : quote(actual[index])}`).join('; ') + (indices.length > 5 ? `; and ${indices.length - 5} more` : '');
 }
 
 /**

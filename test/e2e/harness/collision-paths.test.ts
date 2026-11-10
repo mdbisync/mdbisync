@@ -52,12 +52,28 @@ it('checks both bank collision pairs at their exact run paths against the initia
     engine: { setupRuns: 0, results: [{ report: { summary: report } } as unknown as EngineResult] },
   } as unknown as RunContext;
   assert.deepEqual(await resolveSubject(ctx, 'fixtures.bothCollisionPaths'), { known: true, value: expected });
+  const ignored = manifest.files.find((file) => file.rule !== 'duplicate-title')!;
+  ignored.rule = 'duplicate-title';
+  ignored.synced = false;
+  tree.paths.set('outside/ignored.md', ignored.path);
+  assert.deepEqual(await resolveSubject(ctx, 'fixtures.bothCollisionPaths'), { known: true, value: expected });
   const assertion = loadScenarios().find((scenario) => scenario.id === 'L1-13')!.checks.assertions.find((check) => check.subject === 'summary.collisionPaths')!;
   assert.deepEqual(await evaluateAssertion(ctx, assertion), { holds: true });
   // Missing partners and paths with a changed Unicode form must fail, naming both sides.
   const nfd = `${prefix}/cafe\u0301.md`;
+  const quotedNfd = JSON.stringify(nfd).replace('\u0301', '\\u0301');
   report.collisionPaths = expected.filter((path) => path !== nfd);
-  assert.deepEqual(await evaluateAssertion(ctx, assertion), { holds: false, reason: `same-as did not hold: missing ${JSON.stringify(nfd)}` });
+  assert.deepEqual(await evaluateAssertion(ctx, assertion), { holds: false, reason: `same-as did not hold: missing ${quotedNfd}` });
   report.collisionPaths = [...report.collisionPaths, 'other/Guide.md'];
-  assert.deepEqual(await evaluateAssertion(ctx, assertion), { holds: false, reason: `same-as did not hold: missing ${JSON.stringify(nfd)}; unexpected "other/Guide.md"` });
+  assert.deepEqual(await evaluateAssertion(ctx, assertion), { holds: false, reason: `same-as did not hold: missing ${quotedNfd}; unexpected "other/Guide.md"` });
+  report.collisionPaths = expected.map((path) => path.normalize('NFC'));
+  assert.deepEqual(await evaluateAssertion(ctx, assertion), { holds: false, reason: `same-as did not hold: missing ${quotedNfd}` });
+  report.collisionPaths = [...expected].reverse();
+  const reordered = await evaluateAssertion(ctx, assertion);
+  assert.equal(reordered.holds, false);
+  if (!reordered.holds) assert.match(reordered.reason, /index 0: expected/);
+  report.collisionPaths = [...expected, expected[0]!];
+  const duplicated = await evaluateAssertion(ctx, assertion);
+  assert.equal(duplicated.holds, false);
+  if (!duplicated.holds) assert.match(duplicated.reason, /index 4: expected end of list/);
 });
