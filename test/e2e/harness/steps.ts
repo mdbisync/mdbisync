@@ -511,6 +511,22 @@ export function runFailure(report: Record<string, unknown> | null | undefined): 
   return check === undefined ? `with ${report['code']}` : `at the setup check ${String(check.name)} (${report['code']}): ${String(check.detail)}`;
 }
 
+/**
+ * The documents left out at write for a linked file over the upload limit, when they are all that keeps an
+ * incomplete sync run from completing and the run changed nothing: such a file stays out until git changes it,
+ * so another run leaves it out again. An unreadable file (`upload-unreadable`) can become readable with no git
+ * change, so a run that still has one resumes. Null otherwise.
+ */
+export function onlyLeftOutAtWrite(report: Record<string, unknown> | null | undefined): string | null {
+  const sync = report?.['sync'] as Record<string, unknown> | null | undefined;
+  if (report?.['ok'] !== true || report['changed'] !== false || sync === null || sync === undefined || sync['complete'] !== false) return null;
+  const empty = (key: string) => !Array.isArray(sync[key]) || (sync[key] as unknown[]).length === 0;
+  if (sync['stopped'] != null || !['failed', 'notAttempted', 'skipped', 'conflicts'].every(empty)) return null;
+  const leftOut = Array.isArray(sync['leftOutAtWrite']) ? (sync['leftOutAtWrite'] as Array<{ path?: unknown; rule?: unknown }>) : [];
+  if (leftOut.length === 0 || leftOut.some((entry) => entry.rule !== 'upload-too-large')) return null;
+  return leftOut.map((entry) => `${String(entry.path)} (${String(entry.rule)})`).join(', ');
+}
+
 const RUN: Record<string, Executor> = {
   'run.sync': (ctx, args) => runCommand(ctx, 'sync', args),
   'run.initial-sync': (ctx, args) => runCommand(ctx, 'initial-sync', args),
@@ -536,6 +552,8 @@ const RUN: Record<string, Executor> = {
       await runCommand(ctx, command, args);
       const report = ctx.engine.results.at(-1)?.report;
       if (report?.['complete'] === true) return;
+      const leftOut = onlyLeftOutAtWrite(report);
+      if (leftOut !== null) throw new ProductError(`the run changed nothing and only left out at write ${leftOut}; resuming cannot clear it`);
       const stop = runFailure(report);
       if (stop !== null && stop === previous) throw new ProductError(`the run failed twice in a row ${stop}; resuming cannot clear it`);
       previous = stop;
