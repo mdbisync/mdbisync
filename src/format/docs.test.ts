@@ -62,7 +62,8 @@ describe('format docs', () => {
       ['`` `a \\| b` ``', '| Expression | Meaning |\n| -- | -- |\n| `a \\| b` | either |'],
       ['end the line with two spaces', 'First line  \nSecond line'],
       ['`<br>`', 'First line<br>Second line'],
-      ['`![Banner](https://example.com/banner.png)`', '![Banner](https://example.com/banner.png)'],
+      ['`![Banner](images/banner.png)`', '![Banner](images/banner.png)'],
+      ['`![Revenue chart](images/revenue.png)`', '![Revenue chart](images/revenue.png)'],
     ];
     const flat = docs.replace(/\s+/g, ' ');
     for (const [shown, document] of alternatives) {

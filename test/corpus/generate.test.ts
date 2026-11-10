@@ -413,9 +413,13 @@ test("every animated GIF scene and size moves from frame to frame", () => {
 
 test("the linter flags exactly the documents the manifest classes as lint errors", () => {
   // Duplicate titles are a property of a pair of paths, not of one file's text.
-  for (const file of corpus().files) {
+  const files = corpus().files;
+  const paths = new Set(files.map((file) => file.path));
+  for (const file of files) {
     if (file.kind !== "markdown" || !file.synced || file.rule === "duplicate-title") continue;
-    const rules: string[] = [...new Set(lintText(file.path, new TextDecoder().decode(file.content)).map((f) => f.rule))];
+    // An image must name a file of the corpus, as `lint` checks it in a repository.
+    const linkedFileExists = linkedFileCheck(file.path, (path) => paths.has(path));
+    const rules: string[] = [...new Set(lintText(file.path, new TextDecoder().decode(file.content), { linkedFileExists }).map((f) => f.rule))];
     if (file.expected === "lint-error") assert.ok(rules.includes(file.rule as string), `${file.path}: expected ${file.rule}, the linter found [${rules.join(", ")}]`);
     else assert.deepEqual(rules, [], `${file.path} is not classed as a lint error`);
   }
