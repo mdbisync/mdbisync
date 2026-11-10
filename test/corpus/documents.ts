@@ -308,8 +308,8 @@ function specialDocuments(ctx: Context): void {
     doc(ctx, `${EDGE}/names`, name, "work-documents", (canary) => `# ${name}\n\nThis file name has ${/\s{2}/.test(name) ? "double spaces" : /[^\x20-\x7e]/.test(name) ? "characters outside ASCII" : "spaces, dots or parentheses"}.\n\n${paragraph(rng)}\n\n${idLine(canary)}\n`);
   }
   // Image edge cases.
-  doc(ctx, `${EDGE}/images`, "broken-image", "work-documents", (canary) => `# Missing picture\n\n![diagram that is not there](./missing/diagram.png)\n\n${idLine(canary)}\n`, { note: "a broken image reference" });
-  doc(ctx, `${EDGE}/images`, "remote-image", "work-documents", (canary) => `# Remote picture\n\n![remote chart](https://images.example.com/chart.png)\n\n${idLine(canary)}\n`, { note: "a remote image URL" });
+  doc(ctx, `${EDGE}/images`, "broken-image", "work-documents", (canary) => `# Missing picture\n\n![diagram that is not there](./missing/diagram.png)\n\n${idLine(canary)}\n`, { expected: "lint-error", rule: "image-file-missing", basis: "known", note: "a broken image reference" });
+  doc(ctx, `${EDGE}/images`, "remote-image", "work-documents", (canary) => `# Remote picture\n\n![remote chart](https://images.example.com/chart.png)\n\n${idLine(canary)}\n`, { expected: "lint-error", rule: "image-not-in-repository", basis: "known", note: "a remote image URL" });
   const titled = ctx.assets.shared;
   doc(ctx, `${EDGE}/images`, "titled-image", "work-documents", (canary, path) => `# Picture with a title\n\n${imageMarkdown(path, titled, "Company logo, light version")}\n\n${idLine(canary)}\n`, {
     ...fromFixture(ctx, "images/title.md"),
