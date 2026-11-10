@@ -112,10 +112,35 @@ export function toLinear(text: string, assets: AssetMap): string {
  * stable across runs. The path is percent-encoded like the upload URL it
  * stands for, so a recorded form stays a valid link where the path has spaces.
  */
-export function fromLinear(text: string, assets: AssetMap): string {
+export function fromLinear(text: string, assets: AssetMap, copies: Copies = new Map()): string {
   let result = text;
   for (const [file, url] of assets.urls) result = result.replaceAll(url, assetSpellings(file).at(-1)!);
-  return result;
+  return placeholdCopies(result, copies);
+}
+
+/** Numbers of the Linear copies seen in one readback of a document, by URL. */
+export type Copies = Map<string, number>;
+
+/**
+ * A Linear upload URL. It holds only URL characters and never ends in `.`,
+ * `?` or `&`, so it stops before punctuation or Markdown that follows it.
+ */
+const UPLOAD_URL = /https:\/\/uploads\.linear\.app\/[\w\-.~/%?=&+]*[\w\-~/%=+]/g;
+
+/**
+ * Replaces Linear upload URLs the probe did not upload itself with numbered
+ * placeholders. Linear has copied images whose URL is not one of its own
+ * uploads (even a relative path it cannot fetch) to a new upload, whose URL
+ * differs every run. The placeholder is not a URL, so a recorded form never
+ * points the engine at an upload that does not exist. Pass one `copies` map
+ * for a document's Markdown and Yjs forms of one readback: a URL keeps its
+ * number wherever it appears, numbered in order of first appearance.
+ */
+export function placeholdCopies(text: string, copies: Copies = new Map()): string {
+  return text.replace(UPLOAD_URL, (url) => {
+    if (!copies.has(url)) copies.set(url, copies.size + 1);
+    return `linear-copy-${copies.get(url)}`;
+  });
 }
 
 const CONTENT_TYPES: Record<string, string> = {

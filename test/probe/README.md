@@ -20,7 +20,9 @@ like the URL they stand for), and ids and users in the Yjs tree are
 replaced by placeholders, so the recorded forms do not change from run to
 run. A fixture that spells an asset path differently (for example in angle
 brackets) therefore shows a change that comes from the upload, not from
-Linear.
+Linear. Any other Linear upload URL in a readback is a copy Linear made of
+an image the probe sent by its own URL; it is recorded as `linear-copy-<n>`,
+numbered in order of first appearance within the document.
 
 It also measures what the engine depends on: the title and content length
 limits and how the content limit counts, upload size refusals, whether

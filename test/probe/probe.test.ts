@@ -295,6 +295,28 @@ describe('format probe helpers', () => {
     assert.equal(fromLinear(linear, assets), '![a](../assets/pixel%20copy.png) ![b](../assets/pixel%20copy.png)');
   });
 
+  it('numbers the uploads Linear made of images it did not get as uploads', () => {
+    const ours = 'https://uploads.linear.app/w1/our-upload/pixel.png';
+    const assets = { urls: new Map([['assets/pixel.png', ours]]) };
+    const copy = (id: string) => `https://uploads.linear.app/w1/${id}/0f3a?signature=x-y_z`;
+    const text = `![a](${copy('one')}) ![b](${ours})\n\n| ![c](${copy('two')}) |\n\n[![d](${copy('one')})](https://example.com/build)`;
+    // One numbering for a readback: its Markdown, then each Yjs string.
+    const copies = new Map<string, number>();
+    assert.equal(
+      fromLinear(text, assets, copies),
+      '![a](linear-copy-1) ![b](../assets/pixel.png)\n\n| ![c](linear-copy-2) |\n\n[![d](linear-copy-1)](https://example.com/build)',
+    );
+    assert.equal(fromLinear(copy('two'), assets, copies), 'linear-copy-2', 'a Yjs attribute keeps the Markdown number');
+    assert.equal(fromLinear(copy('three'), assets, copies), 'linear-copy-3', 'a new copy gets the next number');
+    // A bare URL in text keeps the punctuation and Markdown after it.
+    assert.equal(
+      fromLinear(`See ${copy('one')}. **${copy('one')}**, \`${copy('two')}\``, assets),
+      'See linear-copy-1. **linear-copy-1**, `linear-copy-2`',
+    );
+    // Text without uploads is unchanged.
+    assert.equal(fromLinear('![r](https://example.com/chart.png)', assets), '![r](https://example.com/chart.png)');
+  });
+
   it('decodes marks and strips the y-prosemirror mark suffix', () => {
     const doc = new Y.Doc();
     const paragraph = new Y.XmlElement('paragraph');
