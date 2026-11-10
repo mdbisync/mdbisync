@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { Git, type Oid, checkRepoPath } from '../state/index.ts';
 import { SECURITY_ALIAS } from '../setup/hooks.ts';
 import { type SecurityFinding, type SecurityGate, securityGate, securityHookIds } from './security.ts';
+import { message } from '../messages.ts';
 
 export const SECURITY_STEPS = ['stage', 'apply'] as const;
 export type SecurityStep = (typeof SECURITY_STEPS)[number];
@@ -52,7 +53,7 @@ interface Answers {
 /** The staging folder: `RUNNER_TEMP` on a runner, the system's temporary directory elsewhere. */
 export function stageFolder(env: NodeJS.ProcessEnv = process.env): string {
   const base = env['RUNNER_TEMP'];
-  if (base === undefined || base === '') throw new Error('RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job');
+  if (base === undefined || base === '') throw new Error(message('sync.no-runner-temp'));
   return join(base, STAGE_FOLDER);
 }
 
@@ -128,7 +129,7 @@ export interface StagedCheck {
  */
 export async function checkStaged(git: Git, folder: string, env: Record<string, string>): Promise<StagedCheck> {
   const manifest = JSON.parse(await readFile(join(folder, MANIFEST), 'utf8')) as Manifest;
-  if (manifest.version !== VERSION) throw new Error('the staged candidates come from another version of the action');
+  if (manifest.version !== VERSION) throw new Error(message('sync.staged-version'));
   const result: StagedCheck = { sets: manifest.sets.length, rejected: 0, unanswered: 0 };
   const answers: Answers = { version: VERSION, tracked: manifest.tracked, answers: {} };
   if (manifest.sets.length > 0) {
@@ -138,7 +139,7 @@ export async function checkStaged(git: Git, folder: string, env: Record<string, 
         const files = new Map<string, Buffer>();
         for (const { path, sha256: hash } of set.files) {
           checkRepoPath(path);
-          if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error('the staged manifest names a file that is not a content hash');
+          if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(message('sync.staged-hash'));
           files.set(path, await readFile(join(folder, 'files', hash)));
         }
         if ([...files].some(([path, content]) => sha256(content) !== set.files.find((file) => file.path === path)?.sha256) || candidateKey(files) !== set.key) {

@@ -57,6 +57,8 @@ import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, p
 import { readPlanSources } from './run.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
 import { withRecorded } from '../sync/recorded.ts';
+import { message } from '../messages.ts';
+import { type LeftOutAtWriteRule, type WriteCode } from '../codes.ts';
 
 /** The subject of an `ids` commit made while an initial sync is still writing. */
 export const PROGRESS_MESSAGE = INITIAL_SYNC_PROGRESS;
@@ -104,7 +106,7 @@ export type WriteStop = StopReason | { kind: 'test-threshold'; documents: number
 /** A file a transform left out while writing: its rule, and the files that caused it when there are any. */
 export interface LeftOutAtWrite {
   path: string;
-  rule: string;
+  rule: LeftOutAtWriteRule;
   files?: string[];
 }
 
@@ -119,7 +121,7 @@ export interface ConfirmedResult {
   /** Every document written, every extra one trashed and the state recorded. */
   complete: boolean;
   /** Why not complete. */
-  code?: 'stopped' | 'write-failed' | 'state-moved' | 'container-cap';
+  code?: WriteCode;
   /** The run continued an unfinished one: documents it had recorded were skipped. */
   resumed: boolean;
   created: string[];
@@ -157,7 +159,7 @@ export interface RecordResult {
 
 class StateMovedError extends Error {
   constructor() {
-    super('a state ref moved while the run was writing');
+    super(message('initial-sync.state-moved'));
     this.name = 'StateMovedError';
   }
 }
@@ -291,7 +293,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       }
 
       const document = item.kind === 'overwrite' ? sources.documents.get(item.entry.documentId) : undefined;
-      if (item.kind === 'overwrite' && document === undefined) throw new Error(`the planned document for ${path} was not listed`);
+      if (item.kind === 'overwrite' && document === undefined) throw new Error(message('initial-sync.document-not-listed', { path }));
 
       try {
         const source = splitFile(texts.get(path) as string).body;

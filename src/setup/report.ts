@@ -2,38 +2,12 @@
 // short detail that names what failed (a credential, a permission, a team,
 // a file path), never document content or tokens.
 
-export const CHECK_NAMES = [
-  'linear-credentials',
-  'github-access',
-  'github-app',
-  'merge-commits',
-  'linear-format-hook',
-  'annotations',
-  'annotation-targets',
-  'left-out-files',
-  'security-hooks',
-] as const;
-export type CheckName = (typeof CHECK_NAMES)[number];
+import { type CheckName, type FailureCode } from '../codes.ts';
+
+export { CHECK_NAMES, type CheckName, type FailureCode } from '../codes.ts';
 
 /** `warning` lets the run go on; `not-checked` means an earlier failure made the item impossible to check. */
 export type CheckState = 'passed' | 'failed' | 'warning' | 'not-checked';
-
-/** Why a run stopped before writing anything. */
-export type FailureCode =
-  | 'linear-credential-failed'
-  | 'github-credential-failed'
-  | 'missing-permission'
-  | 'github-app-not-found'
-  | 'merge-commits-required'
-  | 'linear-format-hook-required'
-  | 'invalid-annotation'
-  | 'no-annotations'
-  | 'linear-teams-not-visible'
-  | 'annotation-target-not-found'
-  | 'annotation-target-ambiguous'
-  | 'annotation-target-shared'
-  | 'initial-sync-required'
-  | 'initial-pull-request-pending';
 
 export interface CheckResult {
   name: CheckName;

@@ -8,6 +8,7 @@ import { readRateLimitHeaders } from './rate-limit.ts';
 import { LinearTokenError } from './errors.ts';
 import { RequestStats } from './stats.ts';
 import { DEFAULT_BASE_URL, defaultFetch, trimSlash, type LinearHooks, type LogEntry } from './transport.ts';
+import { message } from '../messages.ts';
 
 export interface AppCredentials {
   clientId: string;
@@ -45,7 +46,7 @@ export async function mintAppToken(credentials: AppCredentials, options: TokenOp
   const { response, json } = await oauthPost('oauth.token', '/oauth/token', body, options, requestedScopes);
   if (!response.ok || typeof json.access_token !== 'string') {
     const reason = oauthErrorCode(json.error) ?? `HTTP ${response.status}`;
-    throw new LinearTokenError('oauth.token', `oauth.token: Linear refused the token request (${reason})`, { httpStatus: response.status });
+    throw new LinearTokenError('oauth.token', message('linear.token-refused', { reason }), { httpStatus: response.status });
   }
   const scope = readScopes(json.scope);
   return {
@@ -64,7 +65,7 @@ export async function mintAppToken(credentials: AppCredentials, options: TokenOp
 export async function revokeToken(accessToken: string, options: TokenOptions = {}): Promise<void> {
   const { response, json } = await oauthPost('oauth.revoke', '/oauth/revoke', new URLSearchParams({ token: accessToken }), options);
   if (!response.ok || json.success === false) {
-    throw new LinearTokenError('oauth.revoke', `oauth.revoke: Linear did not confirm the revocation (HTTP ${response.status})`, {
+    throw new LinearTokenError('oauth.revoke', message('linear.revoke-unconfirmed', { status: response.status }), {
       httpStatus: response.status,
     });
   }
@@ -197,7 +198,7 @@ async function oauthPost(
     });
   } catch (error) {
     emitLog<LogEntry>(options.hooks?.log, { ...info, ...requestTiming(started), status: 'network-error', rateLimitHeaders: {} });
-    throw new LinearTokenError(operation, `${operation}: request to Linear failed`, { cause: error });
+    throw new LinearTokenError(operation, message('linear.token-request-failed', { operation }), { cause: error });
   }
   const json = await readJson(response);
   emitLog<LogEntry>(options.hooks?.log, {

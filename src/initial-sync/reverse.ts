@@ -69,6 +69,8 @@ import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planIniti
 import { readPlanSources } from './run.ts';
 import { type LinkMap, type LinkSpellings, documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, workspaceUrlKey } from './links.ts';
 import { type BodyTransform, restoreBody } from './transform.ts';
+import { message } from '../messages.ts';
+import { type RecordCode, type RecordLeftOutRule } from '../codes.ts';
 
 /**
  * The subject of a `linear` record made by an initial sync from Linear to
@@ -80,8 +82,7 @@ export const REVERSE_RECORD_MESSAGE = INITIAL_SYNC_FROM_LINEAR_RECORD;
 export const PULL_REQUEST_TITLE = 'Initial sync from Linear';
 
 /** Why a confirmed run leaves out a planned file once its text is known (`ReverseResult.leftOutAtRecord`). */
-export const RECORD_LEFT_OUT_RULES = ['download-failed', 'front-matter-boundary', 'title-not-a-path', 'security-hook', 'security-unchecked'] as const;
-export type RecordLeftOutRule = (typeof RECORD_LEFT_OUT_RULES)[number];
+export { RECORD_LEFT_OUT_RULES, type RecordLeftOutRule } from '../codes.ts';
 
 /** A document and the file it is, or becomes. */
 export interface ReverseEntry {
@@ -235,7 +236,7 @@ export interface ReverseResult {
    * `sync-branch-changed`: the sync branch holds commits this sync did not
    * make (a person's, on the open pull request); nothing was recorded.
    */
-  code?: 'stopped' | 'state-moved' | 'pull-request-failed' | 'sync-branch-changed';
+  code?: RecordCode;
   /** The run continued an unfinished one. */
   resumed: boolean;
   overwritten: string[];
@@ -549,7 +550,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       } else if (attempt === 1 && newPaths.length > 0) {
         leaveOut(newPaths, 'title-not-a-path');
       } else {
-        throw new Error(`the recorded tree maps ${misplaced.length} files to other documents`);
+        throw new Error(message('initial-sync.misplaced', { count: misplaced.length }));
       }
       commit = await build(entries);
     }

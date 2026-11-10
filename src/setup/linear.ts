@@ -6,6 +6,7 @@ import { setTimeout } from 'node:timers/promises';
 import { type LinearClient, LinearGraphQLError, LinearHttpError, LinearTokenError } from '../linear/index.ts';
 import { type Zone } from '../mapping/index.ts';
 import { type CheckResult, failed, notChecked, passed } from './report.ts';
+import { message } from '../messages.ts';
 
 export const REQUIRED_SCOPES = ['read', 'write'] as const;
 
@@ -53,7 +54,7 @@ export function checkLinearScopes(scope: readonly string[] | undefined): CheckRe
   const missing = REQUIRED_SCOPES.filter((wanted) => !scope.includes(wanted));
   return missing.length === 0
     ? passed('linear-credentials', `Linear token accepted with scopes ${scope.join(', ')}`)
-    : failed('linear-credentials', 'linear-credential-failed', `the Linear token lacks the scope ${missing.join(', ')}`);
+    : failed('linear-credentials', 'linear-credential-failed', message('setup.linear-scope', { scopes: missing.join(', ') }));
 }
 
 export function linearCredentialFailure(detail: string): CheckResult {
@@ -116,7 +117,7 @@ export async function resolveTargets(
       );
       teamNodes.push(...data.teams.nodes.filter((team) => !teamNodes.some((known) => known.id === team.id)));
       if (data.projects !== undefined) {
-        if (data.projects.pageInfo.hasNextPage) throw new Error('more than 250 Linear projects share the annotated names');
+        if (data.projects.pageInfo.hasNextPage) throw new Error(message('setup.too-many-projects'));
         projectNodes = data.projects.nodes;
       }
       if (data.visible !== undefined) seesTeams = data.visible.nodes.length > 0;
@@ -140,7 +141,7 @@ export async function resolveTargets(
           result: failed(
             'annotation-targets',
             'linear-teams-not-visible',
-            `the Linear app saw no team in two lookups, so none of the annotated teams (${[...refs].sort().map((ref) => `"${ref}"`).join(', ')}) can be found: check the app's team access in Linear`,
+            message('setup.no-team-visible', { teams: [...refs].sort().map((ref) => `"${ref}"`).join(', ') }),
           ),
         };
       }
@@ -150,7 +151,7 @@ export async function resolveTargets(
     if (!isCredentialError(error)) throw error;
     return {
       result: notChecked('annotation-targets', 'needs working Linear credentials'),
-      credentials: linearCredentialFailure('Linear refused the token while reading teams'),
+      credentials: linearCredentialFailure(message('setup.linear-refused-teams')),
     };
   }
 
@@ -175,14 +176,14 @@ export async function resolveTargets(
   }
 
   if (missing.length > 0) {
-    return { result: failed('annotation-targets', 'annotation-target-not-found', `not found in Linear: ${missing.join(', ')}`) };
+    return { result: failed('annotation-targets', 'annotation-target-not-found', message('setup.target-not-found', { targets: missing.join(', ') })) };
   }
   if (ambiguous.length > 0) {
-    return { result: failed('annotation-targets', 'annotation-target-ambiguous', `more than one match in Linear: ${ambiguous.join(', ')}`) };
+    return { result: failed('annotation-targets', 'annotation-target-ambiguous', message('setup.target-ambiguous', { targets: ambiguous.join(', ') })) };
   }
   const shared = sharedDestinations(zoneList, targets);
   if (shared.length > 0) {
-    return { result: failed('annotation-targets', 'annotation-target-shared', `more than one folder maps to ${shared.join('; ')}`) };
+    return { result: failed('annotation-targets', 'annotation-target-shared', message('setup.target-shared', { targets: shared.join('; ') })) };
   }
   return {
     result: passed('annotation-targets', `found in Linear: ${targets.teams.size} teams, ${targets.projects.size} projects`),

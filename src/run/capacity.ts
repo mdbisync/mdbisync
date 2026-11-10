@@ -4,6 +4,7 @@ import { type Place } from '../mapping/index.ts';
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { cell, placeLabel } from './summary.ts';
 import { type RunContext } from './preflight.ts';
+import { message } from '../messages.ts';
 
 export const DEFAULT_DOCUMENT_CAP = 1000;
 
@@ -64,7 +65,7 @@ export function assessCapacity(
     const key = containerKey(context, place);
     if (result.has(key)) continue;
     const listed = documents.get(key);
-    if (listed === undefined) throw new Error('container documents were not read');
+    if (listed === undefined) throw new Error(message('run.container-not-read'));
     const unique = [...new Map(listed.map((document) => [document.id, document])).values()];
     const trashed = unique.filter((document) => document.trashed).length;
     const archived = unique.filter((document) => !document.trashed && document.archivedAt !== null).length;

@@ -14,6 +14,7 @@ import {
 } from './errors.ts';
 import { LINEAR_FACTS, lengthRefusal, type LinearFacts } from './facts.ts';
 import { GraphQLTransport, type TransportOptions } from './transport.ts';
+import { message } from '../messages.ts';
 
 /** Largest page Linear serves for a connection. */
 export const MAX_PAGE_SIZE = 250;
@@ -347,14 +348,14 @@ export class LinearClient {
       const comment = data.comments.nodes[0];
       if (!comment) return false;
       if (comment.id !== id || comment.documentContentId !== documentContentId) {
-        throw new LinearError('FindDocumentComment', 'Comment identity does not match its document');
+        throw new LinearError('FindDocumentComment', message('linear.comment-mismatch'));
       }
       return true;
     };
     const existing = async () => {
       if (updateExisting) {
         const comment = await this.updateDocumentComment(id, body);
-        if (comment.id !== id) throw new LinearError('UpdateDocumentComment', 'Updated comment identity does not match');
+        if (comment.id !== id) throw new LinearError('UpdateDocumentComment', message('linear.updated-comment-mismatch'));
       }
       return { id, created: false };
     };
@@ -381,7 +382,7 @@ export class LinearClient {
     }
     // A successful response with the wrong identity is a protocol failure,
     // not an ambiguous mutation to recover by looking up another comment.
-    if (comment.id !== id) throw new LinearError('CommentOnDocument', 'Created comment identity does not match');
+    if (comment.id !== id) throw new LinearError('CommentOnDocument', message('linear.created-comment-mismatch'));
     return { id, created: true };
   }
 
@@ -405,7 +406,7 @@ export class LinearClient {
       { contentType: input.contentType, filename: input.filename, size: input.bytes.byteLength },
     );
     const target = succeeded('FileUpload', data.fileUpload).uploadFile;
-    if (!target) throw new LinearUploadError('FileUpload', 'FileUpload: Linear returned no upload target');
+    if (!target) throw new LinearUploadError('FileUpload', message('linear.no-upload-target', { operation: 'FileUpload' }));
     await this.#putUpload('FileUpload.put', target, input);
     return { assetUrl: target.assetUrl };
   }
@@ -438,7 +439,7 @@ export class LinearClient {
     const targets = inputs.map((_, index) => {
       const payload = data[`f${index}`];
       const target = payload === undefined ? null : succeeded('FileUploads', payload).uploadFile;
-      if (!target) throw new LinearUploadError('FileUploads', 'FileUploads: Linear returned no upload target');
+      if (!target) throw new LinearUploadError('FileUploads', message('linear.no-upload-target', { operation: 'FileUploads' }));
       return target;
     });
     const result: Array<{ assetUrl: string }> = [];
@@ -464,10 +465,10 @@ export class LinearClient {
         signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
       });
     } catch (error) {
-      throw new LinearUploadError(operation, `${operation}: storage request failed`, { cause: error });
+      throw new LinearUploadError(operation, message('linear.storage-failed', { operation }), { cause: error });
     }
     if (!response.ok) {
-      throw new LinearUploadError(operation, `${operation}: storage answered HTTP ${response.status}`);
+      throw new LinearUploadError(operation, message('linear.storage-answered', { operation, status: response.status }));
     }
     // A file is stored once storage took its bytes; the upload target alone stores nothing.
     this.stats.wrote('FileUpload');
@@ -517,7 +518,7 @@ export class LinearClient {
       result.push(...data.documents.nodes.map(toDocument));
       const { hasNextPage, endCursor } = data.documents.pageInfo;
       if (hasNextPage && endCursor === null) {
-        throw new LinearError(operation, `${operation}: Linear reported another page without a cursor`);
+        throw new LinearError(operation, message('linear.page-without-cursor', { operation }));
       }
       after = hasNextPage ? endCursor : null;
     } while (after !== null);
@@ -575,7 +576,7 @@ export async function writeEach<T, R>(
 
 /** Throws when a mutation's payload reports `success: false` without an error. */
 function succeeded<P extends { success: boolean }>(operation: string, payload: P): P {
-  if (payload.success !== true) throw new LinearError(operation, `${operation}: Linear reported success: false`);
+  if (payload.success !== true) throw new LinearError(operation, message('linear.not-success', { operation }));
   return payload;
 }
 

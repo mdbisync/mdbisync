@@ -46,6 +46,8 @@ import {
   readIds,
 } from '../state/index.ts';
 import { knownIdLookup, mergeWithMarkers } from './merge.ts';
+import { message } from '../messages.ts';
+import { type PullRequestCode } from '../codes.ts';
 
 export const DEFAULT_MERGE_GRACE_SECONDS = 60;
 
@@ -102,7 +104,7 @@ export interface PullRequestResult {
    * - `state-moved`: the sync branch moved while this run worked.
    * - `github-failed`: GitHub refused or failed a request, or no answer came; `status` is its HTTP status, absent when no answer came.
    */
-  code?: 'check-failed' | 'conflict' | 'merge-refused' | 'merge-blocked' | 'initial-pull-request-pending' | 'state-moved' | 'github-failed';
+  code?: PullRequestCode;
   /** GitHub's HTTP status for `merge-refused`, `merge-blocked` and `github-failed`. */
   status?: number;
   /** GitHub's reason for `merge-refused` and `merge-blocked`, on one line; empty when it gave none. */
@@ -129,14 +131,14 @@ export interface PullRequestFailure {
 export function pullRequestFailure(result: PullRequestResult | undefined): PullRequestFailure | null {
   switch (result?.code) {
     case 'check-failed':
-      return { kind: 'setup', code: result.code, message: `setup error (${result.code}): a check failed on the sync pull request` };
+      return { kind: 'setup', code: result.code, message: message('pull-request.check-failed', { code: result.code }) };
     case 'merge-blocked':
-      return { kind: 'setup', code: result.code, message: `setup error (${result.code}): GitHub refuses again to merge the sync pull request (${refusalText(result)})` };
+      return { kind: 'setup', code: result.code, message: message('pull-request.merge-blocked', { code: result.code, refusal: refusalText(result) }) };
     case 'initial-pull-request-pending':
-      return { kind: 'no-state', code: result.code, message: `stopped short (${result.code}): an initial sync from Linear waits for a person to merge it` };
+      return { kind: 'no-state', code: result.code, message: message('pull-request.initial-pending', { code: result.code }) };
     case 'state-moved':
     case 'github-failed':
-      return { kind: 'incomplete', code: result.code, message: `not finished (${result.code}); run it again` };
+      return { kind: 'incomplete', code: result.code, message: message('pull-request.not-finished', { code: result.code }) };
     default:
       return null;
   }

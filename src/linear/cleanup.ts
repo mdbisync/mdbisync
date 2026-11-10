@@ -1,4 +1,5 @@
 import { withRunToken, type AppCredentials, type TokenLifecycle, type TokenOptions } from './token.ts';
+import { message } from '../messages.ts';
 
 /**
  * Linear replaces the app's existing tokens when the requested scopes change.
@@ -10,7 +11,7 @@ export async function cleanupAppTokens(
   credentials: Pick<AppCredentials, 'clientId' | 'clientSecret'>,
   options: TokenOptions & { exclusive: boolean; onRevokeError: (error: unknown) => void; lifecycle?: TokenLifecycle },
 ): Promise<void> {
-  if (!options.exclusive) throw new Error('token cleanup requires exclusive use of the Linear app');
+  if (!options.exclusive) throw new Error(message('linear.cleanup-not-exclusive'));
   const reset = (scopes: string[]) => withRunToken({ ...credentials, scopes }, options, async () => {});
   try {
     await reset(['read']);

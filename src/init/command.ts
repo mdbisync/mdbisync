@@ -11,6 +11,7 @@ import { QUICKSTART_URL } from '../setup/fixes.ts';
 import { PROJECT_URL } from '../version.ts';
 import { LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
 import { findFrontMatter } from '../mapping/front-matter.ts';
+import { message } from '../messages.ts';
 
 export const INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA> [--release-version vX.Y.Z]
   --folder <path> --team <name> [--project <name>]   Repeat for each folder
@@ -28,23 +29,23 @@ function parseArgs(args: readonly string[]): Settings {
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (flag === '--security-hooks' || flag === '--no-security-hooks') {
-      if (settings.security !== undefined) throw new InitError('choose security hooks once');
+      if (settings.security !== undefined) throw new InitError(message('init.security-twice'));
       settings.security = flag === '--security-hooks';
       continue;
     }
-    if (!['--release-sha', '--release-version', '--folder', '--team', '--project'].includes(flag ?? '')) throw new InitError(`unknown option: ${flag}`);
+    if (!['--release-sha', '--release-version', '--folder', '--team', '--project'].includes(flag ?? '')) throw new InitError(message('init.unknown-option', { option: String(flag) }));
     const value = args[++i];
-    if (value === undefined || value.startsWith('--') || !value.trim()) throw new InitError(`${flag} needs a value`);
+    if (value === undefined || value.startsWith('--') || !value.trim()) throw new InitError(message('init.needs-value', { option: String(flag) }));
     if (flag === '--folder') settings.folders.push({ path: value });
     else if (flag === '--team' || flag === '--project') {
       const folder = settings.folders.at(-1);
-      if (!folder) throw new InitError(`${flag} must follow --folder`);
+      if (!folder) throw new InitError(message('init.must-follow-folder', { option: flag }));
       const key = flag === '--team' ? 'team' : 'project';
-      if (folder[key] !== undefined) throw new InitError(`${flag} was given twice for a folder`);
+      if (folder[key] !== undefined) throw new InitError(message('init.given-twice-for-folder', { option: flag }));
       folder[key] = value.trim();
     } else {
       const key = flag === '--release-sha' ? 'sha' : 'version';
-      if (settings[key] !== undefined) throw new InitError(`${flag} was given twice`);
+      if (settings[key] !== undefined) throw new InitError(message('init.given-twice', { option: String(flag) }));
       settings[key] = value;
     }
   }
@@ -58,15 +59,15 @@ async function optionalRead(path: string): Promise<string | undefined> {
 
 /** Reject symlinks throughout a destination, including a dangling symlink. */
 async function safePath(root: string, path: string): Promise<string> {
-  if (isAbsolute(path) || path.split(/[\\/]/).includes('..') || path.includes('\\')) throw new InitError('paths must stay inside the repository');
+  if (isAbsolute(path) || path.split(/[\\/]/).includes('..') || path.includes('\\')) throw new InitError(message('init.path-outside'));
   const target = resolve(root, path);
-  if (relative(root, target).startsWith(`..${sep}`)) throw new InitError('paths must stay inside the repository');
+  if (relative(root, target).startsWith(`..${sep}`)) throw new InitError(message('init.path-outside'));
   let part = root;
   for (const component of relative(root, target).split(sep).filter(Boolean)) {
     part = join(part, component);
-    try { if ((await lstat(part)).isSymbolicLink()) throw new InitError('setup destinations must not contain symlinks'); }
+    try { if ((await lstat(part)).isSymbolicLink()) throw new InitError(message('init.symlink')); }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') throw new InitError('a setup folder path names a regular file');
+      if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') throw new InitError(message('init.folder-is-file'));
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
@@ -75,7 +76,7 @@ async function safePath(root: string, path: string): Promise<string> {
 
 function document(text: string) {
   const doc = parseDocument(text, { prettyErrors: false });
-  if (doc.errors.length || (!isMap(doc.contents) && doc.contents !== null)) throw new InitError('invalid YAML configuration');
+  if (doc.errors.length || (!isMap(doc.contents) && doc.contents !== null)) throw new InitError(message('init.invalid-yaml'));
   return doc;
 }
 
@@ -86,7 +87,7 @@ function annotate(text: string, folder: Folder): string {
   for (const [key, value] of [[TEAM_KEY, folder.team], [PROJECT_KEY, folder.project]] as const) {
     if (value === undefined) continue;
     if (doc.has(key)) {
-      if (doc.get(key) !== value) throw new InitError(`${folder.path}/README.md already has a different ${key}`);
+      if (doc.get(key) !== value) throw new InitError(message('init.readme-differs', { folder: folder.path, key }));
     } else { doc.set(key, value); changed = true; }
   }
   if (!changed) return text;
@@ -106,12 +107,12 @@ export const SCANNER_IMAGE = 'ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0a
 function hookConfig(text: string | undefined, settings: Settings): string {
   const doc = document(text ?? 'default_install_hook_types: [pre-commit, pre-push]\nrepos: []\n');
   const repos = doc.get('repos');
-  if (!isSeq(repos)) throw new InitError(`${PRE_COMMIT_CONFIG} needs a repos list`);
+  if (!isSeq(repos)) throw new InitError(message('init.needs-repos', { file: PRE_COMMIT_CONFIG }));
   if (text === undefined) repos.flow = false;
   const data = doc.toJS() as { repos: Array<{ repo?: string; rev?: string; hooks?: Array<{ id?: string; [key: string]: unknown }> }> };
-  if (data.repos.some((repo) => repo === null || typeof repo !== 'object' || !Array.isArray(repo.hooks) || repo.hooks.some((hook) => hook === null || typeof hook !== 'object' || typeof hook.id !== 'string'))) throw new InitError('invalid pre-commit repository entry');
+  if (data.repos.some((repo) => repo === null || typeof repo !== 'object' || !Array.isArray(repo.hooks) || repo.hooks.some((hook) => hook === null || typeof hook !== 'object' || typeof hook.id !== 'string'))) throw new InitError(message('init.invalid-repository-entry'));
   const existing = data.repos.filter((repo) => repo.hooks?.some((hook) => hook.id === LINEAR_FORMAT_HOOK));
-  if (existing.some((repo) => repo.repo !== PROJECT_URL || repo.rev !== settings.sha)) throw new InitError('existing linear-format hook uses a different repository or release');
+  if (existing.some((repo) => repo.repo !== PROJECT_URL || repo.rev !== settings.sha)) throw new InitError(message('init.format-hook-differs'));
   let changed = text === undefined;
   if (!existing.length) {
     repos.add(doc.createNode({ repo: PROJECT_URL, rev: settings.sha, hooks: [{ id: LINEAR_FORMAT_HOOK }] }));
@@ -128,7 +129,7 @@ function hookConfig(text: string | undefined, settings: Settings): string {
       for (const hook of matches) {
         const local = data.repos.some((repo) => repo.repo === 'local' && repo.hooks?.includes(hook));
         if (!local || Object.entries(example).some(([key, value]) => JSON.stringify(hook[key]) !== JSON.stringify(value))) {
-          throw new InitError(`existing ${example.id} hook differs from the security example; reconcile it first`);
+          throw new InitError(message('init.security-hook-differs', { hook: example.id }));
         }
       }
     }
@@ -159,23 +160,23 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
       }
       settings.security ??= /^(y|yes)$/i.test((await ask('Include security hook examples (requires Docker)? [y/N] ')).trim());
     }
-    if (!/^[a-f0-9]{40}$/.test(settings.sha ?? '')) throw new InitError('--release-sha must be a full 40-character commit SHA');
-    if (settings.version !== undefined && !/^v\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(settings.version)) throw new InitError('--release-version must be a version such as v1.2.3');
-    if (!settings.folders.length || settings.folders.some((folder) => !folder.path.trim() || (!folder.team && !folder.project))) throw new InitError('provide --folder with --team and/or --project');
+    if (!/^[a-f0-9]{40}$/.test(settings.sha ?? '')) throw new InitError(message('init.release-sha'));
+    if (settings.version !== undefined && !/^v\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(settings.version)) throw new InitError(message('init.release-version'));
+    if (!settings.folders.length || settings.folders.some((folder) => !folder.path.trim() || (!folder.team && !folder.project))) throw new InitError(message('init.needs-folder'));
     const root = await realpath(options.cwd ?? process.cwd());
-    if (!await lstat(join(root, '.git')).catch(() => undefined)) throw new InitError('run init at the repository root');
+    if (!await lstat(join(root, '.git')).catch(() => undefined)) throw new InitError(message('init.not-at-root'));
     const changes = new Map<string, string>();
     const queue = async (path: string, create: (before: string | undefined) => string) => {
       const target = await safePath(root, path);
       const before = await optionalRead(target);
       const after = create(before);
-      if (changes.has(target) && changes.get(target) !== after) throw new InitError(`conflicting folder options: ${path}`);
+      if (changes.has(target) && changes.get(target) !== after) throw new InitError(message('init.conflicting-folders', { path }));
       if (before !== after) changes.set(target, after);
     };
     for (const [name, template] of Object.entries(templates)) {
       const content = template.replace(/mdbisync\/mdbisync@[a-f0-9]{40} # v[^\s]+/g, `mdbisync/mdbisync@${settings.sha}${settings.version ? ` # ${settings.version}` : ''}`);
       await queue(`.github/workflows/${name}`, (before) => {
-        if (before !== undefined && before !== content) throw new InitError(`existing workflow differs: ${name}`);
+        if (before !== undefined && before !== content) throw new InitError(message('init.workflow-differs', { name }));
         return content;
       });
     }

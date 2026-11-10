@@ -5,6 +5,7 @@
 
 import { setTimeout as sleep } from 'node:timers/promises';
 import { type GitHubRepository, PullRequestError, request } from './github.ts';
+import { message } from '../messages.ts';
 
 /** Check run conclusions that let a merge go ahead. */
 const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
@@ -39,7 +40,7 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
     const answer = await request(target, 'GET', `/commits/${sha}/check-runs?per_page=${PAGE_SIZE}&page=${page}`);
     const body = answer.json as { total_count?: unknown; check_runs?: unknown } | null;
     if (answer.status !== 200 || body === null || typeof body.total_count !== 'number' || !Array.isArray(body.check_runs)) {
-      throw new PullRequestError('reading the check runs of the sync pull request', answer.status);
+      throw new PullRequestError(message('github.reading-check-runs'), answer.status);
     }
     hasRuns ||= body.total_count > 0;
     for (const run of body.check_runs as Array<{ name?: unknown; status?: unknown; conclusion?: unknown }>) {
@@ -59,7 +60,7 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
   const answer = await request(target, 'GET', `/commits/${sha}/status?per_page=${PAGE_SIZE}`);
   const combined = answer.json as { total_count?: unknown; statuses?: unknown } | null;
   if (answer.status !== 200 || combined === null || typeof combined.total_count !== 'number' || !Array.isArray(combined.statuses)) {
-    throw new PullRequestError('reading the commit statuses of the sync pull request', answer.status);
+    throw new PullRequestError(message('github.reading-statuses'), answer.status);
   }
   // The combined status lists at most one page of contexts; ones it does not show are never read as passed.
   if (combined.total_count > combined.statuses.length) pending.add(`${combined.total_count - combined.statuses.length} more commit statuses`);
@@ -129,7 +130,7 @@ export async function mergePullRequest(target: GitHubRepository, number: number,
   if (answer.status === 405 || answer.status === 409 || answer.status === 422) {
     return { merged: false, status: answer.status, reason: refusalReason(body?.message) };
   }
-  throw new PullRequestError('merging the sync pull request', answer.status);
+  throw new PullRequestError(message('github.merging'), answer.status);
 }
 
 /**

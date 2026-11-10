@@ -12,6 +12,7 @@ import { splitFile } from '../format/markdown.ts';
 import { detectConflicts } from './markers.ts';
 import type { Conflict } from './markers.ts';
 import { mergeMarkdown } from './merge.ts';
+import { type StructuralCode } from '../codes.ts';
 
 /** One side's version of a document: its file path and full file text. */
 export interface Version {
@@ -82,7 +83,7 @@ export type GitStep = 'none' | 'restore' | 'move' | 'delete';
  * edit both applied; the tracked branch's path won over a different Linear
  * rename.
  */
-export type StructuralCode = 'edit-wins-delete' | 'rename-and-edit' | 'git-path-wins';
+export type { StructuralCode } from '../codes.ts';
 
 export interface StructuralSummary {
   code: StructuralCode;

@@ -70,6 +70,8 @@ interface Faults {
   rejectId?: string;
   /** Answer the `occurrence`-th request of `operation` with this status; with `ids`, only a request for exactly those ids. */
   onOperation?: { operation: string; occurrence: number; status: number; ids?: readonly string[]; code?: string };
+  /** Run `change` on the fake Linear once, just before it answers the `occurrence`-th request of `operation` for exactly `ids`. */
+  beforeOperation?: { operation: string; occurrence: number; ids: readonly string[]; change: () => void };
 }
 
 interface Exchange {
@@ -93,9 +95,13 @@ function faultyFetch(world: FakeWorld) {
     const position = state.count - state.armedAt;
     const { operationName, variables } = JSON.parse(String(init?.body)) as { operationName: string; variables: Record<string, unknown> };
     const log = (status: Exchange['status'], injected: boolean) => state.exchanges.push({ operation: operationName, status, injected });
-    const { http, budget, writeError, writeErrorOn, rejectId, onOperation } = state.faults;
+    const { http, budget, writeError, writeErrorOn, rejectId, onOperation, beforeOperation } = state.faults;
     const isWrite = operationName === 'CreateDocument' || operationName === 'UpdateDocument';
     const asked = Array.isArray(variables.ids) ? [...(variables.ids as string[])].sort() : undefined;
+    if (beforeOperation?.operation === operationName && JSON.stringify(asked) === JSON.stringify([...beforeOperation.ids].sort())) {
+      beforeOperation.occurrence -= 1;
+      if (beforeOperation.occurrence === 0) beforeOperation.change();
+    }
     const counted = onOperation?.ids === undefined || JSON.stringify(asked) === JSON.stringify([...onOperation.ids].sort());
     const occurrence = (state.seen.get(operationName) ?? 0) + (counted ? 1 : 0);
     state.seen.set(operationName, occurrence);
@@ -626,18 +632,92 @@ describe('sync: rate limits and transport faults', () => {
     assert.equal(await idOf('combined/new.md'), reservedId);
   });
 
-  it('a reserved id that Linear already gives a trashed document is not used again; the run is not stuck', async () => {
+  /** The ids kept for documents that still link a path by an id it did not get. */
+  const supersededIds = async () => JSON.parse((await show('refs/mdbisync/ids:superseded-ids.json').catch(() => '{}')) || '{}') as Record<string, string>;
+
+  /** Runs `createWithLostAnswer` and trashes the document it created, as a person can before the next run. */
+  async function trashedAfterLostAnswer(): Promise<string> {
     const created = await createWithLostAnswer();
-    (world.linear.documents.find((d) => d.id === created) as { trashed?: boolean }).trashed = true;
-    const next = await sync();
-    assert.equal(next.result.exitCode, 0, next.result.stderr);
-    assert.equal(next.report.complete, true);
+    (world.linear.documents.find((d) => d.id === created) as FakeDocument).trashed = true;
+    return created;
+  }
+
+  it('a reserved id that Linear already gives a trashed document is not used again; the documents that link it get the new id', async () => {
+    const created = await trashedAfterLostAnswer();
+    const next = await assertNextRunConverges();
     const id = await idOf('combined/new.md');
     assert.notEqual(id, created, 'a new id, since Linear refuses a second document with the trashed one');
     assert.equal(withNewPage().length, 1);
-    // Known limit: the document written in the first run keeps its link to the trashed document. Rewriting it needs
-    // the sync to tell a link it wrote from a person's edit, which it cannot yet.
+    assert.deepEqual(next.sync?.created, ['combined/new.md']);
+    assert.deepEqual(next.sync?.updated, [pathOf(0)], 'the linking document is written with the new id');
+    // I1 for the linking document: Linear holds its file with the link to the new document.
+    assert.deepEqual(await linkedIds(pathOf(0)), [id]);
+    assert.deepEqual(await supersededIds(), {});
+  });
+
+  /** The fake Linear's document of `path`. */
+  const documentOf = async (path: string) => {
+    const id = await idOf(path);
+    return world.linear.documents.find((d) => d.id === id) as FakeDocument;
+  };
+
+  it("a person's edit in Linear to the linking document is kept when the document gets the new id", async () => {
+    // A longer document, synchronized first, so the edit in Linear and the new link merge without a conflict.
+    const long = (first: string, last: string) => `# Part 0\n\n${first} ${CANARY}\n\nSecond paragraph.\n\nThird paragraph.\n\n${last}\n`;
+    await commit({ [pathOf(0)]: long('No link yet.', 'Last paragraph.') });
+    assert.equal((await sync()).report.complete, true);
+    await commit({ [pathOf(0)]: long('See [the new page](new.md).', 'Last paragraph.'), 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    transport.arm({ writeError: 'reset-after', writeErrorOn: 'CreateDocument' });
+    assertPartial(await sync());
+    transport.clear();
+    const [created] = withNewPage();
+    assert.ok(created !== undefined);
+    created.trashed = true;
+    const linking = await documentOf(pathOf(0));
+    linking.content = (linking.content ?? '').replace('Last paragraph.', 'Last paragraph, edited in Linear.');
+    touch(linking);
+
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.equal(next.report.complete, true);
+    assert.deepEqual(next.report.sync?.conflicts, []);
+    assert.deepEqual(await linkedIds(pathOf(0)), [await idOf('combined/new.md')]);
+    assert.match(linking.content ?? '', /edited in Linear/, 'the edit stays in Linear');
+    const file = await recorded(pathOf(0));
+    assert.match(file, /edited in Linear/, 'and reaches the record');
+    assert.match(file, /\]\(new\.md\)/, 'with the link as the file has it');
+    assert.deepEqual(await supersededIds(), {});
+  });
+
+  it('when writing the linking document fails, the superseded id is kept and the next run writes it', async () => {
+    const created = await trashedAfterLostAnswer();
+    transport.arm({ writeError: 'server-error', writeErrorOn: 'UpdateDocument' });
+    const run = await sync();
+    assertPartial(run);
+    assert.deepEqual(run.report.sync?.created, ['combined/new.md']);
+    assert.deepEqual(run.report.sync?.failed.map((entry) => entry.path), [pathOf(0)]);
     assert.deepEqual(await linkedIds(pathOf(0)), [created]);
+    assert.deepEqual(await supersededIds(), { [created]: 'combined/new.md' });
+    await assertNextRunConverges();
+    assert.deepEqual(await linkedIds(pathOf(0)), [await idOf('combined/new.md')]);
+    assert.deepEqual(await supersededIds(), {});
+  });
+
+  it('a person editing the linking document while the run writes is not overwritten', async () => {
+    const created = await trashedAfterLostAnswer();
+    const linking = await documentOf(pathOf(0));
+    // The edit lands after the capture (the first read of the document), just before the write step reads it again.
+    transport.arm({ beforeOperation: { operation: 'GetDocuments', occurrence: 2, ids: [linking.id], change: () => {
+      linking.content = `${linking.content ?? ''}\nAdded in Linear.\n`;
+      touch(linking);
+    } } });
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.complete, false, 'the next run takes the edit in');
+    assert.deepEqual(run.report.sync?.skipped, [{ path: pathOf(0), reason: 'edited-in-linear' }]);
+    assert.match(linking.content ?? '', /Added in Linear\./);
+    assert.deepEqual(await linkedIds(pathOf(0)), [created], 'the edited document is not written');
+    assert.deepEqual(await supersededIds(), { [created]: 'combined/new.md' });
   });
 
   it('a 500 on the read before writing leaves the batch unwritten and unrecorded; the next run converges', async () => {
