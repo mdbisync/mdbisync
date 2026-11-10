@@ -319,6 +319,56 @@ describe('initial sync from Linear to the tracked branch', () => {
     });
   }
 
+  it('a kept folder annotation with a body stays kept when its folder is renamed, until its body changes', async () => {
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments().filter((d) => d.id !== 'doc-handbook');
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    await merge(world);
+    const handbook = () => world.linear.documents.filter((d) => d.projectId === 'project-handbook');
+    const person = { name: 'A person', email: 'person@example.com' };
+    const commitOnMain = async (changes: Map<string, string | null>, message: string) => {
+      const main = await fixture.remote.text(['rev-parse', 'refs/heads/main']);
+      const next = await commitTree(fixture.remote, { parents: [main], base: main, changes, message, identity: person });
+      await fixture.remote.run(['update-ref', 'refs/heads/main', next]);
+    };
+
+    // The folder is renamed without an edit, and another file is edited in the same push.
+    const moved = new Map<string, string | null>();
+    for (const path of ['combined/README.md', 'combined/Guide.md', 'combined/guide.md']) {
+      moved.set(path, null);
+      moved.set(path.replace(/^combined\//, 'handbook/'), TREE[path] as string);
+    }
+    moved.set('eng/notes/plan.md', `---\nowner: platform\n---\n\n# Plan\n\nEdited in git. ${CANARY}`);
+    await commitOnMain(moved, 'Rename a folder');
+    const renamed = await run(world, {}, 'sync');
+    assert.equal(renamed.result.exitCode, 0, renamed.result.stderr);
+    assert.equal(world.linear.documents.find((d) => d.id === 'doc-plan')?.content, `# Plan\n\nEdited in git. ${CANARY}`);
+    assert.deepEqual(handbook(), [], 'the rename created a document for the kept README');
+    assert.equal(await show('refs/mdbisync/linear:handbook/README.md'), TREE['combined/README.md']);
+    const message = await fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/ids']);
+    assert.match(message, /^Kept-annotations: recorded$/m);
+    assert.match(message, /^Kept-annotation: "handbook\/README\.md"$/m);
+    assert.doesNotMatch(message, /^Kept-annotation: "combined\/README\.md"$/m);
+
+    // The later runs leave it kept at its new path.
+    await commitOnMain(new Map([['eng/notes/plan.md', `---\nowner: platform\n---\n\n# Plan\n\nEdited again. ${CANARY}`]]), 'Edit in git');
+    const later = await run(world, {}, 'sync');
+    assert.equal(later.result.exitCode, 0, later.result.stderr);
+    assert.equal(world.linear.documents.find((d) => d.id === 'doc-plan')?.content, `# Plan\n\nEdited again. ${CANARY}`);
+    assert.deepEqual(handbook(), [], 'a later run created a document for the kept README');
+    const quiet = await run(world, {}, 'sync');
+    assert.equal(quiet.result.exitCode, 0, quiet.result.stderr);
+    assert.deepEqual(handbook(), [], 'a quiet run created a document for the kept README');
+
+    // A body edit still makes it a document.
+    await commitOnMain(new Map([['handbook/README.md', `---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n\nNow a document. ${CANARY}`]]), 'Edit the README');
+    const edited = await run(world, {}, 'sync');
+    assert.equal(edited.result.exitCode, 0, edited.result.stderr);
+    assert.deepEqual(handbook().map((d) => [d.title, d.content]), [['README', `# Handbook\n\nNow a document. ${CANARY}`]]);
+    assert.equal((await readIds())['handbook/README.md'], handbook()[0]?.id);
+  });
+
   it('L1R-04: downloads the files documents embed next to them, stored as .gitattributes decides, linked relatively and cached', async () => {
     await fixture.seed({ '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n' });
     const world = fakeWorld();

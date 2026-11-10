@@ -50,6 +50,7 @@ export {
   FINAL_IDS_MESSAGE,
   PROGRESS_BATCH,
   keptAnnotationTrailer,
+  keptAnnotationsTrailers,
   readKeptAnnotations,
   PROGRESS_MESSAGE,
   RECORD_MESSAGE,
