@@ -37,6 +37,7 @@ import { annotationPath, owningFolder, type Folder } from './corpus.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
 import { canaryIsolated, type CanaryFacts } from './security-canary.ts';
 import { isAppBot } from './workflows.ts';
+import type { PushActivity } from './github.ts';
 import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { documentPaths, MOVE_SOURCE_FOLDER, projectFolders } from './step-helpers.ts';
@@ -311,16 +312,36 @@ async function isAncestor(git: Git, ancestor: string, descendant: string | null)
 }
 
 /** Commits on `tip` that the scenario's start did not have. */
-async function newCommits(git: Git, tip: string | null, startTips: readonly string[]): Promise<string[]> {
-  if (tip === null) return [];
+async function newCommits(git: Git, tip: string | null, startTips: readonly string[], more: readonly string[] = []): Promise<string[]> {
+  const tips = [...(tip === null ? [] : [tip]), ...more];
+  if (tips.length === 0) return [];
   const not = (await present(git, startTips)).map((oid) => `^${oid}`);
-  return (await git.text(['rev-list', tip, ...not])).split('\n').filter(Boolean);
+  return (await git.text(['rev-list', ...tips, ...not])).split('\n').filter(Boolean);
 }
 
 function startTips(ctx: RunContext): string[] {
   const refs = (ctx.observations.get('start.refs') as Record<string, string> | undefined) ?? {};
   const tracked = ctx.observations.get('start.trackedTip') as string | undefined;
   return [...Object.values(refs), ...(tracked === undefined ? [] : [tracked])];
+}
+
+/** The run refs the sync writes, each with the commits on it that neither the start nor the scenario's own steps made. */
+async function syncCommits(ctx: RunContext): Promise<Map<string, string[]>> {
+  const git = await person(ctx);
+  const own = new Set(ctx.ownCommits);
+  const refs = [...(['linear', 'ids', 'uploads'] as const).map((store) => `${ctx.names.refPrefix}/${store}`), `refs/heads/${ctx.names.syncBranch}`];
+  const result = new Map<string, string[]>();
+  for (const ref of refs) {
+    const commits = (await newCommits(git, await fetchRef(git, ref), startTips(ctx))).filter((commit) => !own.has(commit));
+    if (commits.length > 0) result.set(ref, commits);
+  }
+  return result;
+}
+
+/** Who a push record names, for a failure: a bot by its login, a person only as a user account. */
+function actorKind(actor: PushActivity['actor']): string {
+  if (actor === null) return 'no recorded actor';
+  return actor.type === 'Bot' ? actor.login : 'a user account';
 }
 
 /** The scenario's own engine runs: after setup, before the checks' own run (I6). */
@@ -1367,18 +1388,39 @@ export const SUBJECTS: Record<string, Compute> = {
     return current === undefined ? null : checksOf(env.ctx, current.head.sha);
   },
   'workflows.events': async (env) => sorted(new Set(((env.ctx.observations.get('workflows.runs') as Array<{ event: string }> | undefined) ?? []).map((run) => run.event))),
+  // Who authenticated the pushes of the sync's commits, from GitHub's own push records, never from a commit's
+  // author: the engine writes that name itself, whatever credential pushes. 'app-bot' means every recorded push
+  // that set a run ref to one of the sync's commits was made by the App the harness and the workflows hold (its
+  // exact bot login, not any `[bot]` such as the job's own token), and every one of those commits reached GitHub
+  // through such a push. Anything else fails and names the ref and why.
   'writes.githubActor': async (env) => {
+    const live = env.ctx.live;
+    if (live === null) throw new EnvBlockedError('who pushed is read from GitHub, and the run has no sandbox');
+    const app = live.githubAppLogin;
+    if (app === undefined) throw new EnvBlockedError('who pushed is compared with the GitHub App, and the harness holds no App token');
     const git = await person(env.ctx);
-    const own = new Set(env.ctx.ownCommits);
-    const tips = [await stateTip(env.ctx, 'linear'), await stateTip(env.ctx, 'ids'), await syncTip(env.ctx)];
-    const authors = new Set<string>();
-    for (const tip of tips) {
-      for (const commit of await newCommits(git, tip, startTips(env.ctx))) {
-        if (!own.has(commit)) authors.add((await git.text(['show', '-s', '--format=%an', commit])).trim());
+    const byRef = await syncCommits(env.ctx);
+    for (const [ref, commits] of byRef) {
+      const pushes = (await live.rest.pushActivities(ref)).filter((push) => commits.includes(push.after));
+      const other = pushes.find((push) => push.actor?.login !== app || push.actor.type !== 'Bot');
+      if (other !== undefined) throw new ProductError(`${ref}: GitHub records the push of ${other.after.slice(0, 12)} by ${actorKind(other.actor)}, not by the App ${app}`);
+      const afters = await present(git, pushes.map((push) => push.after));
+      const reached = new Set(await newCommits(git, null, startTips(env.ctx), afters));
+      const unproven = commits.filter((commit) => !reached.has(commit));
+      if (unproven.length > 0) throw new ProductError(`${ref}: GitHub has no push record for ${unproven.length} of the sync's ${commits.length} commits (${unproven[0]!.slice(0, 12)} first), so their writer is unproven`);
+    }
+    return byRef.size === 0 ? null : 'app-bot';
+  },
+  // The author and committer the sync's own commits name, as `name <email>`, distinct and sorted.
+  'writes.commitIdentity': async (env) => {
+    const git = await person(env.ctx);
+    const identities = new Set<string>();
+    for (const commits of (await syncCommits(env.ctx)).values()) {
+      for (const commit of commits) {
+        for (const line of (await git.text(['show', '-s', '--format=%an <%ae>%n%cn <%ce>', commit])).split('\n')) if (line !== '') identities.add(line);
       }
     }
-    if (authors.size === 0) return null;
-    return [...authors].every(isAppBot) ? 'app-bot' : sorted(authors).join(', ');
+    return identities.size === 0 ? null : sorted(identities).join(', ');
   },
 
   // --- writes and budget ----------------------------------------------------------------------

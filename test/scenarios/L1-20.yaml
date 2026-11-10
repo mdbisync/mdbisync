@@ -82,6 +82,11 @@
         "subject": "writes.githubActor",
         "operator": "equal",
         "expected": "app-bot"
+      },
+      {
+        "subject": "writes.commitIdentity",
+        "operator": "equal",
+        "expected": "mdbisync <mdbisync@sync.invalid>"
       }
     ]
   }

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
+import { SYNC_IDENTITY } from '../../../src/initial-sync/confirm.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
@@ -2073,6 +2074,111 @@ describe('subjects', () => {
     await ctx.engine.trigger?.action();
     assert.deepEqual(await resolveSubject(ctx, 'writes.git'), { known: true, value: 1 });
     void readFileSync;
+  });
+});
+
+describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
+  // As recorded in the actions run of L1-20: the engine names itself as the author of its state commits, and
+  // GitHub names the sandbox's App as the author of the sync pull request it opened.
+  const APP = 'mdbisync-sandbox[bot]';
+  const ENGINE_AUTHOR = { GIT_AUTHOR_NAME: SYNC_IDENTITY.name, GIT_AUTHOR_EMAIL: SYNC_IDENTITY.email, GIT_COMMITTER_NAME: SYNC_IDENTITY.name, GIT_COMMITTER_EMAIL: SYNC_IDENTITY.email };
+  type Actor = { login: string; type: string } | null;
+
+  /**
+   * A confirmed initial sync to Linear as the workflow writes it: two pushes
+   * of `ids` (a progress commit, then the final one) and one of `linear`. Each
+   * push is recorded by GitHub with `actors[ref][n]` as its actor; `null` for a
+   * push GitHub has no record of.
+   */
+  async function writerCase(actors: { ids: [Actor | undefined, Actor | undefined]; linear: Actor | undefined }, author: Record<string, string> = ENGINE_AUTHOR) {
+    const { ctx, remoteGit } = await fakeRun();
+    const idsRef = `${ctx.names.refPrefix}/ids`;
+    const linearRef = `${ctx.names.refPrefix}/linear`;
+    const startIds = (await remoteGit.text(['rev-parse', idsRef])).trim();
+    ctx.observations.set('start.refs', { [idsRef]: startIds });
+    ctx.observations.set('start.trackedTip', (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim());
+    const engine = new Git(remoteGit.dir, author);
+    const tree = (await engine.text(['rev-parse', `${startIds}^{tree}`])).trim();
+    const progress = (await engine.text(['commit-tree', tree, '-p', startIds, '-m', 'Initial sync: progress'])).trim();
+    const final = (await engine.text(['commit-tree', tree, '-p', progress, '-m', 'Initial sync: final ids'])).trim();
+    const record = (await engine.text(['commit-tree', tree, '-m', "Initial sync: Linear's state"])).trim();
+    await engine.run(['update-ref', idsRef, final]);
+    await engine.run(['update-ref', linearRef, record]);
+    const activity: Record<string, Array<{ ref: string; before: string; after: string; activity_type: string; actor: Actor }>> = { [idsRef]: [], [linearRef]: [] };
+    const recorded = (ref: string, before: string, after: string, actor: Actor | undefined) => {
+      if (actor !== undefined) activity[ref]!.unshift({ ref, before, after, activity_type: 'push', actor });
+    };
+    recorded(idsRef, startIds, progress, actors.ids[0]);
+    recorded(idsRef, progress, final, actors.ids[1]);
+    recorded(linearRef, '0'.repeat(40), record, actors.linear);
+    const asked: string[] = [];
+    ctx.live!.rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, '/repos/example/sandbox/activity');
+      const ref = url.searchParams.get('ref') as string;
+      asked.push(ref);
+      // Another ref's push in the same answer is not this ref's.
+      return Response.json([...(activity[ref] ?? []), { ref: 'refs/heads/main', before: final, after: record, activity_type: 'push', actor: { login: 'someone', type: 'User' } }]);
+    }) as typeof fetch);
+    ctx.live!.githubAppLogin = APP;
+    return { ctx, asked, progress, final, record };
+  }
+  const app: Actor = { login: APP, type: 'Bot' };
+
+  it('accept the App as the writer from GitHub\'s push records while the commits name the engine as their author', async () => {
+    const { ctx, asked } = await writerCase({ ids: [app, app], linear: app });
+    assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
+    assert.deepEqual(asked.sort(), [`${ctx.names.refPrefix}/ids`, `${ctx.names.refPrefix}/linear`]);
+    assert.deepEqual(await resolveSubject(ctx, 'writes.commitIdentity'), { known: true, value: 'mdbisync <mdbisync@sync.invalid>' });
+  });
+
+  it('fail a push made with a person\'s credential, without naming the person', async () => {
+    const { ctx } = await writerCase({ ids: [app, { login: 'someone', type: 'User' }], linear: app });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError
+      && /\/ids: GitHub records the push of [0-9a-f]{12} by a user account, not by the App mdbisync-sandbox\[bot\]$/.test(error.message) && !error.message.includes('someone'));
+  });
+
+  it('fail a run that asked for the App\'s token but pushed with the job\'s own token', async () => {
+    const { ctx } = await writerCase({ ids: [app, app], linear: { login: 'github-actions[bot]', type: 'Bot' } });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/linear: GitHub records the push of [0-9a-f]{12} by github-actions\[bot\], not by the App/.test(error.message));
+  });
+
+  it('fail a user account that took the App\'s login as its name', async () => {
+    const { ctx } = await writerCase({ ids: [app, app], linear: { login: APP, type: 'User' } });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/linear: .* by a user account/.test(error.message));
+  });
+
+  it('leave a commit unproven when GitHub has no record of the push that brought it, whatever its author is called', async () => {
+    // The final ids push has no record: the progress push alone does not reach the final commit.
+    const { ctx: missingFinal } = await writerCase({ ids: [app, undefined], linear: app });
+    await assert.rejects(resolveSubject(missingFinal, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/ids: GitHub has no push record for 1 of the sync's 2 commits/.test(error.message));
+    // A commit author that looks like the App's bot proves nothing on its own.
+    const botName = { GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: APP, GIT_COMMITTER_EMAIL: 'bot@example.com' };
+    const { ctx: named } = await writerCase({ ids: [undefined, undefined], linear: undefined }, botName);
+    await assert.rejects(resolveSubject(named, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /GitHub has no push record/.test(error.message));
+    assert.deepEqual(await resolveSubject(named, 'writes.commitIdentity'), { known: true, value: 'mdbisync-sandbox[bot] <bot@example.com>' });
+  });
+
+  it('cover the progress push through the final one, and have nothing to prove without the sync\'s commits', async () => {
+    // Only the final push is recorded for ids: its commit carries the progress commit too.
+    const { ctx } = await writerCase({ ids: [undefined, app], linear: app });
+    assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
+    const { ctx: quiet, remoteGit } = await fakeRun();
+    quiet.observations.set('start.refs', { [`${quiet.names.refPrefix}/ids`]: (await remoteGit.text(['rev-parse', `${quiet.names.refPrefix}/ids`])).trim() });
+    quiet.live!.githubAppLogin = APP;
+    assert.deepEqual(await resolveSubject(quiet, 'writes.githubActor'), { known: true, value: null });
+    assert.deepEqual(await resolveSubject(quiet, 'writes.commitIdentity'), { known: true, value: null });
+  });
+
+  it('block the check when the harness holds no App token to compare with', async () => {
+    const { ctx } = await writerCase({ ids: [app, app], linear: app });
+    delete ctx.live!.githubAppLogin;
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), EnvBlockedError);
+  });
+
+  it('refuse a full page of push records rather than read it as complete', async () => {
+    const rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async () => Response.json(Array.from({ length: 100 }, () => ({ ref: 'refs/x', before: '', after: '', activity_type: 'push', actor: null })))) as typeof fetch);
+    await assert.rejects(rest.pushActivities('refs/x'), /100 or more pushes to refs\/x/);
   });
 });
 
