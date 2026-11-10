@@ -139,7 +139,14 @@ describe('engine driver', () => {
     const { settlesWithin, withDeadline } = await import('./runner.ts');
     const dir = fresh('engine-abort-');
     const stub = join(dir, 'waiting.mjs');
-    writeFileSync(stub, "setInterval(() => {}, 60_000); process.stdout.write('ready');\n");
+    const lateWrite = join(dir, 'late-write');
+    writeFileSync(stub, `
+      import { spawn } from 'node:child_process';
+      const child = spawn(process.execPath, ['-e', ${JSON.stringify("setTimeout(() => require('node:fs').writeFileSync(process.argv[1], 'late'), 300)")}, ${JSON.stringify(lateWrite)}], { stdio: 'ignore' });
+      setInterval(() => {}, 60_000);
+      child.on('spawn', () => process.stdout.write('ready'));
+    `);
+
     const abort = new AbortController();
     const call = {
       command: 'initial-sync' as const, names: runNames('4f1a9c'), cwd: dir, repository: 'o/r', hooksDir: dir,
@@ -162,7 +169,13 @@ describe('engine driver', () => {
       }, /setup deadline/);
       // Cleanup starts here, after setup has settled and the child has closed.
       assert.equal(running.child.signalCode, 'SIGKILL');
-      assert.equal((await running.done).timedOut, false);
+      const result = await running.done;
+      assert.equal(result.timedOut, false);
+      assert.equal(result.stdout, 'ready');
+      if (process.platform !== 'win32') {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        assert.equal(existsSync(lateWrite), false, 'a Git-like child cannot write after cleanup');
+      }
       assert.throws(() => startEngine(call, env), { name: 'AbortError' });
       await assert.rejects(runEngine(call, env), { name: 'AbortError' });
     } finally {

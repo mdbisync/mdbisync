@@ -127,8 +127,14 @@ export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.e
     cwd: call.cwd,
     env: engineEnv(call, env),
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
   });
-  const stop = () => { child.kill('SIGKILL'); };
+  // Git children must stop too, before cleanup removes their remote refs.
+  const stop = () => {
+    if (process.platform === 'win32' || child.pid === undefined) { child.kill('SIGKILL'); return; }
+    try { process.kill(-child.pid, 'SIGKILL'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+  };
   call.signal?.addEventListener('abort', stop, { once: true });
   let stdout = '';
   let stderr = '';
@@ -137,7 +143,7 @@ export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.e
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill('SIGKILL');
+    stop();
   }, call.timeoutMs);
   child.on('error', (error) => {
     stderr += `could not start the engine: ${error.message}\n`;
@@ -168,11 +174,9 @@ export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.e
       });
     });
   });
-  return { child, done, kill: () => child.kill('SIGKILL') };
+  return { child, done, kill: stop };
 }
 
 export async function runEngine(call: EngineCall, env?: NodeJS.ProcessEnv): Promise<EngineResult> {
-  const result = await startEngine(call, env).done;
-  call.signal?.throwIfAborted();
-  return result;
+  return startEngine(call, env).done;
 }
