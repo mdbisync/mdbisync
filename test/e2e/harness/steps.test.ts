@@ -2509,6 +2509,30 @@ describe('document text right after a run', () => {
     assert.equal(subjectSource('runs.0.documents.brokenImageUrls'), 'engine');
   });
 
+  it('compares with the golden form of the files at the same moment, so a later git edit fails no correct run', async () => {
+    assert.equal(content.expected, 'runs.1.golden.linearForm');
+    const { ctx } = await confirmedInitialSync();
+    await commitAsPerson(ctx, new Map([['eng/platform/notes.md', '# Notes\n\nEdited in git after the run.\n']]), 'Edit after the run');
+    refreshView(ctx);
+    assert.equal(await holds(ctx, content.subject), true);
+    // Against the files as they are now, the same correct run would fail.
+    assert.equal(compare(content.operator, (await resolveSubject(ctx, content.subject)).value, (await resolveSubject(ctx, 'golden.linearForm')).value), false);
+  });
+
+  it('snapshots only the run the scenario names, and never I6\'s extra run', async () => {
+    const { ctx } = await confirmedInitialSync();
+    assert.equal(ctx.observations.has('harness.runView.0'), false);
+    assert.equal(ctx.observations.has('harness.runView.1'), true);
+    ctx.observations.set('scenario.runsEnd', ctx.engine.results.length);
+    await watchRun(ctx, { throughProxy: false }, async () => void ctx.engine.results.push(engineRun('sync', report('quiet-sync'))));
+    assert.equal(ctx.observations.has('harness.runView.2'), false);
+    // For `last`, each run's view replaces the one before it.
+    const last = (await fakeRun()).ctx;
+    last.scenario = { ...last.scenario, checks: { ...l1_20.checks, assertions: [{ subject: 'runs.last.documents.content', operator: 'same-as', expected: 'runs.last.golden.linearForm' }] } };
+    for (let run = 0; run < 2; run += 1) await watchRun(last, { throughProxy: false }, async () => void last.engine.results.push(engineRun('sync', report('quiet-sync'))));
+    assert.deepEqual([...last.observations.keys()].filter((key) => key.startsWith('harness.runView.')), ['harness.runView.1']);
+  });
+
   it('snapshots nothing for a scenario that asserts on no run\'s documents', async () => {
     const { ctx } = await fakeRun();
     await watchRun(ctx, { throughProxy: false }, async () => void ctx.engine.results.push(engineRun('sync', report('quiet-sync'))));

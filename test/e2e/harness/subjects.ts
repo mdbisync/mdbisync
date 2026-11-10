@@ -14,10 +14,11 @@
 // - `before.<subject>`: the same subject, computed on the snapshot the
 //   runner took when setup ended.
 // - `runs.<n|last>.<subject>` for the document text subjects
-//   (`RUN_VIEW_SUBJECT`): the same subject, computed on the snapshot the
-//   harness took of the world right after that run ended, before the next
-//   step. A report holds no document bodies, so the engine cannot answer
-//   these, and the world at the end could hide a later rewrite.
+//   and their golden form (`RUN_VIEW_SUBJECT`): the same subject, computed
+//   on the snapshot the harness took of the world right after that run
+//   ended, before the next step. A report holds no document bodies, so the
+//   engine cannot answer these, and the world at the end could hide a later
+//   rewrite.
 // - UI: `ui.*` values come from the UI session's checklist results.
 //
 // A subject that none of these knows is a harness gap; the scenario-set
@@ -104,7 +105,8 @@ async function commentsOf(env: Env, id: string | undefined): Promise<string[]> {
   if (id === undefined) return [];
   const view = await env.view();
   if (!view.comments.has(id)) {
-    if (env.which === 'before') return [];
+    // Only the world now may be read again; a snapshot answers from what it holds.
+    if (env.which !== 'now') return [];
     view.comments.set(id, await documentComments(env.ctx, id));
   }
   return view.comments.get(id) as string[];
@@ -1773,16 +1775,39 @@ async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string
  * Subjects that also name one run, `runs.<n|last>.<subject>`: computed on the
  * world the harness snapshotted right after that run (`harness.runView.<n>`).
  */
-export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body)$/;
+export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm)$/;
+
+/** The runs whose world the scenario asserts on (`runs.<n|last>.` document subjects): their indices, and whether the last. */
+function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {
+  const indices = new Set<number>();
+  let last = false;
+  for (const assertion of ctx.scenario.checks.assertions) {
+    for (const subject of [assertion.subject, ...(assertion.operator === 'same-as' ? [String(assertion.expected)] : [])]) {
+      const which = RUN_VIEW_SUBJECT.exec(subject)?.[1];
+      if (which === 'last') last = true;
+      else if (which !== undefined) indices.add(Number(which));
+    }
+  }
+  return { indices, last };
+}
 
 /** The scenario asserts on the world right after some run, so its runs are snapshotted. */
 export function watchesRunViews(ctx: RunContext): boolean {
-  return ctx.live !== null && ctx.scenario.checks.assertions.some((assertion) => RUN_VIEW_SUBJECT.test(assertion.subject) || (assertion.operator === 'same-as' && RUN_VIEW_SUBJECT.test(String(assertion.expected))));
+  const { indices, last } = viewedRuns(ctx);
+  return ctx.live !== null && (last || indices.size > 0);
 }
 
-/** The world right after a run, for its `runs.<n>.` subjects. */
+/**
+ * The world right after run <n>, for its `runs.<n>.` subjects, when the
+ * scenario names that run. For `last`, only the latest run's view is kept.
+ * A run after the scenario's own (I6's extra run) is not one of its runs.
+ */
 export async function recordRunView(ctx: RunContext, n: number): Promise<void> {
+  if (ctx.observations.has('scenario.runsEnd')) return;
+  const { indices, last } = viewedRuns(ctx);
+  if (!last && !indices.has(n)) return;
   ctx.observations.set(`harness.runView.${n}`, await takeView(ctx, false, { allowNoIds: true }));
+  if (last && !indices.has(n - 1)) ctx.observations.delete(`harness.runView.${n - 1}`);
 }
 
 /** Families of subjects read from the engine's run report. */
@@ -1880,15 +1905,21 @@ function engineValue(ctx: RunContext, subject: string): unknown {
   return found.value;
 }
 
+/** The index among the scenario's own runs that `<n|last>` names in `subject`. */
+function ownRunIndex(ctx: RunContext, which: string, subject: string): number {
+  const count = ownResults(ctx).length;
+  const index = which === 'last' ? count - 1 : Number(which);
+  if (index < 0 || index >= count) throw new ProductError(`the scenario has no engine run ${which} for ${subject}`);
+  return index;
+}
+
 /**
  * Why run <n|last> of the scenario was not quiet (quiet.ts), empty when it
  * was. The run must have been watched: a run without snapshots is no
  * evidence either way.
  */
 function quietValue(ctx: RunContext, subject: string): string[] {
-  const which = (QUIET_SUBJECT.exec(subject) as RegExpExecArray)[1] as string;
-  const index = which === 'last' ? ownResults(ctx).length - 1 : Number(which);
-  if (index < 0 || index >= ownResults(ctx).length) throw new ProductError(`the scenario has no engine run ${which} for ${subject}`);
+  const index = ownRunIndex(ctx, (QUIET_SUBJECT.exec(subject) as RegExpExecArray)[1] as string, subject);
   const failures = ctx.observations.get(`harness.quiet.${index}`) as string[] | undefined;
   if (failures === undefined) throw new Error(`engine run ${index} was not watched for ${subject}`);
   return failures;
@@ -1901,8 +1932,7 @@ function quietValue(ctx: RunContext, subject: string): string[] {
  */
 async function runViewValue(ctx: RunContext, subject: string): Promise<unknown> {
   const [, which, name] = RUN_VIEW_SUBJECT.exec(subject) as RegExpExecArray;
-  const index = which === 'last' ? ownResults(ctx).length - 1 : Number(which);
-  if (index < 0 || index >= ownResults(ctx).length) throw new ProductError(`the scenario has no engine run ${which} for ${subject}`);
+  const index = ownRunIndex(ctx, which as string, subject);
   const view = ctx.observations.get(`harness.runView.${index}`) as View | undefined;
   if (view === undefined) throw new Error(`engine run ${index} has no snapshot of the world right after it for ${subject}`);
   return (SUBJECTS[name as string] as Compute)({ ctx, which: 'run', view: async () => view });

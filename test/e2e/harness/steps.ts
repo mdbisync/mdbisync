@@ -218,10 +218,12 @@ export async function watchRun(ctx: RunContext, options: { throughProxy: boolean
   const result = ctx.engine.results.at(-1);
   if (ctx.engine.results.length !== count + 1 || result === undefined) throw new Error('a watched invocation recorded no single engine run');
   const n = ctx.engine.results.length - 1 - ctx.engine.setupRuns;
+  // The quiet window closes first: the slower full view must not widen it.
+  if (before !== undefined) {
+    const after = await snapshotWorld(ctx, options);
+    ctx.observations.set(`harness.quiet.${n}`, quietFailures({ exitCode: result.exitCode, report: result.report, before, after, documentWrites: writesBetween(ctx, before, after) }));
+  }
   if (views) await recordRunView(ctx, n);
-  if (before === undefined) return;
-  const after = await snapshotWorld(ctx, options);
-  ctx.observations.set(`harness.quiet.${n}`, quietFailures({ exitCode: result.exitCode, report: result.report, before, after, documentWrites: writesBetween(ctx, before, after) }));
 }
 
 /** Runs the sync until a run changes nothing more (at most `limit` runs). */
