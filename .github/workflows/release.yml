@@ -104,6 +104,8 @@ jobs:
 
   tag:
     needs: build
+    # A skipped gate (every pre-release) would skip this job under the implicit success(), so it checks the build alone.
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -130,3 +132,15 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           node src/release/tag.ts "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/release"
+
+  # A run that created no tag must not end as success, even when every job before it was skipped.
+  tagged:
+    if: ${{ always() }}
+    needs: [gate, build, tag]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require the new tag
+        env:
+          TAG_RESULT: ${{ needs.tag.result }}
+        run: test "$TAG_RESULT" = success

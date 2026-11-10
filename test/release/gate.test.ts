@@ -202,6 +202,6 @@ test('release.yml gates final versions only and builds a final version only afte
   assert.equal(build.needs, 'gate');
   assert.equal(build.if, "${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}");
   assert.equal(tag.needs, 'build');
-  assert.equal(tag.if, undefined, 'the tag job must run only when the build succeeded');
+  assert.equal(tag.if, "${{ !cancelled() && needs.build.result == 'success' }}", 'the tag job must run whenever the build succeeded');
   assert.deepEqual(workflow.permissions, { contents: 'read' });
 });
