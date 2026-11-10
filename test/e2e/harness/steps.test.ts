@@ -18,7 +18,7 @@ import { FIXTURE_PREPARATION } from './runner.ts';
 import { DOCUMENT_FIXTURES, fixtureEdit, paragraphEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
 import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
-import { burst, burstDocuments, burstEditCounts, soak, type SoakDriver } from './load.ts';
+import { burst, burstDocuments, burstEditCounts, editCapacity, soak, soakDocuments, soakEditCounts, type SoakDriver } from './load.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { bodyOf, compare, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -514,16 +514,88 @@ describe('load', () => {
       const clock = fakeClock();
       const edited: string[] = [];
       const driver: SoakDriver = { ...clock, linearEdit: async (actor, path) => void edited.push(`${actor} ${path}`), gitEdit: async (paths) => void edited.push(`git ${paths.join()}`), sync: async () => {}, checkInvariants: async () => ({ lostEdits: 0 }) };
-      const result = await soak(driver, { durationMs: 86_400_000, scheduleMs: 300_000, invariantIntervalMs: 3_600_000, actors: ['editor-a', 'editor-b', 'git'], seed: '173', documents: ['a.md', 'b.md', 'c.md'] });
+      const result = await soak(driver, { ...SOAK, documents: new Map([['a.md', 1000], ['b.md', 1000], ['c.md', 1000]]) });
       return { result, edited };
     };
     const first = await run();
     assert.equal(first.result.invariantChecks, 24);
     assert.equal(first.result.syncRuns, 288);
     assert.ok(first.result.edits.git > 100 && first.result.edits['editor-a'] > 100);
+    assert.deepEqual(first.result.edits, soakEditCounts(SOAK));
     assert.deepEqual((await run()).edited, first.edited);
   });
+
+  it('keeps the seeded soak off near-limit documents and within each document\'s room, without dropping an edit', async () => {
+    const counts = soakEditCounts(SOAK);
+    const total = counts['editor-a'] + counts['editor-b'] + counts.git;
+    const token = `abcdef-${String(counts['editor-a'] + counts['editor-b'] + 4 * counts.git).padStart(3, '0')}`;
+    const perEdit = 2 * paragraphEdit('', undefined, token).length + `${MARKERS.git}\n\n${MARKERS.linear}\n\n${MARKERS.end}\n\n`.length;
+    const nearLimit = 'a'.repeat(249_999);
+    // Room for exactly three edits: the seeded schedule picks it more often, so it fills up and drops out.
+    const tight = 'b'.repeat(Math.floor((250_000 - 3 * perEdit) / 2));
+    const versions = new Map([
+      ['near-linear.md', ['Small file.', nearLimit]],
+      ['near-git.md', [nearLimit, 'Small document.']],
+      ['tight.md', [tight, tight]],
+      ['notes.md', ['# Notes\n', '# Notes\n']],
+      ['plan.md', ['# Plan\n', '# Plan\n']],
+    ]);
+    const documents = soakDocuments(versions, token);
+    assert.deepEqual([...documents.keys()], ['tight.md', 'notes.md', 'plan.md']);
+    assert.equal(documents.get('tight.md'), 3);
+    assert.ok((documents.get('notes.md') as number) + (documents.get('plan.md') as number) >= total);
+
+    const run = async () => {
+      const texts = new Map([...versions].map(([path, values]) => [path, values[0] as string]));
+      const tokens: string[] = [];
+      const order: string[] = [];
+      const edit = async (path: string) => {
+        const next = `abcdef-${String(tokens.length + 1).padStart(3, '0')}`;
+        tokens.push(next);
+        order.push(path);
+        const text = paragraphEdit(texts.get(path) as string, undefined, next);
+        // A conflict can hold both versions: the budget keeps even that within the limit.
+        assert.ok(2 * text.length <= 250_000, `${path} would leave no room for a conflict`);
+        texts.set(path, text);
+      };
+      const clock = fakeClock();
+      const driver: SoakDriver = { ...clock, linearEdit: async (_, path) => edit(path), gitEdit: async ([path]) => edit(path as string), sync: async () => {}, checkInvariants: async () => ({ lostEdits: 0 }) };
+      const result = await soak(driver, { ...SOAK, documents });
+      return { result, texts, tokens, order };
+    };
+    const first = await run();
+    assert.deepEqual(first.result.edits, counts);
+    assert.equal(first.tokens.length, total);
+    assert.ok(first.tokens.every((written, index) => first.texts.get(first.order[index] as string)?.includes(written)), 'every scheduled edit is written');
+    assert.equal(first.order.filter((path) => path === 'tight.md').length, 3);
+    assert.equal(first.texts.get('near-linear.md'), 'Small file.');
+    assert.equal(first.texts.get('near-git.md'), nearLimit);
+    assert.deepEqual((await run()).order, first.order);
+  });
+
+  it('refuses a soak whose documents cannot take every scheduled edit before its first edit', async () => {
+    const counts = soakEditCounts(SOAK);
+    const total = counts['editor-a'] + counts['editor-b'] + counts.git;
+    let edits = 0;
+    const clock = fakeClock();
+    const driver: SoakDriver = { ...clock, linearEdit: async () => { edits += 1; }, gitEdit: async () => { edits += 1; }, sync: async () => {}, checkInvariants: async () => ({ lostEdits: 0 }) };
+    await assert.rejects(soak(driver, { ...SOAK, documents: new Map([['a.md', total - 1]]) }), new RegExp(`room for ${total - 1} of the ${total} soak edits`));
+    await assert.rejects(soak(driver, { ...SOAK, documents: soakDocuments(new Map([['full.md', ['a'.repeat(125_000)]]]), 'abcdef-9999') }), /needs documents to edit/);
+    assert.equal(edits, 0);
+    assert.equal(editCapacity([], 'abcdef-001'), 0);
+  });
+
+  it('reports a missing mapped document as a product failure before the soak starts', async () => {
+    const { ctx, linear } = await fakeRun();
+    linear.documents.clear();
+    await assert.rejects(runStep(ctx, { kind: 'run', action: 'soak', args: { durationSeconds: 0 } }), /soak target is missing/);
+    assert.equal(ctx.edits.length, 0);
+    assert.equal(ctx.engine.results.length, 0);
+  });
 });
+
+/** The L4-13 soak's options. */
+const SOAK = { durationMs: 86_400_000, scheduleMs: 300_000, invariantIntervalMs: 3_600_000, actors: ['editor-a', 'editor-b', 'git'] as const, seed: '173' };
 
 describe('oracles', () => {
   it('give an unchanged file its body by the engine\'s rule as its form, in the bank and the corpus alike', () => {
