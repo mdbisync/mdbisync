@@ -32,7 +32,7 @@ import { listTree, readBlobs, readIds, readUploads, lfsReader, parseLfsPointer, 
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
+import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { annotationPath, owningFolder, type Folder } from './corpus.ts';
@@ -666,8 +666,8 @@ export const SUBJECTS: Record<string, Compute> = {
   'documents.duplicateCount': async (env) => {
     const seen = new Map<string, number>();
     for (const document of (await env.view()).allDocuments) {
-      if (document.trashed || document.archivedAt !== null) continue;
-      const key = `${document.projectId ?? document.teamId}:${document.title}`;
+      if (!isLive(document)) continue;
+      const key = duplicateKey(document);
       seen.set(key, (seen.get(key) ?? 0) + 1);
     }
     return [...seen.values()].filter((count) => count > 1).length;
@@ -803,12 +803,10 @@ export const SUBJECTS: Record<string, Compute> = {
     const created = observed(env.ctx, 'kill.created') as string[];
     const view = await env.view();
     const mapped = new Set([...view.ids.values()].map((entry) => entry.id));
-    const live = (document: LinearDocument | undefined): document is LinearDocument => document !== undefined && !document.trashed && document.archivedAt === null;
-    const placeKey = (document: LinearDocument) => `${document.projectId ?? document.teamId}:${document.title}`;
     return created.length > 0 && created.every((id) => {
       const document = view.documents.get(id);
-      if (!live(document) || !mapped.has(id)) return false;
-      return !view.allDocuments.some((other) => other.id !== id && live(other) && placeKey(other) === placeKey(document));
+      if (!isLive(document) || !mapped.has(id)) return false;
+      return !view.allDocuments.some((other) => other.id !== id && isLive(other) && duplicateKey(other) === duplicateKey(document));
     });
   },
   'documents.newLocation': async (env) => {

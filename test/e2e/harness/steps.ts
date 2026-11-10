@@ -113,8 +113,6 @@ function settleResult(ctx: RunContext, result: EngineResult): void {
 
 /** Starts the engine and waits at `checkpoint`; false (after recording the result) when the engine ended first. */
 async function startPaused(ctx: RunContext, call: EngineCall, checkpoint: Checkpoint): Promise<ReturnType<typeof startEngine>> {
-  // The documents the run owns before the engine starts: a kill at the checkpoint takes the ones the engine created from the rest.
-  ctx.observations.set('pause.ownedBefore', new Set(ownedDocuments(ctx.owned).keys()));
   const running = startEngine(call);
   ctx.engine.pending = running;
   const reached = await ctx.checkpoints.waitReached(checkpoint, { timeoutMs: CHECKPOINT_TIMEOUT_MS, exited: running.done });
@@ -179,6 +177,8 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
   }
   const call = await engineCall(ctx, command, args);
   if (args.wait === false) {
+    // The documents the run owns before this engine starts: a kill takes the ones the engine created from the rest.
+    ctx.observations.set('pause.ownedBefore', new Set(ownedDocuments(ctx.owned).keys()));
     if (ctx.engine.pausedAt === undefined) {
       ctx.engine.pending = startEngine(call);
       return;
@@ -1483,7 +1483,8 @@ const OTHER: Record<string, Executor> = {
     if (pending === undefined || !isCheckpoint(args.checkpoint)) throw new Error('kill needs a paused asynchronous run');
     // The documents Linear confirmed creating for the paused engine, by their exact ids from the run's ownership
     // record (the proxy writes each answer there before the engine sees it), read before the kill.
-    const before = (ctx.observations.get('pause.ownedBefore') as Set<string> | undefined) ?? new Set<string>();
+    const before = ctx.observations.get('pause.ownedBefore') as Set<string> | undefined;
+    if (before === undefined) throw new Error('kill needs the documents the run owned before the engine started');
     ctx.observations.set('kill.created', [...ownedDocuments(ctx.owned)].filter(([id, confirmed]) => confirmed && !before.has(id)).map(([id]) => id));
     pending.kill();
     delete ctx.engine.pending;

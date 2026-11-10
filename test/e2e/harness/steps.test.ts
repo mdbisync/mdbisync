@@ -2103,7 +2103,8 @@ describe('crash-created document adoption (L1-17)', () => {
     recordCreate(ctx, readme);
     (linear.documents.get(readme) as LinearDocument).createdAt = new Date(Date.now() - 60_000).toISOString();
     await runStep(ctx, { kind: 'kill', action: 'engine', args: { checkpoint: 'document-created-before-ids-push' } });
-    // The resumed run's creates come after the kill.
+    // The resumed run's creates come after the kill. The subject reads ids, not times: these times are the live
+    // run's, under which a selection by creation time before the kill finds no document of the run's own.
     for (const [path, entry] of Object.entries(ids)) {
       if (path === 'zone/README.md') continue;
       recordCreate(ctx, entry.id);
@@ -2145,6 +2146,12 @@ describe('crash-created document adoption (L1-17)', () => {
     await linear.trashDocument(readme);
     refreshView(ctx);
     assert.deepEqual(await resolveSubject(ctx, 'documents.adoptedUnmappedTitle'), { known: true, value: false });
+  });
+
+  it('refuse a kill without the documents the run owned before the engine started', async () => {
+    const { ctx } = await fakeRun({ teamZone: true });
+    ctx.engine.pending = { kill: () => {}, done: new Promise(() => {}) } as never;
+    await assert.rejects(runStep(ctx, { kind: 'kill', action: 'engine', args: { checkpoint: 'document-created-before-ids-push' } }), /owned before the engine started/);
   });
 
   it('fail when no create was recorded before the kill', async () => {

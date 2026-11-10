@@ -37,6 +37,16 @@ export function documentState(document: Pick<LinearDocument, 'trashed' | 'archiv
 }
 
 /** The Linear title of a synchronized file: its path below its annotated folder, without `.md`. */
+/** A document Linear still shows: not in the trash and not archived. */
+export function isLive(document: LinearDocument | undefined): document is LinearDocument {
+  return document !== undefined && !document.trashed && document.archivedAt === null;
+}
+
+/** Two live documents with the same key are duplicates: the same title in the same place (a project, else a team zone). */
+export function duplicateKey(document: LinearDocument): string {
+  return `${document.projectId ?? document.teamId}:${document.title}`;
+}
+
 export function titleOf(path: string, folderOfPath: string): string {
   const relative = folderOfPath === '' ? path : path.slice(folderOfPath.length + 1);
   return relative.replace(/\.md$/, '');
@@ -665,8 +675,8 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     const s = await sides();
     const seen = new Map<string, number>();
     for (const document of s.allDocuments) {
-      if (document.trashed || document.archivedAt !== null) continue;
-      const key = `${document.projectId ?? document.teamId}:${document.title}`;
+      if (!isLive(document)) continue;
+      const key = duplicateKey(document);
       seen.set(key, (seen.get(key) ?? 0) + 1);
     }
     const duplicates = [...seen].filter(([, count]) => count > 1).map(([key]) => key.split(':').slice(1).join(':'));
