@@ -216,9 +216,15 @@ rename the document after its file name.
 
 ## The sync pull request
 
-Linear's changes reach the tracked branch only through one pull request from
-the sync branch (`mdbisync/linear` by default), which the sync opens and
-merges itself, acting as the deployer's GitHub App so that CI runs on it.
+Linear's changes reach the tracked branch through two lanes: the normal
+pull request **Changes from Linear** from `mdbisync/linear`, and at most
+one **Suspended changes from Linear** from `mdbisync/suspended` (default
+branch names). The sync opens and merges both, acting as the deployer's
+GitHub App so that CI runs on them. For a custom `sync-branch`, the last
+path segment becomes `suspended` (`team/sync` → `team/suspended`). With
+no slash, or a name already ending in `/suspended`, `-suspended` is
+appended (`docs-sync` → `docs-sync-suspended`). The suspended branch may
+remain after release; its presence alone does not mean a batch is on hold.
 
 - A run opens the pull request when merging Linear's state would change the
   tracked branch. Changes made in git alone open none.
@@ -232,23 +238,50 @@ merges itself, acting as the deployer's GitHub App so that CI runs on it.
   merges with a merge commit in the same run after at least 15 seconds for
   CI registration. With no checks, it waits for 15 seconds of continuously
   absent checks to allow CI to register first.
-  Checks still running at the deadline leave the merge to a later run.
+  Checks still running at the end of this grace period leave the merge to a later run.
   Grace periods of 15 seconds or less defer merging because they leave no
   time for a check observation after registration settles.
   Set `merge-grace-seconds: 0` to always defer a new head's merge to a later
   run. The CLI uses `MDBISYNC_MERGE_GRACE_SECONDS`. Later runs read an
   unchanged head's checks once, without waiting. A moved head cannot merge
   using the old head's checks.
-- Checks still pending, queued or never started `check-deadline-minutes`
+- Checks GitHub reports as pending or queued `check-deadline-minutes`
   (default `60`, range `10`–`1440`) after the sync pushed a head count as
   failed. The CLI uses `MDBISYNC_CHECK_DEADLINE_MINUTES`. The sync never
   reruns a check; a check rerun on the same head counts by its latest result.
-- A check that fails is a setup error: the run summary names it, the run
-  exits with code 3, and the pull request stays open until the repository's
-  checks pass Linear's form. Tracked-branch changes are not written to Linear
-  until then. Fix the check configuration or rerun the failed check on the
-  sync pull request; changing a file on the tracked branch alone does not
-  rerun that check.
+  Configure retries for flaky checks in your own CI. The App needs no
+  Actions permission; its permissions remain those in the
+  [quickstart](quickstart.md#github-app). The push time for each head is
+  kept in a hidden HTML note in the pull request description; a new head
+  starts a new deadline. An unreported check does not time out: if no
+  checks register, the sync attempts a merge after the registration grace
+  period. GitHub can refuse it for a missing required check, yielding
+  `merge-refused` and then `merge-blocked`; fix the workflow filters or
+  required-check names.
+- A failed check counts at once. Unless that check also fails on the
+  tracked branch's tip, the whole batch moves to the suspended lane, and
+  the normal pull request closes. This is a successful sync run, not a
+  setup error. Other documents continue in the normal lane. While the
+  suspended head's checks are still pending before their deadline, the
+  normal lane waits to merge so it cannot move the tracked branch under it.
+- Every suspended document gets a red `Cross` and a comment naming the
+  check, linking to its run when available, and quoting annotations on
+  that document's path. Later Linear edits go only to the suspended lane;
+  tracked-branch edits to those documents wait until release. A Linear
+  edit or a new tracked-branch commit updates the suspended pull request.
+  Once its head contains the current tracked tip and passes checks, it
+  merges, the comments resolve and the marks clear. The normal three-way
+  merge resumes ([suspension and release](sync-cycle.md#suspension-and-release)).
+- If a check also fails under the same name on the tracked branch's tip
+  (`main` by default), the normal pull request stays open and held. Nothing
+  is suspended or marked for that failure; no alert is written to Linear.
+  The run summary names the check and links to its run on the tracked tip.
+  Git-to-Linear writes for other documents continue. The decision waits up
+  to the deadline if the check is still running there; an already recorded
+  red-main hold waits until those checks have actually run and passed on
+  the tip. A hidden HTML note in the description records that hold.
+  Fix CI on the tracked branch: once those checks pass there, a later run
+  merges the new tip into the normal branch and checks the new head.
 - After the merge, the next run finds nothing to write and opens no pull
   request.
 - Until a person merges the pull request of an initial sync from Linear,

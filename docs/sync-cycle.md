@@ -8,7 +8,7 @@ travels each way, what people see in GitHub and in Linear, how long it
 takes, and what every line of a run's summary means.
 
 In this page, "git" means the tracked branch (`main` by default), "the sync
-pull request" is the one pull request the sync opens and merges itself, and
+pull request" is the normal pull request the sync opens and merges itself, and
 "the run summary" is the summary of a sync workflow run in the Actions tab.
 How to set up the workflows, the folder mapping and the setup check are in
 [usage.md](usage.md); what happens when both sides change the same document
@@ -31,7 +31,9 @@ repository never overlap. Each run makes these steps, in this order:
    is not committed and gets the [blocked mark](#the-blocked-mark).
 2. **Linear to git.** When Linear's record holds something the tracked
    branch lacks, the run opens the sync pull request, or adds the new
-   changes to the open one, and merges it once its checks pass
+   changes to the open one, and merges it once its checks pass. A failed
+   batch moves to the suspended lane; a red tracked branch holds it, and
+   pending suspended checks take priority
    ([the sync pull request](usage.md#the-sync-pull-request)).
 3. **Git to Linear, computed.** The run merges the tracked branch into
    Linear's record in its own working copy, with git's three-way merge.
@@ -47,7 +49,10 @@ repository never overlap. Each run makes these steps, in this order:
 
 The sync's state lives in three refs under `refs/mdbisync/` (Linear's
 record, the map of files to Linear document ids, and the cache of uploaded
-images) and in the sync branch `mdbisync/linear`. A plain clone does not
+images) and in the normal branch `mdbisync/linear` and the suspended branch
+`mdbisync/suspended`, created when first needed. The suspended branch can
+stay after release unless GitHub automatically deletes merged branches.
+A plain clone does not
 fetch the refs, and the sync writes nothing of its own into your files.
 
 ## A change made in Linear
@@ -102,11 +107,13 @@ sides ([conflicts.md](conflicts.md)).
 
 ### In GitHub
 
-- **One sync pull request** at a time, titled **Changes from Linear**, from
+- **One normal sync pull request** at a time, titled **Changes from Linear**, from
   the branch `mdbisync/linear` to the tracked branch. It is opened, updated
   and merged by the sync's GitHub App (`<your app>[bot]`), so your
   repository's CI runs on it like on any other pull request. Its
-  description lists the files it changes, by path.
+  description lists the files it changes, by path. A second pull request,
+  **Suspended changes from Linear** from `mdbisync/suspended`, holds failing
+  batches until they pass ([suspension and release](#suspension-and-release)).
 - **Merge commits** on the tracked branch, made by the App, one for each
   merged sync pull request. The repository must allow merge commits.
 - The commits the sync makes itself, on the sync branch and its refs, have
@@ -125,12 +132,13 @@ sides ([conflicts.md](conflicts.md)).
 
 - Documents change only where git changed them. The sync writes through
   your Linear OAuth app, so its edits come from the app, not from a person.
-- A document's icon and color are its owner's. The sync changes them in two
-  cases only, and puts the owner's back exactly when the case clears:
+- A document's icon and color are its owner's. The sync changes them in three
+  cases, and puts the owner's back exactly when the case clears:
 
   | Mark | Meaning | Who acts |
   | --- | --- | --- |
   | Red `Cross` | **Blocked**: a security hook rejected the document, so it is not synchronized | its author, by fixing the finding in Linear |
+  | Red `Cross` | **Suspended**: a check failed or did not finish in time on the batch's pull request | fix the document in Linear or fix CI in git |
   | Orange `Alert` | **Conflict**: the document holds both versions between conflict markers | anyone, on either side ([conflicts.md](conflicts.md)) |
 
 ### The blocked mark
@@ -155,11 +163,92 @@ When a repository security hook (a hook marked `alias: security`, see
 
 Fix it by editing the document in Linear. The next run checks the new text;
 when the hooks pass, it synchronizes the document and puts its own icon and
-color back. The blocked mark takes precedence over the conflict mark, and
-both share the one saved icon and color.
+color back. The marks take precedence in this order: blocked, suspended, conflict.
+All share the one saved icon and color; clearing one still leaves any
+other applicable mark.
 
 Without any security hook, the sync pushes Linear's content unchecked, and
 every run summary says so.
+
+## Suspension and release
+
+A failed pull request check suspends its whole batch, even if only one
+file caused it. Checks GitHub reports as pending or queued past
+`check-deadline-minutes` (default 60, range 10–1440) count as failed too.
+This deadline starts at the head's push, recorded in a hidden HTML note
+in the pull request description; it is separate from the short merge
+grace period. A new head starts a new deadline. The sync never reruns a
+check. Configure flaky-check retries in the repository's CI; a rerun by a
+person or CI counts by its latest result. No Actions permission is needed.
+A check that never registers with GitHub is invisible to this deadline.
+With no reported checks, the sync attempts to merge after its registration
+grace period; an unreported required check can instead cause
+`merge-refused` and then `merge-blocked`. Check workflow filters and the
+required-check names if this happens.
+
+The batch joins the one **Suspended changes from Linear** pull request.
+The normal branch records `Set aside suspended changes` and its pull
+request closes; later changes to other documents use the normal lane.
+Security hooks still run before any push and keep their separate blocked
+mark. Suspension is a successful run, not a setup error.
+
+Each suspended document shows a red `Cross` and one comment, for example:
+
+> Changes to this document are on hold: a check failed on the pull request that brings them to Git. Other documents keep syncing.
+>
+> - Check `build`: [run](https://github.com/example/handbook/actions/runs/123)
+>   - Line 12: Unsupported heading.
+>
+> The failure may come from another document of the same change. If a line above names this document, edit it here to try again; the hold also clears when the check is fixed in Git.
+
+For a timeout the opening is:
+
+> Changes to this document are on hold: a check did not finish in time on the pull request that brings them to Git. Other documents keep syncing.
+
+and its check line says:
+
+> - Check `build` did not finish in time.
+
+Only annotations on this document's path are quoted: at most ten per
+check, each shortened to 200 characters. Text that repeats document
+content is omitted; raw CI logs are never copied. When the failure
+changes, the same comment is edited. At most 50 documents have their
+suspended mark or comment changed per run; the rest follow in later runs.
+Documents in Linear's trash or archived have no mark.
+
+A suspended document is frozen both ways: later Linear edits go only to
+the suspended pull request, and tracked-branch edits are not written to
+that document in Linear. Edit the document in Linear to fix an annotated
+problem, or fix CI on the tracked branch. Either change updates the
+suspended lane and its new head gets checks. Once the suspended head
+contains the current tracked tip and its checks pass, the sync merges it,
+resolves the comments and clears the suspended marks. Any remaining
+blocked or conflict mark still applies. The normal three-way merge
+resumes using the recorded base, so changes waiting on either side meet
+without dropping an edit; overlapping edits can still create a conflict.
+
+The suspended lane goes first: while its head's checks are pending before
+the deadline, the normal lane may collect changes but cannot merge. A
+failed or timed-out suspended head lets the normal lane proceed.
+
+### When the tracked branch is red
+
+If the same check also fails on the tracked branch's tip (`main` by
+default), the normal pull request is held open instead of suspending its
+batch. No document gets a mark or comment for this failure, and no alert
+is written to Linear. Git-to-Linear writes continue for documents that
+are not suspended. The run summary names the check and links to its run
+on the tracked tip. A hidden HTML note in the normal pull request's
+description records the hold.
+
+If the check still runs on the tracked tip, the initial decision waits
+up to the deadline. An already recorded red-main hold waits until the
+held checks have actually run and passed on that tip. When they pass,
+the sync merges a new tracked tip into the normal branch and checks the
+new head. If the held head already contains that tip and still fails,
+it is suspended: the sync does not restart CI for an unchanged head.
+Existing suspended documents keep their comments unchanged while the
+same check also fails on the tracked tip.
 
 ## How long it takes
 
@@ -227,6 +316,31 @@ What step 2 did with the sync pull request. An ordinary run says one of:
 | Added new Linear changes to the sync pull request | New captures joined the open pull request. |
 | The sync pull request waits for its checks | Nothing new; its checks are still running, and a later run merges it. |
 
+The suspended lane and its marks add these lines when applicable:
+
+| Line or beginning | What it means |
+| --- | --- |
+| Suspended changes | Links the suspended pull request and lists its paths. |
+| Released the suspended batch. | Its head passed and merged; the freeze ends. |
+| GitHub refused the suspended merge | A merge refusal on that lane; `merge-refused` and `merge-blocked` apply to either lane. |
+| A GitHub request for the suspended lane failed; the normal lane still runs. | A later run retries that lane. |
+| Suspended files waiting for a manual merge | Named non-document files could not be merged; see [troubleshooting](troubleshooting.md#the-sync-pull-request). |
+| Failed checks: | Names the failed checks on the suspended head or joining batch. |
+| Checks that did not finish in time: | Names checks reported as pending past the deadline. |
+| The suspended documents' comments in Linear stay as they are: | The same check failed on the tracked tip; its failure must not rewrite document comments. |
+| The suspended documents' comments in Linear wait: | A check failed on the suspended head but still runs on the tracked tip; the comments wait for that result. |
+| Suspended documents in Linear: | Counts documents marked, comments updated and marks cleared. |
+| more suspended documents get their mark or comment in a later run | Counts deferred documents, at most 50 changed per run. |
+| Suspended documents in Linear's trash or archived, without a mark: | Lists documents that cannot receive a mark. |
+| GitHub did not give the annotations of | Comments name those checks without annotations; a later run can retry. |
+| The suspended marks did not finish | Gives the stopping code and, when available, operation; a later run goes on. |
+
+A red tracked branch has a held-pull-request line naming and linking to
+its failing checks. A line saying a check “failed on the sync pull request”
+and “still runs on the tracked branch's tip” means the sync waits for that
+result before suspending anything. A normal head waiting for the suspended
+head says “it merges after the suspended pull request, whose checks still run.”
+
 Any other line names a code (`conflict`, `merge-refused`,
 `merge-blocked`, `initial-pull-request-pending`, `state-moved`,
 `github-failed`), explained in
@@ -280,8 +394,8 @@ A finished run succeeds. A partial run ends with a warning,
 `sync: partial, will continue (<code>)`: Linear stopped it, a request to
 Linear or a write failed, a state ref moved while it captured or wrote, or
 a removal is held. It kept what it could record, and the next run goes on
-from there. A run fails when it needs a person (the setup check, a failed
-check on the sync pull request, a merge GitHub refuses again, an initial
+from there. A run fails when it needs a person (the setup check,
+a merge GitHub refuses again, an initial
 sync from Linear not merged yet, a full container), and also when only the sync
 pull request step did not finish (`sync: not finished (<code>); run it
 again`, for `state-moved` or `github-failed` there): the next run tries
