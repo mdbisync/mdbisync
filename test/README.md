@@ -253,7 +253,7 @@ the engine's inputs and outputs, and the evidence the checks read.
 | `pass` | every step ran and every check held |
 | `fail` | a check failed or a step broke on a scenario that is not on the expected-red list, or the harness itself broke: its reason then starts with `harness:` (a step the harness cannot run yet) or `harness error:` (any other error of the harness) |
 | `expected-red` | the scenario is on the expected-red list and failed for a product reason: the engine answered "not implemented", a product step failed, or a check did not hold |
-| `env-blocked` | the environment could not run it: missing configuration, Linear budget, runner, corpus or browser; the reason says which |
+| `env-blocked` | the environment could not run it: missing configuration, Linear budget, runner, corpus or browser, or the engine stopped at its setup check on the test environment's own credentials (`missing-permission`, say) and no later run got past it, unless the scenario's own credentials fault caused it; the reason says which, with the setup item and its detail |
 | `skipped` | not run: deferred, or stopped before its turn |
 
 The reason column lists the checks that did not hold, by name. `I1` to

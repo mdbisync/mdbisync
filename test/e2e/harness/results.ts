@@ -7,7 +7,9 @@
 //   product reason: the engine answered "not implemented", a product step
 //   failed, or a check did not hold.
 // - env-blocked: the environment could not run it (budget, runner,
-//   corpus, browser, credentials), with the reason.
+//   corpus, browser, credentials; an engine stopped at its setup check on the
+//   test environment's credentials, unless the scenario's credentials fault
+//   caused it), with the reason.
 // - skipped: not run (stopped before its turn, or not selected for this host).
 //
 // A scenario on the expected-red list that passes is reported, so the list
@@ -15,6 +17,7 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import type { EngineResult } from './engine.ts';
 
 export type Result = 'pass' | 'fail' | 'expected-red' | 'env-blocked' | 'skipped';
 export const RESULTS: readonly Result[] = ['pass', 'fail', 'expected-red', 'env-blocked', 'skipped'];
@@ -116,4 +119,44 @@ export function classify(
   }
   if (error instanceof HarnessGapError) return { result: 'fail', reason: `harness: ${message}` };
   return { result: 'fail', reason: `harness error: ${message}` };
+}
+
+/**
+ * How a run failed: at its failed setup check (named with the code and detail) or with its code. Null for a
+ * run that did not fail (a partial run is `ok`, and the next one goes on) or failed without a code.
+ */
+export function runFailure(report: Record<string, unknown> | null | undefined): string | null {
+  if (report?.['ok'] !== false || typeof report['code'] !== 'string') return null;
+  const checks = Array.isArray(report['setupChecks']) ? (report['setupChecks'] as Array<{ name?: unknown; state?: unknown; detail?: unknown }>) : [];
+  const check = checks.find((candidate) => candidate.state === 'failed');
+  return check === undefined ? `with ${report['code']}` : `at the setup check ${String(check.name)} (${report['code']}): ${String(check.detail)}`;
+}
+
+/** The setup stops that come from a run's credentials, with the service whose credential each one is about. */
+const CREDENTIAL_STOPS: Readonly<Record<string, 'linear' | 'github'>> = {
+  'linear-credential-failed': 'linear',
+  'github-credential-failed': 'github',
+  'missing-permission': 'github',
+  'github-app-not-found': 'github',
+};
+
+/**
+ * The error a scenario's run is classified by. When the last engine run that wrote a report stopped at its
+ * setup check on its credentials, and no credentials fault of the scenario made that credential invalid,
+ * the test environment's own credentials stopped it (a GitHub token without `checks:read`, say): nothing was
+ * synced, and the checks that fail after it say nothing about the scenario. Such a product failure becomes
+ * env-blocked, naming the run, the setup item and its detail. A stop a later run got past is not one; other
+ * setup stops (annotations, merge policy, hooks) and harness errors stay as they are. The first `setupRuns`
+ * results are setup's runs.
+ */
+export function blockedBySetupStop(error: unknown, results: readonly EngineResult[], setupRuns: number): unknown {
+  if (!(error instanceof ProductError)) return error;
+  const index = results.findLastIndex((result) => result.report !== null);
+  const last = results[index];
+  const code = last?.report?.['code'];
+  if (last === undefined || typeof code !== 'string' || !Object.hasOwn(CREDENTIAL_STOPS, code) || last.credentialFault === CREDENTIAL_STOPS[code]) return error;
+  const stop = runFailure(last.report);
+  if (stop === null) return error;
+  const run = index < setupRuns ? `setup run ${index}` : `run ${index - setupRuns}`;
+  return new EnvBlockedError(`the engine's ${run} (${last.command}) stopped ${stop}; the test environment's credentials do not let the scenario run`);
 }

@@ -20,7 +20,7 @@ import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
 import { burst, burstDocuments, burstEditCounts, editCapacity, soak, soakEditCounts, type Actor, type SoakDriver } from './load.ts';
 import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
-import { EnvBlockedError, ProductError } from './results.ts';
+import { blockedBySetupStop, EnvBlockedError, ProductError } from './results.ts';
 import { bodyOf, compare, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, probedFixtures, readFixture } from '../../probe/bank.ts';
@@ -3005,7 +3005,7 @@ describe('the setup check step (run.check)', () => {
    * A list answers a command's runs in turn, its last entry every later run. With `seen`, the calls are
    * also there when a step throws.
    */
-  async function withEngine(answers: Record<string, Answer | Answer[]>, steps: Array<{ action: string; args: Record<string, unknown> }>, seen: { calls: Array<{ command: string }> } = { calls: [] }) {
+  async function withEngine(answers: Record<string, Answer | Answer[]>, steps: Array<{ kind?: 'run' | 'fault'; action: string; args: Record<string, unknown> }>, seen: { calls: Array<{ command: string }> } = { calls: [] }) {
     const { ctx } = await fakeRun();
     mkdirSync(await ctx.engineClone(), { recursive: true });
     const calls = join(ctx.runDir, 'engine-calls.jsonl');
@@ -3086,6 +3086,21 @@ describe('the setup check step (run.check)', () => {
     const error = await withEngine({ sync: answers }, [{ action: 'resume-until-complete', args: {} }], seen).then(() => null, (failure: Error) => failure);
     return { error, runs: seen.calls.length };
   }
+
+  it('marks the runs a credentials fault made invalid, so their setup stop is the scenario\'s', async () => {
+    const stop = { report: { ...SETUP_STOP, code: 'linear-credential-failed', setupChecks: FAILED_CHECKS }, exitCode: 3 };
+    const { ctx } = await withEngine({ sync: [stop, { report: COMPLETE, exitCode: 0 }] }, [
+      { action: 'sync', args: {} },
+      { kind: 'fault', action: 'credentials', args: { service: 'linear', valid: false } },
+      { action: 'sync', args: {} },
+      { kind: 'fault', action: 'clear', args: {} },
+      { action: 'sync', args: {} },
+    ]);
+    assert.deepEqual(ctx.engine.results.map((result) => result.credentialFault), [undefined, 'linear', undefined]);
+    const failed = new ProductError('checks failed: I1');
+    assert.equal(blockedBySetupStop(failed, ctx.engine.results.slice(1, 2), 0), failed);
+    assert.ok(blockedBySetupStop(failed, ctx.engine.results.slice(0, 1), 0) instanceof EnvBlockedError);
+  });
 
   it('stops resuming when a setup check fails the same way twice in a row, and names it', async () => {
     const { error, runs } = await resume([{ report: SETUP_STOP, exitCode: 3 }]);

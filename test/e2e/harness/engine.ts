@@ -45,6 +45,8 @@ export interface EngineCall {
   linearUrl: string;
   /** `appSlug`: the slug of the App the GitHub token is of; absent for a token of the host's own. */
   credentials: { linearClientId: string; linearClientSecret: string; githubToken: string; appSlug?: string };
+  /** The credential the scenario's fault made invalid for this call, if any. */
+  credentialFault?: 'linear' | 'github';
   /** Test-hook settings for this call. */
   extraEnv: Record<string, string>;
   timeoutMs: number;
@@ -68,6 +70,8 @@ export interface EngineResult {
   summary: string;
   securityCanary?: string;
   report: Record<string, unknown> | null;
+  /** Set when the scenario made this call's credential invalid on purpose: a stop on it is the scenario's. */
+  credentialFault?: 'linear' | 'github';
 }
 
 /** The engine's inputs for a call, as its environment. */
@@ -173,6 +177,7 @@ export function startEngine(call: EngineCall, env: NodeJS.ProcessEnv = process.e
         stderr,
         summary: read(call.summaryFile),
         report,
+        ...(call.credentialFault === undefined ? {} : { credentialFault: call.credentialFault }),
       });
     });
   });
