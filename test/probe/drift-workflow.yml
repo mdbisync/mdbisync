@@ -28,8 +28,9 @@ concurrency:
 jobs:
   probe:
     runs-on: [self-hosted, mdbisync-sandbox]
-    # A full pass sends about 1,400 requests one at a time.
-    timeout-minutes: 90
+    # A pass without the fact measurements sends about 630 requests one at a
+    # time, in a few minutes.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,6 +47,7 @@ jobs:
           LINEAR_TEST_APP_CLIENT_ID: ${{ secrets.LINEAR_TEST_APP_CLIENT_ID }}
           LINEAR_TEST_APP_CLIENT_SECRET: ${{ secrets.LINEAR_TEST_APP_CLIENT_SECRET }}
           OUT: ${{ runner.temp }}/format-probe
+        shell: bash
         run: |
           mkdir -p "$OUT"
           set +e
@@ -54,8 +56,19 @@ jobs:
           set -e
           # The request diagnostics are JSON lines; the rest is the probe's own account.
           grep -v '^{' "$OUT/probe.log" || true
+          drifted=$(grep -c '^drift: ' "$OUT/probe.log" || true)
+          case "$code:$drifted" in
+            0:*) ;;
+            1:0) echo "::error title=Format probe::exit 1 without drift: the probe failed before comparing" ;;
+            1:*) echo "::error title=Format probe::$drifted drifted fixtures" ;;
+            2:*) echo "::error title=Format probe::exit 2: the run could not finish" ;;
+            *) echo "::error title=Format probe::exit $code" ;;
+          esac
+          # The run page shows only the first annotations; the job summary lists every drifted fixture.
           grep '^drift: ' "$OUT/probe.log" | sed -e 's/%/%25/g' -e 's/^drift: /::error title=Format drift::/' || true
-          if [ "$code" -ne 0 ]; then echo "::error title=Format probe::exit $code (1: drift, 2: the run could not finish)"; fi
+          if [ "$drifted" -gt 0 ]; then
+            { echo '### Format drift'; echo; grep '^drift: ' "$OUT/probe.log" | sed -e 's/^drift: /- /'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          fi
           exit "$code"
       - name: Keep the report
         if: ${{ always() }}

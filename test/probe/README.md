@@ -64,7 +64,8 @@ demand) in a test repository with a self-hosted runner labeled
 `LINEAR_TEST_APP_CLIENT_SECRET`; copy it to that repository's
 `.github/workflows/`. It checks out this repository at `main`, runs
 `npm run probe:format -- --no-facts` and fails on drift or an unfinished run,
-with an error annotation naming each drifted fixture. The report, the JSON
+with an error annotation and a job summary line naming each drifted
+fixture. The report, the JSON
 result and the probe's log are uploaded as the `format-probe-report`
 artifact, never committed. A manual run can probe another branch through the
 `ref` input.
