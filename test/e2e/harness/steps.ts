@@ -381,9 +381,10 @@ async function requestScheduledRun(ctx: RunContext): Promise<number> {
   await world.rest.createBranch(ctx.names.scheduleRequest, tip);
   try {
     await waitForRequestTaken(world.rest, ctx.names.scheduleRequest);
-  } finally {
-    // A request no tick took must not start a sync after the step.
-    await world.rest.deleteBranch(ctx.names.scheduleRequest);
+  } catch (error) {
+    // A request no tick took must not start a sync after the step. When a tick took it just now, the deletion
+    // finds nothing: the step goes on to that tick's run rather than leave it writing behind the cleanup.
+    if (await world.rest.deleteBranch(ctx.names.scheduleRequest)) throw error;
   }
   return after;
 }
@@ -572,20 +573,20 @@ const RUN: Record<string, Executor> = {
     const world = live(ctx);
     const events = Array.isArray(args.events) ? (args.events as string[]) : ['push', 'workflow_dispatch'];
     await requireWorkflows(ctx);
-    let after = Date.now();
     // Start every event at once, plus one more when a pending run must be replaced by a newer one.
     const starts = [...events.filter((event) => event !== 'schedule'), ...(args.replacePending === true ? ['workflow_dispatch'] : [])];
     // The install push registered the sync workflow: its push trigger runs on the run's branch.
     const id = await waitForRegistration(world.rest, SYNC_WORKFLOW);
     // GitHub picks a schedule's moment: the others start once a scheduled run has taken the request, beside its job.
-    if (events.includes('schedule')) after = await requestScheduledRun(ctx);
+    const scheduledAfter = events.includes('schedule') ? await requestScheduledRun(ctx) : undefined;
+    const after = Date.now();
     await Promise.all(starts.map(async (event) => {
       if (event === 'push') await loadDriver(ctx, async () => {}).gitEdit([targetPath(ctx)]);
       else await world.rest.dispatchWorkflow(id, ctx.names.trackedBranch, workflowInputs({}));
     }));
     const runs = [];
-    if (events.includes('schedule')) {
-      const run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after, exclude: seenRuns(ctx) });
+    if (scheduledAfter !== undefined) {
+      const run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after: scheduledAfter, exclude: seenRuns(ctx) });
       runs.push(run);
       recordWorkflowRun(ctx, run);
     }

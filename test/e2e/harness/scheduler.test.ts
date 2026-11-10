@@ -14,7 +14,7 @@ import { EnvBlockedError } from './results.ts';
 import {
   ACTION_REPOSITORY, pinnedActionSha, readTemplate, renderScheduler, requestScript, runGroup, SANDBOX_RUNNER, scheduledJobName, SCHEDULER_FILE, SCHEDULER_GROUP, WORKFLOW_FILES,
 } from './workflow-files.ts';
-import { REPORT_ARTIFACT, waitForRequestTaken, waitForScheduledRun } from './workflows.ts';
+import { jobSpans, maxOverlap, REPORT_ARTIFACT, waitForRequestTaken, waitForScheduledRun } from './workflows.ts';
 
 const SHA = 'a'.repeat(40);
 const OUT = (name: string) => `\${{ needs.request.outputs.${name} }}`;
@@ -73,23 +73,26 @@ describe('the scheduled sync on the sandbox\'s default branch', () => {
 });
 
 describe('the request script', () => {
-  // A fake git: ls-remote prints REFS; a push deletes a ref unless TAKEN names it (another tick took it).
+  // A fake git: ls-remote prints REFS; a push deletes a ref, unless TAKEN names it (another tick took it) or
+  // REFUSED does (a rule or the token refuses the deletion).
   const fakeGit = [
     '#!/bin/sh',
     'case "$1" in init) mkdir -p "$3"; exit 0 ;; esac',
     'case "$3" in',
     '  ls-remote) printf "%s" "$REFS" | while read -r ref; do printf "0000\\t%s\\n" "$ref"; done ;;',
-    '  push) ref=${6#:}; echo "$ref" >> "$PUSHED"; case " $TAKEN " in *" $ref "*) exit 1 ;; esac ;;',
+    '  push) ref=${6#:}; echo "$ref" >> "$PUSHED"',
+    '    case " $TAKEN " in *" $ref "*) echo "error: unable to delete \'$ref\': remote ref does not exist" >&2; exit 1 ;; esac',
+    '    case " $REFUSED " in *" $ref "*) echo "remote: error: GH013: Repository rule violations found" >&2; exit 1 ;; esac ;;',
     'esac',
     '',
   ].join('\n');
-  const take = (refs: string[], taken: string[] = []) => {
+  const take = (refs: string[], taken: string[] = [], refused: string[] = []) => {
     const dir = mkdtempSync(join(tmpdir(), 'scheduler-'));
     mkdirSync(join(dir, 'bin'));
     writeFileSync(join(dir, 'bin', 'git'), fakeGit, { mode: 0o755 });
     const env = {
       PATH: `${join(dir, 'bin')}:${process.env['PATH'] ?? ''}`, RUNNER_TEMP: dir, GITHUB_OUTPUT: join(dir, 'output'), PUSHED: join(dir, 'pushed'),
-      TOKEN: 'token', REMOTE: 'https://example.invalid/o/r', REFS: refs.map((ref) => `${ref}\n`).join(''), TAKEN: taken.join(' '),
+      TOKEN: 'token', REMOTE: 'https://example.invalid/o/r', REFS: refs.map((ref) => `${ref}\n`).join(''), TAKEN: taken.join(' '), REFUSED: refused.join(' '),
     };
     const stdout = execFileSync('bash', ['-c', requestScript()], { env, encoding: 'utf8' });
     const read = (file: string) => (existsSync(join(dir, file)) ? readFileSync(join(dir, file), 'utf8') : '');
@@ -111,6 +114,11 @@ describe('the request script', () => {
     const { outputs, pushed } = take(refs, [`refs/heads/${names.scheduleRequest}`]);
     assert.equal(outputs['run'], 'd4e5f6');
     assert.deepEqual(pushed, [gone, names, other].map((run) => `refs/heads/${run.scheduleRequest}`));
+  });
+
+  it('fails the job when a deletion is refused for another reason than a taken request', () => {
+    const request = `refs/heads/${names.scheduleRequest}`;
+    assert.throws(() => take([`refs/heads/${names.trackedBranch}`, request], [], [request]), (error: Error & { stderr?: string }) => /GH013/.test(error.stderr ?? ''));
   });
 
   it('does nothing without a request', () => {
@@ -139,20 +147,34 @@ describe('waiting for a scheduled run', () => {
         assert.deepEqual([file, event], [SCHEDULER_FILE, 'schedule']);
         polls += 1;
         return [
-          { id: 4, status: polls > 1 ? 'completed' : 'in_progress', conclusion: null, event: 'schedule', created_at: at(2000) },
-          { id: 3, status: 'completed', conclusion: 'success', event: 'schedule', created_at: at(1000) },
-          { id: 1, status: 'completed', conclusion: 'success', event: 'schedule', created_at: at(-60_000) },
+          // A tick created before the request, which waited for the runner and then took it.
+          { id: 4, status: polls > 1 ? 'completed' : 'in_progress', conclusion: null, event: 'schedule', created_at: at(-120_000), updated_at: at(polls > 1 ? 3000 : 0) },
+          { id: 3, status: 'in_progress', conclusion: null, event: 'schedule', created_at: at(1000), updated_at: at(1000) },
+          { id: 1, status: 'completed', conclusion: 'success', event: 'schedule', created_at: at(-60_000), updated_at: at(-50_000) },
         ];
       },
       runJobs: async (id: number) => {
         jobsRead.push(id);
-        return id === 4 ? [{ name: 'request' }, { name: 'sync a1b2c3' }] : [{ name: 'request' }, { name: 'sync d4e5f6' }];
+        return id === 4 ? [{ name: 'request', completed_at: at(0) }, { name: 'sync a1b2c3', completed_at: null }] : [{ name: 'request', completed_at: at(1500) }, { name: 'sync d4e5f6', completed_at: null }];
       },
     };
     const run = await waitForScheduledRun(rest as never, { workflow: SCHEDULER_FILE, runId: 'a1b2c3', after: now, pollMs: 1 });
     assert.equal(run.id, 4);
-    // A run before the request is never read; a completed run that served another run is read once.
-    assert.deepEqual(jobsRead, [3, 4, 4]);
+    // A run that finished before the request is never read; a tick that took another run's request is read once.
+    assert.deepEqual(jobsRead, [4, 3, 4]);
     await assert.rejects(waitForScheduledRun(rest as never, { workflow: SCHEDULER_FILE, runId: 'ffffff', after: now, timeoutMs: 0, pollMs: 1 }), EnvBlockedError);
+  });
+});
+
+describe('the jobs that hold a run\'s group', () => {
+  it('leave out a scheduled run\'s request job', async () => {
+    const time = (seconds: number) => new Date(seconds * 1000).toISOString();
+    const rest = {
+      runJobs: async (id: number) => (id === 1
+        ? [{ name: 'request', started_at: time(0), completed_at: time(10) }, { name: 'sync a1b2c3', started_at: time(21), completed_at: time(30) }]
+        : [{ name: 'sync', started_at: time(6), completed_at: time(20) }]),
+    };
+    const spans = await jobSpans(rest as never, [{ id: 1, event: 'schedule' }, { id: 2, event: 'workflow_dispatch' }] as never);
+    assert.equal(maxOverlap(spans), 1);
   });
 });

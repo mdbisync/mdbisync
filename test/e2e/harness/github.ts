@@ -36,6 +36,11 @@ export class GitHubError extends Error {
   }
 }
 
+/** A repository path or ref name for a URL, each segment encoded. */
+function encodePath(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
 async function call<T>(token: string, method: string, path: string, body?: unknown, fetchImpl: typeof fetch = fetch): Promise<T> {
   const response = await fetchImpl(`${API}${path}`, {
     method,
@@ -284,7 +289,7 @@ export class SandboxRest {
   /** A file's text on `ref` (the default branch when absent), or undefined when it is not there. */
   async fileText(path: string, ref?: string): Promise<string | undefined> {
     try {
-      const file = await this.request<{ content?: string; encoding?: string }>('GET', `/contents/${path.split('/').map(encodeURIComponent).join('/')}${ref === undefined ? '' : `?ref=${encodeURIComponent(ref)}`}`);
+      const file = await this.request<{ content?: string; encoding?: string }>('GET', `/contents/${encodePath(path)}${ref === undefined ? '' : `?ref=${encodeURIComponent(ref)}`}`);
       if (file.encoding !== 'base64' || file.content === undefined) throw new Error(`${path} is not a file GitHub returns whole`);
       return Buffer.from(file.content, 'base64').toString('utf8');
     } catch (error) {
@@ -295,7 +300,7 @@ export class SandboxRest {
 
   /** Writes a file on the default branch in one commit, creating or replacing it. */
   async putFile(path: string, text: string, message: string): Promise<{ commit: string }> {
-    const url = `/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
+    const url = `/contents/${encodePath(path)}`;
     let sha: string | undefined;
     try {
       sha = (await this.request<{ sha: string }>('GET', url)).sha;
@@ -330,7 +335,7 @@ export class SandboxRest {
   /** Whether a branch exists. */
   async branchExists(branch: string): Promise<boolean> {
     try {
-      await this.request('GET', `/git/ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`);
+      await this.request('GET', `/git/ref/heads/${encodePath(branch)}`);
       return true;
     } catch (error) {
       if (error instanceof GitHubError && error.status === 404) return false;
@@ -338,13 +343,14 @@ export class SandboxRest {
     }
   }
 
-  /** Deletes a branch; one that is already gone is no error. */
-  async deleteBranch(branch: string): Promise<void> {
+  /** Deletes a branch: true when this call deleted it, false when it was already gone. */
+  async deleteBranch(branch: string): Promise<boolean> {
     try {
-      await this.request('DELETE', `/git/refs/heads/${branch.split('/').map(encodeURIComponent).join('/')}`);
+      await this.request('DELETE', `/git/refs/heads/${encodePath(branch)}`);
+      return true;
     } catch (error) {
       // GitHub answers 422 "Reference does not exist" for a deleted branch.
-      if (error instanceof GitHubError && (error.status === 404 || error.status === 422)) return;
+      if (error instanceof GitHubError && (error.status === 404 || error.status === 422)) return false;
       throw error;
     }
   }

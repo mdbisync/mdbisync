@@ -156,7 +156,8 @@ export const SCHEDULER_FILE = 'mdbisync-scheduled.yml';
 /** The scheduled workflow's own concurrency group: one tick at a time, the newest waiting. */
 export const SCHEDULER_GROUP = 'mdbisync-scheduled';
 
-const REQUEST_JOB = 'request';
+/** The scheduled workflow's first job, which takes a request. */
+export const REQUEST_JOB = 'request';
 
 /** A request job output, as an expression in the sync jobs. */
 function requested(output: string): string {
@@ -188,7 +189,12 @@ export function requestScript(): string {
     `refs=$(remote ls-remote --refs "$REMOTE" 'refs/heads/${requestHead}*' | awk '{print $2}')`,
     `for run in $(printf '%s\\n' "$refs" | sed -n 's|^refs/heads/${requestHead}\\([0-9a-f]\\{6\\}\\)${requestTail}$|\\1|p'); do`,
     '  # The deletion that succeeds takes the request: each is served once.',
-    `  remote push --quiet "$REMOTE" ":refs/heads/${named(names.scheduleRequest)}" || continue`,
+    `  if ! out=$(remote push --quiet "$REMOTE" ":refs/heads/${named(names.scheduleRequest)}" 2>&1); then`,
+    '    # Only a request another tick took is skipped; any other failure (a rule, the token) fails the job.',
+    '    case "$out" in *"remote ref does not exist"*) continue ;; esac',
+    '    printf \'%s\\n\' "$out" >&2',
+    '    exit 1',
+    '  fi',
     '  # A request of a run whose branch is gone is dropped.',
     `  printf '%s\\n' "$refs" | grep -qx "refs/heads/${named(names.trackedBranch)}" || continue`,
     '  {',
@@ -241,7 +247,7 @@ export function renderScheduler(template: string, actionSha?: string): string {
   for (const pair of jobs.items) {
     const job = pair.value as YAMLMap;
     const condition = job.get('if');
-    job.delete('if');
+    for (const key of ['name', 'needs', 'if', 'concurrency']) job.delete(key);
     // Only a tick that took a request runs the template's job, as that run's job: its name carries the run id.
     // The run's own group, the one its pushes and dispatches use, so the scheduled job queues behind them.
     job.items.unshift(...Object.entries({

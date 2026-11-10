@@ -19,7 +19,7 @@
 // scenario then stops at that run. Any other failure stays the run's result
 // for the scenario's checks.
 
-import { WORKFLOW_FILES } from './workflow-files.ts';
+import { REQUEST_JOB, WORKFLOW_FILES } from './workflow-files.ts';
 import { diagnosticRequests } from './request-accounting.ts';
 import { CANARY_EVIDENCE } from './security-canary.ts';
 import { inflateRawSync } from 'node:zlib';
@@ -120,22 +120,27 @@ export async function waitForRequestTaken(rest: SandboxRest, branch: string, opt
 }
 
 /**
- * The completed scheduled run of `workflow`, created at or after `after`,
- * that ran a job for run `runId` (a job named `<job> <runId>`), once it has
- * completed. Call it once the request is taken: that run exists by then.
+ * The scheduled run of `workflow` that ran a job for run `runId` (a job
+ * named `<job> <runId>`), once it has completed. Call it once the request
+ * is taken: that run exists by then. The tick that took it may have been
+ * created before the request (it waited for the runner or for the tick
+ * before it), so only runs that finished before `after` are left out.
  */
 export async function waitForScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; after: number; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number }): Promise<WorkflowRun> {
   const started = Date.now();
-  // Completed runs that served another run, or none: they never become this run's.
+  // Runs that served another run, or none: they never become this run's.
   const others = new Set<number>(options.exclude ?? []);
   for (;;) {
     const candidates = (await rest.workflowFileRuns(options.workflow, 'schedule'))
-      .filter((run) => Date.parse(run.created_at) >= options.after - 5_000 && !others.has(run.id))
+      .filter((run) => !others.has(run.id) && (run.status !== 'completed' || Date.parse(run.updated_at ?? run.created_at) >= options.after - 5_000))
       .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
     for (const run of candidates) {
-      const ours = (await rest.runJobs(run.id)).some((job) => job.name.endsWith(` ${options.runId}`));
+      const jobs = await rest.runJobs(run.id);
+      const ours = jobs.some((job) => job.name.endsWith(` ${options.runId}`));
       if (ours && run.status === 'completed') return run;
-      if (!ours && run.status === 'completed') others.add(run.id);
+      // Once its request job has finished, a tick's jobs and their names are settled.
+      const settled = run.status === 'completed' || jobs.some((job) => job.name === REQUEST_JOB && job.completed_at !== null);
+      if (!ours && settled) others.add(run.id);
     }
     const waited = Date.now() - started;
     if (waited > (options.timeoutMs ?? RUN_WAIT_MS)) throw new EnvBlockedError(`the scheduled run that took the run's request did not finish within ${Math.round((options.timeoutMs ?? RUN_WAIT_MS) / 60_000)} minutes (runner busy?)`);
@@ -261,12 +266,12 @@ export interface JobSpan {
   completed: number;
 }
 
-/** When each run's jobs ran. */
+/** When each run's jobs ran; a scheduled run's request job holds no run's group, so it is left out. */
 export async function jobSpans(rest: SandboxRest, runs: readonly WorkflowRun[]): Promise<JobSpan[]> {
   const spans: JobSpan[] = [];
   for (const run of runs) {
     for (const job of await rest.runJobs(run.id)) {
-      if (job.started_at === null) continue;
+      if (job.started_at === null || (run.event === 'schedule' && job.name === REQUEST_JOB)) continue;
       spans.push({ runId: run.id, started: Date.parse(job.started_at), completed: job.completed_at === null ? Date.now() : Date.parse(job.completed_at) });
     }
   }
