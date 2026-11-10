@@ -10,13 +10,14 @@
 // covers every time recorded before it.
 
 import { type Git, type Oid } from '../state/index.ts';
+import { message } from '../messages.ts';
 
 const RECORDED = /^Document-recorded: (\S+) (\S+)$/gm;
 
 /** A document's update time in the form the capture cursor uses, so times compare as text. */
 export function recordedTime(updatedAt: string): string {
   const time = new Date(updatedAt);
-  if (!Number.isFinite(time.getTime())) throw new Error('a document has an invalid update time');
+  if (!Number.isFinite(time.getTime())) throw new Error(message('sync.invalid-update-time'));
   return time.toISOString();
 }
 

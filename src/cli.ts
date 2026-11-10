@@ -20,6 +20,7 @@ import { type OperationOutcome, runOperation } from "./run/operation.ts";
 import { Git } from "./state/index.ts";
 import { runInit } from "./init/command.ts";
 import { VERSION } from "./version.ts";
+import { message } from "./messages.ts";
 
 export interface CliResult {
   readonly exitCode: number;
@@ -79,7 +80,7 @@ export async function runCli(args: readonly string[], options: CliOptions = {}):
     }
     return notImplemented(first);
   }
-  const problem = first === undefined ? "missing command" : `unknown command: ${first}`;
+  const problem = first === undefined ? message('cli.missing-command') : message('cli.unknown-command', { command: first });
   return { exitCode: USAGE_EXIT_CODE, stdout: "", stderr: `${problem}\n\n${usage()}` };
 }
 
@@ -144,7 +145,7 @@ async function main(): Promise<void> {
 }
 
 if (Number(process.versions.node.split(".")[0]) < 24) {
-  process.stderr.write("mdbisync requires Node 24 or newer; install it before running the hook.\n");
+  process.stderr.write(`${message('cli.node-too-old')}\n`);
   process.exitCode = USAGE_EXIT_CODE;
 } else if (import.meta.main) {
   await main();

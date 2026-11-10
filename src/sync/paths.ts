@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
+import { message } from '../messages.ts';
+import { type PathRule } from '../codes.ts';
 
 /**
  * The name of the rule `titlePath` and `documentPath` follow, as run
  * reports give it: a document read from Linear gets the same file name in a
  * sync's capture and in an initial sync from Linear.
  */
-export const PATH_RULE = 'percent-encode-unsafe-segments';
+export const PATH_RULE = 'percent-encode-unsafe-segments' satisfies PathRule;
 
 /** Titles are slash paths. Encode unsafe segments without allowing traversal or platform aliases. */
 export function titlePath(title: string): string {
@@ -45,6 +47,6 @@ export function documentPath(folder: string, title: string, id: string, occupied
   for (let index = 0; ; index += 1) {
     candidate = posix.join(folder, `${flat}~${suffix}${index === 0 ? '' : `-${index}`}.md`);
     if (!conflicts(candidate)) return candidate;
-    if (index > occupied.size + 1) throw new Error('no safe destination for a document');
+    if (index > occupied.size + 1) throw new Error(message('sync.no-safe-path'));
   }
 }

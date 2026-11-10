@@ -37,6 +37,15 @@ The scenario harness (building the corpus, running scenarios, reading their
 reports and the credentials of live runs) is described in
 [test/README.md](test/README.md).
 
+## Error messages and codes
+
+A message a run prints when it fails, stops or warns takes its text from
+[src/messages.ts](src/messages.ts) through `message(key, values)`, and a
+code it reports is in a table of [src/codes.ts](src/codes.ts). Add a new
+one there and explain it in
+[docs/troubleshooting.md](docs/troubleshooting.md): the page's test fails
+until the page names every code and gives every message.
+
 ## Live tests with your own Linear workspace
 
 The live tests create and delete their own data. Use a workspace and a

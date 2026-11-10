@@ -47,7 +47,7 @@ step with the bare message, without `error:`.
 
 | Last line | Meaning and what to do |
 | --- | --- |
-| `<command>: stopped before any write (<code>): <detail>` | The setup check, or the sync's state, stopped the run before it wrote anything. The code is one of the [setup check codes](#setup-check) or [sync state codes](#sync-state). |
+| `<command>: stopped before any write (<code>): <detail>` | The setup check, or the sync's state, stopped the run before it wrote anything. The code is one of the [setup check codes](#setup-check) or [sync state codes](#sync-state). When the quickstart has a section that fixes it, the line ends with `. How to fix it: <link>`. |
 | `warning: <command>: partial, will continue (<code>)` | A sync run did part of its work and recorded what it finished. The next scheduled run goes on from there; nothing to do unless it repeats. See [Partial sync runs](#partial-sync-runs). |
 | `<command>: stopped by Linear before any write; run it again once the limit has reset` | Linear's rate limit stopped an initial sync or a check before it wrote anything. Wait for the reset time in the job summary and run it again. |
 | `<command>: stopped before any write (container-cap); reduce additions or check document-cap` | See [`container-cap`](#container-cap). |
@@ -85,7 +85,7 @@ last line and the summary row give its detail, shown here:
 
 | Code | Detail | Meaning | What to do |
 | --- | --- | --- | --- |
-| `linear-credential-failed` | `the Linear token lacks the scope <scopes>`, or Linear's refusal of the token request | Linear refused the app's client ID or secret, or the token lacks a scope. | Check the `MDBISYNC_LINEAR_CLIENT_ID` and `MDBISYNC_LINEAR_CLIENT_SECRET` secrets, and that the Linear app has client credentials with read and write. |
+| `linear-credential-failed` | `the Linear token lacks the scope <scopes>`, `Linear refused the OAuth app client credentials`, `Linear refused the token while reading teams`, or Linear's refusal of the token request | Linear refused the app's client ID or secret, or the token lacks a scope. | Check the `MDBISYNC_LINEAR_CLIENT_ID` and `MDBISYNC_LINEAR_CLIENT_SECRET` secrets, and that the Linear app has client credentials with read and write. |
 | `github-credential-failed` | `the GitHub token was refused (HTTP 401)`, `the GitHub token cannot see the repository (HTTP <status>)` | The GitHub token cannot read the repository. | Check the GitHub App's installation on this repository and the `MDBISYNC_APP_CLIENT_ID` variable and `MDBISYNC_APP_PRIVATE_KEY` secret. |
 | `missing-permission` | `the GitHub token lacks <permissions>`, perhaps with `(<permissions> not checked without it)` | The GitHub token lacks the permissions named. | Give the GitHub App contents, pull requests and workflows write, and checks and commit statuses read, then accept the new permissions on the installation. |
 | `merge-commits-required` | `merge commits are not allowed in the repository settings`, `GitHub did not show whether merge commits are allowed` | The repository does not allow merge commits, or GitHub did not say. | Turn on **Allow merge commits** in the repository settings. |

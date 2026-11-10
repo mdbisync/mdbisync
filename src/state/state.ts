@@ -8,6 +8,7 @@ import { type StateConfig, STORES, type Store, branchRef, localRef, stateRef } f
 import { type Git, GitError, type Oid, mapLimit } from './git.ts';
 import { type LfsPointer, type LfsReadResult, lfsReader, parseLfsPointer } from './lfs.ts';
 import { type CommitIdentity, type TreeEntry, commitTree, listTree, readBlobs } from './objects.ts';
+import { message } from '../messages.ts';
 
 /** The state refs as last fetched from the remote; null when a ref does not exist. */
 export type StateSnapshot = Record<Store, Oid | null>;
@@ -30,7 +31,7 @@ export async function fetchState(git: Git, config: StateConfig): Promise<Fetched
   const sync = branchRef(config.syncBranch);
   const advertised = await lsRemote(git, config.remote, [tracked, sync, ...STORES.map((store) => stateRef(config, store))]);
   if (!advertised.has(tracked)) {
-    throw new Error(`the tracked branch "${config.trackedBranch}" does not exist on remote "${config.remote}"`);
+    throw new Error(message('state.tracked-missing', { branch: config.trackedBranch, remote: config.remote }));
   }
 
   // Fetch only refs that exist (a missing one would fail the fetch), and
@@ -128,7 +129,7 @@ function logMoves(git: Git, config: StateConfig, refs: readonly string[]): void 
 
 export class NotFastForwardError extends Error {
   constructor(ref: string) {
-    super(`refusing to move ${ref} to a commit that does not descend from its current value`);
+    super(message('state.not-fast-forward', { ref }));
     this.name = 'NotFastForwardError';
   }
 }
@@ -142,7 +143,7 @@ export class NotFastForwardError extends Error {
  */
 export async function pushAtomic(git: Git, config: StateConfig, updates: readonly RefUpdate[]): Promise<PushResult> {
   if (new Set(updates.map((update) => update.ref)).size !== updates.length) {
-    throw new Error('a push names the same ref twice');
+    throw new Error(message('state.same-ref-twice'));
   }
   const changing = updates.filter((update) => update.next !== update.expected);
   if (changing.length === 0) return { ok: true, updated: [] };
@@ -272,7 +273,7 @@ export async function readIds(git: Git, commit: Oid | null): Promise<IdMap> {
   const data = await readJsonFile(git, commit, IDS_FILE);
   const map: IdMap = new Map();
   for (const [path, value] of Object.entries(data)) {
-    if (!isIdEntry(value)) throw new Error(`${IDS_FILE} has an invalid entry for a path`);
+    if (!isIdEntry(value)) throw new Error(message('state.invalid-path-entry', { file: IDS_FILE }));
     map.set(path, value.saved === undefined ? { id: value.id } : { id: value.id, saved: value.saved });
   }
   return map;
@@ -282,7 +283,7 @@ export async function readUploads(git: Git, commit: Oid | null): Promise<UploadM
   const data = await readJsonFile(git, commit, UPLOADS_FILE);
   const map: UploadMap = new Map();
   for (const [hash, url] of Object.entries(data)) {
-    if (!/^[0-9a-f]{64}$/.test(hash) || typeof url !== 'string') throw new Error(`${UPLOADS_FILE} has an invalid entry`);
+    if (!/^[0-9a-f]{64}$/.test(hash) || typeof url !== 'string') throw new Error(message('state.invalid-entry', { file: UPLOADS_FILE }));
     map.set(hash, url);
   }
   return map;
@@ -386,7 +387,7 @@ async function readStringMap(git: Git, commit: Oid | null, file: string): Promis
   const data = await readJsonFile(git, commit, file);
   const map = new Map<string, string>();
   for (const [key, value] of Object.entries(data)) {
-    if (typeof value !== 'string' || value === '') throw new Error(`${file} has an invalid entry`);
+    if (typeof value !== 'string' || value === '') throw new Error(message('state.invalid-entry', { file }));
     map.set(key, value);
   }
   return map;
@@ -407,7 +408,7 @@ export async function readWrittenHashes(git: Git, commit: Oid | null): Promise<M
   const data = await readJsonFile(git, commit, WRITTEN_FILE);
   const map = new Map<string, string>();
   for (const [path, hash] of Object.entries(data)) {
-    if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) throw new Error(`${WRITTEN_FILE} has an invalid entry`);
+    if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) throw new Error(message('state.invalid-entry', { file: WRITTEN_FILE }));
     map.set(path, hash);
   }
   return map;
@@ -490,15 +491,15 @@ async function readJsonFile(git: Git, commit: Oid | null, file: string): Promise
   // A state commit without its file is damaged state, not an empty map:
   // reading it as empty would make the sync forget every id.
   const read = await git.run(['cat-file', 'blob', `${commit}:${file}`], { okCodes: [0, 128] });
-  if (read.code !== 0) throw new Error(`${file} is missing in state commit ${commit}`);
+  if (read.code !== 0) throw new Error(message('state.file-missing', { file, commit }));
   const blob = read.stdout;
   let data: unknown;
   try {
     data = JSON.parse(blob.toString('utf8'));
   } catch {
-    throw new Error(`${file} in ${commit} is not valid JSON`);
+    throw new Error(message('state.invalid-json', { file, commit }));
   }
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new Error(`${file} in ${commit} is not a JSON object`);
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new Error(message('state.not-object', { file, commit }));
   return data as Record<string, unknown>;
 }
 

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { detectConflicts } from '../merge/index.ts';
 import type { LinearClient, LinearDocument } from '../linear/index.ts';
 import type { IdEntry } from '../state/index.ts';
+import { message } from '../messages.ts';
 
 export const MARKS = {
   conflict: { icon: 'Alert', color: '#F2994A' },
@@ -57,8 +58,8 @@ function blockedComment(findings: readonly SecurityFinding[]): string {
  */
 export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkResult> {
   const { document, linear, persistEntry } = options;
-  if (document.id !== options.entry.id) throw new Error('Document and id entry do not match');
-  if (document.content === undefined) throw new Error('Status reconciliation requires document content');
+  if (document.id !== options.entry.id) throw new Error(message('sync.entry-mismatch'));
+  if (document.content === undefined) throw new Error(message('sync.needs-content'));
   let entry: IdEntry = structuredClone(options.entry);
   const blocked = options.blocked ?? [];
   const state: MarkState = blocked.length > 0 ? 'blocked' : detectConflicts(document.content ?? '').length > 0 ? 'conflict' : 'clear';
@@ -77,7 +78,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
     return result;
   }
 
-  if (!document.documentContentId) throw new Error('A marked document requires a comment target');
+  if (!document.documentContentId) throw new Error(message('sync.needs-comment-target'));
   const body = state === 'conflict' ? CONFLICT_COMMENT : blockedComment(blocked);
   const bodyHash = createHash('sha256').update(body).digest('hex');
   const saved = entry.saved ?? { icon: document.icon, color: document.color };
