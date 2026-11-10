@@ -57,3 +57,18 @@ test('the hooks step accepts a release directory symlink without trusting stage 
     }), { status: 0, output: 'canonical hooks\n' });
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+// Shell syntax in a checkout path must stay a literal Node argument.
+test('the hooks step treats shell metacharacters in its release path literally', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'staged-command-'));
+  try {
+    const release = join(directory, "release ' \" ; $(touch executed) #");
+    await mkdir(join(release, 'dist'), { recursive: true });
+    const script = join(await realpath(release), 'dist/action-hooks.js');
+    await writeFile(script, "console.log('literal path hooks');\n");
+    assert.deepEqual(await runHooksStep(release, directory, {
+      MDBISYNC_NODE: process.execPath, MDBISYNC_HOOKS: script,
+    }), { status: 0, output: 'literal path hooks\n' });
+    await assert.rejects(readFile(join(directory, 'executed')), { code: 'ENOENT' });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

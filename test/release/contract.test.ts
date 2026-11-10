@@ -39,7 +39,8 @@ test('real bundles run from the isolated release tree, install as an offline Nod
   const temporary = await mkdtemp(join(tmpdir(), 'release-contract-'));
   try {
     const source = join(temporary, 'source');
-    const output = join(temporary, 'release');
+    // Exercise action main, hooks and post with a literal shell-looking path.
+    const output = join(temporary, "release ' \" ; $(touch executed) #");
     await mkdir(source);
     for (const file of ['src', 'tools', 'package.json', 'package-lock.json', '.npmrc', 'action.yml', '.pre-commit-hooks.yaml', 'LICENSE', 'README.md', 'third-party-licenses.json']) {
       await cp(join(root, file), join(source, file), { recursive: true });
@@ -53,6 +54,7 @@ test('real bundles run from the isolated release tree, install as an offline Nod
     await stageRelease({ source, output, sourceSha: 'a'.repeat(40), version, action, hooks });
     await smokeRelease(output);
     await smokeStagedFlow(output);
+    await assert.rejects(readFile(join(temporary, 'executed')), { code: 'ENOENT' });
     assert.match(await readFile(join(output, 'dist/THIRD_PARTY_NOTICES.txt'), 'utf8'), /@actions\/core [0-9.]+\nLicense: MIT/);
     assert.equal(await readFile(join(source, 'package.json'), 'utf8'), await readFile(join(root, 'package.json'), 'utf8'));
     await assert.rejects(readFile(join(output, 'package-lock.json')), /ENOENT/);
