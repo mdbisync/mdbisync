@@ -28,6 +28,7 @@ import { startFaultProxy, withoutDocuments } from './fault-proxy.ts';
 import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, installHooks, PERSON, personCommit, Sandbox } from './sandbox.ts';
 import { engineEntry, REPO_ROOT, type EngineResult } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
+import { readHookConfig } from '../../../src/setup/hooks.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { waitForCheck } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
@@ -1291,8 +1292,29 @@ describe('git executors', () => {
     const synced = await remoteFile(path, ctx.names.syncBranch);
     assert.ok(synced.includes(ctx.observations.get('ciFix.unstable') as string));
     assert.ok(ctx.observations.has('syncBranch.personCommit'));
+    const configured = readHookConfig(await remoteFile('.pre-commit-config.yaml', ctx.names.syncBranch));
+    assert.ok(configured.hooks.some((hook) => hook.id === 'aligned-table'));
+    assert.ok(configured.hooks.some((hook) => hook.id === 'stable-fix'));
+    const fixes = await remoteGit.text(['log', '--format=%(trailers:key=Pre-commit-fix,valueonly)', `refs/heads/${ctx.names.syncBranch}`]);
+    assert.match(fixes, /aligned-table/);
+    assert.match(fixes, /stable-fix/);
     // Never pushed to the tracked branch.
     assert.ok(!(await remoteFile(path)).includes(ctx.observations.get('ciFix.stable') as string));
+  });
+
+  it('L2-33 checks the hook name in both the engine report and the rendered summary', async () => {
+    const { ctx } = await fakeRun();
+    const result = { report: { sync: { leftOut: [{ path: 'notes.md', hooks: ['aligned-table'] }] } }, summary: 'CI fixes not written: aligned-table' } as unknown as EngineResult;
+    ctx.engine.results.push(result);
+    assert.deepEqual(await resolveSubject(ctx, 'summary.unstableHookNamed'), { known: true, value: true });
+    result.summary = 'No hook named';
+    assert.deepEqual(await resolveSubject(ctx, 'summary.unstableHookNamed'), { known: true, value: false });
+    result.summary = 'aligned-table';
+    result.report = { sync: { leftOut: [] } };
+    assert.deepEqual(await resolveSubject(ctx, 'summary.unstableHookNamed'), { known: true, value: false });
+    const scenario = scenarios.find((item) => item.id === 'L2-33')!;
+    const targets = scenario.steps.filter((step) => step.kind === 'git' && step.action === 'ci-fix').map((step) => step.args.target);
+    assert.deepEqual(targets, ['first-document', 'other-document']);
   });
 
   it('drop the format hook until fault.clear puts it back', async () => {

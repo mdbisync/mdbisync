@@ -35,7 +35,7 @@ import { burst, realClock, soak, type LoadDriver } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
-import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
+import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG, readHookConfig } from '../../../src/setup/hooks.ts';
 import { validateSha } from '../../../src/release/package.ts';
 import { parse } from 'yaml';
 import { HOOK_REPOSITORY } from '../../corpus/tree.ts';
@@ -1012,7 +1012,14 @@ const GIT: Record<string, Executor> = {
         : `\nChecked by the format job, ref ${token}.\n`;
       commits.push(await commitToSyncBranch(ctx, async (git) => {
         writeFileSync(join(git.dir, path), `${readFileSync(join(git.dir, path), 'utf8').replace(/\n*$/, '\n')}${addition}`);
-      }, 'Apply the format fixes'));
+        // The simulated fixing hook must be configured, as in a real CI job.
+        const config = join(git.dir, PRE_COMMIT_CONFIG);
+        const text = readFileSync(config, 'utf8');
+        const id = fix === 'linear-would-undo' ? 'aligned-table' : 'stable-fix';
+        if (!readHookConfig(text).hooks.some((hook) => hook.id === id)) {
+          writeFileSync(config, `${text}\n  - repo: local\n    hooks:\n      - id: ${id}\n        name: Format check\n        language: system\n        entry: 'true'\n`);
+        }
+      }, `Apply the format fixes\n\nPre-commit-fix: ${fix === 'linear-would-undo' ? 'aligned-table' : 'stable-fix'}`));
       ctx.observations.set(fix === 'linear-would-undo' ? 'ciFix.unstable' : 'ciFix.stable', token);
     }
     ctx.observations.set('ciFix.commits', commits);

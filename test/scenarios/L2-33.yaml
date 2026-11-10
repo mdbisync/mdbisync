@@ -29,9 +29,17 @@
       "action": "ci-fix",
       "args": {
         "fixes": [
-          "stable-fix",
-          "linear-would-undo"
-        ]
+          "stable-fix"
+        ],
+        "target": "first-document"
+      }
+    },
+    {
+      "kind": "git",
+      "action": "ci-fix",
+      "args": {
+        "fixes": ["linear-would-undo"],
+        "target": "other-document"
       }
     },
     {

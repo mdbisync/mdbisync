@@ -258,6 +258,13 @@ files left out. Tables follow, each only when it has rows:
 | Renamed or moved | Documents renamed or moved, from and to. |
 | Moved to trash | Documents whose files were removed in git. |
 | Left out | Files that stay in git only, with their rules ([files left out](troubleshooting.md#files-left-out)). |
+| CI fixes not written | Left-out files changed by a CI fixing commit, with its hook ids and the rules that prevent writing them to Linear. |
+
+The current pre-commit workflow records modifying hook ids in `Pre-commit-fix`
+commit trailers. The summary lists the configured hooks on the latest commit
+that changed each left-out file. A commit can contain fixes from several hooks;
+the table lists those hooks together. Older workflows without these trailers
+still deliver supported fixes and report left-out rules, without hook names.
 
 When Linear stopped the run part way, the section says why, with Linear's
 rate-limit headers, and how many items are not written yet. A **Container
