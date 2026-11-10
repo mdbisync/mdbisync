@@ -54,8 +54,7 @@
       "action": "checks",
       "args": {
         "status": "failed",
-        "name": "format",
-        "target": "other-document"
+        "name": "format"
       }
     },
     {
