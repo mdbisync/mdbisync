@@ -601,6 +601,8 @@ known_constructs:
     class: fixable
   - construct: audio-in-item
     class: fixable
+  - construct: audio-in-item-relative
+    class: unchanged
 assets:
   - file: "assets/pixel.png"
     kind: png
@@ -2399,16 +2401,16 @@ fixtures:
     basis: known
     canary: kx-c508f251
     corpus: false
-    note: "a bullet item holding only an uploaded MP3 link; form recorded by a full-slice sync readback, not yet by the probe"
+    note: "a bullet item holding only an uploaded MP3 link; the probe records a plain link in Markdown and Yjs"
   - file: "list-items/audio-not-uploaded.md"
     group: list-items
     construct: audio-in-item-relative
     class: unchanged
-    basis: assumed
+    basis: known
     canary: kx-f7252e1b
     corpus: false
     missing_target: true
-    note: "a link Linear cannot resolve stays a link, as for other files"
+    note: "the probe confirms a link Linear cannot resolve stays a link in Markdown and Yjs"
   - file: "list-items/file-not-uploaded.md"
     group: list-items
     construct: attachment-in-item-relative
