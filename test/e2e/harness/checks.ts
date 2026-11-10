@@ -14,6 +14,7 @@ import { readIds, readUploads, resolveStateConfig, stateRef, type Git, type IdMa
 import type { RunContext } from './context.ts';
 import { annotatedFolders, annotationPath, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
+import { ownedDocuments } from './ownership.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
 import { encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
@@ -483,11 +484,15 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
 
   const allDocuments: LinearDocument[] = [];
   for (const project of world.projects.values()) allDocuments.push(...(await world.app.listDocuments({ projectId: project.id }, { withContent: true })));
+  // A team zone is shared with other runs: a document there is this run's when its title carries the run's
+  // prefix or the run's ownership record holds its id. Annotation READMEs keep their plain title (README),
+  // so only the record shows they are the run's, and a second one there is seen as a duplicate.
+  const owned = ownedDocuments(ctx.owned);
   for (const team of world.tree.teamZones.keys()) {
     const teamId = world.teams.get(team)?.id;
     if (teamId === undefined) continue;
     const documents = await world.app.listDocuments({ teamId }, { withContent: true });
-    allDocuments.push(...documents.filter((document) => document.projectId === null && document.title.startsWith(ctx.names.teamZonePrefix)));
+    allDocuments.push(...documents.filter((document) => document.projectId === null && (document.title.startsWith(ctx.names.teamZonePrefix) || owned.has(document.id))));
   }
   const documents = new Map(allDocuments.map((document) => [document.id, document]));
   const missing = [...ids.values()].map((entry) => entry.id).filter((id) => !documents.has(id));

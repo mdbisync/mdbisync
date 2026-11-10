@@ -32,6 +32,7 @@ import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { burst, realClock, soak, type LoadDriver } from './load.ts';
+import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
 import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
@@ -112,6 +113,8 @@ function settleResult(ctx: RunContext, result: EngineResult): void {
 
 /** Starts the engine and waits at `checkpoint`; false (after recording the result) when the engine ended first. */
 async function startPaused(ctx: RunContext, call: EngineCall, checkpoint: Checkpoint): Promise<ReturnType<typeof startEngine>> {
+  // The documents the run owns before the engine starts: a kill at the checkpoint takes the ones the engine created from the rest.
+  ctx.observations.set('pause.ownedBefore', new Set(ownedDocuments(ctx.owned).keys()));
   const running = startEngine(call);
   ctx.engine.pending = running;
   const reached = await ctx.checkpoints.waitReached(checkpoint, { timeoutMs: CHECKPOINT_TIMEOUT_MS, exited: running.done });
@@ -1470,8 +1473,11 @@ const OTHER: Record<string, Executor> = {
   'kill.engine': async (ctx, args) => {
     const pending = ctx.engine.pending;
     if (pending === undefined || !isCheckpoint(args.checkpoint)) throw new Error('kill needs a paused asynchronous run');
+    // The documents Linear confirmed creating for the paused engine, by their exact ids from the run's ownership
+    // record (the proxy writes each answer there before the engine sees it), read before the kill.
+    const before = (ctx.observations.get('pause.ownedBefore') as Set<string> | undefined) ?? new Set<string>();
+    ctx.observations.set('kill.created', [...ownedDocuments(ctx.owned)].filter(([id, confirmed]) => confirmed && !before.has(id)).map(([id]) => id));
     pending.kill();
-    ctx.observations.set('kill.at', Date.now());
     delete ctx.engine.pending;
     ctx.checkpoints.resume(args.checkpoint as Checkpoint);
     delete ctx.engine.pausedAt;

@@ -781,11 +781,20 @@ export const SUBJECTS: Record<string, Compute> = {
   'documents.linearOnlyState': async (env) => stateOf(await documentById(env.ctx, observed(env.ctx, 'setup.linearOnlyDocument') as string)),
   'documents.linearOnlyRestorable': async (env) => restorable(env.ctx, observed(env.ctx, 'setup.linearOnlyDocument') as string),
   'documents.adoptedUnmappedTitle': async (env) => {
-    const killedAt = observed(env.ctx, 'kill.at') as number;
+    // The documents the killed run created, by the exact ids Linear confirmed before the kill: the resumed
+    // run keeps each one as its file's document, and the run holds no second live document with its title
+    // in its place. The view's documents include the team-zone ones the run's ownership record holds, so an
+    // annotation README's duplicate counts although its title has no run prefix.
+    const created = observed(env.ctx, 'kill.created') as string[];
     const view = await env.view();
     const mapped = new Set([...view.ids.values()].map((entry) => entry.id));
-    const early = view.allDocuments.filter((document) => !document.trashed && Date.parse(document.createdAt) <= killedAt);
-    return early.length > 0 && early.every((document) => mapped.has(document.id));
+    const live = (document: LinearDocument | undefined): document is LinearDocument => document !== undefined && !document.trashed && document.archivedAt === null;
+    const placeKey = (document: LinearDocument) => `${document.projectId ?? document.teamId}:${document.title}`;
+    return created.length > 0 && created.every((id) => {
+      const document = view.documents.get(id);
+      if (!live(document) || !mapped.has(id)) return false;
+      return !view.allDocuments.some((other) => other.id !== id && live(other) && placeKey(other) === placeKey(document));
+    });
   },
   'documents.newLocation': async (env) => {
     const view = await env.view();

@@ -190,6 +190,11 @@ export function readOwnership(stateDir: string, runId: string): Ownership | null
   return owned;
 }
 
+/** The documents the run's record holds, with whether Linear confirmed each create; empty when it has no record. */
+export function ownedDocuments(ledger: Pick<OwnershipLedger, 'stateDir' | 'runId'>): Map<string, boolean> {
+  return readOwnership(ledger.stateDir, ledger.runId)?.documents ?? new Map();
+}
+
 export function forgetOwnership(stateDir: string, runId: string): void {
   rmSync(ledgerFile(stateDir, runId), { force: true });
 }
