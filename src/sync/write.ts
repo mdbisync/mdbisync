@@ -937,7 +937,12 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         if (derived && linearFiles.get(path) !== resultFiles.get(path)) keepTip(path);
       }
     }
-    for (const entry of merge.held) keepTip(entry.from);
+    // A held rename stays where the tip has it at both paths: recording the new path's file would make it an
+    // addition of Linear's side, and the fix of that file a conflict with it in the next run.
+    for (const entry of merge.held) {
+      keepTip(entry.from);
+      keepTip(entry.to);
+    }
     const tipBlobs = await readBlobs(git, [...fromTip].flatMap((path) => (linearFiles.has(path) ? [linearFiles.get(path) as Oid] : [])));
     for (const path of fromTip) {
       const oid = linearFiles.get(path);
