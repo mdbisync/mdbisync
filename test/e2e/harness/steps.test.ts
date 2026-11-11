@@ -20,7 +20,7 @@ import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
 import { burst, burstDocuments, burstEditCounts, editCapacity, soak, soakEditCounts, type Actor, type SoakDriver } from './load.ts';
 import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
-import { blockedBySetupStop, EnvBlockedError, ProductError } from './results.ts';
+import { blockedBySetupStop, EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
 import { bodyOf, compare, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, probedFixtures, readFixture } from '../../probe/bank.ts';
@@ -1215,6 +1215,7 @@ describe('marker-driven checks', () => {
 
   it("waits for the tracked tip's check after a git step, but only once a check fault is in play", async () => {
     const { ctx, remoteGit } = await fakeRun();
+    ctx.checkPollMs = 0;
     const reads: string[] = [];
     ctx.live!.rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async (input: string | URL | Request) => {
       const sha = /\/commits\/([0-9a-f]+)\/check-runs/.exec(String(input))?.[1];
@@ -1225,13 +1226,30 @@ describe('marker-driven checks', () => {
       return Response.json({ check_runs: [{ id: 1, name: 'format', app: { slug: 'github-actions' }, status: done ? 'completed' : 'queued', conclusion: done ? 'success' : null }] });
     }) as typeof fetch);
     const tip = async () => (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
+    // A git step that commits these changes to the tracked branch, as a person does.
+    const commitStep = (changes: Map<string, string | null>) => async (step: RunContext) => {
+      const git = await step.person();
+      await git.run(['pull', '--quiet', '--no-rebase', '--no-edit', 'origin', step.names.trackedBranch]);
+      await personCommit(git, step.names, changes, 'Update the tree', { verify: false });
+    };
     await runStep(ctx, { kind: 'git', action: 'edit', args: { target: 'eng/platform/plan.md' } });
     assert.deepEqual(reads, [], 'without a check fault the step does not wait');
     ctx.observations.set('fault.checks', { name: 'format', state: 'failed', sha: 'f'.repeat(40) });
     await runStep(ctx, { kind: 'git', action: 'edit', args: { target: 'eng/platform/notes.md' } });
     const edited = await tip();
     assert.deepEqual(reads, [edited, edited]);
-    assert.deepEqual(ctx.observations.get('trackedTip.check'), { sha: edited, state: 'passed' });
+    try {
+      STEP_ACTIONS['git.test-idle'] = async () => {};
+      await runStep(ctx, { kind: 'git', action: 'test-idle', args: {} });
+      assert.deepEqual(reads, [edited, edited], 'a step that leaves the tracked tip in place does not wait');
+      STEP_ACTIONS['git.test-pending'] = commitStep(new Map([[CHECK_MARKER, 'pending\n']]));
+      await assert.rejects(runStep(ctx, { kind: 'git', action: 'test-pending', args: {} }), HarnessGapError);
+      STEP_ACTIONS['git.test-no-workflow'] = commitStep(new Map([[CHECK_WORKFLOW_PATH, null]]));
+      await runStep(ctx, { kind: 'git', action: 'test-no-workflow', args: {} });
+      assert.deepEqual(reads, [edited, edited], 'a tree without the marker workflow starts no check to wait for');
+    } finally {
+      for (const action of ['git.test-idle', 'git.test-pending', 'git.test-no-workflow']) delete STEP_ACTIONS[action];
+    }
   });
 
   it("takes a run's writes from its report, so L1R-03's expected-zero total fails on the first sync's writes", async () => {

@@ -28,22 +28,28 @@ async function readCheck(rest: SandboxRest, sha: string): Promise<CheckReading> 
   return { check, actual };
 }
 
-/** Wait for this workflow's check on this exact head, never an unrelated check. */
-export async function waitForCheck(
-  rest: SandboxRest, sha: string, state: CheckState,
-  options: { timeoutMs?: number; pollMs?: number; signal?: AbortSignal } = {},
-): Promise<void> {
-  const deadline = Date.now() + (options.timeoutMs ?? 5 * 60_000);
+type WaitOptions = { timeoutMs?: number; pollMs?: number | undefined; signal?: AbortSignal };
+
+/** The default bound of every wait for a marker check. */
+export const CHECK_WAIT_MS = 5 * 60_000;
+
+/** Polls the check until `done` accepts its state; at the deadline, `timedOut` names the error. */
+async function pollCheck(rest: SandboxRest, sha: string, done: (actual: string) => boolean, timedOut: (reading: CheckReading) => Error, options: WaitOptions): Promise<string> {
+  const deadline = Date.now() + (options.timeoutMs ?? CHECK_WAIT_MS);
   for (;;) {
     options.signal?.throwIfAborted();
-    const { check, actual } = await readCheck(rest, sha);
-    if (actual === state) return;
-    if (Date.now() >= deadline) {
-      if (check === undefined) throw new ProductError(`no ${CHECK_NAME} check appeared on the marker commit`);
-      throw new EnvBlockedError(`the ${CHECK_NAME} check did not reach ${state} on the marker commit (last state: ${actual})`);
-    }
+    const reading = await readCheck(rest, sha);
+    if (done(reading.actual)) return reading.actual;
+    if (Date.now() >= deadline) throw timedOut(reading);
     await sleep(options.pollMs ?? 2_000, undefined, { signal: options.signal });
   }
+}
+
+/** Wait for this workflow's check on this exact head, never an unrelated check. */
+export async function waitForCheck(rest: SandboxRest, sha: string, state: CheckState, options: WaitOptions = {}): Promise<void> {
+  await pollCheck(rest, sha, (actual) => actual === state, ({ check, actual }) => check === undefined
+    ? new ProductError(`no ${CHECK_NAME} check appeared on the marker commit`)
+    : new EnvBlockedError(`the ${CHECK_NAME} check did not reach ${state} on the marker commit (last state: ${actual})`), options);
 }
 
 /**
@@ -52,19 +58,10 @@ export async function waitForCheck(
  * check that still runs on the tracked tip as a reason to wait before it
  * suspends (the red-main rule), so a scenario step must not race it.
  */
-export async function waitForCheckCompleted(
-  rest: SandboxRest, sha: string,
-  options: { timeoutMs?: number; pollMs?: number; signal?: AbortSignal } = {},
-): Promise<string> {
-  const deadline = Date.now() + (options.timeoutMs ?? 5 * 60_000);
-  for (;;) {
-    options.signal?.throwIfAborted();
-    const { actual } = await readCheck(rest, sha);
-    if (actual !== 'absent' && actual !== 'pending') return actual;
-    // The push trigger and the runner belong to the sandbox, not to the product.
-    if (Date.now() >= deadline) throw new EnvBlockedError(`the ${CHECK_NAME} check on the tracked branch's new tip did not complete (last state: ${actual})`);
-    await sleep(options.pollMs ?? 2_000, undefined, { signal: options.signal });
-  }
+export async function waitForCheckCompleted(rest: SandboxRest, sha: string, options: WaitOptions = {}): Promise<string> {
+  // The push trigger and the runner belong to the sandbox, not to the product.
+  return pollCheck(rest, sha, (actual) => actual !== 'absent' && actual !== 'pending',
+    ({ actual }) => new EnvBlockedError(`the ${CHECK_NAME} check on the tracked branch's new tip did not complete (last state: ${actual})`), options);
 }
 
 export async function faultChecks(ctx: RunContext, args: Record<string, unknown>): Promise<void> {
@@ -117,7 +114,7 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
     await world.rest.openPullRequest(branch, ctx.names.trackedBranch, 'Update documents', 'Review the latest document changes.');
   }
   ctx.log(`waiting up to 5 minutes for ${CHECK_NAME} to reach ${state}`);
-  await waitForCheck(world.rest, sha, state, { signal: ctx.signal });
+  await waitForCheck(world.rest, sha, state, { signal: ctx.signal, pollMs: ctx.checkPollMs });
   ctx.observations.set('fault.checks', { name: CHECK_NAME, state, sha });
 }
 
@@ -139,7 +136,7 @@ export async function rerunCheckAsPerson(ctx: RunContext, person: SandboxRest): 
   await git.run(['fetch', '--quiet', 'origin', `refs/heads/${branch}`]);
   const sha = (await git.text(['rev-parse', 'FETCH_HEAD'])).trim();
   ctx.log(`waiting up to 5 minutes for the suspended head's first failed check`);
-  await waitForCheck(world.rest, sha, 'failed', { signal: ctx.signal });
+  await waitForCheck(world.rest, sha, 'failed', { signal: ctx.signal, pollMs: ctx.checkPollMs });
   // Workflow reads need Actions permission too: keep them on the person's
   // credential, and allow the workflow to finish after its failed check job.
   const deadline = Date.now() + 5 * 60_000;
@@ -156,7 +153,7 @@ export async function rerunCheckAsPerson(ctx: RunContext, person: SandboxRest): 
   }
   await person.request('POST', `/actions/runs/${run.id}/rerun-failed-jobs`);
   ctx.log(`waiting up to 5 minutes for the person-rerun ${CHECK_NAME} check`);
-  await waitForCheck(world.rest, sha, 'passed', { signal: ctx.signal });
+  await waitForCheck(world.rest, sha, 'passed', { signal: ctx.signal, pollMs: ctx.checkPollMs });
   ctx.observations.set('checks.personReruns', Number(ctx.observations.get('checks.personReruns') ?? 0) + 1);
 }
 

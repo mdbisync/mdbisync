@@ -133,7 +133,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         },
         proxy: null, owned: new OwnershipLedger(join(fixture.root, 'state'), names.runId), checkpoints: new CheckpointControl(join(fixture.root, 'hooks')),
         engine: { results: [], setupRuns: 0, env: {}, restores: [] }, edits: [], ownCommits: [], observations: new Map(), sequence: 0, uiSteps: 0,
-        log: (message: string) => t.diagnostic(message), signal: t.signal, person: async () => person, personHooks: async () => {}, engineClone: async () => engine.dir,
+        log: (message: string) => t.diagnostic(message), signal: t.signal, checkPollMs: 10, person: async () => person, personHooks: async () => {}, engineClone: async () => engine.dir,
       } as unknown as RunContext;
       const sync = async (command: 'sync' | 'initial-sync' = 'sync', args: Record<string, unknown> = {}) => {
         const reportFile = join(fixture.root, 'report.json');

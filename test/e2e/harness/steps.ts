@@ -25,8 +25,8 @@ import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
 import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
-import { faultChecks, rerunSuspendedCheck, ageCheck, waitForCheckCompleted } from './check-fault.ts';
-import { CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { faultChecks, rerunSuspendedCheck, ageCheck, waitForCheckCompleted, CHECK_WAIT_MS } from './check-fault.ts';
+import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
@@ -1754,9 +1754,11 @@ async function waitForTrackedTipCheck(ctx: RunContext, before: string): Promise<
   const git = await ctx.person();
   const workflow = await git.run(['cat-file', '-e', `${tip}:${CHECK_WORKFLOW_PATH}`], { okCodes: [0, 128] });
   if (workflow.code !== 0) return;
-  ctx.log(`waiting up to 5 minutes for ${CHECK_NAME} to complete on the tracked branch's new tip`);
-  const result = await waitForCheckCompleted(live(ctx).rest, tip, { signal: ctx.signal });
-  ctx.observations.set('trackedTip.check', { sha: tip, state: result });
+  // A pending marker's job sleeps past every wait: the scenario cannot settle here.
+  const marker = await git.run(['show', `${tip}:${CHECK_MARKER}`], { okCodes: [0, 128] });
+  if (marker.code === 0 && marker.stdout.toString('utf8').trim() === 'pending') throw new HarnessGapError(`a git step moved the tracked branch while its ${CHECK_NAME} marker is pending`);
+  ctx.log(`waiting up to ${CHECK_WAIT_MS / 60_000} minutes for ${CHECK_NAME} to complete on the tracked branch's new tip`);
+  await waitForCheckCompleted(live(ctx).rest, tip, { signal: ctx.signal, pollMs: ctx.checkPollMs, timeoutMs: CHECK_WAIT_MS });
 }
 
 export { snapshotRefs };
