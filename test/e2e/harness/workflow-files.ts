@@ -364,6 +364,26 @@ function readPrerequisiteErrors(): string[] {
   return [...errors];
 }
 
+let knownEngineSteps: ReadonlySet<string> | undefined;
+
+/** The names of the templates' steps that run the engine: those whose `uses` is the action (the stage step and the sync or initial sync step). */
+export function engineSteps(): ReadonlySet<string> {
+  knownEngineSteps ??= readEngineSteps();
+  return knownEngineSteps;
+}
+
+function readEngineSteps(): Set<string> {
+  const names = new Set<string>();
+  for (const file of Object.values(WORKFLOW_FILES)) {
+    if (!existsSync(join(EXAMPLES, file))) continue;
+    const jobs = (parseDocument(readTemplate(file)).toJS() as { jobs?: Record<string, { steps?: Array<{ name?: string; uses?: string }> }> }).jobs ?? {};
+    for (const step of Object.values(jobs).flatMap((job) => job.steps ?? [])) {
+      if (step.name !== undefined && step.uses?.startsWith(`${ACTION_REPOSITORY}@`) === true) names.add(step.name);
+    }
+  }
+  return names;
+}
+
 /** The templates that exist (of `only`, when given), rendered for one run, by their `.github/workflows/` file name. */
 export function runWorkflows(options: RunWorkflowOptions, only?: readonly string[]): Map<string, string> {
   const files = new Map<string, string>();

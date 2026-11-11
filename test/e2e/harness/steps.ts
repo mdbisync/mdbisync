@@ -51,7 +51,7 @@ import {
 import type { WorkflowRun } from './github.ts';
 import { environmentBlocker, hadReplaceableRun, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun } from './workflows.ts';
 import { CANARY_FIXTURE, canaryFacts } from './security-canary.ts';
-import { prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
+import { pinnedActionSha, prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 
 export { documentId, documentPaths, resolveDestination, sibling, targetPath };
 
@@ -93,11 +93,25 @@ export function scheduleTick(env: NodeJS.ProcessEnv = process.env): 'schedule' |
   throw new Error(`${SCHEDULE_TICK_ENV} must be empty or "dispatch", not "${value}"`);
 }
 
-/** The release commit named by `MDBISYNC_TEST_ACTION_SHA`, or undefined for the templates' own pin. */
+/** The release commit named by `MDBISYNC_TEST_ACTION_SHA`, or undefined when it is unset. */
 export function actionShaUnderTest(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const actionSha = env[ACTION_SHA_ENV]?.trim() ?? '';
   if (actionSha !== '' && !/^[0-9a-f]{40}$/.test(actionSha)) throw new EnvBlockedError(`${ACTION_SHA_ENV} must be a full commit SHA`);
   return actionSha === '' ? undefined : actionSha;
+}
+
+/**
+ * The release commit every workflow of actions mode runs. Actions mode tests
+ * the release under test, never the templates' pin: that pin is the release
+ * the templates were last moved to, which can be older than the templates'
+ * own inputs, so a run on it fails for a reason the harness cannot tell from
+ * the product's. Unset blocks the scenario before it installs anything.
+ */
+export function requiredActionSha(env: NodeJS.ProcessEnv = process.env): string {
+  const actionSha = actionShaUnderTest(env);
+  if (actionSha !== undefined) return actionSha;
+  const pin = pinnedActionSha(readTemplate(SYNC_WORKFLOW));
+  throw new EnvBlockedError(`${ACTION_SHA_ENV} is unset: actions mode runs the release under test, never the templates' pin ${pin.slice(0, 7)}; set it to the release commit's full SHA`);
 }
 
 type Executor = (ctx: RunContext, args: Record<string, unknown>) => Promise<void>;
@@ -289,7 +303,7 @@ async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit
  * deployer copies them and rendered for this run (its branches, refs,
  * concurrency group and the sandbox's runner and secret names), committed
  * as a person would. `MDBISYNC_TEST_ACTION_SHA` names the release commit
- * under test; without it the templates' own pin runs. Only the command's
+ * under test; without it the scenario is env-blocked (requiredActionSha). Only the command's
  * workflow and the pull request check go in: a sync workflow in an initial
  * sync scenario would start on the scenario's own pushes, as a deployer is
  * told to avoid. The rendered initial sync starts on those pushes too, but
@@ -301,16 +315,16 @@ async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'):
   const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
   const wanted = [workflowFor(command), WORKFLOW_FILES['pre-commit']].filter((file) => !installed.includes(file));
   if (wanted.length === 0) return;
+  const actionSha = requiredActionSha();
   const git = await ctx.person();
   await pull(git, ctx);
-  const actionSha = actionShaUnderTest();
   const files = runWorkflows({
     trackedBranch: ctx.names.trackedBranch,
     syncBranch: ctx.names.syncBranch,
     refPrefix: ctx.names.refPrefix,
     group: runGroup(ctx.names.runId),
     securityCanary: ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE),
-    ...(actionSha === undefined ? {} : { actionSha }),
+    actionSha,
   }, wanted);
   if (files.size === 0) return;
   mkdirSync(join(git.dir, '.github', 'workflows'), { recursive: true });
@@ -477,7 +491,7 @@ async function requestScheduledRun(ctx: RunContext): Promise<number> {
   const world = live(ctx);
   // Checked before anything is created: a wrong setting must not leave a request behind.
   const byHand = scheduleTick() === 'workflow_dispatch';
-  const wanted = renderScheduler(readTemplate(SYNC_WORKFLOW), actionShaUnderTest());
+  const wanted = renderScheduler(readTemplate(SYNC_WORKFLOW), requiredActionSha());
   const installed = await world.rest.fileText(`.github/workflows/${SCHEDULER_FILE}`);
   if (installed !== wanted) {
     throw new EnvBlockedError(`the sandbox's default branch holds ${installed === undefined ? 'no' : 'another'} ${SCHEDULER_FILE} than the sync template's for the release under test; install it with \`node test/e2e/harness/cli.ts scheduler --install\``);
