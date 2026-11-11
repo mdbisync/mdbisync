@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -16,7 +16,7 @@ import { appInstallationToken, appJwt, SandboxRest } from './github.ts';
 import { registerRun } from './locks.ts';
 import { evidenceSummary, mergeLatest, readLatest, renderRunMarkdown, renderStatusPage, updateStatusPage, type HarnessReport } from './report.ts';
 import { blockedBySetupStop, EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, classify, loadExpectedRed, type ScenarioResult } from './results.ts';
-import { removeRunRefsAndPullRequests, runScenario, runScenarios } from './runner.ts';
+import { finishPersonClone, removeRunRefsAndPullRequests, runScenario, runScenarios } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { SharedAdmission, type StateStore } from './shared-state.ts';
 import { loadScenarios } from './spec.ts';
@@ -107,6 +107,22 @@ describe('results', () => {
 
   it('has an executor for every step action', () => {
     assert.equal(HARNESS_GAPS.size, 0);
+  });
+});
+
+describe('the person clone at the end of a run', () => {
+  it('stays for diagnosis only after a failed run', () => {
+    for (const result of ['fail', 'pass', 'expected-red', 'env-blocked'] as const) {
+      const runDir = fresh('person-end-');
+      mkdirSync(join(runDir, 'person', '.git'), { recursive: true });
+      const lines: string[] = [];
+      finishPersonClone(runDir, result, (line) => void lines.push(line));
+      assert.equal(existsSync(join(runDir, 'person')), result === 'fail', result);
+      assert.equal(lines.some((line) => line.startsWith('kept the person clone for diagnosis')), result === 'fail', result);
+    }
+    // A run that never made the clone has nothing to keep or remove.
+    const empty = fresh('person-end-');
+    finishPersonClone(empty, 'fail', () => assert.fail('nothing to keep'));
   });
 });
 

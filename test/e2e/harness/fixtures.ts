@@ -18,6 +18,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { editBlock, editParagraph, noteSentence, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
+import { pullTracked } from './person-git.ts';
 import { CHECK_MARKER } from '../../corpus/check-workflow.ts';
 import { EnvBlockedError } from './results.ts';
 import { commitAsPerson, documentId, documentPaths, projectFolders, targetPath } from './step-helpers.ts';
@@ -233,7 +234,7 @@ export const STEP_PREPARATION: Record<string, SetupFixture> = {
       const folder = projectFolders(ctx)[0]?.folder;
       if (folder === undefined) throw new EnvBlockedError('the slice has no project folder');
       const git = await ctx.person();
-      await git.run(['pull', '--quiet', '--no-rebase', '--no-edit', 'origin', ctx.names.trackedBranch]);
+      await pullTracked(git, ctx);
       // Documents without relative links, so moving them breaks no link.
       const movable = documentPaths(ctx).filter((path) => !/\]\(\s*(?![a-z][a-z0-9+.-]*:|#)[^)\s]+/i.test(readFileSync(join(git.dir, path), 'utf8')));
       if (movable.length < count) throw new EnvBlockedError(`the slice has ${movable.length} documents without relative links, fewer than the ${count} to move`);

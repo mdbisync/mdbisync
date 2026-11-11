@@ -579,8 +579,10 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
           return;
         } catch (error) {
           // The sync may push to the tracked branch between the pull and the push: try again on top of it.
+          ctx.log(`git edit, try ${attempt + 1}: ${(error as Error).message.split('\n')[0]}`);
           if (attempt >= 3) throw error;
-          await git.run(['reset', '--quiet', '--hard', `origin/${ctx.names.trackedBranch}`], { okCodes: [0, 128] });
+          const reset = await git.run(['reset', '--quiet', '--hard', `origin/${ctx.names.trackedBranch}`], { okCodes: [0, 128] });
+          if (reset.code !== 0) ctx.log(`git edit: could not reset the person clone to origin/${ctx.names.trackedBranch}: ${reset.stderr.trim()}`);
         }
       }
     },
