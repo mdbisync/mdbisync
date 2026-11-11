@@ -53,7 +53,7 @@ import type { PushActivity } from './github.ts';
 import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
-import { documentPaths, MOVE_SOURCE_FOLDER, projectFolders } from './step-helpers.ts';
+import { documentPaths, MOVE_SOURCE_FOLDER, projectFolderOf, projectFolders } from './step-helpers.ts';
 import { UNSAFE_TITLES } from './fixtures.ts';
 
 // --- views of the world ---------------------------------------------------------------
@@ -343,11 +343,8 @@ export function symbolicPath(ctx: RunContext, path: string): string {
  */
 export function movedPath(ctx: RunContext, path: string): string {
   const origin = (ctx.observations.get('target.path') as string | undefined) ?? firstDocument(ctx);
-  const folders = projectFolders(ctx);
-  const source = (ctx.observations.get(MOVE_SOURCE_FOLDER) as string | undefined)
-    ?? folders.find((candidate) => origin.startsWith(`${candidate.folder}/`))?.folder;
-  const folder = folders.find((candidate) => path.startsWith(`${candidate.folder}/`));
-  return source !== undefined && folder?.folder === source ? symbolicPath(ctx, path) : path;
+  const source = (ctx.observations.get(MOVE_SOURCE_FOLDER) as string | undefined) ?? projectFolderOf(ctx, origin);
+  return source !== undefined && projectFolderOf(ctx, path) === source ? symbolicPath(ctx, path) : path;
 }
 
 /** Brings commits into the person's clone; returns the ones it has afterwards. */
