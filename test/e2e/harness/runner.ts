@@ -4,7 +4,7 @@
 
 import { collectCanaryEvidence } from './checks.ts';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts';
 import { Git, readIds } from '../../../src/state/index.ts';
@@ -25,7 +25,9 @@ import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.t
 import { OwnershipLedger, ownedDocuments, type WriteObserver } from './ownership.ts';
 import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import { assertCurrentCorpus } from './corpus-drift.ts';
-import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
+import { CorpusMissingError, hookEnv, installHooks, Sandbox } from './sandbox.ts';
+import { provisionHookNpm } from './hook-npm.ts';
+import { PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep, settleFollowUpRuns } from './steps.ts';
 import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtures.ts';
@@ -690,6 +692,9 @@ export function createRunContext(
       if (engineDir === undefined) {
         await ctx.live.sandbox.clone(names, join(runDir, 'engine'));
         engineDir = join(runDir, 'engine');
+        if (existsSync(join(engineDir, PRE_COMMIT_CONFIG))) {
+          await provisionHookNpm(join(runDir, 'hook-npm'), hookEnv(), { signal: ctx.signal });
+        }
       }
       return engineDir;
     },
@@ -926,7 +931,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     if (cleanupOutcome.ok && !heldForUi && !setupStuck) registration.done();
     rmSync(join(runDir, 'person'), { recursive: true, force: true });
     rmSync(join(runDir, 'engine'), { recursive: true, force: true });
-    if (!heldForUi && !setupStuck) rmSync(join(runDir, 'hook-npm'), { recursive: true, force: true });
+    if (!setupStuck) rmSync(join(runDir, 'hook-npm'), { recursive: true, force: true });
   }
   const outcome = classify(error, deps.expectedRed.has(scenario.id));
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);

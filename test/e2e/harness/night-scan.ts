@@ -17,7 +17,7 @@ export function scanNight(root: string, current?: { directory: string; evidence:
     if (basename(dirname(dir)) === 'runs' && !existsSync(join(dir, 'canary-evidence.json'))) throw new Error('run is missing canary evidence');
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
-      if (entry.isDirectory() && !['engine', 'person', 'scratch', 'hooks', 'node_modules', '.git'].includes(entry.name)) visit(path);
+      if (entry.isDirectory() && !['engine', 'person', 'scratch', 'hooks', 'hook-npm', 'node_modules', '.git'].includes(entry.name)) visit(path);
       else if (entry.isFile() && entry.name === 'canary-pending') throw new Error('canary evidence still being produced');
       else if (entry.isFile() && /(?:\.log|\.stdout|\.stderr)$/.test(entry.name)) logs.push(path);
       else if (entry.isFile() && entry.name === 'canary-evidence.json') {

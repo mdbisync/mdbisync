@@ -18,7 +18,7 @@ import { gitAuthEnv } from './github.ts';
 import { runOfRef, type RunNames } from './isolation.ts';
 import { acquireLock } from './locks.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { hookNpmEnv, provisionHookNpm } from './hook-npm.ts';
+import { hookNpmEnv, provisionHookNpm, repositoryNpmDir } from './hook-npm.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -194,7 +194,7 @@ export class HookRejectedError extends ProductError {
  *
  * With npmDir, a compatible npm is checked or provisioned in the run first.
  * The installation sees only `hookEnv(options.from)` plus that npm: the hooks' own
- * install code run here, and they never get the harness's secrets. An npm
+ * install code runs here, and they never get the harness's secrets. An npm
  * that refuses pre-commit's Git package (older than 11.16.0), a network,
  * registry or host failure, a missing pre-commit or a timeout blocks the run;
  * any other npm failure is the released hook's own defect.
@@ -218,6 +218,8 @@ export async function installHooks(git: Git, options: { from?: NodeJS.ProcessEnv
       throw new EnvBlockedError(`the repository's pre-commit configuration pins a hook to "${String(entry.rev)}", not a released commit SHA`);
     }
   }
+  const started = Date.now();
+  const timeoutMs = options.timeoutMs ?? 15 * 60_000;
   const env = options.npmDir === undefined ? hookEnv(options.from) : await provisionHookNpm(options.npmDir, hookEnv(options.from), {
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
@@ -228,7 +230,7 @@ export async function installHooks(git: Git, options: { from?: NodeJS.ProcessEnv
       cwd: git.dir,
       env,
       maxBuffer: 16 * 1024 * 1024,
-      timeout: options.timeoutMs ?? 15 * 60_000,
+      timeout: Math.max(1, timeoutMs - (Date.now() - started)),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
   } catch (error) {
@@ -266,7 +268,7 @@ export function hookEnv(from: NodeJS.ProcessEnv = process.env): Record<string, s
 
 /** Hook commands in either clone share the scenario run's npm. */
 export function repositoryHookEnv(cwd: string, from: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  return hookNpmEnv(join(dirname(cwd), 'hook-npm'), hookEnv(from));
+  return hookNpmEnv(repositoryNpmDir(cwd), hookEnv(from));
 }
 
 /** A clone's commit identity, as git resolves it there; the hooks' commit keeps it. */

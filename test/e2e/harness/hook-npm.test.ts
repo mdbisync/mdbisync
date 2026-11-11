@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { Git } from '../../../src/state/index.ts';
-import { compatibleHookNpm, HOOK_NPM_VERSION, provisionHookNpm } from './hook-npm.ts';
+import { compatibleHookNpm, HOOK_NPM_VERSION, hookNpmEnv, provisionHookNpm } from './hook-npm.ts';
+import { engineEnv } from './engine.ts';
+import { createRunContext } from './runner.ts';
 import { EnvBlockedError } from './results.ts';
 import { commitStaged, hookEnv, installHooks, repositoryHookEnv } from './sandbox.ts';
 
@@ -19,7 +21,7 @@ function fresh(): string {
 function executable(file: string, source: string): void {
   writeFileSync(file, `#!${process.execPath}\n${source}\n`, { mode: 0o755 });
 }
-function fixture(version = '11.12.1', failure = false) {
+function fixture(version = '11.12.1', failure = false, installedVersion = HOOK_NPM_VERSION) {
   const root = fresh();
   const bin = join(root, 'bin');
   mkdirSync(bin);
@@ -34,7 +36,7 @@ function fixture(version = '11.12.1', failure = false) {
     const dir = args[args.indexOf('--prefix')+1];
     const bin = path.join(dir, 'node_modules', '.bin');
     fs.mkdirSync(bin, {recursive:true});
-    fs.writeFileSync(path.join(bin, 'npm'), ${JSON.stringify(`#!${process.execPath}\nconsole.log('${HOOK_NPM_VERSION}');\n`)}, {mode:0o755});
+    fs.writeFileSync(path.join(bin, 'npm'), ${JSON.stringify(`#!${process.execPath}\nconsole.log('${installedVersion}');\n`)}, {mode:0o755});
   `);
   const from = { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}`, GITHUB_TOKEN: 'github-token-value', npm_config_registry: 'https://invalid.test/', LINEAR_TEST_APP_CLIENT_SECRET: 'app-secret-value' };
   return { root, bin, calls, from, env: hookEnv(from), dir: join(root, 'run', 'hook-npm') };
@@ -79,6 +81,13 @@ describe('per-run npm for repository hooks', () => {
     assert.equal(f.from.PATH, f.env.PATH);
   });
 
+  it('resolves a relative output folder before another working directory uses npm', async () => {
+    const f = fixture();
+    const env = await provisionHookNpm(relative(process.cwd(), f.dir), f.env);
+    assert.equal(execFileSync('npm', ['--version'], { env, cwd: f.root, encoding: 'utf8' }).trim(), HOOK_NPM_VERSION);
+    assert.ok(env.PATH?.startsWith(join(f.dir, 'node_modules', '.bin')));
+  });
+
   it('replaces an unparseable npm version and reports failed provisioning as env-blocked without bootstrap output', async () => {
     const f = fixture('unparseable');
     assert.notEqual((await provisionHookNpm(f.dir, f.env)).PATH, f.env.PATH);
@@ -99,6 +108,36 @@ describe('per-run npm for repository hooks', () => {
     controller.abort();
     await assert.rejects(provisionHookNpm(f.dir, f.env, { signal: controller.signal }), { name: 'AbortError' });
     assert.equal(existsSync(f.calls), false);
+  });
+
+  it('does not expose incomplete or incompatible private npm installations', async () => {
+    const f = fixture('11.12.1', false, '11.15.0');
+    await assert.rejects(provisionHookNpm(f.dir, f.env), EnvBlockedError);
+    assert.deepEqual(hookNpmEnv(f.dir, f.env), f.env);
+    assert.equal(existsSync(join(f.dir, 'ready')), false);
+  });
+
+  it('provisions npm before the engine first uses its clone and passes that path to engine hooks', async () => {
+    const f = fixture();
+    const runDir = join(f.root, 'run');
+    const { ctx } = createRunContext({ id: 'L1-01' } as never, 'a1b2c3', runDir, { config: {} as never, stateDir: join(f.root, 'state'), outDir: f.root, log: () => {} });
+    ctx.live = { sandbox: { async clone(_names: unknown, dir: string) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, '.pre-commit-config.yaml'), 'repos: []\n');
+      return new Git(dir);
+    } } } as never;
+    const saved = process.env.PATH;
+    process.env.PATH = f.from.PATH;
+    try {
+      const cwd = await ctx.engineClone();
+      const env = engineEnv({ cwd, names: ctx.names, command: 'sync', credentials: {}, extraEnv: {} } as never, f.from);
+      assert.equal(execFileSync('npm', ['--version'], { env, cwd, encoding: 'utf8' }).trim(), HOOK_NPM_VERSION);
+      assert.equal(env.LINEAR_TEST_APP_CLIENT_SECRET, undefined);
+      assert.equal(env.GITHUB_TOKEN, undefined);
+    } finally {
+      if (saved === undefined) delete process.env.PATH;
+      else process.env.PATH = saved;
+    }
   });
 
   it('uses the provisioned npm for hook installation and a later verified commit', async () => {
