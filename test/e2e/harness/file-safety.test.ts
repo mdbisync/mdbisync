@@ -52,6 +52,7 @@ it('invalid ownership data is rejected before creating a journal', () => {
   const root = fixture();
   const ledger = new OwnershipLedger(root, 'abc123');
   assert.throws(() => ledger.project({ id: '../outside', name: 'Plan' }));
+  assert.throws(() => ledger.project({ id: 'project\n', name: 'Plan' }));
   assert.throws(() => ledger.project({ id: 'project', name: 'x'.repeat(4097) }));
   assert.deepEqual(readdirSync(join(root, 'owned')), []);
 });

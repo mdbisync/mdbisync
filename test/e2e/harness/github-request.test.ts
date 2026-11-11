@@ -17,6 +17,14 @@ it('sends only checked GitHub fields and refuses malformed data before making a 
   }
   await assert.rejects(rest.request('GET', '/pulls\nforged'));
   await assert.rejects(rest.download('/artifacts\nforged'));
+  for (const suffix of ['\n', '\r', '\u2028', '\u2029']) {
+    await assert.rejects(rest.request('GET', `/pulls${suffix}`));
+    const trailing = new SandboxRest({ owner: 'acme', repo: 'sandbox' }, `test-token${suffix}`, fetchImpl);
+    await assert.rejects(trailing.request('GET', '/pulls'));
+    assert.throws(() => githubRequestBody({ repositories: [`sandbox${suffix}`] }));
+    assert.throws(() => githubRequestBody({ content: `YWJj${suffix}` }));
+    assert.throws(() => githubRequestBody({ inputs: { [`run_id${suffix}`]: 'abc123' } }));
+  }
   const invalidToken = new SandboxRest({ owner: 'acme', repo: 'sandbox' }, 'bad\r\ntoken', fetchImpl);
   await assert.rejects(invalidToken.request('GET', '/pulls'));
   await assert.rejects(invalidToken.download('/artifacts'));

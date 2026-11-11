@@ -14,7 +14,7 @@ export function githubRequestBody(value: unknown): Record<string, unknown> {
   }
   if (input.content !== undefined) {
     const content = outputText(input.content);
-    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content)) throw new Error('Invalid GitHub file content');
+    if (content.trim() !== content || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content)) throw new Error('Invalid GitHub file content');
     result.content = content;
   }
   if (input.state !== undefined) {
@@ -29,7 +29,7 @@ export function githubRequestBody(value: unknown): Record<string, unknown> {
     if (!Array.isArray(input.repositories) || input.repositories.length > 100) throw new Error('Invalid repositories');
     result.repositories = input.repositories.map((value: unknown) => {
       const name = outputText(value, 100);
-      if (!/^[A-Za-z0-9_.-]+$/.test(name) || name === '.' || name === '..') throw new Error('Invalid repository name');
+      if (name.trim() !== name || !/^[A-Za-z0-9_.-]+$/.test(name) || name === '.' || name === '..') throw new Error('Invalid repository name');
       return name;
     });
   }
@@ -38,7 +38,7 @@ export function githubRequestBody(value: unknown): Record<string, unknown> {
     const entries = Object.entries(input.inputs);
     if (entries.length > 100) throw new Error('Too many workflow inputs');
     result.inputs = Object.fromEntries(entries.map(([key, value]) => {
-      if (!/^[A-Za-z_][A-Za-z0-9_-]{0,99}$/.test(key)) throw new Error('Invalid workflow input name');
+      if (key.trim() !== key || !/^[A-Za-z_][A-Za-z0-9_-]{0,99}$/.test(key)) throw new Error('Invalid workflow input name');
       return [key, outputText(value, 10000)];
     }));
   }
@@ -46,11 +46,11 @@ export function githubRequestBody(value: unknown): Record<string, unknown> {
 }
 
 export function githubRequestPath(path: string): string {
-  if (path.length > 8192 || !/^\/[A-Za-z0-9_.~!$&'()*+,;=:@%/?-]*$/.test(path)) throw new Error('Invalid GitHub API path');
+  if (path.length > 8192 || path.trim() !== path || !/^\/[A-Za-z0-9_.~!$&'()*+,;=:@%/?-]*$/.test(path)) throw new Error('Invalid GitHub API path');
   return path;
 }
 
 export function githubRequestToken(token: string): string {
-  if (token.length > 8192 || !/^[A-Za-z0-9._-]+$/.test(token)) throw new Error('Invalid GitHub authentication token');
+  if (token.length > 8192 || token.trim() !== token || !/^[A-Za-z0-9._-]+$/.test(token)) throw new Error('Invalid GitHub authentication token');
   return token;
 }

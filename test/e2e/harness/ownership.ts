@@ -87,7 +87,7 @@ export class OwnershipLedger implements WriteObserver {
     // Construct only the fields the journal understands; validate before opening it.
     const id = (value: unknown) => {
       const text = outputText(value, 256);
-      if (!/^[A-Za-z0-9_-]+$/.test(text)) throw new Error('Invalid ownership id');
+      if (text.trim() !== text || !/^[A-Za-z0-9_-]+$/.test(text)) throw new Error('Invalid ownership id');
       return text;
     };
     let checked: OwnedEntry;
