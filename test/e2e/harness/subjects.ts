@@ -42,7 +42,7 @@ import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { INVALID_DIAGRAM_NOTE } from '../../corpus/documents.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
+import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { annotationPath, owningFolder, type Folder } from './corpus.ts';
@@ -52,6 +52,7 @@ import { isAppBot } from './workflows.ts';
 import type { PushActivity } from './github.ts';
 import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
+import { zoneConcurrent } from './concurrency.ts';
 import { documentPaths, MOVE_SOURCE_FOLDER, projectFolders } from './step-helpers.ts';
 import { UNSAFE_TITLES } from './fixtures.ts';
 
@@ -143,6 +144,10 @@ async function commentsOf(env: Env, id: string | undefined): Promise<string[]> {
   if (!view.comments.has(id)) {
     // Only the world now may be read again; a snapshot answers from what it holds.
     if (env.which !== 'now') return [];
+    // A concurrent run reads comments only of a document in its scope: one its view holds, or one a guarded by-id read returns.
+    if (zoneConcurrent(env.ctx.scenario) && !view.documents.has(id) && await documentById(env.ctx, id) === undefined) {
+      throw new ProductError('a commented document is not in the run scope');
+    }
     view.comments.set(id, await documentComments(env.ctx, id));
   }
   return view.comments.get(id) as string[];
@@ -196,7 +201,10 @@ async function target(env: Env): Promise<{ path: string; id: string | undefined;
   const id = view.ids.get(path)?.id ?? knownId;
   let document = id === undefined ? undefined : view.documents.get(id);
   // Only the world now may be read again; a snapshot answers from what it holds.
-  if (document === undefined && id !== undefined && env.which === 'now' && ctx.live !== null) [document] = await ctx.live.app.getDocuments([id], { withContent: true });
+  if (document === undefined && id !== undefined && env.which === 'now' && ctx.live !== null) {
+    [document] = await ctx.live.app.getDocuments([id], { withContent: true });
+    if (document !== undefined) runScopeGuard(ctx)(document);
+  }
   return { path, id, document };
 }
 
@@ -249,12 +257,14 @@ function stateOf(document: LinearDocument | undefined): DocumentState {
 
 async function documentById(ctx: RunContext, id: string | undefined): Promise<LinearDocument | undefined> {
   if (id === undefined || ctx.live === null) return undefined;
+  let document: LinearDocument | undefined;
   try {
-    const [document] = await ctx.live.app.getDocuments([id], { withContent: true });
-    return document;
+    [document] = await ctx.live.app.getDocuments([id], { withContent: true });
   } catch {
     return undefined;
   }
+  // Outside the try: a foreign document fails the subject instead of reading as gone.
+  return document === undefined ? undefined : runScopeGuard(ctx)(document);
 }
 
 /** Restores a trashed document and trashes it again: whether Linear could restore it. */
