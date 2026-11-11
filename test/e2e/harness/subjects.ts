@@ -707,11 +707,19 @@ async function metrics(env: Env): Promise<Record<string, unknown>> {
   return values;
 }
 
+const BURST_COUNTS = new WeakMap<object, { made: number; foundInGit: number; foundInLinear: number }>();
+
 /** The burst's edits made and found on each side after quiet (L4-12), also kept in the report's metrics. */
 async function burstEdits(env: Env): Promise<{ made: number; foundInGit: number; foundInLinear: number }> {
   const edits = observed(env.ctx, 'burst.edits') as RunContext['edits'];
-  const found = editsFound(edits, await env.view());
-  const counts = { made: edits.length, foundInGit: found.git, foundInLinear: found.linear };
+  const view = await env.view();
+  // Three subjects read these counts from one view: scan its text once.
+  let counts = BURST_COUNTS.get(view);
+  if (counts === undefined) {
+    const found = editsFound(edits, view);
+    counts = { made: edits.length, foundInGit: found.git, foundInLinear: found.linear };
+    BURST_COUNTS.set(view, counts);
+  }
   const values = (env.ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
   values.burstEdits = counts;
   env.ctx.observations.set('metrics', values);

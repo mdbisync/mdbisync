@@ -751,9 +751,19 @@ const RUN: Record<string, Executor> = {
       runs.push(run);
       recordWorkflowRun(ctx, run);
     }
-    ctx.observations.set('workflows.maxActiveInGroup', maxOverlap(await jobSpans(world.rest, runs)));
-    // With one runner, jobs never overlap even without the group; only the group cancels a pending run that a newer one replaced.
-    ctx.observations.set('workflows.replacedPending', runs.filter((run) => run.conclusion === 'cancelled').length);
+    const spans = await jobSpans(world.rest, runs);
+    ctx.observations.set('workflows.maxActiveInGroup', maxOverlap(spans));
+    // With one runner, jobs never overlap even without the group. Only the group cancels a pending run that a newer
+    // one replaced: such a run started no job, unlike a run cancelled while it ran (a timeout or a lost runner).
+    const started = new Set(spans.map((span) => span.runId));
+    const replaced = runs.filter((run) => run.conclusion === 'cancelled' && !started.has(run.id)).length;
+    // A replacement needs a run still waiting: some job running when the last run arrived. Without that the
+    // scenario did not set up its race, and the count says nothing about the group.
+    const lastCreated = Math.max(...runs.map((run) => Date.parse(run.created_at)));
+    if (replaced === 0 && !spans.some((span) => span.started <= lastCreated && span.completed > lastCreated)) {
+      throw new Error('the runs did not overlap: every job had ended before the last run arrived, so no run could wait in the group');
+    }
+    ctx.observations.set('workflows.replacedPending', replaced);
     for (const run of runs) {
       if (run.conclusion === 'cancelled') continue; // replaced by a newer run of the group
       await settleWorkflowRun(ctx, run, 'sync');
@@ -798,9 +808,14 @@ const RUN: Record<string, Executor> = {
     const counts = burstEditCounts(options);
     const documents = burstDocuments(await loadCandidates(ctx, 'burst'), options, lastLoadToken(ctx, counts.linear, counts.git));
     const from = ctx.edits.length;
-    const result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), { ...options, documents });
-    // The edits the burst made, each recorded once it landed: the report counts them on both sides after quiet.
-    ctx.observations.set('burst.edits', ctx.edits.slice(from));
+    let result;
+    try {
+      result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), { ...options, documents });
+    } finally {
+      // The edits the burst made, each recorded once it landed, also when the burst stopped early:
+      // the report counts them on both sides after quiet.
+      ctx.observations.set('burst.edits', ctx.edits.slice(from));
+    }
     ctx.observations.set('report.generatedLinearEdits', result.linearEdits);
     ctx.observations.set('report.generatedGitPushes', result.gitPushes);
   },

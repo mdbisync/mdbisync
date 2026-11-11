@@ -21,7 +21,7 @@ import { OwnershipLedger } from './ownership.ts';
 import { burst, burstDocuments, burstEditCounts, editCapacity, soak, soakEditCounts, type Actor, type SoakDriver } from './load.ts';
 import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
 import { blockedBySetupStop, EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
-import { bodyOf, compare, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { bodyOf, compare, editsFound, holdsToken, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, probedFixtures, readFixture } from '../../probe/bank.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
@@ -427,28 +427,50 @@ describe('workflows', () => {
   });
 
   it('count the runs the concurrency group cancelled when a newer run replaced them (L4-10)', async () => {
-    const { ctx, remoteGit } = await fakeRun();
-    ctx.scenario = { ...ctx.scenario, mode: 'actions' };
-    fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report: (run) => ({ operation: 'sync', capturedTrackedTip: run.head_sha ?? null }) });
-    mkdirSync(ctx.live!.sandbox.cache.dir, { recursive: true });
-    await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
-    // The newer dispatch replaced the pending push run: GitHub ends that one cancelled, and the harness does not settle it.
-    const rest = ctx.live!.rest as unknown as { dispatchWorkflow: (workflow: string | number) => Promise<void>; workflowRuns: () => Promise<WorkflowRun[]> };
-    const dispatch = rest.dispatchWorkflow;
-    rest.dispatchWorkflow = async (workflow) => {
-      await dispatch(workflow);
-      for (const run of await rest.workflowRuns()) if (run.event === 'push' && run.path === '.github/workflows/mdbisync.yml') run.conclusion = 'cancelled';
-    };
-    await STEP_ACTIONS['run.workflow-parallel']!(ctx, { events: ['push'], replacePending: true });
-    assert.equal(ctx.observations.get('workflows.replacedPending'), 1);
-    assert.deepEqual(await resolveSubject(ctx, 'workflows.replacedPending'), { known: true, value: 1 });
-    assert.equal(ctx.engine.results.length, 1, 'only the run that was not replaced is settled');
     const l410 = scenarios.find((item) => item.id === 'L4-10')!;
     const assertion = l410.checks.assertions.find((item) => item.subject === 'workflows.replacedPending')!;
-    assert.equal((await evaluateAssertion(ctx, assertion)).holds, true);
-    // Without the group, nothing is replaced: one runner alone also keeps jobs from overlapping, so only this count proves the group.
-    ctx.observations.set('workflows.replacedPending', 0);
-    assert.equal((await evaluateAssertion(ctx, assertion)).holds, false);
+    // `replaced`: the newer dispatch replaced the pending push run, which started no job. `stopped`: the push run
+    // was cancelled while its job ran. `apart`: nothing was cancelled and no job ran when the last run arrived.
+    const parallel = async (mode: 'replaced' | 'stopped' | 'apart') => {
+      const { ctx, remoteGit } = await fakeRun();
+      ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+      fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report: (run) => ({ operation: 'sync', capturedTrackedTip: run.head_sha ?? null }) });
+      mkdirSync(ctx.live!.sandbox.cache.dir, { recursive: true });
+      await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+      const rest = ctx.live!.rest as unknown as { dispatchWorkflow: (workflow: string | number) => Promise<void>; workflowRuns: () => Promise<WorkflowRun[]>; runJobs: (id: number) => Promise<WorkflowJob[]> };
+      const cancelled = new Set<number>();
+      const dispatch = rest.dispatchWorkflow;
+      rest.dispatchWorkflow = async (workflow) => {
+        await dispatch(workflow);
+        for (const run of await rest.workflowRuns()) {
+          if (mode === 'apart' || run.event !== 'push' || run.path !== '.github/workflows/mdbisync.yml') continue;
+          run.conclusion = 'cancelled';
+          cancelled.add(run.id);
+        }
+      };
+      // The cancelled run's job ran from before the runs started until after the last one arrived.
+      const job = { ...jobWith('Sync', 4), started_at: new Date(Date.now() - 60_000).toISOString(), completed_at: new Date(Date.now() + 60_000).toISOString() };
+      rest.runJobs = async (id) => (mode === 'stopped' && cancelled.has(id) ? [job] : []);
+      const step = STEP_ACTIONS['run.workflow-parallel']!(ctx, { events: ['push'], replacePending: true });
+      if (mode === 'apart') {
+        await assert.rejects(step, (error: Error) => !(error instanceof ProductError) && /the runs did not overlap/.test(error.message));
+        return ctx;
+      }
+      await step;
+      assert.equal(ctx.engine.results.length, 1, 'only the run that was not cancelled is settled');
+      return ctx;
+    };
+    // A pending run the group replaced started no job: it counts, and L4-10's assertion holds.
+    const replaced = await parallel('replaced');
+    assert.deepEqual(await resolveSubject(replaced, 'workflows.replacedPending'), { known: true, value: 1 });
+    assert.equal((await evaluateAssertion(replaced, assertion)).holds, true);
+    // A run cancelled while its job ran (a timeout, a lost runner) was not a pending run replaced by the group.
+    const stopped = await parallel('stopped');
+    assert.deepEqual(await resolveSubject(stopped, 'workflows.replacedPending'), { known: true, value: 0 });
+    assert.equal((await evaluateAssertion(stopped, assertion)).holds, false);
+    // Runs that never overlapped leave no run to replace: the harness says so instead of failing the group.
+    const apart = await parallel('apart');
+    assert.equal(apart.observations.has('workflows.replacedPending'), false);
   });
 
   it('wait for the push run that the sync pull request\'s merge starts before the checks, as a deployment runs it', async () => {
@@ -679,11 +701,45 @@ describe('load', () => {
     assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsFoundInLinear'), { known: true, value: 0 });
   });
 
-  it('records the burst\'s own edits for its report', async () => {
+  it('records the burst\'s own edits for its report, also when the burst stops early', async () => {
     const { ctx } = await fakeRun();
     ctx.edits.push({ side: 'git', path: 'a.md', token: 'aaaaaa-before' });
     await runStep(ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 0 } });
     assert.deepEqual(ctx.observations.get('burst.edits'), [], 'a burst of no time made no edits, and the earlier edit is not its own');
+    // A short real burst: every edit it reports is recorded once, each on the side that made it.
+    // (The fake sandbox's sync does not carry edits across; the counting test above covers the found counts.)
+    const full = (await fakeRun()).ctx;
+    await runStep(full, { kind: 'run', action: 'burst', args: { durationSeconds: 2, linearEditsPerMinute: 60, gitPushesPerMinute: 30 } });
+    const made = full.observations.get('burst.edits') as Array<{ side: string; token: string }>;
+    assert.deepEqual(made.map((edit) => edit.side).sort(), ['git', 'linear', 'linear']);
+    assert.equal(new Set(made.map((edit) => edit.token)).size, 3);
+    assert.equal(made.length, Number(full.observations.get('report.generatedLinearEdits')) + Number(full.observations.get('report.generatedGitPushes')));
+    assert.deepEqual(await resolveSubject(full, 'report.burstEditsMade'), { known: true, value: 3 });
+    // The second Linear edit fails: the burst throws, and the edit that landed before is still recorded as its own.
+    const failing = (await fakeRun()).ctx;
+    failing.edits.push({ side: 'git', path: 'a.md', token: 'aaaaaa-before' });
+    for (const editor of Object.values(failing.live!.editors)) {
+      const client = editor as unknown as { updateDocument: (...args: unknown[]) => Promise<unknown> };
+      const update = client.updateDocument.bind(client);
+      client.updateDocument = async (...args) => {
+        if (failing.edits.length > 1) throw new Error('the editor lost its connection');
+        return update(...args);
+      };
+    }
+    await assert.rejects(runStep(failing, { kind: 'run', action: 'burst', args: { durationSeconds: 2, linearEditsPerMinute: 60, gitPushesPerMinute: 0 } }), /lost its connection/);
+    const recorded = failing.observations.get('burst.edits') as Array<{ side: string; token: string }>;
+    assert.deepEqual(recorded.map((edit) => edit.side), ['linear'], 'the burst recorded the edit that landed, although it threw');
+  });
+
+  it('match an edit token only as a whole token, so a lost edit is not found inside a longer token', () => {
+    assert.equal(holdsToken('Note aaaaaa-1000.', 'aaaaaa-100'), false);
+    assert.equal(holdsToken('Note aaaaaa-1000. Note aaaaaa-100.', 'aaaaaa-100'), true);
+    assert.equal(holdsToken('Note aaaaaa-100', 'aaaaaa-100'), true, 'at the end of the text');
+    const sides = { files: new Map([['a.md', 'Note aaaaaa-1000.\n']]), documents: new Map([['d', { content: 'Note aaaaaa-1000.\n', trashed: false } as LinearDocument]]) };
+    const lost = { side: 'git' as const, path: 'a.md', token: 'aaaaaa-100' };
+    assert.deepEqual(editsFound([lost], sides), { git: 0, linear: 0 });
+    const ctx = { edits: [lost], observations: new Map() } as unknown as RunContext;
+    assert.deepEqual(lostEdits(ctx, sides), [lost]);
   });
 
   it('runs a soak with hourly checks and a repeatable schedule', async () => {
