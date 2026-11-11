@@ -160,9 +160,10 @@ describe('waitForChecks', () => {
     const clock = {
       now: () => elapsed,
       sleep: async (ms: number) => { elapsed += ms; world.github.checks?.set(SHA, at(elapsed)); },
+      timeout: () => new AbortController().signal,
     };
     world.github.checks?.set(SHA, at(0));
-    const result = await waitForChecks(repo, SHA, seconds, clock);
+    const result = await waitForChecks({ ...repo, clock }, SHA, seconds);
     return { result, elapsed, world };
   }
   it('allows green checks to merge only after the registration minimum', async () => {
@@ -230,7 +231,7 @@ describe('waitForChecks', () => {
       elapsed += 40_000;
       return response;
     };
-    const result = await waitForChecks({ ...repo, fetch: fetcher }, SHA, 60, { now: () => elapsed, sleep: async () => {} });
+    const result = await waitForChecks({ ...repo, fetch: fetcher, clock: { now: () => elapsed, sleep: async () => {}, timeout: () => new AbortController().signal } }, SHA, 60);
     assert.equal(result.state, 'pending');
   });
 });
