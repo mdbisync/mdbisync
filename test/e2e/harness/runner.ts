@@ -4,7 +4,7 @@
 
 import { collectCanaryEvidence } from './checks.ts';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts';
 import { Git, readIds } from '../../../src/state/index.ts';
@@ -24,7 +24,8 @@ import { LinearWorld, editorClient, type Project, type Team } from './linear-wor
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { OwnershipLedger, readOwnership, type WriteObserver } from './ownership.ts';
 import { retryGitHubCleanup } from './cleanup-retry.ts';
-import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type Result, type ScenarioResult } from './results.ts';
+import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
+import { finishPersonClone } from './person-git.ts';
 import { assertCurrentCorpus } from './corpus-drift.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
@@ -492,7 +493,7 @@ async function recordedIds(ctx: RunContext): Promise<string[]> {
   const ref = `${ctx.names.refPrefix}/ids`;
   if (!(await retryGitHubCleanup(() => sandbox.runRefs())).some((entry) => entry.ref === ref)) return [];
   const git = await ctx.person();
-  await retryGitHubCleanup(() => git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]));
+  await retryGitHubCleanup(() => git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]));
   const ids = await readIds(git, (await git.text(['rev-parse', ref])).trim());
   return [...ids.values()].map((entry) => entry.id);
 }
@@ -934,28 +935,15 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     clearInterval(heartbeat);
     if (setupStuck) cleanupOutcome = { ok: false, detail: `setup did not stop; ${cleanupOutcome.detail ?? 'cleaned up'}; shared admission keeps its resources reserved for verified recovery` };
     if (cleanupOutcome.ok && !heldForUi && !setupStuck) registration.done();
-    finishPersonClone(runDir, error === undefined ? 'pass' : classify(error, deps.expectedRed.has(scenario.id)).result, log);
     rmSync(join(runDir, 'engine'), { recursive: true, force: true });
   }
   const outcome = classify(error, deps.expectedRed.has(scenario.id));
+  finishPersonClone(runDir, outcome.result, log);
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   writeFileSync(join(runDir, 'harness.log'), logLines.join('\n'));
   rmSync(join(runDir, 'canary-pending'), { force: true });
   const result = resultOf(ctx, outcome, { startedAt: started, budgetWaitMs: grant?.waitedMs ?? 0, checks, cleanup: cleanupOutcome });
   return grant?.owner !== undefined && !released ? { ...result, sharedReservationKept: true } : result;
-}
-
-/**
- * Removes the person's clone at the end of a run, except after a failed one: then it stays in the run folder for
- * diagnosis (a person-git file names what to look at). Its credentials live in the environment, not in the clone.
- */
-export function finishPersonClone(runDir: string, result: Result, log: (line: string) => void): void {
-  const dir = join(runDir, 'person');
-  if (result === 'fail' && existsSync(dir)) {
-    log(`kept the person clone for diagnosis: ${dir}`);
-    return;
-  }
-  rmSync(dir, { recursive: true, force: true });
 }
 
 /** A check that does not hold fails the scenario as a product error; the outcomes stay in the result either way. */

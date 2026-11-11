@@ -1710,7 +1710,7 @@ const FAULT: Record<string, Executor> = {
       checkpoint: 'after-write-before-record',
       action: async () => {
         const git = await ctx.person();
-        await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+        await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]);
         const tip = (await git.text(['rev-parse', ref])).trim();
         const tree = (await git.text(['rev-parse', `${tip}^{tree}`])).trim();
         const moved = (await git.text(['commit-tree', tree, '-p', tip, '-m', 'Unrelated update'])).trim();

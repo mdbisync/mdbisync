@@ -24,6 +24,7 @@ import { runChecks } from './checks.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { startFaultProxy } from './fault-proxy.ts';
 import { OwnershipLedger } from './ownership.ts';
+import { finishPersonClone } from './person-git.ts';
 import { BudgetBlockedError, estimate } from './governor.ts';
 import { githubToken } from './github.ts';
 import { forgetHeldRun, heldRunOf, loadHeldRun, saveHeldRun, type HeldRun } from './held-run.ts';
@@ -294,8 +295,9 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   else registration.hold(0);
   release(false);
   forgetHeldRun(runDir);
-  cleanClones(runDir);
   const outcome = classify(blockedBySetupStop(error, ctx.engine.results, ctx.engine.setupRuns), deps.expectedRed.has(scenario.id));
+  finishPersonClone(runDir, outcome.result, ctx.log);
+  rmSync(join(runDir, 'engine'), { recursive: true, force: true });
   ctx.log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   appendFileSync(join(runDir, 'harness.log'), `\n${logLines.join('\n')}`);
   rmSync(join(runDir, 'canary-pending'), { force: true });
