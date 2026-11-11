@@ -17,7 +17,7 @@ import { runNames } from './isolation.ts';
 import { LinearWorld, editorClient } from './linear-world.ts';
 import { registerRun } from './locks.ts';
 import { OwnershipLedger, readOwnership } from './ownership.ts';
-import { runTeamIds } from './runner.ts';
+import { runTeamZones } from './runner.ts';
 import { sweep, type SweepTargets } from './sweeper.ts';
 
 const roots: string[] = [];
@@ -336,11 +336,11 @@ describe('ownership record', () => {
     const tree = buildRunTree({ slice: 'mini', paths: [...readmes.keys(), 'eng/guides/start.md'] }, readmes, runNames(runId));
     assert.deepEqual([...tree.teamZones.keys()], ['ENG']);
     const teams = new Map([['ENG', { id: 'team-eng' }], ['DOCS', { id: 'team-docs' }]]);
-    assert.throws(() => runTeamIds(tree, new Map([['ENG', { id: 'team-eng' }]])), /the test workspace has no team DOCS/);
+    assert.throws(() => runTeamZones(tree, new Map([['ENG', { id: 'team-eng' }]])), /the test workspace has no team DOCS/);
 
     // Setup records the scope before anything is written.
     const ledger = new OwnershipLedger(dir, runId);
-    ledger.scope(runTeamIds(tree, teams));
+    ledger.scope(runTeamZones(tree, teams).ids);
     deadRun(dir, runId);
     assert.deepEqual([...(readOwnership(dir, runId)?.teamIds ?? [])].sort(), ['team-docs', 'team-eng']);
 
