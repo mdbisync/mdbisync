@@ -7,14 +7,15 @@ import { promisify } from 'node:util';
 import { EnvBlockedError } from './results.ts';
 
 const exec = promisify(execFile);
-export const HOOK_NPM_VERSION = '11.16.0';
-const REQUIRED = `the repository's Node hooks need npm ${HOOK_NPM_VERSION} or newer`;
+export const HOOK_NPM_MINIMUM = '11.16.0';
+export const HOOK_NPM_VERSION = '11.21.1';
+const REQUIRED = `the repository's Node hooks need npm ${HOOK_NPM_MINIMUM} or newer`;
 
 export function compatibleHookNpm(version: string): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
   if (match === null) return false;
   const actual = match.slice(1).map(Number);
-  const minimum = HOOK_NPM_VERSION.split('.').map(Number);
+  const minimum = HOOK_NPM_MINIMUM.split('.').map(Number);
   for (let index = 0; index < minimum.length; index++) {
     if (actual[index] !== minimum[index]) return actual[index]! > minimum[index]!;
   }
