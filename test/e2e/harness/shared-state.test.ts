@@ -7,8 +7,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, it } from 'node:test';
-import { Git } from '../../../src/state/git.ts';
-import { GitStateStore, SharedAdmission, parseSharedState } from './shared-state.ts';
+import { Git, GitError, type RunOptions, type RunResult } from '../../../src/state/git.ts';
+import { GitStateStore, SharedAdmission, parseSharedState, redactGitOutput } from './shared-state.ts';
 import { BudgetBlockedError, Governor } from './governor.ts';
 import { loadScenarios } from './spec.ts';
 import { selectTeams, buildRunTree } from './corpus.ts';
@@ -466,4 +466,168 @@ it('reports an editor key that frees up only after setup would end, without wait
   await assert.rejects(claim(15 * 60_000), (error: Error) => error instanceof EnvBlockedError && /editor budget unavailable: it frees up in 6\d minutes/.test(error.message));
   assert.equal((await first.store.read()).runs[0]?.resources, undefined);
   await grant.release();
+});
+
+// GitHub refuses a push in more forms than git's own rejection texts: an
+// exit code with an unknown reason, or a thrown error. A hook stands in for
+// the push of one store and may change what it reports.
+type PushHook = (push: () => Promise<RunResult>) => Promise<RunResult>;
+class HookedGit extends Git {
+  pushes = 0;
+  readonly hook: PushHook;
+  constructor(dir: string, env: Record<string, string>, hook: PushHook) { super(dir, env); this.hook = hook; }
+  override run(args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
+    if (args[0] !== 'push') return super.run(args, options);
+    this.pushes++;
+    return this.hook(() => super.run(args, options));
+  }
+}
+function hooked(root: string, remote: string, name: string, hook: PushHook, env?: Record<string, string>) {
+  let git: HookedGit | undefined;
+  const store = new GitStateStore({ stateDir: join(root, name), url: remote, ...(env === undefined ? {} : { env }), git: (dir, base) => (git = new HookedGit(dir, base, hook)) });
+  return { shared: new SharedAdmission(store), pushes: () => git?.pushes ?? 0 };
+}
+const unexpectedEnd = () => new GitError(['push'], 128, 'fatal: the remote end hung up unexpectedly');
+
+// Waiters of the exclusive slot all build their update on the tip the release
+// left. Their first pushes go in turn: the first lands, and GitHub refuses each
+// later one in another form. Only the ref tells that a competitor moved it.
+async function waitersAfterRelease(full: boolean) {
+  const { root, remote, first } = await fixture();
+  const holder = options('aaaaaa', { full: true });
+  assert.ok((await first.reserve(holder)).admitted);
+  const refusals: Array<(real: RunResult) => RunResult> = [
+    (real) => real,
+    () => { throw new GitError(['push'], 128, 'remote: Internal Server Error\nfatal: the remote end hung up unexpectedly'); },
+    () => ({ code: 1, stdout: Buffer.from('To https://github.com/example/sandbox.git\n!\tHEAD:refs/heads/scenario-control\t[remote rejected] (internal server error)\nDone\n'), stderr: 'error: failed to push some refs\n' }),
+    () => { throw new GitError(['push'], 1, "remote: error: cannot lock ref 'refs/heads/scenario-control': is at 1111111111111111111111111111111111111111 but expected 2222222222222222222222222222222222222222\n"); },
+  ];
+  let arrived = 0;
+  let allBuilt!: () => void;
+  const built = new Promise<void>((resolve) => { allBuilt = resolve; });
+  const turns = refusals.map(() => Promise.withResolvers<void>());
+  // What each first push really did; checked outside the hook, since update() handles what the hook throws.
+  const raced: number[] = [];
+  const waiters = refusals.map((refuse, index) => {
+    let first = true;
+    return hooked(root, remote, `waiter-${index}`, async (push) => {
+      if (!first) return push();
+      first = false;
+      if (++arrived === refusals.length) allBuilt();
+      await built;
+      await turns[index - 1]?.promise;
+      try {
+        const real = await push();
+        raced[index] = real.code;
+        return refuse(real);
+      } finally { turns[index]!.resolve(); }
+    });
+  });
+  const entries = waiters.map((_, index) => options(String(index + 1).repeat(6), { full }));
+  for (const [index, waiter] of waiters.entries()) assert.equal((await waiter.shared.reserve(entries[index]!)).admitted, false, 'the slot is held');
+  assert.deepEqual(waiters.map((waiter) => waiter.pushes()), [0, 0, 0, 0], 'a refused waiter writes nothing');
+  await first.release(holder.runId, holder.owner);
+  const results = await Promise.all(waiters.map((waiter, index) => waiter.shared.reserve(entries[index]!)));
+  assert.deepEqual(raced, [0, 1, 1, 1], 'only the first push of the race lands');
+  return { first, results, entries, pushes: waiters.map((waiter) => waiter.pushes()) };
+}
+
+it('retries a competing push in any form when waiters for the exclusive slot update at once after a release', async () => {
+  const { first, results, entries, pushes } = await waitersAfterRelease(true);
+  assert.deepEqual(results.map((result) => result.admitted), [true, false, false, false]);
+  assert.deepEqual([...await first.liveRuns()], [entries[0]!.runId]);
+  assert.deepEqual(pushes, [1, 1, 1, 1], 'a retry rereads the state and, refused, writes nothing');
+});
+
+it('applies every waiter update after its competing push was refused, when the slot is shared', async () => {
+  const { first, results, entries, pushes } = await waitersAfterRelease(false);
+  assert.ok(results.every((result) => result.admitted));
+  assert.deepEqual([...await first.liveRuns()].sort(), entries.map((entry) => entry.runId).sort());
+  // The retries race each other again, as real waiters do: each refused waiter pushes at least once more.
+  assert.equal(pushes[0], 1);
+  assert.ok(pushes.slice(1).every((count) => count >= 2), `pushes ${pushes.join(', ')}`);
+});
+
+it('keeps an update that landed although its push reported a thrown error', async () => {
+  const { root, remote, first } = await fixture();
+  const codes: number[] = [];
+  const store = hooked(root, remote, 'landed', async (push) => { codes.push((await push()).code); throw unexpectedEnd(); });
+  assert.ok((await store.shared.reserve(options('aaaaaa'))).admitted);
+  assert.deepEqual(codes, [0]);
+  assert.deepEqual([...await first.liveRuns()], ['aaaaaa']);
+  assert.equal(store.pushes(), 1);
+});
+
+it('keeps an update that landed and was built on before the ref was read back', async () => {
+  const { root, remote, first, second } = await fixture();
+  const codes: number[] = [];
+  const store = hooked(root, remote, 'built-on', async (push) => {
+    codes.push((await push()).code);
+    assert.ok((await second.reserve(options('bbbbbb'))).admitted);
+    throw unexpectedEnd();
+  });
+  assert.ok((await store.shared.reserve(options('aaaaaa'))).admitted, 'not retried into "run id already has a shared reservation"');
+  assert.deepEqual(codes, [0]);
+  assert.deepEqual([...await first.liveRuns()].sort(), ['aaaaaa', 'bbbbbb']);
+  assert.equal(store.pushes(), 1);
+});
+
+it('retries a server failure that left the ref unchanged a few times, then reports it', async () => {
+  const { root, remote, first } = await fixture();
+  let failures = 1;
+  const passing = hooked(root, remote, 'passing', async (push) => (failures-- > 0 ? Promise.reject(unexpectedEnd()) : push()));
+  assert.ok((await passing.shared.reserve(options('aaaaaa'))).admitted);
+  assert.equal(passing.pushes(), 2);
+  const lasting = hooked(root, remote, 'lasting', async () => { throw new GitError(['push'], 128, 'error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\nfatal: the remote end hung up unexpectedly'); });
+  await assert.rejects(lasting.shared.reserve(options('bbbbbb')), /^Error: shared admission push failed: git push exited with 128: error: RPC failed; HTTP 502/);
+  assert.equal(lasting.pushes(), 4);
+  assert.deepEqual([...await first.liveRuns()], ['aaaaaa']);
+});
+
+it('ends at once when credentials for the push cannot be had', async () => {
+  const { root, remote } = await fixture();
+  let calls = 0;
+  const store = new GitStateStore({ stateDir: join(root, 'no-credentials'), url: remote, env: async () => { if (++calls > 1) throw new Error('installation token: HTTP 503'); return {}; } });
+  await assert.rejects(new SharedAdmission(store).reserve(options('aaaaaa')), /^Error: shared admission credentials unavailable: installation token: HTTP 503/);
+});
+
+it('ends at once on an access failure, naming the cause without credentials', async () => {
+  const { root, remote, first } = await fixture();
+  const token = 'tok-secret-value-0123';
+  const env = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader', GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}` };
+  const store = hooked(root, remote, 'denied', async () => {
+    throw new GitError(['push'], 128, `remote: Permission to example/sandbox.git denied to harness-bot (${token}).\nfatal: unable to access 'https://x-access-token:ghs_abcdefghijklmnopqrstuvwxyz@github.com/example/sandbox.git/': The requested URL returned error: 403\n`);
+  }, env);
+  await assert.rejects(store.shared.reserve(options('aaaaaa')), (error: Error) => {
+    assert.match(error.message, /^shared admission push refused access: git push exited with 128: remote: Permission to example\/sandbox.git denied/);
+    assert.match(error.message, /returned error: 403/);
+    assert.doesNotMatch(error.message, /tok-secret|ghs_|x-access-token:/);
+    return true;
+  });
+  assert.equal(store.pushes(), 1, 'an access failure is not retried');
+  assert.equal((await first.liveRuns()).size, 0);
+});
+
+it('reports a refusal that left the ref unchanged with git push output', async () => {
+  const { root, remote, first } = await fixture();
+  const store = hooked(root, remote, 'declined', async () => ({ code: 1, stdout: Buffer.from('To example\n!\tHEAD:refs/heads/scenario-control\t[remote rejected] (pre-receive hook declined)\nDone\n'), stderr: 'error: failed to push some refs\n' }));
+  await assert.rejects(store.shared.reserve(options('aaaaaa')), /^Error: shared admission push failed: git push exited with 1: .*\(pre-receive hook declined\)/s);
+  assert.equal(store.pushes(), 1);
+  assert.equal((await first.liveRuns()).size, 0);
+});
+
+it('removes credentials from git output', () => {
+  const env = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader', GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from('x-access-token:installation-token-1').toString('base64')}` };
+  const text = [
+    'fatal: unable to access \'https://user:password-1@github.com/example/repo.git/\'',
+    'token installation-token-1 leaked',
+    `header ${env.GIT_CONFIG_VALUE_0}`,
+    'Authorization: bearer abcdefgh12345678',
+    'ghp_0123456789abcdefghijABCD and github_pat_0123456789abcdefghij_klm',
+  ].join('\n');
+  const out = redactGitOutput(text, env);
+  assert.doesNotMatch(out, /password-1|installation-token-1|abcdefgh12345678|ghp_|github_pat_/);
+  assert.doesNotMatch(out, new RegExp(Buffer.from('x-access-token:installation-token-1').toString('base64')));
+  assert.match(out, /https:\/\/\*\*\*@github.com\/example\/repo.git/);
+  assert.ok(redactGitOutput('x'.repeat(5000)).length <= 2001);
 });
