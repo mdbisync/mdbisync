@@ -539,9 +539,11 @@ function refusalText(refusal: { status?: number | undefined; reason?: string | u
 /** Why the suspended marks stopped: the code, then the write, its document and Linear's answer when one failed. */
 function holdFailureText(code: string, failure: HoldWriteFailure | undefined): string {
   if (failure === undefined) return `\`${code}\``;
-  const where = failure.path === undefined ? '' : ` on \`${failure.path}\``;
+  // Linear's code and the path go in code spans; a backtick in them cannot close one.
+  const span = (text: string) => `\`${text.replace(/[`\r\n]/g, "'")}\``;
+  const where = failure.path === undefined ? '' : ` on ${span(failure.path)}`;
   const said = failure.message === undefined ? '' : `: ${plainLine(failure.message, LINEAR_MESSAGE_LENGTH)}`;
-  return `\`${code}\`, ${failure.operation}${where}, ${failure.error}${said}`;
+  return `${span(code)}, ${span(failure.operation)}${where}, ${span(failure.error)}${said}`;
 }
 
 /** The job summary's section for step 2: names, numbers and states, no content. */

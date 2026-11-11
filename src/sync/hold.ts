@@ -388,6 +388,12 @@ function refusesComment(error: unknown): error is LinearGraphQLError {
   return error instanceof LinearGraphQLError && error.code !== undefined && !isTransientLinearError(error) && ![401, 403, 429].includes(error.httpStatus) && !NOT_ABOUT_THE_COMMENT.has(error.code);
 }
 
+/** The requests that send a comment's text. */
+const COMMENT_WRITES = new Set(['CommentOnDocument', 'UpdateDocumentComment']);
+
+/** Text with JSON's and Markdown's escapes taken out: `\n`, `\uXXXX`, a backslash before a character, and quotes. */
+const unescaped = (text: string) => text.replace(/\\u[0-9a-fA-F]{4}|\\[nrt]/g, ' ').replace(/[\\"]/g, '');
+
 /** What a failed write reports: the document it was for and Linear's answer, its message only when it quotes nothing sent. */
 export function writeFailure(error: LinearError, path: string | undefined, sent: string | undefined): HoldWriteFailure {
   const failure: HoldWriteFailure = { operation: error.operation, ...(path === undefined ? {} : { path }), error: describeLinearError(error) };
@@ -396,8 +402,10 @@ export function writeFailure(error: LinearError, path: string | undefined, sent:
     failure.status = error.httpStatus;
     if (error.requestId !== undefined) failure.request = error.requestId;
     const detail = error.detail === undefined ? '' : singleLine(error.detail, LINEAR_MESSAGE_LENGTH);
-    // Linear may echo a request's input in its message: one that repeats the comment's text is not kept.
-    if (detail !== '') failure.message = sent !== undefined && quotesDocument(error.detail as string, documentRuns(sent)) ? MESSAGE_WITHHELD : detail;
+    // Linear may echo a request's input in its message: one that repeats the comment's text is not kept. Only a
+    // comment write sent it, and the echo may be JSON-escaped, so both sides are compared without escapes.
+    const echoes = sent !== undefined && COMMENT_WRITES.has(error.operation) && quotesDocument(unescaped(error.detail as string), documentRuns(unescaped(sent)));
+    if (detail !== '') failure.message = echoes ? MESSAGE_WITHHELD : detail;
   } else if (error instanceof LinearHttpError) {
     failure.status = error.httpStatus;
     if (error.requestId !== undefined) failure.request = error.requestId;

@@ -1242,7 +1242,7 @@ describe('sync: the sync pull request', () => {
     const seen = { calls: 0 };
     const inner = fakeFetch(world);
     fetchOverride = async (input, init) => {
-      if (String(input).startsWith(LINEAR_API) && String(init?.body ?? '').includes(`mutation ${mutation}`)) {
+      if (String(input).startsWith(LINEAR_API) && String(init?.body ?? '').includes(`mutation ${mutation}(`)) {
         seen.calls += 1;
         const response = answer();
         if (response !== undefined) return response;
@@ -1266,7 +1266,7 @@ describe('sync: the sync pull request', () => {
     const report = held.report.pullRequest?.holdMarks;
     assert.equal(report?.code, 'write-failed');
     assert.deepEqual(report?.failure, { operation: 'UpdateDocument', path, error: 'LinearGraphQLError INPUT_ERROR HTTP 200', code: 'INPUT_ERROR', status: 200, request: 'request-35', message: 'Argument Validation Error: icon' });
-    assert.ok(held.summary.includes(`The suspended marks did not finish (\`write-failed\`, UpdateDocument on \`${path}\`, LinearGraphQLError INPUT_ERROR HTTP 200: Argument Validation Error: icon); a later run goes on.`), held.summary);
+    assert.ok(held.summary.includes(`The suspended marks did not finish (\`write-failed\`, \`UpdateDocument\` on \`${path}\`, \`LinearGraphQLError INPUT_ERROR HTTP 200\`: Argument Validation Error: icon); a later run goes on.`), held.summary);
     assert.equal(marks.calls, 1);
     refuse = false;
     checksOn(await rev(SUSPENDED), FAILED);

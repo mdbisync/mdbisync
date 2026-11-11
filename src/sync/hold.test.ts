@@ -101,10 +101,19 @@ describe('a failed mark or comment write', () => {
 
   it('withholds a message that repeats the comment the request sent', () => {
     const body = `${HOLD_FAILED}\n\n- Check \`lint\`\n\n${HOLD_FOOTER}`;
-    const failure = writeFailure(refusal(`Variable "$input" got invalid value { body: "${body.slice(0, 40)}" }`), 'docs/a.md', body);
+    const failure = writeFailure(new LinearGraphQLError('UpdateDocumentComment', 200, { message: `Variable "$input" got invalid value { body: "${body.slice(0, 40)}" }`, extensions: { code: 'INPUT_ERROR' } }), 'docs/a.md', body);
     assert.equal(failure.message, MESSAGE_WITHHELD);
     assert.equal(failure.code, 'INPUT_ERROR');
-    assert.equal(writeFailure(refusal('Comment body is too long'), 'docs/a.md', body).message, 'Comment body is too long');
+    assert.equal(writeFailure(new LinearGraphQLError('UpdateDocumentComment', 200, { message: 'Comment body is too long', extensions: { code: 'INPUT_ERROR' } }), 'docs/a.md', body).message, 'Comment body is too long');
+  });
+
+  it('finds an echo Linear JSON-escaped, and compares only when the failed request sent the comment', () => {
+    const body = `${HOLD_FAILED}\n\n- Check \`lint\`\n  - Line 3: Rename my\\_file\\_a\\_b to the\\_new\\_name\n\n${HOLD_FOOTER}`;
+    const escaped = JSON.stringify(body.slice(HOLD_FAILED.length, HOLD_FAILED.length + 80));
+    const comment = new LinearGraphQLError('CommentOnDocument', 200, { message: `Variable "$input" got invalid value { body: ${escaped} }`, extensions: { code: 'INPUT_ERROR' } });
+    assert.equal(writeFailure(comment, 'docs/a.md', body).message, MESSAGE_WITHHELD);
+    // A mark write sent no comment: a phrase it shares with the comment is Linear's own text.
+    assert.equal(writeFailure(refusal('Cannot change this document while it is archived'), 'docs/a.md', body).message, 'Cannot change this document while it is archived');
   });
 
   it('reports an HTTP failure or a lost request without a message', () => {
