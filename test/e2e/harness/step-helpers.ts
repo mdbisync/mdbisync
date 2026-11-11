@@ -27,11 +27,19 @@ export function documentPaths(ctx: RunContext): string[] {
 
 /**
  * The scenario's target document: a named path or path suffix; `<ordinal>-document`
- * and `other-document` pick by position; a paragraph target or none picks the
- * scenario's fixture document when setup made one, else the first document.
+ * and `other-document` pick by position; `project-document` picks the first
+ * document inside a project folder, whichever teams the run selected; a
+ * paragraph target or none picks the scenario's fixture document when setup
+ * made one, else the first document.
  */
 export function targetPath(ctx: RunContext, target?: unknown, offset = 0): string {
   const paths = documentPaths(ctx);
+  if (target === 'project-document') {
+    const folders = projectFolders(ctx);
+    const path = paths.find((candidate) => folders.some((folder) => candidate.startsWith(`${folder.folder}/`)));
+    if (path === undefined) throw new EnvBlockedError('the slice has no synchronized document in a project');
+    return path;
+  }
   if (typeof target === 'string') {
     if (target === 'other-document') return pick(paths, offset + 1);
     if (target.endsWith('-document') && ordinalOf(target) !== null) return pick(paths, (ordinalOf(target) as number) + offset);

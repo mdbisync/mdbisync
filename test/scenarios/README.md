@@ -64,6 +64,13 @@ Steps execute in order. `kind`, `action` and `args` form the adapter call:
 | `merge` | Merge the initial pull request as the specified person. |
 | `ui` | Verify the signed-in editor, perform the stated browser action, and collect DOM evidence. |
 
+A step's `target` names the document it acts on: a path or path suffix,
+`<ordinal>-document` or `other-document` by position, or `project-document`
+for the first document inside a project folder, which exists under every team
+selection of `mini`. Without one, a step acts on the scenario's fixture
+document, else the first document, which can sit at team level when only some
+teams are selected.
+
 `run.args.wait: false` starts an engine asynchronously; a checkpoint is reached
 before the following step executes. The harness joins that invocation after
 `resume` or `kill`. Ordinary invocations wait for completion. `settle` and

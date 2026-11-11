@@ -334,17 +334,20 @@ export function symbolicPath(ctx: RunContext, path: string): string {
 }
 
 /**
- * Where a document a step moved across projects is, in the form its moved
- * path and its recorded destination share: only the project it left reads
- * as `project/`; a path in any other project keeps its real folder, so a
- * document that stayed, or went to the wrong project, does not read the same
- * as its destination. Without a cross-project move, the symbolic path.
+ * Where a moved document is, as specs write it: only the project folder the
+ * document started in reads as `project/` (for a cross-project move, the
+ * project it left, which its recorded destination shares). A path in any
+ * other project, or at team level, keeps its real folder, so a document that
+ * went to the wrong project, or started outside a project, never reads as
+ * `project/…`.
  */
-function movedPath(ctx: RunContext, path: string): string {
-  const source = ctx.observations.get(MOVE_SOURCE_FOLDER) as string | undefined;
-  if (source === undefined) return symbolicPath(ctx, path);
-  const folder = projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`));
-  return folder?.folder === source ? symbolicPath(ctx, path) : path;
+export function movedPath(ctx: RunContext, path: string): string {
+  const origin = (ctx.observations.get('target.path') as string | undefined) ?? firstDocument(ctx);
+  const folders = projectFolders(ctx);
+  const source = (ctx.observations.get(MOVE_SOURCE_FOLDER) as string | undefined)
+    ?? folders.find((candidate) => origin.startsWith(`${candidate.folder}/`))?.folder;
+  const folder = folders.find((candidate) => path.startsWith(`${candidate.folder}/`));
+  return source !== undefined && folder?.folder === source ? symbolicPath(ctx, path) : path;
 }
 
 /** Brings commits into the person's clone; returns the ones it has afterwards. */

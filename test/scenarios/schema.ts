@@ -68,7 +68,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "linear.out-of-scope": ["actor", "variants"],
   "linear.remove-one-marker": ["actor"],
   "linear.remove-secret": ["actor"],
-  "linear.rename": ["actor", "title"],
+  "linear.rename": ["actor", "target", "title"],
   "linear.repeated-edit": ["actor", "count"],
   "linear.resolve": ["actor"],
   "linear.restore": ["actor", "fixture"],
