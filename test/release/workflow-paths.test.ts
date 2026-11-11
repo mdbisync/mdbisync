@@ -18,6 +18,7 @@ interface Job {
   needs?: string | string[];
   if?: string;
   permissions?: Record<string, string>;
+  env?: Record<string, string>;
   steps: { name?: string; if?: string; uses?: string; with?: Record<string, string>; run?: string; env?: Record<string, string> }[];
 }
 interface Context { ref: string; version: string; cancelled: boolean; results: Map<string, Result>; upstream: string[] }
@@ -238,15 +239,28 @@ test('every action in release.yml is pinned to a full commit SHA', () => {
   }
 });
 
-test('the attest job first refuses a version whose tag exists, and stops when the remote cannot be read', () => {
+test('the attest job first requires the source to be the dispatched commit its provenance names', () => {
+  const step = jobs.attest!.steps[0]!;
+  assert.equal(step.name, 'Require the source to be the dispatched commit');
+  assert.equal(jobs.attest!.env?.SOURCE_SHA, '${{ inputs.source-sha }}');
+  const run = (source: string) => spawnSync('bash', ['-e', '-c', step.run!], {
+    env: { ...process.env, SOURCE_SHA: source, GITHUB_SHA: 'a'.repeat(40) }, encoding: 'utf8',
+  });
+  assert.equal(run('a'.repeat(40)).status, 0);
+  const older = run('b'.repeat(40));
+  assert.notEqual(older.status, 0);
+  assert.match(older.stderr, /must be built from main's head at dispatch/);
+});
+
+test('the attest job refuses a version whose tag exists before signing, and stops when the remote cannot be read', () => {
   const steps = jobs.attest!.steps;
-  assert.equal(steps[0]!.name, 'Refuse a version whose tag already exists');
+  assert.equal(steps[1]!.name, 'Refuse a version whose tag already exists');
   const directory = mkdtempSync(join(tmpdir(), 'release-existing-tag-'));
   try {
     // A stub git on PATH stands in for the remote: it prints what ls-remote would, or fails.
     const run = (stub: string) => {
       writeFileSync(join(directory, 'git'), `#!/usr/bin/env bash\n${stub}\n`, { mode: 0o755 });
-      return spawnSync('bash', ['-e', '-c', steps[0]!.run!], {
+      return spawnSync('bash', ['-e', '-c', steps[1]!.run!], {
         env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: 'owner/name', RELEASE_VERSION: 'v0.1.0' },
       }).status;
     };

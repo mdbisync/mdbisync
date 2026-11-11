@@ -125,7 +125,16 @@ jobs:
       attestations: write
     env:
       RELEASE_VERSION: ${{ inputs.version }}
+      SOURCE_SHA: ${{ inputs.source-sha }}
     steps:
+      # The provenance names the commit the workflow was dispatched on as the source it was built from,
+      # so a final version must be built from that commit: main's head at dispatch.
+      - name: Require the source to be the dispatched commit
+        run: |
+          if [ "$SOURCE_SHA" != "$GITHUB_SHA" ]; then
+            echo "A final release must be built from main's head at dispatch ($GITHUB_SHA), not $SOURCE_SHA." >&2
+            exit 1
+          fi
       # The tag job checks this again before it pushes; checking here first avoids signing a version that already exists.
       - name: Refuse a version whose tag already exists
         run: |
