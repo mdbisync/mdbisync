@@ -8,7 +8,7 @@ import { EnvBlockedError } from './results.ts';
 
 const exec = promisify(execFile);
 export const HOOK_NPM_MINIMUM = '11.16.0';
-export const HOOK_NPM_VERSION = '11.21.1';
+export const HOOK_NPM_VERSION = '11.21.2';
 const REQUIRED = `the repository's Node hooks need npm ${HOOK_NPM_MINIMUM} or newer`;
 
 export function compatibleHookNpm(version: string): boolean {

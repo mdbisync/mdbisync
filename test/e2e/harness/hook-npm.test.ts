@@ -77,6 +77,7 @@ describe('per-run npm for repository hooks', () => {
     assert.equal(lock.packages['node_modules/npm'].version, HOOK_NPM_VERSION);
     assert.match(lock.packages['node_modules/npm'].integrity, /^sha512-/);
     assert.equal(lock.packages['node_modules/npm/node_modules/tar'].version, '7.5.22');
+    assert.equal(lock.packages['node_modules/npm/node_modules/undici'].version, '6.29.1');
     const other = await provisionHookNpm(join(f.root, 'other-run', 'hook-npm'), f.env);
     assert.notEqual(other.PATH, first.PATH);
     assert.equal(f.from.PATH, f.env.PATH);
