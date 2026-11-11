@@ -101,12 +101,13 @@ measurements record observed loss and window duration even when nonzero.
 
 Each scenario declares all nine invariants. `required: false` needs a concrete
 applicability reason, for example an offline lint check with no synchronized
-state. Evaluate the required invariants after the final step, before cleanup;
-In `actions` mode, the deployment's own follow-up runs end first. A sync run
-takes in the tracked branch as it was when it started, so a run that merges the
-sync pull request leaves that merge to the push run GitHub starts for it. The
-harness waits for that run, as `settle` runs the next sync in `local` mode.
-I6 uses an extra read-only-observation probe of an ordinary no-change run.
+state. In `actions` mode, the deployment's own follow-up runs end first. A
+sync run takes in the tracked branch as it was when it started, so a run that
+merges the sync pull request leaves that merge to the push run GitHub starts
+for it. The harness waits for that run, and for any push run no step recorded,
+as `settle` runs the next sync in `local` mode. A failed follow-up run fails
+the scenario. Evaluate the required invariants after the final step, before
+cleanup; I6 uses an extra read-only-observation probe of an ordinary no-change run.
 It requires that run to exit successfully and report a successful, complete
 sync and capture before checking that it wrote nothing. A partial capture,
 stopped run or missing completion report cannot establish idempotence.

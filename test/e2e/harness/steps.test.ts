@@ -451,10 +451,40 @@ describe('workflows', () => {
     assert.deepEqual(await resolveSubject(ctx, 'runs.last.capturedTrackedTip'), { known: true, value: taken }, '`runs.last` still names the step\'s run');
     assert.equal(history[0]?.[`${ctx.names.refPrefix}/ids`], (await remoteGit.text(['rev-parse', `${ctx.names.refPrefix}/ids`])).trim());
     assert.equal(await settleFollowUpRuns(ctx), 0, 'once a run took in the tip, the deployment is idle');
+    // A check run names no tracked commit: the latest sync's still counts.
+    ctx.engine.results.push({ ...ctx.engine.results.at(-1)!, command: 'check', report: { operation: 'check', capturedTrackedTip: null } });
+    assert.equal(await settleFollowUpRuns(ctx), 0);
+    // Two merges in a row: the first one's push run, which no step recorded, is the deployment's too.
+    const commit = async (parent: string, message: string) => (await remoteGit.text(['commit-tree', `${parent}^{tree}`, '-p', parent, '-m', message])).trim();
+    const first = await commit(merge, 'First merge');
+    await remoteGit.run(['update-ref', tracked, first]);
+    await ctx.live!.rest.workflowRuns(ctx.names.trackedBranch);
+    const second = await commit(first, 'Second merge');
+    await remoteGit.run(['update-ref', tracked, second]);
+    assert.equal(await settleFollowUpRuns(ctx), 2);
+    assert.deepEqual(ctx.engine.results.slice(-2).map((result) => result.report?.['capturedTrackedTip']), [first, second]);
     // A local scenario has run.settle for this: nothing to wait for.
     ctx.scenario = { ...ctx.scenario, mode: 'local' };
-    await remoteGit.run(['update-ref', tracked, (await remoteGit.text(['commit-tree', `${merge}^{tree}`, '-p', merge, '-m', 'Another'])).trim()]);
+    await remoteGit.run(['update-ref', tracked, await commit(second, 'Another')]);
     assert.equal(await settleFollowUpRuns(ctx), 0);
+  });
+
+  it('fail the scenario when the deployment\'s follow-up push run fails', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+    let conclusion = 'success';
+    const actions = fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report: (run) => ({ operation: 'sync', capturedTrackedTip: run.head_sha ?? null }) });
+    mkdirSync(ctx.live!.sandbox.cache.dir, { recursive: true });
+    await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+    await STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' });
+    const tracked = `refs/heads/${ctx.names.trackedBranch}`;
+    const taken = (await remoteGit.text(['rev-parse', tracked])).trim();
+    await remoteGit.run(['update-ref', tracked, (await remoteGit.text(['commit-tree', `${taken}^{tree}`, '-p', taken, '-m', 'Merge'])).trim()]);
+    conclusion = 'failure';
+    const rest = ctx.live!.rest as unknown as { workflowRuns: (branch: string) => Promise<WorkflowRun[]> };
+    const list = rest.workflowRuns;
+    rest.workflowRuns = async (branch) => (await list(branch)).map((run) => (actions.runs.indexOf(run) >= 2 ? Object.assign(run, { conclusion }) : run));
+    await assert.rejects(settleFollowUpRuns(ctx), (error: Error) => error instanceof ProductError && /follow-up push run \d+ did not succeed/.test(error.message));
   });
 
   it('dispatch the initial sync by its registry id once its push has registered it', async () => {

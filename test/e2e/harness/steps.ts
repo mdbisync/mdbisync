@@ -381,7 +381,8 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
     run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: seenRuns(ctx), workflow });
   } else if (event === 'push') {
     // The run the latest push to the tracked branch started, of the command's workflow.
-    run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after: Number(ctx.observations.get('start.time') ?? 0), exclude: seenRuns(ctx), headSha: await trackedTipOnServer(ctx), workflow: workflowFor(command) });
+    await recordPushRun(ctx, command, await trackedTipOnServer(ctx));
+    return;
   } else if (event === 'pull_request') {
     const pr = ctx.observations.get('ci.pullRequest') as { number: number; head: string; openedAt: number } | undefined;
     if (pr === undefined) throw new Error('run.workflow on pull_request needs git.open-pr first');
@@ -404,28 +405,57 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
  * which records it in `linear` without writing anything. In a deployment,
  * the merge's push starts that run (the template's push trigger). In a local
  * scenario, `run.settle` runs it. Without this wait, I6's extra run would
- * record the merge and move `linear`. A run whose report is missing gives no
- * tracked commit to compare with, so the wait ends there. The follow-up runs
- * count for the request budgets and the canary scan, but they are not the
- * runs that `runs.<n|last>` name. Returns how many runs it recorded.
+ * record the merge and move `linear`.
+ *
+ * It first takes every sync push run that no step recorded (an earlier
+ * merge's run may still be queued). It then compares the tip with the commit
+ * the latest sync run took in, and waits for the tip's push run while they
+ * differ. A failed follow-up run fails the scenario, since it is the
+ * deployment's run. The follow-up runs count for the request budgets and the
+ * canary scan, but they are not the runs that `runs.<n|last>` name. Returns
+ * how many runs it recorded.
  */
 export async function settleFollowUpRuns(ctx: RunContext, limit = 3): Promise<number> {
   const sync = workflowFor('sync');
   const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
   if (ctx.scenario.mode !== 'actions' || ctx.live === null || !installed.includes(sync)) return 0;
+  const after = Number(ctx.observations.get('start.time') ?? 0);
   for (let count = 0; count < limit; count += 1) {
-    const taken = ctx.engine.results.at(-1)?.report?.['capturedTrackedTip'];
-    if (typeof taken !== 'string') return count;
-    const tip = await trackedTipOnServer(ctx);
-    if (tip === taken) return count;
+    const unrecorded = (await live(ctx).rest.workflowRuns(ctx.names.trackedBranch))
+      .filter((run) => run.event === 'push' && run.path?.split('@')[0] === `.github/workflows/${sync}` && Date.parse(run.created_at) >= after - 5_000 && !seenRuns(ctx).has(run.id))
+      .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))[0];
+    let headSha = unrecorded?.head_sha;
+    if (headSha === undefined) {
+      const tip = await trackedTipOnServer(ctx);
+      if (tip === latestTakenTip(ctx)) return count;
+      headSha = tip;
+    }
     // A follow-up run is the deployment's, not a step's: `runs.<n|last>` keep naming the steps' runs.
     if (!ctx.observations.has('scenario.stepRunsEnd')) ctx.observations.set('scenario.stepRunsEnd', ctx.engine.results.length);
-    const run = await waitForRun(live(ctx).rest, { branch: ctx.names.trackedBranch, event: 'push', after: Number(ctx.observations.get('start.time') ?? 0), exclude: seenRuns(ctx), headSha: tip, workflow: sync });
-    recordWorkflowRun(ctx, run);
-    await settleWorkflowRun(ctx, run, 'sync');
+    const run = await recordPushRun(ctx, 'sync', headSha);
     (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined)?.push(await snapshotRefs(ctx));
+    const result = ctx.engine.results.at(-1);
+    if (result?.exitCode !== 0) throw new ProductError(`the deployment's follow-up push run ${run.id} did not succeed (exit ${String(result?.exitCode)})`);
   }
+  ctx.log(`the deployment still had follow-up runs after ${limit}: the checks see it moving`);
   return limit;
+}
+
+/** The tracked commit the latest sync run took in: a check run or a failed sync names none. */
+function latestTakenTip(ctx: RunContext): string | undefined {
+  for (let index = ctx.engine.results.length - 1; index >= 0; index -= 1) {
+    const taken = ctx.engine.results[index]?.report?.['capturedTrackedTip'];
+    if (typeof taken === 'string') return taken;
+  }
+  return undefined;
+}
+
+/** Waits for the push run of `headSha` of the command's workflow, and records it. */
+async function recordPushRun(ctx: RunContext, command: CommandName, headSha: string): Promise<WorkflowRun> {
+  const run = await waitForRun(live(ctx).rest, { branch: ctx.names.trackedBranch, event: 'push', after: Number(ctx.observations.get('start.time') ?? 0), exclude: seenRuns(ctx), headSha, workflow: workflowFor(command) });
+  recordWorkflowRun(ctx, run);
+  await settleWorkflowRun(ctx, run, command);
+  return run;
 }
 
 /**
