@@ -35,7 +35,7 @@ import { loadExpectedRed } from './results.ts';
 import { requireLiveConfig, runScenarios, skippedResult } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios, selectScenarios } from './spec.ts';
-import { actionShaUnderTest, scheduleTick } from './steps.ts';
+import { actionShaUnderTest, requiredActionSha, scheduleTick } from './steps.ts';
 import { sweep } from './sweeper.ts';
 import { parseUiAnswers, renderUiChecklist } from './ui-checklist.ts';
 import { OwnershipLedger, ownedRuns } from './ownership.ts';
@@ -95,7 +95,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === 'scheduler') {
-    const text = renderScheduler(readTemplate(WORKFLOW_FILES.sync), actionShaUnderTest());
+    const text = renderScheduler(readTemplate(WORKFLOW_FILES.sync), requiredActionSha());
     if (values.install !== true) {
       process.stdout.write(text);
       return 0;

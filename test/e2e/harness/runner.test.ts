@@ -20,7 +20,7 @@ import { removeRunRefsAndPullRequests, runScenario, runScenarios } from './runne
 import { Sandbox } from './sandbox.ts';
 import { SharedAdmission, type StateStore } from './shared-state.ts';
 import { loadScenarios } from './spec.ts';
-import { HARNESS_GAPS } from './steps.ts';
+import { ACTION_SHA_ENV, HARNESS_GAPS } from './steps.ts';
 import { shouldSweep, sweep, SWEEP_AGE_MS } from './sweeper.ts';
 import { generateKeyPairSync, createVerify } from 'node:crypto';
 
@@ -424,6 +424,34 @@ describe('runner', () => {
       assert.equal(result?.result, 'env-blocked', sandboxUrl);
       assert.match(result?.reason ?? '', /test configuration is missing: MDBISYNC_TEST_SANDBOX_URL/, sandboxUrl);
       assert.equal(result?.cleanup.ok, true, sandboxUrl);
+    }
+    assert.deepEqual(touched, [], 'neither the shared admission nor the app budget was read');
+  });
+
+  it('blocks an actions scenario without the release under test before it touches the shared admission or the sandbox', async () => {
+    const touched: string[] = [];
+    const store: StateStore = {
+      async read() { touched.push('read'); throw new Error('not read'); },
+      async update() { touched.push('update'); throw new Error('not updated'); },
+    };
+    const governor = new Governor({
+      apps: [{ name: 'app1', key: 'k', readBudget: async () => { touched.push('budget'); throw new Error('not read'); } }],
+      stateDir: fresh('runner-governor-'), shared: new SharedAdmission(store),
+    });
+    const config = loadTestConfig({ MDBISYNC_TEST_CONFIG_DIR: fresh('runner-config-'), MDBISYNC_TEST_SANDBOX_URL: 'https://github.com/example/sandbox',
+      LINEAR_TEST_APP_CLIENT_ID: 'id', LINEAR_TEST_APP_CLIENT_SECRET: 'secret', LINEAR_TEST_ALICE_API_KEY: 'a', LINEAR_TEST_BOB_API_KEY: 'b' });
+    const app = config.linearApps[0]!;
+    const saved = process.env[ACTION_SHA_ENV];
+    delete process.env[ACTION_SHA_ENV];
+    try {
+      assert.equal(byId('L4-10').mode, 'actions');
+      const [result] = await runScenarios([byId('L4-10')], { ...deps(config), governor, appClients: new Map([[app.name, {} as LinearClient]]) }, 4);
+      assert.equal(result?.result, 'env-blocked');
+      assert.match(result?.reason ?? '', new RegExp(`${ACTION_SHA_ENV} is unset`));
+      assert.equal(result?.cleanup.ok, true);
+    } finally {
+      if (saved === undefined) delete process.env[ACTION_SHA_ENV];
+      else process.env[ACTION_SHA_ENV] = saved;
     }
     assert.deepEqual(touched, [], 'neither the shared admission nor the app budget was read');
   });

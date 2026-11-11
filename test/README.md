@@ -297,7 +297,7 @@ environment wins. Values are never written to a report or a log.
 | `MDBISYNC_TEST_SANDBOX_URL` | every live scenario | `https://github.com/<owner>/<repo>` of the test repository, which holds the corpus on `main` |
 | `MDBISYNC_TEST_SANDBOX_GIT_URL` | optional | where Git reads and pushes instead, for example a local mirror |
 | `SYNC_APP_CLIENT_ID` and the App's private key (`SYNC_APP_PRIVATE_KEY`, `SYNC_APP_PRIVATE_KEY_FILE`, or `sync-app.pem` in the configuration folder) | `actions` mode; optional for `local` | a GitHub App installed on the test repository; without it, local runs use your Git credential for the repository |
-| `MDBISYNC_TEST_ACTION_SHA` | optional, `actions` mode; environment only, not read from `secrets.env` | a full release commit SHA the workflows run instead of the version their templates pin |
+| `MDBISYNC_TEST_ACTION_SHA` | `actions` mode and `scheduler`; environment only, not read from `secrets.env` | the full commit SHA of the release under test, which every workflow runs instead of the version the templates pin; unset, an `actions` scenario is env-blocked before it installs anything and `scheduler` stops, since the pin can be an older release than the templates' inputs |
 | `MDBISYNC_TEST_SCHEDULE_TICK` | optional, `actions` mode; environment only | `dispatch` starts the scheduled sync workflow by hand instead of waiting for GitHub's schedule (see below) |
 
 The test workspace needs two teams with the keys `ENG` and `DOCS`; the
