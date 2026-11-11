@@ -16,6 +16,7 @@
       "action": "rename",
       "args": {
         "actor": "editor-a",
+        "target": "project-document",
         "title": "guides/renamed"
       }
     },

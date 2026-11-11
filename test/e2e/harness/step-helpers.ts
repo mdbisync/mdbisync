@@ -27,11 +27,18 @@ export function documentPaths(ctx: RunContext): string[] {
 
 /**
  * The scenario's target document: a named path or path suffix; `<ordinal>-document`
- * and `other-document` pick by position; a paragraph target or none picks the
- * scenario's fixture document when setup made one, else the first document.
+ * and `other-document` pick by position; `project-document` picks by position
+ * among the documents inside a project folder, whichever teams the run
+ * selected; a paragraph target or none picks the scenario's fixture document
+ * when setup made one, else the first document.
  */
 export function targetPath(ctx: RunContext, target?: unknown, offset = 0): string {
   const paths = documentPaths(ctx);
+  if (target === 'project-document') {
+    const inProjects = paths.filter((path) => projectFolderOf(ctx, path) !== undefined);
+    if (inProjects.length === 0) throw new EnvBlockedError('the slice has no synchronized document in a project');
+    return pick(inProjects, offset);
+  }
   if (typeof target === 'string') {
     if (target === 'other-document') return pick(paths, offset + 1);
     if (target.endsWith('-document') && ordinalOf(target) !== null) return pick(paths, (ordinalOf(target) as number) + offset);
@@ -77,6 +84,11 @@ export function projectFolders(ctx: RunContext): Array<{ folder: string; project
     if (name !== undefined) result.push({ folder: readme.replace(/\/?README\.md$/, ''), project: name });
   }
   return result.sort((a, b) => b.folder.length - a.folder.length || a.folder.localeCompare(b.folder));
+}
+
+/** The project folder of the run's tree that holds `path` (the innermost), if any. */
+export function projectFolderOf(ctx: RunContext, path: string): string | undefined {
+  return projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`))?.folder;
 }
 
 /**

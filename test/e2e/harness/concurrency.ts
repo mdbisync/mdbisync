@@ -53,7 +53,7 @@ const AUDITED: Readonly<Record<string, string>> = {
   'L2-11': '6dbd8af6607052a7914e1e8852d0f24e94e1209588329a441cd57749f71313ff',
   'L2-20': '09e7da95f02b08e2a0c6306a8dfd8a4f107f26a8bb95cf53141a7428a307fc23',
   'L2-21': 'e91c6dd8126f81f7c4597a073a6564daee0d4045fa2e3e98ef8ccb3014e62e15',
-  'L2-23': 'c667e4d71b5ed51254d182524968b9d258e48f859b90d833e716c254a1ca8c47',
+  'L2-23': 'bd4772562d30ade4b10761460e507788cf20b10d7502be070b742be1fc123282',
 };
 
 /** SHA-256 of the spec as canonical JSON (object keys sorted, array order kept). */
