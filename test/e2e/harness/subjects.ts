@@ -1819,14 +1819,20 @@ async function mermaidFences(env: Env, side: 'git' | 'linear'): Promise<Map<stri
  * since a cell's image or document link is a Linear URL there. Cell
  * equality is therefore I1 restricted to table rows: it names the table
  * documents whose cells differ.
+ *
+ * Both sides take the same table documents, the ones I1 expects a document
+ * for: synchronized files that no run left out on purpose. A left-out table
+ * (for example one whose image is missing) has no document on either side;
+ * an expected table without a mapping or a document reads as empty in
+ * Linear, so its cells differ.
  */
 async function tableRows(env: Env, side: 'git' | 'linear'): Promise<Array<{ path: string; separator: boolean; cells: string[] }>> {
   const view = await env.view();
   const rows: Array<{ path: string; separator: boolean; cells: string[] }> = [];
   for (const path of groupPaths(env.ctx, 'tables')) {
+    if (!view.files.has(path) || view.omitted.has(path) || view.kept.has(path)) continue;
     const id = view.ids.get(path)?.id;
-    if (side === 'linear' && id === undefined) continue; // left out
-    const text = side === 'git' ? linearLinks(fileBody(view, path) ?? '', path, view) : (view.documents.get(id as string)?.content ?? '');
+    const text = side === 'git' ? linearLinks(fileBody(view, path) ?? '', path, view) : (id === undefined ? '' : (view.documents.get(id)?.content ?? ''));
     for (const line of text.split('\n')) {
       if (!line.startsWith('|')) continue;
       const cells = line.replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((cell) => cell.trim());
