@@ -10,13 +10,15 @@ import { Git } from '../../../src/state/index.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
 import { budgetHolds, reportedHoldChanges, compare, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
-import { parseEnvFile, parseRepoUrl } from './config.ts';
+import { loadTestConfig, parseEnvFile, parseRepoUrl } from './config.ts';
+import { Governor } from './governor.ts';
 import { appInstallationToken, appJwt, SandboxRest } from './github.ts';
 import { registerRun } from './locks.ts';
 import { evidenceSummary, mergeLatest, readLatest, renderRunMarkdown, renderStatusPage, updateStatusPage, type HarnessReport } from './report.ts';
 import { blockedBySetupStop, EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, classify, loadExpectedRed, type ScenarioResult } from './results.ts';
 import { removeRunRefsAndPullRequests, runScenario, runScenarios } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
+import { SharedAdmission, type StateStore } from './shared-state.ts';
 import { loadScenarios } from './spec.ts';
 import { HARNESS_GAPS } from './steps.ts';
 import { shouldSweep, sweep, SWEEP_AGE_MS } from './sweeper.ts';
@@ -394,7 +396,36 @@ describe('runner', () => {
   it('reports a live scenario env-blocked, with the reason, when the configuration is missing', async () => {
     const [result] = await runScenarios([byId('L1-04')], deps(), 4);
     assert.equal(result?.result, 'env-blocked');
+    assert.match(result?.reason ?? '', /test configuration is missing: LINEAR_TEST_APP_CLIENT_ID/);
+  });
+
+  it('reports a live scenario env-blocked when no Linear app is configured', async () => {
+    const [result] = await runScenarios([byId('L1-04')], deps({ missing: [] }), 4);
+    assert.equal(result?.result, 'env-blocked');
     assert.match(result?.reason ?? '', /no Linear app is configured/);
+  });
+
+  it('blocks a live scenario without the sandbox repository before it touches the shared admission', async () => {
+    const touched: string[] = [];
+    const store: StateStore = {
+      async read() { touched.push('read'); throw new Error('shared admission state unavailable or invalid'); },
+      async update() { touched.push('update'); throw new Error('shared admission state unavailable or invalid'); },
+    };
+    const governor = new Governor({
+      apps: [{ name: 'app1', key: 'k', readBudget: async () => { touched.push('budget'); throw new Error('not read'); } }],
+      stateDir: fresh('runner-governor-'), shared: new SharedAdmission(store),
+    });
+    for (const sandboxUrl of ['', 'https://github.com/only-owner']) {
+      // What loadTestConfig makes of an unset URL and of one without an owner and a name.
+      const config = loadTestConfig({ MDBISYNC_TEST_CONFIG_DIR: fresh('runner-config-'), MDBISYNC_TEST_SANDBOX_URL: sandboxUrl,
+        LINEAR_TEST_APP_CLIENT_ID: 'id', LINEAR_TEST_APP_CLIENT_SECRET: 'secret', LINEAR_TEST_ALICE_API_KEY: 'a', LINEAR_TEST_BOB_API_KEY: 'b' });
+      const app = config.linearApps[0]!;
+      const [result] = await runScenarios([byId('L1-04')], { ...deps(config), governor, appClients: new Map([[app.name, {} as LinearClient]]) }, 4);
+      assert.equal(result?.result, 'env-blocked', sandboxUrl);
+      assert.match(result?.reason ?? '', /test configuration is missing: MDBISYNC_TEST_SANDBOX_URL/, sandboxUrl);
+      assert.equal(result?.cleanup.ok, true, sandboxUrl);
+    }
+    assert.deepEqual(touched, [], 'neither the shared admission nor the app budget was read');
   });
 
   it('blocks the published-hook scenario without the sandbox\'s corpus, instead of testing a local hook', async () => {

@@ -613,6 +613,16 @@ export function keptAnnotation(text: string, recorded: string | null, named: boo
 
 type Check = (ctx: RunContext, sides: () => Promise<Sides>) => Promise<CheckOutcome>;
 
+/**
+ * Whether a synchronized file should have a document: not left out on
+ * purpose by a run (its earlier document, if any, stays as it was), and not
+ * an annotation README the engine keeps without a document. I1, I7 and the
+ * per-document oracles that are I1 restricted to a group share this rule.
+ */
+export function expectsDocument(s: Pick<Sides, 'omitted' | 'kept'>, path: string): boolean {
+  return !s.omitted.has(path) && !s.kept.has(path);
+}
+
 const ok = (name: string): CheckOutcome => ({ name, ok: true });
 const bad = (name: string, detail: string): CheckOutcome => ({ name, ok: false, detail });
 
@@ -621,10 +631,8 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     const s = await sides();
     const differing: string[] = [];
     for (const [path, text] of s.files) {
-      // A file its run left out on purpose has no document to match; its earlier document, if any, stays as it was.
-      if (s.omitted.has(path)) continue;
-      // An annotation README the engine keeps without a document has none to match.
-      if (s.kept.has(path)) continue;
+      // A file left out on purpose, or a kept annotation README, has no document to match.
+      if (!expectsDocument(s, path)) continue;
       const entry = s.ids.get(path);
       const document = entry === undefined ? undefined : s.documents.get(entry.id);
       if (document === undefined || document.trashed) {
@@ -720,7 +728,7 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
       if (entry === undefined) {
         // Left out on purpose, it needs no id; a mapped one is still checked below.
         // Nor does an annotation README the engine keeps without a document.
-        if (!s.omitted.has(path) && !s.kept.has(path)) problems.push(`${path} has no id`);
+        if (expectsDocument(s, path)) problems.push(`${path} has no id`);
         continue;
       }
       const document = s.documents.get(entry.id);

@@ -276,9 +276,16 @@ export function runTeamZones(tree: Pick<RunTree, 'teams'>, teams: ReadonlyMap<st
   return { ids, lockKeys };
 }
 
+/**
+ * A live run needs the whole test configuration before it touches anything shared: the shared admission
+ * lives on the sandbox repository, so without its URL it would ask GitHub for a repository with no owner or name.
+ */
+export function requireLiveConfig(config: TestConfig): void {
+  if (config.missing.length > 0) throw new EnvBlockedError(`test configuration is missing: ${config.missing.join(', ')}`);
+}
+
 async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], deadline: SetupDeadline, grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
   const { config } = deps;
-  if (config.missing.length > 0) throw new EnvBlockedError(`test configuration is missing: ${config.missing.join(', ')}`);
   let token;
   try {
     ctx.phase('github token');
@@ -834,6 +841,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   let setupEnded = scenario.setup.state === 'offline';
   try {
     if (scenario.setup.state !== 'offline') {
+      requireLiveConfig(deps.config);
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');
       try {
         // Rendered workflows use the primary app's repository secrets. A

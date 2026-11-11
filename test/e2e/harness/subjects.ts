@@ -42,7 +42,7 @@ import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { INVALID_DIAGRAM_NOTE } from '../../corpus/documents.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
+import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, expectsDocument, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { annotationPath, owningFolder, type Folder } from './corpus.ts';
@@ -1832,14 +1832,23 @@ async function mermaidFences(env: Env, side: 'git' | 'linear'): Promise<Map<stri
  * since a cell's image or document link is a Linear URL there. Cell
  * equality is therefore I1 restricted to table rows: it names the table
  * documents whose cells differ.
+ *
+ * Both sides take the same table documents, the ones I1 expects a document
+ * for: synchronized files that no run left out on purpose. A left-out table
+ * (for example one whose image is missing) has no document on either side;
+ * an expected table without a mapping, or whose document is missing or
+ * trashed, reads as empty in Linear, so its cells differ (I1's "no
+ * document").
  */
 async function tableRows(env: Env, side: 'git' | 'linear'): Promise<Array<{ path: string; separator: boolean; cells: string[] }>> {
   const view = await env.view();
   const rows: Array<{ path: string; separator: boolean; cells: string[] }> = [];
   for (const path of groupPaths(env.ctx, 'tables')) {
+    const file = view.files.get(path);
+    if (file === undefined || !expectsDocument(view, path)) continue;
     const id = view.ids.get(path)?.id;
-    if (side === 'linear' && id === undefined) continue; // left out
-    const text = side === 'git' ? linearLinks(fileBody(view, path) ?? '', path, view) : (view.documents.get(id as string)?.content ?? '');
+    const document = id === undefined ? undefined : view.documents.get(id);
+    const text = side === 'git' ? linearLinks(bodyOf(file), path, view) : (document === undefined || document.trashed ? '' : (document.content ?? ''));
     for (const line of text.split('\n')) {
       if (!line.startsWith('|')) continue;
       const cells = line.replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((cell) => cell.trim());

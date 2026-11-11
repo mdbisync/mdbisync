@@ -337,14 +337,17 @@ it('persists an empty ownership scope before admission so pre-write crashes can 
   const { readOwnership } = await import('./ownership.ts');
   const { root } = await fixture();
   const scenario = loadScenarios().find((scenario) => scenario.id === 'L1-05')!;
+  let admitted = false;
   const result = await runScenario(scenario, {
     stateDir: root, outDir: root, appClients: new Map(), expectedRed: new Set(), log: () => {},
-    config: { linearApps: [], githubApp: null, gitUrl: '', missing: ['not configured'] } as never,
+    config: { linearApps: [], githubApp: null, gitUrl: '', missing: [] } as never,
     governor: { admit: async () => {
+      admitted = true;
       assert.ok(readOwnership(root, 'aaaaaa'));
       throw new BudgetBlockedError('budget unavailable');
     } } as never,
   }, 'aaaaaa');
+  assert.equal(admitted, true, 'the scenario reached admission');
   assert.equal(result.result, 'env-blocked');
   assert.equal(result.cleanup.ok, true);
 });
