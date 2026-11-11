@@ -378,7 +378,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
 }
 
 /** What the subjects compare against: the world when setup ended. */
-async function recordStart(ctx: RunContext, live: LiveWorld): Promise<void> {
+export async function recordStart(ctx: RunContext, live: LiveWorld): Promise<void> {
   ctx.observations.set('start.time', Date.now());
   ctx.observations.set('start.proxyIndex', ctx.proxy?.requests.length ?? 0);
   ctx.observations.set('start.refs', await snapshotRefs(ctx));

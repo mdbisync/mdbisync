@@ -9,7 +9,7 @@ import { after, it } from 'node:test';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import type { IdMap } from '../../../src/state/index.ts';
 import type { RunContext } from './context.ts';
-import { zoneConcurrent } from './concurrency.ts';
+import { AUDITED_CONTRACTS, AUDITED_STEPS, AUDITED_SUBJECTS, zoneConcurrent } from './concurrency.ts';
 import { loadScenarios } from './spec.ts';
 import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
@@ -23,7 +23,18 @@ after(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true 
 const scenario = loadScenarios().find((item) => item.id === 'L1-05')!;
 
 it('requires the audited contract and excludes workspace-wide scenarios', () => {
-  assert.deepEqual(loadScenarios().filter(zoneConcurrent).map((item) => item.id), ['L1-05']);
+  assert.deepEqual(loadScenarios().filter(zoneConcurrent).map((item) => item.id), [
+    'L1-01', 'L1-02', 'L1-05', 'L1-18', 'L1-19', 'L2-01', 'L2-02', 'L2-04', 'L2-07', 'L2-11', 'L2-20', 'L2-21', 'L2-23',
+  ]);
+  assert.deepEqual([...AUDITED_CONTRACTS].sort(), loadScenarios().filter(zoneConcurrent).map((item) => item.id));
+  // Faults, kills, workflows, trash and restore, uploads, helper projects and shared settings stay exclusive.
+  for (const action of ['fault.pause', 'fault.checks', 'fault.settings', 'kill.engine', 'run.workflow', 'run.check', 'linear.trash', 'linear.restore',
+    'linear.out-of-scope', 'linear.image-add', 'linear.metadata', 'git.delete', 'git.move-rewrite', 'git.annotation', 'git.image-add', 'git.remove-security-hooks']) {
+    assert.equal(AUDITED_STEPS.has(action), false, action);
+  }
+  for (const subject of ['workspace.documents', 'documents.deletedState', 'uploads.newCount', 'scan.canaryMatches', 'pullRequests.merger', 'pullRequests.ciPassed']) {
+    assert.equal(AUDITED_SUBJECTS.has(subject), false, subject);
+  }
   for (const mutate of [
     (s: typeof scenario) => { s.slice = 'full'; },
     (s: typeof scenario) => { s.setup.state = 'converged'; },
@@ -31,9 +42,17 @@ it('requires the audited contract and excludes workspace-wide scenarios', () => 
     (s: typeof scenario) => { s.steps.push({ kind: 'fault', action: 'settings', args: {} }); },
     (s: typeof scenario) => { s.checks.assertions.push({ subject: 'workspace.documents', operator: 'equal', expected: 0 }); },
     (s: typeof scenario) => { s.checks.invariants.I1.required = false; },
+    (s: typeof scenario) => { s.mode = 'actions'; },
+    (s: typeof scenario) => { (s.steps[0]!.args as Record<string, unknown>).confirm = false; },
   ]) {
     const changed = structuredClone(scenario); mutate(changed);
     assert.equal(zoneConcurrent(changed), false);
+  }
+  // A changed spec of any audited contract returns it to exclusive mode, even with audited steps and subjects only.
+  for (const audited of loadScenarios().filter(zoneConcurrent)) {
+    const changed = structuredClone(audited);
+    changed.checks.assertions = changed.checks.assertions.slice(1);
+    assert.equal(zoneConcurrent(changed), false, audited.id);
   }
 });
 

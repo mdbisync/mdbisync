@@ -486,6 +486,27 @@ export async function fetchRef(git: Git, ref: string): Promise<string | null> {
 /** Single-document reads `readSides` sends at once. */
 const SINGLE_READS_AT_ONCE = 5;
 
+/**
+ * For a zone-concurrent scenario, a check that a document read by id is the
+ * run's own: in one of its projects, or in a leased team zone with the run's
+ * title prefix or an id its ownership record holds. Any other document fails
+ * as a product error instead of entering an assertion. Other scenarios run
+ * alone and accept every document.
+ */
+export function runScopeGuard(ctx: RunContext, known?: Pick<ReadonlyMap<string, unknown>, 'has'>): (document: LinearDocument) => LinearDocument {
+  const world = ctx.live;
+  if (world === null || !zoneConcurrent(ctx.scenario)) return (document) => document;
+  const owned = known ?? ownedDocuments(ctx.owned);
+  const projectIds = new Set([...world.projects.values()].map((project) => project.id));
+  const teamIds = new Set([...world.tree.teams].map((key) => world.teams.get(key)?.id));
+  return (document) => {
+    const belongs = document.projectId !== null ? projectIds.has(document.projectId)
+      : document.teamId !== null && teamIds.has(document.teamId) && (document.title.startsWith(ctx.names.teamZonePrefix) || owned.has(document.id));
+    if (!belongs) throw new ProductError('mapped document is outside the leased run scope');
+    return document;
+  };
+}
+
 /** The assertion view contains only this run's projects and owned team documents.
  * Every network list is filtered; mapped-id fallbacks fail closed if a
  * concurrent scenario ever points outside its leased scope. */
@@ -498,14 +519,7 @@ export async function readRunDocuments(ctx: RunContext, ids: IdMap): Promise<Pic
   // prefix or the run's ownership record holds its id. Annotation READMEs keep their plain title (README),
   // so only the record shows they are the run's, and a second one there is seen as a duplicate.
   const owned = ownedDocuments(ctx.owned);
-  const projectIds = new Set([...world.projects.values()].map((project) => project.id));
-  const teamIds = new Set([...world.tree.teams].map((key) => world.teams.get(key)?.id));
-  const belongs = (document: LinearDocument) => !zoneConcurrent(ctx.scenario) ||
-    (document.projectId !== null ? projectIds.has(document.projectId) : document.teamId !== null && teamIds.has(document.teamId) && (document.title.startsWith(ctx.names.teamZonePrefix) || owned.has(document.id)));
-  const accept = (document: LinearDocument) => {
-    if (!belongs(document)) throw new ProductError('mapped document is outside the leased run scope');
-    return document;
-  };
+  const accept = runScopeGuard(ctx, owned);
   for (const team of world.tree.teamZones.keys()) {
     const teamId = world.teams.get(team)?.id;
     if (teamId === undefined) continue;
