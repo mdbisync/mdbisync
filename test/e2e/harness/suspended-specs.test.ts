@@ -11,6 +11,7 @@ import { resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts
 import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { CheckpointControl } from './checkpoints.ts';
+import { colorLabel, CONFLICT_MARK } from './conflicts.ts';
 import { runChecks, snapshotRefs, budgetHolds } from './checks.ts';
 import { faultChecks, rerunCheckAsPerson, type WorkflowRun } from './check-fault.ts';
 import type { RunContext } from './context.ts';
@@ -30,6 +31,10 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
       const names = runNames('aaaaaa');
       const count = scenario.id === 'L5-35' ? 65 : 3;
       const documents = Object.fromEntries(Array.from({ length: count }, (_, i) => [`eng/notes/item-${String(i).padStart(2, '0')}.md`, `# Notes ${i}\n\nFirst paragraph.\n\nSecond paragraph.\n`]));
+      // As in the live corpus, one of L5-35's held documents holds a conflict
+      // from git, which the initial sync writes to Linear without the conflict
+      // mark; the sync marks it once it reconciles the edited document.
+      if (scenario.id === 'L5-35') documents['eng/notes/item-03.md'] = '**Sync conflict: git version**\n\n```sh\nnpm ci\n```\n\n**Sync conflict: Linear version**\n\n```sh\nnpm install\n```\n\n**Sync conflict: end**\n\nFirst paragraph.\n';
       const tree = { 'eng/notes/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n', ...documents, '.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/hooks\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n', [CHECK_WORKFLOW_PATH]: CHECK_WORKFLOW };
       await fixture.seed(tree, { branch: names.trackedBranch });
       const world = fakeWorld();
@@ -183,16 +188,20 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           assert.equal(result.exitCode, 0, result.stderr);
           ctx.engine.results.push({ command, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, remote: { runId: ctx.engine.results.length, runAttempt: 1, linearEngine: true, requests }, report: JSON.parse(await readFile(reportFile, 'utf8')), summary: await readFile(summaryFile, 'utf8'), signal: null, durationMs: 0, timedOut: false, notImplemented: false } as EngineResult);
           if (scenario.id === 'L5-35') {
-            const writes = world.linear.documents.filter((d) => {
-              const before = beforeDocuments.get(d.id);
-              return before === undefined || ['content', 'title', 'projectId', 'teamId', 'trashed'].some((key) => d[key as keyof typeof d] !== before[key as keyof typeof before]);
-            }).length;
             // Count changed suspended documents from the service, including clears
             // that capture finishes after the lane's own holdMarks report.
             const changed = new Set([...world.linear.comments].flatMap(([id, c]) => {
               const before = beforeComments.get(id);
               return c.body.includes('Check `') && (before === undefined || before.body !== c.body || before.resolved !== c.resolved) ? [c.documentContentId] : [];
             }));
+            // Changed documents, not write requests. An icon or color change
+            // counts as a write (the live I9 counts icon-only updates too),
+            // except a held document's, which the hold changes already cover.
+            const writes = world.linear.documents.filter((d) => {
+              const before = beforeDocuments.get(d.id);
+              const keys = ['content', 'title', 'projectId', 'teamId', 'trashed', ...(changed.has(`content-${d.id}`) ? [] : ['icon', 'color'])];
+              return before === undefined || keys.some((key) => d[key as keyof typeof d] !== before[key as keyof typeof before]);
+            }).length;
             const count = requests.filter((r) => r.kind !== 'oauth').length;
             assert.ok(budgetHolds(count, writes, 1, changed.size), `I9 per run: ${count} requests, ${writes} document writes, ${changed.size} hold changes`);
           }
@@ -229,6 +238,11 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         assert.deepEqual([...markerRuns.values()].filter((run) => run.cancelledBy === 'person').map((run) => run.branch), [suspendedBranch(resolveStateConfig(names))]);
       }
       assert.equal(await runner(), undefined, 'a pending marker job still holds the runner');
+      // L5-35: the held document with a conflict from git ends with the conflict mark.
+      if (scenario.id === 'L5-35') {
+        const conflicted = world.linear.documents.find((d) => d.title.endsWith('item-03'));
+        assert.deepEqual([conflicted?.icon, colorLabel(conflicted?.color)], [CONFLICT_MARK.icon, CONFLICT_MARK.color]);
+      }
       // I6 uses the same in-process engine transport as the scenario's own runs.
       const original = STEP_ACTIONS['run.sync'];
       STEP_ACTIONS['run.sync'] = async () => sync();
