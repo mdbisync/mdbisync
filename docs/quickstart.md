@@ -41,8 +41,8 @@ first; a version with `-rc` is a pre-release and sorts before its final
 release. Take the last line without `-rc`, or the last line if every
 version is a pre-release: its first
 column, 40 hexadecimal characters, is the release SHA, and the part
-between `refs/tags/` and `^{}` is the version, for example
-`v0.1.0-rc.9`. The steps below call them
+between `refs/tags/` and `^{}` is the version, for example `v0.1.0`
+(or `v0.1.0-rc.9` for a pre-release). The steps below call them
 `<release-sha>` and `<version>`. More on pins:
 [release builds and pins](usage.md#release-builds-and-pins).
 
@@ -172,15 +172,17 @@ removed. Which hooks those are is your choice:
   that refuses private keys. Docker must be available wherever the hooks
   run: on your machine, and on the runner (GitHub's `ubuntu-latest` has
   it). Review them for your repository's needs.
-- **Your own:** add any pre-commit hook to `.pre-commit-config.yaml` and
-  give it `alias: security`, with `stages: [pre-commit, pre-push]`. A hook
+- **Your own:** run `init --no-security-hooks` (or `--security-hooks` to
+  keep the examples too); after `init` has written the files, add any
+  pre-commit hook to `.pre-commit-config.yaml` and give it
+  `alias: security`, with `stages: [pre-commit, pre-push]`. A hook
   that needs a key gets it from a repository secret you add: in both
   `mdbisync.yml` and `mdbisync-initial-sync.yml`, under the `env:` of the
   step **Run the security hooks**, add `NAME: ${{ secrets.NAME }}` (the
   step holds a commented example). That step holds none of the sync's
   secrets.
-- **None:** `init --no-security-hooks`. The sync then pushes Linear's
-  content unchecked, and every run's summary says so.
+- **None:** `init --no-security-hooks` and add none. The sync then pushes
+  Linear's content unchecked, and every run's summary says so.
 
 A document a security hook rejects is not pushed and gets a red mark and
 a comment in Linear that names the hook and line, never the matched text.
