@@ -56,13 +56,22 @@ export interface RunWorkflowOptions {
   refPrefix: string;
   /** The run's own concurrency group, in place of the templates' shared one. */
   group: string;
-  /** The release commit under test; the template's pin when absent. */
+  /**
+   * The release commit under test; the template's pin when absent. Absent
+   * only offline: every live caller passes `requiredActionSha()` (steps.ts),
+   * since the pin can be an older release than the templates' inputs.
+   */
   actionSha?: string;
   securityCanary?: boolean;
 }
 
 export function readTemplate(file: string): string {
   return readFileSync(join(EXAMPLES, file), 'utf8');
+}
+
+/** Whether a step's `uses` is the action, at any ref. */
+export function isActionUses(uses: unknown): boolean {
+  return typeof uses === 'string' && uses.startsWith(`${ACTION_REPOSITORY}@`);
 }
 
 /** The release commit a template pins the action to. */
@@ -222,7 +231,7 @@ const SCHEDULER_HEADER = [
   ` harness's \`scheduler --install\`, never edit it by hand.`,
 ].join('\n');
 
-/** The sync template rendered as the sandbox's scheduled workflow, for the release `actionSha` (the template's pin when absent). */
+/** The sync template rendered as the sandbox's scheduled workflow, for the release `actionSha` (the template's pin when absent; live callers always name it). */
 export function renderScheduler(template: string, actionSha?: string): string {
   const rendered = renderForRun(template, {
     trackedBranch: requested('tracked-branch'),
@@ -292,10 +301,7 @@ export function renderScheduler(template: string, actionSha?: string): string {
 function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): void {
   const steps = job.get('steps');
   if (!isSeq(steps)) return;
-  const isAction = (item: unknown) => {
-    const uses = (item as YAMLMap).get('uses');
-    return typeof uses === 'string' && uses.startsWith(`${ACTION_REPOSITORY}@`);
-  };
+  const isAction = (item: unknown) => isActionUses((item as YAMLMap).get('uses'));
   if (options.securityCanary && steps.items.some(isAction)) {
     const hooks = steps.items.find(item => (item as YAMLMap).get('name') === CANARY_HOOK_STEP) as YAMLMap | undefined;
     if (hooks === undefined) throw new Error('Security canary needs a separate hooks step');
@@ -351,15 +357,25 @@ export function prerequisiteErrors(): string[] {
   return knownPrerequisiteErrors;
 }
 
+interface TemplateStep {
+  name?: string;
+  run?: string;
+  uses?: string;
+}
+
+/** Every step of every template that exists. */
+function templateSteps(): TemplateStep[] {
+  return Object.values(WORKFLOW_FILES)
+    .filter((file) => existsSync(join(EXAMPLES, file)))
+    .flatMap((file) => Object.values((parseDocument(readTemplate(file)).toJS() as { jobs?: Record<string, { steps?: TemplateStep[] }> }).jobs ?? {}))
+    .flatMap((job) => job.steps ?? []);
+}
+
 function readPrerequisiteErrors(): string[] {
   const errors = new Set<string>();
-  for (const file of Object.values(WORKFLOW_FILES)) {
-    if (!existsSync(join(EXAMPLES, file))) continue;
-    const jobs = (parseDocument(readTemplate(file)).toJS() as { jobs?: Record<string, { steps?: Array<{ name?: string; run?: string }> }> }).jobs ?? {};
-    for (const step of Object.values(jobs).flatMap((job) => job.steps ?? [])) {
-      if (step.name === undefined || !PREREQUISITE_STEPS.has(step.name)) continue;
-      for (const match of (step.run ?? '').matchAll(/::error::([^'"\n]+)/g)) errors.add(`##[error]${(match[1] as string).trim()}`);
-    }
+  for (const step of templateSteps()) {
+    if (step.name === undefined || !PREREQUISITE_STEPS.has(step.name)) continue;
+    for (const match of (step.run ?? '').matchAll(/::error::([^'"\n]+)/g)) errors.add(`##[error]${(match[1] as string).trim()}`);
   }
   return [...errors];
 }
@@ -373,15 +389,7 @@ export function engineSteps(): ReadonlySet<string> {
 }
 
 function readEngineSteps(): Set<string> {
-  const names = new Set<string>();
-  for (const file of Object.values(WORKFLOW_FILES)) {
-    if (!existsSync(join(EXAMPLES, file))) continue;
-    const jobs = (parseDocument(readTemplate(file)).toJS() as { jobs?: Record<string, { steps?: Array<{ name?: string; uses?: string }> }> }).jobs ?? {};
-    for (const step of Object.values(jobs).flatMap((job) => job.steps ?? [])) {
-      if (step.name !== undefined && step.uses?.startsWith(`${ACTION_REPOSITORY}@`) === true) names.add(step.name);
-    }
-  }
-  return names;
+  return new Set(templateSteps().filter((step) => isActionUses(step.uses)).flatMap((step) => (step.name === undefined ? [] : [step.name])));
 }
 
 /** The templates that exist (of `only`, when given), rendered for one run, by their `.github/workflows/` file name. */

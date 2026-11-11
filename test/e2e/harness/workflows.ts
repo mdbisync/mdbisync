@@ -239,6 +239,8 @@ function stepOfLogFile(file: string): string | undefined {
   return step === undefined ? undefined : comparable(step);
 }
 
+let comparableEngineSteps: ReadonlySet<string> | undefined;
+
 function comparable(name: string): string {
   return name.replace(/[^A-Za-z0-9]+/g, '');
 }
@@ -253,7 +255,8 @@ function comparable(name: string): string {
  * engine starts.
  */
 export function engineNotImplemented(files: ReadonlyMap<string, string>, command: CommandName): boolean {
-  const steps = new Set([...engineSteps()].map(comparable));
+  comparableEngineSteps ??= new Set([...engineSteps()].map(comparable));
+  const steps = comparableEngineSteps;
   const line = notImplementedMessage(command);
   for (const [file, log] of files) {
     const step = stepOfLogFile(file);

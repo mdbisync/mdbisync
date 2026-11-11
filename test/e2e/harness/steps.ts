@@ -110,8 +110,12 @@ export function actionShaUnderTest(env: NodeJS.ProcessEnv = process.env): string
 export function requiredActionSha(env: NodeJS.ProcessEnv = process.env): string {
   const actionSha = actionShaUnderTest(env);
   if (actionSha !== undefined) return actionSha;
-  const pin = pinnedActionSha(readTemplate(SYNC_WORKFLOW));
-  throw new EnvBlockedError(`${ACTION_SHA_ENV} is unset: actions mode runs the release under test, never the templates' pin ${pin.slice(0, 7)}; set it to the release commit's full SHA`);
+  // The pin only illustrates the reason; a template without one still blocks for the unset variable.
+  let pin = '';
+  try {
+    pin = ` ${pinnedActionSha(readTemplate(SYNC_WORKFLOW)).slice(0, 7)}`;
+  } catch {}
+  throw new EnvBlockedError(`${ACTION_SHA_ENV} is unset: actions mode runs the release under test, never the templates' pin${pin}; set it to the release commit's full SHA`);
 }
 
 type Executor = (ctx: RunContext, args: Record<string, unknown>) => Promise<void>;

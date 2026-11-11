@@ -28,7 +28,7 @@ import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type Check
 import { assertCurrentCorpus } from './corpus-drift.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
-import { runStep, settleFollowUpRuns } from './steps.ts';
+import { requiredActionSha, runStep, settleFollowUpRuns } from './steps.ts';
 import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtures.ts';
 import { projectFolders } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
@@ -850,6 +850,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   try {
     if (scenario.setup.state !== 'offline') {
       requireLiveConfig(deps.config);
+      // Before admission and setup: an actions scenario without the release under test must create nothing.
+      if (scenario.mode === 'actions') requiredActionSha();
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');
       try {
         // Rendered workflows use the primary app's repository secrets. A
