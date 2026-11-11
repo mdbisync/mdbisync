@@ -41,14 +41,17 @@ Edit in Linear or in git, and both stay in sync.
 ## How it works
 
 There is no mdbisync service and no database. Each run is a job in your
-GitHub Actions runner, and the sync's state lives in three refs of your
-repository, under `refs/mdbisync/`, outside your branches and files.
+GitHub Actions runner. The sync's state lives in three refs of your
+repository under `refs/mdbisync/`, outside your branches and files, and its
+pull requests come from the branches `mdbisync/linear` and
+`mdbisync/suspended`.
 
 ![A sync run: Linear's edits are captured through your hooks into the state refs and reach main through the sync pull request; main is merged with Linear's record and written back to Linear.](docs/images/architecture.svg)
 
-Changes from Linear reach `main` only through the sync pull request, which
-merges itself once your checks pass. Changes on `main` reach Linear in the
-next run, usually within a minute or two. Each step is in
+After the initial sync, changes from Linear reach `main` only through the
+sync pull request, which merges itself once your checks pass; a batch that
+fails them waits in a suspended pull request. Changes on `main` reach Linear
+in the next run, usually within a minute or two. Each step is in
 [docs/sync-cycle.md](docs/sync-cycle.md).
 
 ## Conflicts
@@ -88,7 +91,8 @@ takes the result to the other side. Details: [docs/conflicts.md](docs/conflicts.
   ([docs/linear-format.md](docs/linear-format.md)).
 - **Security hooks before any push:** your `alias: security` pre-commit
   hooks check Linear's changes; a rejected document gets a red mark in
-  Linear and is not committed.
+  Linear and is not committed. Without such hooks the content is not
+  checked, and every run summary says so.
 - **A sync pull request with your checks:** it merges itself when they pass;
   a failing batch moves to a suspended lane while other documents keep
   syncing.
@@ -102,11 +106,13 @@ takes the result to the other side. Details: [docs/conflicts.md](docs/conflicts.
 - Linear documents only: issues, comments, icons and colors are not synced.
   YAML front matter stays in git.
 - Linear to git waits for the next scheduled run: GitHub starts schedules
-  every five minutes at best, often later.
-- Markdown Linear would lose (footnotes, link titles, table alignment),
-  images from the web, files over 10 MB and documents over 250,000
-  characters stay in git only and are listed in the run summary until fixed.
-- GitHub and GitHub Actions only.
+  every five minutes at best, often later, and turns them off in a public
+  repository after 60 days without activity.
+- A document with Markdown Linear would lose (a footnote, a link title,
+  table alignment), an image from the web, a linked file over 10 MB or more
+  than 250,000 characters is left out whole: it stays in git only and is
+  listed in the run summary until fixed.
+- The repository must be on GitHub.
 
 ## Setup
 

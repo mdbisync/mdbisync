@@ -121,10 +121,11 @@ The action revokes each run's Linear token when it ends and retries in its
 `post` step, including failed and cancelled jobs. A runner that disappears
 before post can execute can leave an active token behind.
 
-The example workflows leave `cleanup-tokens: false`. Enable it before staging
-with `cleanup-tokens: true` to clean orphan tokens automatically. This
-requires a **dedicated Linear OAuth app** used only by these two workflows
-in this repository, both in the same `concurrency` group. Cleanup requests
+The example workflows leave `cleanup-tokens: false`. To clean orphan tokens
+automatically, set `cleanup-tokens: true` on the stage step, or on the only
+mdbisync step when `security-step` is empty; never on the apply step. This
+requires a **dedicated Linear OAuth app** used only by this repository's
+sync and initial-sync workflows, both in the same `concurrency` group. Cleanup requests
 read-only scopes and then restores read/write scopes, replacing the app's
 existing tokens in that workspace. Do not enable it when another repository,
 process or test worker uses the same app; leave it false and revoke stale
