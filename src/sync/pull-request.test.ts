@@ -80,6 +80,7 @@ describe('sync: the sync pull request', () => {
     concurrentMove = false;
     world.github.checks = new Map();
     world.github.merge = mergeOnRemote;
+    world.github.pullRequestHead = (pr) => rev(`refs/heads/${pr.head}`);
     const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
     assert.equal(initial.result.exitCode, 0, initial.result.stderr);
     start = await rev('refs/heads/main');
@@ -128,7 +129,7 @@ describe('sync: the sync pull request', () => {
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
     for (const text of texts) assert.ok(!text.includes(CANARY), 'content reached the output or a pull request (I5)');
     await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined, movedByOthers: [...(concurrentMove ? ['ids'] as const : []), ...(deletedSuspendedDuringRun ? ['suspendedBranch'] as const : [])] });
-    return { result, report, summary, clock, writes: world.writes.slice(writesBefore), linearRequests: linearRequests.length - linearBefore };
+    return { result, report, summary, clock, writes: world.writes.slice(writesBefore), linearRequests: linearRequests.length - linearBefore, linearApiRequests: linearRequests.slice(linearBefore).filter((url) => !url.startsWith(`${LINEAR_API}/oauth/`)).length };
   }
 
   /** One sync run, with the invariants every run keeps. */
@@ -487,6 +488,99 @@ describe('sync: the sync pull request', () => {
     assertNoRerun();
   });
 
+  it('waits for GitHub to show the empty head before closing a suspended normal pull request', async () => {
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nHeld edit.\n');
+    await sync();
+    const failed = await rev(SYNC_BRANCH);
+    checksOn(failed, [{ name: CHECK_NAME, status: 'completed', conclusion: 'failure' }]);
+    let reads = 0;
+    let visible = failed;
+    world.github.pullRequestHead = async (pr) => {
+      reads += 1;
+      visible = reads < 3 ? failed : await rev(`refs/heads/${pr.head}`);
+      return visible;
+    };
+    world.github.reset = (request, body) => {
+      if (request === 'PATCH /pulls/1' && body.state === 'closed') {
+        assert.notEqual(visible, failed, 'closed while GitHub still showed the failed batch');
+      }
+      return undefined;
+    };
+    const held = await sync();
+    assert.equal(held.result.exitCode, 0, held.result.stderr);
+    assert.equal(reads, 3);
+    assert.equal(world.github.pullRequests[0]?.state, 'closed');
+    assert.equal(await rev(`${visible}^{tree}`), await rev('refs/heads/main^{tree}'));
+    assert.ok(held.report.pullRequest?.suspended?.pullRequest);
+  });
+
+  for (const crash of [false, true]) it(`recovers a ${crash ? 'failed close after the atomic suspension push' : 'head update deferred beyond the polling limit'} without reusing the normal pull request`, async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nHeld edit.\n');
+    await sync();
+    const failed = await rev(SYNC_BRANCH);
+    checksOn(failed, [{ name: CHECK_NAME, status: 'completed', conclusion: 'failure' }]);
+    let reads = 0;
+    world.github.pullRequestHead = async (pr) => {
+      reads += 1;
+      return crash ? rev(`refs/heads/${pr.head}`) : failed;
+    };
+    if (crash) world.github.reset = (request, body) => request === 'PATCH /pulls/1' && body.state === 'closed' ? 'before' : undefined;
+    const first = await sync();
+    assert.equal(first.result.exitCode, crash ? INCOMPLETE_EXIT_CODE : 0, first.result.stderr);
+    assert.equal(reads, crash ? 1 : 5);
+    if (!crash) {
+      assert.equal(first.report.pullRequest?.suspended?.normalClosePending, true);
+      assert.ok(first.report.pullRequest?.suspended?.pullRequest);
+      assert.match(first.summary, /waiting for GitHub to show its empty head/);
+      assert.doesNotMatch(first.summary, /no pull request is needed/);
+    }
+    const empty = await rev(SYNC_BRANCH);
+    assert.notEqual(empty, failed);
+    assert.equal(await rev(`${empty}^{tree}`), await rev('refs/heads/main^{tree}'));
+    assert.equal(world.github.pullRequests[0]?.state, 'open');
+    assert.ok(((await ids())[path] as { suspended?: unknown }).suspended);
+    delete world.github.reset;
+    world.github.pullRequestHead = async () => failed;
+    await editInLinear('combined/guide.md', '# Guide\n\nAn unrelated edit.\n');
+    // Even a green suspended head cannot release before the normal PR closes:
+    // release would replace the empty head, making the old close unrecoverable.
+    checksOn(await rev(SUSPENDED), [{ name: CHECK_NAME, status: 'completed', conclusion: 'success' }]);
+    world.github.reset = (request) => request === 'GET /pulls/1' ? 'before' : undefined;
+    const unavailable = await sync();
+    assert.equal(unavailable.result.exitCode, INCOMPLETE_EXIT_CODE, unavailable.result.stderr);
+    assert.equal(unavailable.report.pullRequest?.suspended?.normalClosePending, true);
+    assert.doesNotMatch(unavailable.summary, /the normal lane still runs/);
+    assert.equal(await rev(SYNC_BRANCH), empty);
+    delete world.github.reset;
+    const stale = await sync();
+    assert.equal(stale.result.exitCode, 0, stale.result.stderr);
+    assert.equal(stale.report.pullRequest?.suspended?.normalClosePending, true);
+    assert.equal(stale.report.pullRequest?.suspended?.waiting, undefined);
+    assert.match(stale.summary, /New normal batches and suspended release wait for that close/);
+    assert.doesNotMatch(stale.summary, /no pull request is needed/);
+    assert.equal(await rev(SYNC_BRANCH), empty);
+    assert.equal(world.github.pullRequests[0]?.state, 'open');
+    world.github.pullRequestHead = (pr) => rev(`refs/heads/${pr.head}`);
+    let closedAt: string | undefined;
+    world.github.reset = (request, body) => {
+      if (request === 'PATCH /pulls/1' && body.state === 'closed') closedAt = empty;
+      return undefined;
+    };
+    const recovered = await sync();
+    assert.equal(recovered.result.exitCode, 0, recovered.result.stderr);
+    assert.equal(closedAt, empty);
+    assert.equal(world.github.pullRequests[0]?.state, 'closed');
+    // A crash before opening the suspended PR still gives its new checks the
+    // normal grace period. An existing PR can release in this recovery run.
+    if (crash) {
+      assert.equal(recovered.report.pullRequest?.suspended?.waiting, true);
+      assert.ok((await sync()).report.pullRequest?.suspended?.released);
+    } else assert.ok(recovered.report.pullRequest?.suspended?.released);
+    assert.equal(openPullRequests().filter((pr) => pr.head === 'mdbisync/linear').length, 1);
+    assert.notEqual(openPullRequests().find((pr) => pr.head === 'mdbisync/linear')?.number, 1);
+  });
+
   it('L5-35: a batch of 60 suspended documents is marked 50 in one run and 10 in the next, within I9', async () => {
     const projectId = (await documentOf('eng/notes/plan.md')).projectId as string;
     for (let i = 0; i < MANY; i += 1) await editInLinear(`eng/notes/item-${i}.md`, `# Item ${i}\n\nClosed.\n`);
@@ -526,6 +620,54 @@ describe('sync: the sync pull request', () => {
     const idle = await sync();
     assert.equal(idle.report.pullRequest?.holdMarks, undefined);
     assert.ok(idle.linearRequests <= 5, `an idle suspended run made ${idle.linearRequests} Linear requests`);
+  });
+
+  it('L5-35: a release past the per-run limit clears the rest in the next run and says so, within I9', async () => {
+    const projectId = (await documentOf('eng/notes/plan.md')).projectId as string;
+    for (let i = 0; i < MANY; i += 1) await editInLinear(`eng/notes/item-${i}.md`, `# Item ${i}\n\nClosed.\n`);
+    for (let i = 0; i < MANY; i += 1) await editInLinear(`combined/page-${i}.md`, `# Page ${i}\n\nFinal.\n`);
+    for (let i = 0; i < MANY; i += 1) {
+      world.linear.documents.push({ id: `fresh-${i}`, title: `fresh-${i}`, projectId, content: `# Fresh ${i}\n\nNew.\n`, createdAt: '2026-01-03T00:00:00Z' });
+      touch(world.linear.documents.at(-1) as FakeDocument);
+    }
+    const own = new Map(world.linear.documents.map((document) => [document.id, { icon: document.icon ?? null, color: document.color ?? null }]));
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), FAILED);
+    await sync();
+    checksOn(await rev(SUSPENDED), FAILED);
+    await sync();
+    const held = Object.entries(await ids()).filter(([, entry]) => (entry as { suspended?: unknown }).suspended !== undefined).map(([path]) => path);
+    assert.equal(held.length, 60);
+    // I9 as the harness counts it: Linear's API requests, without the token's exchange and revocation.
+    const withinBudget = (run: Awaited<ReturnType<typeof sync>>) => {
+      const marks = run.report.pullRequest?.holdMarks;
+      const changes = (marks?.set.length ?? 0) + (marks?.updated.length ?? 0) + (marks?.cleared.length ?? 0);
+      const written = run.writes.filter((write) => write === 'CreateDocument').length + run.writes.filter((write) => write === 'UpdateDocument').length - changes;
+      assert.ok(run.linearApiRequests <= 1.5 * Math.max(written, 0) + 5 + 2 * changes, `${run.linearApiRequests} Linear requests for ${changes} mark changes and ${written} written documents`);
+    };
+    const released = await releaseHeld();
+    assert.equal(released.report.pullRequest?.holdMarks?.cleared.length, HOLD_MARK_LIMIT);
+    assert.equal(released.report.pullRequest?.holdMarks?.deferred, 60 - HOLD_MARK_LIMIT);
+    assert.match(released.summary, /10 more suspended documents get their mark or comment in a later run/);
+    assert.equal(released.report.complete, false);
+    withinBudget(released);
+    // The next run finishes the rest and reports it: nothing is left for a later run that never comes.
+    const rest = await sync();
+    assert.equal(rest.result.exitCode, 0, rest.result.stderr);
+    assert.equal(rest.report.pullRequest?.holdMarks?.cleared.length, 60 - HOLD_MARK_LIMIT);
+    assert.equal(rest.report.pullRequest?.holdMarks?.deferred, 0);
+    assert.match(rest.summary, /Suspended documents in Linear: 10 cleared\./);
+    withinBudget(rest);
+    for (const path of held) {
+      const document = await documentOf(path);
+      assert.deepEqual({ icon: document.icon ?? null, color: document.color ?? null }, own.get(document.id), path);
+      assert.equal(commentsOf(document).length, 1, path);
+      assert.equal(commentsOf(document)[0]?.resolved, true, path);
+      assert.equal('saved' in ((await ids())[path] as object), false, path);
+    }
+    const quiet = await sync();
+    assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
+    assert.deepEqual(quiet.writes, []);
   });
 
   it('a batch that joins while earlier documents still wait for their mark describes only its own documents', async () => {
@@ -1069,6 +1211,124 @@ describe('sync: the sync pull request', () => {
     // Released while in the trash: its comment is resolved before its id is forgotten.
     assert.equal(commentsOf(document).length, 1);
     assert.equal(commentsOf(document)[0]?.resolved, true);
+  });
+
+  /** Suspends the plan, then trashes its document in Linear, so the batch releases while it is in the trash. */
+  async function suspendThenTrash(path: string): Promise<FakeDocument> {
+    await suspendOne(path);
+    const document = await documentOf(path);
+    document.trashed = true;
+    touch(document);
+    await sync();
+    return document;
+  }
+  /** Answers Linear's `ResolveComment` with `answer` while it returns a response; other requests reach the fakes. */
+  function onResolve(answer: () => Response | undefined): { calls: number } {
+    const seen = { calls: 0 };
+    const inner = fakeFetch(world);
+    fetchOverride = async (input, init) => {
+      if (String(input).startsWith(LINEAR_API) && String(init?.body ?? '').includes('mutation ResolveComment')) {
+        seen.calls += 1;
+        const response = answer();
+        if (response !== undefined) return response;
+      }
+      return inner(input, init);
+    };
+    return seen;
+  }
+  const linearAnswer = (status: number, code: string) => new Response(JSON.stringify({ data: null, errors: [{ message: 'injected', extensions: { code } }] }), { status, headers: { 'content-type': 'application/json' } });
+
+  it('L5-32: a comment Linear will not resolve on a released document in the trash is reported once and not tried again', async () => {
+    const path = 'eng/notes/plan.md';
+    const document = await suspendThenTrash(path);
+    const resolve = onResolve(() => linearAnswer(200, 'INPUT_ERROR'));
+    const released = await releaseHeld();
+    const marks = released.report.pullRequest?.holdMarks;
+    assert.equal(marks?.code, undefined);
+    assert.deepEqual(marks?.unresolved?.map(({ path: where }) => where), [path]);
+    assert.match(marks?.unresolved?.[0]?.error ?? '', /INPUT_ERROR/);
+    assert.ok(released.summary.includes(`Linear refused to resolve the suspension comment of released documents: \`${path}\``), released.summary);
+    assert.doesNotMatch(released.summary, /a later run goes on/);
+    assert.equal(resolve.calls, 1);
+    assert.equal((await ids())[path], undefined);
+    assert.equal(commentsOf(document)[0]?.resolved, undefined);
+    const quiet = await sync();
+    assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
+    assert.equal(resolve.calls, 1, 'the refused comment was tried again');
+  });
+
+  it('a released comment a person deleted gives the document its own icon back and is reported once, without stalling later runs', async () => {
+    const path = 'eng/notes/plan.md';
+    const own = { icon: (await documentOf(path)).icon ?? null, color: (await documentOf(path)).color ?? null };
+    await suspendOne(path);
+    const resolve = onResolve(() => linearAnswer(200, 'INPUT_ERROR'));
+    const released = await releaseHeld();
+    const marks = released.report.pullRequest?.holdMarks;
+    assert.equal(marks?.code, undefined);
+    assert.deepEqual(marks?.unresolved?.map(({ path: where }) => where), [path]);
+    const document = await documentOf(path);
+    assert.deepEqual({ icon: document.icon ?? null, color: document.color ?? null }, own);
+    assert.equal('saved' in ((await ids())[path] as object), false);
+    const quiet = await sync();
+    assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
+    assert.equal(resolve.calls, 1, 'the refused comment was tried again');
+  });
+
+  it('a token refusal or a server failure while resolving a released comment in the trash is not final: the comment waits for a later run', async () => {
+    const path = 'eng/notes/plan.md';
+    const document = await suspendThenTrash(path);
+    // A token refusal, then a server failure Linear reports with HTTP 200: neither is about the comment.
+    const answers = [linearAnswer(401, 'AUTHENTICATION_ERROR'), linearAnswer(200, 'DEADLOCK_DETECTED')];
+    let refused = true;
+    onResolve(() => (refused ? answers.shift() : undefined));
+    checksOn(await rev(SUSPENDED), FAILED);
+    await sync();
+    checksOn(await rev(SUSPENDED), PASSED);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.equal(released.report.pullRequest?.holdMarks?.code, 'write-failed');
+    assert.equal(released.report.pullRequest?.holdMarks?.unresolved, undefined);
+    assert.ok(((await ids())[path] as { saved?: { hold?: unknown } } | undefined)?.saved?.hold !== undefined, 'the pending comment was forgotten');
+    const again = await sync();
+    assert.equal(again.report.pullRequest?.holdMarks?.code, 'write-failed');
+    assert.equal(again.report.pullRequest?.holdMarks?.unresolved, undefined);
+    refused = false;
+    const next = await sync();
+    assert.deepEqual(next.report.pullRequest?.holdMarks?.cleared, [path]);
+    assert.equal(commentsOf(document)[0]?.resolved, true);
+    assert.equal((await ids())[path], undefined);
+  });
+
+  it('L5-32: a comment on a released document in the trash that Linear could not resolve yet is resolved by the next run', async () => {
+    const path = 'eng/notes/plan.md';
+    const document = await suspendThenTrash(path);
+    let outage = true;
+    const resolve = onResolve(() => (outage ? linearAnswer(500, 'INTERNAL_SERVER_ERROR') : undefined));
+    checksOn(await rev(SUSPENDED), FAILED);
+    await sync();
+    checksOn(await rev(SUSPENDED), PASSED);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.equal(released.report.pullRequest?.holdMarks?.code, 'write-failed');
+    assert.match(released.summary, /a later run goes on/);
+    assert.equal(released.report.complete, false);
+    // The release is recorded, and the comment's id stays until it is resolved.
+    assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/heads/main:${path}`], { okCodes: [0, 128] })).code, 128);
+    const kept = (await ids())[path] as { saved?: { hold?: unknown }; releaseBase?: unknown } | undefined;
+    assert.ok(kept?.saved?.hold !== undefined, 'the pending comment was forgotten');
+    assert.equal(kept?.releaseBase, undefined);
+    outage = false;
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.deepEqual(next.report.pullRequest?.holdMarks?.cleared, [path]);
+    assert.match(next.summary, /Suspended documents in Linear: 1 cleared\./);
+    assert.equal(commentsOf(document)[0]?.resolved, true);
+    assert.equal(document.trashed, true);
+    assert.equal((await ids())[path], undefined);
+    assert.equal(resolve.calls, 2);
+    const quiet = await sync();
+    assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
+    assert.deepEqual(quiet.writes, []);
   });
 
   it('keeps suspended membership by id through a Linear rename', async () => {

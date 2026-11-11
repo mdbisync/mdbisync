@@ -116,6 +116,8 @@ export interface FakeWorld {
     rateLimited: boolean;
     rateLimitedRepository: boolean;
     pullRequests: FakePullRequest[];
+    /** The head SHA GitHub currently shows on a pull request detail read. */
+    pullRequestHead?: (pr: FakePullRequest) => Promise<string>;
     /** Answer 422 to every pull request a run tries to open. */
     refusePullRequests?: boolean;
     /** Checks by commit; a commit without an entry has none. */
@@ -264,7 +266,7 @@ async function github(world: FakeWorld, method: string, path: string, init: Requ
     const writable = !world.github.missing.has('contents:write');
     return json(200, { full_name: repo[0].slice(7), ...(writable ? { allow_merge_commit: world.github.allowMergeCommit } : {}) });
   }
-  const pulls = pullRequests(world, method, rest, init);
+  const pulls = await pullRequests(world, method, rest, init);
   if (pulls !== undefined) return pulls;
   const merged = await mergeRequest(world, method, rest, init);
   if (merged !== undefined) return merged;
@@ -291,13 +293,16 @@ async function github(world: FakeWorld, method: string, path: string, init: Requ
  * Lists and opens pull requests; undefined for other requests, and for the
  * setup check's empty-bodied probe, which the probes answer.
  */
-function pullRequests(world: FakeWorld, method: string, rest: string, init: RequestInit | undefined): Response | undefined {
+async function pullRequests(world: FakeWorld, method: string, rest: string, init: RequestInit | undefined): Promise<Response | undefined> {
   const [path = '', search = ''] = rest.split('?');
   const store = world.github.pullRequests;
   const one = /^\/pulls\/(\d+)$/.exec(path);
   if (one !== null && method === 'GET') {
     const pr = store.find((candidate) => candidate.number === Number(one[1]));
-    return pr === undefined ? json(404, { message: 'Not Found' }) : json(200, pullRequestNode(read(pr)));
+    if (pr === undefined) return json(404, { message: 'Not Found' });
+    const node = pullRequestNode(read(pr));
+    const sha = await world.github.pullRequestHead?.(pr);
+    return json(200, { ...node, head: { ...node.head, sha } });
   }
   if (one !== null && method === 'PATCH') {
     const pr = store.find((candidate) => candidate.number === Number(one[1]));
