@@ -43,7 +43,7 @@ import { INVALID_DIAGRAM_NOTE } from '../../corpus/documents.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
 import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, editsFound, readSides, sameAsFile, expectsDocument, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
-import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
+import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, inConflict, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { annotationPath, owningFolder, type Folder } from './corpus.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
@@ -1278,6 +1278,9 @@ export const SUBJECTS: Record<string, Compute> = {
     const held = env.ctx.observations.get('suspended.documents') as Set<string> | undefined;
     return held !== undefined && held.size > 0 && [...held].every((id) => {
       const document = view.documents.get(id);
+      // A released document whose text holds conflict markers keeps or gets
+      // the conflict mark; every other one gets its own icon and color back.
+      if (inConflict(document?.content ?? '')) return markRetained(document);
       const own = before.documents.get(id);
       return document?.icon === own?.icon && document?.color === own?.color;
     });
