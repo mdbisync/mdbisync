@@ -68,6 +68,21 @@
         "expected": 15
       },
       {
+        "subject": "report.burstEditsMade",
+        "operator": "equal",
+        "expected": 765
+      },
+      {
+        "subject": "report.burstEditsFoundInGit",
+        "operator": "same-as",
+        "expected": "report.burstEditsMade"
+      },
+      {
+        "subject": "report.burstEditsFoundInLinear",
+        "operator": "same-as",
+        "expected": "report.burstEditsMade"
+      },
+      {
         "subject": "report.lostEditCount",
         "operator": "equal",
         "expected": 0

@@ -775,18 +775,46 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   },
 };
 
+/** All tracked files' text, and all documents' text that are not trashed: where an edit's token is looked for. */
+function sideTexts(sides: Pick<Sides, 'files' | 'documents'>): { gitText: string; linearText: string } {
+  return {
+    gitText: [...sides.files.values()].join('\n'),
+    linearText: [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n'),
+  };
+}
+
+/**
+ * Whether the text holds this edit token as a whole token. A token's sequence
+ * number grows past its padding (`<run>-999`, then `<run>-1000`), so `<run>-100`
+ * is a prefix of `<run>-1000`: a digit right after a match is another token.
+ */
+export function holdsToken(text: string, token: string): boolean {
+  for (let at = text.indexOf(token); at !== -1; at = text.indexOf(token, at + 1)) {
+    if (!/[0-9]/.test(text.charAt(at + token.length))) return true;
+  }
+  return false;
+}
+
+/** How many of these edits each side shows, counted on its own: the burst's report of edits found (L4-12). */
+export function editsFound(edits: RunContext['edits'], sides: Pick<Sides, 'files' | 'documents'>): { git: number; linear: number } {
+  const { gitText, linearText } = sideTexts(sides);
+  return {
+    git: edits.filter((edit) => holdsToken(gitText, edit.token)).length,
+    linear: edits.filter((edit) => holdsToken(linearText, edit.token)).length,
+  };
+}
+
 /** Edits that are not on both sides (or, for a removal, still on a side). */
 export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documents'>): RunContext['edits'] {
-  const gitText = [...sides.files.values()].join('\n');
-  const linearText = [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n');
+  const { gitText, linearText } = sideTexts(sides);
   return ctx.edits.filter((edit) => {
     if (edit.retired === true) return false;
     // An explicit user deletion supersedes earlier edits only after both sides
     // show that deletion. A restore removes this intent and checks the edits again.
     const deletedId = (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined)?.get(edit.path);
     if (deletedId !== undefined && (ctx.observations.get('linear.editsBeforeTrash') as Map<string, Set<string>> | undefined)?.get(edit.path)?.has(edit.token) === true && !sides.files.has(edit.path) && sides.documents.get(deletedId)?.trashed === true) return false;
-    const inGit = gitText.includes(edit.token);
-    const inLinear = linearText.includes(edit.token);
+    const inGit = holdsToken(gitText, edit.token);
+    const inLinear = holdsToken(linearText, edit.token);
     return edit.removal === true ? inGit || inLinear : !(inGit && inLinear);
   });
 }

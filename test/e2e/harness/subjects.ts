@@ -42,7 +42,7 @@ import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { INVALID_DIAGRAM_NOTE } from '../../corpus/documents.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, expectsDocument, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
+import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, editsFound, readSides, sameAsFile, expectsDocument, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { annotationPath, owningFolder, type Folder } from './corpus.ts';
@@ -705,6 +705,25 @@ async function metrics(env: Env): Promise<Record<string, unknown>> {
   }
   ctx.observations.set('metrics', values);
   return values;
+}
+
+const BURST_COUNTS = new WeakMap<object, { made: number; foundInGit: number; foundInLinear: number }>();
+
+/** The burst's edits made and found on each side after quiet (L4-12), also kept in the report's metrics. */
+async function burstEdits(env: Env): Promise<{ made: number; foundInGit: number; foundInLinear: number }> {
+  const edits = observed(env.ctx, 'burst.edits') as RunContext['edits'];
+  const view = await env.view();
+  // Three subjects read these counts from one view: scan its text once.
+  let counts = BURST_COUNTS.get(view);
+  if (counts === undefined) {
+    const found = editsFound(edits, view);
+    counts = { made: edits.length, foundInGit: found.git, foundInLinear: found.linear };
+    BURST_COUNTS.set(view, counts);
+  }
+  const values = (env.ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+  values.burstEdits = counts;
+  env.ctx.observations.set('metrics', values);
+  return counts;
 }
 
 const linearBody: Compute = (env) => perTarget(env, (path, document, view) => documentBody(view, path, document));
@@ -1662,6 +1681,9 @@ export const SUBJECTS: Record<string, Compute> = {
   'report.budgetWindows': async (env) => (await metrics(env)).budgetWindows,
   'report.generatedLinearEdits': async (env) => observed(env.ctx, 'report.generatedLinearEdits'),
   'report.generatedGitPushes': async (env) => observed(env.ctx, 'report.generatedGitPushes'),
+  'report.burstEditsMade': async (env) => (await burstEdits(env)).made,
+  'report.burstEditsFoundInGit': async (env) => (await burstEdits(env)).foundInGit,
+  'report.burstEditsFoundInLinear': async (env) => (await burstEdits(env)).foundInLinear,
   // The most edits lost at any moment the harness looked: the end, or an hourly soak check.
   'report.lostEditCount': async (env) => Math.max(lostEdits(env.ctx, await env.view()).length, Number(env.ctx.observations.get('soak.maxLostEdits') ?? 0)),
   'report.hourlyInvariantChecks': async (env) => observed(env.ctx, 'report.hourlyInvariantChecks'),
@@ -1705,7 +1727,7 @@ export const SUBJECTS: Record<string, Compute> = {
     // run.probe (L0-05)
     'probe.firstReadback', 'probe.secondReadback', 'probe.drift',
     // run.workflow-parallel (L4-10)
-    'workflows.maxActiveInGroup',
+    'workflows.maxActiveInGroup', 'workflows.replacedPending',
     'tokens.activeBeforeCleanup', 'tokens.activeAfterCleanup',
   ].map((name): [string, Compute] => [name, async (env) => observed(env.ctx, name)])),
 
