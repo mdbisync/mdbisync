@@ -193,7 +193,7 @@ async function runWithSecurity(
       documentCap: inputs.documentCap,
       mergeGraceSeconds: inputs.mergeGraceSeconds,
       checkDeadlineMinutes: inputs.checkDeadlineMinutes,
-      github: { ...inputs.github, writes: pullRequestWrites, ...(options.fetch ? { fetch: options.fetch } : {}) },
+      github: { ...inputs.github, writes: pullRequestWrites, ...(options.fetch ? { fetch: options.fetch } : {}), ...(options.checkClock ? { clock: options.checkClock } : {}) },
       transforms,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });

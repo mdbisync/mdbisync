@@ -20,6 +20,7 @@ import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, type FakeCheck, type FakeDocument, ty
 import { INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
 import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
 import { DEFAULT_MERGE_GRACE_SECONDS, SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
+import { type CheckClock } from '../pull-request/index.ts';
 import { DEFAULT_CHECK_DEADLINE_MINUTES } from './deadline.ts';
 import { CHECK_NAME } from '../../test/corpus/check-workflow.ts';
 
@@ -101,6 +102,17 @@ describe('sync: the sync pull request', () => {
     ...extra,
   });
 
+  /**
+   * A clock for a run's waits for checks that moves only when the run sleeps:
+   * a read takes no time on it and is never cut off at the grace deadline, so
+   * what a run reads within its grace never depends on how fast the machine
+   * is, and a grace costs no real time.
+   */
+  function virtualClock(): CheckClock {
+    let elapsed = 0;
+    return { now: () => elapsed, sleep: async (ms) => { elapsed += ms; }, timeout: () => new AbortController().signal };
+  }
+
   async function cli(command: string, extra: Record<string, string> = {}) {
     await rm(reportFile(), { force: true });
     await rm(summaryFile(), { force: true });
@@ -109,13 +121,14 @@ describe('sync: the sync pull request', () => {
     const mark = await markWorld(world, fixture);
     const linearBefore = linearRequests.length;
     const counted = fetchOverride ?? fakeFetch(world);
-    const result = await runCli([command], { env: env(extra), cwd, fetch: async (input, init) => { if (String(input).startsWith(LINEAR_API)) linearRequests.push(String(input)); if (String(input).startsWith(GITHUB_API)) githubRequests.push(`${init?.method ?? 'GET'} ${String(input)}`); return counted(input, init); } });
+    const clock = virtualClock();
+    const result = await runCli([command], { env: env(extra), cwd, checkClock: clock, fetch: async (input, init) => { if (String(input).startsWith(LINEAR_API)) linearRequests.push(String(input)); if (String(input).startsWith(GITHUB_API)) githubRequests.push(`${init?.method ?? 'GET'} ${String(input)}`); return counted(input, init); } });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
     for (const text of texts) assert.ok(!text.includes(CANARY), 'content reached the output or a pull request (I5)');
     await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined, movedByOthers: [...(concurrentMove ? ['ids'] as const : []), ...(deletedSuspendedDuringRun ? ['suspendedBranch'] as const : [])] });
-    return { result, report, summary, writes: world.writes.slice(writesBefore), linearRequests: linearRequests.length - linearBefore, linearApiRequests: linearRequests.slice(linearBefore).filter((url) => !url.startsWith(`${LINEAR_API}/oauth/`)).length };
+    return { result, report, summary, clock, writes: world.writes.slice(writesBefore), linearRequests: linearRequests.length - linearBefore, linearApiRequests: linearRequests.slice(linearBefore).filter((url) => !url.startsWith(`${LINEAR_API}/oauth/`)).length };
   }
 
   /** One sync run, with the invariants every run keeps. */
@@ -245,11 +258,10 @@ describe('sync: the sync pull request', () => {
 
   it('merges a head with no checks after the registration settle time using the default grace', async () => {
     await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
-    const began = performance.now();
     const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '' });
     assert.equal(run.result.exitCode, 0, run.result.stderr);
     assert.ok(run.report.pullRequest?.merged);
-    assert.ok(performance.now() - began >= 15_000);
+    assert.ok(run.clock.now() >= 15_000, 'merged before the registration settle time');
     const quiet = await cli('sync');
     assert.deepEqual(quiet.writes, []);
   });
@@ -298,7 +310,8 @@ describe('sync: the sync pull request', () => {
     });
   }
 
-  it('cannot merge a branch that moves while waiting using checks from its old head', async () => {
+  // The time limit turns a wait that never ends into this test's own failure instead of a stalled suite.
+  it('cannot merge a branch that moves while waiting using checks from its old head', { timeout: 60_000 }, async () => {
     await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
     const transport = fakeFetch(world);
     let observations = 0;
@@ -317,6 +330,7 @@ describe('sync: the sync pull request', () => {
       return transport(input, init);
     };
     const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '25' });
+    assert.ok(observations >= 2, `the run read the checks ${observations} times, so the branch never moved while it waited`);
     assert.equal(run.report.pullRequest?.merged, null);
     assert.equal(run.report.pullRequest?.code, 'merge-refused');
     assert.equal(await rev('refs/heads/main'), start);

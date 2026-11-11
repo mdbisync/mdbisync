@@ -4,7 +4,7 @@
 // private repository on GitHub Free cannot have.
 
 import { setTimeout as sleep } from 'node:timers/promises';
-import { type GitHubRepository, PullRequestError, request } from './github.ts';
+import { type CheckClock, type GitHubRepository, PullRequestError, request } from './github.ts';
 import { message } from '../messages.ts';
 
 /** Check run conclusions that let a merge go ahead. */
@@ -12,6 +12,7 @@ const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 /** Enough for any real repository; a commit with more is read as pending, never as passed. */
 const MAX_PAGES = 10;
 const PAGE_SIZE = 100;
+const REAL_CLOCK: CheckClock = { now: () => performance.now(), sleep: (ms) => sleep(ms), timeout: (ms) => AbortSignal.timeout(ms) };
 
 export interface CheckState {
   /** `passed`: every check finished and passed (also when there are none); `pending`: some still run; `failed`: one finished and failed. */
@@ -147,17 +148,15 @@ export async function readAnnotations(target: GitHubRepository, checkRunId: numb
  * A new head gets a bounded wait for CI, polling every five seconds. No
  * checks must hold for fifteen seconds to allow CI registration. Registered
  * checks also get at least fifteen seconds before green can permit a merge.
- * The deadline also bounds HTTP requests; expiration always leaves the PR open.
+ * The deadline also cuts off a read still unanswered; expiration always
+ * leaves the PR open. All of it runs on the target's clock, real time by
+ * default.
  */
-export async function waitForChecks(
-  target: GitHubRepository,
-  sha: string,
-  seconds: number,
-  clock = { now: () => performance.now(), sleep: (ms: number) => sleep(ms) },
-): Promise<CheckState> {
+export async function waitForChecks(target: GitHubRepository, sha: string, seconds: number): Promise<CheckState> {
+  const clock = target.clock ?? REAL_CLOCK;
   const started = clock.now();
   const deadline = started + seconds * 1000;
-  const signal = AbortSignal.any([AbortSignal.timeout(seconds * 1000), ...(target.signal ? [target.signal] : [])]);
+  const signal = AbortSignal.any([clock.timeout(seconds * 1000), ...(target.signal ? [target.signal] : [])]);
   let emptySince: number | null = null;
   let last: CheckState = { state: 'pending', failed: [], pending: [], hasChecks: false };
   // Also cap observations independently of the clock and API latency.
