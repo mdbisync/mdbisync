@@ -12,6 +12,7 @@ import {
   notImplementedMessage,
 } from "./commands.ts";
 import { type LogEntry } from "./linear/index.ts";
+import { type CheckClock } from "./pull-request/index.ts";
 import { runFix, runLint } from "./format/command.ts";
 import { runEnding } from "./run/exit.ts";
 import { writeRunReport } from "./run/finish.ts";
@@ -33,6 +34,8 @@ export interface CliOptions {
   /** The repository the command works in. */
   cwd?: string;
   fetch?: typeof fetch;
+  /** Paces a sync run's waits for checks; real time when absent. */
+  checkClock?: CheckClock;
   /** Explicit terminal prompt for repository setup; never opened by library calls. */
   prompt?: (question: string) => Promise<string>;
   /** Optional immediate sinks for callers that need diagnostics even on rejection. */
@@ -105,6 +108,7 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
     },
     log: options.log ?? (() => {}),
     ...(options.fetch ? { fetch: options.fetch } : {}),
+    ...(options.checkClock ? { checkClock: options.checkClock } : {}),
   });
   if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
   // Inside a workflow step the summary also goes to the job summary.

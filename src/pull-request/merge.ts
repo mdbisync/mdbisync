@@ -4,7 +4,7 @@
 // private repository on GitHub Free cannot have.
 
 import { setTimeout as sleep } from 'node:timers/promises';
-import { type GitHubRepository, PullRequestError, request } from './github.ts';
+import { type CheckClock, type GitHubRepository, PullRequestError, request } from './github.ts';
 import { message } from '../messages.ts';
 
 /** Check run conclusions that let a merge go ahead. */
@@ -12,6 +12,7 @@ const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 /** Enough for any real repository; a commit with more is read as pending, never as passed. */
 const MAX_PAGES = 10;
 const PAGE_SIZE = 100;
+const REAL_CLOCK: CheckClock = { now: () => performance.now(), sleep: (ms) => sleep(ms) };
 
 export interface CheckState {
   /** `passed`: every check finished and passed (also when there are none); `pending`: some still run; `failed`: one finished and failed. */
@@ -153,7 +154,7 @@ export async function waitForChecks(
   target: GitHubRepository,
   sha: string,
   seconds: number,
-  clock = { now: () => performance.now(), sleep: (ms: number) => sleep(ms) },
+  clock: CheckClock = target.clock ?? REAL_CLOCK,
 ): Promise<CheckState> {
   const started = clock.now();
   const deadline = started + seconds * 1000;

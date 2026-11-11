@@ -13,8 +13,16 @@ export interface GitHubRepository {
   fetch?: typeof fetch;
   /** Bounds a sequence of requests, including reading their bodies. */
   signal?: AbortSignal;
+  /** Paces the waits between reads of a head's checks; real time when absent. Tests give a virtual one. */
+  clock?: CheckClock;
   /** Counts the pull request calls GitHub accepted, by kind (`opened`, `updated`, `merged`, `closed`); a refused or unanswered call is not counted. */
   writes?: Map<string, number>;
+}
+
+/** The time a wait for checks reads and the way it sleeps between reads, in milliseconds. */
+export interface CheckClock {
+  now(): number;
+  sleep(ms: number): Promise<void>;
 }
 
 /** A pull request call that writes, and the status with which GitHub accepts it. */
