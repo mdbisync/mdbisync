@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"code_block","attrs":{"id":"<id>","language":"markdown"},"children":[{"text":"```\ninner fence\n```","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-b923fd17","marks":{"attribution":"user"}}]}
-  ]
-}

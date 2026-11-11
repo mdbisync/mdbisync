@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"Great work on the launch 😄","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-cd759cdf","marks":{"attribution":"user"}}]}
-  ]
-}

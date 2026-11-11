@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"heading","attrs":{"id":"<id>","level":1},"children":[{"text":"Nested map","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-2fe2ac98","marks":{"attribution":"user"}}]}
-  ]
-}
