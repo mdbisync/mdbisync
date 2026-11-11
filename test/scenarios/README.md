@@ -89,8 +89,8 @@ computed from the actual result being checked. `runs.0` is the first explicit
 This includes probe and pre-commit invocations. A compound `settle` or
 `resume-until-complete` step exposes a single aggregate result with its recovery
 flags and successful upload/write observations, while preserving individual
-cycle results under `cycles`. Setup invocations and invariant idempotency
-probes do not change those indices.
+cycle results under `cycles`. Setup invocations, the deployment's follow-up
+runs (below) and invariant idempotency probes do not change those indices.
 
 Samples must cover every requested construct, not just select the first files.
 UI steps verify the editor and screen availability before input, collect DOM
@@ -102,6 +102,10 @@ measurements record observed loss and window duration even when nonzero.
 Each scenario declares all nine invariants. `required: false` needs a concrete
 applicability reason, for example an offline lint check with no synchronized
 state. Evaluate the required invariants after the final step, before cleanup;
+In `actions` mode, the deployment's own follow-up runs end first. A sync run
+takes in the tracked branch as it was when it started, so a run that merges the
+sync pull request leaves that merge to the push run GitHub starts for it. The
+harness waits for that run, as `settle` runs the next sync in `local` mode.
 I6 uses an extra read-only-observation probe of an ordinary no-change run.
 It requires that run to exit successfully and report a successful, complete
 sync and capture before checking that it wrote nothing. A partial capture,

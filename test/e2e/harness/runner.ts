@@ -27,7 +27,7 @@ import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type Check
 import { assertCurrentCorpus } from './corpus-drift.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
-import { runStep } from './steps.ts';
+import { runStep, settleFollowUpRuns } from './steps.ts';
 import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtures.ts';
 import { projectFolders } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
@@ -874,6 +874,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       await runStep(ctx, step);
       history.push(await snapshotRefs(ctx));
     }
+    await settleFollowUpRuns(ctx);
     checks = await runChecks(ctx);
     failOnChecks(checks);
   } catch (caught) {

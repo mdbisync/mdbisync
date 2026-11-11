@@ -35,10 +35,10 @@ import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/
 import { waitForCheck } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
-import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, STEP_ACTIONS, watchRun } from './steps.ts';
+import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
 import { commitAsPerson, folderTeam, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
-import { environmentBlocker, maxOverlap, unzip, waitForRegistration, waitForRun } from './workflows.ts';
+import { environmentBlocker, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
 import { prerequisiteErrors } from './workflow-files.ts';
 import { parse as parseYaml } from 'yaml';
@@ -351,7 +351,7 @@ describe('workflows', () => {
   });
 
   /** A sandbox's Actions for one run: the workflow registry, dispatches, runs, their jobs and logs. */
-  function fakeActions(ctx: RunContext, remoteGit: Git, options: { conclusion: string; jobs: WorkflowJob[]; logs: Record<string, string>; registeredAfter?: number; workflow?: string }) {
+  function fakeActions(ctx: RunContext, remoteGit: Git, options: { conclusion: string; jobs: WorkflowJob[]; logs: Record<string, string>; registeredAfter?: number; workflow?: string; report?: (run: WorkflowRun) => Record<string, unknown> }) {
     const runs: WorkflowRun[] = [];
     const dispatched: Array<string | number> = [];
     let registryReads = 0;
@@ -374,11 +374,18 @@ describe('workflows', () => {
         return runs;
       },
       request: async (_method: string, path: string) => {
-        if (/^\/actions\/runs\/\d+\/artifacts$/.test(path)) return { artifacts: [] };
+        const artifacts = /^\/actions\/runs\/(\d+)\/artifacts$/.exec(path);
+        // A run's report artifact shares the run's id.
+        if (artifacts !== null) return { artifacts: options.report === undefined ? [] : [{ id: Number(artifacts[1]), name: REPORT_ARTIFACT, expired: false }] };
         throw new Error(`unexpected ${path}`);
       },
       runJobs: async () => options.jobs,
-      download: async () => logZip,
+      download: async (path: string) => {
+        const artifact = /^\/actions\/artifacts\/(\d+)\/zip$/.exec(path);
+        const run = artifact === null ? undefined : runs.find((candidate) => candidate.id === Number(artifact[1]));
+        if (run === undefined || options.report === undefined) return logZip;
+        return zip({ 'report.json': { data: Buffer.from(JSON.stringify(options.report(run))), deflate: true } });
+      },
     };
     Object.assign(ctx.live!, { rest, githubTokenSource: 'app' });
     return { runs, dispatched };
@@ -417,6 +424,37 @@ describe('workflows', () => {
     await STEP_ACTIONS['run.settle']!(ctx, {});
     assert.deepEqual(dispatched, [99, 99, 99, 99], 'without a changed=false report, settle keeps dispatching to its limit');
     assert.equal(ctx.engine.results.length, 4);
+  });
+
+  it('wait for the push run that the sync pull request\'s merge starts before the checks, as a deployment runs it', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+    // Each run's report names the tracked commit it took in: the commit its push was for.
+    fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report: (run) => ({ operation: 'sync', capturedTrackedTip: run.head_sha ?? null }) });
+    const history: Array<Record<string, string>> = [];
+    ctx.observations.set('refHistory', history);
+    mkdirSync(ctx.live!.sandbox.cache.dir, { recursive: true });
+    await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+    await STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' });
+    assert.equal(await settleFollowUpRuns(ctx), 0, 'the last run took in the tracked tip: nothing follows it');
+    // That run merged the sync pull request: the merge commit lands after the tip the run took in.
+    const tracked = `refs/heads/${ctx.names.trackedBranch}`;
+    const taken = (await remoteGit.text(['rev-parse', tracked])).trim();
+    const merge = (await remoteGit.text(['commit-tree', `${taken}^{tree}`, '-p', taken, '-m', 'Merge the sync pull request'])).trim();
+    await remoteGit.run(['update-ref', tracked, merge]);
+    assert.equal(await settleFollowUpRuns(ctx), 1, 'the push run of the merge is the deployment\'s, and the harness waits for it');
+    assert.equal(ctx.engine.results.length, 2);
+    assert.equal(ctx.engine.results.at(-1)?.report?.['capturedTrackedTip'], merge);
+    assert.deepEqual((ctx.observations.get('workflows.runs') as Array<{ event: string }>).map((run) => run.event), ['push', 'push']);
+    assert.equal(history.length, 1, 'the follow-up run\'s refs join the history the checks read');
+    assert.equal(ctx.observations.get('scenario.stepRunsEnd'), 1);
+    assert.deepEqual(await resolveSubject(ctx, 'runs.last.capturedTrackedTip'), { known: true, value: taken }, '`runs.last` still names the step\'s run');
+    assert.equal(history[0]?.[`${ctx.names.refPrefix}/ids`], (await remoteGit.text(['rev-parse', `${ctx.names.refPrefix}/ids`])).trim());
+    assert.equal(await settleFollowUpRuns(ctx), 0, 'once a run took in the tip, the deployment is idle');
+    // A local scenario has run.settle for this: nothing to wait for.
+    ctx.scenario = { ...ctx.scenario, mode: 'local' };
+    await remoteGit.run(['update-ref', tracked, (await remoteGit.text(['commit-tree', `${merge}^{tree}`, '-p', merge, '-m', 'Another'])).trim()]);
+    assert.equal(await settleFollowUpRuns(ctx), 0);
   });
 
   it('dispatch the initial sync by its registry id once its push has registered it', async () => {

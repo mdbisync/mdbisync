@@ -397,6 +397,38 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
 }
 
 /**
+ * Waits for the sync workflow runs that the deployment starts on its own
+ * after the scenario's steps, and records each one as an engine run. A sync
+ * run takes in the tracked branch as it was when the run started. So the run
+ * that merges the sync pull request leaves the merge commit to the next run,
+ * which records it in `linear` without writing anything. In a deployment,
+ * the merge's push starts that run (the template's push trigger). In a local
+ * scenario, `run.settle` runs it. Without this wait, I6's extra run would
+ * record the merge and move `linear`. A run whose report is missing gives no
+ * tracked commit to compare with, so the wait ends there. The follow-up runs
+ * count for the request budgets and the canary scan, but they are not the
+ * runs that `runs.<n|last>` name. Returns how many runs it recorded.
+ */
+export async function settleFollowUpRuns(ctx: RunContext, limit = 3): Promise<number> {
+  const sync = workflowFor('sync');
+  const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
+  if (ctx.scenario.mode !== 'actions' || ctx.live === null || !installed.includes(sync)) return 0;
+  for (let count = 0; count < limit; count += 1) {
+    const taken = ctx.engine.results.at(-1)?.report?.['capturedTrackedTip'];
+    if (typeof taken !== 'string') return count;
+    const tip = await trackedTipOnServer(ctx);
+    if (tip === taken) return count;
+    // A follow-up run is the deployment's, not a step's: `runs.<n|last>` keep naming the steps' runs.
+    if (!ctx.observations.has('scenario.stepRunsEnd')) ctx.observations.set('scenario.stepRunsEnd', ctx.engine.results.length);
+    const run = await waitForRun(live(ctx).rest, { branch: ctx.names.trackedBranch, event: 'push', after: Number(ctx.observations.get('start.time') ?? 0), exclude: seenRuns(ctx), headSha: tip, workflow: sync });
+    recordWorkflowRun(ctx, run);
+    await settleWorkflowRun(ctx, run, 'sync');
+    (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined)?.push(await snapshotRefs(ctx));
+  }
+  return limit;
+}
+
+/**
  * Asks the sandbox's scheduled workflow for one scheduled sync of this run
  * and returns once a scheduled run has taken the request, with the time
  * before the request. Its job for this run is queued or running then. The

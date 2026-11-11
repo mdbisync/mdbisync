@@ -402,9 +402,12 @@ function actorKind(actor: PushActivity['actor']): string {
   return actor.type === 'Bot' ? actor.login : 'a user account';
 }
 
-/** The scenario's own engine runs: after setup, before the checks' own run (I6). */
+/**
+ * The scenario's own engine runs: after setup, before the deployment's
+ * follow-up runs (steps.ts, settleFollowUpRuns) and the checks' own run (I6).
+ */
 function ownResults(ctx: RunContext) {
-  const end = ctx.observations.get('scenario.runsEnd') as number | undefined;
+  const end = (ctx.observations.get('scenario.stepRunsEnd') ?? ctx.observations.get('scenario.runsEnd')) as number | undefined;
   return ctx.engine.results.slice(ctx.engine.setupRuns, end);
 }
 
