@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { parseOperation } from '../../src/action/main.ts';
 import { COMMANDS } from '../../src/commands.ts';
-import { INIT_USAGE } from '../../src/init/command.ts';
+import { INIT_SECURITY_FLAGS, INIT_USAGE, INIT_VALUE_FLAGS } from '../../src/init/command.ts';
 import templates from '../../src/init/workflows.json' with { type: 'json' };
 import { PROJECT_KEY, TEAM_KEY } from '../../src/mapping/annotations.ts';
 import { DEFAULT_DOCUMENT_CAP } from '../../src/run/capacity.ts';
@@ -42,7 +42,7 @@ function table(markdown: string, heading: string): string[][] {
     if (/^#{1,6} /.test(line)) break;
     if (line.startsWith('|')) {
       inTable = true;
-      rows.push(line.slice(1, -1).split(' | ').map((cell) => cell.trim()));
+      rows.push(line.trim().slice(1, -1).split('|').map((cell) => cell.trim()));
     } else if (inTable) break;
   }
   return rows.slice(2);
@@ -74,7 +74,6 @@ function workflowSettings(): Set<string> {
       for (const match of line.matchAll(/\$\{\{\s*(secrets|vars)\.(\w+)\s*\}\}/g)) found.add(`${match[1] === 'vars' ? 'Variable' : 'Secret'} ${match[2]}`);
     }
   }
-  found.delete('Secret GITHUB_TOKEN');
   return found;
 }
 
@@ -113,9 +112,10 @@ describe('configuration reference', () => {
     assert.deepEqual(listed.sort(), [...workflowSettings()].sort());
   });
 
-  it('lists every init flag', () => {
-    const flags = new Set(INIT_USAGE.match(/--[a-z][a-z-]+/g));
-    assert.deepEqual([...byName(table(PAGE, 'init')).keys()].sort(), [...flags].sort());
+  it('lists every init flag, as init accepts and its help shows them', () => {
+    const accepted = [...INIT_VALUE_FLAGS, ...INIT_SECURITY_FLAGS].sort();
+    assert.deepEqual([...byName(table(PAGE, 'init')).keys()].sort(), accepted);
+    assert.deepEqual([...new Set(INIT_USAGE.match(/--[a-z][a-z-]+/g))].sort(), accepted, 'init --help');
   });
 
   it('lists every command', () => {

@@ -19,6 +19,10 @@ export const INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA>
 Existing files and annotations are preserved; conflicting values must be resolved first.
 `;
 
+/** The flags `init` accepts: the ones that take a value, then the security choice. */
+export const INIT_VALUE_FLAGS = ['--release-sha', '--release-version', '--folder', '--team', '--project'] as const;
+export const INIT_SECURITY_FLAGS = ['--security-hooks', '--no-security-hooks'] as const;
+
 interface Folder { path: string; team?: string; project?: string }
 interface Settings { sha?: string; version?: string; security?: boolean; folders: Folder[] }
 export interface InitOptions { cwd?: string; prompt?: (question: string) => Promise<string> }
@@ -28,12 +32,12 @@ function parseArgs(args: readonly string[]): Settings {
   const settings: Settings = { folders: [] };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
-    if (flag === '--security-hooks' || flag === '--no-security-hooks') {
+    if ((INIT_SECURITY_FLAGS as readonly string[]).includes(flag ?? '')) {
       if (settings.security !== undefined) throw new InitError(message('init.security-twice'));
       settings.security = flag === '--security-hooks';
       continue;
     }
-    if (!['--release-sha', '--release-version', '--folder', '--team', '--project'].includes(flag ?? '')) throw new InitError(message('init.unknown-option', { option: String(flag) }));
+    if (!(INIT_VALUE_FLAGS as readonly string[]).includes(flag ?? '')) throw new InitError(message('init.unknown-option', { option: String(flag) }));
     const value = args[++i];
     if (value === undefined || value.startsWith('--') || !value.trim()) throw new InitError(message('init.needs-value', { option: String(flag) }));
     if (flag === '--folder') settings.folders.push({ path: value });

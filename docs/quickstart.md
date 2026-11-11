@@ -158,11 +158,8 @@ installation accepted them.
 
 If `main` is protected by a rule that requires approving reviews, the
 sync cannot merge its own pull request: add the App to that rule's bypass
-list. In a ruleset: Settings → Rules → Rulesets → the ruleset → Bypass
-list → Add bypass → your App → Save changes. In a classic branch
-protection rule: Settings → Branches → Edit the rule for `main` → Allow
-specified actors to bypass required pull requests → your App → Save
-changes.
+list: Settings → Rules → Rulesets → the ruleset → Bypass list → Add
+bypass → your App → Save changes.
 
 ## Security hooks
 
@@ -223,7 +220,10 @@ It writes:
 
 It keeps what the files already hold, and stops before writing anything
 when a value it would write differs from one already there. It ends by
-printing the steps that remain; they are the sections of this page.
+printing the steps that remain; the sections below cover them in order.
+The setup check it mentions runs at the start of the initial sync's dry
+run, so there is no separate `check` step here, and the required check
+comes after the first sync run.
 Don't commit yet: install the hooks first.
 
 ## Folder annotations
@@ -285,7 +285,7 @@ them by path, for example with one annotated folder `docs`:
 git status
 git add .github/workflows/mdbisync.yml .github/workflows/mdbisync-initial-sync.yml \
   .github/workflows/pre-commit.yml .pre-commit-config.yaml docs/README.md
-git add docs/guide.md   # each Markdown file pre-commit rewrote, as git status lists
+# Then git add each Markdown file pre-commit rewrote, as git status lists it.
 git commit -m "Set up the Linear sync"
 git push origin main
 ```
@@ -303,9 +303,11 @@ Open the pull request GitHub offers for the branch, wait for its checks
 and merge it.
 
 If the commit stops because `linear-format` rewrote a file, run the same
-`git add` again and commit again: the second attempt passes. Reaching `main` starts
-the sync workflow once; that run writes nothing and fails with
-`initial-sync-required`, which is expected.
+`git add` again and commit again: the second attempt passes.
+
+Reaching `main` starts the sync workflow, and its schedule starts it
+again every five minutes; until you disable it, each run writes nothing
+and fails with `initial-sync-required`, which is expected.
 
 Now turn the sync workflow off until the initial sync has finished:
 Actions → **mdbisync** → `⋯` → **Disable workflow**. A sync queued in the

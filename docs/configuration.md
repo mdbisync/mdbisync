@@ -20,7 +20,7 @@ only" has no command-line form.
 | `linear-client-id` | yes | none | `MDBISYNC_LINEAR_CLIENT_ID` | Client ID of the [Linear OAuth app](quickstart.md#linear-oauth-app). |
 | `linear-client-secret` | yes | none | `MDBISYNC_LINEAR_CLIENT_SECRET` | Client secret of that app. |
 | `linear-api-url` | no | none | `MDBISYNC_LINEAR_API_URL` | Linear API origin; empty means Linear itself (`https://api.linear.app`). |
-| `cleanup-tokens` | no | `false` | action only | `true` replaces Linear tokens left by runs that were killed. Only with a Linear app used by nothing but these workflows in this repository, and only on the stage step ([tokens left by interrupted jobs](../README.md#tokens-left-by-interrupted-jobs)). |
+| `cleanup-tokens` | no | `false` | action only | `true` replaces Linear tokens left by runs that were killed. Only with a Linear app used by nothing but these workflows in this repository, and never with `security-step: apply`: on the stage step, or on the only mdbisync step when `security-step` is empty ([tokens left by interrupted jobs](../README.md#tokens-left-by-interrupted-jobs)). |
 | `github-token` | yes | none | `MDBISYNC_GITHUB_TOKEN` | Installation token of the sync's [GitHub App](quickstart.md#github-app), from `actions/create-github-app-token`. |
 | `app-slug` | yes | none | `MDBISYNC_APP_SLUG` | The App's slug, the token step's output `app-slug`; the sync's commits name the App's bot account. Optional on the command line, whose commits then name a neutral author. |
 | `github-api-url` | no | none | `MDBISYNC_GITHUB_API_URL` | GitHub REST API URL; empty means the runner's (`GITHUB_API_URL`), else `https://api.github.com`. |
@@ -108,8 +108,9 @@ environment variables; secrets never go in arguments.
 | `--folder` | none, at least one | A folder to synchronize; the `--team` and `--project` after it apply to it. Repeat for each folder. |
 | `--team` | none | The folder's Linear team, by key or name. A folder needs a team or a project. |
 | `--project` | none | The folder's Linear project; its team may come from a folder above. |
-| `--security-hooks` | asked in a terminal, else off | Adds the two security hook examples (Docker needed where they run). |
-| `--no-security-hooks` | | Adds none. |
+| `--security-hooks` | off | Adds the two security hook examples (Docker needed where they run). |
+| `--no-security-hooks` | on | Adds none; give one of the two to make the choice explicit. |
 
-With a terminal attached, `init` asks for what the flags leave out. It
-changes local files only.
+With a terminal attached and the release SHA, a folder, or a folder's
+team or project missing, `init` asks for those, and then whether to add
+the security hook examples. It changes local files only.
