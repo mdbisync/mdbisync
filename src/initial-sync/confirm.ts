@@ -6,7 +6,8 @@
 //    document, so its id, comments and history stay); a file without a
 //    document gets a new one. A document that already holds the body is
 //    not written. Ids are pushed to the `ids` state ref as the run goes, in
-//    progress commits.
+//    progress commits. A document whose text holds a conflict gets the
+//    conflict mark and its comment, as the sync's write step gives it.
 // 3. Move the documents without a file to Linear's trash.
 // 4. Record: one atomic push of the final `ids`, `uploads` (created when
 //    missing) and `linear`, a commit whose parent is the tracked branch and
@@ -57,7 +58,9 @@ import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments }
 import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
+import { MARKS, reconcileDocumentMark } from '../sync/marks.ts';
 import { withRecorded } from '../sync/recorded.ts';
+import { stableId } from '../sync/stable-id.ts';
 import { message } from '../messages.ts';
 import { type LeftOutAtWriteRule, type WriteCode } from '../codes.ts';
 
@@ -268,6 +271,32 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     uploadsPushed = uploads.size;
   };
 
+  /**
+   * Sets or clears a synchronized document's status mark from the text Linear
+   * stores, as the sync's write step does: conflict markers show the conflict
+   * mark and its one comment, after the document's own icon and color are
+   * pushed in `ids`. A document without a conflict and without a saved icon
+   * costs no request. The comment's id follows from the document and the text
+   * sent, so a run again after the state is lost finds the comment it posted
+   * instead of adding a second one.
+   */
+  const reconcileMark = async (path: string, document: LinearDocument, hash: string) => {
+    const entry = ids.get(path);
+    if (entry === undefined || entry.id !== document.id || document.content == null) return;
+    // Without a saved icon (the state was lost) a conflict mark Linear already shows is this tool's, not the document's own.
+    const shown = entry.saved === undefined && document.icon === MARKS.conflict.icon && document.color === MARKS.conflict.color;
+    await reconcileDocumentMark({
+      document,
+      entry: shown ? { ...entry, saved: { icon: null, color: null } } : entry,
+      linear,
+      noticeId: (state) => stableId('initial-sync', state, document.id, hash),
+      persistEntry: async (next) => {
+        ids.set(path, next);
+        await pushProgress();
+      },
+    });
+  };
+
   const work: Work[] = [
     ...plan.overwrite.map((entry): Work => ({ kind: 'overwrite', entry })),
     ...plan.create.map((entry): Work => ({ kind: 'create', entry })),
@@ -326,6 +355,8 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           result.skippedCompleted.push(path);
           sentHashes.set(path, hash);
           remember(path, document);
+          // The stopped run may have stopped between the write and the mark.
+          await reconcileMark(path, document, hash);
           continue;
         }
         // A document already holding the body, as sent or in the form Linear
@@ -344,6 +375,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
         ))) {
           result.unchanged.push(path);
           remember(path, document);
+          await reconcileMark(path, document, hash);
           continue;
         }
         if (!beforeWriteReached) {
@@ -359,14 +391,18 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           sentHashes.set(path, hash);
           result.created.push(path);
           await checkpoint('document-created-before-ids-push');
+          written += 1;
+          unpushed += 1;
+          await reconcileMark(path, created, hash);
         } else {
           const updated = await linear.updateDocument(item.entry.documentId, { content: body });
           remember(path, updated);
           sentHashes.set(path, hash);
           result.overwritten.push(path);
+          written += 1;
+          unpushed += 1;
+          await reconcileMark(path, updated, hash);
         }
-        written += 1;
-        unpushed += 1;
       } catch (error) {
         if (error instanceof LeaveOutError) {
           result.leftOutAtWrite.push(error.files.length > 0 ? { path, rule: error.rule, files: [...error.files] } : { path, rule: error.rule });

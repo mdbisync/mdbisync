@@ -47,6 +47,12 @@ export interface MarkOptions {
   blocked?: readonly SecurityFinding[];
   /** Must durably record the entry in ids before resolving. Never just queue it. */
   persistEntry: (entry: IdEntry) => Promise<void>;
+  /**
+   * The id of a new notice's comment; random by default. A caller that may run
+   * again without the entry it saved (a rebuilt state) passes an id derived from
+   * the episode, so the comment posted before is found instead of added again.
+   */
+  noticeId?: (state: Exclude<MarkState, 'clear'>) => string;
 }
 
 export interface MarkResult {
@@ -115,7 +121,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   const previous = saved.notice;
   const notice = previous?.kind === state
     ? { ...previous, bodyHash, posted: previous.posted && previous.bodyHash === bodyHash }
-    : { id: randomUUID(), kind: state, bodyHash, posted: false };
+    : { id: options.noticeId?.(state) ?? randomUUID(), kind: state, bodyHash, posted: false };
   if (entry.saved === undefined || previous?.kind !== state || previous.bodyHash !== bodyHash) {
     entry = { ...entry, saved: { ...saved, notice } };
     await persistEntry(entry);

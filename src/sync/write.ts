@@ -21,7 +21,7 @@
 // adopted by its title.
 
 import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { documentPath } from './paths.ts';
 import { sameMarkdown, splitFile } from '../format/index.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
@@ -58,6 +58,7 @@ import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments }
 import { nameFixingHooks } from './fix-hooks.ts';
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark, releasedHold } from './marks.ts';
+import { stableId } from './stable-id.ts';
 import { suspendedPaths } from './suspended.ts';
 import { recordedTrailers } from './recorded.ts';
 import { message } from '../messages.ts';
@@ -1090,13 +1091,6 @@ async function wentOnFromPartial(git: RunContext['git'], tips: ReadonlyArray<Oid
 function pathsOf(change: DocumentChange): string[] {
   if (change.kind === 'keep') return change.from === change.to ? [change.to] : [change.from, change.to];
   return [change.path];
-}
-
-/** A UUID that follows from its parts: a Linear id a repeated run must find again instead of making anew. */
-function stableId(...parts: string[]): string {
-  const hex = createHash('sha256').update(parts.join('\0')).digest('hex');
-  const variant = ((parseInt(hex[16] as string, 16) & 0x3) | 0x8).toString(16);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 function compare(a: string, b: string): number {
