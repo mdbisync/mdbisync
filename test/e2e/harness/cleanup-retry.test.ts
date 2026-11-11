@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { LinearClient, LinearGraphQLError, LinearHttpError, LinearNetworkError, LinearStoppedError } from '../../../src/linear/index.ts';
-import { retryCleanup } from './cleanup-retry.ts';
+import { GitError } from '../../../src/state/index.ts';
+import { retryGitHubCleanup, retryCleanup } from './cleanup-retry.ts';
 import { LinearWorld } from './linear-world.ts';
 
 it('preserves the server error when its response also stops the client on low budget', async () => {
@@ -78,6 +79,44 @@ for (const error of [
   it(`reports ${error.message} immediately without retrying`, async () => {
     let calls = 0;
     await assert.rejects(retryCleanup(async () => { calls += 1; throw error; }, async () => { assert.fail('unexpected pause'); }), (caught) => caught === error);
+    assert.equal(calls, 1);
+  });
+}
+
+for (const command of ['ls-remote', 'fetch']) {
+  for (const stderr of ['fatal: unable to access repository: The requested URL returned error: 504', 'remote: Repository not found.', "fatal: repository 'https://github.com/example/sandbox.git/' not found", 'fatal: HTTP 503']) {
+    it(`retries cleanup ${command}: ${stderr}`, async () => {
+      let calls = 0;
+      const pauses: number[] = [];
+      assert.equal(await retryGitHubCleanup(async () => {
+        if (++calls < 3) throw new GitError([command, 'origin'], 128, stderr);
+        return 'listed';
+      }, async (ms) => { pauses.push(ms); }), 'listed');
+      assert.equal(calls, 3);
+      assert.deepEqual(pauses, [1000, 2000]);
+    });
+  }
+}
+
+it('reports the final missing-repository error after a bounded cleanup retry', async () => {
+  let calls = 0;
+  const errors = [1, 2, 3].map((n) => new GitError(['ls-remote', 'origin'], n, 'remote: Repository not found.'));
+  const pauses: number[] = [];
+  await assert.rejects(retryGitHubCleanup(async () => { throw errors[calls++]; }, async (ms) => { pauses.push(ms); }), (error) => error === errors[2]);
+  assert.equal(calls, 3);
+  assert.deepEqual(pauses, [1000, 2000]);
+});
+
+for (const error of [
+  new GitError(['ls-remote', 'origin'], 128, 'The requested URL returned error: 403'),
+  new GitError(['fetch', 'origin'], 128, 'Authentication failed'),
+  new GitError(['fetch', 'origin'], 128, 'could not find remote ref'),
+  new GitError(['push', 'origin'], 128, 'The requested URL returned error: 503'),
+  new Error('HTTP 503'),
+]) {
+  it(`does not retry unrelated cleanup failure: ${error.message}`, async () => {
+    let calls = 0;
+    await assert.rejects(retryGitHubCleanup(async () => { calls++; throw error; }, async () => assert.fail('unexpected delay')), (caught) => caught === error);
     assert.equal(calls, 1);
   });
 }

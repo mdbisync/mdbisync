@@ -65,6 +65,8 @@ export interface RunContext {
   live: LiveWorld | null;
   /** The sandbox, known before the live world is complete, so cleanup can remove an early branch. */
   sandbox?: Sandbox;
+  /** Set before the first remote write, including a push whose answer may be lost. */
+  remoteWritesStarted?: boolean;
   proxy: FaultProxy | null;
   /** What the run created in Linear, on disk as it is created, for cleanup and for a recovery after a failed one. */
   owned: OwnershipLedger;
