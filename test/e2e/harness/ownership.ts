@@ -11,12 +11,13 @@
 // never came back (a network error) is still the run's. Only ids and project
 // names are kept, never titles or content.
 
-import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { RUN_ID_PATTERN, runOfProject, runOfTeamTitle, runNames } from './isolation.ts';
 import type { LinearWorld, Project } from './linear-world.ts';
 import { retryCleanup } from './cleanup-retry.ts';
+import { outputText, reportText } from '../../../src/run/output.ts';
 
 export type OwnedEntry =
   /** Team zones (team ids) the run may create documents in. */
@@ -83,13 +84,47 @@ export class OwnershipLedger implements WriteObserver {
   }
 
   record(entry: OwnedEntry): void {
-    const fd = openSync(this.#file, 'a+');
+    // Construct only the fields the journal understands; validate before opening it.
+    const id = (value: unknown) => {
+      const text = outputText(value, 256);
+      if (text.trim() !== text || !/^[A-Za-z0-9_-]+$/.test(text)) throw new Error('Invalid ownership id');
+      return text;
+    };
+    let checked: OwnedEntry;
+    switch (entry.kind) {
+      case 'scope': checked = { kind: 'scope', teamIds: entry.teamIds.map(id) }; break;
+      case 'project':
+        if (typeof entry.name !== 'string' || entry.name.length > 4096) throw new Error('Invalid ownership name');
+        checked = { kind: 'project', id: id(entry.id), name: entry.name };
+        break;
+      case 'project-deleted': checked = { kind: 'project-deleted', id: id(entry.id) }; break;
+      case 'document':
+        if (typeof entry.confirmed !== 'boolean') throw new Error('Invalid ownership confirmation');
+        checked = { kind: 'document', id: id(entry.id), confirmed: entry.confirmed };
+        break;
+      default: throw new Error('Invalid ownership entry');
+    }
+    const flags = constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW;
+    let fd: number;
     try {
+      fd = openSync(this.#file, flags, 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      try {
+        fd = openSync(this.#file, flags | constants.O_CREAT | constants.O_EXCL, 0o600);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        // Another writer created the journal first. Open it without following a link.
+        fd = openSync(this.#file, flags, 0o600);
+      }
+    }
+    try {
+      fchmodSync(fd, 0o600);
       // A writer that died mid-line left a torn tail: start on a new line, so this entry is not lost with it.
       const size = fstatSync(fd).size;
       const last = Buffer.alloc(1);
       const torn = size > 0 && readSync(fd, last, 0, 1, size - 1) === 1 && last[0] !== 0x0a;
-      writeSync(fd, `${torn ? '\n' : ''}${JSON.stringify(entry)}\n`);
+      writeSync(fd, reportText(`${torn ? '\n' : ''}${JSON.stringify(checked)}\n`));
       fsyncSync(fd);
     } finally {
       closeSync(fd);

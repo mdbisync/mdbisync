@@ -5,6 +5,7 @@
 import { createSign } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import type { TestConfig } from './config.ts';
+import { githubRequestBody, githubRequestPath, githubRequestToken } from './github-request.ts';
 
 const API = 'https://api.github.com';
 
@@ -42,16 +43,16 @@ function encodePath(path: string): string {
 }
 
 async function call<T>(token: string, method: string, path: string, body?: unknown, fetchImpl: typeof fetch = fetch): Promise<T> {
-  const response = await fetchImpl(`${API}${path}`, {
+  const response = await fetchImpl(`${API}${githubRequestPath(path)}`, {
     method,
     headers: {
       accept: 'application/vnd.github+json',
-      authorization: `Bearer ${token}`,
+      authorization: `Bearer ${githubRequestToken(token)}`,
       'x-github-api-version': '2022-11-28',
       'user-agent': 'scenario-harness',
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { body: JSON.stringify(githubRequestBody(body)) }),
     signal: AbortSignal.timeout(60_000),
   });
   if (!response.ok) throw new GitHubError(`${method} ${path.split('?')[0]}: HTTP ${response.status}`, response.status);
@@ -116,13 +117,13 @@ export interface PullRequest {
 export interface WorkflowRun {
   id: number;
   run_attempt?: number;
-  status: string;
+  status: string | null;
   conclusion: string | null;
   event: string;
   created_at: string;
   run_started_at?: string;
   updated_at?: string;
-  head_branch?: string;
+  head_branch?: string | null;
   head_sha?: string;
   path?: string;
   actor?: { login: string } | null;
@@ -172,8 +173,8 @@ export class SandboxRest {
 
   /** Bytes of a repository API path that answers with a redirect to a file (artifacts, logs). */
   async download(path: string): Promise<Buffer> {
-    const response = await this.#fetch(`${API}${this.#repoPath}${path}`, {
-      headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${this.#token}`, 'x-github-api-version': '2022-11-28', 'user-agent': 'scenario-harness' },
+    const response = await this.#fetch(`${API}${githubRequestPath(`${this.#repoPath}${path}`)}`, {
+      headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${githubRequestToken(this.#token)}`, 'x-github-api-version': '2022-11-28', 'user-agent': 'scenario-harness' },
     });
     if (!response.ok) throw new GitHubError(`GET ${path.split('?')[0]}: HTTP ${response.status}`, response.status);
     return Buffer.from(await response.arrayBuffer());

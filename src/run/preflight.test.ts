@@ -78,6 +78,28 @@ describe('preflight', () => {
     return { result, report };
   };
 
+  it('summary controls do not turn a completed dry run into a failure', async () => {
+    const isolated = await createFixture();
+    try {
+      await isolated.seed({ ...MINI, 'eng/control\x85.md': '# Notes\n' });
+      const work = (await isolated.clone('work')).dir;
+      const summary = join(isolated.root, 'summary.md');
+      const report = join(isolated.root, 'report.json');
+      const world = fakeWorld();
+      const result = await runCli(['initial-sync'], {
+        cwd: work, fetch: fakeFetch(world),
+        env: env({ MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_REPORT_FILE: report, GITHUB_STEP_SUMMARY: summary }),
+      });
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.match(await readFile(summary, 'utf8'), /control\\u0085\.md/);
+      assert.doesNotMatch(await readFile(summary, 'utf8'), /\x85/);
+      assert.equal((JSON.parse(await readFile(report, 'utf8')) as RunReport).exitStatus, 'success');
+      assert.deepEqual(world.writes, []);
+    } finally {
+      await isolated.cleanup();
+    }
+  });
+
   it('L1-01: the sync without state writes nothing, asks for initial sync and talks to no service', async () => {
     const world = fakeWorld();
     const { result, report } = await run('sync', world);

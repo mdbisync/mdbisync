@@ -232,6 +232,14 @@ describe('format probe against a fake Linear', () => {
     assert.ok(report.split('\n').includes(String.raw`| Cleanup | one\\\|two\\\\\|three |`));
   });
 
+  it('escapes control characters in remote probe diagnostics before rendering the report', async () => {
+    const run = await probe();
+    run.yjsBlocked = 'HTTP diagnostic\x1b\x85';
+    const report = renderReport(run, { drift: [], updated: false });
+    assert.match(report, /HTTP diagnostic\\u001b\\u0085/);
+    assert.doesNotMatch(report, /[\x1b\x85]/);
+  });
+
   it('reports a Yjs state that can no longer be read as drift', async () => {
     const original = fake.operations.get('ReadBack')!;
     fake.operations.set('ReadBack', (r: ReceivedRequest) => {
