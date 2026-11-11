@@ -22,7 +22,7 @@ import { engineRequestCount, requestBuckets, remoteRequests, isGraphql } from '.
 import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
-import { OwnershipLedger, ownedDocuments, readOwnership, type WriteObserver } from './ownership.ts';
+import { OwnershipLedger, readOwnership, type WriteObserver } from './ownership.ts';
 import { retryGitHubCleanup } from './cleanup-retry.ts';
 import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import { assertCurrentCorpus } from './corpus-drift.ts';
@@ -578,7 +578,7 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
     && owned.teamIds.size === 0 && owned.projects.size === 0 && owned.documents.size === 0) {
     return problems.length === 0 ? { ok: true } : { ok: false, detail: problems.join('; ') };
   }
-  const created = new Set([...(ctx.live?.seededDocuments ?? []), ...ownedDocuments(ctx.owned).keys()]);
+  const created = new Set([...(ctx.live?.seededDocuments ?? []), ...(owned?.documents.keys() ?? [])]);
   if (ctx.live !== null) {
     await attempt('ids', async () => {
       for (const id of await recordedIds(ctx)) created.add(id);
