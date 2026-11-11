@@ -675,6 +675,22 @@ describe('load', () => {
     assert.equal(ctx.engine.results.length, 0);
   });
 
+  it('leaves a file the run left out on purpose out of the load-test targets, and still fails on a document missing otherwise', async () => {
+    // A live run moved a folder under its run id while the linked image stayed at the corpus path: the initial sync
+    // left the file out (image-file-missing), so it has no document. Here: that file's document is gone and the
+    // initial sync's report names it as left out.
+    const leftOut = 'eng/platform/notes.md';
+    const leftOutReport = { operation: 'initial-sync', initialSync: { created: [] }, summary: { leftOutFiles: [{ path: leftOut, rules: ['image-file-missing'], lines: [3] }] } };
+    for (const action of ['burst', 'soak']) {
+      const { ctx, linear, ids } = await fakeRun();
+      linear.documents.delete(ids[leftOut]!.id);
+      // Without the report, the missing document is a product failure, as before.
+      await assert.rejects(runStep(ctx, { kind: 'run', action, args: { durationSeconds: 0 } }), ProductError, action);
+      ctx.engine.results.push({ command: 'initial-sync', exitCode: 0, report: leftOutReport } as never);
+      await runStep(ctx, { kind: 'run', action, args: { durationSeconds: 0 } });
+    }
+  });
+
   it('reports the burst\'s edits made and found on each side, which L4-12 requires to be equal', async () => {
     const { ctx, linear, ids } = await fakeRun();
     const path = 'docs/handbook/start.md';

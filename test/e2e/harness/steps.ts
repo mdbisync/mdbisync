@@ -23,7 +23,7 @@ import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
-import { INVARIANT_CHECKS, editsFound, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
+import { INVARIANT_CHECKS, editsFound, expectsDocument, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, waitForCheckCompleted, CHECK_WAIT_MS } from './check-fault.ts';
 import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
@@ -570,11 +570,16 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
   };
 }
 
-/** Each tracked document's file and Linear content, the versions a load test's edit budget is measured on. */
+/**
+ * Each tracked document's file and Linear content, the versions a load test's edit budget is measured on. A file
+ * that I1 expects no document for (one a run left out on purpose, such as a moved file whose image is missing) is
+ * not a target; any other file without a document stops the test as a product failure.
+ */
 async function loadCandidates(ctx: RunContext, test: 'burst' | 'soak'): Promise<Map<string, string[]>> {
   const sides = await readSides(ctx);
   const candidates = new Map<string, string[]>();
   for (const path of documentPaths(ctx)) {
+    if (!expectsDocument(sides, path)) continue;
     const file = sides.files.get(path);
     const id = sides.ids.get(path)?.id;
     const document = id === undefined ? undefined : sides.documents.get(id);
