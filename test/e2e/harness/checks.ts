@@ -921,11 +921,23 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
   return Object.fromEntries(refs.filter((ref) => ref.runId === ctx.names.runId && ref.ref !== `refs/heads/${ctx.names.trackedBranch}`).map((ref) => [ref.ref, ref.oid]));
 }
 
-/** Stable solo/parallel evidence. Only known resource identities are normalized;
- * document text is hashed after its own links are resolved to corpus paths. */
+/** The placeholder that stands for the run's own id in isolation evidence. */
+export const RUN_ID_PLACEHOLDER = '<run>';
+
+/** `text` with every standalone occurrence of the run's own id replaced by the placeholder.
+ * An id inside a longer word (a commit hash, an upload key) is left alone, and so is any other run's id. */
+export function withoutRunId(text: string, runId: string): string {
+  return text.replace(new RegExp(`(?<![0-9A-Za-z])${runId}(?![0-9A-Za-z])`, 'g'), RUN_ID_PLACEHOLDER);
+}
+
+/** Stable solo/parallel evidence. Only known resource identities are normalized:
+ * document text is hashed after its own links are resolved to corpus paths, and
+ * the run's own id becomes a placeholder in paths, titles and text, so two runs
+ * that differ only by run id give the same snapshot. */
 export function isolationSnapshot(ctx: RunContext, sides: Sides): unknown {
   const world = ctx.live;
   if (world === null) throw new Error('isolation evidence needs a live world');
+  const own = (text: string) => withoutRunId(text, ctx.names.runId);
   const source = (path: string) => world.tree.paths.get(path) ?? path;
   const ids = new Map([...sides.ids].map(([path, entry]) => [source(path), entry]));
   const uploads = new Map([...sides.uploads].map(([url, path]) => [url, source(path)]));
@@ -934,11 +946,12 @@ export function isolationSnapshot(ctx: RunContext, sides: Sides): unknown {
   return [...sides.files.keys()].sort().map((path) => {
     const id = sides.ids.get(path)?.id;
     const doc = id === undefined ? undefined : sides.documents.get(id);
-    if (doc === undefined) return { path: source(path), document: null };
+    if (doc === undefined) return { path: own(source(path)), document: null };
     const content = gitLinks(doc.content ?? '', source(path), { ids, uploads, documentUrlBase: sides.documentUrlBase });
-    return { path: source(path), title: doc.projectId === null && doc.title.startsWith(ctx.names.teamZonePrefix) ? doc.title.slice(ctx.names.teamZonePrefix.length) : doc.title,
+    const title = doc.projectId === null && doc.title.startsWith(ctx.names.teamZonePrefix) ? doc.title.slice(ctx.names.teamZonePrefix.length) : doc.title;
+    return { path: own(source(path)), title: own(title),
       place: doc.projectId === null ? teams.get(doc.teamId ?? '') : projects.get(doc.projectId), state: documentState(doc),
-      contentHash: createHash('sha256').update(content).digest('hex') };
+      contentHash: createHash('sha256').update(own(content)).digest('hex') };
   }).sort((a, b) => a.path.localeCompare(b.path));
 }
 
