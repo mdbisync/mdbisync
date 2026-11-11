@@ -1728,9 +1728,11 @@ export const SUBJECTS: Record<string, Compute> = {
 
 /**
  * What every run checks before writing, in order, by the names the
- * engine's report uses in `setupChecks`.
+ * engine's report uses in `setupChecks`. Written out rather than imported,
+ * so a check the engine adds, drops or moves fails `setup-checks.test.ts`
+ * until this list is updated on purpose.
  */
-export const REQUIRED_SETUP_CHECKS = ['linear-credentials', 'github-access', 'merge-commits', 'linear-format-hook', 'annotations', 'annotation-targets', 'left-out-files', 'security-hooks'] as const;
+export const REQUIRED_SETUP_CHECKS = ['linear-credentials', 'github-access', 'github-app', 'merge-commits', 'linear-format-hook', 'annotations', 'annotation-targets', 'left-out-files', 'security-hooks'] as const;
 
 interface SetupCheck {
   name: string;
