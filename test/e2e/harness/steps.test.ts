@@ -469,6 +469,28 @@ describe('workflows', () => {
     assert.equal(await settleFollowUpRuns(ctx), 0);
   });
 
+  for (const older of ['success', 'cancelled'] as const) {
+    it(`take an older push run (${older}) that no step recorded after the step's newer one, without waiting for the newer again`, async () => {
+      const { ctx, remoteGit } = await fakeRun();
+      ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+      const actions = fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report: (run) => ({ operation: 'sync', capturedTrackedTip: run.head_sha ?? null }) });
+      mkdirSync(ctx.live!.sandbox.cache.dir, { recursive: true });
+      // Commit A (the workflows) starts a push run; commit B (an edit) right after starts another.
+      await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+      const tracked = `refs/heads/${ctx.names.trackedBranch}`;
+      const a = (await remoteGit.text(['rev-parse', tracked])).trim();
+      await ctx.live!.rest.workflowRuns(ctx.names.trackedBranch);
+      for (const run of actions.runs) if (run.head_sha === a) run.conclusion = older;
+      const b = (await remoteGit.text(['commit-tree', `${a}^{tree}`, '-p', a, '-m', 'Edit'])).trim();
+      await remoteGit.run(['update-ref', tracked, b]);
+      await STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' });
+      assert.equal(ctx.engine.results.at(-1)?.report?.['capturedTrackedTip'], b, 'the step recorded the newer run');
+      assert.equal(await settleFollowUpRuns(ctx), older === 'success' ? 1 : 0, 'B was taken in by a recorded run: no wait for another B run');
+      assert.equal(ctx.engine.results.length, older === 'success' ? 2 : 1, 'a cancelled run did nothing and is no engine run');
+      assert.equal((ctx.observations.get('workflows.runs') as unknown[]).length, 2);
+    });
+  }
+
   it('fail the scenario when the deployment\'s follow-up push run fails', async () => {
     const { ctx, remoteGit } = await fakeRun();
     ctx.scenario = { ...ctx.scenario, mode: 'actions' };
