@@ -491,6 +491,17 @@ describe('workflows', () => {
     });
   }
 
+  it('leave the push runs of a scenario without sync state alone: they end with initial-sync-required', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+    const { runs } = fakeActions(ctx, remoteGit, { conclusion: 'failure', jobs: [], logs: {}, workflow: 'mdbisync.yml', report: () => ({ operation: 'sync', code: 'initial-sync-required', capturedTrackedTip: null }) });
+    await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+    await ctx.live!.rest.workflowRuns(ctx.names.trackedBranch);
+    assert.ok(runs.some((run) => run.event === 'push' && run.path === '.github/workflows/mdbisync.yml'), 'the workflows\' push started a sync run');
+    assert.equal(await settleFollowUpRuns(ctx), 0);
+    assert.equal(ctx.engine.results.length, 0);
+  });
+
   it('fail the scenario when the deployment\'s follow-up push run fails', async () => {
     const { ctx, remoteGit } = await fakeRun();
     ctx.scenario = { ...ctx.scenario, mode: 'actions' };

@@ -406,7 +406,8 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
  * scenario, `run.settle` runs it. Without this wait, I6's extra run would
  * record the merge and move `linear`.
  *
- * It first takes every sync push run that no step recorded (an earlier
+ * It waits only once some sync run has taken in a tracked commit. It first
+ * takes every sync push run that no step recorded (an earlier
  * merge's run may still be queued); one the concurrency group cancelled did
  * nothing and is only marked seen. It then waits for the tip's push run until
  * some recorded run has taken the tip in. Runs can be recorded out of their
@@ -419,6 +420,9 @@ export async function settleFollowUpRuns(ctx: RunContext, limit = 5): Promise<nu
   const sync = workflowFor('sync');
   const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
   if (ctx.scenario.mode !== 'actions' || ctx.live === null || !installed.includes(sync)) return 0;
+  // Before any sync took in a commit there is no sync state to follow (a hook-only scenario on an empty setup):
+  // its push runs end with `initial-sync-required`, as a deployer is told to expect.
+  if (takenTips(ctx).size === 0) return 0;
   const after = Number(ctx.observations.get('start.time') ?? 0);
   let recorded = 0;
   for (let count = 0; count < limit; count += 1) {
