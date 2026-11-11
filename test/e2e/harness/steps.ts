@@ -752,6 +752,8 @@ const RUN: Record<string, Executor> = {
       recordWorkflowRun(ctx, run);
     }
     ctx.observations.set('workflows.maxActiveInGroup', maxOverlap(await jobSpans(world.rest, runs)));
+    // With one runner, jobs never overlap even without the group; only the group cancels a pending run that a newer one replaced.
+    ctx.observations.set('workflows.replacedPending', runs.filter((run) => run.conclusion === 'cancelled').length);
     for (const run of runs) {
       if (run.conclusion === 'cancelled') continue; // replaced by a newer run of the group
       await settleWorkflowRun(ctx, run, 'sync');
@@ -795,7 +797,10 @@ const RUN: Record<string, Executor> = {
     };
     const counts = burstEditCounts(options);
     const documents = burstDocuments(await loadCandidates(ctx, 'burst'), options, lastLoadToken(ctx, counts.linear, counts.git));
+    const from = ctx.edits.length;
     const result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), { ...options, documents });
+    // The edits the burst made, each recorded once it landed: the report counts them on both sides after quiet.
+    ctx.observations.set('burst.edits', ctx.edits.slice(from));
     ctx.observations.set('report.generatedLinearEdits', result.linearEdits);
     ctx.observations.set('report.generatedGitPushes', result.gitPushes);
   },

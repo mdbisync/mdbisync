@@ -426,6 +426,31 @@ describe('workflows', () => {
     assert.equal(ctx.engine.results.length, 4);
   });
 
+  it('count the runs the concurrency group cancelled when a newer run replaced them (L4-10)', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+    fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report: (run) => ({ operation: 'sync', capturedTrackedTip: run.head_sha ?? null }) });
+    mkdirSync(ctx.live!.sandbox.cache.dir, { recursive: true });
+    await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+    // The newer dispatch replaced the pending push run: GitHub ends that one cancelled, and the harness does not settle it.
+    const rest = ctx.live!.rest as unknown as { dispatchWorkflow: (workflow: string | number) => Promise<void>; workflowRuns: () => Promise<WorkflowRun[]> };
+    const dispatch = rest.dispatchWorkflow;
+    rest.dispatchWorkflow = async (workflow) => {
+      await dispatch(workflow);
+      for (const run of await rest.workflowRuns()) if (run.event === 'push' && run.path === '.github/workflows/mdbisync.yml') run.conclusion = 'cancelled';
+    };
+    await STEP_ACTIONS['run.workflow-parallel']!(ctx, { events: ['push'], replacePending: true });
+    assert.equal(ctx.observations.get('workflows.replacedPending'), 1);
+    assert.deepEqual(await resolveSubject(ctx, 'workflows.replacedPending'), { known: true, value: 1 });
+    assert.equal(ctx.engine.results.length, 1, 'only the run that was not replaced is settled');
+    const l410 = scenarios.find((item) => item.id === 'L4-10')!;
+    const assertion = l410.checks.assertions.find((item) => item.subject === 'workflows.replacedPending')!;
+    assert.equal((await evaluateAssertion(ctx, assertion)).holds, true);
+    // Without the group, nothing is replaced: one runner alone also keeps jobs from overlapping, so only this count proves the group.
+    ctx.observations.set('workflows.replacedPending', 0);
+    assert.equal((await evaluateAssertion(ctx, assertion)).holds, false);
+  });
+
   it('wait for the push run that the sync pull request\'s merge starts before the checks, as a deployment runs it', async () => {
     const { ctx, remoteGit } = await fakeRun();
     ctx.scenario = { ...ctx.scenario, mode: 'actions' };
@@ -609,6 +634,56 @@ describe('load', () => {
     await assert.rejects(runStep(ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 0 } }), ProductError);
     assert.equal(ctx.edits.length, 0);
     assert.equal(ctx.engine.results.length, 0);
+  });
+
+  it('reports the burst\'s edits made and found on each side, which L4-12 requires to be equal', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const path = 'docs/handbook/start.md';
+    const document = linear.documents.get(ids[path]!.id)!;
+    // An edit before the burst is not the burst's: only the recorded burst edits are counted.
+    ctx.edits.push({ side: 'git', path, token: 'aaaaaa-before' });
+    const burstEdits = [
+      { side: 'linear' as const, path, token: 'aaaaaa-0001' },
+      { side: 'linear' as const, path, token: 'aaaaaa-0002' },
+      { side: 'git' as const, path, token: 'aaaaaa-0003' },
+    ];
+    ctx.edits.push(...burstEdits);
+    ctx.observations.set('burst.edits', burstEdits);
+    const git = await ctx.person();
+    const publish = async (text: string) => {
+      writeFileSync(join(git.dir, path), text);
+      await git.run(['add', '--', path]);
+      await git.run(['commit', '--quiet', '-m', 'Update the review date']);
+      await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    };
+    // Git has the first and the third edit; Linear has the first two.
+    await publish('# Start\n\nNote aaaaaa-0001.\n\nNote aaaaaa-0003.\n');
+    document.content = 'Note aaaaaa-0001.\n\nNote aaaaaa-0002.\n';
+    refreshView(ctx);
+    const l412 = scenarios.find((item) => item.id === 'L4-12')!;
+    const counted = l412.checks.assertions.filter((item) => item.subject.startsWith('report.burstEdits'));
+    assert.deepEqual(counted.map((item) => item.subject), ['report.burstEditsMade', 'report.burstEditsFoundInGit', 'report.burstEditsFoundInLinear']);
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsMade'), { known: true, value: 3 });
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsFoundInGit'), { known: true, value: 2 });
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsFoundInLinear'), { known: true, value: 2 });
+    assert.deepEqual((ctx.observations.get('metrics') as Record<string, unknown>).burstEdits, { made: 3, foundInGit: 2, foundInLinear: 2 }, 'the report keeps the counts');
+    for (const assertion of counted.slice(1)) assert.equal((await evaluateAssertion(ctx, assertion)).holds, false, assertion.subject);
+    // Once both sides hold every burst edit, the counts are equal.
+    await publish('# Start\n\nNote aaaaaa-0001.\n\nNote aaaaaa-0002.\n\nNote aaaaaa-0003.\n');
+    document.content = 'Note aaaaaa-0001.\n\nNote aaaaaa-0002.\n\nNote aaaaaa-0003.\n';
+    refreshView(ctx);
+    for (const assertion of counted.slice(1)) assert.equal((await evaluateAssertion(ctx, assertion)).holds, true, assertion.subject);
+    // A trashed document's text is not found in Linear.
+    document.trashed = true;
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsFoundInLinear'), { known: true, value: 0 });
+  });
+
+  it('records the burst\'s own edits for its report', async () => {
+    const { ctx } = await fakeRun();
+    ctx.edits.push({ side: 'git', path: 'a.md', token: 'aaaaaa-before' });
+    await runStep(ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 0 } });
+    assert.deepEqual(ctx.observations.get('burst.edits'), [], 'a burst of no time made no edits, and the earlier edit is not its own');
   });
 
   it('runs a soak with hourly checks and a repeatable schedule', async () => {

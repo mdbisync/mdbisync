@@ -774,10 +774,26 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   },
 };
 
+/** All tracked files' text, and all documents' text that are not trashed: where an edit's token is looked for. */
+function sideTexts(sides: Pick<Sides, 'files' | 'documents'>): { gitText: string; linearText: string } {
+  return {
+    gitText: [...sides.files.values()].join('\n'),
+    linearText: [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n'),
+  };
+}
+
+/** How many of these edits each side shows, counted on its own: the burst's report of edits found (L4-12). */
+export function editsFound(edits: RunContext['edits'], sides: Pick<Sides, 'files' | 'documents'>): { git: number; linear: number } {
+  const { gitText, linearText } = sideTexts(sides);
+  return {
+    git: edits.filter((edit) => gitText.includes(edit.token)).length,
+    linear: edits.filter((edit) => linearText.includes(edit.token)).length,
+  };
+}
+
 /** Edits that are not on both sides (or, for a removal, still on a side). */
 export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documents'>): RunContext['edits'] {
-  const gitText = [...sides.files.values()].join('\n');
-  const linearText = [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n');
+  const { gitText, linearText } = sideTexts(sides);
   return ctx.edits.filter((edit) => {
     if (edit.retired === true) return false;
     // An explicit user deletion supersedes earlier edits only after both sides
