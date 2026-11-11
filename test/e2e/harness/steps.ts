@@ -578,14 +578,20 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
 async function loadCandidates(ctx: RunContext, test: 'burst' | 'soak'): Promise<Map<string, string[]>> {
   const sides = await readSides(ctx);
   const candidates = new Map<string, string[]>();
+  const skipped: string[] = [];
   for (const path of documentPaths(ctx)) {
-    if (!expectsDocument(sides, path)) continue;
+    if (!expectsDocument(sides, path)) {
+      skipped.push(`${path} (${sides.omitted.get(path) ?? 'kept without a document'})`);
+      continue;
+    }
     const file = sides.files.get(path);
     const id = sides.ids.get(path)?.id;
     const document = id === undefined ? undefined : sides.documents.get(id);
     if (file === undefined || document === undefined) throw new ProductError(`a ${test} target is missing from the tracked files or recorded Linear documents`);
     candidates.set(path, [file, document.content ?? '']);
   }
+  if (skipped.length > 0) ctx.log(`${test}: ${skipped.length} file(s) without a document on purpose are not targets: ${skipped.join(', ')}`);
+  if (candidates.size === 0) throw new Error(`the ${test} has no target: every synchronized document was left out on purpose`);
   return candidates;
 }
 

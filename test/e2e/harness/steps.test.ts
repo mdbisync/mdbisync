@@ -680,15 +680,32 @@ describe('load', () => {
     // left the file out (image-file-missing), so it has no document. Here: that file's document is gone and the
     // initial sync's report names it as left out.
     const leftOut = 'eng/platform/notes.md';
-    const leftOutReport = { operation: 'initial-sync', initialSync: { created: [] }, summary: { leftOutFiles: [{ path: leftOut, rules: ['image-file-missing'], lines: [3] }] } };
+    const initialSync = (paths: string[]) => engineRun('initial-sync', {
+      operation: 'initial-sync', initialSync: { created: [] }, summary: { leftOutFiles: paths.map((path) => ({ path, rules: ['image-file-missing'], lines: [3] })) },
+    });
     for (const action of ['burst', 'soak']) {
       const { ctx, linear, ids } = await fakeRun();
+      const lines: string[] = [];
+      ctx.log = (line) => void lines.push(line);
       linear.documents.delete(ids[leftOut]!.id);
       // Without the report, the missing document is a product failure, as before.
       await assert.rejects(runStep(ctx, { kind: 'run', action, args: { durationSeconds: 0 } }), ProductError, action);
-      ctx.engine.results.push({ command: 'initial-sync', exitCode: 0, report: leftOutReport } as never);
+      ctx.engine.results.push(initialSync([leftOut]));
       await runStep(ctx, { kind: 'run', action, args: { durationSeconds: 0 } });
+      assert.ok(lines.some((line) => line.startsWith(`${action}: 1 file(s)`) && line.includes(`${leftOut} (lint: image-file-missing)`)), `${action} names the skipped file: ${lines.join(' | ')}`);
     }
+    // A short real burst edits the other documents and never the left-out file.
+    const { ctx, linear, ids } = await fakeRun();
+    linear.documents.delete(ids[leftOut]!.id);
+    ctx.engine.results.push(initialSync([leftOut]));
+    await runStep(ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 2, linearEditsPerMinute: 60, gitPushesPerMinute: 30 } });
+    const edited = new Set((ctx.observations.get('burst.edits') as Array<{ path: string }>).map((edit) => edit.path));
+    assert.ok(edited.size > 0 && !edited.has(leftOut), [...edited].join(', '));
+    // When every document was left out on purpose, the load test names that instead of a capacity problem.
+    const empty = await fakeRun();
+    for (const path of Object.keys(empty.ids)) empty.linear.documents.delete(empty.ids[path]!.id);
+    empty.ctx.engine.results.push(initialSync(['eng/platform/plan.md', 'eng/platform/notes.md', 'docs/handbook/start.md']));
+    await assert.rejects(runStep(empty.ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 0 } }), /has no target: every synchronized document was left out on purpose/);
   });
 
   it('reports the burst\'s edits made and found on each side, which L4-12 requires to be equal', async () => {
