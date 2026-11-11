@@ -182,7 +182,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   if (suspended?.code !== undefined) result.code = suspended.code;
   if (suspended?.status !== undefined) result.status = suspended.status;
   if (suspended?.reason !== undefined) result.reason = suspended.reason;
-  if (linear === null) return result;
+  if (linear === null || suspended?.normalClosePending === true) return result;
 
   const frozen = suspendedPaths(await readIds(git, options.state.ids));
   // Mask before merging, so frozen paths cannot conflict or restart normal checks.
@@ -554,7 +554,8 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     const link = hold.pullRequest === undefined ? '' : ` [#${hold.pullRequest.number}](${hold.pullRequest.url})`;
     lines.push(hold.released ? 'Released the suspended batch.' : `Suspended changes${link}: ${hold.paths.map((path) => `\`${path}\``).join(', ')}.`, '');
     if (hold.code === 'merge-refused' || hold.code === 'merge-blocked') lines.push(`GitHub refused the suspended merge (${refusalText(hold)}).`, '');
-    if (hold.code === 'github-failed') lines.push('A GitHub request for the suspended lane failed; the normal lane still runs.', '');
+    if (hold.normalClosePending === true) lines.push('The normal pull request is waiting for GitHub to show its empty head before closing; a later run retries. New normal batches and suspended release wait for that close.', '');
+    if (hold.code === 'github-failed' && hold.normalClosePending !== true) lines.push('A GitHub request for the suspended lane failed; the normal lane still runs.', '');
     if (hold.conflicts !== undefined) lines.push(`Suspended files waiting for a manual merge: ${hold.conflicts.map((path) => `\`${path}\``).join(', ')}.`, '');
     if (hold.checks.length > 0) lines.push(`Failed checks: ${codeNames(hold.checks)}.`, '');
     if (hold.timedOut !== undefined && hold.timedOut.length > 0) lines.push(`Checks that did not finish in time: ${codeNames(hold.timedOut)}.`, '');
@@ -581,7 +582,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
   } else if (result.waitsForSuspended === true) {
     lines.push(`Every check on the sync pull request ${link} passed; it merges after the suspended pull request, whose checks still run.`);
   }
-  const explained = result.redMain !== undefined || result.mainPending !== undefined || result.waitsForSuspended === true;
+  const explained = result.redMain !== undefined || result.mainPending !== undefined || result.waitsForSuspended === true || result.suspended?.normalClosePending === true;
   switch (result.code) {
     case 'conflict':
       lines.push("Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. The sync branch is left as it is this run. When the conflicting files are documents, the sync merges them with conflict markers: this run into Linear's state, a later run into the sync branch. A conflicting file that is not a document waits: merge the tracked branch and Linear's state ref into the sync branch and resolve it there; the sync keeps those commits.");

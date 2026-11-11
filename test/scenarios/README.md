@@ -173,7 +173,12 @@ deferring every merge). A starting tree holds the pull request check workflow
 only for a scenario with a `fault.checks` step or the `check-workflow` fixture;
 without either it has no checks. The `pending-check` fixture publishes the
 workflow and holds its check pending with a marker committed before the
-initial sync.
+initial sync. The workflow also runs on pushes to the tracked branch. Once a
+`fault.checks` step has run, every `git` step that moves the tracked branch's
+tip waits until that push's check has completed, whatever its result, so the
+next sync does not see it still running there and wait one run before it
+suspends. A pending marker on the new tip is a harness gap, since its check
+never completes in time.
 
 `proposedRule` records a testable proposed behavior. The concrete checks remain
 binding until the behavior and its specification are deliberately revised.

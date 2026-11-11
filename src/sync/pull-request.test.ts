@@ -80,6 +80,7 @@ describe('sync: the sync pull request', () => {
     concurrentMove = false;
     world.github.checks = new Map();
     world.github.merge = mergeOnRemote;
+    world.github.pullRequestHead = (pr) => rev(`refs/heads/${pr.head}`);
     const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
     assert.equal(initial.result.exitCode, 0, initial.result.stderr);
     start = await rev('refs/heads/main');
@@ -485,6 +486,99 @@ describe('sync: the sync pull request', () => {
     const quiet = await sync();
     assert.deepEqual(quiet.writes, []);
     assertNoRerun();
+  });
+
+  it('waits for GitHub to show the empty head before closing a suspended normal pull request', async () => {
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nHeld edit.\n');
+    await sync();
+    const failed = await rev(SYNC_BRANCH);
+    checksOn(failed, [{ name: CHECK_NAME, status: 'completed', conclusion: 'failure' }]);
+    let reads = 0;
+    let visible = failed;
+    world.github.pullRequestHead = async (pr) => {
+      reads += 1;
+      visible = reads < 3 ? failed : await rev(`refs/heads/${pr.head}`);
+      return visible;
+    };
+    world.github.reset = (request, body) => {
+      if (request === 'PATCH /pulls/1' && body.state === 'closed') {
+        assert.notEqual(visible, failed, 'closed while GitHub still showed the failed batch');
+      }
+      return undefined;
+    };
+    const held = await sync();
+    assert.equal(held.result.exitCode, 0, held.result.stderr);
+    assert.equal(reads, 3);
+    assert.equal(world.github.pullRequests[0]?.state, 'closed');
+    assert.equal(await rev(`${visible}^{tree}`), await rev('refs/heads/main^{tree}'));
+    assert.ok(held.report.pullRequest?.suspended?.pullRequest);
+  });
+
+  for (const crash of [false, true]) it(`recovers a ${crash ? 'failed close after the atomic suspension push' : 'head update deferred beyond the polling limit'} without reusing the normal pull request`, async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nHeld edit.\n');
+    await sync();
+    const failed = await rev(SYNC_BRANCH);
+    checksOn(failed, [{ name: CHECK_NAME, status: 'completed', conclusion: 'failure' }]);
+    let reads = 0;
+    world.github.pullRequestHead = async (pr) => {
+      reads += 1;
+      return crash ? rev(`refs/heads/${pr.head}`) : failed;
+    };
+    if (crash) world.github.reset = (request, body) => request === 'PATCH /pulls/1' && body.state === 'closed' ? 'before' : undefined;
+    const first = await sync();
+    assert.equal(first.result.exitCode, crash ? INCOMPLETE_EXIT_CODE : 0, first.result.stderr);
+    assert.equal(reads, crash ? 1 : 5);
+    if (!crash) {
+      assert.equal(first.report.pullRequest?.suspended?.normalClosePending, true);
+      assert.ok(first.report.pullRequest?.suspended?.pullRequest);
+      assert.match(first.summary, /waiting for GitHub to show its empty head/);
+      assert.doesNotMatch(first.summary, /no pull request is needed/);
+    }
+    const empty = await rev(SYNC_BRANCH);
+    assert.notEqual(empty, failed);
+    assert.equal(await rev(`${empty}^{tree}`), await rev('refs/heads/main^{tree}'));
+    assert.equal(world.github.pullRequests[0]?.state, 'open');
+    assert.ok(((await ids())[path] as { suspended?: unknown }).suspended);
+    delete world.github.reset;
+    world.github.pullRequestHead = async () => failed;
+    await editInLinear('combined/guide.md', '# Guide\n\nAn unrelated edit.\n');
+    // Even a green suspended head cannot release before the normal PR closes:
+    // release would replace the empty head, making the old close unrecoverable.
+    checksOn(await rev(SUSPENDED), [{ name: CHECK_NAME, status: 'completed', conclusion: 'success' }]);
+    world.github.reset = (request) => request === 'GET /pulls/1' ? 'before' : undefined;
+    const unavailable = await sync();
+    assert.equal(unavailable.result.exitCode, INCOMPLETE_EXIT_CODE, unavailable.result.stderr);
+    assert.equal(unavailable.report.pullRequest?.suspended?.normalClosePending, true);
+    assert.doesNotMatch(unavailable.summary, /the normal lane still runs/);
+    assert.equal(await rev(SYNC_BRANCH), empty);
+    delete world.github.reset;
+    const stale = await sync();
+    assert.equal(stale.result.exitCode, 0, stale.result.stderr);
+    assert.equal(stale.report.pullRequest?.suspended?.normalClosePending, true);
+    assert.equal(stale.report.pullRequest?.suspended?.waiting, undefined);
+    assert.match(stale.summary, /New normal batches and suspended release wait for that close/);
+    assert.doesNotMatch(stale.summary, /no pull request is needed/);
+    assert.equal(await rev(SYNC_BRANCH), empty);
+    assert.equal(world.github.pullRequests[0]?.state, 'open');
+    world.github.pullRequestHead = (pr) => rev(`refs/heads/${pr.head}`);
+    let closedAt: string | undefined;
+    world.github.reset = (request, body) => {
+      if (request === 'PATCH /pulls/1' && body.state === 'closed') closedAt = empty;
+      return undefined;
+    };
+    const recovered = await sync();
+    assert.equal(recovered.result.exitCode, 0, recovered.result.stderr);
+    assert.equal(closedAt, empty);
+    assert.equal(world.github.pullRequests[0]?.state, 'closed');
+    // A crash before opening the suspended PR still gives its new checks the
+    // normal grace period. An existing PR can release in this recovery run.
+    if (crash) {
+      assert.equal(recovered.report.pullRequest?.suspended?.waiting, true);
+      assert.ok((await sync()).report.pullRequest?.suspended?.released);
+    } else assert.ok(recovered.report.pullRequest?.suspended?.released);
+    assert.equal(openPullRequests().filter((pr) => pr.head === 'mdbisync/linear').length, 1);
+    assert.notEqual(openPullRequests().find((pr) => pr.head === 'mdbisync/linear')?.number, 1);
   });
 
   it('L5-35: a batch of 60 suspended documents is marked 50 in one run and 10 in the next, within I9', async () => {

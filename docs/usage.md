@@ -260,8 +260,11 @@ remain after release; its presence alone does not mean a batch is on hold.
   marked in Linear; fix the workflow filters or required-check names.
 - A failed check counts at once. Unless that check also fails on the
   tracked branch's tip, the whole batch moves to the suspended lane, and
-  the normal pull request closes. This is a successful sync run, not a
-  setup error. Other documents continue in the normal lane. While the
+  the normal pull request closes once GitHub shows its empty set-aside head.
+  The sync waits up to five seconds for that update; if it is still pending,
+  a later run closes the pull request. New normal batches and suspended
+  release wait for that close. This is a successful sync run, not a setup
+  error. Other documents then continue in the normal lane. While the
   suspended head's checks are still pending before their deadline, the
   normal lane waits to merge so it cannot move the tracked branch under it.
 - Every suspended document gets a red `Cross` and a comment naming the

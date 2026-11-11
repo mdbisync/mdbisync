@@ -100,6 +100,8 @@ export interface RunContext {
   phase(name: string): void;
   /** Aborted when setup missed its deadline. */
   signal: AbortSignal;
+  /** Poll interval of the waits for marker checks; offline tests shorten it. */
+  checkPollMs?: number;
   /** A clone of the tracked branch where people commit; made on first use. */
   person(): Promise<Git>;
   /** Installs the repository's pre-commit hooks in the person's clone, once; commits that do not bypass the hooks call it first. */

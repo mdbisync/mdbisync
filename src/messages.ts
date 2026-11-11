@@ -162,6 +162,7 @@ export const MESSAGES = {
   'github.no-answer': 'GitHub did not answer while {action}',
   'github.answered': 'GitHub answered HTTP {status} while {action}',
   'github.listing': 'listing open pull requests',
+  'github.reading-pull-request': 'reading a pull request',
   'github.opening': 'opening a pull request',
   'github.updating': 'updating a pull request',
   'github.closing': 'closing a pull request',

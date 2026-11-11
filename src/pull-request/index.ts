@@ -5,6 +5,7 @@ export {
   type PullRequest,
   PullRequestError,
   closePullRequest,
+  closePullRequestAtHead,
   ensurePullRequest,
   findOpenPullRequest,
   openPullRequest,

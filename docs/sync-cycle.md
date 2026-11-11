@@ -195,7 +195,10 @@ happens.
 
 The batch joins the one **Suspended changes from Linear** pull request.
 The normal branch records `Set aside suspended changes` and its pull
-request closes; later changes to other documents use the normal lane.
+request closes once GitHub shows the empty set-aside head. The sync waits
+up to five seconds for that update, then leaves closure to a later run if
+necessary. New normal batches and suspended release wait for that close;
+later changes to other documents then use the normal lane.
 Security hooks still run before any push and keep their separate blocked
 mark. Suspension is a successful run, not a setup error.
 
@@ -328,6 +331,7 @@ The suspended lane and its marks add these lines when applicable:
 | Line or beginning | What it means |
 | --- | --- |
 | Suspended changes | Links the suspended pull request and lists its paths. |
+| The normal pull request is waiting for GitHub to show its empty head | A later run retries the close; new normal batches and suspended release wait for it. |
 | Released the suspended batch. | Its head passed and merged; the freeze ends. |
 | GitHub refused the suspended merge | A merge refusal on that lane; `merge-refused` and `merge-blocked` apply to either lane. |
 | A GitHub request for the suspended lane failed; the normal lane still runs. | A later run retries that lane. |
