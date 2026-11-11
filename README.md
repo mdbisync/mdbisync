@@ -41,7 +41,9 @@ Edit in Linear or in git, and both stay in sync.
 ## Setup
 
 Four steps, all in accounts you already own. Each run checks the whole setup
-before it writes anything, and says what is missing in the run summary.
+before it writes anything, and says what is missing in the run summary. The
+[quickstart](docs/quickstart.md) has every step in order, with the exact
+settings and commands.
 
 ### 1. Create a private Linear OAuth app
 
@@ -59,7 +61,8 @@ new-App form already filled in: [GitHub App](docs/quickstart.md#github-app).
 
 ### 3. Run a one-time initial sync
 
-First prepare the repository:
+First prepare the repository. `mdbisync init` writes the files for it
+([repository files](docs/quickstart.md#repository-files)):
 
 - map a folder to Linear: `linear-team` and `linear-project` in the front
   matter of its `README.md` ([folder mapping](docs/usage.md#folder-mapping));
@@ -88,6 +91,10 @@ to `.github/workflows/`. It runs on every push to `main` and every five
 minutes, in both directions.
 
 ## Documentation
+
+The whole setup, step by step: [docs/quickstart.md](docs/quickstart.md).
+Every input, secret, hook and flag with its default:
+[docs/configuration.md](docs/configuration.md).
 
 How folders map to Linear, the checks every run makes, the sync pull request
 and how to pin a release: [docs/usage.md](docs/usage.md). How a change
