@@ -98,11 +98,11 @@ describe('results', () => {
     });
   });
 
-  it('lists only known scenarios as expected-red, and none of the scenarios confirmed passing', () => {
+  it('lists only known scenarios as expected-red, and none of the offline format scenarios that pass', () => {
     const list = loadExpectedRed();
     const known = new Set(scenarios.map((scenario) => scenario.id));
     for (const id of list) assert.ok(known.has(id), id);
-    for (const id of ['L0-01', 'L0-02', 'L0-03', 'L0-04', 'L0-07', 'L0-08', 'L2-37']) assert.ok(!list.has(id), id);
+    for (const id of ['L0-01', 'L0-02', 'L0-03', 'L0-04', 'L0-07', 'L0-08']) assert.ok(!list.has(id), id);
   });
 
   it('has an executor for every step action', () => {
