@@ -205,7 +205,7 @@ test('only a final version writes and uploads the SBOM, after the release tree i
   const steps = jobs.build!.steps;
   const conditional = finalOnly('build');
   assert.equal(conditional.length, 2, 'the SBOM is written and uploaded, and nothing else in build depends on the version');
-  assert.match(conditional[0]!.run!, /^node src\/release\/sbom\.ts "\$GITHUB_REPOSITORY" "\$RUNNER_TEMP\/release" "\$RUNNER_TEMP\/sbom\.spdx\.json"$/);
+  assert.equal(conditional[0]!.run, 'node src/release/sbom.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA" "$RELEASE_VERSION" "$RUNNER_TEMP/release" "$RUNNER_TEMP/sbom.spdx.json"');
   assert.match(conditional[1]!.uses!, /^actions\/upload-artifact@/);
   assert.equal(conditional[1]!.with!.name, 'release-sbom');
   const stage = steps.findIndex((step) => step.run?.includes('src/release/prepare.ts'));
@@ -235,6 +235,26 @@ test('every action in release.yml is pinned to a full commit SHA', () => {
     for (const step of job.steps) {
       if (step.uses !== undefined) assert.match(step.uses, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, `${name}: ${step.uses}`);
     }
+  }
+});
+
+test('the attest job first refuses a version whose tag exists, and stops when the remote cannot be read', () => {
+  const steps = jobs.attest!.steps;
+  assert.equal(steps[0]!.name, 'Refuse a version whose tag already exists');
+  const directory = mkdtempSync(join(tmpdir(), 'release-existing-tag-'));
+  try {
+    // A stub git on PATH stands in for the remote: it prints what ls-remote would, or fails.
+    const run = (stub: string) => {
+      writeFileSync(join(directory, 'git'), `#!/usr/bin/env bash\n${stub}\n`, { mode: 0o755 });
+      return spawnSync('bash', ['-e', '-c', steps[0]!.run!], {
+        env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: 'owner/name', RELEASE_VERSION: 'v0.1.0' },
+      }).status;
+    };
+    assert.equal(run('exit 0'), 0, 'no tag yet');
+    assert.notEqual(run(`echo "${'a'.repeat(40)}\trefs/tags/v0.1.0"`), 0, 'the tag exists');
+    assert.notEqual(run('exit 128'), 0, 'the remote cannot be read');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

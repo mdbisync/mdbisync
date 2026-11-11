@@ -55,7 +55,9 @@ test('real bundles run from the isolated release tree, install as an offline Nod
     await stageRelease({ source, output, sourceSha: 'a'.repeat(40), version, action, hooks });
     // The SBOM a final release writes from the same tree lists exactly the bundled packages of the inventory.
     const sbomFile = join(temporary, 'sbom.spdx.json');
-    await writeSbom({ repository: 'owner/name', source, directory: output, output: sbomFile });
+    await writeSbom({ repository: 'owner/name', sourceSha: 'a'.repeat(40), version, source, directory: output, output: sbomFile });
+    await assert.rejects(writeSbom({ repository: 'owner/name', sourceSha: 'b'.repeat(40), version, source, directory: output, output: `${sbomFile}.other` }),
+      /provenance does not match/, 'the SBOM describes only the tree staged for the requested source');
     const sbom = JSON.parse(await readFile(sbomFile, 'utf8')) as { packages: { name: string; versionInfo: string }[] };
     const inventory = JSON.parse(await readFile(join(source, 'third-party-licenses.json'), 'utf8')) as { name: string; version: string }[];
     assert.deepEqual(sbom.packages.slice(1).map((pkg) => `${pkg.name}@${pkg.versionInfo}`), inventory.map((pkg) => `${pkg.name}@${pkg.version}`));

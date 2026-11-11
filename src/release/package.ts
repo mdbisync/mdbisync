@@ -8,9 +8,14 @@ import { RELEASE_BUNDLES } from './bundles.ts';
 // Written by the build: license texts and notices of the bundled packages.
 export const NOTICES_FILE = 'dist/THIRD_PARTY_NOTICES.txt';
 
-function record(value: unknown): Record<string, unknown> {
+export function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected a mapping');
   return value as Record<string, unknown>;
+}
+
+/** The title of a bundled package's section in the notices; the SBOM looks each package up by it. */
+export function noticeTitle(entry: { readonly name: string; readonly version: string; readonly license: string }): string {
+  return `${entry.name} ${entry.version}\nLicense: ${entry.license}`;
 }
 
 export function validateVersion(version: string): string {
