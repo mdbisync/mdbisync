@@ -352,11 +352,12 @@ async function resolveCleared(linear: HoldClient, hold: HoldNotice): Promise<tru
   }
 }
 
-const NOT_ABOUT_THE_COMMENT = new Set(['AUTHENTICATION_ERROR', 'FORBIDDEN', 'RATELIMITED']);
+/** Codes that are not about the comment: the token, its scope, the rate, or a server failure Linear reports with HTTP 200. */
+const NOT_ABOUT_THE_COMMENT = new Set(['AUTHENTICATION_ERROR', 'FORBIDDEN', 'RATELIMITED', 'INTERNAL_SERVER_ERROR', 'INTERNAL_ERROR', 'DEADLOCK_DETECTED']);
 
-/** Linear answered and refused the request itself, for reasons that asking again does not change. */
+/** Linear answered with a code and refused the request itself, for reasons that asking again does not change. */
 function refusesComment(error: unknown): error is LinearGraphQLError {
-  return error instanceof LinearGraphQLError && !isTransientLinearError(error) && ![401, 403, 429].includes(error.httpStatus) && !NOT_ABOUT_THE_COMMENT.has(error.code ?? '');
+  return error instanceof LinearGraphQLError && error.code !== undefined && !isTransientLinearError(error) && ![401, 403, 429].includes(error.httpStatus) && !NOT_ABOUT_THE_COMMENT.has(error.code);
 }
 
 /** The pending comment of a new episode, its id chosen before the suspension's push. */

@@ -1180,11 +1180,13 @@ describe('sync: the sync pull request', () => {
     assert.equal(resolve.calls, 1, 'the refused comment was tried again');
   });
 
-  it('a refusal of the token while resolving a released comment in the trash is not final: the comment waits for a later run', async () => {
+  it('a token refusal or a server failure while resolving a released comment in the trash is not final: the comment waits for a later run', async () => {
     const path = 'eng/notes/plan.md';
     const document = await suspendThenTrash(path);
+    // A token refusal, then a server failure Linear reports with HTTP 200: neither is about the comment.
+    const answers = [linearAnswer(401, 'AUTHENTICATION_ERROR'), linearAnswer(200, 'DEADLOCK_DETECTED')];
     let refused = true;
-    onResolve(() => (refused ? linearAnswer(401, 'AUTHENTICATION_ERROR') : undefined));
+    onResolve(() => (refused ? answers.shift() : undefined));
     checksOn(await rev(SUSPENDED), FAILED);
     await sync();
     checksOn(await rev(SUSPENDED), PASSED);
@@ -1193,6 +1195,9 @@ describe('sync: the sync pull request', () => {
     assert.equal(released.report.pullRequest?.holdMarks?.code, 'write-failed');
     assert.equal(released.report.pullRequest?.holdMarks?.unresolved, undefined);
     assert.ok(((await ids())[path] as { saved?: { hold?: unknown } } | undefined)?.saved?.hold !== undefined, 'the pending comment was forgotten');
+    const again = await sync();
+    assert.equal(again.report.pullRequest?.holdMarks?.code, 'write-failed');
+    assert.equal(again.report.pullRequest?.holdMarks?.unresolved, undefined);
     refused = false;
     const next = await sync();
     assert.deepEqual(next.report.pullRequest?.holdMarks?.cleared, [path]);
