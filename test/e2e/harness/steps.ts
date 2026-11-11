@@ -382,7 +382,7 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
     run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after, exclude: seenRuns(ctx), workflow });
   } else if (event === 'push') {
     // The run the latest push to the tracked branch started, of the command's workflow.
-    run = await waitForRun(world.rest, { branch: ctx.names.trackedBranch, event, after: Number(ctx.observations.get('start.time') ?? 0), exclude: seenRuns(ctx), headSha: await trackedTipOnServer(ctx), workflow: workflowFor(command) });
+    run = await findPushRun(ctx, command, await trackedTipOnServer(ctx));
   } else if (event === 'pull_request') {
     const pr = ctx.observations.get('ci.pullRequest') as { number: number; head: string; openedAt: number } | undefined;
     if (pr === undefined) throw new Error('run.workflow on pull_request needs git.open-pr first');
@@ -396,6 +396,74 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
   recordWorkflowRun(ctx, run);
   await settleWorkflowRun(ctx, run, command);
 }
+
+/**
+ * Waits for the sync workflow runs that the deployment starts on its own
+ * after the scenario's steps, and records each one as an engine run. A sync
+ * run takes in the tracked branch as it was when the run started. So the run
+ * that merges the sync pull request leaves the merge commit to the next run,
+ * which records it in `linear` without writing anything. In a deployment,
+ * the merge's push starts that run (the template's push trigger). In a local
+ * scenario, `run.settle` runs it. Without this wait, I6's extra run would
+ * record the merge and move `linear`.
+ *
+ * It waits only once some sync run has taken in a tracked commit. It first
+ * takes every sync push run that no step recorded (an earlier
+ * merge's run may still be queued); one the concurrency group cancelled did
+ * nothing and is only marked seen. It then waits for the tip's push run until
+ * some recorded run has taken the tip in. Runs can be recorded out of their
+ * order, so any recorded run counts, not only the latest. A failed follow-up
+ * run fails the scenario, since it is the deployment's run. The follow-up
+ * runs count for the request budgets and the canary scan, but they are not
+ * the runs that `runs.<n|last>` name. Returns how many runs it recorded.
+ */
+export async function settleFollowUpRuns(ctx: RunContext, limit = 5): Promise<number> {
+  const sync = workflowFor('sync');
+  const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
+  if (ctx.scenario.mode !== 'actions' || ctx.live === null || !installed.includes(sync)) return 0;
+  // Before any sync took in a commit there is no sync state to follow (a hook-only scenario on an empty setup):
+  // its push runs end with `initial-sync-required`, as a deployer is told to expect.
+  if (takenTips(ctx).size === 0) return 0;
+  const after = Number(ctx.observations.get('start.time') ?? 0);
+  let recorded = 0;
+  for (let count = 0; count < limit; count += 1) {
+    const unrecorded = (await live(ctx).rest.workflowRuns(ctx.names.trackedBranch))
+      .filter((run) => run.event === 'push' && run.path?.split('@')[0] === `.github/workflows/${sync}` && Date.parse(run.created_at) >= after - 5_000 && !seenRuns(ctx).has(run.id))
+      .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))[0];
+    let headSha = unrecorded?.head_sha;
+    if (headSha === undefined) {
+      const tip = await trackedTipOnServer(ctx);
+      if (takenTips(ctx).has(tip)) return recorded;
+      headSha = tip;
+    }
+    const run = await findPushRun(ctx, 'sync', headSha);
+    if (run.conclusion === 'cancelled') {
+      recordWorkflowRun(ctx, run);
+      continue;
+    }
+    // A follow-up run is the deployment's, not a step's: `runs.<n|last>` keep naming the steps' runs.
+    if (!ctx.observations.has('scenario.stepRunsEnd')) ctx.observations.set('scenario.stepRunsEnd', ctx.engine.results.length);
+    recordWorkflowRun(ctx, run);
+    await settleWorkflowRun(ctx, run, 'sync');
+    recorded += 1;
+    (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined)?.push(await snapshotRefs(ctx));
+    const result = ctx.engine.results.at(-1);
+    if (result?.exitCode !== 0) throw new ProductError(`the deployment's follow-up push run ${run.id} did not succeed (exit ${String(result?.exitCode)})`);
+  }
+  ctx.log(`the deployment still had follow-up runs after ${limit}: the checks see it moving`);
+  return recorded;
+}
+
+/** The tracked commits the recorded sync runs took in: a check run or a failed sync names none. */
+function takenTips(ctx: RunContext): Set<string> {
+  return new Set(ctx.engine.results.map((result) => result.report?.['capturedTrackedTip']).filter((tip): tip is string => typeof tip === 'string'));
+}
+
+/** The completed push run of `headSha` of the command's workflow that no step recorded yet. */
+function findPushRun(ctx: RunContext, command: CommandName, headSha: string): Promise<WorkflowRun> {
+  return waitForRun(live(ctx).rest, { branch: ctx.names.trackedBranch, event: 'push', after: Number(ctx.observations.get('start.time') ?? 0), exclude: seenRuns(ctx), headSha, workflow: workflowFor(command) });
+}
+
 
 /**
  * Asks the sandbox's scheduled workflow for one scheduled sync of this run
