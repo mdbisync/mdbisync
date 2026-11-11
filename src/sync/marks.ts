@@ -79,7 +79,10 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
 
   // Suspension decorations are reconciled after the lane's state push.
   if (entry.suspended !== undefined && blocked.length === 0) return result;
-  // A released episode whose comment the hold step has not reached yet: resolve it here, before its mark goes.
+  // A released episode whose comment the hold step has not reached yet (the per-run limit, a failed write): the
+  // hold step clears it and reports it, within its limit. Only a new conflict or blocked mark takes it over here,
+  // resolving the comment before its mark goes.
+  if (entry.suspended === undefined && entry.saved?.hold !== undefined && state === 'clear') return result;
   if (entry.suspended === undefined && entry.saved?.hold !== undefined) {
     await resolveHold(linear, entry.saved.hold);
     const { hold: _hold, ...saved } = entry.saved;
