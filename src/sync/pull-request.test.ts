@@ -103,16 +103,15 @@ describe('sync: the sync pull request', () => {
   });
 
   /**
-   * A clock for a run's waits for checks that moves only when the run sleeps,
-   * so what a run reads within its grace never depends on how fast the
-   * machine is, and a grace costs no real time.
+   * A clock for a run's waits for checks that moves only when the run sleeps:
+   * a read takes no time on it and is never cut off at the grace deadline, so
+   * what a run reads within its grace never depends on how fast the machine
+   * is, and a grace costs no real time.
    */
   function virtualClock(): CheckClock {
     let elapsed = 0;
-    return { now: () => elapsed, sleep: async (ms) => { elapsed += ms; } };
+    return { now: () => elapsed, sleep: async (ms) => { elapsed += ms; }, timeout: () => new AbortController().signal };
   }
-  /** The clock of the latest run. */
-  let checkClock = virtualClock();
 
   async function cli(command: string, extra: Record<string, string> = {}) {
     await rm(reportFile(), { force: true });
@@ -122,13 +121,14 @@ describe('sync: the sync pull request', () => {
     const mark = await markWorld(world, fixture);
     const linearBefore = linearRequests.length;
     const counted = fetchOverride ?? fakeFetch(world);
-    const result = await runCli([command], { env: env(extra), cwd, checkClock: (checkClock = virtualClock()), fetch: async (input, init) => { if (String(input).startsWith(LINEAR_API)) linearRequests.push(String(input)); if (String(input).startsWith(GITHUB_API)) githubRequests.push(`${init?.method ?? 'GET'} ${String(input)}`); return counted(input, init); } });
+    const clock = virtualClock();
+    const result = await runCli([command], { env: env(extra), cwd, checkClock: clock, fetch: async (input, init) => { if (String(input).startsWith(LINEAR_API)) linearRequests.push(String(input)); if (String(input).startsWith(GITHUB_API)) githubRequests.push(`${init?.method ?? 'GET'} ${String(input)}`); return counted(input, init); } });
     const summary = await readFile(summaryFile(), 'utf8').catch(() => '');
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
     for (const text of texts) assert.ok(!text.includes(CANARY), 'content reached the output or a pull request (I5)');
     await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined, movedByOthers: [...(concurrentMove ? ['ids'] as const : []), ...(deletedSuspendedDuringRun ? ['suspendedBranch'] as const : [])] });
-    return { result, report, summary, writes: world.writes.slice(writesBefore), linearRequests: linearRequests.length - linearBefore };
+    return { result, report, summary, clock, writes: world.writes.slice(writesBefore), linearRequests: linearRequests.length - linearBefore };
   }
 
   /** One sync run, with the invariants every run keeps. */
@@ -261,7 +261,7 @@ describe('sync: the sync pull request', () => {
     const run = await cli('sync', { MDBISYNC_MERGE_GRACE_SECONDS: '' });
     assert.equal(run.result.exitCode, 0, run.result.stderr);
     assert.ok(run.report.pullRequest?.merged);
-    assert.ok(checkClock.now() >= 15_000, 'merged before the registration settle time');
+    assert.ok(run.clock.now() >= 15_000, 'merged before the registration settle time');
     const quiet = await cli('sync');
     assert.deepEqual(quiet.writes, []);
   });
