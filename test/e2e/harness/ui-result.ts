@@ -37,6 +37,7 @@ import {
   createRunContext,
   failOnChecks,
   liveWorld,
+  requireLiveConfig,
   resultOf,
   retainPendingOutput,
   runTeamZones,
@@ -190,6 +191,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
     ctx.uiSteps = held.uiSteps;
     ctx.observations = held.observations;
     for (const [subject, value] of answers.values) ctx.observations.set(subject, value);
+    requireLiveConfig(deps.config);
     if (deps.governor !== null) {
       try {
         grant = await deps.governor.admit(scenario, held.runId, estimate(scenario), held.appName, held.observations.get('admission.owner') as string | undefined);
