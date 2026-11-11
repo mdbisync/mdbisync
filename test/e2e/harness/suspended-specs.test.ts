@@ -11,6 +11,7 @@ import { resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts
 import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { CheckpointControl } from './checkpoints.ts';
+import { colorLabel, CONFLICT_MARK } from './conflicts.ts';
 import { runChecks, snapshotRefs, budgetHolds } from './checks.ts';
 import { faultChecks, rerunCheckAsPerson, type WorkflowRun } from './check-fault.ts';
 import type { RunContext } from './context.ts';
@@ -193,11 +194,12 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
               const before = beforeComments.get(id);
               return c.body.includes('Check `') && (before === undefined || before.body !== c.body || before.resolved !== c.resolved) ? [c.documentContentId] : [];
             }));
-            // A conflict mark's icon write is a document write, as the live I9
-            // counts it; a suspended mark's is already in the hold changes.
+            // Changed documents, not write requests. An icon or color change
+            // counts as a write (the live I9 counts icon-only updates too),
+            // except a held document's, which the hold changes already cover.
             const writes = world.linear.documents.filter((d) => {
               const before = beforeDocuments.get(d.id);
-              const keys = changed.has(`content-${d.id}`) ? ['content', 'title', 'projectId', 'teamId', 'trashed'] : ['content', 'title', 'projectId', 'teamId', 'trashed', 'icon', 'color'];
+              const keys = ['content', 'title', 'projectId', 'teamId', 'trashed', ...(changed.has(`content-${d.id}`) ? [] : ['icon', 'color'])];
               return before === undefined || keys.some((key) => d[key as keyof typeof d] !== before[key as keyof typeof before]);
             }).length;
             const count = requests.filter((r) => r.kind !== 'oauth').length;
@@ -239,7 +241,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
       // L5-35: the held document with a conflict from git ends with the conflict mark.
       if (scenario.id === 'L5-35') {
         const conflicted = world.linear.documents.find((d) => d.title.endsWith('item-03'));
-        assert.deepEqual([conflicted?.icon, conflicted?.color], ['Alert', '#F2994A']);
+        assert.deepEqual([conflicted?.icon, colorLabel(conflicted?.color)], [CONFLICT_MARK.icon, CONFLICT_MARK.color]);
       }
       // I6 uses the same in-process engine transport as the scenario's own runs.
       const original = STEP_ACTIONS['run.sync'];
