@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { buildCorpus } from '../../corpus/generate.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
-import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
+import { BANK_DIR, engineForm, linkedAssets, loadBank, readFixture } from '../../probe/bank.ts';
 import { bodyOf } from './checks.ts';
 import { MARKERS } from './conflicts.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
@@ -16,6 +16,8 @@ import { REPO_ROOT, engineEntry } from './engine.ts';
 export interface OfflineInput {
   /** Path → text. */
   files: Map<string, string>;
+  /** Linked non-Markdown files, kept out of format observations and comparisons. */
+  assets: Map<string, Buffer>;
   /**
    * Path → the form Linear keeps, for the files whose form is known: an
    * unchanged file's body by the engine's rule (`bodyOf`: no byte order mark,
@@ -28,7 +30,7 @@ export interface OfflineInput {
 
 function bankInput(filter: (fixture: { class: string; construct: string }, text: string) => boolean): OfflineInput {
   const bank = loadBank(join(REPO_ROOT, BANK_DIR));
-  const input: OfflineInput = { files: new Map(), golden: new Map(), lintErrors: [] };
+  const input: OfflineInput = { files: new Map(), assets: new Map(), golden: new Map(), lintErrors: [] };
   for (const fixture of bank.fixtures) {
     if (fixture.synced === false || !fixture.file.endsWith('.md')) continue;
     const text = readFixture(bank, fixture);
@@ -37,6 +39,9 @@ function bankInput(filter: (fixture: { class: string; construct: string }, text:
     if (fixture.class === 'lint-error') input.lintErrors.push(fixture.file);
     const golden = engineForm(bank, fixture, text);
     if (golden !== undefined) input.golden.set(fixture.file, golden);
+  }
+  for (const file of linkedAssets(bank, [...input.files.values()])) {
+    input.assets.set(file, readFileSync(join(bank.dir, file)));
   }
   input.lintErrors.sort();
   return input;
@@ -53,8 +58,10 @@ function corpusInput(): OfflineInput {
     const text = readFixture(bank, fixture);
     return [fixture.file, { text, form: fixture.class === 'unchanged' ? undefined : engineForm(bank, fixture, text) }];
   }));
-  const input: OfflineInput = { files: new Map(), golden: new Map(), lintErrors: [] };
+  const input: OfflineInput = { files: new Map(), assets: new Map(), golden: new Map(), lintErrors: [] };
+  const linked = new Set(corpus.files.filter((file) => file.kind === 'markdown' && file.synced).flatMap((file) => file.links));
   for (const file of corpus.files) {
+    if (file.kind !== 'markdown' && linked.has(file.path)) input.assets.set(file.path, file.content);
     if (file.kind !== 'markdown' || !file.synced) continue;
     const text = file.content.toString('utf8');
     input.files.set(file.path, text);
@@ -90,7 +97,7 @@ function markerInput(): OfflineInput {
     ['markers/table.md', `# Notes\n\n${MARKERS.git}\n\n| a | b |\n| -- | -- |\n| 1 | 2 |\n\n${MARKERS.linear}\n\n| a | b |\n| -- | -- |\n| 3 | 4 |\n\n${MARKERS.end}\n`],
     ['markers/code.md', `# Notes\n\n${MARKERS.git}\n\n\`\`\`text\none\n\`\`\`\n\n${MARKERS.linear}\n\n\`\`\`text\ntwo\n\`\`\`\n\n${MARKERS.end}\n`],
   ]);
-  return { files, golden: new Map(), lintErrors: [] };
+  return { files, assets: new Map(), golden: new Map(), lintErrors: [] };
 }
 
 export function offlineInput(name: unknown): OfflineInput {
@@ -109,11 +116,11 @@ export function offlineInput(name: unknown): OfflineInput {
   }
 }
 
-export function writeInput(dir: string, files: ReadonlyMap<string, string>): void {
+export function writeInput(dir: string, files: ReadonlyMap<string, string>, assets: ReadonlyMap<string, Buffer> = new Map()): void {
   rmSync(dir, { recursive: true, force: true });
-  for (const [path, text] of files) {
+  for (const [path, content] of [...files, ...assets]) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
-    writeFileSync(join(dir, path), text);
+    writeFileSync(join(dir, path), content);
   }
 }
 
