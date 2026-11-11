@@ -5,7 +5,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type CheckAnnotation } from '../pull-request/index.ts';
-import { ANNOTATIONS_PER_CHECK, HOLD_FAILED, HOLD_FOOTER, HOLD_TIMED_OUT, HOLD_UNNAMED, documentRuns, holdComment, quotesDocument } from './hold.ts';
+import { LinearGraphQLError, LinearHttpError, LinearNetworkError } from '../linear/index.ts';
+import { ANNOTATIONS_PER_CHECK, HOLD_FAILED, HOLD_FOOTER, HOLD_TIMED_OUT, HOLD_UNNAMED, LINEAR_MESSAGE_LENGTH, MESSAGE_WITHHELD, documentRuns, holdComment, quotesDocument, writeFailure } from './hold.ts';
 
 const RUN = 'https://github.test/owner/repo/runs/7';
 const at = (line: number, message: string, title?: string): CheckAnnotation => ({ path: 'docs/a.md', line, message, ...(title === undefined ? {} : { title }) });
@@ -74,5 +75,40 @@ describe('the suspended comment', () => {
   it('never lets a check name break out of its code span', () => {
     const body = holdComment([{ name: 'a`b\nc', url: RUN }], [], new Map(), '');
     assert.ok(body.includes('- Check `a b c`: [run]'));
+  });
+});
+
+describe('a failed mark or comment write', () => {
+  const refusal = (message: string, code = 'INPUT_ERROR') => new LinearGraphQLError('UpdateDocument', 200, { message, extensions: { code } }, 'request-7');
+
+  it("names the document, Linear's code, status, request and message", () => {
+    assert.deepEqual(writeFailure(refusal('Argument Validation Error'), 'docs/a.md', undefined), {
+      operation: 'UpdateDocument',
+      path: 'docs/a.md',
+      error: 'LinearGraphQLError INPUT_ERROR HTTP 200',
+      code: 'INPUT_ERROR',
+      status: 200,
+      request: 'request-7',
+      message: 'Argument Validation Error',
+    });
+  });
+
+  it("keeps Linear's message on one line and cuts it", () => {
+    const failure = writeFailure(refusal(`First\nsecond\u0007 ${'y'.repeat(400)}`), 'docs/a.md', undefined);
+    assert.match(failure.message ?? '', /^First second y+…$/);
+    assert.equal([...(failure.message ?? '')].length, LINEAR_MESSAGE_LENGTH);
+  });
+
+  it('withholds a message that repeats the comment the request sent', () => {
+    const body = `${HOLD_FAILED}\n\n- Check \`lint\`\n\n${HOLD_FOOTER}`;
+    const failure = writeFailure(refusal(`Variable "$input" got invalid value { body: "${body.slice(0, 40)}" }`), 'docs/a.md', body);
+    assert.equal(failure.message, MESSAGE_WITHHELD);
+    assert.equal(failure.code, 'INPUT_ERROR');
+    assert.equal(writeFailure(refusal('Comment body is too long'), 'docs/a.md', body).message, 'Comment body is too long');
+  });
+
+  it('reports an HTTP failure or a lost request without a message', () => {
+    assert.deepEqual(writeFailure(new LinearHttpError('ResolveComment', 502, 'request-8'), 'docs/a.md', undefined), { operation: 'ResolveComment', path: 'docs/a.md', error: 'LinearHttpError HTTP 502', status: 502, request: 'request-8' });
+    assert.deepEqual(writeFailure(new LinearNetworkError('CommentOnDocument', new Error('reset')), 'docs/a.md', undefined), { operation: 'CommentOnDocument', path: 'docs/a.md', error: 'LinearNetworkError' });
   });
 });

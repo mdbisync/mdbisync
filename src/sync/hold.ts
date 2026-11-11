@@ -10,7 +10,7 @@
 // comment target). At most `HOLD_MARK_LIMIT` documents change per run.
 
 import { createHash } from 'node:crypto';
-import { LinearError, LinearGraphQLError, LinearStoppedError, describeLinearError, isTransientLinearError, type LinearClient, type LinearDocument } from '../linear/index.ts';
+import { LinearError, LinearGraphQLError, LinearHttpError, LinearStoppedError, describeLinearError, isTransientLinearError, type LinearClient, type LinearDocument } from '../linear/index.ts';
 import { type CheckAnnotation, type CheckFailure, type GitHubRepository, PullRequestError, readAnnotations } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { type HoldNotice, type IdEntry, type Oid, type StateConfig, type StateSnapshot, listTree, pushAtomic, readIds, stateRef } from '../state/index.ts';
@@ -75,10 +75,32 @@ export interface HoldMarksResult {
   unresolved?: Array<{ path: string; error: string }>;
   /** How the step stopped short, as a write step would: the run ends partial with it. */
   code?: 'state-moved' | 'stopped' | 'write-failed';
-  failure?: { operation: string };
+  failure?: HoldWriteFailure;
   /** Failed checks whose annotations could not be read: their comment names them without annotations. */
   unreadAnnotations?: string[];
 }
+
+/**
+ * The write that stopped the step: its operation and document, and Linear's answer. `message` is Linear's own
+ * text as one plain line, left out when Linear sent none and replaced by `MESSAGE_WITHHELD` when it repeats the
+ * comment the request sent, so the report never quotes it.
+ */
+export interface HoldWriteFailure {
+  operation: string;
+  /** The document whose mark or comment was being written; absent only when the failure came before any document. */
+  path?: string;
+  /** The error's class, Linear's code and the HTTP status, as other write failures report them. */
+  error: string;
+  code?: string;
+  status?: number;
+  request?: string;
+  message?: string;
+}
+
+/** Stands for a Linear message that repeated the request's comment. */
+export const MESSAGE_WITHHELD = 'withheld: it repeats the comment the request sent';
+/** The longest Linear message a report keeps. */
+export const LINEAR_MESSAGE_LENGTH = 300;
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 /** A failure's identity: its checks, their runs and the ones past the deadline. A new run of a check is a new failure. */
@@ -89,12 +111,16 @@ export function linkTarget(url: string): string {
   return url.replace(/[()[\]<>!\s"'`\\]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
 }
 
-/** One line of plain text, Markdown's own characters escaped, so a check cannot add links or images. */
-function plainLine(text: string, limit: number): string {
+/** One line of text, control characters and runs of white space turned into one space, cut at `limit` code points. */
+function singleLine(text: string, limit: number): string {
   const line = text.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
   const points = [...line];
-  const cut = points.length > limit ? `${points.slice(0, limit - 1).join('')}…` : line;
-  return cut.replace(/[\\`*_[\]<>|~!]/g, (character) => `\\${character}`);
+  return points.length > limit ? `${points.slice(0, limit - 1).join('')}…` : line;
+}
+
+/** One line of plain text, Markdown's own characters escaped, so a check cannot add links or images. */
+export function plainLine(text: string, limit: number): string {
+  return singleLine(text, limit).replace(/[\\`*_[\]<>|~!]/g, (character) => `\\${character}`);
 }
 
 function checkName(name: string): string {
@@ -283,8 +309,10 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
     tipPaths ??= new Set(options.state.linear === null ? [] : (await listTree(git, options.state.linear)).map((entry) => entry.path));
     return tipPaths.has(path);
   };
+  let current: Work | undefined;
   try {
     for (const item of chosen) {
+      current = item;
       const { document, path } = item;
       if (item.kind === 'clear') {
         const resolved = await resolveCleared(linear, item.entry.saved?.hold as HoldNotice);
@@ -330,7 +358,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
   } catch (error) {
     if (!(error instanceof LinearError)) throw error;
     result.code = error instanceof LinearStoppedError ? 'stopped' : 'write-failed';
-    result.failure = { operation: error.operation };
+    result.failure = writeFailure(error, current?.path, current !== undefined && 'body' in current ? current.body : undefined);
   }
   if (!(await persist())) result.code = 'state-moved';
   return result;
@@ -358,6 +386,23 @@ const NOT_ABOUT_THE_COMMENT = new Set(['AUTHENTICATION_ERROR', 'FORBIDDEN', 'RAT
 /** Linear answered with a code and refused the request itself, for reasons that asking again does not change. */
 function refusesComment(error: unknown): error is LinearGraphQLError {
   return error instanceof LinearGraphQLError && error.code !== undefined && !isTransientLinearError(error) && ![401, 403, 429].includes(error.httpStatus) && !NOT_ABOUT_THE_COMMENT.has(error.code);
+}
+
+/** What a failed write reports: the document it was for and Linear's answer, its message only when it quotes nothing sent. */
+export function writeFailure(error: LinearError, path: string | undefined, sent: string | undefined): HoldWriteFailure {
+  const failure: HoldWriteFailure = { operation: error.operation, ...(path === undefined ? {} : { path }), error: describeLinearError(error) };
+  if (error instanceof LinearGraphQLError) {
+    if (error.code !== undefined) failure.code = error.code;
+    failure.status = error.httpStatus;
+    if (error.requestId !== undefined) failure.request = error.requestId;
+    const detail = error.detail === undefined ? '' : singleLine(error.detail, LINEAR_MESSAGE_LENGTH);
+    // Linear may echo a request's input in its message: one that repeats the comment's text is not kept.
+    if (detail !== '') failure.message = sent !== undefined && quotesDocument(error.detail as string, documentRuns(sent)) ? MESSAGE_WITHHELD : detail;
+  } else if (error instanceof LinearHttpError) {
+    failure.status = error.httpStatus;
+    if (error.requestId !== undefined) failure.request = error.requestId;
+  }
+  return failure;
 }
 
 /** The pending comment of a new episode, its id chosen before the suspension's push. */

@@ -340,7 +340,7 @@ The suspended lane and its marks add these lines when applicable:
 | more suspended documents get their mark or comment in a later run | Counts deferred documents, at most 50 changed per run. |
 | Suspended documents in Linear's trash or archived, without a mark: | Lists documents that cannot receive a mark. |
 | GitHub did not give the annotations of | Comments name those checks without annotations; a later run can retry. |
-| The suspended marks did not finish | Gives the stopping code and, when available, operation; a later run goes on. |
+| The suspended marks did not finish | Gives the stopping code and, for a failed write, its operation, the document's path, the error's class, Linear's code and HTTP status, and Linear's message on one line; the report's `pullRequest.holdMarks.failure` also keeps Linear's request id. A message that repeats the comment the request sent is withheld. A later run goes on. |
 
 A red tracked branch has a held-pull-request line naming and linking to
 its failing checks. A line saying a check “failed on the sync pull request”

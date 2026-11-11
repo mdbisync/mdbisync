@@ -47,7 +47,7 @@ import {
   readIds,
   commitTree,
 } from '../state/index.ts';
-import { HOLD_MARK_LIMIT, type HoldMarksResult, linkTarget } from './hold.ts';
+import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_MESSAGE_LENGTH, linkTarget, plainLine } from './hold.ts';
 import { DEFAULT_CHECK_DEADLINE_MINUTES, codeNames, headNote, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold } from './deadline.ts';
 import { LaneMoved, LaneConflict, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
@@ -536,6 +536,14 @@ function refusalText(refusal: { status?: number | undefined; reason?: string | u
   return `HTTP ${refusal.status ?? 0}${reason ? `: \`${reason}\`` : ''}`;
 }
 
+/** Why the suspended marks stopped: the code, then the write, its document and Linear's answer when one failed. */
+function holdFailureText(code: string, failure: HoldWriteFailure | undefined): string {
+  if (failure === undefined) return `\`${code}\``;
+  const where = failure.path === undefined ? '' : ` on \`${failure.path}\``;
+  const said = failure.message === undefined ? '' : `: ${plainLine(failure.message, LINEAR_MESSAGE_LENGTH)}`;
+  return `\`${code}\`, ${failure.operation}${where}, ${failure.error}${said}`;
+}
+
 /** The job summary's section for step 2: names, numbers and states, no content. */
 export function renderPullRequest(result: PullRequestResult): string[] {
   const lines = ['### Linear to the tracked branch', ''];
@@ -559,7 +567,7 @@ export function renderPullRequest(result: PullRequestResult): string[] {
     if (marks.removed.length > 0) lines.push(`Suspended documents in Linear's trash or archived, without a mark: ${marks.removed.map((path) => `\`${path}\``).join(', ')}.`, '');
     if (marks.unresolved !== undefined) lines.push(`Linear refused to resolve the suspension comment of released documents: ${marks.unresolved.map(({ path, error }) => `\`${path}\` (${error})`).join(', ')}. The comment stays as it is, and no later run tries again.`, '');
     if (marks.unreadAnnotations !== undefined) lines.push(`GitHub did not give the annotations of ${marks.unreadAnnotations.map((name) => `\`${name}\``).join(', ')}; the comments name those checks without them.`, '');
-    if (marks.code !== undefined) lines.push(`The suspended marks did not finish (\`${marks.code}\`${marks.failure === undefined ? '' : `, ${marks.failure.operation}`}); a later run goes on.`, '');
+    if (marks.code !== undefined) lines.push(`The suspended marks did not finish (${holdFailureText(marks.code, marks.failure)}); a later run goes on.`, '');
   }
   const pr = result.pullRequest;
   const link = pr === null ? '' : `[#${pr.number}](${pr.url})`;
