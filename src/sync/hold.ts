@@ -404,8 +404,10 @@ export function writeFailure(error: LinearError, path: string | undefined, sent:
     const detail = error.detail === undefined ? '' : singleLine(error.detail, LINEAR_MESSAGE_LENGTH);
     // Linear may echo a request's input in its message: one that repeats the comment's text is not kept. Only a
     // comment write sent it, and the echo may be JSON-escaped, so both sides are compared without escapes.
-    const echoes = sent !== undefined && COMMENT_WRITES.has(error.operation) && quotesDocument(unescaped(error.detail as string), documentRuns(unescaped(sent)));
-    if (detail !== '') failure.message = echoes ? MESSAGE_WITHHELD : detail;
+    if (error.detail !== undefined && detail !== '') {
+      const echoes = sent !== undefined && COMMENT_WRITES.has(error.operation) && quotesDocument(unescaped(error.detail), documentRuns(unescaped(sent)));
+      failure.message = echoes ? MESSAGE_WITHHELD : detail;
+    }
   } else if (error instanceof LinearHttpError) {
     failure.status = error.httpStatus;
     if (error.requestId !== undefined) failure.request = error.requestId;

@@ -116,6 +116,11 @@ describe('a failed mark or comment write', () => {
     assert.equal(writeFailure(refusal('Cannot change this document while it is archived'), 'docs/a.md', body).message, 'Cannot change this document while it is archived');
   });
 
+  it('reports a comment write whose error has no message without one', () => {
+    const silent = new LinearGraphQLError('CommentOnDocument', 200, { extensions: { code: 'INPUT_ERROR' } });
+    assert.deepEqual(writeFailure(silent, 'docs/a.md', HOLD_FAILED), { operation: 'CommentOnDocument', path: 'docs/a.md', error: 'LinearGraphQLError INPUT_ERROR HTTP 200', code: 'INPUT_ERROR', status: 200 });
+  });
+
   it('reports an HTTP failure or a lost request without a message', () => {
     assert.deepEqual(writeFailure(new LinearHttpError('ResolveComment', 502, 'request-8'), 'docs/a.md', undefined), { operation: 'ResolveComment', path: 'docs/a.md', error: 'LinearHttpError HTTP 502', status: 502, request: 'request-8' });
     assert.deepEqual(writeFailure(new LinearNetworkError('CommentOnDocument', new Error('reset')), 'docs/a.md', undefined), { operation: 'CommentOnDocument', path: 'docs/a.md', error: 'LinearNetworkError' });
