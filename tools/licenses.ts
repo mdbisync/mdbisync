@@ -9,7 +9,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import type { Metafile } from "esbuild";
-import { NOTICES_FILE } from "../src/release/package.ts";
+import { NOTICES_FILE, noticeTitle } from "../src/release/package.ts";
 import { packagePathOf } from "./lockfile.ts";
 
 export { NOTICES_FILE };
@@ -152,7 +152,7 @@ export function formatNotices(packages: readonly BundledPackage[]): string {
   const rule = "=".repeat(78);
   const sections = uniquePackages(packages).map((pkg) => {
     const texts = pkg.noticeFiles.map(({ file, text }) => `--- ${file} ---\n\n${text.trimEnd()}\n`);
-    return `${rule}\n${pkg.name} ${pkg.version}\nLicense: ${pkg.license}\n${rule}\n\n${texts.join("\n")}`;
+    return `${rule}\n${noticeTitle(pkg)}\n${rule}\n\n${texts.join("\n")}`;
   });
   const header = [
     "Third-party software notices",
