@@ -183,10 +183,18 @@ UI holds and corpus caches stay in the state folder. When a team is busy,
 ordinary runs wait with cancellation and a deadline. App-budget shortages wait
 for the upstream reset; full/worker contention does not poll Linear budget.
 
-Concurrency is opt-in for the audited local mini `L1-05` contract. Any change
-to its setup, steps or assertions returns it to exclusive admission; all
-other scenarios, including full slices and workspace-wide settings, token,
-permission, budget and webhook tests, exclude every other live reservation.
+Concurrency is opt-in for audited local mini contracts: `L1-01`, `L1-02`,
+`L1-05`, `L1-18`, `L1-19`, `L2-01`, `L2-02`, `L2-04`, `L2-07`, `L2-11`,
+`L2-20`, `L2-21` and `L2-23` (`concurrency.ts`). Each is pinned by the digest
+of its spec, and it may use only steps and assertion subjects whose reads and
+writes were audited to stay in the run's team, projects, ids and refs. Any
+change to its setup, steps or assertions returns it to exclusive admission.
+All other scenarios exclude every other live reservation. These include full
+slices, workspace-wide settings, token, permission, budget and webhook tests,
+faults, kills, workflows, trash and restore, uploads and helper projects.
+`zone-audit.test.ts` runs every audited contract for two runs in one fake
+workspace, with foreign writes between their reads, and requires each run's
+solo values.
 Editor quotas are reserved atomically across apps using hashed viewer ids,
 so different keys for the same account cannot promise its budget twice.
 Concurrent results include normalized document mappings and content hashes

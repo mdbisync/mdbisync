@@ -352,7 +352,7 @@ it('persists an empty ownership scope before admission so pre-write crashes can 
 it('workspace-wide scenarios exclude otherwise disjoint audited runs', async () => {
   const { root, first, second } = await fixture();
   const ordinary = loadScenarios().find((item) => item.id === 'L1-05')!;
-  const global = loadScenarios().find((item) => item.id === 'L2-01')!;
+  const global = loadScenarios().find((item) => item.id === 'L2-30')!;
   const governor = (shared: SharedAdmission) => new Governor({ apps: [{ name: 'app', readBudget: async () => budget }], stateDir: root, shared, maxWaitMs: 0 });
   const a = governor(first); const b = governor(second);
   const exclusive = await a.admit(global, 'aaaaaa', { requests: 1, complexity: 1 });
