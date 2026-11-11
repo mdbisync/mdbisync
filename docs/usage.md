@@ -4,8 +4,9 @@ How to set up and run mdbisync in a repository: how folders map to Linear,
 the checks every run makes, the workflows, both directions of the initial sync (each has its own
 page: [git to Linear](initial-sync-git-to-linear.md) and
 [Linear to git](initial-sync-linear-to-git.md)), the sync pull request, and how to pin a release. The setup steps (the
-Linear OAuth app, the GitHub App, the secrets and the workflows) are on
-[mdbisync.com](https://mdbisync.com/#setup). How Markdown is kept in
+Linear OAuth app, the GitHub App, the secrets and the workflows) are in the
+[quickstart](quickstart.md), and every input with its default in the
+[configuration reference](configuration.md). How Markdown is kept in
 Linear's form is in [linear-format.md](linear-format.md), and conflicts, when
 both sides change one document, in [conflicts.md](conflicts.md). How a change
 travels each way after the initial sync, what people see, how long it takes
