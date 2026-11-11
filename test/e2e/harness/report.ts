@@ -2,7 +2,7 @@
 // the latest result of every scenario, and an evidence summary. Reports hold
 // ids, results, reasons, counts and timings; never document content.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RESULTS, type Result, type ScenarioResult } from './results.ts';
 import { LEVELS, levelOf, type Level } from './spec.ts';
@@ -145,7 +145,12 @@ export function renderStatusPage(catalog: readonly string[], latest: readonly La
  * environment) are kept.
  */
 export function updateStatusPage(file: string, catalog: readonly string[], report: HarnessReport): void {
-  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  let text = '';
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
   const frontMatter = /^---\n[\s\S]*?\n---\n/.exec(text)?.[0] ?? '---\nstatus: generated\n---\n';
   const body = text.slice(frontMatter.length).split(DATA_START)[0] ?? '';
   const sections = body.split(/^(?=## )/m).filter((section) => section.startsWith('## ') && !section.startsWith('## Scenarios'));

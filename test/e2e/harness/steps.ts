@@ -49,7 +49,8 @@ import {
   commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import type { WorkflowRun } from './github.ts';
-import { environmentBlocker, hadReplaceableRun, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun } from './workflows.ts';
+import { blockerEvidence, environmentBlocker, hadReplaceableRun, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun, workflowEvidence } from './workflows.ts';
+import { outputCount, outputFile } from '../../../src/run/output.ts';
 import { CANARY_FIXTURE, canaryFacts } from './security-canary.ts';
 import { pinnedActionSha, prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 
@@ -532,7 +533,7 @@ async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: Com
     if (/Security hooks: staged sets checked [1-9][0-9]*,/.test(result.stdout) && facts.length === 0) ctx.observations.set('securityCanary.missing', true);
     const previous = (ctx.observations.get('securityCanary.facts') as unknown[] | undefined) ?? [];
     ctx.observations.set('securityCanary.facts', [...previous, ...facts]);
-    const dir = join(ctx.runDir, 'workflows', String(run.id));
+    const dir = outputFile(join(ctx.runDir, 'workflows'), String(outputCount(run.id)));
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'security-canary.json'), `${JSON.stringify(facts, null, 2)}\n`);
   }
@@ -542,11 +543,10 @@ async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: Com
     return;
   }
   recordResult(ctx, result);
-  const dir = join(ctx.runDir, 'workflows', String(run.id));
+  const dir = outputFile(join(ctx.runDir, 'workflows'), String(outputCount(run.id)));
   mkdirSync(dir, { recursive: true });
-  const { id, event, status, conclusion, head_branch, head_sha, html_url, created_at, updated_at } = run;
-  writeFileSync(join(dir, 'run.json'), `${JSON.stringify({ id, event, status, conclusion, head_branch, head_sha, html_url, created_at, updated_at }, null, 2)}\n`);
-  writeFileSync(join(dir, 'blocker.json'), `${JSON.stringify(blocker, null, 2)}\n`);
+  writeFileSync(join(dir, 'run.json'), `${JSON.stringify(workflowEvidence(run), null, 2)}\n`);
+  writeFileSync(join(dir, 'blocker.json'), `${JSON.stringify(blockerEvidence(blocker), null, 2)}\n`);
   writeFileSync(join(dir, 'failed-step.txt'), logs.get(blocker.logFile) ?? '');
   ctx.observations.set('workflows.blocker', blocker);
   ctx.log(`first environment blocker: ${blocker.reason}; evidence in ${dir}`);

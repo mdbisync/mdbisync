@@ -18,6 +18,9 @@ export const MESSAGES = {
   'action.unknown-security-step': 'unknown security-step: {step} (expected one of: {steps}, or empty)',
   'action.cleanup-before-stage': 'cleanup-tokens belongs before the stage step, not apply',
   'action.cleanup-revocation-failed': 'token cleanup revocation failed',
+  'output.invalid-text': 'cannot write report text: expected printable Unicode text of at most {limit} characters',
+  'output.invalid-count': 'cannot write report metadata: expected a non-negative safe integer',
+  'output.outside-directory': 'report destination must stay inside the configured output directory',
 
   // `init`.
   'init.security-twice': 'choose security hooks once',

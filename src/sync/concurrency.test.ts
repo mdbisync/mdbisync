@@ -586,7 +586,7 @@ async function serve(world: FakeWorld): Promise<Served> {
         response.writeHead(reply.status, { ...Object.fromEntries(reply.headers), 'content-type': reply.headers.get('content-type') ?? 'application/json', 'content-length': String(bytes.length) });
         response.end(bytes);
       } catch (error) {
-        console.error(error);
+        console.error(JSON.stringify(error instanceof Error ? error.stack ?? error.message : String(error)));
         response.writeHead(500, { 'content-type': 'text/plain' });
         response.end('Request failed');
       }
@@ -598,3 +598,21 @@ async function serve(world: FakeWorld): Promise<Served> {
   served.close = () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
   return served;
 }
+
+it('the fake server logs request failures as a single escaped line', async (t) => {
+  const server = await serve(fakeWorld());
+  const logged = t.mock.method(console, 'error', () => {});
+  server.fault = () => { throw new Error('failed\r\nforged log entry'); };
+  try {
+    const response = await fetch(`${server.url}/github/test`);
+    assert.equal(response.status, 500);
+    assert.equal(await response.text(), 'Request failed');
+    assert.equal(logged.mock.callCount(), 1);
+    const [line] = logged.mock.calls[0]!.arguments as unknown as [string];
+    assert.doesNotMatch(line, /[\r\n]/);
+    assert.match(JSON.parse(line) as string, /failed\r\nforged log entry/);
+  } finally {
+    logged.mock.restore();
+    await server.close();
+  }
+});

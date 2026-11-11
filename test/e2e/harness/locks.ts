@@ -8,12 +8,17 @@
 
 import { randomUUID } from 'node:crypto';
 import { hostname, tmpdir } from 'node:os';
-import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { forgetOwnership } from './ownership.ts';
 
 export const STATE_DIR_ENV = 'MDBISYNC_HARNESS_STATE_DIR';
+
+function throwIfAccessDenied(error: unknown): void {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === 'EACCES' || code === 'EPERM') throw error;
+}
 
 export function defaultStateDir(env: NodeJS.ProcessEnv = process.env): string {
   return env[STATE_DIR_ENV] || join(tmpdir(), 'mdbisync-harness');
@@ -54,7 +59,8 @@ function heldLock(owner: Owner, stateDir: string, now = Date.now()): boolean {
   try {
     const run = JSON.parse(readFileSync(join(stateDir, 'runs', `${owner.runId}.json`), 'utf8')) as LiveRun;
     return run.runId === owner.runId && run.holdUntil !== undefined && run.holdUntil > now;
-  } catch {
+  } catch (error) {
+    throwIfAccessDenied(error);
     return false;
   }
 }
@@ -62,8 +68,18 @@ function heldLock(owner: Owner, stateDir: string, now = Date.now()): boolean {
 /** Writes a whole file at once: readers never see it half written or empty. */
 export function writeAtomically(file: string, text: string): void {
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, text);
-  renameSync(temporary, file);
+  const fd = openSync(temporary, 'wx', 0o600);
+  try {
+    try {
+      writeFileSync(fd, text);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(temporary, file);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
 }
 
 function writeOwner(dir: string, owner: Owner): void {
@@ -74,7 +90,8 @@ function writeOwner(dir: string, owner: Owner): void {
 function readOwner(dir: string): Owner | null {
   try {
     return JSON.parse(readFileSync(join(dir, 'owner.json'), 'utf8')) as Owner;
-  } catch {
+  } catch (error) {
+    throwIfAccessDenied(error);
     return null;
   }
 }
@@ -257,14 +274,16 @@ export function liveRuns(stateDir: string, now = Date.now()): Set<string> {
   let names: string[];
   try {
     names = readdirSync(root);
-  } catch {
+  } catch (error) {
+    throwIfAccessDenied(error);
     return live;
   }
   for (const name of names) {
     let entry: LiveRun;
     try {
       entry = JSON.parse(readFileSync(join(root, name), 'utf8')) as LiveRun;
-    } catch {
+    } catch (error) {
+      throwIfAccessDenied(error);
       continue;
     }
     const held = entry.holdUntil !== undefined && entry.holdUntil > now;

@@ -28,6 +28,7 @@ import { notImplementedMessage, type CommandName } from '../../../src/commands.t
 import type { EngineResult } from './engine.ts';
 import { GitHubError, type SandboxRest, type WorkflowJob, type WorkflowRun } from './github.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
+import { outputCount, outputText } from '../../../src/run/output.ts';
 
 export const REPORT_ARTIFACT = 'mdbisync-report';
 export const RUN_WAIT_MS = 30 * 60_000;
@@ -200,6 +201,26 @@ export interface RunBlocker {
   /** The step's log file in the run's logs. */
   logFile: string;
   reason: string;
+}
+
+/** Only the bounded workflow metadata needed for diagnosing a blocked run. */
+export function workflowEvidence(run: WorkflowRun): Record<string, unknown> {
+  const optional = (value: unknown, limit: number) => value === undefined || value === null ? value : outputText(value, limit);
+  return {
+    id: outputCount(run.id), event: outputText(run.event, 100), status: run.status === null ? null : outputText(run.status, 100),
+    conclusion: run.conclusion === null ? null : outputText(run.conclusion, 100),
+    head_branch: optional(run.head_branch, 1024), head_sha: optional(run.head_sha, 256),
+    html_url: optional(run.html_url, 4096),
+    created_at: outputText(run.created_at, 100), updated_at: optional(run.updated_at, 100),
+  };
+}
+
+export function blockerEvidence(blocker: RunBlocker): RunBlocker {
+  return {
+    runId: outputCount(blocker.runId), job: outputText(blocker.job, 4096),
+    step: outputText(blocker.step, 4096), cause: outputText(blocker.cause, 4096),
+    logFile: outputText(blocker.logFile, 8192), reason: outputText(blocker.reason, 16384),
+  };
 }
 
 /**
