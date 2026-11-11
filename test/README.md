@@ -245,7 +245,7 @@ the engine's inputs and outputs, and the evidence the checks read.
 
 | Scenario | Run | Result | Reason | Engine requests | Harness app reads | Seconds | Cleanup |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| L1-01 | b9e23f | env-blocked | no Linear app is configured | 0 | 0 | 0 | ok |
+| L1-01 | b9e23f | env-blocked | test configuration is missing: MDBISYNC_TEST_SANDBOX_URL | 0 | 0 | 0 | ok |
 ```
 
 | Result | Meaning |
