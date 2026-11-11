@@ -168,6 +168,16 @@ describe('confirmed initial sync from git to Linear: the conflict mark', () => {
     await assertQuotedClear(world, MARKS.conflict);
   });
 
+  it('an adopted document whose own icon is the orange alert keeps it in ids when the write brings a conflict', async () => {
+    const world = fakeWorld();
+    world.linear.documents = [
+      { id: 'doc-conflict', title: 'backend/conflict', teamId: 'team-eng', createdAt: '2026-01-01T00:00:01Z', content: 'Old text.', ...MARKS.conflict },
+    ];
+    const { result } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    await assertMarked(world, MARKS.conflict);
+  });
+
   it('run again with nothing changed, it posts no second comment and leaves the refs as they are', async () => {
     const world = fakeWorld();
     assert.equal((await run(world)).result.exitCode, 0);

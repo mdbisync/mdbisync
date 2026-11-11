@@ -281,13 +281,14 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
    * sent, so a run again after the state is lost finds the comment it posted
    * instead of adding a second one.
    */
-  const reconcileMark = async (path: string, document: LinearDocument, hash: string) => {
+  const reconcileMark = async (path: string, document: LinearDocument, hash: string, listed: LinearDocument = document) => {
     const entry = ids.get(path);
     if (entry === undefined || entry.id !== document.id || document.content === undefined) return;
-    // Without a saved icon (the state was lost) a conflict mark Linear already shows on a conflicted text is this
-    // tool's, not the document's own. On a text without a conflict it is the document's own icon, and it stays.
-    const shown = entry.saved === undefined && document.icon === MARKS.conflict.icon && document.color === MARKS.conflict.color
-      && detectConflicts(document.content ?? '').length > 0;
+    // Without a saved icon (the state was lost) a conflict mark Linear showed on a conflicted text before this run
+    // wrote it (`listed`) is this tool's, not the document's own. On a text that held no conflict it is the
+    // document's own icon, and it stays, even when this run writes a conflict into it.
+    const shown = entry.saved === undefined && listed.icon === MARKS.conflict.icon && listed.color === MARKS.conflict.color
+      && detectConflicts(listed.content ?? '').length > 0;
     await reconcileDocumentMark({
       document,
       entry: shown ? { ...entry, saved: { icon: null, color: null } } : entry,
@@ -404,7 +405,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
           result.overwritten.push(path);
           written += 1;
           unpushed += 1;
-          await reconcileMark(path, updated, hash);
+          await reconcileMark(path, updated, hash, document);
         }
       } catch (error) {
         if (error instanceof LeaveOutError) {
