@@ -5,6 +5,7 @@
 import { createSign } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import type { TestConfig } from './config.ts';
+import { githubRequestBody, githubRequestPath, githubRequestToken } from './github-request.ts';
 
 const API = 'https://api.github.com';
 
@@ -42,16 +43,16 @@ function encodePath(path: string): string {
 }
 
 async function call<T>(token: string, method: string, path: string, body?: unknown, fetchImpl: typeof fetch = fetch): Promise<T> {
-  const response = await fetchImpl(`${API}${path}`, {
+  const response = await fetchImpl(`${API}${githubRequestPath(path)}`, {
     method,
     headers: {
       accept: 'application/vnd.github+json',
-      authorization: `Bearer ${token}`,
+      authorization: `Bearer ${githubRequestToken(token)}`,
       'x-github-api-version': '2022-11-28',
       'user-agent': 'scenario-harness',
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { body: JSON.stringify(githubRequestBody(body)) }),
     signal: AbortSignal.timeout(60_000),
   });
   if (!response.ok) throw new GitHubError(`${method} ${path.split('?')[0]}: HTTP ${response.status}`, response.status);

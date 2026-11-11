@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, it } from 'node:test';
-import { writeAtomically } from './locks.ts';
+import { acquireLock, liveRuns, writeAtomically } from './locks.ts';
 import { OwnershipLedger, readOwnership } from './ownership.ts';
 import { updateStatusPage, type HarnessReport } from './report.ts';
 
@@ -15,7 +15,7 @@ function fixture(): string {
 }
 after(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
 
-it('atomic writes replace the destination link without changing its target and preserve state permissions', () => {
+it('atomic writes replace the destination link without changing its target and keep private permissions', () => {
   const root = fixture();
   const target = join(root, 'target');
   const file = join(root, 'owner.json');
@@ -25,7 +25,7 @@ it('atomic writes replace the destination link without changing its target and p
   writeAtomically(file, 'second');
   assert.equal(readFileSync(target, 'utf8'), 'untouched');
   assert.equal(readFileSync(file, 'utf8'), 'second');
-  if (process.platform !== 'win32') assert.equal(statSync(file).mode & 0o777, 0o644 & ~process.umask());
+  if (process.platform !== 'win32') assert.equal(statSync(file).mode & 0o777, 0o600 & ~process.umask());
   assert.deepEqual(readdirSync(root).sort(), ['owner.json', 'target']);
 });
 
@@ -37,14 +37,45 @@ it('failed atomic replacement removes its temporary file', () => {
   assert.deepEqual(readdirSync(root), ['destination']);
 });
 
-it('ownership journals preserve entries across reopening and preserve state permissions', () => {
+it('ownership journals preserve entries across reopening and keep private permissions', () => {
   const root = fixture();
   new OwnershipLedger(root, 'abc123').scope(['team']);
+  chmodSync(join(root, 'owned', 'abc123.jsonl'), 0o644);
   new OwnershipLedger(root, 'abc123').project({ id: 'project', name: 'Plan' });
   const owned = readOwnership(root, 'abc123');
   assert.deepEqual([...owned!.teamIds], ['team']);
   assert.deepEqual([...owned!.projects], [['project', 'Plan']]);
-  if (process.platform !== 'win32') assert.equal(statSync(join(root, 'owned', 'abc123.jsonl')).mode & 0o777, 0o644 & ~process.umask());
+  if (process.platform !== 'win32') assert.equal(statSync(join(root, 'owned', 'abc123.jsonl')).mode & 0o777, 0o600);
+});
+
+it('invalid ownership data is rejected before creating a journal', () => {
+  const root = fixture();
+  const ledger = new OwnershipLedger(root, 'abc123');
+  assert.throws(() => ledger.project({ id: '../outside', name: 'Plan' }));
+  assert.throws(() => ledger.project({ id: 'project', name: 'bad\0name' }));
+  assert.deepEqual(readdirSync(join(root, 'owned')), []);
+});
+
+it('unreadable state never permits taking a lock or treating its run as dead', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
+  const root = fixture();
+  const held = join(root, 'locks', 'held');
+  mkdirSync(held, { recursive: true });
+  const owner = join(held, 'owner.json');
+  writeAtomically(owner, '{}');
+  chmodSync(owner, 0);
+  const runs = join(root, 'runs');
+  mkdirSync(runs);
+  const run = join(runs, 'abc123.json');
+  writeAtomically(run, '{}');
+  chmodSync(run, 0);
+  try {
+    await assert.rejects(acquireLock('held', { stateDir: root, runId: 'def456', timeoutMs: 0 }), { code: 'EACCES' });
+    assert.throws(() => liveRuns(root), { code: 'EACCES' });
+    assert.deepEqual(readdirSync(held), ['owner.json']);
+  } finally {
+    chmodSync(owner, 0o600);
+    chmodSync(run, 0o600);
+  }
 });
 
 it('ownership journals refuse a symlink instead of appending to another file', { skip: process.platform === 'win32' }, () => {

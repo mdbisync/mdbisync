@@ -21,6 +21,7 @@ import { loadBank } from './bank.ts';
 import { PROBE_FACTS, runProbe, type ProbeRun } from './probe.ts';
 import { findDrift, writeRecord } from './record.ts';
 import { renderReport } from './report.ts';
+import { outputText } from '../../src/run/output.ts';
 
 export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<number> {
   const { values } = parseArgs({
@@ -92,7 +93,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
   } catch (error) {
     console.error(`format probe: run ${runId} failed: ${error instanceof Error ? error.message : String(error)}`);
     console.error(`format probe: ${stats.total} API requests sent`);
-    if (values.json) writeFileSync(values.json, `${JSON.stringify({ runId, failed: true, requests: stats.toJSON(), requestLog }, null, 2)}\n`);
+    if (values.json) writeFileSync(values.json, outputText(`${JSON.stringify({ runId, failed: true, requests: stats.toJSON(), requestLog }, null, 2)}\n`));
     return 2;
   }
   run.requests = stats.toJSON();

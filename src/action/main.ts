@@ -10,11 +10,12 @@
 // `post` step revokes it when a killed or failed run left it behind.
 
 import { writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as core from "@actions/core";
 import { runEnding } from "../run/exit.ts";
 import { writeRunReport } from "../run/finish.ts";
+import { outputFile, outputText } from "../run/output.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { type OperationOutcome, runOperation } from "../run/operation.ts";
 import { Git } from "../state/index.ts";
@@ -120,7 +121,7 @@ export async function run(options: RunOptions = {}): Promise<void> {
     else core.info(outcome.summary);
     if (inputs.reportFile !== undefined) {
       await writeRunReport(inputs.reportFile, outcome);
-      await writeFile(join(dirname(inputs.reportFile), SUMMARY_FILE), outcome.summary);
+      await writeFile(outputFile(dirname(inputs.reportFile), SUMMARY_FILE), outputText(outcome.summary));
     }
     if (outcome.ok && outcome.staged !== undefined) {
       // The hooks step runs this script with the runner's Node.js.
