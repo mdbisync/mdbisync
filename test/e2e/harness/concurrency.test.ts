@@ -186,34 +186,40 @@ it('caps a full-corpus editor reservation to a usable quota window', async () =>
 it('gives equal isolation snapshots for runs that differ only by run id, and still shows a real difference', () => {
   // One run of an edit contract: a corpus document edited with the run's own token,
   // a copy the run created under its zone folder, and a team-zone document.
-  const snapshot = (runId: string, edit = (text: string) => text) => {
+  const snapshot = (runId: string, edit = (text: string) => text, title = (text: string) => text) => {
     const names = runNames(runId);
     const corpus = 'eng/backend/decisions/adr-003.md';
     const copy = `eng/${runId}/guides/new-page-copy-${runId}-001.md`;
     const rows = new Map<string, LinearDocument>([
       [`${runId}-edited`, { ...doc(`${runId}-edited`, null, 'zone-eng', `${names.teamZonePrefix}backend/decisions/adr-003`),
-        content: edit(`Rate limits per partner.\n\nEdit ${runId}-001 keeps cccccc and commit 0f4db41c9e as they are.\n`) }],
-      [`${runId}-copy`, { ...doc(`${runId}-copy`, `${runId}-project`, 'zone-eng', `guides/new-page-copy-${runId}-001`), content: `Copied for ${names.project(0)}.\n` }],
+        content: edit(`Rate limits per partner.\n\nEdit ${runId}-001 keeps cccccc, key_4db41c and commit 0f4db41c9e as they are.\n`) }],
+      [`${runId}-copy`, { ...doc(`${runId}-copy`, `${runId}-project`, 'zone-eng', title(`guides/new-page-copy-${runId}-001`)), content: `Copied for ${names.project(0)}.\n` }],
     ]);
     const ctx = { names, live: {
       tree: { paths: new Map([[`eng/${runId}/backend/decisions/adr-003.md`, corpus]]) },
       projects: new Map([['PROJECT_ENG_1', { id: `${runId}-project` }]]), teams: new Map([['ENG', { id: 'zone-eng' }]]),
     } } as unknown as RunContext;
     const ids: IdMap = new Map([[`eng/${runId}/backend/decisions/adr-003.md`, { id: `${runId}-edited` }], [copy, { id: `${runId}-copy` }]]);
-    const sides = { ids, files: new Map([...ids.keys()].map((path) => [path, ''])), documents: rows, uploads: new Map(),
+    // A file the run wrote whose document is gone still shows, under its normalized path.
+    const files = new Map([...ids.keys(), `eng/${runId}/notes/removed-${runId}.md`].map((path) => [path, '']));
+    const sides = { ids, files, documents: rows, uploads: new Map(),
       documentUrlBase: 'https://example.test/document' } as unknown as Sides;
     return isolationSnapshot(ctx, sides) as Array<Record<string, unknown>>;
   };
   const solo = snapshot('4db41c');
   const pair = snapshot('fcd171');
   assert.deepEqual(solo, pair);
-  assert.deepEqual(solo.map((row) => [row.path, row.title, row.place]), [
-    ['eng/<run>/guides/new-page-copy-<run>-001.md', 'guides/new-page-copy-<run>-001', 'PROJECT_ENG_1'],
-    ['eng/backend/decisions/adr-003.md', 'backend/decisions/adr-003', 'ENG'],
+  assert.deepEqual(solo.map((row) => [row.path, row.title, row.place, row.document]), [
+    ['eng/<run>/guides/new-page-copy-<run>-001.md', 'guides/new-page-copy-<run>-001', 'PROJECT_ENG_1', undefined],
+    ['eng/<run>/notes/removed-<run>.md', undefined, undefined, null],
+    ['eng/backend/decisions/adr-003.md', 'backend/decisions/adr-003', 'ENG', undefined],
   ]);
-  // A real content difference, another run's id, and the id inside a longer word stay visible.
+  // A real content or title difference, another run's id, and the id inside a longer word stay visible.
   assert.notDeepEqual(snapshot('fcd171', (text) => text.replace('per partner', 'per client')), solo);
   assert.notDeepEqual(snapshot('fcd171', (text) => text.replace('fcd171-001', 'fcd171-002')), solo);
   assert.notDeepEqual(snapshot('fcd171', (text) => text.replace('fcd171-001', '4db41c-001')), solo);
-  assert.equal(withoutRunId('t/aaaaaa/main 0faaaaaa9e aaaaaa-001 bbbbbb', 'aaaaaa'), 't/<run>/main 0faaaaaa9e <run>-001 bbbbbb');
+  assert.notDeepEqual(snapshot('fcd171', undefined, (text) => text.replace('fcd171', '4db41c')), solo);
+  assert.notDeepEqual(snapshot('fcd171', undefined, (text) => text.replace('new-page', 'old-page')), solo);
+  assert.equal(withoutRunId('aaaaaa')('t/aaaaaa/main 0faaaaaa9e key_aaaaaa aaaaaa-001 bbbbbb'), 't/<run>/main 0faaaaaa9e key_aaaaaa <run>-001 bbbbbb');
+  assert.throws(() => withoutRunId('a.b+c'), /six hex characters/);
 });

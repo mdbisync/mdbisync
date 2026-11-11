@@ -18,6 +18,7 @@ import type { EngineResult } from './engine.ts';
 import { ownedDocuments } from './ownership.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
+import { RUN_ID_PATTERN } from './isolation.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
 import { encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
 
@@ -924,10 +925,12 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
 /** The placeholder that stands for the run's own id in isolation evidence. */
 export const RUN_ID_PLACEHOLDER = '<run>';
 
-/** `text` with every standalone occurrence of the run's own id replaced by the placeholder.
- * An id inside a longer word (a commit hash, an upload key) is left alone, and so is any other run's id. */
-export function withoutRunId(text: string, runId: string): string {
-  return text.replace(new RegExp(`(?<![0-9A-Za-z])${runId}(?![0-9A-Za-z])`, 'g'), RUN_ID_PLACEHOLDER);
+/** A function that replaces every standalone occurrence of the run's own id with the placeholder.
+ * An id inside a longer word (a commit hash, an upload key, `key_<id>`) is left alone, and so is any other run's id. */
+export function withoutRunId(runId: string): (text: string) => string {
+  if (!RUN_ID_PATTERN.test(runId)) throw new Error(`run id must be six hex characters: ${runId}`);
+  const own = new RegExp(`(?<![0-9A-Za-z_])${runId}(?![0-9A-Za-z_])`, 'g');
+  return (text) => text.replace(own, RUN_ID_PLACEHOLDER);
 }
 
 /** Stable solo/parallel evidence. Only known resource identities are normalized:
@@ -937,13 +940,14 @@ export function withoutRunId(text: string, runId: string): string {
 export function isolationSnapshot(ctx: RunContext, sides: Sides): unknown {
   const world = ctx.live;
   if (world === null) throw new Error('isolation evidence needs a live world');
-  const own = (text: string) => withoutRunId(text, ctx.names.runId);
+  const own = withoutRunId(ctx.names.runId);
   const source = (path: string) => world.tree.paths.get(path) ?? path;
   const ids = new Map([...sides.ids].map(([path, entry]) => [source(path), entry]));
   const uploads = new Map([...sides.uploads].map(([url, path]) => [url, source(path)]));
   const projects = new Map([...world.projects].map(([placeholder, project]) => [project.id, placeholder]));
   const teams = new Map([...world.teams].map(([key, team]) => [team.id, key]));
-  return [...sides.files.keys()].sort().map((path) => {
+  // Ordered by the normalized path, which is what two runs compare.
+  return [...sides.files.keys()].map((path) => {
     const id = sides.ids.get(path)?.id;
     const doc = id === undefined ? undefined : sides.documents.get(id);
     if (doc === undefined) return { path: own(source(path)), document: null };
