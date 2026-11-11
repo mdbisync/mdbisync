@@ -35,12 +35,12 @@ import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/
 import { cancelPendingRuns, faultChecks, waitForCheck, waitForCheckCompleted } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
-import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
+import { ACTION_SHA_ENV, editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, requiredActionSha, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
 import { commitAsPerson, folderTeam, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
-import { environmentBlocker, hadReplaceableRun, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
+import { engineNotImplemented, environmentBlocker, hadReplaceableRun, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
-import { prerequisiteErrors } from './workflow-files.ts';
+import { engineSteps, pinnedActionSha, prerequisiteErrors, readTemplate, WORKFLOW_FILES } from './workflow-files.ts';
 import { parse as parseYaml } from 'yaml';
 
 const roots: string[] = [];
@@ -246,6 +246,18 @@ describe('edit fixtures', () => {
 });
 
 describe('workflows', () => {
+  // Actions mode runs the release under test; these fakes name one.
+  const RELEASE_SHA = 'c'.repeat(40);
+  let savedActionSha: string | undefined;
+  before(() => {
+    savedActionSha = process.env[ACTION_SHA_ENV];
+    process.env[ACTION_SHA_ENV] = RELEASE_SHA;
+  });
+  after(() => {
+    if (savedActionSha === undefined) delete process.env[ACTION_SHA_ENV];
+    else process.env[ACTION_SHA_ENV] = savedActionSha;
+  });
+
   /** A zip with stored and deflated entries, built the way zip tools write them. */
   function zip(files: Record<string, { data: Buffer; deflate: boolean }>): Buffer {
     const locals: Buffer[] = [];
@@ -342,6 +354,46 @@ describe('workflows', () => {
     assert.equal(environmentBlocker(failedRun(7), [earlier], logs), undefined);
   });
 
+  it('block actions mode with a clear reason when the release under test is not named, never falling back to the templates\' pin', () => {
+    const pin = pinnedActionSha(readTemplate(WORKFLOW_FILES.sync));
+    assert.throws(() => requiredActionSha({}), (error: Error) => error instanceof EnvBlockedError && error.message.includes(`${ACTION_SHA_ENV} is unset`) && error.message.includes(pin.slice(0, 7)));
+    assert.throws(() => requiredActionSha({ [ACTION_SHA_ENV]: '  ' }), EnvBlockedError);
+    assert.throws(() => requiredActionSha({ [ACTION_SHA_ENV]: 'v0.1.0' }), (error: Error) => error instanceof EnvBlockedError && /full commit SHA/.test(error.message));
+    assert.equal(requiredActionSha({ [ACTION_SHA_ENV]: RELEASE_SHA }), RELEASE_SHA);
+  });
+
+  it('read "not implemented" only from the engine\'s own line in a step that runs the engine', () => {
+    assert.deepEqual([...engineSteps()].sort(), ['Initial sync', 'Stage Linear\'s changes', 'Stage Linear\'s documents', 'Sync']);
+    const at = '2026-11-11T19:20:00.1234567Z ';
+    // The engine's own answer, as the action reports it from the sync or initial sync step.
+    assert.equal(engineNotImplemented(new Map([['sync/9_Sync.txt', `${at}##[group]Run mdbisync/mdbisync@x\n${at}##[error]sync: not implemented\n`]]), 'sync'), true);
+    assert.equal(engineNotImplemented(new Map([['sync 5a9cba/7_Stage Linear\'s changes.txt', `${at}##[error]sync: not implemented\r\n`]]), 'sync'), true);
+    assert.equal(engineNotImplemented(new Map([['initial-sync/9_Initial sync.txt', `${at}##[error]initial-sync: not implemented\n`]]), 'initial-sync'), true);
+    // An older release's post step on any failed run, or the same words outside the engine's steps.
+    assert.equal(engineNotImplemented(new Map([['sync/15_Post Sync.txt', `${at}post: not implemented, nothing to clean up\n`]]), 'sync'), false);
+    assert.equal(engineNotImplemented(new Map([['sync/6_Run the security hooks.txt', `${at}##[error]sync: not implemented\n`]]), 'sync'), false);
+    // The job's whole log beside the step logs, another command's answer, and the words inside another line.
+    assert.equal(engineNotImplemented(new Map([['0_sync.txt', `${at}##[error]sync: not implemented\n`]]), 'sync'), false);
+    assert.equal(engineNotImplemented(new Map([['sync/9_Sync.txt', `${at}##[error]initial-sync: not implemented\n`]]), 'sync'), false);
+    assert.equal(engineNotImplemented(new Map([['sync/9_Sync.txt', `${at}##[error]sync: not implemented yet for this path\n`]]), 'sync'), false);
+  });
+
+  it('block an actions step before it installs anything when the release under test is not named', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+    fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml' });
+    const tip = (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
+    delete process.env[ACTION_SHA_ENV];
+    try {
+      await assert.rejects(STEP_ACTIONS['git.edit']!(ctx, { workflows: true }), (error: Error) => error instanceof EnvBlockedError && error.message.includes(`${ACTION_SHA_ENV} is unset`));
+      await assert.rejects(STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' }), (error: Error) => error instanceof EnvBlockedError && error.message.includes(`${ACTION_SHA_ENV} is unset`));
+    } finally {
+      process.env[ACTION_SHA_ENV] = RELEASE_SHA;
+    }
+    assert.equal((await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim(), tip, 'nothing was pushed');
+    assert.equal(ctx.observations.has('workflows.installed'), false);
+  });
+
   it('wait for a workflow to be registered, and fail as the harness when it never is', async () => {
     let calls = 0;
     const rest = { workflowId: async () => (++calls > 2 ? 42 : undefined) };
@@ -415,6 +467,24 @@ describe('workflows', () => {
     assert.equal(ctx.observations.get('runs.0.exitCode'), 1);
     assert.equal(ctx.observations.has('workflows.blocker'), false);
     assert.equal(existsSync(join(ctx.runDir, 'workflows')), false);
+  });
+
+  it('keep a failed run whose old post step says "not implemented" as a failure, not expected-red', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    const at = '2026-11-11T19:20:00.1234567Z ';
+    const logs = {
+      'sync/9_Sync.txt': `${at}fatal: could not read Username for 'https://github.com': No such device or address\n${at}##[error]The process '/usr/bin/git' failed with exit code 128\n`,
+      'sync/15_Post Sync.txt': `${at}post: not implemented, nothing to clean up\n`,
+    };
+    fakeActions(ctx, remoteGit, { conclusion: 'failure', jobs: [jobWith('Sync', 9)], logs });
+    await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+    await STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' });
+    assert.equal(ctx.engine.results.length, 1);
+    assert.equal(ctx.engine.results[0]?.notImplemented, false);
+    assert.equal(ctx.observations.get('runs.0.exitCode'), 1);
+    const installed = await remoteGit.text(['show', `${ctx.names.trackedBranch}:.github/workflows/mdbisync.yml`]);
+    assert.ok(installed.includes(`mdbisync/mdbisync@${RELEASE_SHA}`), 'the release under test, not the templates\' pin');
+    assert.ok(!installed.includes(pinnedActionSha(readTemplate(WORKFLOW_FILES.sync))));
   });
 
   it('settles an Actions scenario with dispatches instead of local sync processes', async () => {

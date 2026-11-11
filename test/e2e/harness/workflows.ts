@@ -19,12 +19,12 @@
 // scenario then stops at that run. Any other failure stays the run's result
 // for the scenario's checks.
 
-import { REQUEST_JOB, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
+import { engineSteps, REQUEST_JOB, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
 import { diagnosticRequests } from './request-accounting.ts';
 import { CANARY_EVIDENCE } from './security-canary.ts';
 import { inflateRawSync } from 'node:zlib';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { CommandName } from '../../../src/commands.ts';
+import { notImplementedMessage, type CommandName } from '../../../src/commands.ts';
 import type { EngineResult } from './engine.ts';
 import { GitHubError, type SandboxRest, type WorkflowJob, type WorkflowRun } from './github.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
@@ -233,6 +233,42 @@ export function environmentBlocker(run: WorkflowRun, jobs: readonly WorkflowJob[
   return undefined;
 }
 
+/** A step's log file in a run's logs, `<job>/<number>_<step>.txt`, without the characters GitHub may drop from a file name. */
+function stepOfLogFile(file: string): string | undefined {
+  const step = /\/\d+_([^/]+)\.txt$/.exec(file)?.[1];
+  return step === undefined ? undefined : comparable(step);
+}
+
+let comparableEngineSteps: ReadonlySet<string> | undefined;
+
+function comparable(name: string): string {
+  return name.replace(/[^A-Za-z0-9]+/g, '');
+}
+
+/**
+ * Whether a run's engine answered "not implemented" for `command`: a step
+ * that runs the engine (engineSteps) logged the engine's own line,
+ * `<command>: not implemented`, which the action reports as the step's
+ * failure. Any other text is not that answer: an older release's post step
+ * prints "post: not implemented, nothing to clean up" on every failed run,
+ * and a run on a release that rejects the template's inputs fails before the
+ * engine starts.
+ */
+export function engineNotImplemented(files: ReadonlyMap<string, string>, command: CommandName): boolean {
+  comparableEngineSteps ??= new Set([...engineSteps()].map(comparable));
+  const steps = comparableEngineSteps;
+  const line = notImplementedMessage(command);
+  for (const [file, log] of files) {
+    const step = stepOfLogFile(file);
+    if (step === undefined || !steps.has(step)) continue;
+    // Each log line starts with its timestamp; the action's failure carries GitHub's error marker.
+    for (const entry of log.split(/\r?\n/)) {
+      if (entry.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z /, '').replace(/^##\[error\]/, '').trimEnd() === line) return true;
+    }
+  }
+  return false;
+}
+
 /** What a finished workflow run reported, in the shape of a local engine result. */
 export async function runResult(rest: SandboxRest, run: WorkflowRun, command: CommandName, logFiles?: ReadonlyMap<string, string>): Promise<EngineResult> {
   let report: Record<string, unknown> | null = null;
@@ -265,7 +301,7 @@ export async function runResult(rest: SandboxRest, run: WorkflowRun, command: Co
     },
     exitCode: run.conclusion === 'success' ? 0 : 1,
     signal: null,
-    notImplemented: /not implemented/.test(logs) && run.conclusion !== 'success',
+    notImplemented: run.conclusion !== 'success' && engineNotImplemented(files, command),
     timedOut: false,
     durationMs: Date.parse(run.updated_at ?? run.created_at) - started,
     stdout: logs,
