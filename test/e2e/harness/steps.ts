@@ -174,7 +174,7 @@ async function startPaused(ctx: RunContext, call: EngineCall, checkpoint: Checkp
 async function offlineFormat(ctx: RunContext, command: 'lint' | 'fix', args: Record<string, unknown>): Promise<void> {
   const input = offlineInput(args.input);
   const dir = join(ctx.runDir, `${command}-input`);
-  writeInput(dir, input.files);
+  writeInput(dir, input.files, input.assets);
   // Expectations of this input; the bank's recorded forms only for the files that have one.
   const compared = args.input === 'lint-errors' ? new Set(input.files.keys()) : new Set(input.golden.keys());
   const only = (files: ReadonlyMap<string, string>) => new Map([...files].filter(([path]) => compared.has(path)));
