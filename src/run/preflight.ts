@@ -19,6 +19,7 @@ import {
   runSetupCheck,
 } from '../setup/index.ts';
 import { type CommitIdentity, type FetchedState, type Git, NEUTRAL_IDENTITY, fetchState, initialPullRequestPending, isAncestor, readInitialSyncProgress } from '../state/index.ts';
+import { type CheckClock } from '../pull-request/index.ts';
 import { type RunInputs } from './inputs.ts';
 import { type PREFLIGHT_COMMANDS } from '../commands.ts';
 import { renderStoppedBeforeWriting } from './stop.ts';
@@ -64,6 +65,8 @@ export interface PreflightOptions {
   /** For warnings that do not change the outcome, such as a token that could not be revoked. */
   warn: (message: string) => void;
   fetch?: typeof fetch;
+  /** Paces a sync run's waits for checks; real time when absent. */
+  checkClock?: CheckClock;
   /** Safe per-request diagnostics; emitted immediately, including on failure. */
   log: (entry: LogEntry) => void;
   /** Refuse, writing nothing, while the pull request of an initial sync from Linear waits for a person. */

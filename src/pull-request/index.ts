@@ -1,4 +1,5 @@
 export {
+  type CheckClock,
   type GitHubRepository,
   type NewPullRequest,
   type PullRequest,
