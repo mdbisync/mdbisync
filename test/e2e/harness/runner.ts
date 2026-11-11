@@ -22,7 +22,8 @@ import { engineRequestCount, requestBuckets, remoteRequests, isGraphql } from '.
 import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
-import { OwnershipLedger, ownedDocuments, type WriteObserver } from './ownership.ts';
+import { OwnershipLedger, readOwnership, type WriteObserver } from './ownership.ts';
+import { retryGitHubCleanup } from './cleanup-retry.ts';
 import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import { assertCurrentCorpus } from './corpus-drift.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
@@ -303,6 +304,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     ctx.phase('corpus manifest');
     manifest = await sandbox.manifest();
     ctx.phase('tracked branch');
+    ctx.remoteWritesStarted = true;
     created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names, {
       validate: (selected) => assertCurrentCorpus(manifest, selected, (path) => sandbox.readMain(`corpus/${path}`), deps.teams),
       checks: publishesCheckWorkflow(ctx.scenario),
@@ -488,9 +490,9 @@ async function recordedIds(ctx: RunContext): Promise<string[]> {
   const sandbox = ctx.sandbox;
   if (sandbox === undefined) return [];
   const ref = `${ctx.names.refPrefix}/ids`;
-  if (!(await sandbox.runRefs()).some((entry) => entry.ref === ref)) return [];
+  if (!(await retryGitHubCleanup(() => sandbox.runRefs())).some((entry) => entry.ref === ref)) return [];
   const git = await ctx.person();
-  await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+  await retryGitHubCleanup(() => git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]));
   const ids = await readIds(git, (await git.text(['rev-parse', ref])).trim());
   return [...ids.values()].map((entry) => entry.id);
 }
@@ -531,7 +533,7 @@ export async function removeRunRefsAndPullRequests(
   }
   if (sandbox !== undefined) {
     try {
-      const ofRun = async () => (await sandbox.runRefs()).filter((ref) => ref.runId === runId).map((ref) => ref.ref);
+      const ofRun = async () => (await retryGitHubCleanup(() => sandbox.runRefs())).filter((ref) => ref.runId === runId).map((ref) => ref.ref);
       await sandbox.deleteRunRefs(runId, await ofRun());
       const left = await ofRun();
       if (left.length > 0) problems.push(`refs: still on the sandbox: ${left.join(', ')}`);
@@ -571,7 +573,12 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
   // Every document the run made, by id: what the harness seeded, what the run's ownership record holds (every
   // create, a team zone's README and a create whose answer was lost included) and what the engine recorded.
   // Read the ids before the refs go.
-  const created = new Set([...(ctx.live?.seededDocuments ?? []), ...ownedDocuments(ctx.owned).keys()]);
+  const owned = readOwnership(ctx.owned.stateDir, ctx.names.runId);
+  if (ctx.live === null && ctx.remoteWritesStarted === false && owned !== null
+    && owned.teamIds.size === 0 && owned.projects.size === 0 && owned.documents.size === 0) {
+    return problems.length === 0 ? { ok: true } : { ok: false, detail: problems.join('; ') };
+  }
+  const created = new Set([...(ctx.live?.seededDocuments ?? []), ...(owned?.documents.keys() ?? [])]);
   if (ctx.live !== null) {
     await attempt('ids', async () => {
       for (const id of await recordedIds(ctx)) created.add(id);
@@ -663,6 +670,7 @@ export function createRunContext(
     names,
     runDir,
     live: null,
+    remoteWritesStarted: false,
     proxy: null,
     owned: new OwnershipLedger(deps.stateDir, runId),
     checkpoints: new CheckpointControl(join(runDir, 'hooks')),
