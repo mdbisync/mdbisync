@@ -57,7 +57,7 @@ import {
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { nameFixingHooks } from './fix-hooks.ts';
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
-import { reconcileDocumentMark } from './marks.ts';
+import { reconcileDocumentMark, releasedHold } from './marks.ts';
 import { suspendedPaths } from './suspended.ts';
 import { recordedTrailers } from './recorded.ts';
 import { message } from '../messages.ts';
@@ -756,13 +756,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const document = current.get(change.id);
     if (document === undefined || document.trashed || document.archivedAt !== null) {
       // Already gone from Linear: nothing to trash, and the id goes with the file.
-      nextIds.delete(change.path);
+      forgetEntry(change.path);
       result.trashed.push(change.path);
       return true;
     }
     if (!(await unchangedSinceCapture(document, change.path))) return skip(change.path, 'edited-in-linear');
     await timed(() => linear.trashDocument(change.id));
-    nextIds.delete(change.path);
+    forgetEntry(change.path);
     result.trashed.push(change.path);
     return true;
   }
@@ -910,6 +910,16 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     });
   }
 
+  /**
+   * Forgets the id of a document whose file is gone. A released episode's comment that the hold step has not
+   * resolved yet (a failed write) keeps the entry: the hold step resolves that comment, then drops it.
+   */
+  function forgetEntry(path: string): void {
+    const entry = nextIds.get(path);
+    if (entry !== undefined && releasedHold(entry)) return;
+    nextIds.delete(path);
+  }
+
   /** Pushes the id map on its own, with its lease, so a saved icon is durable before the mark replaces it. */
   async function pushIds(): Promise<void> {
     for (const path of nextIds.keys()) nextReserved.delete(path);
@@ -988,7 +998,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
         delete entry.releaseBase;
         delete entry.releasePaths;
         // A suspended Linear delete kept a tombstone until the lane released.
-        if (!resultFiles.has(path) && !linearFiles.has(path)) nextIds.delete(path);
+        if (!resultFiles.has(path) && !linearFiles.has(path)) forgetEntry(path);
       }
     }
     for (const path of nextIds.keys()) nextReserved.delete(path);

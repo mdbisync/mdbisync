@@ -14,9 +14,9 @@ import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, 
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
-import { type CommitIdentity, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
+import { type CommitIdentity, type IdEntry, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
-import { MARKS, reconcileDocumentMark } from './marks.ts';
+import { MARKS, reconcileDocumentMark, releasedHold } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
@@ -296,7 +296,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     for (const id of gone) {
       const old = byId.get(id)!;
       const changedFile = removeBody(old.path);
-      const retained = old.entry.suspended !== undefined || old.entry.releaseBase !== undefined;
+      const retained = keptForLane(old.entry);
       if (!retained) ids.delete(old.path);
       documentIds.delete(old.path);
       if (!retained || changedFile) result.removed.push(old.path);
@@ -329,7 +329,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           const saved = old.entry.saved;
           if (saved !== undefined && options.stageOnly !== true && (doc.icon !== saved.icon || doc.color !== saved.color)) await linear.updateDocument(doc.id, {icon: saved.icon, color: saved.color});
           const changedFile = removeBody(old.path);
-          const retained = old.entry.suspended !== undefined || old.entry.releaseBase !== undefined;
+          const retained = keptForLane(old.entry);
           if (!retained) ids.delete(old.path);
           documentIds.delete(old.path);
           if (!retained || changedFile) result.removed.push(old.path);
@@ -572,6 +572,14 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     result.summary = renderCapture(result, gate.configured);
     return result;
   } finally { await gate.close?.(); }
+}
+
+/**
+ * An entry of a removed document that stays: a suspended tombstone, a release not yet recorded, or a released
+ * episode's comment the hold step has not resolved yet.
+ */
+function keptForLane(entry: IdEntry): boolean {
+  return entry.suspended !== undefined || entry.releaseBase !== undefined || releasedHold(entry);
 }
 
 /** Up to this many changed link targets, every combination of them rejected is staged; above it, each alone and all together. */
