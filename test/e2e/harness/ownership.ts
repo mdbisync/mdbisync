@@ -17,7 +17,7 @@ import type { LinearDocument } from '../../../src/linear/index.ts';
 import { RUN_ID_PATTERN, runOfProject, runOfTeamTitle, runNames } from './isolation.ts';
 import type { LinearWorld, Project } from './linear-world.ts';
 import { retryCleanup } from './cleanup-retry.ts';
-import { outputText } from '../../../src/run/output.ts';
+import { outputText, reportText } from '../../../src/run/output.ts';
 
 export type OwnedEntry =
   /** Team zones (team ids) the run may create documents in. */
@@ -93,7 +93,10 @@ export class OwnershipLedger implements WriteObserver {
     let checked: OwnedEntry;
     switch (entry.kind) {
       case 'scope': checked = { kind: 'scope', teamIds: entry.teamIds.map(id) }; break;
-      case 'project': checked = { kind: 'project', id: id(entry.id), name: outputText(entry.name, 4096) }; break;
+      case 'project':
+        if (typeof entry.name !== 'string' || entry.name.length > 4096) throw new Error('Invalid ownership name');
+        checked = { kind: 'project', id: id(entry.id), name: entry.name };
+        break;
       case 'project-deleted': checked = { kind: 'project-deleted', id: id(entry.id) }; break;
       case 'document':
         if (typeof entry.confirmed !== 'boolean') throw new Error('Invalid ownership confirmation');
@@ -121,7 +124,7 @@ export class OwnershipLedger implements WriteObserver {
       const size = fstatSync(fd).size;
       const last = Buffer.alloc(1);
       const torn = size > 0 && readSync(fd, last, 0, 1, size - 1) === 1 && last[0] !== 0x0a;
-      writeSync(fd, `${torn ? '\n' : ''}${JSON.stringify(checked)}\n`);
+      writeSync(fd, reportText(`${torn ? '\n' : ''}${JSON.stringify(checked)}\n`));
       fsyncSync(fd);
     } finally {
       closeSync(fd);

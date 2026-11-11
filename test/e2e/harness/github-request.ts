@@ -29,7 +29,7 @@ export function githubRequestBody(value: unknown): Record<string, unknown> {
     if (!Array.isArray(input.repositories) || input.repositories.length > 100) throw new Error('Invalid repositories');
     result.repositories = input.repositories.map((value: unknown) => {
       const name = outputText(value, 100);
-      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name)) throw new Error('Invalid repository name');
+      if (!/^[A-Za-z0-9_.-]+$/.test(name) || name === '.' || name === '..') throw new Error('Invalid repository name');
       return name;
     });
   }

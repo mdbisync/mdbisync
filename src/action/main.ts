@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import * as core from "@actions/core";
 import { runEnding } from "../run/exit.ts";
 import { writeRunReport } from "../run/finish.ts";
-import { outputFile, outputText } from "../run/output.ts";
+import { outputFile, reportText } from "../run/output.ts";
 import { type InputName, readInitialSyncInputs, readInputs } from "../run/inputs.ts";
 import { type OperationOutcome, runOperation } from "../run/operation.ts";
 import { Git } from "../state/index.ts";
@@ -117,11 +117,12 @@ export async function run(options: RunOptions = {}): Promise<void> {
       tokenLifecycle,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }, security);
-    if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(outcome.summary).write();
-    else core.info(outcome.summary);
+    const summary = reportText(outcome.summary);
+    if (process.env["GITHUB_STEP_SUMMARY"]) await core.summary.addRaw(summary).write();
+    else core.info(summary);
     if (inputs.reportFile !== undefined) {
       await writeRunReport(inputs.reportFile, outcome);
-      await writeFile(outputFile(dirname(inputs.reportFile), SUMMARY_FILE), outputText(outcome.summary));
+      await writeFile(outputFile(dirname(inputs.reportFile), SUMMARY_FILE), summary);
     }
     if (outcome.ok && outcome.staged !== undefined) {
       // The hooks step runs this script with the runner's Node.js.

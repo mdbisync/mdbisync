@@ -16,8 +16,10 @@ it('sends only checked GitHub fields and refuses malformed data before making a 
     await assert.rejects(rest.request('POST', '/pulls', invalid));
   }
   await assert.rejects(rest.request('GET', '/pulls\nforged'));
+  await assert.rejects(rest.download('/artifacts\nforged'));
   const invalidToken = new SandboxRest({ owner: 'acme', repo: 'sandbox' }, 'bad\r\ntoken', fetchImpl);
   await assert.rejects(invalidToken.request('GET', '/pulls'));
+  await assert.rejects(invalidToken.download('/artifacts'));
   assert.equal(sent.length, 1);
 });
 
@@ -25,13 +27,15 @@ it('preserves file upload bytes, workflow inputs and repository selection', () =
   const body = { message: 'Update notes', content: Buffer.from('Résumé\n').toString('base64'), sha: 'revision' };
   assert.deepEqual(githubRequestBody(body), body);
   assert.deepEqual(githubRequestBody({ ref: 'main', inputs: { run_id: 'abc123' } }), { ref: 'main', inputs: { run_id: 'abc123' } });
-  assert.deepEqual(githubRequestBody({ repositories: ['sandbox'] }), { repositories: ['sandbox'] });
+  assert.deepEqual(githubRequestBody({ repositories: ['sandbox', '.github', '_notes', '-notes'] }), { repositories: ['sandbox', '.github', '_notes', '-notes'] });
 });
 
 it('projects bounded workflow evidence and rejects malformed remote metadata', () => {
   const run = { id: 42, event: 'push', status: 'completed', conclusion: 'failure', created_at: '2026-01-01', extra: 'discarded' } as WorkflowRun;
   assert.equal(workflowEvidence(run).id, 42);
   assert.equal('extra' in workflowEvidence(run), false);
+  assert.equal(workflowEvidence({ ...run, status: null, head_branch: null }).head_branch, null);
+  assert.equal(workflowEvidence({ ...run, status: null }).status, null);
   assert.throws(() => workflowEvidence({ ...run, id: '../escape' as unknown as number }));
   assert.throws(() => workflowEvidence({ ...run, head_branch: 'x'.repeat(1025) }));
   const blocker = { runId: 42, job: 'check', step: 'setup', cause: 'missing command', logFile: 'check/1_setup.txt', reason: 'Install command' };

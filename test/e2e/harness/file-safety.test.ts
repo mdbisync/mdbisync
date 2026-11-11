@@ -52,8 +52,16 @@ it('invalid ownership data is rejected before creating a journal', () => {
   const root = fixture();
   const ledger = new OwnershipLedger(root, 'abc123');
   assert.throws(() => ledger.project({ id: '../outside', name: 'Plan' }));
-  assert.throws(() => ledger.project({ id: 'project', name: 'bad\0name' }));
+  assert.throws(() => ledger.project({ id: 'project', name: 'x'.repeat(4097) }));
   assert.deepEqual(readdirSync(join(root, 'owned')), []);
+});
+
+it('keeps exact project names through safe journal serialization', () => {
+  const root = fixture();
+  const name = 'Plan\0\x85\nNext';
+  new OwnershipLedger(root, 'abc123').project({ id: 'project', name });
+  assert.equal(readOwnership(root, 'abc123')!.projects.get('project'), name);
+  assert.doesNotMatch(readFileSync(join(root, 'owned', 'abc123.jsonl'), 'utf8'), /[\x00\x85]/);
 });
 
 it('unreadable state never permits taking a lock or treating its run as dead', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {

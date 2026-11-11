@@ -21,7 +21,7 @@ import { loadBank } from './bank.ts';
 import { PROBE_FACTS, runProbe, type ProbeRun } from './probe.ts';
 import { findDrift, writeRecord } from './record.ts';
 import { renderReport } from './report.ts';
-import { outputText } from '../../src/run/output.ts';
+import { reportText } from '../../src/run/output.ts';
 
 export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<number> {
   const { values } = parseArgs({
@@ -49,8 +49,17 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
   const runId = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex')}`;
 
   const requestLog: LogEntry[] = [];
+  let requestLogSize = 0;
+  let requestLogOmitted = 0;
   const log = (entry: LogEntry) => {
-    requestLog.push(entry);
+    // Keep failure diagnostics writable even when a server sends oversized headers.
+    const size = JSON.stringify(entry).length;
+    if (requestLogSize + size <= 1024 * 1024) {
+      requestLog.push(entry);
+      requestLogSize += size;
+    } else {
+      requestLogOmitted += 1;
+    }
     console.error(JSON.stringify({ runId, ...entry }));
   };
   let run: ProbeRun;
@@ -93,7 +102,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
   } catch (error) {
     console.error(`format probe: run ${runId} failed: ${error instanceof Error ? error.message : String(error)}`);
     console.error(`format probe: ${stats.total} API requests sent`);
-    if (values.json) writeFileSync(values.json, outputText(`${JSON.stringify({ runId, failed: true, requests: stats.toJSON(), requestLog }, null, 2)}\n`));
+    if (values.json) writeFileSync(values.json, reportText(`${JSON.stringify({ runId, failed: true, requests: stats.toJSON(), requestLog, ...(requestLogOmitted ? { requestLogOmitted } : {}) }, null, 2)}\n`));
     return 2;
   }
   run.requests = stats.toJSON();
@@ -104,7 +113,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
   if (values.json) {
     // Results only: no fixture text, Linear forms or Yjs trees.
     const fixtures = run.fixtures.map(({ source: _s, first: _f, second: _d, yjs: _y, ...rest }) => rest);
-    writeFileSync(values.json, `${JSON.stringify({ ...run, fixtures, drift, requestLog }, null, 2)}\n`);
+    writeFileSync(values.json, reportText(`${JSON.stringify({ ...run, fixtures, drift, requestLog, ...(requestLogOmitted ? { requestLogOmitted } : {}) }, null, 2)}\n`));
   }
 
   const notFixed = run.fixtures.filter((r) => r.fixedPoint === false).length;

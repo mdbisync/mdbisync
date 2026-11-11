@@ -16,7 +16,7 @@ import { type CheckClock } from "./pull-request/index.ts";
 import { runFix, runLint } from "./format/command.ts";
 import { runEnding } from "./run/exit.ts";
 import { writeRunReport } from "./run/finish.ts";
-import { outputText } from "./run/output.ts";
+import { reportText } from "./run/output.ts";
 import { InputError, type InputName, environmentName, readInitialSyncInputs, readInputs } from "./run/inputs.ts";
 import { type OperationOutcome, runOperation } from "./run/operation.ts";
 import { Git } from "./state/index.ts";
@@ -114,7 +114,7 @@ async function runPreflightCommand(command: (typeof PREFLIGHT_COMMANDS)[number],
   if (inputs.reportFile !== undefined) await writeRunReport(inputs.reportFile, outcome);
   // Inside a workflow step the summary also goes to the job summary.
   const summaryFile = env["GITHUB_STEP_SUMMARY"];
-  if (summaryFile) await appendFile(summaryFile, outputText(outcome.summary));
+  if (summaryFile) await appendFile(summaryFile, reportText(outcome.summary));
   return endedRun(outcome, warnings.join(""));
 }
 
