@@ -163,10 +163,14 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   // Finish a deferred close (or a crash after the atomic push) before release
   // can replace the set-aside head. The normal lane must preserve it too.
   if (context.fetched.sync !== null && await git.text(['show', '-s', '--format=%s', context.fetched.sync]) === SET_ASIDE_MESSAGE) {
-    const pending: SuspendedResult = { paths: [...paths].sort(), checks: [], waiting: true, normalClosePending: true };
+    const pending: SuspendedResult = { paths: [...paths].sort(), checks: [], normalClosePending: true };
     try {
       const normal = await findOpenPullRequest(options.github, options.config.syncBranch, options.config.trackedBranch);
-      if (normal !== null && !await closePullRequestAtHead(options.github, normal.number, context.fetched.sync)) return pending;
+      if (normal !== null && !await closePullRequestAtHead(options.github, normal.number, context.fetched.sync)) {
+        const held = await findOpenPullRequest(options.github, suspendedBranch(options.config), options.config.trackedBranch);
+        if (held !== null) pending.pullRequest = { number: held.number, url: held.url };
+        return pending;
+      }
     } catch (error) {
       if (!(error instanceof PullRequestError)) throw error;
       return { ...pending, code: 'github-failed', ...(error.status === undefined ? {} : { status: error.status }) };
@@ -322,11 +326,11 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   if (anchor?.suspended !== undefined) anchor.suspended.paths = [...paths].sort();
   const normal = await commit(context, options, await git.text(['rev-parse', `${tracked}^{tree}`]), [failed, tracked], SET_ASIDE_MESSAGE);
   await push(context, options, ids, head, previous, { expected: failed, next: normal });
-  await closePullRequestAtHead(options.github, normalNumber, normal);
+  const closed = await closePullRequestAtHead(options.github, normalNumber, normal);
   const { pullRequest } = await ensurePullRequest(options.github, {
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE,
     body: `Changes on hold: ${codeNames([...checks, ...timedOut])}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n\n${headNote(head, new Date())}\n`,
   });
   const late = timedOut.length > 0 ? { timedOut } : {};
-  return { paths: [...paths].sort(), checks, ...late, batchFailure: { head: failed, paths: batchPaths, checks: failures, ...late }, changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
+  return { paths: [...paths].sort(), checks, ...late, batchFailure: { head: failed, paths: batchPaths, checks: failures, ...late }, ...(!closed ? { normalClosePending: true } : {}), changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };
 }

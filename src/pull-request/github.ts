@@ -92,7 +92,7 @@ export async function closePullRequest(target: GitHubRepository, number: number)
 /**
  * A push updates GitHub's PR head asynchronously. Closing before that update
  * freezes the old diff, so wait for the exact empty head first. A stale head
- * gets five reads, at one-second intervals, with at most five seconds for the
+ * gets up to five reads, at one-second intervals, with at most five seconds for the
  * whole read sequence (including response bodies). A later run can retry.
  */
 export async function closePullRequestAtHead(target: GitHubRepository, number: number, head: string): Promise<boolean> {
@@ -102,7 +102,7 @@ export async function closePullRequestAtHead(target: GitHubRepository, number: n
   try {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const answer = await request({ ...target, signal }, 'GET', `/pulls/${number}`);
-      if (answer.status !== 200) throw new PullRequestError(message('github.listing'), answer.status);
+      if (answer.status !== 200) throw new PullRequestError(message('github.reading-pull-request'), answer.status);
       const pr = answer.json as { state?: unknown; head?: { sha?: unknown } } | null;
       if (pr?.state === 'closed') return true;
       if (pr?.state === 'open' && pr.head?.sha === head) {
@@ -114,7 +114,11 @@ export async function closePullRequestAtHead(target: GitHubRepository, number: n
   } catch (error) {
     // Only our visibility deadline is an ordinary deferral. API failures and
     // cancellation of the caller retain their normal error reporting.
-    if (!deadline.aborted || target.signal?.aborted) throw error;
+    if (error instanceof Error && error.name === 'AbortError') {
+      if (deadline.aborted && !target.signal?.aborted) return false;
+      throw new PullRequestError(message('github.sending', { method: 'GET' }), undefined, error);
+    }
+    if (!(error instanceof PullRequestError) || !deadline.aborted || target.signal?.aborted) throw error;
   }
   if (!ready) return false;
   await closePullRequest(target, number);

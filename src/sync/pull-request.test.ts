@@ -515,6 +515,12 @@ describe('sync: the sync pull request', () => {
     const first = await sync();
     assert.equal(first.result.exitCode, crash ? INCOMPLETE_EXIT_CODE : 0, first.result.stderr);
     assert.equal(reads, crash ? 1 : 5);
+    if (!crash) {
+      assert.equal(first.report.pullRequest?.suspended?.normalClosePending, true);
+      assert.ok(first.report.pullRequest?.suspended?.pullRequest);
+      assert.match(first.summary, /waiting for GitHub to show its empty head/);
+      assert.doesNotMatch(first.summary, /no pull request is needed/);
+    }
     const empty = await rev(SYNC_BRANCH);
     assert.notEqual(empty, failed);
     assert.equal(await rev(`${empty}^{tree}`), await rev('refs/heads/main^{tree}'));
@@ -530,11 +536,15 @@ describe('sync: the sync pull request', () => {
     const unavailable = await sync();
     assert.equal(unavailable.result.exitCode, INCOMPLETE_EXIT_CODE, unavailable.result.stderr);
     assert.equal(unavailable.report.pullRequest?.suspended?.normalClosePending, true);
+    assert.doesNotMatch(unavailable.summary, /the normal lane still runs/);
     assert.equal(await rev(SYNC_BRANCH), empty);
     delete world.github.reset;
     const stale = await sync();
     assert.equal(stale.result.exitCode, 0, stale.result.stderr);
     assert.equal(stale.report.pullRequest?.suspended?.normalClosePending, true);
+    assert.equal(stale.report.pullRequest?.suspended?.waiting, undefined);
+    assert.match(stale.summary, /New normal batches and suspended release wait for that close/);
+    assert.doesNotMatch(stale.summary, /no pull request is needed/);
     assert.equal(await rev(SYNC_BRANCH), empty);
     assert.equal(world.github.pullRequests[0]?.state, 'open');
     world.github.pullRequestHead = (pr) => rev(`refs/heads/${pr.head}`);
@@ -1359,7 +1369,6 @@ describe('sync: the sync pull request', () => {
     assert.equal(second.report.pullRequest?.suspended?.code, 'merge-blocked');
     assert.equal(second.result.exitCode, SETUP_FAILED_EXIT_CODE);
     world.github.merge = mergeOnRemote;
-    world.github.pullRequestHead = (pr) => rev(`refs/heads/${pr.head}`);
     const released = await sync();
     assert.equal(released.result.exitCode, 0, released.result.stderr);
     assert.ok(released.report.pullRequest?.suspended?.released);
@@ -1852,7 +1861,6 @@ describe('sync: the sync pull request', () => {
     assert.match(fromAction.output, /::set-output name=code::merge-blocked/);
 
     world.github.merge = mergeOnRemote;
-    world.github.pullRequestHead = (pr) => rev(`refs/heads/${pr.head}`);
     const fixed = await sync();
     assert.equal(fixed.result.exitCode, 0, fixed.result.stderr);
     assert.deepEqual(fixed.writes, ['PUT /pulls/1/merge']);

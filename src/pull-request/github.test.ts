@@ -98,6 +98,24 @@ describe('closing only at the expected pull request head', () => {
     await assert.rejects(closePullRequestAtHead(target(closeRefused), 1, 'empty'), (error: unknown) => error instanceof PullRequestError && error.status === 403);
   });
 
+  it('reports caller cancellation during the polling sleep as a GitHub failure', async () => {
+    const controller = new AbortController();
+    const fetch = (async () => Response.json({ state: 'open', head: { sha: 'old' } })) as typeof globalThis.fetch;
+    const timer = setTimeout(() => controller.abort(), 20);
+    try { await assert.rejects(closePullRequestAtHead(target(fetch, controller.signal), 1, 'empty'), PullRequestError); }
+    finally { clearTimeout(timer); }
+  });
+
+  it('does not hide an unrelated error when the visibility deadline expires', async () => {
+    const unexpected = new Error('unexpected failure');
+    const fetch = (async (_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(unexpected), { once: true });
+    })) as typeof globalThis.fetch;
+    const keepAlive = setInterval(() => {}, 1_000);
+    try { await assert.rejects(closePullRequestAtHead(target(fetch), 1, 'empty'), (error: unknown) => error === unexpected); }
+    finally { clearInterval(keepAlive); }
+  });
+
   it('defers when a detail request exceeds the visibility deadline', async () => {
     const fetch = (async (_input, init) => {
       assert.equal(init?.method, 'GET');
