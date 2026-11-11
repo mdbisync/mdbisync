@@ -153,18 +153,19 @@ describe('confirmed initial sync from git to Linear: the conflict mark', () => {
     assert.ok(operations.length <= 1.5 * 3 + 5, `${operations.length} requests: ${operations.join(', ')}`);
   });
 
-  it('an adopted document keeps its own icon in ids; a clear one keeps its icon in Linear', async () => {
+  it('an adopted document keeps its own icon in ids; a clear one keeps its icon in Linear, even the orange alert', async () => {
     const world = fakeWorld();
     world.linear.documents = [
       { id: 'doc-conflict', title: 'backend/conflict', teamId: 'team-eng', createdAt: '2026-01-01T00:00:01Z', content: 'Old text.', icon: 'Book', color: '#5E6AD2' },
-      { id: 'doc-quoted', title: 'backend/quoted', teamId: 'team-eng', createdAt: '2026-01-01T00:00:02Z', content: 'Old text.', icon: 'Book', color: '#5E6AD2' },
+      // Its own icon looks like the conflict mark, but its text holds no conflict: it is not the mark.
+      { id: 'doc-quoted', title: 'backend/quoted', teamId: 'team-eng', createdAt: '2026-01-01T00:00:02Z', content: 'Old text.', ...MARKS.conflict },
     ];
     const { result, report } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.initialSync?.overwritten, [CONFLICT, QUOTED]);
     assert.equal((await readIds())[CONFLICT]?.id, 'doc-conflict');
     await assertMarked(world, { icon: 'Book', color: '#5E6AD2' });
-    await assertQuotedClear(world, { icon: 'Book', color: '#5E6AD2' });
+    await assertQuotedClear(world, MARKS.conflict);
   });
 
   it('run again with nothing changed, it posts no second comment and leaves the refs as they are', async () => {

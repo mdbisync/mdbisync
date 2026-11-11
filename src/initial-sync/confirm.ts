@@ -58,6 +58,7 @@ import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments }
 import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, planInitialSync } from './plan.ts';
 import { readPlanSources } from './run.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
+import { detectConflicts } from '../merge/index.ts';
 import { MARKS, reconcileDocumentMark } from '../sync/marks.ts';
 import { withRecorded } from '../sync/recorded.ts';
 import { stableId } from '../sync/stable-id.ts';
@@ -282,9 +283,11 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
    */
   const reconcileMark = async (path: string, document: LinearDocument, hash: string) => {
     const entry = ids.get(path);
-    if (entry === undefined || entry.id !== document.id || document.content == null) return;
-    // Without a saved icon (the state was lost) a conflict mark Linear already shows is this tool's, not the document's own.
-    const shown = entry.saved === undefined && document.icon === MARKS.conflict.icon && document.color === MARKS.conflict.color;
+    if (entry === undefined || entry.id !== document.id || document.content === undefined) return;
+    // Without a saved icon (the state was lost) a conflict mark Linear already shows on a conflicted text is this
+    // tool's, not the document's own. On a text without a conflict it is the document's own icon, and it stays.
+    const shown = entry.saved === undefined && document.icon === MARKS.conflict.icon && document.color === MARKS.conflict.color
+      && detectConflicts(document.content ?? '').length > 0;
     await reconcileDocumentMark({
       document,
       entry: shown ? { ...entry, saved: { icon: null, color: null } } : entry,
