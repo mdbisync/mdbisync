@@ -29,7 +29,7 @@ import { githubToken } from './github.ts';
 import { forgetHeldRun, heldRunOf, loadHeldRun, saveHeldRun, type HeldRun } from './held-run.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { readLatest, updateStatusPage, writeEvidence, writeRunReport, type HarnessReport } from './report.ts';
-import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
+import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import {
   captureCanaryEvidence,
   claimEditorBudgets,
@@ -39,6 +39,7 @@ import {
   liveWorld,
   resultOf,
   retainPendingOutput,
+  runTeamZones,
   takeTeamLocks,
   type RunnerDeps,
 } from './runner.ts';
@@ -204,13 +205,10 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
     ctx.sandbox = ctx.live.sandbox;
     ctx.proxy = await startFaultProxy('https://api.linear.app', { history: held.proxyRequests, observer: ctx.owned });
     await claimEditorBudgets(ctx, grant);
-    const zoneIds = [...held.live.tree.teams].map((key) => {
-      const team = ctx.live!.teams.get(key);
-      if (team === undefined) throw new EnvBlockedError('held run team is unavailable');
-      return team.id;
-    });
-    await grant?.claimZones?.(zoneIds, ctx.signal);
-    await takeTeamLocks(ctx, deps.stateDir, held.live.tree.teamZones.keys(), locks);
+    // The same team set as at setup, so the take-up holds the locks the held run kept, a README-only zone's included.
+    const zones = runTeamZones(held.live.tree, ctx.live.teams);
+    await grant?.claimZones?.(zones.ids, ctx.signal);
+    await takeTeamLocks(ctx, deps.stateDir, zones.lockKeys, locks);
   } catch (error) {
     await ctx.proxy?.close();
     release(true);
@@ -295,7 +293,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   release(false);
   forgetHeldRun(runDir);
   cleanClones(runDir);
-  const outcome = classify(error, deps.expectedRed.has(scenario.id));
+  const outcome = classify(blockedBySetupStop(error, ctx.engine.results, ctx.engine.setupRuns), deps.expectedRed.has(scenario.id));
   ctx.log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   appendFileSync(join(runDir, 'harness.log'), `\n${logLines.join('\n')}`);
   rmSync(join(runDir, 'canary-pending'), { force: true });

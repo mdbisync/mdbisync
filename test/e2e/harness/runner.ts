@@ -14,6 +14,7 @@ import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, CORPUS_DIR, inheritedTeam, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
 import { startFaultProxy } from './fault-proxy.ts';
+import { runScheduled } from './schedule.ts';
 import { BudgetBlockedError, budgetFromStatus, estimate, MAX_ADMISSION, type Governor } from './governor.ts';
 import { SandboxRest, githubToken, type GitHubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
@@ -22,7 +23,8 @@ import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
 import { OwnershipLedger, ownedDocuments, type WriteObserver } from './ownership.ts';
-import { classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
+import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
+import { assertCurrentCorpus } from './corpus-drift.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { runStep } from './steps.ts';
@@ -259,16 +261,19 @@ export async function claimEditorBudgets(ctx: RunContext, grant: Awaited<ReturnT
 }
 
 /**
- * The ids of every team the run's slice annotates: the zones the run locks and the scope of its ownership record.
- * A team zone whose only file is its own README is not in `tree.teamZones`, yet the engine syncs that README into
- * the zone, so the scope is every annotated team, not only the zones the run places files below.
+ * Every team the run's slice annotates, as team lock keys and as team ids: one set for the run's team locks, its
+ * shared zone claim and the scope of its ownership record. A team zone whose only file is its own README is not in
+ * `tree.teamZones`, yet the engine syncs that README into the zone, so the set is every annotated team, not only
+ * the zones the run places files below.
  */
-export function runTeamIds(tree: Pick<RunTree, 'teams'>, teams: ReadonlyMap<string, Pick<Team, 'id'>>): string[] {
-  return [...tree.teams].map((key) => {
+export function runTeamZones(tree: Pick<RunTree, 'teams'>, teams: ReadonlyMap<string, Pick<Team, 'id'>>): { ids: string[]; lockKeys: string[] } {
+  const lockKeys = [...tree.teams];
+  const ids = lockKeys.map((key) => {
     const team = teams.get(key);
     if (team === undefined) throw new EnvBlockedError(`the test workspace has no team ${key}`);
     return team.id;
   });
+  return { ids, lockKeys };
 }
 
 async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, locks: Lock[], deadline: SetupDeadline, grant?: Awaited<ReturnType<Governor['admit']>>): Promise<void> {
@@ -285,13 +290,14 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   ctx.sandbox = sandbox;
   ctx.phase('sandbox cache');
   await sandbox.refreshCache();
-  let manifest;
+  let manifest: Manifest;
   let created;
   try {
     ctx.phase('corpus manifest');
     manifest = await sandbox.manifest();
     ctx.phase('tracked branch');
     created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names, {
+      validate: (selected) => assertCurrentCorpus(manifest, selected, (path) => sandbox.readMain(`corpus/${path}`), deps.teams),
       checks: publishesCheckWorkflow(ctx.scenario),
       ...(deps.teams === undefined ? {} : { teams: deps.teams }),
     });
@@ -306,16 +312,16 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   const { teams, world } = live;
   ctx.live = live;
   // The team zones the run may write in, on record before anything is created there.
-  const zoneIds = runTeamIds(tree, teams);
-  ctx.owned.scope(zoneIds);
+  const zones = runTeamZones(tree, teams);
+  ctx.owned.scope(zones.ids);
 
   // Setup ends after SETUP_TIMEOUT_MS: a key that frees up later is reported now, with its reason.
   ctx.phase('editor budget');
   await claimEditorBudgets(ctx, grant, SETUP_TIMEOUT_MS);
 
-  // The team lock: initial sync matches every document of an annotated team zone.
+  // The team lock: initial sync matches every document of an annotated team zone, a README-only zone included.
   ctx.phase('team lock');
-  await takeTeamZones(ctx, deps.stateDir, grant, { ids: zoneIds, lockKeys: tree.teamZones.keys() }, locks, deadline);
+  await takeTeamZones(ctx, deps.stateDir, grant, zones, locks, deadline);
 
   const readmes = new Map<string, string>();
   for (const [target, source] of tree.paths) {
@@ -813,6 +819,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   if (deps.teams !== undefined) ctx.observations.set('corpus.teams', [...deps.teams]);
   const locks: Lock[] = [];
   let grant: Awaited<ReturnType<Governor['admit']>> | undefined;
+  let released = false;
   let error: unknown;
   let checks: CheckOutcome[] = [];
   let cleanupOutcome: { ok: boolean; detail?: string } = { ok: true };
@@ -823,6 +830,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   let heldForUi = false;
   /** Set when setup did not stop after its deadline: the run stays registered, so the sweeper removes what it makes later. */
   let setupStuck = false;
+  /** Set once setup has ended: until then, every engine run so far is setup's. */
+  let setupEnded = scenario.setup.state === 'offline';
   try {
     if (scenario.setup.state !== 'offline') {
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');
@@ -850,6 +859,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
         setupStuck = !(await settlesWithin(setup, SETUP_STOP_MS));
         throw late;
       }
+      setupEnded = true;
       ctx.phase('steps');
     }
     const history: Array<Record<string, string>> = [await snapshotRefs(ctx)];
@@ -867,7 +877,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     checks = await runChecks(ctx);
     failOnChecks(checks);
   } catch (caught) {
-    error = caught;
+    // What failed after a run stopped at its setup check on the environment's credentials says nothing about the scenario.
+    error = blockedBySetupStop(caught, ctx.engine.results, setupEnded ? ctx.engine.setupRuns : ctx.engine.results.length);
   } finally {
     await retainPendingOutput(ctx);
     // Capture output before cleanup removes remote pull requests and comments,
@@ -898,7 +909,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       }
     }
     if (grant !== undefined && (grant.owner === undefined || (cleanupOutcome.ok && !heldForUi && !setupStuck))) {
-      try { await grant.release(); }
+      try { await grant.release(); released = true; }
       catch { cleanupOutcome = { ok: false, detail: 'shared reservation could not be released; retry cleanup before reuse' }; }
     }
     clearInterval(heartbeat);
@@ -911,7 +922,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   writeFileSync(join(runDir, 'harness.log'), logLines.join('\n'));
   rmSync(join(runDir, 'canary-pending'), { force: true });
-  return resultOf(ctx, outcome, { startedAt: started, budgetWaitMs: grant?.waitedMs ?? 0, checks, cleanup: cleanupOutcome });
+  const result = resultOf(ctx, outcome, { startedAt: started, budgetWaitMs: grant?.waitedMs ?? 0, checks, cleanup: cleanupOutcome });
+  return grant?.owner !== undefined && !released ? { ...result, sharedReservationKept: true } : result;
 }
 
 /** A check that does not hold fails the scenario as a product error; the outcomes stay in the result either way. */
@@ -942,17 +954,20 @@ export async function runScenarios(
 ): Promise<ScenarioResult[]> {
   const results: ScenarioResult[] = new Array(scenarios.length);
   const ordinary = scenarios.map((_, index) => index).filter((index) => scenarios[index]?.id !== 'L5-21');
-  let next = 0;
-  const worker = async () => {
-    for (;;) {
-      const index = ordinary[next++];
-      if (index === undefined) return;
-      const scenario = scenarios[index];
-      if (scenario === undefined) return;
-      results[index] = stop.requested ? skippedResult(scenario, 'the harness was stopped before this scenario') : await runScenario(scenario, deps);
-    }
+  const governor = deps.governor;
+  const memo = new Map<number, boolean>();
+  const conflicting = (a: number, b: number) => {
+    const key = a * scenarios.length + b;
+    if (!memo.has(key)) memo.set(key, governor !== null && governor.conflicts(scenarios[a]!, scenarios[b]!));
+    return memo.get(key)!;
   };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(workers, scenarios.length)) }, worker));
+  // A stopped batch only reports the rest skipped, which conflicts with nothing.
+  const conflicts = (a: number, b: number) => !stop.requested && conflicting(a, b);
+  await runScheduled(ordinary, workers, conflicts, async (index) => {
+    const scenario = scenarios[index]!;
+    results[index] = stop.requested ? skippedResult(scenario, 'the harness was stopped before this scenario') : await runScenario(scenario, deps);
+    return results[index]!.sharedReservationKept === true ? 'kept' : 'released';
+  });
   // The batch scan runs after all producer workers and their cleanup finish.
   for (let index = 0; index < scenarios.length; index++) {
     const scenario = scenarios[index]!;
