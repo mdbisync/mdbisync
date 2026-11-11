@@ -4,6 +4,7 @@
 
 import { DEFAULT_GITHUB_API_URL } from '../setup/github.ts';
 import { message } from '../messages.ts';
+import { setTimeout } from 'node:timers/promises';
 
 export interface GitHubRepository {
   /** `owner/name`. */
@@ -86,6 +87,38 @@ export async function updatePullRequest(target: GitHubRepository, number: number
 export async function closePullRequest(target: GitHubRepository, number: number): Promise<void> {
   const answer = await request(target, 'PATCH', `/pulls/${number}`, { state: 'closed' }, { kind: 'closed', accepted: 200 });
   if (answer.status !== 200) throw new PullRequestError(message('github.closing'), answer.status);
+}
+
+/**
+ * A push updates GitHub's PR head asynchronously. Closing before that update
+ * freezes the old diff, so wait for the exact empty head first. A stale head
+ * gets five reads, at one-second intervals, with at most five seconds for the
+ * whole read sequence (including response bodies). A later run can retry.
+ */
+export async function closePullRequestAtHead(target: GitHubRepository, number: number, head: string): Promise<boolean> {
+  const deadline = AbortSignal.timeout(5_000);
+  const signal = AbortSignal.any([deadline, ...(target.signal ? [target.signal] : [])]);
+  let ready = false;
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const answer = await request({ ...target, signal }, 'GET', `/pulls/${number}`);
+      if (answer.status !== 200) throw new PullRequestError(message('github.listing'), answer.status);
+      const pr = answer.json as { state?: unknown; head?: { sha?: unknown } } | null;
+      if (pr?.state === 'closed') return true;
+      if (pr?.state === 'open' && pr.head?.sha === head) {
+        ready = true;
+        break;
+      }
+      if (attempt < 4) await setTimeout(1_000, undefined, { signal });
+    }
+  } catch (error) {
+    // Only our visibility deadline is an ordinary deferral. API failures and
+    // cancellation of the caller retain their normal error reporting.
+    if (!deadline.aborted || target.signal?.aborted) throw error;
+  }
+  if (!ready) return false;
+  await closePullRequest(target, number);
+  return true;
 }
 
 /**

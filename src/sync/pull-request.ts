@@ -182,7 +182,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
   if (suspended?.code !== undefined) result.code = suspended.code;
   if (suspended?.status !== undefined) result.status = suspended.status;
   if (suspended?.reason !== undefined) result.reason = suspended.reason;
-  if (linear === null) return result;
+  if (linear === null || suspended?.normalClosePending === true) return result;
 
   const frozen = suspendedPaths(await readIds(git, options.state.ids));
   // Mask before merging, so frozen paths cannot conflict or restart normal checks.
