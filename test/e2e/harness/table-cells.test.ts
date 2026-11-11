@@ -44,6 +44,8 @@ it('compares L1-10 table cells with the file as Linear stores it, image upload U
     ids: new Map([[table.path, { id: 'doc-1' }]]),
     documentUrlBase: 'https://linear.app/team/document',
     documents,
+    omitted: new Map<string, string>(),
+    kept: new Set<string>(),
   };
   const ctx = {
     live: { manifest: { seed: corpus.manifest.seed, files: midEntries }, tree: { paths: new Map([[table.path, table.path], [aligned.path, aligned.path]]) } },
@@ -72,6 +74,70 @@ it('compares L1-10 table cells with the file as Linear stores it, image upload U
   uploadsByHash.clear();
   documents.set('doc-1', { id: 'doc-1', content: stored });
   assert.deepEqual(await verdict(), { holds: false, paths: `differs at ${table.path}` });
+});
+
+it('leaves a table the run left out out of both sides of L1-10 table cells, and still fails a synchronized table without a document', async () => {
+  const cells = assertionOf('documents.tableCells');
+  const isImage = (path: string) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
+  // A live run placed this table under a run folder while its image stayed at the corpus path, so the relative image link
+  // found no file and the engine left the table out (image-file-missing) with no mapping. Here: that placement, unmapped.
+  const leftOut = midEntries.find((entry) => entry.group === 'tables' && entry.class === null && entry.links.some(isImage))!;
+  const other = midEntries.find((entry) => entry.group === 'tables' && entry.class === null && entry.links.length === 0)!;
+  assert.ok(leftOut !== undefined && other !== undefined);
+  const placed = `eng/run-1/${leftOut.path.replace(/^eng\//, '')}`;
+  const dataRow = (line: string) => line.startsWith('|') && !line.replace(/^\||\|$/g, '').split('|').every((cell) => /^:?-+:?$/.test(cell.trim()));
+  assert.ok(textOf(leftOut.path).split('\n').some(dataRow), 'the left-out file has table data rows');
+  const otherText = textOf(other.path);
+
+  const documents = new Map<string, { id: string; content: string; trashed?: boolean }>([['doc-other', { id: 'doc-other', content: bodyOf(otherText) }]]);
+  const ids = new Map<string, { id: string }>([[other.path, { id: 'doc-other' }]]);
+  const omitted = new Map([[placed, 'lint: image-file-missing']]);
+  const kept = new Set<string>();
+  const files = new Map([[placed, textOf(leftOut.path)], [other.path, otherText]]);
+  const view = {
+    files,
+    hashes: new Map<string, string>(),
+    uploadsByHash: new Map<string, string>(),
+    ids,
+    documentUrlBase: 'https://linear.app/team/document',
+    documents,
+    omitted,
+    kept,
+  };
+  const ctx = {
+    live: { manifest: { seed: corpus.manifest.seed, files: midEntries }, tree: { paths: new Map([[placed, leftOut.path], [other.path, other.path]]) } },
+    observations: new Map<string, unknown>([[BEFORE_VIEW, view]]),
+  } as unknown as RunContext;
+  const verdict = async () => {
+    const actual = (await resolveSubject(ctx, `before.${cells.subject}`)).value;
+    const expected = (await resolveSubject(ctx, `before.${String(cells.expected)}`)).value;
+    return { holds: compare('same-as', actual, expected), paths: differingPaths(actual, expected), keys: [...(expected as Map<string, unknown>).keys()] };
+  };
+
+  // The left-out table is on neither side; the synchronized one is compared.
+  assert.deepEqual(await verdict(), { holds: true, paths: undefined, keys: [other.path] });
+
+  // Not left out by any run, the same unmapped table fails, naming it.
+  omitted.clear();
+  assert.deepEqual(await verdict(), { holds: false, paths: `differs at ${placed}`, keys: [other.path, placed].sort() });
+
+  // Kept without a document by the engine's own rule, or not a synchronized file at all, it is on neither side either.
+  kept.add(placed);
+  assert.deepEqual(await verdict(), { holds: true, paths: undefined, keys: [other.path] });
+  kept.clear();
+  const placedText = files.get(placed)!;
+  files.delete(placed);
+  assert.deepEqual(await verdict(), { holds: true, paths: undefined, keys: [other.path] });
+  files.set(placed, placedText);
+  omitted.set(placed, 'lint: image-file-missing');
+
+  // A mapped table whose document is in Linear's trash fails, as I1 counts it as no document.
+  documents.set('doc-other', { id: 'doc-other', content: bodyOf(otherText), trashed: true });
+  assert.deepEqual(await verdict(), { holds: false, paths: `differs at ${other.path}`, keys: [other.path] });
+
+  // A mapped table whose document is missing from Linear fails, naming it.
+  documents.clear();
+  assert.deepEqual(await verdict(), { holds: false, paths: `differs at ${other.path}`, keys: [other.path] });
 });
 
 it("expects L1-10's left-out rules among those the engine's plan reports for the mid slice", () => {
