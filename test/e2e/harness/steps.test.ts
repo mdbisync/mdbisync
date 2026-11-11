@@ -21,7 +21,7 @@ import { OwnershipLedger } from './ownership.ts';
 import { burst, burstDocuments, burstEditCounts, editCapacity, soak, soakEditCounts, type Actor, type SoakDriver } from './load.ts';
 import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
 import { blockedBySetupStop, EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
-import { bodyOf, compare, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { bodyOf, compare, editsFound, holdsToken, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, probedFixtures, readFixture } from '../../probe/bank.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
@@ -38,7 +38,7 @@ import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
 import { commitAsPerson, folderTeam, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
-import { environmentBlocker, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
+import { environmentBlocker, hadReplaceableRun, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
 import { prerequisiteErrors } from './workflow-files.ts';
 import { parse as parseYaml } from 'yaml';
@@ -426,6 +426,70 @@ describe('workflows', () => {
     assert.equal(ctx.engine.results.length, 4);
   });
 
+  it('count the runs the concurrency group cancelled when a newer run replaced them (L4-10)', async () => {
+    const l410 = scenarios.find((item) => item.id === 'L4-10')!;
+    const assertion = l410.checks.assertions.find((item) => item.subject === 'workflows.replacedPending')!;
+    // Three runs arrive: a push and two dispatches. `replaced`: a newer dispatch replaced the pending push run,
+    // which started no job. `stopped`: the push run was cancelled while its job ran, and the first dispatch was
+    // waiting when the second arrived. `apart`: nothing was cancelled and no job ran when a run arrived.
+    const parallel = async (mode: 'replaced' | 'stopped' | 'apart') => {
+      const { ctx, remoteGit } = await fakeRun();
+      ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+      fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report: (run) => ({ operation: 'sync', capturedTrackedTip: run.head_sha ?? null }) });
+      mkdirSync(ctx.live!.sandbox.cache.dir, { recursive: true });
+      await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+      const rest = ctx.live!.rest as unknown as { dispatchWorkflow: (workflow: string | number) => Promise<void>; workflowRuns: () => Promise<WorkflowRun[]>; runJobs: (id: number) => Promise<WorkflowJob[]> };
+      const cancelled = new Set<number>();
+      const dispatch = rest.dispatchWorkflow;
+      rest.dispatchWorkflow = async (workflow) => {
+        await dispatch(workflow);
+        for (const run of await rest.workflowRuns()) {
+          if (mode === 'apart' || run.event !== 'push' || run.path !== '.github/workflows/mdbisync.yml') continue;
+          run.conclusion = 'cancelled';
+          cancelled.add(run.id);
+        }
+      };
+      // The cancelled run's job ran from before the runs started until after the last one arrived.
+      const job = { ...jobWith('Sync', 4), started_at: new Date(Date.now() - 60_000).toISOString(), completed_at: new Date(Date.now() + 60_000).toISOString() };
+      rest.runJobs = async (id) => (mode === 'stopped' && cancelled.has(id) ? [job] : []);
+      const step = STEP_ACTIONS['run.workflow-parallel']!(ctx, { events: ['push', 'workflow_dispatch'], replacePending: true });
+      if (mode === 'apart') {
+        await assert.rejects(step, (error: Error) => !(error instanceof ProductError) && /the runs did not overlap enough/.test(error.message));
+        return ctx;
+      }
+      await step;
+      assert.equal(ctx.engine.results.length, 2, 'only the runs that were not cancelled are settled');
+      return ctx;
+    };
+    // A pending run the group replaced started no job: it counts, and L4-10's assertion holds.
+    const replaced = await parallel('replaced');
+    assert.deepEqual(await resolveSubject(replaced, 'workflows.replacedPending'), { known: true, value: 1 });
+    assert.equal((await evaluateAssertion(replaced, assertion)).holds, true);
+    // A run cancelled while its job ran (a timeout, a lost runner) was not a pending run replaced by the group.
+    const stopped = await parallel('stopped');
+    assert.deepEqual(await resolveSubject(stopped, 'workflows.replacedPending'), { known: true, value: 0 });
+    assert.equal((await evaluateAssertion(stopped, assertion)).holds, false);
+    // Runs that never overlapped leave no run to replace: the harness says so instead of failing the group.
+    const apart = await parallel('apart');
+    assert.equal(apart.observations.has('workflows.replacedPending'), false);
+  });
+
+  it('tell a race that could replace a pending run from runs that only queued one after another', () => {
+    const at = (second: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, second)).toISOString();
+    const ms = (second: number) => Date.parse(at(second));
+    const run = (id: number, created: number) => ({ id, created_at: at(created) });
+    // The scheduled job runs 0 to 10; the dispatch arrives at 5 and runs 10 to 20; the push arrives at 15.
+    // Each later run waited alone, so a working group cancels nothing: not a race that proves the group.
+    const queued = [run(1, 0), run(2, 5), run(3, 15)];
+    const queuedSpans = [{ runId: 1, started: ms(0), completed: ms(10) }, { runId: 2, started: ms(10), completed: ms(20) }, { runId: 3, started: ms(20), completed: ms(30) }];
+    assert.equal(hadReplaceableRun(queued, queuedSpans), false);
+    // The push arrives at 7, while the scheduled job runs and the dispatch waits: the group can replace the dispatch.
+    const raced = [run(1, 0), run(2, 5), run(3, 7)];
+    assert.equal(hadReplaceableRun(raced, [{ runId: 1, started: ms(0), completed: ms(10) }, { runId: 3, started: ms(10), completed: ms(20) }]), true);
+    // Two runs alone never make a replacement possible.
+    assert.equal(hadReplaceableRun(raced.slice(0, 2), [{ runId: 1, started: ms(0), completed: ms(10) }]), false);
+  });
+
   it('wait for the push run that the sync pull request\'s merge starts before the checks, as a deployment runs it', async () => {
     const { ctx, remoteGit } = await fakeRun();
     ctx.scenario = { ...ctx.scenario, mode: 'actions' };
@@ -609,6 +673,96 @@ describe('load', () => {
     await assert.rejects(runStep(ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 0 } }), ProductError);
     assert.equal(ctx.edits.length, 0);
     assert.equal(ctx.engine.results.length, 0);
+  });
+
+  it('reports the burst\'s edits made and found on each side, which L4-12 requires to be equal', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const path = 'docs/handbook/start.md';
+    const document = linear.documents.get(ids[path]!.id)!;
+    // An edit before the burst is not the burst's: only the recorded burst edits are counted.
+    ctx.edits.push({ side: 'git', path, token: 'aaaaaa-before' });
+    const burstEdits = [
+      { side: 'linear' as const, path, token: 'aaaaaa-0001' },
+      { side: 'linear' as const, path, token: 'aaaaaa-0002' },
+      { side: 'git' as const, path, token: 'aaaaaa-0003' },
+    ];
+    ctx.edits.push(...burstEdits);
+    ctx.observations.set('burst.edits', burstEdits);
+    const git = await ctx.person();
+    const publish = async (text: string) => {
+      writeFileSync(join(git.dir, path), text);
+      await git.run(['add', '--', path]);
+      await git.run(['commit', '--quiet', '-m', 'Update the review date']);
+      await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    };
+    // Git has the first and the third edit; Linear has the first two.
+    await publish('# Start\n\nNote aaaaaa-0001.\n\nNote aaaaaa-0003.\n');
+    document.content = 'Note aaaaaa-0001.\n\nNote aaaaaa-0002.\n';
+    refreshView(ctx);
+    const l412 = scenarios.find((item) => item.id === 'L4-12')!;
+    const counted = l412.checks.assertions.filter((item) => item.subject.startsWith('report.burstEdits'));
+    assert.deepEqual(counted.map((item) => item.subject), ['report.burstEditsMade', 'report.burstEditsFoundInGit', 'report.burstEditsFoundInLinear']);
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsMade'), { known: true, value: 3 });
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsFoundInGit'), { known: true, value: 2 });
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsFoundInLinear'), { known: true, value: 2 });
+    assert.deepEqual((ctx.observations.get('metrics') as Record<string, unknown>).burstEdits, { made: 3, foundInGit: 2, foundInLinear: 2 }, 'the report keeps the counts');
+    for (const assertion of counted.slice(1)) assert.equal((await evaluateAssertion(ctx, assertion)).holds, false, assertion.subject);
+    // Once both sides hold every burst edit, the counts are equal.
+    await publish('# Start\n\nNote aaaaaa-0001.\n\nNote aaaaaa-0002.\n\nNote aaaaaa-0003.\n');
+    document.content = 'Note aaaaaa-0001.\n\nNote aaaaaa-0002.\n\nNote aaaaaa-0003.\n';
+    refreshView(ctx);
+    for (const assertion of counted.slice(1)) assert.equal((await evaluateAssertion(ctx, assertion)).holds, true, assertion.subject);
+    // A trashed document's text is not found in Linear.
+    document.trashed = true;
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsFoundInLinear'), { known: true, value: 0 });
+  });
+
+  it('records the burst\'s own edits for its report, also when the burst stops early', async () => {
+    const { ctx } = await fakeRun();
+    ctx.edits.push({ side: 'git', path: 'a.md', token: 'aaaaaa-before' });
+    await runStep(ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 0 } });
+    assert.deepEqual(ctx.observations.get('burst.edits'), [], 'a burst of no time made no edits, and the earlier edit is not its own');
+    // A short real burst: every edit it reports is recorded once, each on the side that made it.
+    // (The fake sandbox's sync does not carry edits across; the counting test above covers the found counts.)
+    const full = (await fakeRun()).ctx;
+    await runStep(full, { kind: 'run', action: 'burst', args: { durationSeconds: 2, linearEditsPerMinute: 60, gitPushesPerMinute: 30 } });
+    const made = full.observations.get('burst.edits') as Array<{ side: string; token: string }>;
+    assert.deepEqual(made.map((edit) => edit.side).sort(), ['git', 'linear', 'linear']);
+    assert.equal(new Set(made.map((edit) => edit.token)).size, 3);
+    assert.equal(made.length, Number(full.observations.get('report.generatedLinearEdits')) + Number(full.observations.get('report.generatedGitPushes')));
+    assert.deepEqual(await resolveSubject(full, 'report.burstEditsMade'), { known: true, value: 3 });
+    // The second Linear edit fails: the burst throws, and the edit that landed before is still recorded as its own.
+    const failing = (await fakeRun()).ctx;
+    failing.edits.push({ side: 'git', path: 'a.md', token: 'aaaaaa-before' });
+    for (const editor of Object.values(failing.live!.editors)) {
+      const client = editor as unknown as { updateDocument: (...args: unknown[]) => Promise<unknown> };
+      const update = client.updateDocument.bind(client);
+      client.updateDocument = async (...args) => {
+        if (failing.edits.length > 1) throw new Error('the editor lost its connection');
+        return update(...args);
+      };
+    }
+    await assert.rejects(runStep(failing, { kind: 'run', action: 'burst', args: { durationSeconds: 2, linearEditsPerMinute: 60, gitPushesPerMinute: 0 } }), /lost its connection/);
+    const recorded = failing.observations.get('burst.edits') as Array<{ side: string; token: string }>;
+    assert.deepEqual(recorded.map((edit) => edit.side), ['linear'], 'the burst recorded the edit that landed, although it threw');
+    // A failed step skips the checks, so the report's metrics already say where the sides stand.
+    const metrics = (failing.observations.get('metrics') as Record<string, unknown>).burstEdits as Record<string, unknown>;
+    assert.equal(metrics.made, 1);
+    assert.equal(metrics.afterQuiet, false);
+    assert.equal(metrics.foundInLinear, 1, 'the edit that landed is in Linear');
+    assert.equal(typeof metrics.foundInGit, 'number');
+  });
+
+  it('match an edit token only as a whole token, so a lost edit is not found inside a longer token', () => {
+    assert.equal(holdsToken('Note aaaaaa-1000.', 'aaaaaa-100'), false);
+    assert.equal(holdsToken('Note aaaaaa-1000. Note aaaaaa-100.', 'aaaaaa-100'), true);
+    assert.equal(holdsToken('Note aaaaaa-100', 'aaaaaa-100'), true, 'at the end of the text');
+    const sides = { files: new Map([['a.md', 'Note aaaaaa-1000.\n']]), documents: new Map([['d', { content: 'Note aaaaaa-1000.\n', trashed: false } as LinearDocument]]) };
+    const lost = { side: 'git' as const, path: 'a.md', token: 'aaaaaa-100' };
+    assert.deepEqual(editsFound([lost], sides), { git: 0, linear: 0 });
+    const ctx = { edits: [lost], observations: new Map() } as unknown as RunContext;
+    assert.deepEqual(lostEdits(ctx, sides), [lost]);
   });
 
   it('runs a soak with hourly checks and a repeatable schedule', async () => {

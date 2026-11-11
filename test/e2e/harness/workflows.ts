@@ -306,6 +306,22 @@ export function maxOverlap(spans: readonly JobSpan[]): number {
   return max;
 }
 
+/**
+ * Whether the runs set up a replacement: when some run arrived, another run's
+ * job was running and a third run was already waiting (created, its job not
+ * started). Only then can a concurrency group replace a pending run. Runs
+ * that arrive one after another, each waiting alone, never give it the chance.
+ */
+export function hadReplaceableRun(runs: readonly Pick<WorkflowRun, 'id' | 'created_at'>[], spans: readonly JobSpan[]): boolean {
+  const firstStart = (id: number) => Math.min(...spans.filter((span) => span.runId === id).map((span) => span.started));
+  return runs.some((arriving) => {
+    const at = Date.parse(arriving.created_at);
+    const active = spans.some((span) => span.runId !== arriving.id && span.started <= at && span.completed > at);
+    const waiting = runs.some((other) => other.id !== arriving.id && Date.parse(other.created_at) <= at && firstStart(other.id) > at);
+    return active && waiting;
+  });
+}
+
 /** Whether a GitHub login is a GitHub App's bot account. */
 export function isAppBot(login: string | null | undefined): boolean {
   return typeof login === 'string' && login.endsWith('[bot]');

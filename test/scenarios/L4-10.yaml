@@ -65,6 +65,11 @@
         "expected": 1
       },
       {
+        "subject": "workflows.replacedPending",
+        "operator": "at-least",
+        "expected": 1
+      },
+      {
         "subject": "documents.allEditsPreserved",
         "operator": "equal",
         "expected": true

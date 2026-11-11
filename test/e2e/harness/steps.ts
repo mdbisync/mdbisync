@@ -23,7 +23,7 @@ import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
-import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
+import { INVARIANT_CHECKS, editsFound, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, waitForCheckCompleted, CHECK_WAIT_MS } from './check-fault.ts';
 import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
@@ -49,7 +49,7 @@ import {
   commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import type { WorkflowRun } from './github.ts';
-import { environmentBlocker, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun } from './workflows.ts';
+import { environmentBlocker, hadReplaceableRun, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun } from './workflows.ts';
 import { CANARY_FIXTURE, canaryFacts } from './security-canary.ts';
 import { prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 
@@ -751,7 +751,18 @@ const RUN: Record<string, Executor> = {
       runs.push(run);
       recordWorkflowRun(ctx, run);
     }
-    ctx.observations.set('workflows.maxActiveInGroup', maxOverlap(await jobSpans(world.rest, runs)));
+    const spans = await jobSpans(world.rest, runs);
+    ctx.observations.set('workflows.maxActiveInGroup', maxOverlap(spans));
+    // With one runner, jobs never overlap even without the group. Only the group cancels a pending run that a newer
+    // one replaced: such a run started no job, unlike a run cancelled while it ran (a timeout or a lost runner).
+    const started = new Set(spans.map((span) => span.runId));
+    const replaced = runs.filter((run) => run.conclusion === 'cancelled' && !started.has(run.id)).length;
+    // A replacement needs, when some run arrived, a job running and another run already waiting. Without that
+    // the scenario did not set up its race, and a count of zero says nothing about the group.
+    if (replaced === 0 && !hadReplaceableRun(runs, spans)) {
+      throw new Error('the runs did not overlap enough: no run arrived while one job ran and another run waited, so the group had nothing to replace');
+    }
+    ctx.observations.set('workflows.replacedPending', replaced);
     for (const run of runs) {
       if (run.conclusion === 'cancelled') continue; // replaced by a newer run of the group
       await settleWorkflowRun(ctx, run, 'sync');
@@ -795,7 +806,28 @@ const RUN: Record<string, Executor> = {
     };
     const counts = burstEditCounts(options);
     const documents = burstDocuments(await loadCandidates(ctx, 'burst'), options, lastLoadToken(ctx, counts.linear, counts.git));
-    const result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), { ...options, documents });
+    const from = ctx.edits.length;
+    let result;
+    try {
+      result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), { ...options, documents });
+    } catch (error) {
+      // A failed step skips the checks, so the report keeps what the burst left: the edits that landed and,
+      // as far as the sides can still be read, where each side stands (not after quiet).
+      const made = ctx.edits.slice(from);
+      ctx.observations.set('burst.edits', made);
+      const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+      metrics.burstEdits = { made: made.length, afterQuiet: false };
+      try {
+        const found = editsFound(made, await readSides(ctx));
+        metrics.burstEdits = { made: made.length, foundInGit: found.git, foundInLinear: found.linear, afterQuiet: false };
+      } catch (readError) {
+        ctx.log(`burst: the sides could not be read after the burst stopped: ${(readError as Error).message}`);
+      }
+      ctx.observations.set('metrics', metrics);
+      throw error;
+    }
+    // The edits the burst made, each recorded once it landed: the report counts them on both sides after quiet.
+    ctx.observations.set('burst.edits', ctx.edits.slice(from));
     ctx.observations.set('report.generatedLinearEdits', result.linearEdits);
     ctx.observations.set('report.generatedGitPushes', result.gitPushes);
   },

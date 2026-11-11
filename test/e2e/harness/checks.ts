@@ -18,6 +18,7 @@ import type { EngineResult } from './engine.ts';
 import { ownedDocuments } from './ownership.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
+import { RUN_ID_PATTERN } from './isolation.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
 import { encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
 
@@ -774,18 +775,46 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   },
 };
 
+/** All tracked files' text, and all documents' text that are not trashed: where an edit's token is looked for. */
+function sideTexts(sides: Pick<Sides, 'files' | 'documents'>): { gitText: string; linearText: string } {
+  return {
+    gitText: [...sides.files.values()].join('\n'),
+    linearText: [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n'),
+  };
+}
+
+/**
+ * Whether the text holds this edit token as a whole token. A token's sequence
+ * number grows past its padding (`<run>-999`, then `<run>-1000`), so `<run>-100`
+ * is a prefix of `<run>-1000`: a digit right after a match is another token.
+ */
+export function holdsToken(text: string, token: string): boolean {
+  for (let at = text.indexOf(token); at !== -1; at = text.indexOf(token, at + 1)) {
+    if (!/[0-9]/.test(text.charAt(at + token.length))) return true;
+  }
+  return false;
+}
+
+/** How many of these edits each side shows, counted on its own: the burst's report of edits found (L4-12). */
+export function editsFound(edits: RunContext['edits'], sides: Pick<Sides, 'files' | 'documents'>): { git: number; linear: number } {
+  const { gitText, linearText } = sideTexts(sides);
+  return {
+    git: edits.filter((edit) => holdsToken(gitText, edit.token)).length,
+    linear: edits.filter((edit) => holdsToken(linearText, edit.token)).length,
+  };
+}
+
 /** Edits that are not on both sides (or, for a removal, still on a side). */
 export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documents'>): RunContext['edits'] {
-  const gitText = [...sides.files.values()].join('\n');
-  const linearText = [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n');
+  const { gitText, linearText } = sideTexts(sides);
   return ctx.edits.filter((edit) => {
     if (edit.retired === true) return false;
     // An explicit user deletion supersedes earlier edits only after both sides
     // show that deletion. A restore removes this intent and checks the edits again.
     const deletedId = (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined)?.get(edit.path);
     if (deletedId !== undefined && (ctx.observations.get('linear.editsBeforeTrash') as Map<string, Set<string>> | undefined)?.get(edit.path)?.has(edit.token) === true && !sides.files.has(edit.path) && sides.documents.get(deletedId)?.trashed === true) return false;
-    const inGit = gitText.includes(edit.token);
-    const inLinear = linearText.includes(edit.token);
+    const inGit = holdsToken(gitText, edit.token);
+    const inLinear = holdsToken(linearText, edit.token);
     return edit.removal === true ? inGit || inLinear : !(inGit && inLinear);
   });
 }
@@ -921,24 +950,40 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
   return Object.fromEntries(refs.filter((ref) => ref.runId === ctx.names.runId && ref.ref !== `refs/heads/${ctx.names.trackedBranch}`).map((ref) => [ref.ref, ref.oid]));
 }
 
-/** Stable solo/parallel evidence. Only known resource identities are normalized;
- * document text is hashed after its own links are resolved to corpus paths. */
+/** The placeholder that stands for the run's own id in isolation evidence. */
+export const RUN_ID_PLACEHOLDER = '<run>';
+
+/** A function that replaces every standalone occurrence of the run's own id with the placeholder.
+ * An id inside a longer word (a commit hash, an upload key, `key_<id>`) is left alone, and so is any other run's id. */
+export function withoutRunId(runId: string): (text: string) => string {
+  if (!RUN_ID_PATTERN.test(runId)) throw new Error(`run id must be six hex characters: ${runId}`);
+  const own = new RegExp(`(?<![0-9A-Za-z_])${runId}(?![0-9A-Za-z_])`, 'g');
+  return (text) => text.replace(own, RUN_ID_PLACEHOLDER);
+}
+
+/** Stable solo/parallel evidence. Only known resource identities are normalized:
+ * document text is hashed after its own links are resolved to corpus paths, and
+ * the run's own id becomes a placeholder in paths, titles and text, so two runs
+ * that differ only by run id give the same snapshot. */
 export function isolationSnapshot(ctx: RunContext, sides: Sides): unknown {
   const world = ctx.live;
   if (world === null) throw new Error('isolation evidence needs a live world');
+  const own = withoutRunId(ctx.names.runId);
   const source = (path: string) => world.tree.paths.get(path) ?? path;
   const ids = new Map([...sides.ids].map(([path, entry]) => [source(path), entry]));
   const uploads = new Map([...sides.uploads].map(([url, path]) => [url, source(path)]));
   const projects = new Map([...world.projects].map(([placeholder, project]) => [project.id, placeholder]));
   const teams = new Map([...world.teams].map(([key, team]) => [team.id, key]));
-  return [...sides.files.keys()].sort().map((path) => {
+  // Ordered by the normalized path, which is what two runs compare.
+  return [...sides.files.keys()].map((path) => {
     const id = sides.ids.get(path)?.id;
     const doc = id === undefined ? undefined : sides.documents.get(id);
-    if (doc === undefined) return { path: source(path), document: null };
+    if (doc === undefined) return { path: own(source(path)), document: null };
     const content = gitLinks(doc.content ?? '', source(path), { ids, uploads, documentUrlBase: sides.documentUrlBase });
-    return { path: source(path), title: doc.projectId === null && doc.title.startsWith(ctx.names.teamZonePrefix) ? doc.title.slice(ctx.names.teamZonePrefix.length) : doc.title,
+    const title = doc.projectId === null && doc.title.startsWith(ctx.names.teamZonePrefix) ? doc.title.slice(ctx.names.teamZonePrefix.length) : doc.title;
+    return { path: own(source(path)), title: own(title),
       place: doc.projectId === null ? teams.get(doc.teamId ?? '') : projects.get(doc.projectId), state: documentState(doc),
-      contentHash: createHash('sha256').update(content).digest('hex') };
+      contentHash: createHash('sha256').update(own(content)).digest('hex') };
   }).sort((a, b) => a.path.localeCompare(b.path));
 }
 
