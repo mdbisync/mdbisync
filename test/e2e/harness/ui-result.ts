@@ -318,6 +318,7 @@ function addWaitingAppRequests(runDir: string, requests: number): void {
 function cleanClones(runDir: string): void {
   rmSync(join(runDir, 'person'), { recursive: true, force: true });
   rmSync(join(runDir, 'engine'), { recursive: true, force: true });
+  rmSync(join(runDir, 'hook-npm'), { recursive: true, force: true });
 }
 
 /** The harness run's report and the index of a run's result in it; throws when the report has none. */

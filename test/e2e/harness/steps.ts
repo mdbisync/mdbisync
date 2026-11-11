@@ -35,7 +35,7 @@ import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readIn
 import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, runFailure } from './results.ts';
-import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
+import { commitStaged, HARNESS, repositoryHookEnv, installHooks, personCommit } from './sandbox.ts';
 import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG, readHookConfig } from '../../../src/setup/hooks.ts';
 import { validateSha } from '../../../src/release/package.ts';
 import { parse, stringify } from 'yaml';
@@ -1234,7 +1234,7 @@ const GIT: Record<string, Executor> = {
     writeFileSync(join(scratch, 'page.md'), fixableSample().text);
     spawnSync('git', ['add', '--all'], { cwd: scratch });
     // pre-commit fetches the pinned hook and builds its environment now, with no harness secret in sight.
-    if (source === 'published') await installHooks(new Git(scratch), { signal: ctx.signal });
+    if (source === 'published') await installHooks(new Git(scratch), { signal: ctx.signal, npmDir: join(ctx.runDir, 'hook-npm') });
     // What the scratch repository holds now, not what was asked for: its configuration names the released hook, or not.
     ctx.observations.set('hook.source', hookSourceOf(readFileSync(join(scratch, PRE_COMMIT_CONFIG), 'utf8')));
   },
@@ -1247,7 +1247,7 @@ const GIT: Record<string, Executor> = {
  */
 async function runHooks(cwd: string, signal: AbortSignal): Promise<{ status: number; output: string }> {
   try {
-    const { stdout, stderr } = await execFileAsync('pre-commit', ['run', '--all-files'], { cwd, env: hookEnv(), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: PRE_COMMIT_TIMEOUT_MS, signal });
+    const { stdout, stderr } = await execFileAsync('pre-commit', ['run', '--all-files'], { cwd, env: repositoryHookEnv(cwd), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: PRE_COMMIT_TIMEOUT_MS, signal });
     return { status: 0, output: `${stdout}${stderr}` };
   } catch (error) {
     const failure = error as { code?: unknown; killed?: boolean; name?: unknown; stdout?: string; stderr?: string };

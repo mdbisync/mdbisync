@@ -682,7 +682,7 @@ export function createRunContext(
       if (ctx.live === null) throw new Error('offline scenarios have no repository');
       if (hooksInstalled) return;
       // No sandbox credentials: npm runs while the public hooks install.
-      await installHooks(await ctx.person(), { signal: ctx.signal });
+      await installHooks(await ctx.person(), { signal: ctx.signal, npmDir: join(runDir, 'hook-npm') });
       hooksInstalled = true;
     },
     async engineClone() {
@@ -926,6 +926,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     if (cleanupOutcome.ok && !heldForUi && !setupStuck) registration.done();
     rmSync(join(runDir, 'person'), { recursive: true, force: true });
     rmSync(join(runDir, 'engine'), { recursive: true, force: true });
+    if (!heldForUi && !setupStuck) rmSync(join(runDir, 'hook-npm'), { recursive: true, force: true });
   }
   const outcome = classify(error, deps.expectedRed.has(scenario.id));
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);

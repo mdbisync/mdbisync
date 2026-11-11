@@ -1545,7 +1545,11 @@ describe('the scratch-hook scenario (L0-08)', () => {
     // The corpus generator's own configuration, as the sandbox's corpus holds it.
     const config = preCommitConfig(rev);
     const ctx = await offlineRun(config);
-    await withEnv({ ...SECRETS, HOME: home, PRE_COMMIT_HOME: join(root, 'pre-commit') }, async () => {
+    // This fixture's released hook uses system language, so no real npm install is needed.
+    const bin = join(root, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho 11.16.0\n', { mode: 0o755 });
+    await withEnv({ ...SECRETS, HOME: home, PRE_COMMIT_HOME: join(root, 'pre-commit'), PATH: `${bin}:${process.env.PATH ?? ''}` }, async () => {
       for (const step of L0_08.steps) await runStep(ctx, step);
     });
     const scratch = join(ctx.runDir, 'scratch');
