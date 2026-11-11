@@ -1,12 +1,14 @@
-// Check runs belong to Actions: the harness only writes the branch marker
-// and reads the resulting check. It never needs checks:write.
+// Check runs belong to Actions: the harness writes the branch marker and
+// reads the resulting check. It never needs checks:write. A person's
+// credential (never the sync App's) reruns a failed check and cancels a
+// pending marker job that would keep the sandbox's single runner busy.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Git, resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import type { RunContext } from './context.ts';
-import { SandboxRest, hostToken } from './github.ts';
+import { GitHubError, SandboxRest, hostToken } from './github.ts';
 import { targetPath } from './step-helpers.ts';
 import { nextToken } from './context.ts';
 import { EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
@@ -38,13 +40,83 @@ export async function waitForCheck(
   }
 }
 
-export async function faultChecks(ctx: RunContext, args: Record<string, unknown>): Promise<void> {
+/** A `pending` marker job sleeps on the sandbox's single runner until its head moves on. */
+interface PendingHead { branch: string; sha: string }
+const PENDING_HEADS = 'checks.pendingHeads';
+
+type WorkflowRun = { id: number; head_sha: string; path: string; status: string; conclusion: string | null };
+
+async function markerRuns(person: SandboxRest, sha: string): Promise<WorkflowRun[]> {
+  const { workflow_runs: runs } = await person.request<{ workflow_runs: WorkflowRun[] }>(
+    'GET', `/actions/workflows/${encodeURIComponent(CHECK_WORKFLOW_PATH.split('/').at(-1)!)}/runs?head_sha=${sha}&per_page=100`,
+  );
+  return runs.filter((run) => run.head_sha === sha && run.path === CHECK_WORKFLOW_PATH);
+}
+
+/**
+ * Cancel the marker workflow's unfinished runs on these pending heads and wait
+ * until GitHub reports them completed, so the runner is free for the next check.
+ * Returns how many cancels GitHub accepted.
+ */
+export async function cancelPendingRuns(
+  ctx: RunContext, person: SandboxRest, shas: string[],
+  options: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<number> {
+  const deadline = Date.now() + (options.timeoutMs ?? 5 * 60_000);
+  const requested = new Set<number>();
+  let cancelled = 0;
+  for (const sha of shas) {
+    for (;;) {
+      ctx.signal.throwIfAborted();
+      const open = (await markerRuns(person, sha)).filter((run) => run.status !== 'completed');
+      if (open.length === 0) break;
+      for (const run of open.filter((run) => !requested.has(run.id))) {
+        try {
+          await person.request('POST', `/actions/runs/${run.id}/cancel`);
+          cancelled += 1;
+        } catch (error) {
+          // 409: the run completed between the read and the cancel.
+          if (!(error instanceof GitHubError && error.status === 409)) throw error;
+        }
+        requested.add(run.id);
+      }
+      if (Date.now() >= deadline) throw new EnvBlockedError('the pending marker run did not finish within 5 minutes after its cancel');
+      await sleep(options.pollMs ?? 2_000, undefined, { signal: ctx.signal });
+    }
+  }
+  return cancelled;
+}
+
+/** A person's REST client for Actions writes; the sync App's token never cancels or reruns a check. */
+export function personRest(ctx: RunContext, purpose: string): SandboxRest {
+  const world = live(ctx);
+  const [owner, repo] = world.repository.split('/');
+  if (!owner || !repo) throw new Error('invalid sandbox repository');
+  const token = hostToken({ owner, repo });
+  if (token === null || token === world.githubToken) throw new EnvBlockedError(`a separate person credential with Actions write permission is required to ${purpose}`);
+  return new SandboxRest({ owner, repo }, token);
+}
+
+export async function faultChecks(
+  ctx: RunContext, args: Record<string, unknown>,
+  actionsPerson: () => SandboxRest = () => personRest(ctx, 'cancel the pending check'),
+): Promise<void> {
   const state = args.status;
   if (state !== 'pending' && state !== 'failed' && state !== 'passed') throw new Error('invalid check status');
   if (args.name !== undefined && args.name !== CHECK_NAME) throw new Error(`the marker workflow provides only the ${CHECK_NAME} check`);
   if (args.lane !== undefined && args.lane !== 'normal' && args.lane !== 'suspended' && args.lane !== 'tracked') throw new Error('invalid check lane');
   const branch = args.lane === 'suspended' ? suspendedBranch(resolveStateConfig({trackedBranch:ctx.names.trackedBranch,syncBranch:ctx.names.syncBranch,refPrefix:ctx.names.refPrefix})) : args.lane === 'tracked' ? ctx.names.trackedBranch : ctx.names.syncBranch;
   const world = live(ctx);
+  // A new head on the same branch cancels its pending job (the workflow's
+  // concurrency group); a fault on another lane would queue behind it.
+  const pending = (ctx.observations.get(PENDING_HEADS) as PendingHead[] | undefined) ?? [];
+  const elsewhere = pending.filter((head) => head.branch !== branch);
+  if (elsewhere.length > 0) {
+    ctx.log(`cancelling the pending ${CHECK_NAME} run on ${elsewhere.map((head) => head.branch).join(', ')}`);
+    const cancelled = await cancelPendingRuns(ctx, actionsPerson(), elsewhere.map((head) => head.sha));
+    ctx.observations.set('checks.cancelledPending', Number(ctx.observations.get('checks.cancelledPending') ?? 0) + cancelled);
+  }
+  ctx.observations.set(PENDING_HEADS, []);
   const person = await ctx.person();
   const ref = `refs/heads/${branch}`;
   const refs = await world.sandbox.runRefs();
@@ -89,17 +161,13 @@ export async function faultChecks(ctx: RunContext, args: Record<string, unknown>
   }
   ctx.log(`waiting up to 5 minutes for ${CHECK_NAME} to reach ${state}`);
   await waitForCheck(world.rest, sha, state, { signal: ctx.signal });
+  if (state === 'pending') ctx.observations.set(PENDING_HEADS, [{ branch, sha } satisfies PendingHead]);
   ctx.observations.set('fault.checks', { name: CHECK_NAME, state, sha });
 }
 
 /** A person's rerun uses a host credential, never the sync App's token. */
 export async function rerunSuspendedCheck(ctx: RunContext): Promise<void> {
-  const world = live(ctx);
-  const [owner, repo] = world.repository.split('/');
-  if (!owner || !repo) throw new Error('invalid sandbox repository');
-  const token = hostToken({ owner, repo });
-  if (token === null || token === world.githubToken) throw new EnvBlockedError('a separate person credential with Actions write permission is required to rerun the check');
-  await rerunCheckAsPerson(ctx, new SandboxRest({ owner, repo }, token));
+  await rerunCheckAsPerson(ctx, personRest(ctx, 'rerun the check'));
 }
 
 /** The caller supplies a separate person's REST client; the App client only reads. */
@@ -114,13 +182,10 @@ export async function rerunCheckAsPerson(ctx: RunContext, person: SandboxRest): 
   // Workflow reads need Actions permission too: keep them on the person's
   // credential, and allow the workflow to finish after its failed check job.
   const deadline = Date.now() + 5 * 60_000;
-  let run: { id: number; head_sha: string; path: string; status: string; conclusion: string | null } | undefined;
+  let run: WorkflowRun | undefined;
   for (;;) {
     ctx.signal.throwIfAborted();
-    const { workflow_runs: runs } = await person.request<{ workflow_runs: Array<{ id: number; head_sha: string; path: string; status: string; conclusion: string | null }> }>(
-      'GET', `/actions/workflows/${encodeURIComponent(CHECK_WORKFLOW_PATH.split('/').at(-1)!)}/runs?head_sha=${sha}&per_page=100`,
-    );
-    run = runs.find((candidate) => candidate.head_sha === sha && candidate.path === CHECK_WORKFLOW_PATH && candidate.status === 'completed' && candidate.conclusion === 'failure');
+    run = (await markerRuns(person, sha)).find((candidate) => candidate.status === 'completed' && candidate.conclusion === 'failure');
     if (run?.status === 'completed') break;
     if (Date.now() >= deadline) throw new EnvBlockedError('the marker workflow did not complete within 5 minutes after its failed check');
     await sleep(2_000, undefined, { signal: ctx.signal });

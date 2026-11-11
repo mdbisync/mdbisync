@@ -11,7 +11,7 @@ import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs, budgetHolds } from './checks.ts';
-import { rerunCheckAsPerson } from './check-fault.ts';
+import { faultChecks, rerunCheckAsPerson } from './check-fault.ts';
 import type { RunContext } from './context.ts';
 import { engineInputs, type EngineResult } from './engine.ts';
 import { SandboxRest } from './github.ts';
@@ -36,6 +36,9 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
       world.github.checks = new Map();
       const attempts = new Map<string, number>();
       const checks = new Map<string, FakeCheck>();
+      // The sandbox has one runner: a sleeping `pending` job holds it until it is cancelled.
+      const markerRuns = new Map<number, { id: number; head_sha: string; path: string; status: string; conclusion: string | null }>();
+      const holder = () => [...markerRuns.values()].find((run) => run.status !== 'completed');
       const show = async (sha: string, path: string) => {
         const result = await fixture.remote.run(['show', `${sha}:${path}`], { okCodes: [0, 128] });
         return result.code === 0 ? result.stdout.toString('utf8') : null;
@@ -48,7 +51,11 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           const target = (await show(sha, '.harness-check-target'))?.trim();
           const passed = marker === undefined || await show(sha, '.harness-check-fixed') !== null || (marker === 'flaky' && (attempts.get(sha) ?? 1) > 1) || (marker === 'document' && target !== undefined && (await show(sha, target))?.includes('Approved for review.'));
           const check = checks.get(sha) ?? { name: 'format', status: 'completed' };
-          Object.assign(check, { status: marker === 'pending' && !passed ? 'queued' : 'completed', conclusion: passed ? 'success' : 'failure', annotations: (target === undefined ? [] : [target]).map((path) => ({ path, start_line: 1, title: 'Review required', message: 'Check the review status.' })) });
+          const sleeping = marker === 'pending' && !passed;
+          if (sleeping && ![...markerRuns.values()].some((run) => run.head_sha === sha)) markerRuns.set(100 + markerRuns.size, { id: 100 + markerRuns.size, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null });
+          const own = [...markerRuns.values()].find((run) => run.head_sha === sha);
+          const blocked = holder() !== undefined && holder()!.head_sha !== sha;
+          Object.assign(check, { status: (sleeping && own?.status !== 'completed') || blocked ? 'queued' : 'completed', conclusion: own?.conclusion === 'cancelled' ? 'cancelled' : passed ? 'success' : 'failure', annotations: (target === undefined ? [] : [target]).map((path) => ({ path, start_line: 1, title: 'Review required', message: 'Check the review status.' })) });
           checks.set(sha, check);
           world.github.checks!.set(sha, [check]);
           const response = await transport(String(input).replace('https://api.github.com', GITHUB_API), init);
@@ -59,7 +66,16 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         if (url.includes('/actions/workflows/harness-check.yml/runs')) {
           assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
           const sha = new URL(url).searchParams.get('head_sha')!;
-          return Response.json({ workflow_runs: [{ id: 1, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'completed', conclusion: 'failure' }] });
+          const held = [...markerRuns.values()].filter((run) => run.head_sha === sha);
+          return Response.json({ workflow_runs: held.length > 0 ? held : [{ id: 1, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'completed', conclusion: 'failure' }] });
+        }
+        const cancel = /\/actions\/runs\/(\d+)\/cancel$/.exec(url);
+        if (cancel !== null) {
+          assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
+          const run = markerRuns.get(Number(cancel[1]));
+          if (run === undefined) return new Response(null, { status: 404 });
+          Object.assign(run, { status: 'completed', conclusion: 'cancelled' });
+          return new Response(null, { status: 202 });
         }
         if (url.endsWith('/actions/runs/1/rerun-failed-jobs')) {
           assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
@@ -175,10 +191,15 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           } else await sync('sync', step.args);
         } else if (step.action === 'rerun-suspended-check') {
           await rerunCheckAsPerson(ctx, new SandboxRest({ owner: 'owner', repo: 'repo' }, 'person-token', fetchImpl));
+        } else if (step.kind === 'fault' && step.action === 'checks') {
+          await faultChecks(ctx, step.args, () => new SandboxRest({ owner: 'owner', repo: 'repo' }, 'person-token', fetchImpl));
         } else await runStep(ctx, step);
         history.push(await snapshotRefs(ctx));
         refreshView(ctx);
       }
+      // L5-27: the tracked-lane check ran only after a person cancelled the sleeping pending job.
+      if (scenario.id === 'L5-27') assert.equal(ctx.observations.get('checks.cancelledPending'), 1);
+      assert.equal(holder(), undefined, 'a pending marker job still holds the runner');
       // I6 uses the same in-process engine transport as the scenario's own runs.
       const original = STEP_ACTIONS['run.sync'];
       STEP_ACTIONS['run.sync'] = async () => sync();
