@@ -75,7 +75,11 @@ The release ships on Wednesday.
 
 The document gets an alert icon and a comment in Linear. Keep the text you
 want and remove the marker paragraphs, in Linear or in git; the next run
-takes the result to the other side. Details: [docs/conflicts.md](docs/conflicts.md).
+takes the result to the other side. A delete against an edit, or two
+different renames, is decided by rules instead: a change beats a delete,
+and git's path beats Linear's title
+([deletes and renames](docs/conflicts.md#deletes-and-renames)). Details:
+[docs/conflicts.md](docs/conflicts.md).
 
 ## Features
 
