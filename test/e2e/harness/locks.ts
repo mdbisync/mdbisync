@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { hostname, tmpdir } from 'node:os';
-import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { forgetOwnership } from './ownership.ts';
@@ -62,11 +62,18 @@ function heldLock(owner: Owner, stateDir: string, now = Date.now()): boolean {
 /** Writes a whole file at once: readers never see it half written or empty. */
 export function writeAtomically(file: string, text: string): void {
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, text, { flag: 'wx', mode: 0o600 });
+  // Keep the state records readable by the other harness users on this host.
+  const fd = openSync(temporary, 'wx', 0o644);
   try {
+    try {
+      writeFileSync(fd, text);
+    } finally {
+      closeSync(fd);
+    }
     renameSync(temporary, file);
-  } finally {
+  } catch (error) {
     rmSync(temporary, { force: true });
+    throw error;
   }
 }
 

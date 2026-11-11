@@ -90,7 +90,7 @@ export class OwnershipLedger implements WriteObserver {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       try {
-        fd = openSync(this.#file, flags | constants.O_CREAT | constants.O_EXCL, 0o600);
+        fd = openSync(this.#file, flags | constants.O_CREAT | constants.O_EXCL, 0o644);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         // Another writer created the journal first. Open it without following a link.

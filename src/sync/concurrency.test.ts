@@ -586,7 +586,7 @@ async function serve(world: FakeWorld): Promise<Served> {
         response.writeHead(reply.status, { ...Object.fromEntries(reply.headers), 'content-type': reply.headers.get('content-type') ?? 'application/json', 'content-length': String(bytes.length) });
         response.end(bytes);
       } catch (error) {
-        console.error(JSON.stringify(error instanceof Error ? error.message : String(error)));
+        console.error(JSON.stringify(error instanceof Error ? error.stack ?? error.message : String(error)));
         response.writeHead(500, { 'content-type': 'text/plain' });
         response.end('Request failed');
       }
@@ -608,7 +608,9 @@ it('the fake server logs request failures as a single escaped line', async (t) =
     assert.equal(response.status, 500);
     assert.equal(await response.text(), 'Request failed');
     assert.equal(logged.mock.callCount(), 1);
-    assert.deepEqual(logged.mock.calls[0]?.arguments, ['"failed\\r\\nforged log entry"']);
+    const [line] = logged.mock.calls[0]!.arguments as unknown as [string];
+    assert.doesNotMatch(line, /[\r\n]/);
+    assert.match(JSON.parse(line) as string, /failed\r\nforged log entry/);
   } finally {
     logged.mock.restore();
     await server.close();
