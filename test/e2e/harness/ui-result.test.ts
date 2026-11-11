@@ -415,6 +415,15 @@ describe('ui-result', () => {
     assert.equal(loadHeldRun(runDir).stepIndex, 3);
   });
 
+  it('leaves a held run as it was when the test configuration lacks the sandbox repository', async () => {
+    const { runDir, stateDir, checklist, deps, steps, attached } = heldRun();
+    const incomplete = { ...deps, config: { ...config, missing: ['MDBISYNC_TEST_SANDBOX_URL'] } };
+    await assert.rejects(takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 2)), scenarios, incomplete), /test configuration is missing: MDBISYNC_TEST_SANDBOX_URL/);
+    assert.deepEqual([steps, attached], [[], []]);
+    assert.ok(liveRuns(stateDir).has(RUN));
+    assert.equal(loadHeldRun(runDir).stepIndex, 0);
+  });
+
   it('lets the harness act on a UI step answered pass, before the steps after it', async () => {
     const { runDir, checklist, deps } = heldRun();
     const order: string[] = [];

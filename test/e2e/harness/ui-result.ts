@@ -37,6 +37,7 @@ import {
   createRunContext,
   failOnChecks,
   liveWorld,
+  requireLiveConfig,
   resultOf,
   retainPendingOutput,
   runTeamZones,
@@ -73,7 +74,7 @@ export function reportDirOf(runDir: string): string {
 /** The default `attach`: tokens, the sandbox and the Linear clients made again for the held run. */
 export async function attachHeldRun(held: HeldRun, deps: UiResultDeps): Promise<LiveWorld> {
   const { config } = deps;
-  if (config.missing.length > 0) throw new EnvBlockedError(`test configuration is missing: ${config.missing.join(', ')}`);
+  requireLiveConfig(config);
   const token = await githubToken(config, 'local');
   const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, stateDir: deps.stateDir, runId: held.runId });
   await sandbox.refreshCache();
@@ -166,6 +167,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   // Nothing new answered where the run stopped: nothing to take up.
   const next = itemOf.get(held.stepIndex);
   if (next !== undefined && answers.items[next - 1]?.result === null) return { state: 'waiting', ran: [], nextItem: next };
+  requireLiveConfig(deps.config);
 
   // The hold stays while this process works: should it die, the run still waits for the UI session.
   const registration = registerRun(deps.stateDir, held.runId, { holdUntil: held.holdUntil });

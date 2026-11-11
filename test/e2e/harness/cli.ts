@@ -32,7 +32,7 @@ import { LinearWorld, editorClient } from './linear-world.ts';
 import { acquireLock, defaultStateDir, forgetRun, registerRun, requireStoppedLocalRun } from './locks.ts';
 import { updateStatusPage, writeEvidence, writeRunReport, type HarnessReport } from './report.ts';
 import { loadExpectedRed } from './results.ts';
-import { runScenarios, skippedResult } from './runner.ts';
+import { requireLiveConfig, runScenarios, skippedResult } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios, selectScenarios } from './spec.ts';
 import { actionShaUnderTest, scheduleTick } from './steps.ts';
@@ -100,7 +100,7 @@ async function main(argv: string[]): Promise<number> {
       process.stdout.write(text);
       return 0;
     }
-    if (config.missing.length > 0) throw new Error(`test configuration is missing: ${config.missing.join(', ')}`);
+    requireLiveConfig(config);
     const rest = new SandboxRest(config, (await githubToken(config, 'actions')).token);
     const path = `.github/workflows/${SCHEDULER_FILE}`;
     if ((await rest.fileText(path)) === text) {
@@ -139,7 +139,7 @@ async function main(argv: string[]): Promise<number> {
     }
 
     if (command === 'sweep' || command === 'recover') {
-      if (config.missing.length > 0) throw new Error(`test configuration is missing: ${config.missing.join(', ')}`);
+      requireLiveConfig(config);
       const recoveryId = command === 'recover' ? positionals[1] : undefined;
       if (command === 'recover' && (recoveryId === undefined || !RUN_ID_PATTERN.test(recoveryId) || values['writer-stopped'] !== true)) throw new Error('usage: recover <run id> --writer-stopped (verify the writer and all engine/workflow children stopped first)');
       if (recoveryId !== undefined && !ownedRuns(stateDir).includes(recoveryId)) throw new Error('recovery needs the owning run state directory and its ownership record');
