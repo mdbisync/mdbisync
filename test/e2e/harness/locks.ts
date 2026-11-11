@@ -62,8 +62,12 @@ function heldLock(owner: Owner, stateDir: string, now = Date.now()): boolean {
 /** Writes a whole file at once: readers never see it half written or empty. */
 export function writeAtomically(file: string, text: string): void {
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, text);
-  renameSync(temporary, file);
+  writeFileSync(temporary, text, { flag: 'wx', mode: 0o600 });
+  try {
+    renameSync(temporary, file);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
 }
 
 function writeOwner(dir: string, owner: Owner): void {

@@ -11,7 +11,7 @@
 // never came back (a network error) is still the run's. Only ids and project
 // names are kept, never titles or content.
 
-import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, constants, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { RUN_ID_PATTERN, runOfProject, runOfTeamTitle, runNames } from './isolation.ts';
@@ -83,7 +83,20 @@ export class OwnershipLedger implements WriteObserver {
   }
 
   record(entry: OwnedEntry): void {
-    const fd = openSync(this.#file, 'a+');
+    const flags = constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW;
+    let fd: number;
+    try {
+      fd = openSync(this.#file, flags);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      try {
+        fd = openSync(this.#file, flags | constants.O_CREAT | constants.O_EXCL, 0o600);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        // Another writer created the journal first. Open it without following a link.
+        fd = openSync(this.#file, flags);
+      }
+    }
     try {
       // A writer that died mid-line left a torn tail: start on a new line, so this entry is not lost with it.
       const size = fstatSync(fd).size;
