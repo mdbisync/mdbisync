@@ -7,11 +7,12 @@ import { it } from 'node:test';
 import { runCli } from '../../../src/cli.ts';
 import { LinearClient, type LogEntry } from '../../../src/linear/index.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeCheck } from '../../../src/setup/test-helpers.ts';
+import { resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs, budgetHolds } from './checks.ts';
-import { faultChecks, rerunCheckAsPerson } from './check-fault.ts';
+import { faultChecks, rerunCheckAsPerson, type WorkflowRun } from './check-fault.ts';
 import type { RunContext } from './context.ts';
 import { engineInputs, type EngineResult } from './engine.ts';
 import { SandboxRest } from './github.ts';
@@ -40,12 +41,28 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
       // harness has polled it once: it runs while the harness waits, and a sync
       // that does not wait for it sees it queued, as on GitHub.
       const polled = new Set<string>();
-      // The sandbox has one runner: a sleeping `pending` job holds it until it is cancelled.
-      const markerRuns = new Map<number, { id: number; head_sha: string; path: string; status: string; conclusion: string | null }>();
-      const holder = () => [...markerRuns.values()].find((run) => run.status !== 'completed');
       const show = async (sha: string, path: string) => {
         const result = await fixture.remote.run(['show', `${sha}:${path}`], { okCodes: [0, 128] });
         return result.code === 0 ? result.stdout.toString('utf8') : null;
+      };
+      // The sandbox has one runner. As on GitHub, the marker workflow runs for
+      // the tip of the tracked branch and of every open pull request's head
+      // branch; a new tip or a close cancels the earlier head's job (its
+      // concurrency group). A `pending` job sleeps and holds the runner.
+      const markerRuns = new Map<string, WorkflowRun & { branch: string; cancelledBy?: 'person' | 'concurrency' }>();
+      const holder = () => [...markerRuns.values()].find((run) => run.status !== 'completed');
+      const runner = async () => {
+        const tips = new Map<string, string>();
+        for (const branch of [names.trackedBranch, ...world.github.pullRequests.filter((pr) => pr.state === 'open').map((pr) => pr.head)]) {
+          const tip = await fixture.remote.run(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { okCodes: [0, 1] });
+          if (tip.code === 0) tips.set(tip.stdout.toString('utf8').trim(), branch);
+        }
+        for (const run of markerRuns.values()) if (run.status !== 'completed' && !tips.has(run.head_sha)) Object.assign(run, { status: 'completed', conclusion: 'cancelled', cancelledBy: 'concurrency' });
+        for (const [sha, branch] of tips) {
+          if (markerRuns.has(sha) || (await show(sha, CHECK_MARKER))?.trim() !== 'pending' || await show(sha, '.harness-check-fixed') !== null) continue;
+          markerRuns.set(sha, { id: 100 + markerRuns.size, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null, branch });
+        }
+        return holder();
       };
       const serve = async (input: Parameters<typeof fetch>[0], init: RequestInit | undefined, byHarness: boolean): Promise<Response> => {
         const url = String(input);
@@ -56,9 +73,9 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           const passed = marker === undefined || await show(sha, '.harness-check-fixed') !== null || (marker === 'flaky' && (attempts.get(sha) ?? 1) > 1) || (marker === 'document' && target !== undefined && (await show(sha, target))?.includes('Approved for review.'));
           const check = checks.get(sha) ?? { name: 'format', status: 'completed' };
           const sleeping = marker === 'pending' && !passed;
-          if (sleeping && ![...markerRuns.values()].some((run) => run.head_sha === sha)) markerRuns.set(100 + markerRuns.size, { id: 100 + markerRuns.size, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null });
-          const own = [...markerRuns.values()].find((run) => run.head_sha === sha);
-          const blocked = holder() !== undefined && holder()!.head_sha !== sha;
+          const busy = await runner();
+          const own = markerRuns.get(sha);
+          const blocked = busy !== undefined && busy.head_sha !== sha;
           const fresh = ctx.ownCommits.includes(sha) && !polled.has(sha);
           if (byHarness) polled.add(sha);
           Object.assign(check, { status: fresh || (sleeping && own?.status !== 'completed') || blocked ? 'queued' : 'completed', conclusion: own?.conclusion === 'cancelled' ? 'cancelled' : passed ? 'success' : 'failure', annotations: (target === undefined ? [] : [target]).map((path) => ({ path, start_line: 1, title: 'Review required', message: 'Check the review status.' })) });
@@ -72,15 +89,16 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         if (url.includes('/actions/workflows/harness-check.yml/runs')) {
           assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
           const sha = new URL(url).searchParams.get('head_sha')!;
-          const held = [...markerRuns.values()].filter((run) => run.head_sha === sha);
-          return Response.json({ workflow_runs: held.length > 0 ? held : [{ id: 1, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'completed', conclusion: 'failure' }] });
+          const held = markerRuns.get(sha);
+          return Response.json({ workflow_runs: held !== undefined ? [held] : [{ id: 1, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'completed', conclusion: 'failure' }] });
         }
         const cancel = /\/actions\/runs\/(\d+)\/cancel$/.exec(url);
         if (cancel !== null) {
           assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
-          const run = markerRuns.get(Number(cancel[1]));
+          const run = [...markerRuns.values()].find((candidate) => candidate.id === Number(cancel[1]));
           if (run === undefined) return new Response(null, { status: 404 });
-          Object.assign(run, { status: 'completed', conclusion: 'cancelled' });
+          if (run.status === 'completed') return new Response(null, { status: 409 });
+          Object.assign(run, { status: 'completed', conclusion: 'cancelled', cancelledBy: 'person' });
           return new Response(null, { status: 202 });
         }
         if (url.endsWith('/actions/runs/1/rerun-failed-jobs')) {
@@ -204,9 +222,13 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         history.push(await snapshotRefs(ctx));
         refreshView(ctx);
       }
-      // L5-27: the tracked-lane check ran only after a person cancelled the sleeping pending job.
-      if (scenario.id === 'L5-27') assert.equal(ctx.observations.get('checks.cancelledPending'), 1);
-      assert.equal(holder(), undefined, 'a pending marker job still holds the runner');
+      // L5-27: the suspended head carries the batch's `pending` marker, so its
+      // job held the runner until a person cancelled it before the tracked-lane fault.
+      if (scenario.id === 'L5-27') {
+        assert.equal(ctx.observations.get('checks.cancelledPending'), 1);
+        assert.deepEqual([...markerRuns.values()].filter((run) => run.cancelledBy === 'person').map((run) => run.branch), [suspendedBranch(resolveStateConfig(names))]);
+      }
+      assert.equal(await runner(), undefined, 'a pending marker job still holds the runner');
       // I6 uses the same in-process engine transport as the scenario's own runs.
       const original = STEP_ACTIONS['run.sync'];
       STEP_ACTIONS['run.sync'] = async () => sync();

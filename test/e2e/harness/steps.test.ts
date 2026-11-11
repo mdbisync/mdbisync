@@ -32,7 +32,7 @@ import { engineEntry, REPO_ROOT, type EngineResult } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
 import { readHookConfig } from '../../../src/setup/hooks.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
-import { cancelPendingRuns, waitForCheck, waitForCheckCompleted } from './check-fault.ts';
+import { cancelPendingRuns, faultChecks, waitForCheck, waitForCheckCompleted } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
@@ -1251,9 +1251,11 @@ describe('marker-driven checks', () => {
     await git.run(['fetch', '--quiet', 'origin', `refs/heads/${ctx.names.syncBranch}`]);
     await git.run(['checkout', '--quiet', '--detach', 'FETCH_HEAD']);
     const editCommit = await personCommit(git, ctx.names, new Map([[path, edit]]), 'Update the plan', { verify: false, branch: ctx.names.syncBranch });
-    await runStep(ctx, { kind: 'fault', action: 'checks', args: { name: 'format', status: 'failed' } });
+    // On the same branch the new head cancels the pending job itself: no person's Actions credential is needed.
+    const noPerson = () => { throw new Error('a same-branch fault must not cancel through a person'); };
+    await faultChecks(ctx, { name: 'format', status: 'failed' }, noPerson);
     assert.equal((await remoteFile(CHECK_MARKER, ctx.names.syncBranch)).trim(), 'failed');
-    await runStep(ctx, { kind: 'fault', action: 'checks', args: { status: 'passed' } });
+    await faultChecks(ctx, { status: 'passed' }, noPerson);
     const passed = checked.at(-1)!;
     assert.equal((await remoteGit.run(['cat-file', '-e', `${passed}:${CHECK_MARKER}`], { okCodes: [0, 128] })).code, 128);
     assert.equal(await remoteFile(path, ctx.names.syncBranch), edit.trimEnd());
@@ -1390,7 +1392,7 @@ describe('marker-driven checks', () => {
       return Response.json({ workflow_runs: [{ id: 7, head_sha: 'abc', path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null }] });
     }) as typeof fetch);
     const ctx = { signal: new AbortController().signal } as unknown as RunContext;
-    await assert.rejects(cancelPendingRuns(ctx, person, ['abc'], { pollMs: 0, timeoutMs: 20 }), EnvBlockedError);
+    await assert.rejects(cancelPendingRuns(ctx, person, ['abc'], { pollMs: 0, timeoutMs: 20 }), (error) => error instanceof EnvBlockedError && /within 0 s after its cancel/.test(error.message));
     assert.equal(posts, 1, 'one cancel per run, not one per poll');
     const forbidden = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'person-token', (async (_input, init) => init?.method === 'POST' ? new Response(null, { status: 403 })
       : Response.json({ workflow_runs: [{ id: 7, head_sha: 'abc', path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null }] })) as typeof fetch);

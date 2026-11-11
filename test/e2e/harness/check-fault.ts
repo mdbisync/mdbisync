@@ -66,11 +66,14 @@ export async function waitForCheckCompleted(rest: SandboxRest, sha: string, opti
     ({ actual }) => new EnvBlockedError(`the ${CHECK_NAME} check on the tracked branch's new tip did not complete (last state: ${actual})`), options);
 }
 
-/** A `pending` marker job sleeps on the sandbox's single runner until its head moves on. */
-interface PendingHead { branch: string; sha: string }
-const PENDING_HEADS = 'checks.pendingHeads';
+/**
+ * The head of this scenario's `pending` check fault. Its marker job sleeps on
+ * the sandbox's single runner, and the product carries the marker on into
+ * later heads (a suspended batch's head), so it is never cleared.
+ */
+const PENDING_HEAD = 'checks.pendingHead';
 
-type WorkflowRun = { id: number; head_sha: string; path: string; status: string; conclusion: string | null };
+export type WorkflowRun = { id: number; head_sha: string; path: string; status: string; conclusion: string | null };
 
 async function markerRuns(person: SandboxRest, sha: string): Promise<WorkflowRun[]> {
   const { workflow_runs: runs } = await person.request<{ workflow_runs: WorkflowRun[] }>(
@@ -88,7 +91,8 @@ export async function cancelPendingRuns(
   ctx: RunContext, person: SandboxRest, shas: string[],
   options: { timeoutMs?: number; pollMs?: number | undefined } = {},
 ): Promise<number> {
-  const deadline = Date.now() + (options.timeoutMs ?? 5 * 60_000);
+  const timeoutMs = options.timeoutMs ?? CHECK_WAIT_MS;
+  const deadline = Date.now() + timeoutMs;
   const requested = new Set<number>();
   let cancelled = 0;
   for (const sha of shas) {
@@ -106,11 +110,39 @@ export async function cancelPendingRuns(
         }
         requested.add(run.id);
       }
-      if (Date.now() >= deadline) throw new EnvBlockedError('the pending marker run did not finish within 5 minutes after its cancel');
+      if (Date.now() >= deadline) throw new EnvBlockedError(`the pending marker run did not finish within ${Math.round(timeoutMs / 1000)} s after its cancel`);
       await sleep(options.pollMs ?? 2_000, undefined, { signal: ctx.signal });
     }
   }
   return cancelled;
+}
+
+/**
+ * Heads whose marker job may still sleep outside `branch`'s history: the
+ * pending fault's own head and this run's other lane tips. Only a head whose tree still selects `pending` and whose check is
+ * still pending counts, so a check that a scenario fixed or failed is never
+ * cancelled. Nothing is read before the scenario's first `pending` fault.
+ */
+async function sleepingHeads(ctx: RunContext, person: Git, refs: Array<{ ref: string; oid: string }>, branch: string): Promise<string[]> {
+  const recorded = ctx.observations.get(PENDING_HEAD) as string | undefined;
+  if (recorded === undefined) return [];
+  const tipOf = (name: string) => refs.find((entry) => entry.ref === `refs/heads/${name}`)?.oid;
+  const branches = [ctx.names.syncBranch, suspendedBranch(resolveStateConfig(ctx.names)), ctx.names.trackedBranch];
+  if (!branches.includes(branch)) branches.push(branch);
+  const present = branches.filter((name) => tipOf(name) !== undefined);
+  if (present.length > 0) await person.run(['fetch', '--quiet', 'origin', ...present.map((name) => `refs/heads/${name}`)]);
+  const target = tipOf(branch);
+  const candidates = [...new Set([recorded, ...present.filter((name) => name !== branch).map((name) => tipOf(name)!)])];
+  const heads: string[] = [];
+  for (const sha of candidates) {
+    // A head in the target branch's history runs in that branch's group: this push, or an earlier one, cancels it.
+    if (target !== undefined && (await person.run(['merge-base', '--is-ancestor', sha, target], { okCodes: [0, 1] })).code === 0) continue;
+    const marker = await person.run(['show', `${sha}:${CHECK_MARKER}`], { okCodes: [0, 128] });
+    const fixed = await person.run(['cat-file', '-e', `${sha}:.harness-check-fixed`], { okCodes: [0, 128] });
+    if (marker.code !== 0 || marker.stdout.toString('utf8').trim() !== 'pending' || fixed.code === 0) continue;
+    if ((await readCheck(live(ctx).rest, sha)).actual === 'pending') heads.push(sha);
+  }
+  return heads;
 }
 
 /** A person's REST client for Actions writes; the sync App's token never cancels or reruns a check. */
@@ -133,19 +165,17 @@ export async function faultChecks(
   if (args.lane !== undefined && args.lane !== 'normal' && args.lane !== 'suspended' && args.lane !== 'tracked') throw new Error('invalid check lane');
   const branch = args.lane === 'suspended' ? suspendedBranch(resolveStateConfig({trackedBranch:ctx.names.trackedBranch,syncBranch:ctx.names.syncBranch,refPrefix:ctx.names.refPrefix})) : args.lane === 'tracked' ? ctx.names.trackedBranch : ctx.names.syncBranch;
   const world = live(ctx);
-  // A new head on the same branch cancels its pending job (the workflow's
-  // concurrency group); a fault on another lane would queue behind it.
-  const pending = (ctx.observations.get(PENDING_HEADS) as PendingHead[] | undefined) ?? [];
-  const elsewhere = pending.filter((head) => head.branch !== branch);
-  if (elsewhere.length > 0) {
-    ctx.log(`cancelling the pending ${CHECK_NAME} run on ${elsewhere.map((head) => head.branch).join(', ')}`);
-    const cancelled = await cancelPendingRuns(ctx, actionsPerson(), elsewhere.map((head) => head.sha), { pollMs: ctx.checkPollMs });
-    ctx.observations.set('checks.cancelledPending', Number(ctx.observations.get('checks.cancelledPending') ?? 0) + cancelled);
-  }
-  ctx.observations.set(PENDING_HEADS, []);
   const person = await ctx.person();
   const ref = `refs/heads/${branch}`;
   const refs = await world.sandbox.runRefs();
+  // This fault's push cancels a sleeping job on its own branch (the
+  // workflow's concurrency group); one on another lane would hold the runner.
+  const sleeping = await sleepingHeads(ctx, person, refs, branch);
+  if (sleeping.length > 0) {
+    ctx.log(`cancelling the pending ${CHECK_NAME} run on ${sleeping.join(', ')}`);
+    const cancelled = await cancelPendingRuns(ctx, actionsPerson(), sleeping, { pollMs: ctx.checkPollMs });
+    ctx.observations.set('checks.cancelledPending', Number(ctx.observations.get('checks.cancelledPending') ?? 0) + cancelled);
+  }
   const exists = refs.some((entry) => entry.ref === ref);
   if (!exists && state === 'passed') throw new HarnessGapError('fault.checks release without a sync branch');
   await person.run(['fetch', '--quiet', 'origin', exists ? ref : `refs/heads/${ctx.names.trackedBranch}`]);
@@ -187,7 +217,7 @@ export async function faultChecks(
   }
   ctx.log(`waiting up to 5 minutes for ${CHECK_NAME} to reach ${state}`);
   await waitForCheck(world.rest, sha, state, { signal: ctx.signal, pollMs: ctx.checkPollMs });
-  if (state === 'pending') ctx.observations.set(PENDING_HEADS, [{ branch, sha } satisfies PendingHead]);
+  if (state === 'pending') ctx.observations.set(PENDING_HEAD, sha);
   ctx.observations.set('fault.checks', { name: CHECK_NAME, state, sha });
 }
 
