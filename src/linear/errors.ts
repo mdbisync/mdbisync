@@ -54,6 +54,8 @@ export class LinearGraphQLError extends LinearError {
   readonly notFound: boolean;
   /** Linear's `x-request-id` of the answer. */
   readonly requestId: string | undefined;
+  /** Linear's own message, as it sent it; it may quote the request, so a caller checks it before it reports it. */
+  readonly detail: string | undefined;
 
   constructor(operation: string, httpStatus: number, error: GraphQLErrorShape, requestId?: string) {
     const code = stringOrUndefined(error.extensions?.code);
@@ -66,6 +68,7 @@ export class LinearGraphQLError extends LinearError {
     this.type = type;
     this.httpStatus = httpStatus;
     this.requestId = requestId;
+    this.detail = stringOrUndefined(error.message);
     this.notFound = typeof error.message === 'string' && error.message.startsWith('Entity not found');
   }
 }

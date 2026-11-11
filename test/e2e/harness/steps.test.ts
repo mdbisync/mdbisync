@@ -32,7 +32,7 @@ import { engineEntry, REPO_ROOT, type EngineResult } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
 import { readHookConfig } from '../../../src/setup/hooks.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
-import { waitForCheck, waitForCheckCompleted } from './check-fault.ts';
+import { cancelPendingRuns, faultChecks, waitForCheck, waitForCheckCompleted } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
@@ -1382,9 +1382,11 @@ describe('marker-driven checks', () => {
     await git.run(['fetch', '--quiet', 'origin', `refs/heads/${ctx.names.syncBranch}`]);
     await git.run(['checkout', '--quiet', '--detach', 'FETCH_HEAD']);
     const editCommit = await personCommit(git, ctx.names, new Map([[path, edit]]), 'Update the plan', { verify: false, branch: ctx.names.syncBranch });
-    await runStep(ctx, { kind: 'fault', action: 'checks', args: { name: 'format', status: 'failed' } });
+    // On the same branch the new head cancels the pending job itself: no person's Actions credential is needed.
+    const noPerson = () => { throw new Error('a same-branch fault must not cancel through a person'); };
+    await faultChecks(ctx, { name: 'format', status: 'failed' }, noPerson);
     assert.equal((await remoteFile(CHECK_MARKER, ctx.names.syncBranch)).trim(), 'failed');
-    await runStep(ctx, { kind: 'fault', action: 'checks', args: { status: 'passed' } });
+    await faultChecks(ctx, { status: 'passed' }, noPerson);
     const passed = checked.at(-1)!;
     assert.equal((await remoteGit.run(['cat-file', '-e', `${passed}:${CHECK_MARKER}`], { okCodes: [0, 128] })).code, 128);
     assert.equal(await remoteFile(path, ctx.names.syncBranch), edit.trimEnd());
@@ -1482,6 +1484,50 @@ describe('marker-driven checks', () => {
     } finally {
       for (const action of ['git.test-idle', 'git.test-pending', 'git.test-no-workflow']) delete STEP_ACTIONS[action];
     }
+  });
+
+  it('cancels the pending marker runs on a head and waits until they complete', async () => {
+    const runs = [
+      { id: 7, head_sha: 'abc', path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null as string | null },
+      { id: 8, head_sha: 'abc', path: CHECK_WORKFLOW_PATH, status: 'queued', conclusion: null as string | null },
+      { id: 9, head_sha: 'abc', path: '.github/workflows/other.yml', status: 'in_progress', conclusion: null as string | null },
+    ];
+    const calls: string[] = [];
+    let reads = 0;
+    const person = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'person-token', (async (input, init) => {
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
+      const path = new URL(String(input)).pathname;
+      calls.push(`${init?.method} ${path}`);
+      if (init?.method === 'GET') {
+        reads += 1;
+        // GitHub finishes a cancel asynchronously: the runs complete one read later.
+        if (reads === 3) for (const run of runs) if (run.id !== 9 && run.conclusion === 'cancelled') run.status = 'completed';
+        return Response.json({ workflow_runs: runs });
+      }
+      const run = runs.find((candidate) => path.endsWith(`/actions/runs/${candidate.id}/cancel`))!;
+      // Run 8 finished on its own between the read and the cancel.
+      if (run.id === 8) { run.status = 'completed'; run.conclusion = 'failure'; return new Response(null, { status: 409 }); }
+      run.conclusion = 'cancelled';
+      return new Response(null, { status: 202 });
+    }) as typeof fetch);
+    const ctx = { signal: new AbortController().signal } as unknown as RunContext;
+    assert.equal(await cancelPendingRuns(ctx, person, ['abc'], { pollMs: 0, timeoutMs: 1000 }), 1);
+    assert.deepEqual(calls.filter((call) => call.startsWith('POST')), ['POST /repos/example/sandbox/actions/runs/7/cancel', 'POST /repos/example/sandbox/actions/runs/8/cancel']);
+    assert.equal(calls.filter((call) => call.startsWith('GET')).length, 3);
+  });
+
+  it('reports a pending marker run that will not finish as env-blocked', async () => {
+    let posts = 0;
+    const person = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'person-token', (async (_input, init) => {
+      if (init?.method === 'POST') { posts += 1; return new Response(null, { status: 202 }); }
+      return Response.json({ workflow_runs: [{ id: 7, head_sha: 'abc', path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null }] });
+    }) as typeof fetch);
+    const ctx = { signal: new AbortController().signal } as unknown as RunContext;
+    await assert.rejects(cancelPendingRuns(ctx, person, ['abc'], { pollMs: 0, timeoutMs: 20 }), (error) => error instanceof EnvBlockedError && /within 0 s after its cancel/.test(error.message));
+    assert.equal(posts, 1, 'one cancel per run, not one per poll');
+    const forbidden = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'person-token', (async (_input, init) => init?.method === 'POST' ? new Response(null, { status: 403 })
+      : Response.json({ workflow_runs: [{ id: 7, head_sha: 'abc', path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null }] })) as typeof fetch);
+    await assert.rejects(cancelPendingRuns(ctx, forbidden, ['abc'], { pollMs: 0 }), { name: 'GitHubError', status: 403 });
   });
 
   it("takes a run's writes from its report, so L1R-03's expected-zero total fails on the first sync's writes", async () => {

@@ -12,7 +12,7 @@ import { runCli } from '../cli.ts';
 import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { detectConflicts, MARKERS } from '../merge/index.ts';
 import { MARKS } from './marks.ts';
-import { HOLD_MARK_LIMIT, HOLD_TIMED_OUT } from './hold.ts';
+import { HOLD_FAILED, HOLD_MARK_LIMIT, HOLD_TIMED_OUT, MESSAGE_WITHHELD } from './hold.ts';
 import { APP_PERMISSIONS } from '../setup/app.ts';
 import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
@@ -1329,6 +1329,66 @@ describe('sync: the sync pull request', () => {
     const quiet = await sync();
     assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
     assert.deepEqual(quiet.writes, []);
+  });
+
+  /** Answers Linear's `mutation` with `answer` while it returns a response; other requests reach the fakes. */
+  function onMutation(mutation: string, answer: () => Response | undefined): { calls: number } {
+    const seen = { calls: 0 };
+    const inner = fakeFetch(world);
+    fetchOverride = async (input, init) => {
+      if (String(input).startsWith(LINEAR_API) && String(init?.body ?? '').includes(`mutation ${mutation}(`)) {
+        seen.calls += 1;
+        const response = answer();
+        if (response !== undefined) return response;
+      }
+      return inner(input, init);
+    };
+    return seen;
+  }
+  const refusal = (message: string) => new Response(JSON.stringify({ data: null, errors: [{ message, extensions: { code: 'INPUT_ERROR' } }] }), { status: 200, headers: { 'content-type': 'application/json', 'x-request-id': 'request-35' } });
+
+  it("L5-35: a mark Linear refuses names the document and Linear's code and message, and the next run sets it", async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nHeld Linear edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), FAILED);
+    let refuse = true;
+    const marks = onMutation('UpdateDocument', () => (refuse ? refusal('Argument Validation Error: icon') : undefined));
+    const held = await sync();
+    assert.ok(held.report.pullRequest?.suspended);
+    assert.equal(held.report.complete, false);
+    const report = held.report.pullRequest?.holdMarks;
+    assert.equal(report?.code, 'write-failed');
+    assert.deepEqual(report?.failure, { operation: 'UpdateDocument', path, error: 'LinearGraphQLError INPUT_ERROR HTTP 200', code: 'INPUT_ERROR', status: 200, request: 'request-35', message: 'Argument Validation Error: icon' });
+    assert.ok(held.summary.includes(`The suspended marks did not finish (\`write-failed\`, \`UpdateDocument\` on \`${path}\`, \`LinearGraphQLError INPUT_ERROR HTTP 200\`: Argument Validation Error: icon); a later run goes on.`), held.summary);
+    assert.equal(marks.calls, 1);
+    refuse = false;
+    checksOn(await rev(SUSPENDED), FAILED);
+    const next = await sync();
+    assert.deepEqual(next.report.pullRequest?.holdMarks?.set, [path]);
+    assert.equal(next.report.pullRequest?.holdMarks?.failure, undefined);
+    assert.equal((await documentOf(path)).icon, MARKS.suspended.icon);
+  });
+
+  it("a comment Linear refuses with a message that echoes the comment keeps the code and leaves the message out", async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nHeld Linear edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), FAILED);
+    let refuse = true;
+    onMutation('CommentOnDocument', () => (refuse ? refusal(`Variable "$input" got invalid value { body: "${HOLD_FAILED}" }`) : undefined));
+    const held = await sync();
+    const report = held.report.pullRequest?.holdMarks;
+    assert.equal(report?.code, 'write-failed');
+    assert.equal(report?.failure?.path, path);
+    assert.equal(report?.failure?.code, 'INPUT_ERROR');
+    assert.equal(report?.failure?.message, MESSAGE_WITHHELD);
+    for (const text of [held.summary, JSON.stringify(held.report)]) assert.ok(!text.includes(HOLD_FAILED.slice(0, 40)), 'the comment was quoted');
+    refuse = false;
+    checksOn(await rev(SUSPENDED), FAILED);
+    const next = await sync();
+    assert.deepEqual(next.report.pullRequest?.holdMarks?.set, [path]);
+    assert.equal(commentsOf(await documentOf(path)).length, 1);
   });
 
   it('keeps suspended membership by id through a Linear rename', async () => {
