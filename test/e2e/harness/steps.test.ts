@@ -38,7 +38,7 @@ import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
 import { commitAsPerson, folderTeam, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
-import { environmentBlocker, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
+import { environmentBlocker, hadReplaceableRun, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
 import { prerequisiteErrors } from './workflow-files.ts';
 import { parse as parseYaml } from 'yaml';
@@ -429,8 +429,9 @@ describe('workflows', () => {
   it('count the runs the concurrency group cancelled when a newer run replaced them (L4-10)', async () => {
     const l410 = scenarios.find((item) => item.id === 'L4-10')!;
     const assertion = l410.checks.assertions.find((item) => item.subject === 'workflows.replacedPending')!;
-    // `replaced`: the newer dispatch replaced the pending push run, which started no job. `stopped`: the push run
-    // was cancelled while its job ran. `apart`: nothing was cancelled and no job ran when the last run arrived.
+    // Three runs arrive: a push and two dispatches. `replaced`: a newer dispatch replaced the pending push run,
+    // which started no job. `stopped`: the push run was cancelled while its job ran, and the first dispatch was
+    // waiting when the second arrived. `apart`: nothing was cancelled and no job ran when a run arrived.
     const parallel = async (mode: 'replaced' | 'stopped' | 'apart') => {
       const { ctx, remoteGit } = await fakeRun();
       ctx.scenario = { ...ctx.scenario, mode: 'actions' };
@@ -451,13 +452,13 @@ describe('workflows', () => {
       // The cancelled run's job ran from before the runs started until after the last one arrived.
       const job = { ...jobWith('Sync', 4), started_at: new Date(Date.now() - 60_000).toISOString(), completed_at: new Date(Date.now() + 60_000).toISOString() };
       rest.runJobs = async (id) => (mode === 'stopped' && cancelled.has(id) ? [job] : []);
-      const step = STEP_ACTIONS['run.workflow-parallel']!(ctx, { events: ['push'], replacePending: true });
+      const step = STEP_ACTIONS['run.workflow-parallel']!(ctx, { events: ['push', 'workflow_dispatch'], replacePending: true });
       if (mode === 'apart') {
-        await assert.rejects(step, (error: Error) => !(error instanceof ProductError) && /the runs did not overlap/.test(error.message));
+        await assert.rejects(step, (error: Error) => !(error instanceof ProductError) && /the runs did not overlap enough/.test(error.message));
         return ctx;
       }
       await step;
-      assert.equal(ctx.engine.results.length, 1, 'only the run that was not cancelled is settled');
+      assert.equal(ctx.engine.results.length, 2, 'only the runs that were not cancelled are settled');
       return ctx;
     };
     // A pending run the group replaced started no job: it counts, and L4-10's assertion holds.
@@ -471,6 +472,22 @@ describe('workflows', () => {
     // Runs that never overlapped leave no run to replace: the harness says so instead of failing the group.
     const apart = await parallel('apart');
     assert.equal(apart.observations.has('workflows.replacedPending'), false);
+  });
+
+  it('tell a race that could replace a pending run from runs that only queued one after another', () => {
+    const at = (second: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, second)).toISOString();
+    const ms = (second: number) => Date.parse(at(second));
+    const run = (id: number, created: number) => ({ id, created_at: at(created) });
+    // The scheduled job runs 0 to 10; the dispatch arrives at 5 and runs 10 to 20; the push arrives at 15.
+    // Each later run waited alone, so a working group cancels nothing: not a race that proves the group.
+    const queued = [run(1, 0), run(2, 5), run(3, 15)];
+    const queuedSpans = [{ runId: 1, started: ms(0), completed: ms(10) }, { runId: 2, started: ms(10), completed: ms(20) }, { runId: 3, started: ms(20), completed: ms(30) }];
+    assert.equal(hadReplaceableRun(queued, queuedSpans), false);
+    // The push arrives at 7, while the scheduled job runs and the dispatch waits: the group can replace the dispatch.
+    const raced = [run(1, 0), run(2, 5), run(3, 7)];
+    assert.equal(hadReplaceableRun(raced, [{ runId: 1, started: ms(0), completed: ms(10) }, { runId: 3, started: ms(10), completed: ms(20) }]), true);
+    // Two runs alone never make a replacement possible.
+    assert.equal(hadReplaceableRun(raced.slice(0, 2), [{ runId: 1, started: ms(0), completed: ms(10) }]), false);
   });
 
   it('wait for the push run that the sync pull request\'s merge starts before the checks, as a deployment runs it', async () => {
@@ -729,6 +746,12 @@ describe('load', () => {
     await assert.rejects(runStep(failing, { kind: 'run', action: 'burst', args: { durationSeconds: 2, linearEditsPerMinute: 60, gitPushesPerMinute: 0 } }), /lost its connection/);
     const recorded = failing.observations.get('burst.edits') as Array<{ side: string; token: string }>;
     assert.deepEqual(recorded.map((edit) => edit.side), ['linear'], 'the burst recorded the edit that landed, although it threw');
+    // A failed step skips the checks, so the report's metrics already say where the sides stand.
+    const metrics = (failing.observations.get('metrics') as Record<string, unknown>).burstEdits as Record<string, unknown>;
+    assert.equal(metrics.made, 1);
+    assert.equal(metrics.afterQuiet, false);
+    assert.equal(metrics.foundInLinear, 1, 'the edit that landed is in Linear');
+    assert.equal(typeof metrics.foundInGit, 'number');
   });
 
   it('match an edit token only as a whole token, so a lost edit is not found inside a longer token', () => {
