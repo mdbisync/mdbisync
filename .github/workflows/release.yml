@@ -101,12 +101,58 @@ jobs:
           path: ${{ runner.temp }}/release.tar
           retention-days: 1
           if-no-files-found: error
+      # A final version also gets an SPDX SBOM of its bundled packages; a pre-release skips both steps.
+      - name: Write the SBOM of the release
+        if: ${{ !contains(inputs.version, '-') }}
+        run: node src/release/sbom.ts "$GITHUB_REPOSITORY" "$RUNNER_TEMP/release" "$RUNNER_TEMP/sbom.spdx.json"
+      - if: ${{ !contains(inputs.version, '-') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-sbom
+          path: ${{ runner.temp }}/sbom.spdx.json
+          retention-days: 90
+          if-no-files-found: error
+
+  # Signs build provenance and the SBOM for every file of the release tree before
+  # the tag publishes it. It needs a passed gate, so it runs only for a final
+  # version. It runs no repository code and alone holds the id-token permission.
+  attest:
+    needs: [gate, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-tree
+          path: ${{ runner.temp }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-sbom
+          path: ${{ runner.temp }}
+      - name: List the release files as attestation subjects
+        run: |
+          mkdir "$RUNNER_TEMP/release"
+          tar -C "$RUNNER_TEMP/release" -xf "$RUNNER_TEMP/release.tar"
+          cd "$RUNNER_TEMP/release"
+          find . -type f -printf '%P\0' | LC_ALL=C sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/subjects.sha256"
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/subjects.sha256
+      - name: Attest the SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/subjects.sha256
+          sbom-path: ${{ runner.temp }}/sbom.spdx.json
 
   tag:
-    needs: [gate, build]
+    needs: [gate, build, attest]
     # A skipped gate (every pre-release) would skip this job under the implicit success(), so the condition is explicit.
-    # It repeats the build's gate rule, so a final version is never tagged without a passed gate.
-    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}
+    # It repeats the build's gate rule, so a final version is never tagged without a passed gate and its attestations.
+    if: ${{ !cancelled() && needs.build.result == 'success' && ((needs.gate.result == 'success' && needs.attest.result == 'success') || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

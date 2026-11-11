@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 import { stageRelease, validateAction, validateHooks } from '../../src/release/package.ts';
+import { writeSbom } from '../../src/release/sbom.ts';
 import { smokeRelease } from '../../src/release/smoke.ts';
 import { smokeStagedFlow } from './staged-flow.ts';
 
@@ -52,6 +53,13 @@ test('real bundles run from the isolated release tree, install as an offline Nod
     const action: unknown = parse(await readFile(join(source, 'action.yml'), 'utf8'));
     const hooks: unknown = parse(await readFile(join(source, '.pre-commit-hooks.yaml'), 'utf8'));
     await stageRelease({ source, output, sourceSha: 'a'.repeat(40), version, action, hooks });
+    // The SBOM a final release writes from the same tree lists exactly the bundled packages of the inventory.
+    const sbomFile = join(temporary, 'sbom.spdx.json');
+    await writeSbom({ repository: 'owner/name', source, directory: output, output: sbomFile });
+    const sbom = JSON.parse(await readFile(sbomFile, 'utf8')) as { packages: { name: string; versionInfo: string }[] };
+    const inventory = JSON.parse(await readFile(join(source, 'third-party-licenses.json'), 'utf8')) as { name: string; version: string }[];
+    assert.deepEqual(sbom.packages.slice(1).map((pkg) => `${pkg.name}@${pkg.versionInfo}`), inventory.map((pkg) => `${pkg.name}@${pkg.version}`));
+    assert.ok(sbom.packages.some((pkg) => pkg.name === '@actions/core'));
     await smokeRelease(output);
     await smokeStagedFlow(output);
     await assert.rejects(readFile(join(temporary, 'executed')), { code: 'ENOENT' });

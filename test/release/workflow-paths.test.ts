@@ -5,8 +5,11 @@
 // included).
 
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 
@@ -15,7 +18,7 @@ interface Job {
   needs?: string | string[];
   if?: string;
   permissions?: Record<string, string>;
-  steps: { run?: string; env?: Record<string, string> }[];
+  steps: { name?: string; if?: string; uses?: string; with?: Record<string, string>; run?: string; env?: Record<string, string> }[];
 }
 interface Context { ref: string; version: string; cancelled: boolean; results: Map<string, Result>; upstream: string[] }
 
@@ -113,39 +116,48 @@ function simulate(ref: string, version: string, outcomes: Partial<Record<string,
 }
 
 const main = 'refs/heads/main';
-const passing = { gate: 'success', build: 'success', tag: 'success' } as const;
+const passing = { gate: 'success', build: 'success', attest: 'success', tag: 'success' } as const;
 
-test('release.yml has the gate, build, tag and final check jobs in that order', () => {
-  assert.deepEqual(Object.keys(jobs), ['gate', 'build', 'tag', 'tagged']);
+test('release.yml has the gate, build, attest, tag and final check jobs in that order', () => {
+  assert.deepEqual(Object.keys(jobs), ['gate', 'build', 'attest', 'tag', 'tagged']);
+  assert.deepEqual(needsOf('attest'), ['gate', 'build']);
+  assert.deepEqual(needsOf('tag'), ['gate', 'build', 'attest']);
   assert.deepEqual(needsOf('tagged'), ['tag']);
   assert.deepEqual(jobs.tagged!.permissions, {});
 });
 
-test('the tag job itself requires a passed gate for a final version, whatever the build condition says', () => {
-  const tags = (version: string, gate: Result) => evaluate(jobs.tag!.if!, {
-    ref: main, version, cancelled: false, upstream: ['gate', 'build'],
-    results: new Map<string, Result>([['gate', gate], ['build', 'success']]),
+test('the tag job itself requires a passed gate and attestations for a final version, whatever the build condition says', () => {
+  const tags = (version: string, gate: Result, attest: Result) => evaluate(jobs.tag!.if!, {
+    ref: main, version, cancelled: false, upstream: ['gate', 'build', 'attest'],
+    results: new Map<string, Result>([['gate', gate], ['build', 'success'], ['attest', attest]]),
   });
-  for (const gate of ['failure', 'skipped', 'cancelled'] as const) assert.equal(tags('v0.1.0', gate), false, gate);
-  assert.equal(tags('v0.1.0', 'success'), true);
-  assert.equal(tags('v0.1.0-rc.9', 'skipped'), true);
+  for (const gate of ['failure', 'skipped', 'cancelled'] as const) assert.equal(tags('v0.1.0', gate, 'success'), false, gate);
+  for (const attest of ['failure', 'skipped', 'cancelled'] as const) assert.equal(tags('v0.1.0', 'success', attest), false, attest);
+  assert.equal(tags('v0.1.0', 'success', 'success'), true);
+  assert.equal(tags('v0.1.0-rc.9', 'skipped', 'skipped'), true);
 });
 
-test('a pre-release skips the gate, then builds and tags', () => {
+test('a pre-release skips the gate and the attestations, then builds and tags', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', passing);
-  assert.deepEqual(results, { gate: 'skipped', build: 'success', tag: 'success', tagged: 'success' });
+  assert.deepEqual(results, { gate: 'skipped', build: 'success', attest: 'skipped', tag: 'success', tagged: 'success' });
   assert.equal(conclusion, 'success');
 });
 
-test('a final release that passed the gate builds and tags', () => {
+test('a final release that passed the gate builds, attests and tags', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', passing);
-  assert.deepEqual(results, { gate: 'success', build: 'success', tag: 'success', tagged: 'success' });
+  assert.deepEqual(results, { gate: 'success', build: 'success', attest: 'success', tag: 'success', tagged: 'success' });
   assert.equal(conclusion, 'success');
 });
 
-test('a final release that failed the gate builds and tags nothing and fails', () => {
+test('a final release that failed the gate builds, attests and tags nothing and fails', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, gate: 'failure' });
-  assert.deepEqual(results, { gate: 'failure', build: 'skipped', tag: 'skipped', tagged: 'failure' });
+  assert.deepEqual(results, { gate: 'failure', build: 'skipped', attest: 'skipped', tag: 'skipped', tagged: 'failure' });
+  assert.equal(conclusion, 'failure');
+});
+
+test('a final release whose attestation failed tags nothing and fails', () => {
+  const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, attest: 'failure' });
+  assert.deepEqual(results, { gate: 'success', build: 'success', attest: 'failure', tag: 'skipped', tagged: 'failure' });
   assert.equal(conclusion, 'failure');
 });
 
@@ -167,14 +179,84 @@ test('a failed tag fails the run', () => {
 
 test('a cancelled build tags nothing and the run ends cancelled, without a failed check', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', { ...passing, build: 'cancelled' });
-  assert.deepEqual(results, { gate: 'skipped', build: 'cancelled', tag: 'skipped', tagged: 'skipped' });
+  assert.deepEqual(results, { gate: 'skipped', build: 'cancelled', attest: 'skipped', tag: 'skipped', tagged: 'skipped' });
   assert.equal(conclusion, 'cancelled');
 });
 
 test('a run outside main skips every release job and does not end as success', () => {
   for (const version of ['v0.1.0-rc.9', 'v0.1.0']) {
     const { results, conclusion } = simulate('refs/heads/other', version, passing);
-    assert.deepEqual(results, { gate: 'skipped', build: 'skipped', tag: 'skipped', tagged: 'failure' }, version);
+    assert.deepEqual(results, { gate: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', tagged: 'failure' }, version);
     assert.equal(conclusion, 'failure', version);
+  }
+});
+
+// Steps of the build job that run only for a final version, by their condition.
+const finalOnly = (job: string) => jobs[job]!.steps
+  .filter((step) => step.if !== undefined)
+  .map((step) => {
+    const run = (version: string) => Boolean(evaluate(step.if!, { ref: main, version, cancelled: false, results: new Map(), upstream: [] }));
+    assert.equal(run('v0.1.0-rc.9'), false, `a pre-release must skip ${step.name ?? step.uses}`);
+    assert.equal(run('v0.1.0'), true, `a final version must run ${step.name ?? step.uses}`);
+    return step;
+  });
+
+test('only a final version writes and uploads the SBOM, after the release tree is staged and uploaded', () => {
+  const steps = jobs.build!.steps;
+  const conditional = finalOnly('build');
+  assert.equal(conditional.length, 2, 'the SBOM is written and uploaded, and nothing else in build depends on the version');
+  assert.match(conditional[0]!.run!, /^node src\/release\/sbom\.ts "\$GITHUB_REPOSITORY" "\$RUNNER_TEMP\/release" "\$RUNNER_TEMP\/sbom\.spdx\.json"$/);
+  assert.match(conditional[1]!.uses!, /^actions\/upload-artifact@/);
+  assert.equal(conditional[1]!.with!.name, 'release-sbom');
+  const stage = steps.findIndex((step) => step.run?.includes('src/release/prepare.ts'));
+  assert.ok(stage >= 0 && steps.indexOf(conditional[0]!) > stage, 'the SBOM reads the staged release');
+});
+
+test('the attest job signs provenance and the SBOM for the release files with only the permissions it needs', () => {
+  const job = jobs.attest!;
+  assert.equal(job.if, undefined, 'it runs only when the gate and the build succeeded, so only for a final version');
+  assert.deepEqual(job.permissions, { 'id-token': 'write', attestations: 'write' });
+  const downloads = job.steps.filter((step) => step.uses?.startsWith('actions/download-artifact@')).map((step) => step.with!.name);
+  assert.deepEqual(downloads, ['release-tree', 'release-sbom']);
+  // No checkout and no repository script: the job that can mint an identity token runs only pinned actions and coreutils.
+  assert.ok(job.steps.every((step) => !step.uses?.startsWith('actions/checkout@') && !/\bnode\b|\bnpm\b/.test(step.run ?? '')));
+  const attests = job.steps.filter((step) => step.uses?.startsWith('actions/attest@'));
+  assert.deepEqual(attests.map((step) => step.with), [
+    { 'subject-checksums': '${{ runner.temp }}/subjects.sha256' },
+    { 'subject-checksums': '${{ runner.temp }}/subjects.sha256', 'sbom-path': '${{ runner.temp }}/sbom.spdx.json' },
+  ]);
+  for (const [name, other] of Object.entries(jobs)) {
+    if (name !== 'attest') assert.ok(!other.permissions || !('id-token' in other.permissions), `${name} must not get id-token`);
+  }
+});
+
+test('every action in release.yml is pinned to a full commit SHA', () => {
+  for (const [name, job] of Object.entries(jobs)) {
+    for (const step of job.steps) {
+      if (step.uses !== undefined) assert.match(step.uses, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, `${name}: ${step.uses}`);
+    }
+  }
+});
+
+test('the attestation subjects are every file of the release tree, by path', () => {
+  const step = jobs.attest!.steps.find((each) => each.name === 'List the release files as attestation subjects')!;
+  const directory = mkdtempSync(join(tmpdir(), 'release-subjects-'));
+  try {
+    mkdirSync(join(directory, 'tree/dist'), { recursive: true });
+    writeFileSync(join(directory, 'tree/dist/cli.js'), 'cli\n');
+    writeFileSync(join(directory, 'tree/action.yml'), 'action\n');
+    writeFileSync(join(directory, 'tree/.pre-commit-hooks.yaml'), 'hooks\n');
+    execFileSync('tar', ['-C', join(directory, 'tree'), '-cf', join(directory, 'release.tar'), '.']);
+    const run = spawnSync('bash', ['-e', '-c', step.run!], { env: { ...process.env, RUNNER_TEMP: directory }, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const digest = (text: string) => createHash('sha256').update(text).digest('hex');
+    assert.equal(readFileSync(join(directory, 'subjects.sha256'), 'utf8'), [
+      `${digest('hooks\n')}  .pre-commit-hooks.yaml`,
+      `${digest('action\n')}  action.yml`,
+      `${digest('cli\n')}  dist/cli.js`,
+      '',
+    ].join('\n'));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
