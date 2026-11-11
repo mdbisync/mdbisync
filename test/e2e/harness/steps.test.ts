@@ -32,7 +32,7 @@ import { engineEntry, REPO_ROOT, type EngineResult } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
 import { readHookConfig } from '../../../src/setup/hooks.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
-import { waitForCheck } from './check-fault.ts';
+import { waitForCheck, waitForCheckCompleted } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
 import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, STEP_ACTIONS, watchRun } from './steps.ts';
@@ -1192,6 +1192,46 @@ describe('marker-driven checks', () => {
     const queued = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async () => Response.json({ check_runs: [{ id: 1, name: 'format', app: { slug: 'github-actions' }, status: 'queued', conclusion: null }] })) as typeof fetch);
     await assert.rejects(waitForCheck(queued, 'abc', 'passed', { timeoutMs: 0 }), EnvBlockedError);
     await assert.rejects(waitForCheck(rest, 'abc', 'passed', { signal: AbortSignal.abort() }), { name: 'AbortError' });
+  });
+
+  it('waits for a check to complete with any result, and blocks on the environment when it never does', async () => {
+    for (const [conclusion, state] of [['success', 'passed'], ['failure', 'failed'], ['cancelled', 'cancelled']] as const) {
+      let polls = 0;
+      const rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async () => {
+        polls += 1;
+        const check = { id: polls, name: 'format', app: { slug: 'github-actions' }, status: 'completed', conclusion };
+        if (polls === 1) return Response.json({ check_runs: [] });
+        if (polls === 2) return Response.json({ check_runs: [{ ...check, name: 'other' }] });
+        if (polls === 3) return Response.json({ check_runs: [{ ...check, status: 'in_progress', conclusion: null }] });
+        return Response.json({ check_runs: [check] });
+      }) as typeof fetch);
+      assert.equal(await waitForCheckCompleted(rest, 'abc123', { pollMs: 0, timeoutMs: 1000 }), state);
+      assert.equal(polls, 4);
+    }
+    const absent = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async () => Response.json({ check_runs: [] })) as typeof fetch);
+    await assert.rejects(waitForCheckCompleted(absent, 'abc', { timeoutMs: 0 }), EnvBlockedError);
+    await assert.rejects(waitForCheckCompleted(absent, 'abc', { signal: AbortSignal.abort() }), { name: 'AbortError' });
+  });
+
+  it("waits for the tracked tip's check after a git step, but only once a check fault is in play", async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    const reads: string[] = [];
+    ctx.live!.rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async (input: string | URL | Request) => {
+      const sha = /\/commits\/([0-9a-f]+)\/check-runs/.exec(String(input))?.[1];
+      assert.ok(sha, String(input));
+      reads.push(sha);
+      // The push's check is still queued when it is first read.
+      const done = reads.filter((read) => read === sha).length > 1;
+      return Response.json({ check_runs: [{ id: 1, name: 'format', app: { slug: 'github-actions' }, status: done ? 'completed' : 'queued', conclusion: done ? 'success' : null }] });
+    }) as typeof fetch);
+    const tip = async () => (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
+    await runStep(ctx, { kind: 'git', action: 'edit', args: { target: 'eng/platform/plan.md' } });
+    assert.deepEqual(reads, [], 'without a check fault the step does not wait');
+    ctx.observations.set('fault.checks', { name: 'format', state: 'failed', sha: 'f'.repeat(40) });
+    await runStep(ctx, { kind: 'git', action: 'edit', args: { target: 'eng/platform/notes.md' } });
+    const edited = await tip();
+    assert.deepEqual(reads, [edited, edited]);
+    assert.deepEqual(ctx.observations.get('trackedTip.check'), { sha: edited, state: 'passed' });
   });
 
   it("takes a run's writes from its report, so L1R-03's expected-zero total fails on the first sync's writes", async () => {

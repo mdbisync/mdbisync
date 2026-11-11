@@ -25,7 +25,8 @@ import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
 import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
-import { faultChecks, rerunSuspendedCheck, ageCheck } from './check-fault.ts';
+import { faultChecks, rerunSuspendedCheck, ageCheck, waitForCheckCompleted } from './check-fault.ts';
+import { CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
@@ -1736,7 +1737,26 @@ export async function afterUiStep(ctx: RunContext, step: Step): Promise<void> {
 export async function runStep(ctx: RunContext, step: Step): Promise<void> {
   const executor = STEP_ACTIONS[`${step.kind}.${step.action}`];
   if (executor === undefined) throw new HarnessGapError(`${step.kind}.${step.action}`);
+  // A person's push to the tracked branch starts the marker check there. Once
+  // a check fault is in play, the next sync would see that check still
+  // running on the tracked tip and wait one run before it suspends; wait for
+  // the check here so the scenario's run numbers hold.
+  const settle = step.kind === 'git' && ctx.live !== null && ctx.observations.has('fault.checks');
+  const before = settle ? await trackedTipOnServer(ctx) : null;
   await executor(ctx, step.args);
+  if (before !== null) await waitForTrackedTipCheck(ctx, before);
+}
+
+/** Waits for the marker check on the tracked tip when the step moved it. */
+async function waitForTrackedTipCheck(ctx: RunContext, before: string): Promise<void> {
+  const tip = await trackedTipOnServer(ctx);
+  if (tip === before) return;
+  const git = await ctx.person();
+  const workflow = await git.run(['cat-file', '-e', `${tip}:${CHECK_WORKFLOW_PATH}`], { okCodes: [0, 128] });
+  if (workflow.code !== 0) return;
+  ctx.log(`waiting up to 5 minutes for ${CHECK_NAME} to complete on the tracked branch's new tip`);
+  const result = await waitForCheckCompleted(live(ctx).rest, tip, { signal: ctx.signal });
+  ctx.observations.set('trackedTip.check', { sha: tip, state: result });
 }
 
 export { snapshotRefs };

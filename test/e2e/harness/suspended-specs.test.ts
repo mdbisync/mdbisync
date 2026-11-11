@@ -36,11 +36,15 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
       world.github.checks = new Map();
       const attempts = new Map<string, number>();
       const checks = new Map<string, FakeCheck>();
+      // The check of a person's or a fault's push is still queued until the
+      // harness has polled it once: it runs while the harness waits, and a sync
+      // that does not wait for it sees it queued, as on GitHub.
+      const polled = new Set<string>();
       const show = async (sha: string, path: string) => {
         const result = await fixture.remote.run(['show', `${sha}:${path}`], { okCodes: [0, 128] });
         return result.code === 0 ? result.stdout.toString('utf8') : null;
       };
-      const fetchImpl: typeof fetch = async (input, init) => {
+      const serve = async (input: Parameters<typeof fetch>[0], init: RequestInit | undefined, byHarness: boolean): Promise<Response> => {
         const url = String(input);
         const sha = /\/commits\/([0-9a-f]+)\/check-runs/.exec(url)?.[1];
         if (sha !== undefined) {
@@ -48,7 +52,9 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           const target = (await show(sha, '.harness-check-target'))?.trim();
           const passed = marker === undefined || await show(sha, '.harness-check-fixed') !== null || (marker === 'flaky' && (attempts.get(sha) ?? 1) > 1) || (marker === 'document' && target !== undefined && (await show(sha, target))?.includes('Approved for review.'));
           const check = checks.get(sha) ?? { name: 'format', status: 'completed' };
-          Object.assign(check, { status: marker === 'pending' && !passed ? 'queued' : 'completed', conclusion: passed ? 'success' : 'failure', annotations: (target === undefined ? [] : [target]).map((path) => ({ path, start_line: 1, title: 'Review required', message: 'Check the review status.' })) });
+          const fresh = ctx.ownCommits.includes(sha) && !polled.has(sha);
+          if (byHarness) polled.add(sha);
+          Object.assign(check, { status: fresh || (marker === 'pending' && !passed) ? 'queued' : 'completed', conclusion: passed ? 'success' : 'failure', annotations: (target === undefined ? [] : [target]).map((path) => ({ path, start_line: 1, title: 'Review required', message: 'Check the review status.' })) });
           checks.set(sha, check);
           world.github.checks!.set(sha, [check]);
           const response = await transport(String(input).replace('https://api.github.com', GITHUB_API), init);
@@ -102,6 +108,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         }
         return transport(String(input).replace('https://api.github.com', GITHUB_API), init);
       };
+      const fetchImpl: typeof fetch = (input, init) => serve(input, init, false);
       world.github.merge = async (pr, sha) => {
         const base = (await fixture.remote.text(['rev-parse', `refs/heads/${pr.base}`])).trim();
         const result = await fixture.remote.run(['merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
@@ -110,7 +117,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
         return { sha: commit };
       };
-      const rest = new SandboxRest({ owner: 'owner', repo: 'repo' }, 'app-token', fetchImpl);
+      const rest = new SandboxRest({ owner: 'owner', repo: 'repo' }, 'app-token', (input, init) => serve(input, init, true));
       const app = new LinearClient({ token: 'fake-token', baseUrl: LINEAR_API, fetch: fetchImpl });
       const sandbox = new Sandbox({ url: fixture.url, token: 'unused', stateDir: join(fixture.root, 'state'), runId: names.runId });
       await mkdir(sandbox.cache.dir, { recursive: true });

@@ -15,6 +15,19 @@ import { live } from './step-helpers.ts';
 
 export type CheckState = 'pending' | 'failed' | 'passed';
 
+type CheckReading = { check: { id: number } | undefined; actual: string };
+
+/** The latest marker-workflow check on this exact head, never an unrelated check. */
+async function readCheck(rest: SandboxRest, sha: string): Promise<CheckReading> {
+  const { check_runs: runs } = await rest.request<{ check_runs: Array<{ id: number; name: string; status: string; conclusion: string | null; app?: { slug: string } }> }>(
+    'GET', `/commits/${sha}/check-runs?check_name=${CHECK_NAME}&filter=latest&per_page=100`,
+  );
+  const check = runs.filter((run) => run.name === CHECK_NAME && run.app?.slug === 'github-actions').sort((a, b) => b.id - a.id)[0];
+  const actual = check === undefined ? 'absent' : check.status !== 'completed' ? 'pending'
+    : check.conclusion === 'success' ? 'passed' : check.conclusion === 'failure' ? 'failed' : String(check.conclusion);
+  return { check, actual };
+}
+
 /** Wait for this workflow's check on this exact head, never an unrelated check. */
 export async function waitForCheck(
   rest: SandboxRest, sha: string, state: CheckState,
@@ -23,17 +36,33 @@ export async function waitForCheck(
   const deadline = Date.now() + (options.timeoutMs ?? 5 * 60_000);
   for (;;) {
     options.signal?.throwIfAborted();
-    const { check_runs: runs } = await rest.request<{ check_runs: Array<{ id: number; name: string; status: string; conclusion: string | null; app?: { slug: string } }> }>(
-      'GET', `/commits/${sha}/check-runs?check_name=${CHECK_NAME}&filter=latest&per_page=100`,
-    );
-    const check = runs.filter((run) => run.name === CHECK_NAME && run.app?.slug === 'github-actions').sort((a, b) => b.id - a.id)[0];
-    const actual = check === undefined ? 'absent' : check.status !== 'completed' ? 'pending'
-      : check.conclusion === 'success' ? 'passed' : check.conclusion === 'failure' ? 'failed' : check.conclusion;
+    const { check, actual } = await readCheck(rest, sha);
     if (actual === state) return;
     if (Date.now() >= deadline) {
       if (check === undefined) throw new ProductError(`no ${CHECK_NAME} check appeared on the marker commit`);
       throw new EnvBlockedError(`the ${CHECK_NAME} check did not reach ${state} on the marker commit (last state: ${actual})`);
     }
+    await sleep(options.pollMs ?? 2_000, undefined, { signal: options.signal });
+  }
+}
+
+/**
+ * Wait until the check that a push to the tracked branch starts has
+ * completed, whatever its result, and return that result. The sync treats a
+ * check that still runs on the tracked tip as a reason to wait before it
+ * suspends (the red-main rule), so a scenario step must not race it.
+ */
+export async function waitForCheckCompleted(
+  rest: SandboxRest, sha: string,
+  options: { timeoutMs?: number; pollMs?: number; signal?: AbortSignal } = {},
+): Promise<string> {
+  const deadline = Date.now() + (options.timeoutMs ?? 5 * 60_000);
+  for (;;) {
+    options.signal?.throwIfAborted();
+    const { actual } = await readCheck(rest, sha);
+    if (actual !== 'absent' && actual !== 'pending') return actual;
+    // The push trigger and the runner belong to the sandbox, not to the product.
+    if (Date.now() >= deadline) throw new EnvBlockedError(`the ${CHECK_NAME} check on the tracked branch's new tip did not complete (last state: ${actual})`);
     await sleep(options.pollMs ?? 2_000, undefined, { signal: options.signal });
   }
 }
