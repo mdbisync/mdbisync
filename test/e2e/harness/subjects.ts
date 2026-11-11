@@ -52,6 +52,7 @@ import { isAppBot } from './workflows.ts';
 import type { PushActivity } from './github.ts';
 import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
+import { zoneConcurrent } from './concurrency.ts';
 import { documentPaths, MOVE_SOURCE_FOLDER, projectFolders } from './step-helpers.ts';
 import { UNSAFE_TITLES } from './fixtures.ts';
 
@@ -143,6 +144,10 @@ async function commentsOf(env: Env, id: string | undefined): Promise<string[]> {
   if (!view.comments.has(id)) {
     // Only the world now may be read again; a snapshot answers from what it holds.
     if (env.which !== 'now') return [];
+    // A concurrent run reads comments only of a document in its scope: one its view holds, or one a guarded by-id read returns.
+    if (zoneConcurrent(env.ctx.scenario) && !view.documents.has(id) && await documentById(env.ctx, id) === undefined) {
+      throw new ProductError('a commented document is not in the run scope');
+    }
     view.comments.set(id, await documentComments(env.ctx, id));
   }
   return view.comments.get(id) as string[];

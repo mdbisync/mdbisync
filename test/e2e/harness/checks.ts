@@ -493,9 +493,10 @@ const SINGLE_READS_AT_ONCE = 5;
  * as a product error instead of entering an assertion. Other scenarios run
  * alone and accept every document.
  */
-export function runScopeGuard(ctx: RunContext, owned: Pick<ReadonlyMap<string, unknown>, 'has'> = ownedDocuments(ctx.owned)): (document: LinearDocument) => LinearDocument {
+export function runScopeGuard(ctx: RunContext, known?: Pick<ReadonlyMap<string, unknown>, 'has'>): (document: LinearDocument) => LinearDocument {
   const world = ctx.live;
   if (world === null || !zoneConcurrent(ctx.scenario)) return (document) => document;
+  const owned = known ?? ownedDocuments(ctx.owned);
   const projectIds = new Set([...world.projects.values()].map((project) => project.id));
   const teamIds = new Set([...world.tree.teams].map((key) => world.teams.get(key)?.id));
   return (document) => {

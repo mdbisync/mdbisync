@@ -104,6 +104,8 @@ interface Zone { runId: string; team: string; teamId: string; folder: string; pr
 
 const A: Zone = { runId: 'aaaaaa', team: 'ENG', teamId: 'team-eng', folder: 'eng', projectId: 'project-a' };
 const B: Zone = { runId: 'bbbbbb', team: 'DOCS', teamId: 'team-docs', folder: 'docs', projectId: 'project-b' };
+/** Written only by the foreign run; each run's manifest names it as a content canary. */
+const CANARY = 'Quartz-lantern-4471';
 /** The third run whose writes the two runs must never see. */
 const FOREIGN = runNames('cccccc');
 
@@ -179,7 +181,9 @@ async function world(scenario: Scenario) {
       githubToken: 'unused',
       githubTokenSource: 'host',
       repository: 'example/sandbox',
-      manifest: { seed: 'test', files: Object.keys(files).map((path) => ({ path, group: 'work-documents', kind: 'markdown' as const, synced: true, lfs: false, canary: null, class: null, rule: null })) },
+      // A canary none of the run's own texts hold: only foreign texts carry it, so a leak fails I5.
+      manifest: { seed: 'test', files: Object.keys(files).map((path) => ({ path, group: 'work-documents', kind: 'markdown' as const, synced: true, lfs: false,
+        canary: path.endsWith('/api.md') ? CANARY : null, canary_in: 'content' as const, class: null, rule: null })) },
       tree: {
         paths: new Map(Object.keys(files).map((path) => [path, path])),
         rewritten: new Map([[`${zone.folder}/platform/README.md`, files[`${zone.folder}/platform/README.md`]!]]),
@@ -225,6 +229,7 @@ async function world(scenario: Scenario) {
   const b = await run(B);
 
   let writes = 0;
+  const foreignIds: string[] = [];
   let queue = Promise.resolve();
   // One foreign writer: its writes run one at a time, whichever run's read triggers them.
   const foreign = () => (queue = queue.then(write));
@@ -233,11 +238,15 @@ async function world(scenario: Scenario) {
     // pushes its own refs and opens pull requests; the two runs' documents only change updatedAt.
     writes += 1;
     for (const zone of [A, B]) {
-      linear.add({ teamId: zone.teamId }, `${FOREIGN.teamZonePrefix}backend/api`, `# API\n\nForeign ${writes}.\n`);
-      linear.add({ teamId: zone.teamId }, 'README', `Unowned ${writes}.\n`);
-      const other = linear.add({ projectId: `foreign-${zone.projectId}`, teamId: zone.teamId }, 'plan', `Foreign plan ${writes}.\n`);
-      linear.comments.set(other.id, [`Foreign comment ${writes}.`]);
-      if (writes > 1) Object.assign(linear.documents.get(`doc-${linear.documents.size - 4}`) as LinearDocument, { trashed: true, archivedAt: 'now' });
+      const zoneDocument = linear.add({ teamId: zone.teamId }, `${FOREIGN.teamZonePrefix}backend/api`, `# API\n\nForeign ${writes} ${CANARY}.\n`);
+      linear.comments.set(zoneDocument.id, [`Zone comment ${writes} ${CANARY}.`]);
+      linear.add({ teamId: zone.teamId }, 'README', `Unowned ${writes} ${CANARY}.\n`);
+      const other = linear.add({ projectId: `foreign-${zone.projectId}`, teamId: zone.teamId }, 'plan', `Foreign plan ${writes} ${CANARY}.\n`);
+      linear.comments.set(other.id, [`Foreign comment ${writes} ${CANARY}.`]);
+      // The foreign run trashes one of its own earlier documents.
+      const earlier = foreignIds.shift();
+      if (earlier !== undefined) Object.assign(linear.documents.get(earlier) as LinearDocument, { trashed: true, archivedAt: 'now' });
+      foreignIds.push(other.id);
     }
     for (const document of linear.documents.values()) if (!document.title.startsWith(FOREIGN.teamZonePrefix)) document.updatedAt = String(writes);
     pulls.push(pull(FOREIGN.syncBranch, writes % 2 === 0 ? 'f'.repeat(40) : undefined));
@@ -252,11 +261,13 @@ async function world(scenario: Scenario) {
 /** What the run's checks see: its scoped invariants and every value its assertions name. */
 async function inspect(ctx: RunContext) {
   refreshView(ctx);
+  // I5 caches the remote texts it scanned; each inspection reads them again.
+  ctx.observations.delete('canary.remoteTexts');
   const errorOf = (error: unknown) => ({ error: (error as Error).message });
   let cached: ReturnType<typeof readSides> | undefined;
   const sides = () => (cached ??= readSides(ctx, { allowNoIds: true }));
   const invariants = [];
-  for (const id of ['I1', 'I2', 'I7', 'I8'] as const) invariants.push(await INVARIANT_CHECKS[id](ctx, sides).catch(errorOf));
+  for (const id of ['I1', 'I2', 'I3', 'I4', 'I5', 'I7', 'I8', 'I9'] as const) invariants.push(await INVARIANT_CHECKS[id](ctx, sides).catch(errorOf));
   const subjects: Record<string, unknown> = {};
   for (const subject of assertionSubjects(ctx.scenario)) subjects[subject] = await resolveSubject(ctx, subject).catch(errorOf);
   const assertions = [];
@@ -280,6 +291,7 @@ for (const scenario of audited) {
     for (const solo of [soloA, soloB]) {
       for (const [subject, value] of Object.entries(solo.subjects)) assert.ok(!('error' in (value as object)), `${scenario.id} ${subject}: ${JSON.stringify(value)}`);
       for (const check of solo.invariants) assert.ok(!('error' in check), `${scenario.id}: ${JSON.stringify(check)}`);
+      assert.deepEqual(solo.invariants.find((check) => 'name' in check && check.name === 'I5'), { name: 'I5', ok: true }, `${scenario.id}: I5 alone`);
     }
     linear.onRead = foreign;
     const [concurrentA, concurrentB] = await Promise.all([inspect(a), inspect(b)]);
@@ -300,6 +312,11 @@ it('fails a by-id read that leaves the run scope instead of reading it', async (
   a.observations.set('target.path', `${A.folder}/platform/gone.md`);
   refreshView(a);
   for (const subject of ['ids.documentId', 'documents.title', 'documents.body']) await assert.rejects(resolveSubject(a, subject), /outside the leased run scope/, subject);
+  // An id no read returns at all: its comments are not read by id either.
+  a.observations.set('target.id', 'doc-unknown');
+  refreshView(a);
+  await assert.rejects(resolveSubject(a, 'documents.comments'), /not in the run scope/);
+  a.observations.set('target.id', foreignId);
   // Read for an exclusive scenario, the same document is accepted: only audited contracts are guarded.
   a.scenario = { ...a.scenario, id: 'L2-22' };
   refreshView(a);
