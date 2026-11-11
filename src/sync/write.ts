@@ -57,7 +57,7 @@ import {
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { nameFixingHooks } from './fix-hooks.ts';
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
-import { reconcileDocumentMark } from './marks.ts';
+import { reconcileDocumentMark, releasedHold } from './marks.ts';
 import { suspendedPaths } from './suspended.ts';
 import { recordedTrailers } from './recorded.ts';
 import { message } from '../messages.ts';
@@ -916,7 +916,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    */
   function forgetEntry(path: string): void {
     const entry = nextIds.get(path);
-    if (entry?.suspended === undefined && entry?.saved?.hold !== undefined) return;
+    if (entry !== undefined && releasedHold(entry)) return;
     nextIds.delete(path);
   }
 

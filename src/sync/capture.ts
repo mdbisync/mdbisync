@@ -16,7 +16,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type IdEntry, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
-import { MARKS, reconcileDocumentMark } from './marks.ts';
+import { MARKS, reconcileDocumentMark, releasedHold } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
@@ -579,7 +579,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
  * episode's comment the hold step has not resolved yet.
  */
 function keptForLane(entry: IdEntry): boolean {
-  return entry.suspended !== undefined || entry.releaseBase !== undefined || entry.saved?.hold !== undefined;
+  return entry.suspended !== undefined || entry.releaseBase !== undefined || releasedHold(entry);
 }
 
 /** Up to this many changed link targets, every combination of them rejected is staged; above it, each alone and all together. */

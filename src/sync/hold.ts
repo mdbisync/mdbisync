@@ -10,10 +10,10 @@
 // comment target). At most `HOLD_MARK_LIMIT` documents change per run.
 
 import { createHash } from 'node:crypto';
-import { LinearError, LinearStoppedError, describeLinearError, isTransientLinearError, type LinearClient, type LinearDocument } from '../linear/index.ts';
+import { LinearError, LinearGraphQLError, LinearStoppedError, describeLinearError, isTransientLinearError, type LinearClient, type LinearDocument } from '../linear/index.ts';
 import { type CheckAnnotation, type CheckFailure, type GitHubRepository, PullRequestError, readAnnotations } from '../pull-request/index.ts';
 import { type RunContext } from '../run/preflight.ts';
-import { type HoldNotice, type IdEntry, type Oid, type StateConfig, type StateSnapshot, pushAtomic, readIds, stateRef } from '../state/index.ts';
+import { type HoldNotice, type IdEntry, type Oid, type StateConfig, type StateSnapshot, listTree, pushAtomic, readIds, stateRef } from '../state/index.ts';
 import { MARKS, resolveHold } from './marks.ts';
 import { commitLaneIds } from './suspended.ts';
 
@@ -69,8 +69,8 @@ export interface HoldMarksResult {
   /** Suspended documents in Linear's trash or archived: they hold no mark. */
   removed: string[];
   /**
-   * Released documents in Linear's trash, archived or gone whose comment Linear refused to resolve, with Linear's
-   * error class and code: the comment stays on the document, and no later run tries again.
+   * Released documents whose comment Linear refused to resolve (it is gone, or Linear will not change it), with
+   * Linear's error class and code: the comment stays as it is, and no later run tries again.
    */
   unresolved?: Array<{ path: string; error: string }>;
   /** How the step stopped short, as a write step would: the run ends partial with it. */
@@ -277,12 +277,17 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
   if (!(await persist())) return { ...result, code: 'state-moved' };
 
   const { linear } = options;
-  const inLinearTip = async (path: string) => options.state.linear !== null && (await git.run(['cat-file', '-e', `${options.state.linear}:${path}`], { okCodes: [0, 128] })).code === 0;
+  // The `linear` tip's paths, listed once and only when a removed document's entry may go.
+  let tipPaths: Set<string> | undefined;
+  const inLinearTip = async (path: string) => {
+    tipPaths ??= new Set(options.state.linear === null ? [] : (await listTree(git, options.state.linear)).map((entry) => entry.path));
+    return tipPaths.has(path);
+  };
   try {
     for (const item of chosen) {
       const { document, path } = item;
       if (item.kind === 'clear') {
-        const resolved = await resolveCleared(linear, item.entry.saved?.hold as HoldNotice, document === undefined);
+        const resolved = await resolveCleared(linear, item.entry.saved?.hold as HoldNotice);
         const { hold: _hold, ...saved } = item.entry.saved as NonNullable<IdEntry['saved']>;
         // A conflict or blocked notice still stands: its own mark comes back. Otherwise the document's own decoration.
         const mark = saved.notice === undefined ? { icon: saved.icon, color: saved.color } : MARKS[saved.notice.kind];
@@ -332,18 +337,26 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
 }
 
 /**
- * Resolves a released document's comment. For a document in Linear's trash, archived or gone, a refusal is
- * Linear's last word: the error's description comes back instead, and the hold is forgotten. An outage or a
- * stop still ends the step, and a later run tries again.
+ * Resolves a released document's comment. Linear's refusal of that one comment (a person deleted it, or its
+ * document is in the trash) is its last word: the error's description comes back instead, and the hold is
+ * forgotten, so it never stalls the step run after run. An outage, a stop, or a refusal of the token, its scope
+ * or the rate still ends the step, and a later run tries again.
  */
-async function resolveCleared(linear: HoldClient, hold: HoldNotice, removed: boolean): Promise<true | string> {
+async function resolveCleared(linear: HoldClient, hold: HoldNotice): Promise<true | string> {
   try {
     await resolveHold(linear, hold);
     return true;
   } catch (error) {
-    if (!removed || !(error instanceof LinearError) || error instanceof LinearStoppedError || isTransientLinearError(error)) throw error;
+    if (!refusesComment(error)) throw error;
     return describeLinearError(error);
   }
+}
+
+const NOT_ABOUT_THE_COMMENT = new Set(['AUTHENTICATION_ERROR', 'FORBIDDEN', 'RATELIMITED']);
+
+/** Linear answered and refused the request itself, for reasons that asking again does not change. */
+function refusesComment(error: unknown): error is LinearGraphQLError {
+  return error instanceof LinearGraphQLError && !isTransientLinearError(error) && ![401, 403, 429].includes(error.httpStatus) && !NOT_ABOUT_THE_COMMENT.has(error.code ?? '');
 }
 
 /** The pending comment of a new episode, its id chosen before the suspension's push. */

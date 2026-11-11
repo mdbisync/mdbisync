@@ -365,6 +365,20 @@ test('a conflict mark resolves a released suspension comment before it takes the
   assert.equal(world.entry.saved?.icon, ':fire:');
 });
 
+test('a cleared conflict takes over a released suspension comment, so the document gets its own icon back at once', async () => {
+  const world = new World();
+  world.document.content = 'Plain text.\n';
+  world.document.icon = MARKS.conflict.icon;
+  world.document.color = MARKS.conflict.color;
+  const hold = { id: '22222222-2222-4222-8222-222222222222', bodyHash: 'a'.repeat(64), posted: true };
+  const notice = { id: '44444444-4444-4444-8444-444444444444', kind: 'conflict' as const, bodyHash: 'b'.repeat(64), posted: true };
+  world.entry = { id: 'document-one', saved: { icon: ':fire:', color: '#123456', hold, notice } };
+  await world.reconcile();
+  assert.ok(world.resolved.includes(hold.id));
+  assert.equal(world.document.icon, ':fire:');
+  assert.equal(world.entry.saved, undefined);
+});
+
 test('a document marked blocked while suspended keeps its suspension comment', async () => {
   const world = new World();
   world.document.content = 'Plain text.\n';

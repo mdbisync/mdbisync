@@ -25,6 +25,11 @@ export async function resolveHold(linear: Pick<LinearClient, 'resolveComment' | 
   if (hold.posted || await linear.commentExists(hold.id)) await linear.resolveComment(hold.id);
 }
 
+/** A released episode's comment still to be resolved: its entry stays, even when its document is gone, until the hold step resolves it. */
+export function releasedHold(entry: IdEntry): boolean {
+  return entry.suspended === undefined && entry.saved?.hold !== undefined;
+}
+
 export interface SecurityFinding {
   hook: string;
   line: number;
@@ -79,12 +84,12 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
 
   // Suspension decorations are reconciled after the lane's state push.
   if (entry.suspended !== undefined && blocked.length === 0) return result;
-  // A released episode whose comment the hold step has not reached yet (the per-run limit, a failed write): the
-  // hold step clears it and reports it, within its limit. Only a new conflict or blocked mark takes it over here,
-  // resolving the comment before its mark goes.
-  if (entry.suspended === undefined && entry.saved?.hold !== undefined && state === 'clear') return result;
-  if (entry.suspended === undefined && entry.saved?.hold !== undefined) {
-    await resolveHold(linear, entry.saved.hold);
+  // A released episode whose comment the hold step has not reached yet (the per-run limit, a failed write).
+  if (releasedHold(entry) && entry.saved !== undefined) {
+    // Nothing else to show: the hold step clears it and reports it, within its limit.
+    if (state === 'clear' && entry.saved.notice === undefined) return result;
+    // A conflict or blocked mark (new, or one that has just cleared) takes it over: the comment is resolved before its mark goes.
+    await resolveHold(linear, entry.saved.hold as HoldNotice);
     const { hold: _hold, ...saved } = entry.saved;
     entry = { ...entry, saved };
     await persistEntry(entry);

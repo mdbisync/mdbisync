@@ -1153,7 +1153,7 @@ describe('sync: the sync pull request', () => {
     assert.equal(marks?.code, undefined);
     assert.deepEqual(marks?.unresolved?.map(({ path: where }) => where), [path]);
     assert.match(marks?.unresolved?.[0]?.error ?? '', /INPUT_ERROR/);
-    assert.ok(released.summary.includes(`Linear refused to resolve the comment of released documents in its trash or archived: \`${path}\``), released.summary);
+    assert.ok(released.summary.includes(`Linear refused to resolve the suspension comment of released documents: \`${path}\``), released.summary);
     assert.doesNotMatch(released.summary, /a later run goes on/);
     assert.equal(resolve.calls, 1);
     assert.equal((await ids())[path], undefined);
@@ -1161,6 +1161,43 @@ describe('sync: the sync pull request', () => {
     const quiet = await sync();
     assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
     assert.equal(resolve.calls, 1, 'the refused comment was tried again');
+  });
+
+  it('a released comment a person deleted gives the document its own icon back and is reported once, without stalling later runs', async () => {
+    const path = 'eng/notes/plan.md';
+    const own = { icon: (await documentOf(path)).icon ?? null, color: (await documentOf(path)).color ?? null };
+    await suspendOne(path);
+    const resolve = onResolve(() => linearAnswer(200, 'INPUT_ERROR'));
+    const released = await releaseHeld();
+    const marks = released.report.pullRequest?.holdMarks;
+    assert.equal(marks?.code, undefined);
+    assert.deepEqual(marks?.unresolved?.map(({ path: where }) => where), [path]);
+    const document = await documentOf(path);
+    assert.deepEqual({ icon: document.icon ?? null, color: document.color ?? null }, own);
+    assert.equal('saved' in ((await ids())[path] as object), false);
+    const quiet = await sync();
+    assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
+    assert.equal(resolve.calls, 1, 'the refused comment was tried again');
+  });
+
+  it('a refusal of the token while resolving a released comment in the trash is not final: the comment waits for a later run', async () => {
+    const path = 'eng/notes/plan.md';
+    const document = await suspendThenTrash(path);
+    let refused = true;
+    onResolve(() => (refused ? linearAnswer(401, 'AUTHENTICATION_ERROR') : undefined));
+    checksOn(await rev(SUSPENDED), FAILED);
+    await sync();
+    checksOn(await rev(SUSPENDED), PASSED);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.equal(released.report.pullRequest?.holdMarks?.code, 'write-failed');
+    assert.equal(released.report.pullRequest?.holdMarks?.unresolved, undefined);
+    assert.ok(((await ids())[path] as { saved?: { hold?: unknown } } | undefined)?.saved?.hold !== undefined, 'the pending comment was forgotten');
+    refused = false;
+    const next = await sync();
+    assert.deepEqual(next.report.pullRequest?.holdMarks?.cleared, [path]);
+    assert.equal(commentsOf(document)[0]?.resolved, true);
+    assert.equal((await ids())[path], undefined);
   });
 
   it('L5-32: a comment on a released document in the trash that Linear could not resolve yet is resolved by the next run', async () => {
