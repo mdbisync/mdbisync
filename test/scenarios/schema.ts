@@ -89,7 +89,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "run.resume-until-complete": ["command", "confirm", "direction"],
   "run.scan-canaries": ["scope", "sources"],
   "run.settle": ["mergeGraceSeconds"],
-  "run.soak": ["actors", "durationSeconds", "invariantIntervalSeconds", "randomSeed", "scheduleSeconds"],
+  "run.soak": ["actors", "drainSyncs", "durationSeconds", "invariantIntervalSeconds", "randomSeed", "scheduleSeconds"],
   "run.sync": ["mergeGraceSeconds", "wait", "checkDeadlineMinutes"],
   "run.token-lifecycle": ["outcomes"],
   "run.workflow": ["command", "confirm", "direction", "event"],
@@ -130,7 +130,7 @@ function list(value: unknown): asserts value is unknown[] {
 
 const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name lane operation path project ref scope service source storage target title'.split(' '));
 const booleanArguments = new Set('reset flaky document allFiles bypassHook compareGolden concurrencyGroup confirm coverAllConstructs includeEndpointLimits linearFormat mergeCommits replacePending samePath scheduled valid wait workflows'.split(' '));
-const numericArguments = new Set('minutes checkDeadlineMinutes characters cleanEdits conflictingDocuments count documents durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
+const numericArguments = new Set('minutes checkDeadlineMinutes characters cleanEdits conflictingDocuments count documents drainSyncs durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
 const arrayArguments = new Set('actors constructs events fixes measure names orderings outcomes sources variants'.split(' '));
 const requiredArguments: Record<string, string[]> = {
     'fault.check-age': ['minutes'],

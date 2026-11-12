@@ -51,6 +51,8 @@ export interface SoakSyncEntry {
   /** The engine's step summary: what it captured, which pull requests wait and why, what it suspended. */
   summary?: string;
   error?: string;
+  /** A run an hourly check waited for, with no edit made since the check's first look. */
+  phase?: 'drain';
 }
 
 /** JSON with credentials redacted in each string value, so redaction never runs across escapes or field boundaries. */
@@ -186,10 +188,43 @@ export function pathVersions(paths: Iterable<string>, input: Omit<PresenceInput,
   });
 }
 
+/**
+ * Where the lost edits' tokens are at a failed check. A retained edit is still on one side or on the sync or
+ * suspended branch: pending, not propagated, and still a failure. An absent edit is found nowhere: destroyed.
+ * When a sync lane could not be read, an edit on neither side is unknown, never called destroyed. An edit
+ * outside the soak's ledger (an earlier step's) is named on its own. I2 counts every one of them all the same.
+ */
+export interface SoakPresence {
+  retainedPending: string[];
+  absentEverywhere: string[];
+  unknown: string[];
+  unledgered: string[];
+}
+
+/**
+ * The lost edits of the verdicts by presence; `unledgered` are the lost tokens the ledger does not hold.
+ * `lanesRead` says every existing sync lane was read: a null lane then means the branch does not exist.
+ */
+export function presenceOf(verdicts: readonly TokenVerdict[], unledgered: readonly string[], lanesRead: boolean): SoakPresence {
+  const lost = verdicts.filter((verdict) => verdict.lost);
+  const retained = (verdict: TokenVerdict) => verdict.inGit || verdict.inLinear || verdict.inSyncBranch === true || verdict.inSuspendedBranch === true;
+  const rest = lost.filter((verdict) => !retained(verdict)).map((verdict) => verdict.token);
+  return {
+    retainedPending: lost.filter(retained).map((verdict) => verdict.token),
+    absentEverywhere: lanesRead ? rest : [],
+    unknown: lanesRead ? [] : rest,
+    unledgered: [...unledgered],
+  };
+}
+
 export interface SoakFailureReport {
   hour: number;
   at: string;
   verdict: { I1: boolean; I1Detail?: string; lostEdits: number };
+  /** How many sync runs the check waited for before this verdict, of the most it may. */
+  boundary: { drainSyncs: number; drainLimit: number };
+  /** The lost edits by where their tokens still are. */
+  presence: SoakPresence;
   /** The tracked branch's tip the sides were read at. */
   trackedTip: string;
   /** The run's branches and state refs on the remote: ref → commit. */

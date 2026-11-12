@@ -18,6 +18,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { acquireLock, acquireSlot, processAlive, type Lock } from './locks.ts';
 import type { Scenario } from './spec.ts';
+import { soakDrainSyncs } from './soak-drain.ts';
 
 export const MAX_WORKERS_PER_APP = 4;
 /** Documents per slice; the corpus manifest replaces these when it is known. */
@@ -46,13 +47,27 @@ export interface Estimate {
   complexity: number;
 }
 
+type Step = Scenario['steps'][number];
+
+/** A soak's hourly checks, and the most drain runs each may wait for before its verdict. */
+function soakChecks(step: Step): { checks: number; drainSyncs: number } {
+  return {
+    checks: Math.floor(Number(step.args.durationSeconds ?? 86400) / Number(step.args.invariantIntervalSeconds ?? 3600)),
+    drainSyncs: soakDrainSyncs(step.args),
+  };
+}
+
 /** How many times the engine runs in a scenario: setup, its run steps and the I6 re-run. */
 export function engineRuns(scenario: Scenario): number {
   // A conflicted start: the initial sync, the conflict's run and a settle (up to four runs) that merges it to the tracked branch.
   const setup = { offline: 0, empty: 0, 'no-state': 0, 'linear-seeded': 0, converged: 1, conflicted: 6 }[scenario.setup.state];
   const steps = scenario.steps.reduce((count, step) => {
     if (step.kind !== 'run' || ['fix', 'lint', 'scan-canaries', 'cleanup', 'pre-commit'].includes(step.action)) return count;
-    if (step.action === 'soak') return count + Math.floor(Number(step.args.durationSeconds ?? 86400) / Number(step.args.scheduleSeconds ?? 300));
+    if (step.action === 'soak') {
+      // The scheduled runs, and each hourly check's drain runs at most.
+      const { checks, drainSyncs } = soakChecks(step);
+      return count + Math.floor(Number(step.args.durationSeconds ?? 86400) / Number(step.args.scheduleSeconds ?? 300)) + checks * drainSyncs;
+    }
     return count + (step.action === 'settle' ? 4 : 1);
   }, 0);
   return setup + steps + (scenario.checks.invariants.I6.required ? 1 : 0);
@@ -63,7 +78,11 @@ export function estimate(scenario: Scenario, documents: number = SLICE_DOCUMENTS
   const runs = engineRuns(scenario);
   const holds = scenario.steps.some((s) => s.kind === 'fault' && s.action === 'checks') ? 2 * documents * runs : 0;
   const hourlyReads = scenario.steps.filter((step) => step.kind === 'run' && step.action === 'soak')
-    .reduce((count, step) => count + documents * Math.floor(Number(step.args.durationSeconds ?? 86400) / Number(step.args.invariantIntervalSeconds ?? 3600)), 0);
+    .reduce((count, step) => {
+      // Each hourly check reads the sides once, and again after each drain run.
+      const { checks, drainSyncs } = soakChecks(step);
+      return count + documents * checks * (1 + drainSyncs);
+    }, 0);
   const requests = Math.ceil(holds + hourlyReads + runs * (REQUESTS_PER_DOCUMENT * documents + REQUESTS_PER_RUN) + HARNESS_REQUESTS_PER_DOCUMENT * documents + HARNESS_REQUESTS_FIXED);
   return { requests, complexity: requests * COMPLEXITY_PER_REQUEST };
 }

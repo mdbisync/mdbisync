@@ -986,7 +986,7 @@ describe('load', () => {
     };
     await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), /edits lost/);
     assert.equal(syncs, 1);
-    assert.deepEqual(saved.at(-1), { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 1, lostEdits: 1, scheduleDelays: [50] });
+    assert.deepEqual(saved.at(-1), { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 1, lostEdits: 1, drainSyncs: 0, scheduleDelays: [50] });
   });
 
   it('stops an overrun instead of stretching a timed soak into a longer passing run', async () => {
@@ -1020,7 +1020,7 @@ describe('load', () => {
       checkInvariants: async () => ({ lostEdits: 0 }), progress: async (result) => { saved = structuredClone(result); },
     };
     await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), (error) => error === failure);
-    assert.deepEqual(saved, { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 0, lostEdits: 0, scheduleDelays: [25] });
+    assert.deepEqual(saved, { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 0, lostEdits: 0, drainSyncs: 0, scheduleDelays: [25] });
   });
 
   it('persists the soak step report even when no timed events are requested', async () => {
@@ -1108,7 +1108,8 @@ describe('load', () => {
 
   it('keeps a self-contained report of a failed hourly check before cleanup, as a failure and as expected red', async () => {
     // Seed s23 makes one editor-a edit and one git edit before the first check, and no sync run: each edit is on one side only.
-    const args = { durationSeconds: 2, scheduleSeconds: 5, invariantIntervalSeconds: 2, actors: ['editor-a', 'git'], randomSeed: 's23' };
+    // No drain: the first look is the hour's verdict.
+    const args = { durationSeconds: 2, scheduleSeconds: 5, invariantIntervalSeconds: 2, actors: ['editor-a', 'git'], randomSeed: 's23', drainSyncs: 0 };
     assert.deepEqual(soakEditCounts({ durationMs: 2000, scheduleMs: 5000, invariantIntervalMs: 2000, actors: ['editor-a', 'git'], seed: 's23' }), { 'editor-a': 1, 'editor-b': 0, git: 1 });
     for (const expectedRed of [false, true]) {
       const { ctx, linear, ids, remoteGit, docs } = await fakeRun();
@@ -1133,7 +1134,9 @@ describe('load', () => {
       const early = { side: 'linear' as const, path: 'docs/handbook/start.md', token: 'aaaaaa-early' };
       ctx.edits.push(early);
       const error = await runStep(ctx, { kind: 'run', action: 'soak', args }).then(() => undefined, (thrown: unknown) => thrown);
-      assert.ok(error instanceof ProductError && /soak stopped at hour 1: I1=false, 3 edits lost/.test(error.message), String(error));
+      assert.ok(error instanceof ProductError, String(error));
+      assert.equal(error.message, 'soak stopped at hour 1: I1=false, 3 edits lost (2 retained pending, 0 absent everywhere, 1 outside the soak ledger) after 0 of 0 drain syncs');
+      assert.deepEqual(ctx.observations.get('soak.checks'), [{ I1: false, lost: 3, drainSyncs: 0, looks: [], retainedPending: 2, absentEverywhere: 0, unknown: 0, unledgered: 1 }]);
 
       // The ledger: each edit with its measured write window, the git edit with its commit.
       const ledger = readFileSync(join(ctx.runDir, 'soak-edits.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
@@ -1155,6 +1158,8 @@ describe('load', () => {
       const report = JSON.parse(readFileSync(join(ctx.runDir, 'soak-failure-hour-1.json'), 'utf8')) as SoakFailureReport;
       assert.deepEqual(report.verdict.I1, false);
       assert.equal(report.verdict.lostEdits, 3);
+      assert.deepEqual(report.boundary, { drainSyncs: 0, drainLimit: 0 });
+      assert.deepEqual(report.presence, { retainedPending: report.tokens.map((token) => token.token), absentEverywhere: [], unknown: [], unledgered: [early.token] });
       assert.deepEqual(report.evidenceErrors, ['jobs of run 8: jobs read failed', 'lost edits not in the soak ledger: linear aaaaaa-early docs/handbook/start.md']);
       assert.equal(report.missing.length, 2);
       const earlyVersions = report.payloads.find((payload) => payload.path === early.path);
@@ -1181,6 +1186,31 @@ describe('load', () => {
       const checks = report.checks as Array<{ id: number; jobs: Array<{ name: string; conclusion: string }> | null }>;
       assert.deepEqual(checks.map((check) => [check.id, check.jobs?.map((job) => [job.name, job.conclusion]) ?? null]), [[7, [['pre-commit', 'failure']]], [8, null]]);
     }
+  });
+
+  it('drains an unsettled hour through the step\'s own sync and keeps the report only after the last drain run', async () => {
+    // The same seed: each edit is on one side only at the first look. The fake run's sync moves nothing, so the
+    // drain cannot settle the hour: it ends in a failure after its one run, never in a pass or a blocked environment.
+    const args = { durationSeconds: 2, scheduleSeconds: 5, invariantIntervalSeconds: 2, actors: ['editor-a', 'git'], randomSeed: 's23', drainSyncs: 1 };
+    const { ctx } = await fakeRun();
+    const error = await runStep(ctx, { kind: 'run', action: 'soak', args }).then(() => undefined, (thrown: unknown) => thrown);
+    assert.ok(error instanceof ProductError, String(error));
+    assert.equal(error.message, 'soak stopped at hour 1: I1=false, 2 edits lost (2 retained pending, 0 absent everywhere) after 1 of 1 drain syncs');
+    // The drain run went through the step's sync, into its ledger, marked as a drain run.
+    const syncs = readFileSync(join(ctx.runDir, 'soak-syncs.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.deepEqual(syncs.map((entry) => [entry.index, entry.phase, entry.completed]), [[1, 'drain', true]]);
+    assert.equal(ctx.engine.results.length, 1, 'the drain run is an engine run of the step');
+    // One look before the drain, then the verdict, with the report of the final look.
+    assert.deepEqual(ctx.observations.get('soak.checks'), [{ I1: false, lost: 2, drainSyncs: 1, looks: [{ drainSyncs: 0, I1: false, lost: 2 }], retainedPending: 2, absentEverywhere: 0, unknown: 0, unledgered: 0 }]);
+    const report = JSON.parse(readFileSync(join(ctx.runDir, 'soak-failure-hour-1.json'), 'utf8')) as SoakFailureReport;
+    assert.deepEqual(report.boundary, { drainSyncs: 1, drainLimit: 1 });
+    assert.equal(report.presence.retainedPending.length, 2);
+    assert.deepEqual(report.syncs.map((entry) => entry.phase), ['drain']);
+    // The look before the drain kept its I1 differences under its own name; the verdict's are the run's.
+    assert.ok(existsSync(join(ctx.runDir, 'soak-hour-1-look-1-i1-differences.txt')));
+    assert.ok(existsSync(join(ctx.runDir, 'i1-differences.txt')));
+    const saved = JSON.parse(readFileSync(join(ctx.runDir, 'soak-progress.json'), 'utf8')) as { metrics: { soak: { syncRuns: number; drainSyncs: number; invariantChecks: number; lostEdits: number } } };
+    assert.deepEqual([saved.metrics.soak.syncRuns, saved.metrics.soak.drainSyncs, saved.metrics.soak.invariantChecks, saved.metrics.soak.lostEdits], [1, 1, 1, 2]);
   });
 });
 

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { holdsToken } from './checks.ts';
-import { pathVersions, SOAK_EDITS_FILE, SOAK_SYNCS_FILE, SoakLedger, tokenVerdicts } from './soak-evidence.ts';
+import { pathVersions, presenceOf, SOAK_EDITS_FILE, SOAK_SYNCS_FILE, SoakLedger, tokenVerdicts, type TokenVerdict } from './soak-evidence.ts';
 
 describe('soak ledger', () => {
   it('places each edit between the sync invocations around its write and keeps credentials out', () => {
@@ -35,5 +35,34 @@ describe('soak ledger', () => {
     assert.deepEqual(verdicts.map((verdict) => [verdict.inGit, verdict.inLinear, verdict.inSyncBranch, verdict.inSuspendedBranch]), [[false, true, true, null], [true, false, false, null]]);
     assert.deepEqual(verdicts[0]?.linearDocuments, ['a.md']);
     assert.deepEqual(pathVersions(['b.md', 'a.md'], input).map((versions) => [versions.path, versions.trackedFile, versions.document, versions.syncBranchFile]), [['a.md', 'A', 'A run-001', 'A run-001'], ['b.md', 'B run-002', 'B', null]]);
+  });
+  it('names each lost edit retained pending while its token is on some side or sync lane, and absent only when it is nowhere', () => {
+    const verdict = (token: string, where: Partial<Pick<TokenVerdict, 'lost' | 'inGit' | 'inLinear' | 'inSyncBranch' | 'inSuspendedBranch'>>): TokenVerdict => ({
+      token, actor: 'editor-a', side: 'linear', path: `${token}.md`, startedAt: '', completedAt: '', syncsBefore: 0, syncBefore: null, syncAfter: null,
+      lost: true, inGit: false, inLinear: false, gitPaths: [], linearDocuments: [], inSyncBranch: null, inSuspendedBranch: null, ...where,
+    });
+    const verdicts = [
+      verdict('kept', { lost: false, inGit: true, inLinear: true }),
+      verdict('linear-only', { inLinear: true }),
+      verdict('git-only', { inGit: true }),
+      verdict('sync-lane', { inSyncBranch: true }),
+      verdict('suspended', { inSyncBranch: false, inSuspendedBranch: true }),
+      verdict('gone', { inSyncBranch: false, inSuspendedBranch: false }),
+      verdict('gone-no-lanes', {}),
+    ];
+    // Every lane was read: a lane that is null does not exist, so a token on neither side and no lane is gone.
+    assert.deepEqual(presenceOf(verdicts, ['earlier'], true), {
+      retainedPending: ['linear-only', 'git-only', 'sync-lane', 'suspended'],
+      absentEverywhere: ['gone', 'gone-no-lanes'],
+      unknown: [],
+      unledgered: ['earlier'],
+    });
+    // A lane read failed: such tokens may still wait in a pull request, so they are unknown, never destroyed.
+    assert.deepEqual(presenceOf(verdicts, [], false), {
+      retainedPending: ['linear-only', 'git-only', 'sync-lane', 'suspended'],
+      absentEverywhere: [],
+      unknown: ['gone', 'gone-no-lanes'],
+      unledgered: [],
+    });
   });
 });
