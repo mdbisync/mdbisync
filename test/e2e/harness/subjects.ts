@@ -686,6 +686,20 @@ function markRetained(document: LinearDocument | undefined): boolean {
   return document?.icon === CONFLICT_MARK.icon && colorLabel(document.color) === CONFLICT_MARK.color;
 }
 
+/** Marks on the documents the scenario conflicted, excluding unrelated corpus fixtures. */
+async function scenarioConflictMarks(env: Env): Promise<Map<string, boolean>> {
+  const view = await env.view();
+  const paths = env.ctx.observations.get('conflict.paths') as string[] | undefined;
+  if (paths === undefined) {
+    const byId = new Map([...view.ids].map(([path, entry]) => [entry.id, path]));
+    return new Map([...view.documents].map(([id, document]) => [byId.get(id) ?? id, markRetained(document)]));
+  }
+  return new Map(paths.map((path) => {
+    const id = view.ids.get(path)?.id;
+    return [path, markRetained(id === undefined ? undefined : view.documents.get(id))];
+  }));
+}
+
 /** A synchronized document the run's final view shows with the conflict mark. */
 export interface ConflictMarkRecord {
   path: string;
@@ -1556,7 +1570,8 @@ export const SUBJECTS: Record<string, Compute> = {
     const [first] = await conflictTexts(env);
     return agreed(scanMarkers(first?.git ?? '').nested, scanMarkers(first?.linear ?? '').nested);
   },
-  'conflicts.markCount': async (env) => [...(await env.view()).documents.values()].filter(markRetained).length,
+  'conflicts.marks': scenarioConflictMarks,
+  'conflicts.markCount': async (env) => [...(await scenarioConflictMarks(env)).values()].filter(Boolean).length,
   'conflicts.markRetained': async (env) => markRetained((await target(env)).document),
   'conflicts.icon': async (env) => (await target(env)).document?.icon ?? null,
   'conflicts.color': async (env) => colorLabel((await target(env)).document?.color),

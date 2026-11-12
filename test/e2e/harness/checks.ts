@@ -342,6 +342,12 @@ export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): 
     expected = other.value;
   }
   if (compare(assertion.operator, actual.value, expected)) return { holds: true };
+  if (assertion.subject === 'conflicts.markCount') {
+    const marks = (await resolveSubject(ctx, 'conflicts.marks')).value as Map<string, boolean>;
+    const marked = [...marks].filter(([, marked]) => marked).map(([path]) => path);
+    const missing = [...marks].filter(([, marked]) => !marked).map(([path]) => path);
+    return { holds: false, reason: `${assertion.operator} did not hold: expected ${JSON.stringify(expected)}, actual ${actual.value}; marked paths ${JSON.stringify(marked)}; missing marks ${JSON.stringify(missing)}` };
+  }
   const paths = assertion.subject === 'summary.collisionPaths' && ['same-as', 'equal'].includes(assertion.operator)
     ? differingCollisionPaths(actual.value, expected)
     : differingPaths(actual.value, expected);
