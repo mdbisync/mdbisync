@@ -43,6 +43,7 @@ it('the CLI blocks unsupported upload bytes and captures every supported type af
       '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"/>',
       '<!-- page --><html/>', '<svg><script/></svg>', '<svg onload="run()"/>',
       '<svg><foreignObject/></svg>', '<svg><use href="https://example.com/picture.svg"/></svg>',
+      '<svg><a href="#safe"><set attributeName="href" to="javascript:alert(1)"/></a></svg>',
     ];
     bad.forEach((text,index) => world.linear.uploads.push({filename:'image.png',assetUrl:`https://uploads.linear.app/bad-${index}.png`,bytes:Buffer.from(text),size:text.length,contentType:'image/png'}));
     const goodBody = expected.map(({url}) => `![Image](${url})`).join('\n\n') + '\n';
@@ -68,7 +69,7 @@ it('the CLI blocks unsupported upload bytes and captures every supported type af
     assert.equal(document.icon,'Cross');
     const notice = [...world.linear.comments.values()][0]!;
     const reason = 'the uploaded file is not a supported image or document. Remove it or upload the original file.';
-    assert.equal(notice.body,'Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n' + bad.map((_,index) => `- Image ${index + 10} of 16 (line ${index * 2 + 19}): ${reason}`).join('\n'));
+    assert.equal(notice.body,'Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n' + bad.map((_,index) => `- Image ${index + 10} of 17 (line ${index * 2 + 19}): ${reason}`).join('\n'));
     await run();
     assert.equal(world.linear.comments.size,1);
     document.content = goodBody;

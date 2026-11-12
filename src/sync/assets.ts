@@ -113,7 +113,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
     const files = new Map<string, Buffer>();
     const additions: UploadMap = new Map();
-    const images = imagesOf(body);
+    const originalBody = body;
     const unsupported = new Set<string>();
     // Restore known URLs before restricting new downloads to the upload host.
     const cachedUrls = [...uploads.values()];
@@ -182,6 +182,7 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       replacements.push({...range, text: posix.relative(posix.dirname(path), assetPath).split('/').map(encodeURIComponent).join('/') + suffix});
     }
     if (unsupported.size > 0) {
+      const images = imagesOf(originalBody);
       const findings = images.flatMap((image, index) => unsupported.has(image.url) ? [{image:index + 1, total:images.length, line:image.line, reason:'unsupported-type' as const}] : []);
       if (findings.length > 0) throw new ImageBlockedError(findings);
       throw new Error(message('assets.not-allowed'));

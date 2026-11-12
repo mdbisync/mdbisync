@@ -96,9 +96,10 @@ and git's path beats Linear's title
   with a red mark and a comment showing which images to fix. Upload the
   files instead; the next sync clears the comment and restores the icon.
   New uploads must contain PNG, JPEG, GIF, WebP, AVIF, PDF, MP4, WebM or SVG,
-  identified from their bytes. SVGs with scripts, event attributes, foreign
-  objects or non-fragment links are blocked. Files already in the repository
-  keep working. Downloaded files use the detected extension, regardless of
+  identified from their bytes. SVGs with `script` or `foreignObject` elements,
+  animation elements, event attributes, `xml:base` or non-fragment `href`
+  references are blocked. Files already
+  in the repository keep working. Downloaded files use the detected extension, regardless of
   the upload URL or declared content type.
 - **The `linear-format` hook:** `lint` and `fix` keep Markdown in the form
   Linear stores, so a round trip changes nothing
