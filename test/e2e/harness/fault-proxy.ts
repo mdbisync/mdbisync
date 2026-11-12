@@ -48,6 +48,10 @@ export interface ProxyRequestRecord {
   answerDropped?: boolean;
   /** When the request arrived (ms since the epoch). */
   at: number;
+  /** A forwarded answer's body size, decoded, in bytes; never its content. */
+  responseBytes?: number;
+  /** From the request's arrival to the end of Linear's answer body, in ms. */
+  durationMs?: number;
 }
 
 /**
@@ -296,6 +300,7 @@ export async function startFaultProxy(
       }
     }
     let payload: Buffer = Buffer.from(await upstreamResponse.arrayBuffer());
+    const measured = { responseBytes: payload.length, durationMs: Date.now() - at };
     if (isGraphql && options.observer !== undefined && kind === 'mutation') observeAnswer(options.observer, text, payload);
     // A lost answer only for a write Linear applied: a refused one (GraphQL errors come with HTTP 200) is passed
     // on as it is, and the fault stays armed for the next write.
@@ -303,7 +308,7 @@ export async function startFaultProxy(
       // Linear has the write and answered; the engine never hears it. The record keeps Linear's status, so the
       // write counts as written for I9 and the writes subjects, and marks the lost answer.
       dropAnswer.used = (dropAnswer.used ?? 0) + 1;
-      requests.push({ n, operation, kind, status: upstreamResponse.status, injected: false, answerDropped: true, at });
+      requests.push({ n, operation, kind, status: upstreamResponse.status, injected: false, answerDropped: true, at, ...measured });
       request.socket.destroy();
       return;
     }
@@ -314,7 +319,7 @@ export async function startFaultProxy(
     const gone = faults.flatMap((fault) => (fault.kind === 'document-gone' ? [fault.id] : []));
     if (gone.length > 0 && isGraphql) payload = withoutDocuments(payload, new Set(gone));
     response.writeHead(upstreamResponse.status, out).end(payload);
-    record(upstreamResponse.status, false);
+    requests.push({ n, operation, kind, status: upstreamResponse.status, injected: false, at, ...measured });
   }
 
   const server: Server = createServer((request, response) => {

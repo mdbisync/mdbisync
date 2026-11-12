@@ -57,6 +57,22 @@ export function renderRunMarkdown(report: HarnessReport): string {
   }
   const passing = report.results.filter((result) => result.unexpectedPass);
   if (passing.length > 0) lines.push('', `Passing while on the expected-red list (remove them from the list): ${passing.map((result) => result.id).join(', ')}.`);
+  const answers = report.results.flatMap((result) => Object.entries(result.answerSizes ?? {}).map(([operation, size]) => ({ id: result.id, operation, size })));
+  if (answers.length > 0) {
+    // The largest answers: content pages near the transport's timeout show here.
+    const largest = answers.sort((a, b) => b.size.maxBytes - a.size.maxBytes).slice(0, 10);
+    lines.push('', '## Largest engine answers', '', '| Scenario | Operation | Answers | Largest bytes | Its seconds | Slowest seconds |', '| --- | --- | --- | --- | --- | --- |');
+    for (const { id, operation, size } of largest) lines.push(`| ${id} | ${cell(operation)} | ${size.count} | ${size.maxBytes} | ${(size.maxBytesDurationMs / 1000).toFixed(1)} | ${(size.maxDurationMs / 1000).toFixed(1)} |`);
+  }
+  const marks = report.results.filter((result) => result.conflictMarks !== undefined);
+  if (marks.length > 0) {
+    lines.push('', '## Conflict marks at the end', '', '| Scenario | Mapped | Path | Mark | Saved own icon | Comments |', '| --- | --- | --- | --- | --- | --- |');
+    for (const result of marks) {
+      const { mapped, marked } = result.conflictMarks as NonNullable<typeof result.conflictMarks>;
+      if (marked.length === 0) lines.push(`| ${result.id} | ${mapped} | none |  |  |  |`);
+      for (const mark of marked) lines.push(`| ${result.id} | ${mapped} | ${cell(mark.path)} | ${mark.icon}/${mark.color} | ${mark.saved === null ? 'none' : `${mark.saved.icon ?? 'none'}/${mark.saved.color ?? 'none'}`} | ${mark.comments} |`);
+    }
+  }
   return `${lines.join('\n')}\n`;
 }
 
