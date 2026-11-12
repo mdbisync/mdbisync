@@ -189,11 +189,22 @@ describe('the person clone at the end of a run', () => {
     const person = new Git(join(runDir, 'person'), IDENTITY);
     assert.ok(existsSync(join(person.dir, '.git', 'objects', 'info', 'alternates')));
     await person.run(['config', 'remote.origin.url', 'https://person:s3cret@mirror.example/sandbox.git?access_token=abc']);
+    // Git also records the URL it cloned or fetched from, query and all, in the reflogs and FETCH_HEAD.
+    const head = await person.text(['rev-parse', 'HEAD']);
+    const headLog = join(person.dir, '.git', 'logs', 'HEAD');
+    writeFileSync(headLog, `${readFileSync(headLog, 'utf8')}${head} ${head} T <t@example.com> 1 +0000\tclone: from https://mirror.example/sandbox.git?access_token=abc\n`);
+    const fetchHead = join(person.dir, '.git', 'FETCH_HEAD');
+    writeFileSync(fetchHead, `${head}\t\tbranch 't/aaaaaa/main' of https://mirror.example/sandbox.git?access_token=abc\n`);
     const lines: string[] = [];
     finishPersonClone(runDir, 'fail', (line) => void lines.push(line));
     assert.ok(lines.some((line) => line.startsWith('kept the person clone for diagnosis')), lines.join(' | '));
     assert.equal(await person.text(['config', '--get', 'remote.origin.url']), 'https://mirror.example/sandbox.git');
     assert.ok(!readFileSync(join(person.dir, '.git', 'config'), 'utf8').includes('s3cret'));
+    for (const file of [headLog, join(person.dir, '.git', 'logs', 'refs', 'heads', 't', 'aaaaaa', 'main'), fetchHead]) {
+      const text = readFileSync(file, 'utf8');
+      assert.ok(!text.includes('access_token=abc'), `${file}: ${text}`);
+    }
+    assert.match(readFileSync(headLog, 'utf8'), /clone: from https:\/\/mirror\.example\/sandbox\.git\?access_token=\*\*\*/);
     // The cache may go; the kept clone still reads its whole history.
     rmSync(cache, { recursive: true, force: true });
     assert.equal(existsSync(join(person.dir, '.git', 'objects', 'info', 'alternates')), false);

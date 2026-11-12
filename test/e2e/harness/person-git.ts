@@ -10,7 +10,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { GitError, type Git } from '../../../src/state/git.ts';
 import type { RunContext } from './context.ts';
@@ -115,8 +115,8 @@ export async function writePersonDiagnostics(git: Git, ctx: Pick<RunContext, 'na
 
 /**
  * Removes the person's clone at the end of a run, except after a failed one: then it stays in the run folder for
- * diagnosis, made safe to keep first. Its remote URL loses any credentials it carried (the harness passes its token
- * through the environment, but a configured mirror URL may hold one), and it copies in the objects it borrowed from
+ * diagnosis, made safe to keep first. Its remote URL, reflogs and FETCH_HEAD lose any credentials they carried (the
+ * harness passes its token through the environment, but a configured mirror URL may hold one), and it copies in the objects it borrowed from
  * the shared cache, whose unreachable objects a later cleanup of the cache may drop. A clone that cannot be made safe
  * is removed.
  */
@@ -133,11 +133,27 @@ export function finishPersonClone(runDir: string, result: Result, log: (line: st
     ...(clean !== url ? [git(['config', 'remote.origin.url', clean])] : []),
     ...(existsSync(join(dir, '.git', 'objects', 'info', 'alternates')) ? [git(['repack', '-a', '-d', '-q'])] : []),
   ];
-  if (steps.some((step) => step.status !== 0)) {
-    log(`removed the person clone: it could not be made safe to keep (${steps.map((step) => step.stderr.trim()).filter(Boolean).join('; ')})`);
+  let scrubbed = true;
+  try {
+    // Git records the URL it cloned or fetched from in the reflogs and FETCH_HEAD, query and all.
+    for (const file of [...filesUnder(join(dir, '.git', 'logs')), join(dir, '.git', 'FETCH_HEAD')].filter((path) => existsSync(path))) {
+      const text = readFileSync(file, 'utf8');
+      const clean = redactCredentials(text);
+      if (clean !== text) writeFileSync(file, clean);
+    }
+  } catch {
+    scrubbed = false;
+  }
+  if (!scrubbed || steps.some((step) => step.status !== 0)) {
+    log(`removed the person clone: it could not be made safe to keep (${steps.map((step) => step.stderr.trim()).filter(Boolean).join('; ') || 'its logs could not be scrubbed'})`);
     rmSync(dir, { recursive: true, force: true });
     return;
   }
   rmSync(join(dir, '.git', 'objects', 'info', 'alternates'), { force: true });
   log(`kept the person clone for diagnosis: ${dir}`);
+}
+
+function filesUnder(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? filesUnder(join(dir, entry.name)) : [join(dir, entry.name)]));
 }
