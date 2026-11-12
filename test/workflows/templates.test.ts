@@ -68,15 +68,15 @@ describe('workflow templates', () => {
     for (const file of readdirSync(EXAMPLES).filter((name) => name.endsWith('.yml'))) {
       for (const step of steps(file)) {
         const run = step.run ?? '';
-        assert.doesNotMatch(run, /\b(?:pipx|uv|easy_install)\b/, `${file}: ${step.name}: an installer other than pip`);
-        const installs = run.match(/\bpip3? install\b.*/g) ?? [];
+        assert.doesNotMatch(run, /\b(?:pipx|uvx?|easy_install)\b/, `${file}: ${step.name}: an installer other than pip`);
+        const installs = run.match(/\bpip(?:\d+(?:\.\d+)?)?\b[^\n]*?\b(?:install|download)\b.*/g) ?? [];
         if (installs.length === 0) continue;
         assert.deepEqual(installs, ["pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then"], `${file}: ${step.name}`);
         const list = /<<'REQUIREMENTS'; then\n([\s\S]*?)\nREQUIREMENTS\n/.exec(run)?.[1];
         assert.ok(list !== undefined, `${file}: ${step.name}: no requirements list`);
         const requirements = list.replace(/ \\\n\s*/g, ' ').split('\n');
         for (const requirement of requirements) {
-          assert.match(requirement, /^[a-z0-9-]+==\d+(?:\.\d+)+(?: ; python_version < "\d+\.\d+")?(?: --hash=sha256:[0-9a-f]{64})+$/, `${file}: ${requirement}`);
+          assert.match(requirement, /^[a-z0-9-]+==\d+(?:\.\d+)+(?: --hash=sha256:[0-9a-f]{64})+$/, `${file}: ${requirement}`);
         }
         assert.ok(requirements.some((requirement) => requirement.startsWith('pre-commit==')), `${file}: pre-commit is not in the list`);
         lists.add(list);

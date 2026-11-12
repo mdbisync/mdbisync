@@ -94,6 +94,9 @@ describe('workflow templates rendered for a run', () => {
     assert.ok(errors.every((error) => error.startsWith('##[error]') && !/['"]/.test(error)));
     assert.ok(errors.some((error) => error.includes('Install Python 3 with venv support')));
     assert.ok(errors.some((error) => error.includes('venv support is required')));
+    assert.ok(errors.includes('##[error]Python 3.11 to 3.14 is required; install it, or provide pre-commit on PATH.'), errors.join('\n'));
+    // Logs hold the printed text, so a known error must not depend on shell expansion.
+    assert.ok(errors.every((error) => !/[$`]/.test(error)), errors.join('\n'));
     // A failed install may be a wrong pin or the network: it proves nothing about the runner.
     assert.ok(!errors.some((error) => error.includes('Could not install')), errors.join('\n'));
   });
