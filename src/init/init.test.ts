@@ -108,6 +108,31 @@ test('embedded workflow assets match the reviewed examples', async () => {
   }
 });
 
+test('init refuses a release older than the templates pin and writes the pinned one as before', async (t) => {
+  const { MINIMUM_RELEASE } = await import('./releases.ts');
+  const minimum = MINIMUM_RELEASE.version.replaceAll('.', '\\.');
+  const rc2 = '79db9969462ae7f1f00c88e95b311e61db3c455e';
+  const cwd = await fixture(t);
+  const refused = await runCli(['init', '--release-sha', rc2, '--release-version', 'v0.1.0-rc.2', '--folder', 'guides', '--team', 'Planning'], { cwd });
+  assert.equal(refused.exitCode, 2);
+  assert.match(refused.stderr, new RegExp(`^init: --release-sha is v0\\.1\\.0-rc\\.2, older than ${minimum}, the release these workflows are written for and checked against\\. Use ${minimum} or later\n`));
+  await assert.rejects(readFile(join(cwd, '.github/workflows/mdbisync.yml')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(cwd, '.pre-commit-config.yaml')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(cwd, 'guides/README.md')), { code: 'ENOENT' });
+
+  const written = await runCli(['init', '--release-sha', MINIMUM_RELEASE.sha, '--release-version', MINIMUM_RELEASE.version, '--folder', 'guides', '--team', 'Planning', '--no-security-hooks'], { cwd });
+  assert.equal(written.exitCode, 0, written.stderr);
+  const { default: templates } = await import('./workflows.json', { with: { type: 'json' } });
+  for (const [name, text] of Object.entries(templates)) assert.equal(await readFile(join(cwd, '.github/workflows', name), 'utf8'), text, name);
+  assert.equal(parse(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8')).repos[0].rev, MINIMUM_RELEASE.sha);
+});
+
+test('init --help names the oldest release it writes', async () => {
+  const { MINIMUM_RELEASE } = await import('./releases.ts');
+  const help = await runCli(['init', '--help']);
+  assert.ok(help.stdout.includes(`The release must be ${MINIMUM_RELEASE.version} or later`), help.stdout);
+});
+
 test('init prompts only through an explicit terminal prompt and accepts team-only folders', async (t) => {
   const cwd = await fixture(t);
   const { runInit } = await import('./command.ts');

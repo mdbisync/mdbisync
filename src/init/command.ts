@@ -12,10 +12,12 @@ import { PROJECT_URL } from '../version.ts';
 import { LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
 import { findFrontMatter } from '../mapping/front-matter.ts';
 import { message } from '../messages.ts';
+import { MINIMUM_RELEASE, OLDER_RELEASES } from './releases.ts';
 
 export const INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA> [--release-version vX.Y.Z]
   --folder <path> --team <name> [--project <name>]   Repeat for each folder
   --security-hooks | --no-security-hooks           Optional examples (requires Docker)
+The release must be ${MINIMUM_RELEASE.version} or later: the workflows use its action inputs.
 Existing files and annotations are preserved; conflicting values must be resolved first.
 `;
 
@@ -165,6 +167,8 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
       settings.security ??= /^(y|yes)$/i.test((await ask('Include security hook examples (requires Docker)? [y/N] ')).trim());
     }
     if (!/^[a-f0-9]{40}$/.test(settings.sha ?? '')) throw new InitError(message('init.release-sha'));
+    const older = Object.hasOwn(OLDER_RELEASES, settings.sha!) ? OLDER_RELEASES[settings.sha!] : undefined;
+    if (older !== undefined) throw new InitError(message('init.release-too-old', { version: older, minimum: MINIMUM_RELEASE.version }));
     if (settings.version !== undefined && !/^v\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(settings.version)) throw new InitError(message('init.release-version'));
     if (!settings.folders.length || settings.folders.some((folder) => !folder.path.trim() || (!folder.team && !folder.project))) throw new InitError(message('init.needs-folder'));
     const root = await realpath(options.cwd ?? process.cwd());
