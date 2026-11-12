@@ -31,7 +31,7 @@ function summaryZip(text: string): Buffer {
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'walkthrough-'));
   mkdirSync(join(dir, '.github/workflows'), { recursive: true });
-  for (const file of [WORKFLOW_FILES.sync, WORKFLOW_FILES['initial-sync']]) writeFileSync(join(dir, '.github/workflows', file), readTemplate(file));
+  for (const file of Object.values(WORKFLOW_FILES)) writeFileSync(join(dir, '.github/workflows', file), readTemplate(file));
   return dir;
 }
 
@@ -45,6 +45,7 @@ it('guards refs and arguments before authenticating, and names the missing sandb
     ['dispatch', '--workflow', WORKFLOW_FILES['initial-sync'], '--input', 'tracked-branch=main'],
     ['dispatch', '--workflow', WORKFLOW_FILES['initial-sync'], '--input', 'direction=other'],
     ['cancel', '--run-number', '../1'], ['list', 'extra'],
+    ['wait', '--run-number', '0x10'], ['list', '--workflow', WORKFLOW_FILES.sync], ['dispatch', '--run-number', '2'],
   ]) await assert.rejects(walkthrough([...args, '--run', 'abcdef'], options));
   await assert.rejects(walkthrough(['list', '--run', 'abcdef'], { ...options, config: { ...config, sandboxUrl: '' } }), (error: unknown) => error instanceof EnvBlockedError && /MDBISYNC_TEST_SANDBOX_URL/.test(error.message));
   assert.equal(connected, false);
@@ -57,12 +58,19 @@ it('prepares copied workflows locally and pushes only a committed isolated branc
   try {
     assert.throws(() => requireWalkthroughIsolation(readTemplate(WORKFLOW_FILES.sync), 'abcdef'));
     await walkthrough(['prepare', '--run', 'abcdef', '--dir', dir], options);
+    const first = Object.values(WORKFLOW_FILES).map((file) => readFileSync(join(dir, '.github/workflows', file), 'utf8'));
+    await walkthrough(['prepare', '--run', 'abcdef', '--dir', dir], options);
+    assert.deepEqual(Object.values(WORKFLOW_FILES).map((file) => readFileSync(join(dir, '.github/workflows', file), 'utf8')), first);
     for (const file of [WORKFLOW_FILES.sync, WORKFLOW_FILES['initial-sync']]) {
       const text = readFileSync(join(dir, '.github/workflows', file), 'utf8');
       requireWalkthroughIsolation(text, 'abcdef');
       assert.match(text, /summary|mdbisync-report/);
       assert.match(text, /upload-artifact@/);
+      assert.throws(() => requireWalkthroughIsolation(text.replace('mdbisync-abcdef', 'mdbisync-shared'), 'abcdef', file));
+      assert.throws(() => requireWalkthroughIsolation(text.replace('mdbisync-sandbox', 'ubuntu-latest'), 'abcdef', file));
+      assert.throws(() => requireWalkthroughIsolation(text.replace('- t/abcdef/main', '- main'), 'abcdef', file));
     }
+    requireWalkthroughIsolation(readFileSync(join(dir, '.github/workflows', WORKFLOW_FILES['pre-commit']), 'utf8'), 'abcdef', WORKFLOW_FILES['pre-commit']);
     const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe' });
     git('init', '--initial-branch', ref); git('add', '.github');
     git('-c', 'user.name=Test Editor', '-c', 'user.email=editor@example.com', 'commit', '-m', 'Prepare workflows');
@@ -77,9 +85,8 @@ it('dispatches on the run ref, polls a new run and prints its summary without th
   const dir = fixture();
   try {
     await walkthrough(['prepare', '--run', 'abcdef', '--dir', dir], { write: () => {} });
-    const text = readFileSync(join(dir, '.github/workflows', WORKFLOW_FILES['initial-sync']), 'utf8');
     const token = 'installation-test-secret';
-    const sent: Array<{ path: string; method: string; body: unknown }> = []; let polls = 0; let dispatched = false;
+    const sent: Array<{ path: string; method: string; body: unknown }> = []; let polls = 0; let registrations = 0; let dispatched = false;
     const output: string[] = [];
     const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
       const path = new URL(String(url)).pathname;
@@ -87,7 +94,11 @@ it('dispatches on the run ref, polls a new run and prints its summary without th
       if (path.endsWith('/installation')) return Response.json({ id: 1, app_slug: 'example' });
       if (path.endsWith('/access_tokens')) return Response.json({ token });
       assert.equal((init?.headers as Record<string, string>)['authorization'], `Bearer ${token}`);
-      if (path.includes('/contents/')) return Response.json({ encoding: 'base64', content: Buffer.from(text).toString('base64') });
+      if (path.includes('/contents/')) {
+        const text = readFileSync(join(dir, '.github/workflows', path.split('/').at(-1)!), 'utf8');
+        return Response.json({ encoding: 'base64', content: Buffer.from(text).toString('base64') });
+      }
+      if (path.endsWith('/workflows')) return Response.json({ workflows: ++registrations === 1 ? [] : [{ id: 7, path: '.github/workflows/mdbisync-initial-sync.yml' }] });
       if (path.endsWith('/dispatches')) { dispatched = true; return new Response(null, { status: 204 }); }
       if (path.endsWith('/runs')) {
         polls += 1;
@@ -99,10 +110,12 @@ it('dispatches on the run ref, polls a new run and prints its summary without th
     }) as typeof fetch;
     assert.equal(await walkthrough(['dispatch', '--run', 'abcdef', '--workflow', WORKFLOW_FILES['initial-sync'], '--input', 'direction=git-to-linear', '--input', 'confirm=false'], { config, fetch: fetchImpl, write: (text) => { output.push(text); }, pollMs: 1, timeoutMs: 1000 }), 0);
     assert.deepEqual(sent.find((item) => item.path.endsWith('/dispatches'))?.body, { ref, inputs: { direction: 'git-to-linear', confirm: 'false' } });
+    assert.ok(sent.some((item) => item.path.endsWith('/workflows/7/dispatches')));
     assert.match(output.join(''), /Create docs\/notes.md/);
     assert.match(output.join(''), /"id":2/);
     assert.ok(!output.join('').includes(token));
     assert.ok(polls >= 3);
+    assert.equal(registrations, 2);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -129,6 +142,6 @@ it('lists and cancels only the selected run branch and workflows; wait preserves
 
 it('bounds wait polling and suppresses unexpected credential-bearing transport errors', async () => {
   const options = { config, write: () => {}, timeoutMs: 0, connect: async () => ({ safe: (text: string) => text, push: async () => {}, rest: { request: async () => run(2, 'in_progress') } as never }) };
-  await assert.rejects(walkthrough(['wait', '--run', 'abcdef', '--run-number', '2'], options), /walkthrough operation failed/);
+  await assert.rejects(walkthrough(['wait', '--run', 'abcdef', '--run-number', '2'], options), EnvBlockedError);
   await assert.rejects(walkthrough(['list', '--run', 'abcdef'], { config, connect: async () => { throw new Error('credential-value'); } }), (error: Error) => !error.message.includes('credential-value'));
 });
