@@ -603,6 +603,31 @@ describe('sync: conflicts through the cycle (L3)', () => {
     await assertBothSides(DOC, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, Linear.').replace('Gamma paragraph.', 'Gamma paragraph, git.'));
   });
 
+  it('a gone document an interrupted run recreated and a person then trashed is restored with git\'s text, not skipped on every run', async () => {
+    const document = await documentOf(DOC);
+    document.trashed = true;
+    document.archivedAt = new Date().toISOString();
+    touch(document);
+    const gitText = PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.');
+    const recreated: FakeDocument = {
+      id: stableId('recreated', document.id), title: document.title, projectId: document.projectId as string, createdAt: new Date().toISOString(),
+      content: body(gitText), trashed: true, archivedAt: new Date().toISOString(),
+    };
+    afterCapture(() => {
+      world.linear.documents.splice(world.linear.documents.indexOf(document), 1);
+      world.linear.documents.push(recreated);
+      touch(recreated);
+    });
+    await commitGit({ [DOC]: gitText });
+    const first = await sync();
+    assert.deepEqual(first.report.sync?.skipped, []);
+    assert.deepEqual(first.report.sync?.restored, [DOC]);
+    assert.ok(!recreated.trashed);
+    await settle();
+    assert.equal((await documentOf(DOC)).id, recreated.id);
+    await assertBothSides(DOC, gitText);
+  });
+
   it('L3-17: renamed in Linear and edited in git, both apply', async () => {
     const document = await documentOf(DOC);
     document.title = 'Roadmap';

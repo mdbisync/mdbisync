@@ -119,9 +119,9 @@ ongoing sync runs. You do not need to wait for a run to finish:
   leaves the document in Linear. If you edit that document, nothing
   overwrites your edit: a later run takes the document over only if it
   still holds the text the run would write. Otherwise the next run captures
-  it as a new document at the file's path and merges it with the file in
-  git; text that differs on both sides becomes a
-  [conflict](conflicts.md).
+  it as a new document at the file's path. The two texts have no earlier
+  version in common, so every part where the document and the file in git
+  differ becomes a [conflict](conflicts.md) that keeps both versions.
 - A push that arrives after the run read the tracked branch is picked up by
   a later run. Commits on the sync branch are kept too, including changes
   from a person or CI. Closing its pull request causes a later run to open
