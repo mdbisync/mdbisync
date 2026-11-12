@@ -29,7 +29,7 @@ export interface ImageFinding {
 export class ImageBlockedError extends Error {
   readonly findings: ImageFinding[];
   constructor(findings: ImageFinding[]) {
-    super('Images must be uploads.');
+    super(message('assets.not-allowed'));
     this.findings = findings;
   }
 }
