@@ -16,6 +16,7 @@ npm run typecheck
 npm run build              # bundles dist/, checks bundled licenses, writes the notices
 npm test
 npm run test:hooks         # needs pre-commit; offline scratch hook and CI checks
+npm run test:template-install  # needs Python 3.10+ with venv and PyPI; the templates' pre-commit install
 pre-commit run --all-files
 ```
 
