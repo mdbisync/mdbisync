@@ -32,7 +32,7 @@ import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, install
 import { engineEntry, REPO_ROOT, type EngineResult } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
 import { readHookConfig } from '../../../src/setup/hooks.ts';
-import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { cancelPendingRuns, faultChecks, waitForCheck, waitForCheckCompleted } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
@@ -496,6 +496,91 @@ describe('workflows', () => {
     await STEP_ACTIONS['run.settle']!(ctx, {});
     assert.deepEqual(dispatched, [99, 99, 99, 99], 'without a changed=false report, settle keeps dispatching to its limit');
     assert.equal(ctx.engine.results.length, 4);
+  });
+
+  /**
+   * A sync branch head (optionally with the `pending` marker, and a person's
+   * fix of it), its open pull request 261, and checks on that head that stay
+   * pending for `pendingReads` reads: the marker check, another workflow's
+   * check and a commit status (L4-09).
+   */
+  async function pendingPullRequest(ctx: RunContext, options: { marker?: boolean; fixed?: boolean; pendingReads: number; others?: boolean }) {
+    const git = await ctx.person();
+    await git.run(['fetch', '--quiet', 'origin', ctx.names.trackedBranch]);
+    await git.run(['checkout', '--quiet', '-B', 'sync-head', 'FETCH_HEAD']);
+    writeFileSync(join(git.dir, 'eng/platform/notes.md'), '# Notes\n\nKept short.\n\nA paragraph from Linear.\n');
+    if (options.marker === true) writeFileSync(join(git.dir, CHECK_MARKER), 'pending\n');
+    if (options.fixed === true) writeFileSync(join(git.dir, '.harness-check-fixed'), 'approved\n');
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '--no-verify', '-m', 'Update documents']);
+    await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.syncBranch}`]);
+    const head = (await git.text(['rev-parse', 'HEAD'])).trim();
+    const reads: string[] = [];
+    const rest = ctx.live!.rest as unknown as Record<string, unknown>;
+    const request = (rest.request as (method: string, path: string) => Promise<unknown>).bind(rest);
+    rest.pullRequest = async (number: number) => ({ number, state: 'open', head: { ref: ctx.names.syncBranch, sha: head }, base: { ref: ctx.names.trackedBranch } });
+    rest.request = async (method: string, path: string) => {
+      const runs = /^\/commits\/([0-9a-f]+)\/check-runs/.exec(path)?.[1];
+      const status = /^\/commits\/([0-9a-f]+)\/status/.exec(path)?.[1];
+      if (runs === undefined && status === undefined) return request(method, path);
+      if (runs !== undefined) reads.push(runs);
+      const done = reads.length > options.pendingReads;
+      if (status !== undefined) return { statuses: options.others === true ? [{ context: 'deploy/preview', state: done ? 'success' : 'pending' }] : [] };
+      const names = [CHECK_NAME, ...(options.others === true ? ['pre-commit'] : [])];
+      return { check_runs: names.map((name, id) => ({ id, name, status: done ? 'completed' : 'in_progress', conclusion: done ? 'success' : null, app: { slug: 'github-actions' } })) };
+    };
+    return { head, reads };
+  }
+
+  const pending = { hasChecks: true, state: 'pending', failed: [], pending: [CHECK_NAME] };
+  const passed = { hasChecks: true, state: 'passed', failed: [], pending: [] };
+  /** Reports in turn; the last one repeats. */
+  const reportsOf = (...reports: Array<{ changed: boolean; checks: Record<string, unknown> }>) => {
+    let next = 0;
+    return () => {
+      const { changed, checks } = reports[Math.min(next++, reports.length - 1)]!;
+      return { changed, pullRequest: { needed: true, pullRequest: { number: 261, opened: false }, checks, merged: null } };
+    };
+  };
+  const settleScenario = async (report: () => Record<string, unknown>, options: Parameters<typeof pendingPullRequest>[1]) => {
+    const { ctx, remoteGit } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, mode: 'actions', setup: { ...ctx.scenario.setup, fixtures: ['actions-security-canary'] } };
+    ctx.checkPollMs = 1;
+    const { dispatched } = fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report });
+    const { head, reads } = await pendingPullRequest(ctx, options);
+    await STEP_ACTIONS['run.settle']!(ctx, {});
+    return { ctx, dispatched, head, reads };
+  };
+
+  it('settle waits for the check still pending on the sync pull request\'s new head, then runs again (L4-09)', async () => {
+    const { ctx, dispatched, head, reads } = await settleScenario(reportsOf({ changed: false, checks: pending }, { changed: false, checks: passed }), { pendingReads: 2 });
+    assert.deepEqual(dispatched, [99, 99], 'a run that changed nothing while the check was pending is not the settled run');
+    assert.deepEqual(reads, [head, head, head], 'settle polled the checks on the pull request\'s head until they completed');
+    assert.equal(ctx.observations.get('settle.checkWaits'), 1);
+  });
+
+  it('settle runs again after a wait on its last run', async () => {
+    const changed = { changed: true, checks: passed };
+    const { dispatched } = await settleScenario(reportsOf(changed, changed, changed, { changed: false, checks: pending }, { changed: false, checks: passed }), { pendingReads: 1 });
+    assert.equal(dispatched.length, 5, 'the run after the wait comes on top of the four runs');
+  });
+
+  it('settle waits for every pending check and status on the head, not only the marker check', async () => {
+    const { reads, dispatched } = await settleScenario(reportsOf({ changed: false, checks: { ...pending, pending: ['deploy/preview', 'pre-commit'] } }, { changed: false, checks: passed }), { pendingReads: 1, others: true });
+    assert.equal(reads.length, 2);
+    assert.equal(dispatched.length, 2);
+  });
+
+  it('settle does not wait for a head that carries the scenario\'s own pending marker', async () => {
+    const { dispatched, reads } = await settleScenario(reportsOf({ changed: false, checks: pending }), { marker: true, pendingReads: Infinity });
+    assert.deepEqual(dispatched, [99], 'the marker job sleeps by design: the run that changed nothing settles');
+    assert.deepEqual(reads, []);
+  });
+
+  it('settle waits for a marker head that a person fixed', async () => {
+    const { dispatched, reads } = await settleScenario(reportsOf({ changed: false, checks: pending }, { changed: false, checks: passed }), { marker: true, fixed: true, pendingReads: 1 });
+    assert.equal(reads.length, 2);
+    assert.equal(dispatched.length, 2);
   });
 
   it('count the runs the concurrency group cancelled when a newer run replaced them (L4-10)', async () => {
