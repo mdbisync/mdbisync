@@ -15,30 +15,43 @@ import { join, resolve } from 'node:path';
 
 export const SYNC_COMMAND = 'npm run sync:pre-commit-pins';
 export const REQUIREMENTS_PATH = '.github/requirements/pre-commit.txt';
+const INIT_COPIES = 'src/init/workflows.json';
 
-/** The pre-commit version a requirements list pins. */
+/**
+ * The pre-commit version a requirements list pins. Only a release version
+ * (`4.7.0`) is accepted: the templates name it in plain text, where a
+ * pre-release suffix could not be told apart from the words around it.
+ */
 export function preCommitVersion(requirements: string): string {
   const version = /^pre-commit==([^\s\\]+)/m.exec(requirements)?.[1];
   if (!version) throw new Error(`${REQUIREMENTS_PATH} must pin pre-commit`);
+  if (!/^\d+(?:\.\d+)+$/.test(version)) throw new Error(`${REQUIREMENTS_PATH} must pin a release of pre-commit, not ${version}`);
   return version;
 }
 
+const HEREDOC = /(<<'REQUIREMENTS'; then\n)[\s\S]*?\n( *)REQUIREMENTS\n/g;
+
 /**
- * The template with its "Install pre-commit" step carrying `requirements`: the
- * list between `<<'REQUIREMENTS'; then` and the closing `REQUIREMENTS` line,
- * and every `pre-commit <version>` the step names. The rest of the text stays
- * byte for byte. A template without that step is returned unchanged.
+ * The template with each "Install pre-commit" step carrying `requirements`:
+ * the list between `<<'REQUIREMENTS'; then` and the closing `REQUIREMENTS`
+ * line, and every `pre-commit <version>` the step names. The rest of the text
+ * stays byte for byte. Throws when a list sits outside such a step, which the
+ * command could not keep in step.
  */
 export function syncTemplate(text: string, requirements: string): string {
-  const step = /^( *)- name: Install pre-commit\n(?:\1 {2}.*\n|\n)*/m.exec(text);
-  if (!step) return text;
   const version = preCommitVersion(requirements);
   const lines = requirements.trim().split('\n');
-  const synced = step[0]
-    .replace(/(<<'REQUIREMENTS'; then\n)[\s\S]*?\n( *)REQUIREMENTS\n/, (_, opening: string, indent: string) =>
-      `${opening}${lines.map(line => indent + line).join('\n')}\n${indent}REQUIREMENTS\n`)
-    .replace(/\bpre-commit \d+(?:\.\d+)+\b/g, `pre-commit ${version}`);
-  return text.slice(0, step.index) + synced + text.slice(step.index + step[0].length);
+  let lists = 0;
+  const synced = text.replace(/^( *)- name: Install pre-commit\n(?:\1 {2}.*\n|\n)*/gm, step => step
+    .replace(HEREDOC, (_, opening: string, indent: string) => {
+      lists += 1;
+      return `${opening}${lines.map(line => indent + line).join('\n')}\n${indent}REQUIREMENTS\n`;
+    })
+    .replace(/\bpre-commit \d+(?:\.\d+)+\b/g, `pre-commit ${version}`));
+  if ((text.match(HEREDOC) ?? []).length !== lists) {
+    throw new Error('a REQUIREMENTS list sits outside a step named "Install pre-commit" (with `- name:` first); move it into one');
+  }
+  return synced;
 }
 
 /** The quickstart with its `pre-commit==<version>` install hint set to the list's version. */
@@ -46,23 +59,21 @@ export function syncQuickstart(text: string, requirements: string): string {
   return text.replace(/\bpre-commit==\d+(?:\.\d+)+\b/g, `pre-commit==${preCommitVersion(requirements)}`);
 }
 
-/** The text of `src/init/workflows.json` for these templates, by file name. */
-export function initCopies(templates: Map<string, string>): string {
-  const sorted = [...templates].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return `${JSON.stringify(Object.fromEntries(sorted), null, 2)}\n`;
-}
-
 /** Every file the list is copied into, with the text it must have, relative to `root`. */
 export function syncedFiles(root: string): Map<string, string> {
   const requirements = readFileSync(join(root, REQUIREMENTS_PATH), 'utf8');
   const files = new Map<string, string>();
-  const templates = new Map<string, string>();
   for (const name of readdirSync(join(root, 'examples')).filter(name => name.endsWith('.yml'))) {
-    const text = syncTemplate(readFileSync(join(root, 'examples', name), 'utf8'), requirements);
-    templates.set(name, text);
-    files.set(`examples/${name}`, text);
+    files.set(`examples/${name}`, syncTemplate(readFileSync(join(root, 'examples', name), 'utf8'), requirements));
   }
-  files.set('src/init/workflows.json', initCopies(templates));
+  // `init` writes the templates it already lists; a new example joins them only by hand.
+  const copies = JSON.parse(readFileSync(join(root, INIT_COPIES), 'utf8')) as Record<string, string>;
+  for (const name of Object.keys(copies)) {
+    const text = files.get(`examples/${name}`);
+    if (text === undefined) throw new Error(`${INIT_COPIES} lists ${name}, which examples/ lacks`);
+    copies[name] = text;
+  }
+  files.set(INIT_COPIES, `${JSON.stringify(copies, null, 2)}\n`);
   files.set('docs/quickstart.md', syncQuickstart(readFileSync(join(root, 'docs/quickstart.md'), 'utf8'), requirements));
   return files;
 }
