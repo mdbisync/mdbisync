@@ -465,7 +465,7 @@ const README = (fields: string) => `---\n${fields}\n---\n# Area\n`;
 const CORPUS: Record<string, string> = {
   'README.md': '# Corpus\n',
   'eng/README.md': README('linear-team: ENG'),
-  'eng/guides/start.md': '# Start\n\nkx-00000001\n',
+  'eng/guides/start.md': '# Start — über\n\nkx-00000001\n\nSee [the plan](../alpha/plan.md).\n',
   'eng/alpha/README.md': README('linear-project: PROJECT_ENG_1'),
   'eng/alpha/plan.md': '# Plan\n\nkx-00000002\n',
   'docs/README.md': README('linear-team: DOCS'),
@@ -547,6 +547,8 @@ describe('run tree from a slice', () => {
     const { commit } = await sandbox.createTrackedBranch('mini', names);
     const files = (await new Git(remote).text(['ls-tree', '-r', '--name-only', names.trackedBranch])).split('\n');
     assert.ok(files.includes('eng/4f1a9c/guides/start.md'));
+    // A moved zone file's link into an unmoved project folder still reaches its file.
+    assert.equal(await new Git(remote).text(['show', `${names.trackedBranch}:eng/4f1a9c/guides/start.md`]), '# Start — über\n\nkx-00000001\n\nSee [the plan](../../alpha/plan.md).');
     assert.ok(!files.some((file) => file.startsWith('corpus')));
     assert.ok(!files.some((file) => file.startsWith('.github/')));
     const enabled = runNames('abcdef');

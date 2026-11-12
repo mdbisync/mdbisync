@@ -190,7 +190,7 @@ function encodeFragment(fragment: string): string {
 }
 
 /** Replaces destinations by offset; `replace` returns the new raw destination, or undefined to keep it. */
-function rewriteDestinations(body: string, replace: (destination: Destination) => string | undefined): string {
+export function rewriteDestinations(body: string, replace: (destination: Destination) => string | undefined): string {
   let result = '';
   let at = 0;
   for (const destination of linkDestinations(body)) {

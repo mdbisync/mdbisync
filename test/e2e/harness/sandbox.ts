@@ -15,6 +15,7 @@ import { LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
 import { CORPUS_DIR, SLICES_DIR, buildRunTree, selectTeams, parseManifest, parseSlice, type Manifest, type RunTree, type SliceList } from './corpus.ts';
 import { gitAuthEnv } from './github.ts';
+import { relinkRunTree } from './run-links.ts';
 import { runOfRef, type RunNames } from './isolation.ts';
 import { acquireLock } from './locks.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
@@ -111,7 +112,9 @@ export class Sandbox {
     const selected = options.teams === undefined ? list : selectTeams(list, readmes, options.teams);
     await options.validate?.(selected);
     const selectedReadmes = new Map([...readmes].filter(([path]) => selected.paths.includes(path)));
-    const tree = buildRunTree(selected, selectedReadmes, names);
+    const markdown = selected.paths.filter((path) => path.endsWith('.md'));
+    const texts = await this.blobTexts(markdown.map((path) => (entries.get(path) as { oid: string }).oid));
+    const tree = relinkRunTree(buildRunTree(selected, selectedReadmes, names), new Map(markdown.map((path, index) => [path, texts[index] as string])));
     // Only check-fault scenarios opt into runner jobs. Other scenarios keep
     // their workflow-free starting tree.
     if (options.checks !== true) tree.paths.delete(CHECK_WORKFLOW_PATH);
@@ -130,6 +133,23 @@ export class Sandbox {
     const commit = (await this.cache.text(['commit-tree', treeOid, '-m', 'Starting tree'])).trim();
     await this.cache.run(['push', '--quiet', '--no-verify', this.url, `${commit}:refs/heads/${names.trackedBranch}`]);
     return { tree, commit };
+  }
+
+  /** The UTF-8 text of each blob, in order, read from the cache in one call. */
+  async blobTexts(oids: readonly string[]): Promise<string[]> {
+    if (oids.length === 0) return [];
+    const { stdout } = await this.cache.run(['cat-file', '--batch'], { input: `${oids.join('\n')}\n` });
+    const texts: string[] = [];
+    let at = 0;
+    for (const oid of oids) {
+      const end = stdout.indexOf(0x0a, at);
+      const header = /^([0-9a-f]+) blob (\d+)$/.exec(stdout.subarray(at, end).toString('utf8'));
+      if (header === null || header[1] !== oid) throw new Error(`the sandbox cache has no blob ${oid}`);
+      const size = Number(header[2]);
+      texts.push(stdout.subarray(end + 1, end + 1 + size).toString('utf8'));
+      at = end + 1 + size + 1;
+    }
+    return texts;
   }
 
   /** A working clone of the run's tracked branch (no LFS content), for the engine or for a person. */
