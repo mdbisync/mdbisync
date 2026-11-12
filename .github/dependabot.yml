@@ -21,3 +21,15 @@ updates:
       interval: weekly
     cooldown:
       default-days: 14
+  # The hash-checked pre-commit list that CI, release and every workflow
+  # template install, `.github/requirements/pre-commit.txt`. Dependabot finds
+  # it because it sits in a folder named `requirements`. An update changes
+  # only that file: the workflow tests fail until the same lines are copied
+  # into the templates in `examples/` and `src/init/workflows.json`, and the
+  # install check finds a hashed wheel for each pin on Python 3.11 to 3.14.
+  - package-ecosystem: pip
+    directory: /.github
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
