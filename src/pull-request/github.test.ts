@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { PullRequestError, closePullRequestAtHead, openPullRequest, updatePullRequest } from './github.ts';
+import { PullRequestError, closePullRequestAtHead, ensurePullRequest, openPullRequest, updatePullRequest } from './github.ts';
 import { mergePullRequest } from './merge.ts';
 
 /** A GitHub that answers every request with `status` and `body`. */
@@ -39,6 +39,52 @@ describe('pull request writes', () => {
     const merged = answering(405, { message: 'Pull Request is not mergeable' });
     assert.equal((await mergePullRequest(merged.target, 1, 'abc')).merged, false);
     assert.deepEqual([...opened.writes, ...merged.writes], []);
+  });
+});
+
+describe('ensuring the sync pull request', () => {
+  const node = (body: string) => ({ number: 7, html_url: 'https://github.test/pull/7', head: { ref: 'sync' }, base: { ref: 'main' }, title: 'Sync', body });
+
+  /** A GitHub where another run opens the pull request between this run's look and its open. */
+  function racing(open: unknown[] | Response, openAnswer: { status: number; body: unknown }) {
+    const calls: string[] = [];
+    let listed = 0;
+    const fetch = (async (_input, init) => {
+      const method = init?.method ?? 'GET';
+      calls.push(method);
+      if (method === 'GET') return listed++ === 0 ? Response.json([]) : open instanceof Response ? open : Response.json(open);
+      if (method === 'POST') return Response.json(openAnswer.body, { status: openAnswer.status });
+      return Response.json(node(JSON.parse(String(init?.body)).body as string));
+    }) as typeof globalThis.fetch;
+    return { target: { repository: 'owner/repo', token: 'token', apiUrl: 'https://api.example.test', fetch }, calls };
+  }
+
+  it('uses the pull request another run opened when GitHub refuses a duplicate', async () => {
+    const same = racing([node('Body.')], { status: 422, body: { message: 'Validation Failed', errors: [{ message: 'A pull request already exists for owner:sync.' }] } });
+    const kept = await ensurePullRequest(same.target, spec);
+    assert.deepEqual(kept, { pullRequest: { number: 7, url: 'https://github.test/pull/7', head: 'sync', base: 'main', title: 'Sync', body: 'Body.' }, opened: false, updated: false });
+    assert.deepEqual(same.calls, ['GET', 'POST', 'GET']);
+
+    // The other run's description is replaced with this run's, as for any open pull request.
+    const other = racing([node('Other body.')], { status: 422, body: { message: 'Validation Failed' } });
+    const updated = await ensurePullRequest(other.target, spec);
+    assert.equal(updated.opened, false);
+    assert.equal(updated.updated, true);
+    assert.equal(updated.pullRequest.body, 'Body.');
+    assert.deepEqual(other.calls, ['GET', 'POST', 'GET', 'PATCH']);
+  });
+
+  it('still fails on a refusal when no pull request is open, and on other statuses without looking again', async () => {
+    const none = racing([], { status: 422, body: { message: 'Validation Failed' } });
+    await assert.rejects(ensurePullRequest(none.target, spec), (error: unknown) => error instanceof PullRequestError && error.status === 422);
+    assert.deepEqual(none.calls, ['GET', 'POST', 'GET']);
+    // A second look that fails reports the refusal, not the look.
+    const failing = racing(Response.json({ message: 'Server Error' }, { status: 502 }), { status: 422, body: { message: 'Validation Failed' } });
+    await assert.rejects(ensurePullRequest(failing.target, spec), (error: unknown) => error instanceof PullRequestError && error.status === 422);
+    assert.deepEqual(failing.calls, ['GET', 'POST', 'GET']);
+    const forbidden = racing([node('Body.')], { status: 403, body: { message: 'Resource not accessible by integration' } });
+    await assert.rejects(ensurePullRequest(forbidden.target, spec), (error: unknown) => error instanceof PullRequestError && error.status === 403);
+    assert.deepEqual(forbidden.calls, ['GET', 'POST']);
   });
 });
 

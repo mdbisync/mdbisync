@@ -142,17 +142,35 @@ export async function closePullRequestAtHead(target: GitHubRepository, number: n
  * The open pull request from `head` into `base`, opened when there is none.
  * An open one gets the new title and description, which describe its head as
  * it is now.
+ *
+ * Another run can open the same pull request between the look and the open:
+ * GitHub then refuses the second with 422. When a pull request from `head`
+ * into `base` is open after that refusal, it is the one to use.
  */
 export async function ensurePullRequest(
   target: GitHubRepository,
   spec: NewPullRequest,
 ): Promise<{ pullRequest: PullRequest; opened: boolean; updated: boolean }> {
   const open = await findOpenPullRequest(target, spec.head, spec.base);
-  if (open !== null) {
-    if (open.title === spec.title && open.body === spec.body) return { pullRequest: open, opened: false, updated: false };
-    return { pullRequest: await updatePullRequest(target, open.number, spec), opened: false, updated: true };
+  if (open !== null) return useOpen(target, open, spec);
+  try {
+    return { pullRequest: await openPullRequest(target, spec), opened: true, updated: false };
+  } catch (error) {
+    if (!(error instanceof PullRequestError) || error.status !== 422) throw error;
+    // A failed second look reports the refusal, its cause, not the look.
+    const opened = await findOpenPullRequest(target, spec.head, spec.base).catch((failed: unknown) => {
+      if (failed instanceof PullRequestError) return null;
+      throw failed;
+    });
+    if (opened === null) throw error;
+    return useOpen(target, opened, spec);
   }
-  return { pullRequest: await openPullRequest(target, spec), opened: true, updated: false };
+}
+
+/** An open pull request with the given title and description. */
+async function useOpen(target: GitHubRepository, open: PullRequest, spec: NewPullRequest): Promise<{ pullRequest: PullRequest; opened: false; updated: boolean }> {
+  if (open.title === spec.title && open.body === spec.body) return { pullRequest: open, opened: false, updated: false };
+  return { pullRequest: await updatePullRequest(target, open.number, spec), opened: false, updated: true };
 }
 
 function toPullRequest(value: unknown): PullRequest | null {

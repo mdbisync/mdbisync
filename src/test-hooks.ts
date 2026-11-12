@@ -15,7 +15,7 @@
 // MDBISYNC_TEST_STOP_AFTER_DOCUMENTS makes the engine stop writing after that
 // many documents, as if Linear's budget had run low.
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -92,7 +92,11 @@ export async function checkpoint(name: Checkpoint, env: Env = process.env): Prom
   mark(dir, 'passed', name, count);
 }
 
+/** Writes the visit whole: the harness polls the file and must never read it half written. */
 function mark(dir: string, kind: 'reached' | 'passed', name: string, count: number): void {
   mkdirSync(join(dir, kind), { recursive: true });
-  writeFileSync(join(dir, kind, name), `${JSON.stringify({ pid: process.pid, count, at: new Date().toISOString() })}\n`);
+  const file = join(dir, kind, name);
+  const partial = `${file}.${process.pid}.tmp`;
+  writeFileSync(partial, `${JSON.stringify({ pid: process.pid, count, at: new Date().toISOString() })}\n`);
+  renameSync(partial, file);
 }
