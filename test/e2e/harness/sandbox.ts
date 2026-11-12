@@ -118,7 +118,7 @@ export class Sandbox {
   }
 
   /** Builds the run's tree from a slice and pushes it as the run's tracked branch (a new root commit). */
-  async createTrackedBranch(slice: string, names: RunNames, options: { checks?: boolean; soak?: boolean; teams?: readonly string[]; validate?: (selected: SliceList) => Promise<void> } = {}): Promise<{ tree: RunTree; commit: string }> {
+  async createTrackedBranch(slice: string, names: RunNames, options: { checks?: boolean; soak?: Manifest; teams?: readonly string[]; validate?: (selected: SliceList) => Promise<void> } = {}): Promise<{ tree: RunTree; commit: string }> {
     const sliceText = await this.readMain(`${SLICES_DIR}/${slice}.json`);
     if (sliceText === null) throw new CorpusMissingError(`the sandbox's main has no ${SLICES_DIR}/${slice}.json (the corpus is not there yet)`);
     const list = parseSlice(sliceText, slice);
@@ -144,7 +144,7 @@ export class Sandbox {
     await options.validate?.(selected);
     const selectedReadmes = new Map([...readmes].filter(([path]) => selected.paths.includes(path)));
     const relinked = relinkRunTree(buildRunTree(selected, selectedReadmes, names), texts);
-    const tree = options.soak === true ? soakRunTree(relinked, await this.manifest(), texts) : relinked;
+    const tree = options.soak === undefined ? relinked : soakRunTree(relinked, options.soak, texts);
     // Only check-fault scenarios opt into runner jobs. Other scenarios keep
     // their workflow-free starting tree.
     if (options.checks !== true) tree.paths.delete(CHECK_WORKFLOW_PATH);

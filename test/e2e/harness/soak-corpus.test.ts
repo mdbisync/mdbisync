@@ -21,7 +21,7 @@ test('the mid soak baseline passes the all-files formatter without removing nega
   const root = mkdtempSync(join(tmpdir(), 'soak-corpus-'));
   try {
     const corpus = buildCorpus('0'.repeat(40));
-    const texts = new Map(corpus.files.filter((file) => file.kind === 'markdown').map((file) => [file.path, file.content.toString()]));
+    const texts = new Map(corpus.files.filter((file) => file.kind === 'markdown' && Buffer.from(file.content.toString()).equals(file.content)).map((file) => [file.path, file.content.toString()]));
     const readmes = new Map([...texts].filter(([path]) => /(^|\/)README\.md$/.test(path)));
     const original = relinkRunTree(buildRunTree({ slice: 'mid', paths: corpus.slices.mid }, readmes, runNames('abcdef')), texts);
     const byPath = new Map(corpus.files.map((file) => [file.path, file]));
@@ -73,7 +73,7 @@ test('only the soak branch omits declared negative fixtures, and unexplained lin
     const normal = await sandbox.createTrackedBranch('mid', runNames('aaaaaa'));
     assert.ok([...normal.tree.paths.values()].includes('eng/footnote.md'));
     let validated = false;
-    const soak = await sandbox.createTrackedBranch('mid', runNames('bbbbbb'), { soak: true, validate: async (slice) => {
+    const soak = await sandbox.createTrackedBranch('mid', runNames('bbbbbb'), { soak: manifest, validate: async (slice) => {
       assert.ok(slice.paths.includes('eng/footnote.md'), 'validate the original corpus before selection');
       validated = true;
     } });
@@ -87,9 +87,19 @@ test('only the soak branch omits declared negative fixtures, and unexplained lin
     await seed.run(['commit', '--quiet', '-m', 'Incorrect expectation']);
     await seed.run(['push', '--quiet', remote, 'main']);
     await sandbox.refreshCache();
-    await assert.rejects(sandbox.createTrackedBranch('mid', runNames('cccccc'), { soak: true }), /soak corpus is not format-clean: .*footnote/);
+    await assert.rejects(sandbox.createTrackedBranch('mid', runNames('cccccc'), { soak: manifest }), /soak corpus is not format-clean: .*footnote/);
     assert.equal((await new Git(remote).run(['show-ref', '--verify', '--quiet', 'refs/heads/t/cccccc/main'], { okCodes: [0, 1] })).code, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('the soak refuses links to omitted fixtures, unformatted text and undecodable Markdown instead of skipping more files', () => {
+  const tree = buildRunTree({ slice: 'mid', paths: ['notes/ready.md', 'notes/negative.md'] }, new Map());
+  const manifest: Manifest = { seed: 'test', files: [{ path: 'notes/negative.md', group: 'notes', kind: 'markdown', synced: true, lfs: false, canary: null, class: 'lint-error', rule: 'footnote' }] };
+  for (const text of ['[Note](negative.md)', '[Note][ref]\n\n[ref]: negative.md', '[Note](/notes/negative.md#detail)']) {
+    assert.throws(() => soakRunTree(tree, manifest, new Map([['notes/ready.md', text]])), /depends on omitted fixture notes\/negative.md/);
+  }
+  assert.throws(() => soakRunTree(tree, manifest, new Map([['notes/ready.md', '- ready\n']])), /not in Linear's form/);
+  assert.throws(() => soakRunTree(tree, manifest, new Map()), /soak corpus has no text for notes\/ready.md/);
 });
