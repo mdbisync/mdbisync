@@ -51,8 +51,8 @@ import { mutationsBetween, quietFailures, snapshotWorld, untouchedFailures, watc
 import {
   commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
-import type { WorkflowRun } from './github.ts';
-import { blockerEvidence, environmentBlocker, hadReplaceableRun, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun, workflowEvidence } from './workflows.ts';
+import type { SandboxRest, WorkflowRun } from './github.ts';
+import { blockerEvidence, environmentBlocker, hadReplaceableRun, jobSpans, maxOverlap, runLogs, runResult, stopScheduledRun, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun, workflowEvidence } from './workflows.ts';
 import { outputCount, outputFile } from '../../../src/run/output.ts';
 import { CANARY_FIXTURE, canaryFacts } from './security-canary.ts';
 import { pinnedActionSha, prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
@@ -153,7 +153,7 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
     linearUrl: ctx.proxy?.url ?? 'https://api.linear.app',
     credentials: {
       ...linear,
-      githubToken: ctx.engine.badCredential === 'github' ? 'not-a-valid-token' : world.githubToken,
+      githubToken: ctx.engine.badCredential === 'github' ? 'not-a-valid-token' : await world.getGithubToken?.() ?? world.githubToken,
       ...(world.githubAppLogin === undefined ? {} : { appSlug: world.githubAppLogin.replace(/\[bot\]$/, '') }),
     },
     timeoutMs: ENGINE_TIMEOUT_MS,
@@ -446,8 +446,22 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
     if (pr === undefined) throw new Error('run.workflow on pull_request needs git.open-pr first');
     run = await waitForRun(world.rest, { branch: ctx.names.syncBranch, event, after: pr.openedAt, exclude: seenRuns(ctx) });
   } else if (event === 'schedule') {
-    const after = await requestScheduledRun(ctx);
-    run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after, exclude: seenRuns(ctx) });
+    const deadlineAt = typeof args.deadlineAt === 'number' ? args.deadlineAt : undefined;
+    const rest = deadlineAt === undefined ? world.rest : world.rest.withSignal(AbortSignal.timeout(Math.max(0, deadlineAt - Date.now())));
+    const after = Date.now();
+    ctx.observations.set('soak.requestAttempted', false);
+    try {
+      const requestedAt = await requestScheduledRun(ctx, rest, deadlineAt);
+      run = await waitForScheduledRun(rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after: requestedAt, exclude: seenRuns(ctx), ...(deadlineAt === undefined ? {} : { deadlineAt }) });
+    } catch (error) {
+      if (deadlineAt === undefined || Date.now() < deadlineAt) throw error;
+      if (ctx.observations.get('soak.requestAttempted') === true) {
+        ctx.observations.set('workflows.unstopped', true);
+        await stopScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, requestBranch: ctx.names.scheduleRequest, after, exclude: seenRuns(ctx) });
+        ctx.observations.set('workflows.unstopped', false);
+      }
+      throw new EnvBlockedError('soak workflow deadline expired; outstanding request or writer stopped');
+    }
   } else {
     throw new Error(`run.workflow cannot start a ${event} run`);
   }
@@ -533,24 +547,26 @@ function findPushRun(ctx: RunContext, command: CommandName, headSha: string): Pr
  * rendering for the release under test: a run never installs it, since the
  * default branch is every run's (workflow-files.ts).
  */
-async function requestScheduledRun(ctx: RunContext): Promise<number> {
+async function requestScheduledRun(ctx: RunContext, rest: SandboxRest = live(ctx).rest, deadlineAt?: number): Promise<number> {
   const world = live(ctx);
   // Checked before anything is created: a wrong setting must not leave a request behind.
   const byHand = scheduleTick() === 'workflow_dispatch';
   const wanted = renderScheduler(readTemplate(SYNC_WORKFLOW), requiredActionSha());
-  const installed = await world.rest.fileText(`.github/workflows/${SCHEDULER_FILE}`);
+  const installed = await rest.fileText(`.github/workflows/${SCHEDULER_FILE}`);
   if (installed !== wanted) {
     throw new EnvBlockedError(`the sandbox's default branch holds ${installed === undefined ? 'no' : 'another'} ${SCHEDULER_FILE} than the sync template's for the release under test; install it with \`node test/e2e/harness/cli.ts scheduler --install\``);
   }
-  const state = await world.rest.workflowState(SCHEDULER_FILE);
+  const state = await rest.workflowState(SCHEDULER_FILE);
   if (state !== 'active') throw new EnvBlockedError(`the sandbox's scheduled workflow ${SCHEDULER_FILE} is ${state ?? 'not registered'}, not active`);
   const tip = await trackedTipOnServer(ctx);
   const after = Date.now();
-  await world.rest.createBranch(ctx.names.scheduleRequest, tip);
+  ctx.observations.set('soak.requestAttempted', true);
+  await rest.createBranch(ctx.names.scheduleRequest, tip);
   try {
-    const defaultBranch = byHand ? (await world.rest.request<{ default_branch: string }>('GET', '')).default_branch : '';
-    await waitForRequestTaken(world.rest, ctx.names.scheduleRequest, byHand ? { tick: () => world.rest.dispatchWorkflow(SCHEDULER_FILE, defaultBranch, {}) } : {});
+    const defaultBranch = byHand ? (await rest.request<{ default_branch: string }>('GET', '')).default_branch : '';
+    await waitForRequestTaken(rest, ctx.names.scheduleRequest, { ...(byHand ? { tick: () => rest.dispatchWorkflow(SCHEDULER_FILE, defaultBranch, {}) } : {}), ...(deadlineAt === undefined ? {} : { deadlineAt }) });
   } catch (error) {
+    if (deadlineAt !== undefined && Date.now() >= deadlineAt) throw error;
     // A request no tick took must not start a sync after the step. When a tick took it just now, the deletion
     // finds nothing: the step goes on to that tick's run rather than leave it writing behind the cleanup.
     if (await world.rest.deleteBranch(ctx.names.scheduleRequest)) throw error;
@@ -596,7 +612,7 @@ async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: Com
 
 // --- the executors -------------------------------------------------------
 
-function loadDriver(ctx: RunContext, sync: () => Promise<void | number>): LoadDriver {
+function loadDriver(ctx: RunContext, sync: LoadDriver['sync']): LoadDriver {
   return {
     ...realClock,
     sleep: (ms) => delay(Math.max(0, ms), undefined, { signal: ctx.signal }),
@@ -926,11 +942,11 @@ const RUN: Record<string, Executor> = {
         accounted.add(run.id);
       }
     };
-    const sync = async () => {
+    const sync: LoadDriver['sync'] = async (deadlineAt) => {
       if (actions) {
         const before = ctx.engine.results.length;
         let failure: unknown;
-        try { await workflowRun(ctx, { event: 'schedule' }); }
+        try { await workflowRun(ctx, { event: 'schedule', deadlineAt }); }
         catch (error) { failure = error; }
         const result = ctx.engine.results.at(-1)!;
         let started: number | undefined;
@@ -945,12 +961,16 @@ const RUN: Record<string, Executor> = {
             started = Math.min(...spans.map((span) => span.started));
           } catch (error) { failure ??= error; }
         }
-        if (failure !== undefined) throw failure;
-        if (result.exitCode !== 0) throw new ProductError(`scheduled soak workflow ${result.remote?.runId ?? 'unknown'} failed (exit ${String(result.exitCode)})`);
-        const tokens = observedTokens(ctx.engine.results.slice(firstRun));
-        if (tokens.outstanding === null) throw new EnvBlockedError('soak stopped: workflow token lifecycle diagnostics are missing');
-        if (tokens.outstanding !== 0) throw new ProductError('soak stopped: workflow token revocation is unconfirmed');
-        return started;
+        const completed = ctx.engine.results.length > before;
+        if (failure === undefined && completed) {
+          if (result.exitCode !== 0) failure = new ProductError(`scheduled soak workflow ${result.remote?.runId ?? 'unknown'} failed (exit ${String(result.exitCode)})`);
+          else {
+            const tokens = observedTokens(ctx.engine.results.slice(firstRun));
+            if (tokens.outstanding === null) failure = new EnvBlockedError('soak stopped: workflow token lifecycle diagnostics are missing');
+            else if (tokens.outstanding !== 0) failure = new ProductError('soak stopped: workflow token revocation is unconfirmed');
+          }
+        }
+        return { completed, startedAt: started, error: failure };
       } else await runCommand(ctx, 'sync', {});
     };
     const progress = async (result: SoakResult) => {

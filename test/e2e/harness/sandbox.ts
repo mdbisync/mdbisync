@@ -13,6 +13,7 @@ import { validateSha } from '../../../src/release/package.ts';
 import { CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
+import type { RunOptions, RunResult } from '../../../src/state/git.ts';
 import { CORPUS_DIR, SLICES_DIR, buildRunTree, selectTeams, parseManifest, parseSlice, type Manifest, type RunTree, type SliceList } from './corpus.ts';
 import { gitAuthEnv } from './github.ts';
 import { relinkRunTree } from './run-links.ts';
@@ -39,13 +40,28 @@ export class CorpusMissingError extends Error {
 export interface SandboxOptions {
   url: string;
   token: string;
+  getToken?: () => Promise<string>;
   stateDir: string;
   runId: string;
+}
+
+/** Refresh before every Git operation; isolated hook environments never inherit credentials. */
+export class CredentialGit extends Git {
+  readonly #load: () => Promise<string>;
+  constructor(dir: string, env: Record<string, string>, load: () => Promise<string>) {
+    super(dir, env);
+    this.#load = load;
+  }
+  override async run(args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
+    if (options.onlyEnv !== undefined) return super.run(args, options);
+    return super.run(args, { ...options, env: { ...gitAuthEnv(await this.#load()), ...options.env } });
+  }
 }
 
 export class Sandbox {
   readonly url: string;
   readonly #token: string;
+  readonly #getToken: (() => Promise<string>) | undefined;
   readonly #stateDir: string;
   readonly #runId: string;
   readonly cache: Git;
@@ -53,14 +69,21 @@ export class Sandbox {
   constructor(options: SandboxOptions) {
     this.url = options.url;
     this.#token = options.token;
+    this.#getToken = options.getToken;
     this.#stateDir = options.stateDir;
     this.#runId = options.runId;
-    this.cache = new Git(join(options.stateDir, 'cache', 'sandbox.git'), this.env(HARNESS));
+    this.cache = this.git(join(options.stateDir, 'cache', 'sandbox.git'), HARNESS);
   }
 
   env(who: { name: string; email: string } = HARNESS): Record<string, string> {
     // A stalled transfer (under 1 KB/s for a minute) fails instead of hanging the run.
     return { ...gitAuthEnv(this.#token), ...identityEnv(who), GIT_LFS_SKIP_SMUDGE: '1', GIT_HTTP_LOW_SPEED_LIMIT: '1000', GIT_HTTP_LOW_SPEED_TIME: '60' };
+  }
+
+  private git(dir: string, who = HARNESS): Git {
+    const load = this.#getToken;
+    const base = this.env(who);
+    return load === undefined ? new Git(dir, base) : new CredentialGit(dir, base, load);
   }
 
   /** Brings the shared cache up to date with the sandbox's main branch. */
@@ -69,7 +92,7 @@ export class Sandbox {
     try {
       if (!existsSync(join(this.cache.dir, 'HEAD'))) {
         mkdirSync(dirname(this.cache.dir), { recursive: true });
-        await new Git(dirname(this.cache.dir), this.env()).run(['clone', '--quiet', '--bare', '--filter=blob:none', '--single-branch', '--branch', 'main', this.url, this.cache.dir]);
+        await this.git(dirname(this.cache.dir)).run(['clone', '--quiet', '--bare', '--filter=blob:none', '--single-branch', '--branch', 'main', this.url, this.cache.dir]);
       } else {
         await this.cache.run(['fetch', '--quiet', '--filter=blob:none', this.url, '+refs/heads/main:refs/heads/main']);
       }
@@ -162,10 +185,10 @@ export class Sandbox {
   /** A working clone of the run's tracked branch (no LFS content), for the engine or for a person. */
   async clone(names: RunNames, dir: string): Promise<Git> {
     mkdirSync(dirname(dir), { recursive: true });
-    await new Git(dirname(dir), this.env()).run([
+    await this.git(dirname(dir)).run([
       'clone', '--quiet', '--reference-if-able', this.cache.dir, '--single-branch', '--branch', names.trackedBranch, this.url, dir,
     ]);
-    return new Git(dir, this.env(PERSON));
+    return this.git(dir, PERSON);
   }
 
   /** All run branches and state refs on the sandbox, with their run ids. */

@@ -216,7 +216,8 @@ export async function liveWorld(
     ?? `https://linear.app/${(await appClient.request<{ organization: { urlKey: string } }>('Organization', 'query', 'query Organization { organization { urlKey } }')).organization.urlKey}/document`;
   return {
     sandbox: parts.sandbox,
-    rest: new SandboxRest(config, parts.token.token),
+    rest: new SandboxRest(config, parts.token.getToken ?? parts.token.token),
+    ...(parts.token.getToken === undefined ? {} : { getGithubToken: parts.token.getToken }),
     githubToken: parts.token.token,
     githubTokenSource: parts.token.source,
     ...(parts.token.appLogin === undefined ? {} : { githubAppLogin: parts.token.appLogin }),
@@ -295,7 +296,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   } catch (error) {
     throw new EnvBlockedError(`GitHub token: ${(error as Error).message}`);
   }
-  const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, stateDir: deps.stateDir, runId: ctx.names.runId });
+  const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, ...(token.getToken === undefined ? {} : { getToken: token.getToken }), stateDir: deps.stateDir, runId: ctx.names.runId });
   ctx.sandbox = sandbox;
   ctx.phase('sandbox cache');
   await sandbox.refreshCache();
@@ -554,6 +555,7 @@ export async function removeRunRefsAndPullRequests(
 }
 
 async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string }> {
+  if (ctx.observations.get('workflows.unstopped') === true) return { ok: false, detail: 'scheduled writer stop is unconfirmed; retain resources and shared reservation for verified recovery' };
   const problems: string[] = [];
   const attempt = async (what: string, action: () => Promise<unknown>) => {
     try {
@@ -639,7 +641,7 @@ async function corpusReader(deps: Pick<RunnerDeps, 'config' | 'stateDir'>, runId
   } catch (error) {
     throw new EnvBlockedError(`GitHub token: ${(error as Error).message}`);
   }
-  const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, stateDir: deps.stateDir, runId });
+  const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, ...(token.getToken === undefined ? {} : { getToken: token.getToken }), stateDir: deps.stateDir, runId });
   try {
     await sandbox.refreshCache();
   } catch (error) {
@@ -932,13 +934,18 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     if (!heldForUi) cleanupOutcome = await cleanupAndCount(ctx);
     await ctx.proxy?.close();
     await ctx.engine.lfsProxy?.close();
-    locks.splice(0).reverse().forEach((lock) => lock.release());
+    const writerUnstopped = ctx.observations.get('workflows.unstopped') === true;
+    if (writerUnstopped) {
+      // Only verified recovery may release an unknown writer's team zones.
+      registration.hold(Number.MAX_SAFE_INTEGER);
+      locks.splice(0).reverse().forEach((lock) => lock.hold(Number.MAX_SAFE_INTEGER));
+    } else locks.splice(0).reverse().forEach((lock) => lock.release());
     if (grant !== undefined) for (const { entry } of remoteRequests(ctx)) {
       if (isGraphql(entry) && deps.config.linearApps[0] !== undefined) {
         deps.governor?.observeRateLimits(deps.config.linearApps[0].name, entry.rateLimitHeaders, Date.parse(entry.finishedAt));
       }
     }
-    if (grant !== undefined && (grant.owner === undefined || (cleanupOutcome.ok && !heldForUi && !setupStuck))) {
+    if (grant !== undefined && !writerUnstopped && (grant.owner === undefined || (cleanupOutcome.ok && !heldForUi && !setupStuck))) {
       try { await grant.release(); released = true; }
       catch { cleanupOutcome = { ok: false, detail: 'shared reservation could not be released; retry cleanup before reuse' }; }
     }

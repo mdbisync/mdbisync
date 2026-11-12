@@ -12,13 +12,19 @@ import { ProductError, EnvBlockedError } from './results.ts';
 
 export type Actor = 'editor-a' | 'editor-b' | 'git';
 
+export interface SyncOutcome {
+  completed: boolean;
+  startedAt?: number | undefined;
+  error?: unknown;
+}
+
 export interface LoadDriver {
   /** One Linear edit by an editor on a document. */
   linearEdit(actor: 'editor-a' | 'editor-b', path: string): Promise<void>;
   /** One git push that edits these documents. */
   gitEdit(paths: readonly string[]): Promise<void>;
   /** One sync run; resolves when it ends, optionally with the actual runner start time. */
-  sync(): Promise<void | number>;
+  sync(deadlineAt?: number): Promise<void | number | SyncOutcome>;
   now(): number;
   sleep(ms: number): Promise<void>;
 }
@@ -218,9 +224,14 @@ export async function soak(driver: SoakDriver, options: SoakOptions): Promise<So
         result.edits[event.actor] += 1;
       } else if (event.kind === 'sync') {
         const invoked = driver.now();
-        const started = await driver.sync();
-        result.scheduleDelays.push(Math.max(0, (started ?? invoked) - at));
-        result.syncRuns += 1;
+        const outcome = await driver.sync(start + options.durationMs + options.scheduleMs);
+        const completed = typeof outcome === 'object' ? outcome.completed : true;
+        const started = typeof outcome === 'object' ? outcome.startedAt : outcome ?? invoked;
+        if (completed) {
+          if (started !== undefined) result.scheduleDelays.push(Math.max(0, started - at));
+          result.syncRuns += 1;
+        }
+        if (typeof outcome === 'object' && outcome.error !== undefined) throw outcome.error;
       } else {
         const check = await driver.checkInvariants();
         result.invariantChecks += 1;

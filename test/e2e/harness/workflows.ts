@@ -114,11 +114,13 @@ export async function waitForRun(rest: SandboxRest, options: WaitOptions): Promi
  * while the request waits. A request no tick took within `timeoutMs` blocks
  * the run.
  */
-export async function waitForRequestTaken(rest: SandboxRest, branch: string, options: { tick?: () => Promise<void>; retickMs?: number; timeoutMs?: number; pollMs?: number } = {}): Promise<void> {
+export async function waitForRequestTaken(rest: SandboxRest, branch: string, options: { tick?: () => Promise<void>; retickMs?: number; timeoutMs?: number; pollMs?: number; deadlineAt?: number } = {}): Promise<void> {
   const started = Date.now();
   const timeoutMs = options.timeoutMs ?? SCHEDULE_TAKE_MS;
   let ticked = -Infinity;
+  const deadline = Math.min(started + timeoutMs, options.deadlineAt ?? Infinity);
   for (;;) {
+    if (Date.now() >= deadline) throw new EnvBlockedError(`scheduled request wait reached its deadline (${options.tick === undefined ? 'no scheduled tick took it' : 'no tick started by hand took it'})`);
     if (options.tick !== undefined && Date.now() - ticked >= (options.retickMs ?? RETICK_MS)) {
       ticked = Date.now();
       await options.tick();
@@ -128,7 +130,7 @@ export async function waitForRequestTaken(rest: SandboxRest, branch: string, opt
       const cause = options.tick === undefined ? 'GitHub started no tick of the schedule, or the runner was busy' : 'no tick started by hand took it: the runner was busy, or other requests went first';
       throw new EnvBlockedError(`no scheduled run took the run's request within ${Math.round(timeoutMs / 60_000)} minutes (${cause})`);
     }
-    await sleep(options.pollMs ?? POLL_MS);
+    await sleep(Math.max(0, Math.min(options.pollMs ?? POLL_MS, deadline - Date.now())));
   }
 }
 
@@ -140,11 +142,13 @@ export async function waitForRequestTaken(rest: SandboxRest, branch: string, opt
  * created before the request (it waited for the runner or for the tick
  * before it), so only runs that finished before `after` are left out.
  */
-export async function waitForScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; after: number; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number }): Promise<WorkflowRun> {
+export async function waitForScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; after: number; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number; deadlineAt?: number }): Promise<WorkflowRun> {
   const started = Date.now();
   // Runs that served another run, or none: they never become this run's.
   const others = new Set<number>(options.exclude ?? []);
+  const deadline = Math.min(started + (options.timeoutMs ?? RUN_WAIT_MS), options.deadlineAt ?? Infinity);
   for (;;) {
+    if (Date.now() >= deadline) throw new EnvBlockedError('scheduled workflow wait reached its deadline');
     // GitHub's tick or one by hand, whichever took the request; the run keeps its true event.
     const runs = [...(await rest.workflowFileRuns(options.workflow, 'schedule')), ...(await rest.workflowFileRuns(options.workflow, 'workflow_dispatch'))];
     const candidates = runs
@@ -161,7 +165,29 @@ export async function waitForScheduledRun(rest: SandboxRest, options: { workflow
     }
     const waited = Date.now() - started;
     if (waited > (options.timeoutMs ?? RUN_WAIT_MS)) throw new EnvBlockedError(`the scheduled run that took the run's request did not finish within ${Math.round((options.timeoutMs ?? RUN_WAIT_MS) / 60_000)} minutes (runner busy?)`);
-    await sleep(options.pollMs ?? POLL_MS);
+    await sleep(Math.max(0, Math.min(options.pollMs ?? POLL_MS, deadline - Date.now())));
+  }
+}
+
+/** Fence an untaken request, or cancel only a workflow proven to contain this run's job. */
+export async function stopScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; requestBranch: string; after: number; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number }): Promise<void> {
+  if (await rest.deleteBranch(options.requestBranch)) return;
+  const deadline = Date.now() + (options.timeoutMs ?? 120_000);
+  const cancelled = new Set<number>();
+  for (;;) {
+    const runs = [...await rest.workflowFileRuns(options.workflow, 'schedule'), ...await rest.workflowFileRuns(options.workflow, 'workflow_dispatch')];
+    for (const run of runs) {
+      if (options.exclude?.has(run.id)) continue;
+      if (run.status === 'completed' && Date.parse(run.updated_at ?? run.created_at) < options.after) continue;
+      if (!(await rest.runJobs(run.id)).some((job) => job.name.endsWith(` ${options.runId}`))) continue;
+      if (run.status === 'completed') return;
+      if (!cancelled.has(run.id)) {
+        await rest.request('POST', `/actions/runs/${run.id}/cancel`);
+        cancelled.add(run.id);
+      }
+    }
+    if (Date.now() >= deadline) throw new EnvBlockedError('could not confirm the scheduled writer stopped; reservation must remain held');
+    await sleep(Math.min(options.pollMs ?? 1000, Math.max(0, deadline - Date.now())));
   }
 }
 

@@ -1005,6 +1005,22 @@ describe('load', () => {
     assert.deepEqual(saved, [false, true]);
   });
 
+  it('retains a completed failing invocation in the count and delay distribution', async () => {
+    const clock = fakeClock();
+    const failure = new EnvBlockedError('workflow diagnostics missing');
+    let saved: unknown;
+    const driver: SoakDriver = {
+      ...clock, linearEdit: async () => {}, gitEdit: async () => {},
+      sync: async (deadlineAt) => {
+        assert.equal(deadlineAt, 4000);
+        return { completed: true, startedAt: 1025, error: failure };
+      },
+      checkInvariants: async () => ({ lostEdits: 0 }), progress: async (result) => { saved = structuredClone(result); },
+    };
+    await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), (error) => error === failure);
+    assert.deepEqual(saved, { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 0, lostEdits: 0, scheduleDelays: [25] });
+  });
+
   it('persists the soak step report even when no timed events are requested', async () => {
     const { ctx } = await fakeRun();
     await runStep(ctx, { kind: 'run', action: 'soak', args: { durationSeconds: 0 } });
