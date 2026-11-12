@@ -26,7 +26,7 @@ You need:
   Node.js 24.2 or later with npm 11.16.0 or later (`npm install --global
   npm@11.21.2` updates it), and Python 3.11 or later with
   [pre-commit](https://pre-commit.com) (`python3 -m pip install
-  pre-commit==4.6.2`, or `pipx install pre-commit`). Docker too, if you
+  pre-commit==4.7.0`, or `pipx install pre-commit`). Docker too, if you
   choose the security hook examples ([security hooks](#security-hooks)).
 
 Pick a release and note its **release SHA**, the commit both the action

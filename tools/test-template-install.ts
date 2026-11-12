@@ -1,7 +1,7 @@
 // Integration check: template and repository workflow "Install pre-commit" steps, run
 // as written on a runner without pre-commit. It must install exactly the
 // hash-checked list from PyPI into its own virtual environment and put
-// pre-commit 4.6.2 on GITHUB_PATH; a list with a wrong hash must install
+// the pre-commit version that list pins on GITHUB_PATH; a list with a wrong hash must install
 // nothing. Requires Python 3.11 to 3.14 with venv support and access to PyPI.
 // TEMPLATE_INSTALL_PYTHON picks another interpreter; given one outside 3.11 to 3.14
 // (Python 3.10, say), it checks that every template refuses it with a clear error
@@ -13,9 +13,11 @@ import { access, mkdtemp, mkdir, readdir, readFile, readlink, rm, stat, symlink,
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parse } from 'yaml';
+import { preCommitVersion, REQUIREMENTS_PATH } from './sync-pre-commit-pins.ts';
 
 const root = resolve(import.meta.dirname, '..');
 const TEMPLATES = ['mdbisync.yml', 'mdbisync-initial-sync.yml', 'pre-commit.yml'];
+const preCommit = preCommitVersion(await readFile(join(root, REQUIREMENTS_PATH), 'utf8'));
 
 /** The step's script and the `name==version` pins of its requirements list. */
 async function installStep(file: string, job?: string) {
@@ -24,7 +26,7 @@ async function installStep(file: string, job?: string) {
   const script = steps.find((step) => step.name === 'Install pre-commit')?.run;
   assert.ok(script, `${file}: no Install pre-commit step`);
   const list = job
-    ? (await readFile(join(root, '.github/requirements/pre-commit.txt'), 'utf8')).trim()
+    ? (await readFile(join(root, REQUIREMENTS_PATH), 'utf8')).trim()
     : /<<'REQUIREMENTS'; then\n([\s\S]*?)\nREQUIREMENTS\n/.exec(script)?.[1];
   assert.ok(list, `${file}: no requirements list`);
   const pins = list.replace(/ \\\n\s*/g, ' ').split('\n').map((line) => {
@@ -34,6 +36,9 @@ async function installStep(file: string, job?: string) {
   });
   return { script, pins, list };
 }
+
+/** The pre-commit line with every hash replaced by a wrong one. */
+const tamper = (line: string) => line.replace(/(--hash=sha256:)[0-9a-f]{64}/g, `$1${'0'.repeat(64)}`);
 
 /** The absolute path of the executable file a command name or path names, found as the shell would. */
 async function executable(name: string) {
@@ -75,7 +80,7 @@ try {
     const home = join(temporary, name);
     await mkdir(home);
     // Release preserves the workflow revision's list before checking out source.
-    await writeFile(join(home, 'pre-commit-requirements.txt'), await readFile(join(cwd, '.github/requirements/pre-commit.txt')));
+    await writeFile(join(home, 'pre-commit-requirements.txt'), await readFile(join(cwd, REQUIREMENTS_PATH)));
     const githubPath = join(home, 'github-path');
     await writeFile(githubPath, '');
     const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {
@@ -103,10 +108,10 @@ try {
       const { script, pins } = await installStep(file, job);
       const { result, added } = await run(`${file}-${job ?? 'template'}`, script);
       assert.equal(result.status, 0, `${file}\n${result.stdout}${result.stderr}`);
-      const preCommit = join(added, 'pre-commit');
-      const shown = spawnSync(preCommit, ['--version'], { encoding: 'utf8' });
-      assert.equal(shown.stdout, 'pre-commit 4.6.2\n', `${file}: ${shown.stderr}`);
-      const python = join(dirname(await readlink(preCommit)), 'python');
+      const command = join(added, 'pre-commit');
+      const shown = spawnSync(command, ['--version'], { encoding: 'utf8' });
+      assert.equal(shown.stdout, `pre-commit ${preCommit}\n`, `${file}: ${shown.stderr}`);
+      const python = join(dirname(await readlink(command)), 'python');
       installedPython = python;
       const listed = spawnSync(python, ['-m', 'pip', 'list', '--format=freeze', '--disable-pip-version-check', '--exclude', 'pip', '--exclude', 'setuptools'], { encoding: 'utf8' });
       const installed = listed.stdout.trim().split('\n').map((line) => line.toLowerCase().replace(/_/g, '-')).sort();
@@ -135,21 +140,21 @@ try {
 
     // One wrong hash: pip refuses the file, and the step adds nothing to PATH.
     const { script } = await installStep('pre-commit.yml');
-    const tampered = script.replace(/^(pre-commit==\S+ --hash=sha256:)[0-9a-f]{64}$/m, `$1${'0'.repeat(64)}`);
+    const tampered = script.replace(/^pre-commit==\S+(?: --hash=sha256:[0-9a-f]{64})+$/m, tamper);
     assert.notEqual(tampered, script);
     const { result, added } = await run('tampered', tampered);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /THESE PACKAGES DO NOT MATCH THE HASHES/);
-    assert.match(result.stdout, /::error::Could not install pre-commit 4\.6\.2 from its pinned hashes/);
+    assert.ok(result.stdout.includes(`::error::Could not install pre-commit ${preCommit} from its pinned hashes`), result.stdout);
     assert.equal(added, '');
     console.log('pre-commit.yml: a wrong hash installs nothing');
 
     // The repository steps must also fail closed when their shared file is tampered with.
     const tamperedRoot = join(temporary, 'tampered-repository');
     await mkdir(join(tamperedRoot, '.github/requirements'), { recursive: true });
-    const repositoryList = (await readFile(join(root, '.github/requirements/pre-commit.txt'), 'utf8'))
-      .replace(/^(pre-commit==\S+ --hash=sha256:)[0-9a-f]{64}$/m, `$1${'0'.repeat(64)}`);
-    await writeFile(join(tamperedRoot, '.github/requirements/pre-commit.txt'), repositoryList);
+    const repositoryList = (await readFile(join(root, REQUIREMENTS_PATH), 'utf8'))
+      .replace(/^pre-commit==\S+(?: --hash=sha256:[0-9a-f]{64})+$/m, tamper);
+    await writeFile(join(tamperedRoot, REQUIREMENTS_PATH), repositoryList);
     for (const { file, job } of installs.filter(install => install.job)) {
       const { script } = await installStep(file, job);
       const { result, added } = await run(`tampered-${file}-${job}`, script, tamperedRoot);

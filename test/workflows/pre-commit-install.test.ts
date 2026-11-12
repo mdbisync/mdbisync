@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
+import { preCommitVersion } from '../../tools/sync-pre-commit-pins.ts';
 
+// The version the hash-checked list pins; the step's stub install reports it.
+const preCommit = preCommitVersion(readFileSync(new URL('../../.github/requirements/pre-commit.txt', import.meta.url), 'utf8'));
 const realPython = spawnSync('/bin/bash', ['-c', 'command -v python3'], { encoding: 'utf8' }).stdout.trim();
 
 for (const file of ['pre-commit.yml', 'mdbisync.yml', 'mdbisync-initial-sync.yml']) {
@@ -25,7 +28,7 @@ for (const file of ['pre-commit.yml', 'mdbisync.yml', 'mdbisync-initial-sync.yml
         executable('mktemp', 'exec /usr/bin/mktemp "$@"');
         executable('mkdir', 'exec /bin/mkdir "$@"');
         executable('ln', 'exec /bin/ln "$@"');
-        if (mode === 'installed' || mode === 'old-version') executable('pre-commit', `echo 'pre-commit ${mode === 'installed' ? '4.6.2' : '2.0.0'}'`);
+        if (mode === 'installed' || mode === 'old-version') executable('pre-commit', `echo 'pre-commit ${mode === 'installed' ? preCommit : '2.0.0'}'`);
         // The step's version check runs in a real Python that reports this version.
         const version = { 'old-python': [3, 10, 12], 'new-python': [3, 15, 0], 'install-3.11': [3, 11, 0] }[mode] ?? [3, 14, 4];
         if (mode !== 'missing-python') executable('python3', `
@@ -38,11 +41,11 @@ for (const file of ['pre-commit.yml', 'mdbisync.yml', 'mdbisync-initial-sync.yml
 #!/bin/bash
 [ "$*" = '-m pip install --require-hashes --only-binary :all: -r /dev/stdin' ] || exit 2
 # The requirements arrive on standard input, pinned with hashes.
-/bin/grep -q '^pre-commit==4\\.6\\.2 --hash=sha256:[0-9a-f]\\{64\\}$' || exit 3
+/bin/grep -q '^pre-commit==${preCommit.replaceAll('.', '\\.')}\\( --hash=sha256:[0-9a-f]\\{64\\}\\)\\{1,\\}$' || exit 3
 ${mode === 'pip-failure' ? 'exit 7' : `
 /bin/cat > "$(/usr/bin/dirname "$0")/pre-commit" <<'PRECOMMIT'
 #!/bin/bash
-echo 'pre-commit 4.6.2'
+echo 'pre-commit ${preCommit}'
 PRECOMMIT
 /bin/chmod +x "$(/usr/bin/dirname "$0")/pre-commit"`}
 PYTHON
@@ -62,7 +65,7 @@ PYTHON
             env: { PATH: `${commands}:${bin}` }, encoding: 'utf8',
           });
           assert.equal(next.status, 0, next.stderr);
-          assert.equal(next.stdout, `pre-commit 4.6.2\n${bin}/python3\n`);
+          assert.equal(next.stdout, `pre-commit ${preCommit}\n${bin}/python3\n`);
         } else if (mode === 'installed' || mode === 'old-version') {
           assert.equal(result.status, 0, result.stderr);
           assert.equal(readFileSync(output, 'utf8'), '');
