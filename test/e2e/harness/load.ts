@@ -133,11 +133,46 @@ export interface SoakOptions {
   documents: ReadonlyMap<string, readonly string[]>;
   /** The widest token the scheduled edits can write, from each actor's edit count. */
   lastToken: (edits: Record<Actor, number>) => string;
+  /**
+   * The most sync runs an hourly check may wait for before its strict verdict (default 0: the check is strict
+   * at once). See `soak`.
+   */
+  drainSyncs?: number;
+}
+
+/**
+ * Where an hourly check stands, and how far its drain went. A look whose sides have settled (I1 holds and no edit
+ * is lost) is always the hour's verdict. A look that finds them apart is the verdict only when it is `final`:
+ * then the driver keeps the evidence of the failure. Otherwise another drain run follows.
+ */
+export interface SoakBoundary {
+  /** 1 for the soak's first hourly check. */
+  hour: number;
+  /** The drain runs that completed for this check so far. */
+  drainSyncs: number;
+  /** No drain run follows: the drain is used up, or a drain run failed. */
+  final: boolean;
+}
+
+export interface SoakCheck {
+  lostEdits: number;
+  converged?: boolean;
+  /**
+   * Of the lost edits: those whose token is still on some side or sync lane, those found nowhere, those whose
+   * sync lanes could not be read (not on either side, but maybe pending), and those an earlier step made
+   * (outside the soak's ledger).
+   */
+  retained?: number;
+  absent?: number;
+  unknown?: number;
+  unledgered?: number;
 }
 
 export interface SoakDriver extends LoadDriver {
   /** Checks I1 and I2 now; returns how many edits are lost. */
-  checkInvariants(): Promise<{ lostEdits: number; converged?: boolean }>;
+  checkInvariants(boundary: SoakBoundary): Promise<SoakCheck>;
+  /** One sync run; a drain run of an hourly check says so. */
+  sync(deadlineAt?: number, phase?: 'drain'): Promise<void | number | SyncOutcome>;
   /** Saves completed events, including the final hourly verdict, before the next wait. */
   progress?(result: SoakResult): Promise<void>;
 }
@@ -148,11 +183,13 @@ export interface SoakResult {
   invariantChecks: number;
   /** Edits lost at any hourly check (must stay zero). */
   lostEdits: number;
+  /** The sync runs the hourly checks waited for, already counted in `syncRuns` and `scheduleDelays`. */
+  drainSyncs: number;
   /** How late each sync run started after its scheduled time, in ms. */
   scheduleDelays: number[];
 }
 
-type SoakScheduleOptions = Omit<SoakOptions, 'documents' | 'lastToken'>;
+type SoakScheduleOptions = Omit<SoakOptions, 'documents' | 'lastToken' | 'drainSyncs'>;
 const ACTORS: readonly Actor[] = ['editor-a', 'editor-b', 'git'];
 
 type SoakEvent = { at: number; kind: 'edit'; actor: Actor } | { at: number; kind: 'sync' } | { at: number; kind: 'check' };
@@ -195,8 +232,24 @@ export function soakEditCounts(options: SoakScheduleOptions): Record<Actor, numb
  * room for it (`editCapacity` at the schedule's widest token), and a soak
  * whose documents cannot take every scheduled edit fails before its first
  * edit. Random choices come from the seed, so a run can be repeated.
+ *
+ * An hourly check reads the sides at a settled boundary. The sync merges a
+ * waiting pull request only on a later run, once the checks of its head have
+ * passed, so the hour's last edits may still be on their way. When a look
+ * finds the sides apart, the soak makes no edit and lets the sync run on its
+ * schedule, up to `drainSyncs` more times, looking again after each run. The
+ * first look that finds the sides settled is the hour's verdict; otherwise
+ * the look after the last drain run is, and the soak fails: a drain that ends
+ * with an edit lost or the sides apart is a failure, never a pass or a
+ * blocked environment. A drain run that fails ends the soak with its own
+ * failure, after a final look that keeps the hour's evidence. The completed
+ * drain runs count as sync runs. The rest of the schedule, and its hard end,
+ * move by the drain's intervals (one per started run), so every scheduled
+ * edit is still made and the wall clock stays bounded.
  */
 export async function soak(driver: SoakDriver, options: SoakOptions): Promise<SoakResult> {
+  const drainLimit = options.drainSyncs ?? 0;
+  if (!Number.isInteger(drainLimit) || drainLimit < 0) throw new Error('soak drain syncs must be a nonnegative whole number');
   const { events, rng } = soakSchedule(options);
   const counts = editCounts(events);
   const lastToken = options.lastToken(counts);
@@ -205,13 +258,58 @@ export async function soak(driver: SoakDriver, options: SoakOptions): Promise<So
   const room = [...remaining.values()].reduce((sum, capacity) => sum + capacity, 0);
   if (room < edits) throw new Error(`the documents have room for ${room} of the ${edits} soak edits`);
   const start = driver.now();
-  const result: SoakResult = { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 0, invariantChecks: 0, lostEdits: 0, scheduleDelays: [] };
+  const result: SoakResult = { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 0, invariantChecks: 0, lostEdits: 0, drainSyncs: 0, scheduleDelays: [] };
+  // How far the hourly drains moved the schedule: each drain run takes one schedule interval.
+  let paused = 0;
+  const end = () => start + paused + options.durationMs + options.scheduleMs;
+  const overrun = () => {
+    if (driver.now() > end()) throw new EnvBlockedError('soak exceeded its wall-clock duration plus one schedule interval');
+  };
+  const runSync = async (at: number, deadlineAt: number, phase?: 'drain') => {
+    const invoked = driver.now();
+    const outcome = await driver.sync(deadlineAt, phase);
+    const completed = typeof outcome === 'object' ? outcome.completed : true;
+    const started = typeof outcome === 'object' ? outcome.startedAt : outcome ?? invoked;
+    if (completed) {
+      if (started !== undefined) result.scheduleDelays.push(Math.max(0, started - at));
+      result.syncRuns += 1;
+      if (phase === 'drain') result.drainSyncs += 1;
+    }
+    if (typeof outcome === 'object' && outcome.error !== undefined) throw outcome.error;
+  };
+  const settled = (check: SoakCheck) => (check.converged ?? true) && check.lostEdits === 0;
+  // The check of the hour that ends at `at`; no edit is made until it has its verdict. `attempts` drain runs
+  // were started (each takes a schedule slot), `drained` of them completed.
+  const hourlyCheck = async (at: number): Promise<{ check: SoakCheck; drained: number; attempts: number }> => {
+    const hour = result.invariantChecks + 1;
+    // A drain run, like any scheduled run, may take until the soak's hard end, grown by the whole drain.
+    const deadlineAt = end() + drainLimit * options.scheduleMs;
+    const before = result.drainSyncs;
+    const drained = () => result.drainSyncs - before;
+    for (let attempts = 0; ; attempts += 1) {
+      const final = attempts >= drainLimit;
+      const check = await driver.checkInvariants({ hour, drainSyncs: drained(), final });
+      if (final || settled(check)) return { check, drained: drained(), attempts };
+      const slot = at + (attempts + 1) * options.scheduleMs;
+      await driver.sleep(slot - driver.now());
+      try {
+        await runSync(slot, deadlineAt, 'drain');
+      } catch (error) {
+        // The sides were apart at the last look: keep the hour's evidence before the failure ends the soak.
+        // The run's own failure stays the soak's verdict, whatever this look finds.
+        await driver.progress?.(result);
+        await driver.checkInvariants({ hour, drainSyncs: drained(), final: true }).catch(() => undefined);
+        throw error;
+      }
+      await driver.progress?.(result);
+    }
+  };
   await driver.progress?.(result);
   for (const event of events) {
-    const at = start + event.at;
+    const at = start + paused + event.at;
     await driver.sleep(at - driver.now());
-    if (driver.now() > start + options.durationMs + options.scheduleMs) throw new EnvBlockedError('soak exceeded its wall-clock duration plus one schedule interval');
-    let converged = true;
+    overrun();
+    let verdict: { check: SoakCheck; drained: number; attempts: number } | undefined;
     try {
       if (event.kind === 'edit') {
         const open = [...remaining.keys()];
@@ -223,28 +321,27 @@ export async function soak(driver: SoakDriver, options: SoakOptions): Promise<So
         else await driver.linearEdit(event.actor, path);
         result.edits[event.actor] += 1;
       } else if (event.kind === 'sync') {
-        const invoked = driver.now();
-        const outcome = await driver.sync(start + options.durationMs + options.scheduleMs);
-        const completed = typeof outcome === 'object' ? outcome.completed : true;
-        const started = typeof outcome === 'object' ? outcome.startedAt : outcome ?? invoked;
-        if (completed) {
-          if (started !== undefined) result.scheduleDelays.push(Math.max(0, started - at));
-          result.syncRuns += 1;
-        }
-        if (typeof outcome === 'object' && outcome.error !== undefined) throw outcome.error;
+        await runSync(at, end());
       } else {
-        const check = await driver.checkInvariants();
+        verdict = await hourlyCheck(at);
+        paused += verdict.attempts * options.scheduleMs;
         result.invariantChecks += 1;
-        result.lostEdits = Math.max(result.lostEdits, check.lostEdits);
-        converged = check.converged ?? true;
+        result.lostEdits = Math.max(result.lostEdits, verdict.check.lostEdits);
       }
     } catch (error) {
       await driver.progress?.(result);
       throw error;
     }
     await driver.progress?.(result);
-    if (!converged || result.lostEdits > 0) throw new ProductError(`soak stopped at hour ${result.invariantChecks}: I1=${String(converged)}, ${result.lostEdits} edits lost`);
-    if (driver.now() > start + options.durationMs + options.scheduleMs) throw new EnvBlockedError('soak exceeded its wall-clock duration plus one schedule interval');
+    if (verdict !== undefined && !settled(verdict.check)) {
+      const { check, drained } = verdict;
+      const optional = (count: number | undefined, label: string) => (count === undefined || count === 0 ? '' : `, ${count} ${label}`);
+      const presence = check.retained === undefined && check.absent === undefined
+        ? ''
+        : ` (${check.retained ?? 0} retained pending, ${check.absent ?? 0} absent everywhere${optional(check.unknown, 'with unread sync lanes')}${optional(check.unledgered, 'outside the soak ledger')})`;
+      throw new ProductError(`soak stopped at hour ${result.invariantChecks}: I1=${String(check.converged ?? true)}, ${check.lostEdits} edits lost${presence} after ${drained} of ${drainLimit} drain syncs`);
+    }
+    overrun();
   }
   return result;
 }

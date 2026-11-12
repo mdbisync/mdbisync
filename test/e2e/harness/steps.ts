@@ -13,10 +13,10 @@ import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { delayDistribution, observedTokens } from './soak-report.ts';
-import { pathVersions, missingEdits, tokenVerdicts, writeSoakFailure, SoakLedger, type SoakFailureReport } from './soak-evidence.ts';
+import { pathVersions, missingEdits, presenceOf, tokenVerdicts, writeSoakFailure, SoakLedger, type SoakFailureReport, type SoakPresence } from './soak-evidence.ts';
 import { cleanupKilledTokens } from './token-cleanup.ts';
 import { recordRunView, tokenActive, watchesRunViews } from './subjects.ts';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { COMMANDS, type CommandName } from '../../../src/commands.ts';
@@ -26,7 +26,7 @@ import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
-import { INVARIANT_CHECKS, editsFound, expectsDocument, holdsToken, lostEdits, readSides, snapshotRefs, bodyOf, type Sides } from './checks.ts';
+import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, editsFound, expectsDocument, holdsToken, lostEdits, readSides, snapshotRefs, bodyOf, type Sides } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
 import type { CheckState } from '../../../src/pull-request/merge.ts';
@@ -37,7 +37,8 @@ import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineC
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
-import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver, type SoakResult } from './load.ts';
+import { soakDrainSyncs } from './soak-drain.ts';
+import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver, type SoakBoundary, type SoakDriver, type SoakResult } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, runFailure, type CheckOutcome } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
@@ -981,12 +982,14 @@ const RUN: Record<string, Executor> = {
       } else await runCommand(ctx, 'sync', {});
     };
     // Each invocation goes into the ledger as it ends, with the workflow run and the summary that says what waits.
-    const sync: LoadDriver['sync'] = async (deadlineAt) => {
+    // A drain run of an hourly check is the same scheduled run, marked as one.
+    const sync: SoakDriver['sync'] = async (deadlineAt, phase) => {
       const invokedAt = new Date().toISOString();
       const before = ctx.engine.results.length;
       const record = (error: unknown) => {
         const result = ctx.engine.results.length > before ? ctx.engine.results.at(-1) : undefined;
         ledger.sync({
+          ...(phase === undefined ? {} : { phase }),
           invokedAt,
           endedAt: new Date().toISOString(),
           completed: result !== undefined,
@@ -1029,8 +1032,9 @@ const RUN: Record<string, Executor> = {
       writeFileSync(join(ctx.runDir, 'soak-progress.json'), `${JSON.stringify({ at: new Date().toISOString(), metrics }, null, 2)}\n`);
     };
     const base = loadDriver(ctx, sync);
-    // This soak's hourly checks, as its stop message counts them.
-    let hour = 0;
+    const drainLimit = soakDrainSyncs(args);
+    // The looks of the current hour that found the sides apart, each before a drain run.
+    let looks: Array<{ drainSyncs: number; I1: boolean; lost: number }> = [];
     // Each edit that landed goes into the ledger with its measured write window, before the soak goes on.
     const recorded = async (actor: Actor, write: () => Promise<void>) => {
       const from = ctx.edits.length;
@@ -1044,21 +1048,37 @@ const RUN: Record<string, Executor> = {
         ledger.edit({ token: edit.token, actor, side: edit.side, path: edit.path, startedAt, completedAt, ...(commit === undefined ? {} : { commit }), syncsBefore });
       }
     };
-    const driver = {
+    const driver: SoakDriver = {
       ...base,
       linearEdit: (actor: 'editor-a' | 'editor-b', path: string) => recorded(actor, () => base.linearEdit(actor, path)),
       gitEdit: (paths: readonly string[]) => recorded('git', () => base.gitEdit(paths)),
       progress,
-      checkInvariants: async () => {
+      checkInvariants: async (boundary: SoakBoundary) => {
         const sides = await readSides(ctx);
         const lost = lostEdits(ctx, sides);
         const converged = await INVARIANT_CHECKS.I1(ctx, async () => sides);
-        const checks = (ctx.observations.get('soak.checks') as Array<{ I1: boolean; lost: number }> | undefined) ?? [];
-        ctx.observations.set('soak.checks', [...checks, { I1: converged.ok, lost: lost.length }]);
+        const settled = converged.ok && lost.length === 0;
+        if (!settled && !boundary.final) {
+          // Not yet a verdict: the edits wait while the sync drains what is pending. The look's I1 differences
+          // keep their own name, so a run whose drain settles the hour leaves no I1 failure behind.
+          const differences = join(ctx.runDir, I1_DIFFERENCES_FILE);
+          if (existsSync(differences)) renameSync(differences, join(ctx.runDir, `soak-hour-${boundary.hour}-look-${looks.length + 1}-${I1_DIFFERENCES_FILE}`));
+          looks.push({ drainSyncs: boundary.drainSyncs, I1: converged.ok, lost: lost.length });
+          ctx.log(`soak: hour ${boundary.hour} not settled after ${boundary.drainSyncs} drain syncs (I1=${String(converged.ok)}, ${lost.length} edits not on both sides); the sync drains before the verdict`);
+          return { lostEdits: lost.length, converged: converged.ok };
+        }
         // Before the soak stops and cleanup removes the clones, refs and documents.
-        hour += 1;
-        if (!converged.ok || lost.length > 0) await keepSoakFailure(ctx, ledger, sides, { hour, I1: converged, lost });
-        return { lostEdits: lost.length, converged: converged.ok };
+        const presence = settled ? undefined : await keepSoakFailure(ctx, ledger, sides, { hour: boundary.hour, I1: converged, lost, drainSyncs: boundary.drainSyncs, drainLimit });
+        const checks = (ctx.observations.get('soak.checks') as unknown[] | undefined) ?? [];
+        ctx.observations.set('soak.checks', [...checks, {
+          I1: converged.ok, lost: lost.length, drainSyncs: boundary.drainSyncs, looks,
+          ...(presence === undefined ? {} : { retainedPending: presence.retainedPending.length, absentEverywhere: presence.absentEverywhere.length, unknown: presence.unknown.length, unledgered: presence.unledgered.length }),
+        }]);
+        looks = [];
+        return {
+          lostEdits: lost.length, converged: converged.ok,
+          ...(presence === undefined ? {} : { retained: presence.retainedPending.length, absent: presence.absentEverywhere.length, unknown: presence.unknown.length, unledgered: presence.unledgered.length }),
+        };
       },
     };
     const options = {
@@ -1067,6 +1087,7 @@ const RUN: Record<string, Executor> = {
       invariantIntervalMs: Number(args.invariantIntervalSeconds ?? 3600) * 1000,
       actors: Array.isArray(args.actors) ? (args.actors as Actor[]) : (['editor-a', 'editor-b', 'git'] as Actor[]),
       seed: String(args.randomSeed ?? ctx.names.runId),
+      drainSyncs: drainLimit,
     };
     const documents = await loadCandidates(ctx, 'soak');
     const lastToken = (edits: Record<Actor, number>) => lastLoadToken(ctx, edits['editor-a'] + edits['editor-b'], edits.git);
@@ -1078,9 +1099,11 @@ const RUN: Record<string, Executor> = {
  * Keeps what a failed hourly soak check needs to be explained offline: each edit's token on each side and on the
  * sync and suspended branches, the versions of every path that holds a lost edit, the run's refs, its sync pull
  * requests and the checks of their heads, and the ledger of sync invocations. A read that fails is named in the
- * report and the rest is still kept; the report never replaces the check's verdict.
+ * report and the rest is still kept; the report never replaces the check's verdict. Returns where each lost
+ * edit's token still is (retained on a side or sync lane, absent everywhere, or outside the ledger), or
+ * undefined when the report could not be kept.
  */
-async function keepSoakFailure(ctx: RunContext, ledger: SoakLedger, sides: Sides, verdict: { hour: number; I1: CheckOutcome; lost: RunContext['edits'] }): Promise<void> {
+async function keepSoakFailure(ctx: RunContext, ledger: SoakLedger, sides: Sides, verdict: { hour: number; I1: CheckOutcome; lost: RunContext['edits']; drainSyncs: number; drainLimit: number }): Promise<SoakPresence | undefined> {
   const errors: string[] = [];
   const attempt = async <T>(what: string, read: () => Promise<T>, fallback: T): Promise<T> => {
     try {
@@ -1138,10 +1161,17 @@ async function keepSoakFailure(ctx: RunContext, ledger: SoakLedger, sides: Sides
     // An I2 loss outside the ledger (an edit made before the soak) is named; its path's versions are in the payloads.
     const unledgered = verdict.lost.filter((edit) => !edits.some((entry) => entry.token === edit.token));
     if (unledgered.length > 0) errors.push(`lost edits not in the soak ledger: ${unledgered.map((edit) => `${edit.side} ${edit.token} ${edit.path}`).join(', ')}`);
+    // A lane that exists but could not be read, or refs that could not be listed, leave a token's lanes unknown.
+    const refsRead = person !== null && !errors.some((error) => error.startsWith('refs:'));
+    const laneRead = (branch: string, texts: ReadonlyMap<string, string> | null) => refs[`refs/heads/${branch}`] === undefined || texts !== null;
+    const lanesRead = refsRead && laneRead(syncBranch, syncTexts) && laneRead(suspended, suspendedTexts);
+    const presence = presenceOf(tokens, unledgered.map((edit) => edit.token), lanesRead);
     const report: SoakFailureReport = {
       hour: verdict.hour,
       at: new Date().toISOString(),
       verdict: { I1: verdict.I1.ok, ...(verdict.I1.detail === undefined ? {} : { I1Detail: verdict.I1.detail }), lostEdits: verdict.lost.length },
+      boundary: { drainSyncs: verdict.drainSyncs, drainLimit: verdict.drainLimit },
+      presence,
       trackedTip: sides.tip,
       refs,
       pullRequests,
@@ -1153,8 +1183,10 @@ async function keepSoakFailure(ctx: RunContext, ledger: SoakLedger, sides: Sides
       evidenceErrors: errors,
     };
     ctx.log(`soak: hour ${verdict.hour} failed; kept ${writeSoakFailure(ctx.runDir, report)}`);
+    return presence;
   } catch (error) {
     ctx.log(`soak: the failed hour ${verdict.hour} could not be kept: ${(error as Error).message}${errors.length > 0 ? `; earlier: ${errors.join('; ')}` : ''}`);
+    return undefined;
   }
 }
 
