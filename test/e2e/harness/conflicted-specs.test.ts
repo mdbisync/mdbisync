@@ -2,11 +2,11 @@
 // against local git and the same service fakes as the engine tests. The
 // setup is the live one: the initial sync, then the setup conflict, whose
 // markers reach the tracked branch through the sync cycle, so the git-side
-// steps (L3-10, L3-12) find them there.
+// steps (L3-10, L3-12) find them there. The setup fails unless they do.
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { DOCUMENTS, runOnFakeServices } from './fake-services.ts';
 import { loadScenarios } from './spec.ts';
-import { runScenarioSteps, specWorld } from './spec-world.ts';
 
 const CONFLICTED = /^L3-(09|1[0-4])$/;
 
@@ -18,12 +18,7 @@ it('the conflicted L3 specs are the six scenarios this file runs', () => {
 
 for (const scenario of loadScenarios().filter((s) => CONFLICTED.test(s.id))) {
   it(`${scenario.id}: live setup, steps and assertions on fake services`, { timeout: 180_000 }, async (t) => {
-    const spec = await specWorld(t, scenario);
-    try {
-      // The setup fails unless the tracked branch holds the conflict's markers.
-      await spec.setUp();
-      await runScenarioSteps(spec);
-      await spec.check();
-    } finally { await spec.cleanup(); }
+    const outcomes = await runOnFakeServices(t, scenario, DOCUMENTS);
+    for (const outcome of outcomes) assert.equal(outcome.ok, true, JSON.stringify(outcome));
   });
 }
