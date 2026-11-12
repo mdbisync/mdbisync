@@ -180,13 +180,21 @@ export function noteSentence(token: string): string {
 }
 
 /**
+ * Adds `line` as a new last paragraph. The text keeps its own final line ending: a file in Linear's form, without
+ * a final newline, gets none, since Linear drops it and a file that kept it would differ from its document (I1).
+ */
+export function appendParagraph(text: string, line: string): string {
+  return `${text.replace(/\n*$/, '')}\n\n${line}${text.endsWith('\n') ? '\n' : ''}`;
+}
+
+/**
  * Adds a sentence with `token` to the end of the n-th plain paragraph (0-based).
  * A document with fewer paragraphs gets a new paragraph at its end.
  */
 export function editParagraph(text: string, ordinal: number, token: string): string {
   const { blocks, separators } = splitBlocks(text);
   const index = paragraphIndexes(text)[ordinal];
-  if (index === undefined) return `${text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n`;
+  if (index === undefined) return appendParagraph(text, noteSentence(token));
   blocks[index] = `${(blocks[index] as string).replace(/\s+$/, '')} ${noteSentence(token)}`;
   return joinBlocks(blocks, separators);
 }
