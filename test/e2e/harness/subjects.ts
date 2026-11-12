@@ -1624,14 +1624,17 @@ export const SUBJECTS: Record<string, Compute> = {
   // the tracked branch and in Linear alike.
   'conflicts.pendingEditsBetweenMarkers': async (env) => {
     const pending = observed(env.ctx, 'syncBranch.personEdit') as { path: string; token: string };
-    const later = env.ctx.edits.filter((edit) => edit.path === pending.path && edit.token !== pending.token).at(-1)?.token;
+    const at = env.ctx.edits.findIndex((edit) => edit.token === pending.token);
+    const later = env.ctx.edits.slice(at + 1).filter((edit) => edit.path === pending.path).at(-1)?.token;
     if (later === undefined) throw new Error('the scenario made no later edit of the document edited on the sync branch');
-    const [first] = await conflictTexts(env);
-    return [first?.git, first?.linear].every((text) => {
+    const view = await env.view();
+    const id = view.ids.get(pending.path)?.id;
+    const texts = [fileBody(view, pending.path), id === undefined ? null : view.documents.get(id)?.content ?? null];
+    return texts.every((text) => {
       if (text === null || text === undefined) return false;
       const { sets } = scanMarkers(text);
       const [set] = sets;
-      if (set === undefined || sets.length !== 1) return false;
+      if (set === undefined || sets.length !== 1 || !['git', 'linear', 'end'].every((kind) => set.kinds.includes(kind as never))) return false;
       const once = (token: string) => text.split(token).length === 2;
       const version = (token: string) => (set.git.includes(token) ? 'git' : set.linear.includes(token) ? 'linear' : null);
       return once(pending.token) && once(later) && version(pending.token) !== null && version(later) !== null && version(pending.token) !== version(later);

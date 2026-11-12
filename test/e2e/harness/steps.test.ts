@@ -1993,6 +1993,28 @@ describe('git executors', () => {
     assert.equal(ctx.observations.get('resolved.body'), '# Plan\n\nOurs.\n');
   });
 
+  it('edit a paragraph on the sync branch and resolve markers there, never on the tracked branch', async () => {
+    const plan = 'eng/platform/guides/weekly-plan.md';
+    const conflicted = `# Plan\n\nFirst.\n\n${MARKERS.git}\n\nOurs.\n\n${MARKERS.linear}\n\nTheirs.\n\n${MARKERS.end}\n`;
+    const { ctx, remoteGit, remoteFile } = await fakeRun({ review: conflicted });
+    ctx.observations.set('fixture.document', plan);
+    await remoteGit.run(['update-ref', `refs/heads/${ctx.names.syncBranch}`, ctx.names.trackedBranch]);
+    await runStep(ctx, { kind: 'git', action: 'edit-sync-branch', args: { target: 'first-paragraph' } });
+    const pending = ctx.observations.get('syncBranch.personEdit') as { path: string; token: string };
+    assert.equal(pending.path, plan);
+    // The sentence joins the first paragraph, not a new paragraph at the end.
+    const base = await remoteFile(plan);
+    assert.equal(await remoteFile(plan, ctx.names.syncBranch), editParagraph(base, 0, pending.token));
+    await runStep(ctx, { kind: 'git', action: 'resolve-sync-branch', args: {} });
+    const resolved = `# Plan\n\nFirst. The review moved to the next morning, note ${pending.token}.\n\nOurs.\n`;
+    // The fake's file reader drops the final newline, as in the tracked-branch resolve test.
+    assert.equal(await remoteFile(plan, ctx.names.syncBranch), resolved.replace(/\n$/, ''));
+    assert.equal(ctx.observations.get('resolved.body'), resolved);
+    assert.ok(ctx.observations.has('syncBranch.resolutionCommit'));
+    assert.equal(await remoteFile(plan), base);
+    await assert.rejects(runStep(ctx, { kind: 'git', action: 'resolve-sync-branch', args: {} }), /no conflict markers to resolve/);
+  });
+
   it('commit to the sync branch as CI and as a person, recording which interleaving it was', async () => {
     const { ctx, remoteGit, remoteFile } = await fakeRun();
     await assert.rejects(runStep(ctx, { kind: 'git', action: 'ci-fix', args: {} }), ProductError);

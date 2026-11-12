@@ -1217,8 +1217,9 @@ const GIT: Record<string, Executor> = {
   },
   'git.resolve-sync-branch': async (ctx) => {
     // A person resolves the conflict markers a run merged into the pending sync
-    // branch, keeping the git version, before the pull request merges.
-    const path = targetPath(ctx);
+    // branch, keeping the git version, before the pull request merges: the
+    // document edited on the sync branch, else the scenario's target.
+    const path = (ctx.observations.get('syncBranch.personEdit') as { path: string } | undefined)?.path ?? targetPath(ctx);
     setTarget(ctx, path);
     let conflicted = '';
     let committed = '';
