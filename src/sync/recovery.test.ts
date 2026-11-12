@@ -28,7 +28,7 @@ const PRE_COMMIT = `repos:
     hooks:
       - id: linear-format
 `;
-const DIAGRAM = Buffer.from(`diagram bytes ${'x'.repeat(300)}`);
+const DIAGRAM = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
 const TREE: Record<string, string | Buffer> = {
   'README.md': `# Repository\n\n${CANARY}\n`,

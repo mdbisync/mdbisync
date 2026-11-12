@@ -90,11 +90,17 @@ and git's path beats Linear's title
 - **Folders as teams and projects:** the front matter of a folder's `README.md`
   maps it to a Linear team and project; deeper folders become title paths.
 - **Images and files:** files a document links are uploaded to Linear once;
-  images pasted in Linear land in the repository next to the document, in
+  supported images and documents pasted in Linear land next to the document, in
   Git LFS when your `.gitattributes` says so. An image written in Linear must
   be an upload: an external URL, `data:` URI or path blocks that document
   with a red mark and a comment showing which images to fix. Upload the
   files instead; the next sync clears the comment and restores the icon.
+  New uploads must contain PNG, JPEG, GIF, WebP, AVIF, PDF, MP4, WebM or SVG,
+  identified from their bytes. SVGs with `script` or `foreignObject` elements,
+  animation elements, event attributes, `xml:base` or non-fragment `href`
+  references are blocked. Files already
+  in the repository keep working. Downloaded files use the detected extension, regardless of
+  the upload URL or declared content type.
 - **The `linear-format` hook:** `lint` and `fix` keep Markdown in the form
   Linear stores, so a round trip changes nothing
   ([docs/linear-format.md](docs/linear-format.md)).

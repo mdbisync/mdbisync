@@ -238,7 +238,7 @@ describe('sync: the Linear request budget (I9)', () => {
 
   it('an image pasted in Linear (L2-28)', async () => {
     const url = `${UPLOADS_HOST}/workspace/diagram.png`;
-    world.linear.uploads.push({ assetUrl: url, filename: 'diagram.png', contentType: 'image/png', size: 11, bytes: Buffer.from('image-bytes') });
+    world.linear.uploads.push({ assetUrl: url, filename: 'diagram.png', contentType: 'image/png', size: 11, bytes: await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url)) });
     const document = byTitle('plan');
     document.content = `${document.content ?? ''}\n![Diagram](${url})\n`;
     touch(document);
