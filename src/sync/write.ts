@@ -829,8 +829,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       // Only a document that already holds this run's text is taken over. The capture did not see it, so any other
       // text may be a person's edit made since an interrupted run created it: it is left for the next capture, which
       // takes it in as a new document at this path for the merge with git's file.
-      if (!sameMarkdown(withCurrentIds(adopted).content ?? '', body)) return skip(change.path, 'edited-in-linear');
-      document = adopted;
+      const held = withCurrentIds(adopted);
+      if (!sameMarkdown(held.content ?? '', body)) return skip(change.path, 'edited-in-linear');
+      // Equal only with its links by superseded ids read as current ones: the links are written with the current ids.
+      document = held === adopted ? adopted : await timed(() => linear.updateDocument(adopted.id, { content: body }));
       if (recreated === undefined) result.adopted.push(change.path);
     } else {
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });
