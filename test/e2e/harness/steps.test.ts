@@ -11,7 +11,7 @@ import { Git, GitError, lfsReader, parseLfsPointer } from '../../../src/state/in
 import { fakeLfsServer } from '../../../src/state/test-helpers.ts';
 import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
+import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, noteSentence, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import type { RunTree } from './corpus.ts';
 import { FIXTURE_PREPARATION } from './runner.ts';
@@ -1538,7 +1538,7 @@ async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: b
   const remoteGit = new Git(remote, IDENTITY);
   const remoteFile = async (path: string, ref = names.trackedBranch) => remoteGit.text(['show', `${ref}:${path}`]);
   // The file's exact bytes, final newline included.
-  const rawFile = async (path: string) => (await remoteGit.run(['show', `${names.trackedBranch}:${path}`])).stdout.toString('utf8');
+  const rawFile = async (path: string, ref = names.trackedBranch) => (await remoteGit.run(['show', `${ref}:${path}`])).stdout.toString('utf8');
   return { ctx, linear, ids, remoteGit, remoteFile, rawFile, faults, created, docs };
 }
 
@@ -2103,6 +2103,37 @@ describe('git executors', () => {
     assert.ok(ctx.observations.has('syncBranch.resolutionCommit'));
     assert.equal(await remoteFile(plan), base);
     await assert.rejects(runStep(ctx, { kind: 'git', action: 'resolve-sync-branch', args: {} }), /no conflict markers to resolve/);
+  });
+
+  it('edit a file in Linear\'s form on the sync branch without adding a final newline, so I1 holds after the merge (L4-08)', async () => {
+    const { ctx, linear, ids, remoteGit, rawFile, docs } = await fakeRun();
+    // The tracked files and their documents as a sync leaves them: in Linear's form, without a final newline.
+    const kept = new Map(await Promise.all(docs.map(async (path) => [path, (await rawFile(path)).replace(/\n+$/, '')] as [string, string])));
+    await commitAsPerson(ctx, kept, 'Store the files as the documents keep them', true);
+    for (const [path, text] of kept) await linear.updateDocument(ids[path]?.id as string, { content: text });
+    await remoteGit.run(['update-ref', `refs/heads/${ctx.names.syncBranch}`, ctx.names.trackedBranch]);
+
+    await runStep(ctx, { kind: 'git', action: 'edit-sync-branch', args: {} });
+    const { path, token } = ctx.observations.get('syncBranch.personEdit') as { path: string; token: string };
+    const edited = await rawFile(path, ctx.names.syncBranch);
+
+    // The sync pull request merges and the sync writes the person's note to the document, which Linear keeps
+    // without a final newline.
+    await remoteGit.run(['update-ref', `refs/heads/${ctx.names.trackedBranch}`, ctx.names.syncBranch]);
+    await linear.updateDocument(ids[path]?.id as string, { content: edited.replace(/\n+$/, '') });
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const sides = await readSides(ctx);
+    assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
+    assert.equal(edited, `${kept.get(path)}\n\n${noteSentence(token)}`);
+  });
+
+  it('append a paragraph keeping the text\'s own final line ending', () => {
+    const token = 'abcdef-001';
+    assert.equal(paragraphEdit('# Notes\n\nKept short.', undefined, token), `# Notes\n\nKept short.\n\n${noteSentence(token)}`);
+    assert.equal(paragraphEdit('# Notes\n\nKept short.\n', undefined, token), `# Notes\n\nKept short.\n\n${noteSentence(token)}\n`);
+    assert.equal(paragraphEdit('# Notes\n\nKept short.\n\n\n', undefined, token), `# Notes\n\nKept short.\n\n${noteSentence(token)}\n`);
+    // A paragraph target past the last paragraph appends the same way.
+    assert.equal(paragraphEdit('# Notes', 'second-paragraph', token), `# Notes\n\n${noteSentence(token)}`);
   });
 
   it('commit to the sync branch as CI and as a person, recording which interleaving it was', async () => {

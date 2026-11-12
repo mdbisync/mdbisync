@@ -1,7 +1,7 @@
 // L3-15 (deleted in git, edited in Linear) with its live steps and
 // assertions on fake services. The fake Linear drops a final newline, as the
-// format probe measured (fixture construct-singles/final-newline), so the
-// editor's sent text and Linear's stored text differ as they do live.
+// format probe measured (fixture construct-singles/final-newline), so a sent
+// text with a final newline differs from Linear's stored text as it does live.
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { differingValue, evaluateAssertion } from './checks.ts';
@@ -26,7 +26,9 @@ it('L3-15: the Linear edit wins over the git deletion, with the live steps and a
       assert.equal(runs.at(-1)?.report?.['code'], null);
       // The checks the live batch failed on, with the failure details they now give.
       assert.deepEqual(await evaluateAssertion(ctx, { subject: 'summary.code', operator: 'equal', expected: 'edit-wins-delete' }), { holds: false, reason: 'equal did not hold: actual null' });
-      assert.deepEqual(await evaluateAssertion(ctx, { subject: 'tracked.body', operator: 'same-as', expected: 'edited.linearBody' }), { holds: false, reason: 'same-as did not hold: only the line breaks at the end differ (actual ends "", expected "\\n")' });
+      // The live batch also failed on the sent text, which then ended with a final newline that Linear dropped.
+      // The editor's edit now keeps the document's own final line ending, so the sent text is what Linear stores.
+      assert.deepEqual(await evaluateAssertion(ctx, { subject: 'tracked.body', operator: 'same-as', expected: 'edited.linearBody' }), { holds: true });
     },
   });
   const names = new Set(outcomes.map((outcome) => outcome.name));
