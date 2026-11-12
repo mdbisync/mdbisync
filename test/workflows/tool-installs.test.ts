@@ -14,13 +14,15 @@ const workflows = new URL('../../.github/workflows/', import.meta.url);
 const requirementsPath = '.github/requirements/pre-commit.txt';
 const requirements = readFileSync(new URL(`../../${requirementsPath}`, import.meta.url), 'utf8').trim();
 
-function checkInstalls(workflow: Workflow) {
-  for (const [name, job] of Object.entries(workflow.jobs)) {
+// release.yml installs from the copy its checkout step takes from main before
+// it checks out the source, which may predate the requirements file.
+function checkInstalls(workflow: Workflow, copiedList = false) {
+  for (const job of Object.values(workflow.jobs)) {
     for (const step of job.steps) {
       const run = step.run ?? '';
       assert.doesNotMatch(run, /\b(?:pipx|uvx?|easy_install)\b/, 'Python packages must use hash-checked pip');
       for (const install of run.match(/\bpip(?:\d+(?:\.\d+)?)?\b[^\n]*?\b(?:install|download)\b[^\n]*/g) ?? []) {
-        const list = name === 'build' ? '"$RUNNER_TEMP/pre-commit-requirements.txt"' : requirementsPath;
+        const list = copiedList ? '"$RUNNER_TEMP/pre-commit-requirements.txt"' : requirementsPath;
         assert.equal(install, `pip install --require-hashes --only-binary :all: -r ${list}`);
       }
       for (const install of run.match(/\bnpm (?:install|i|add)\b.*/g) ?? []) {
@@ -40,7 +42,7 @@ function checkInstalls(workflow: Workflow) {
 
 test('repository workflows install only hashed Python wheels and patched npm', () => {
   for (const file of readdirSync(workflows).filter(file => file.endsWith('.yml'))) {
-    checkInstalls(parse(readFileSync(new URL(file, workflows), 'utf8')));
+    checkInstalls(parse(readFileSync(new URL(file, workflows), 'utf8')), file === 'release.yml');
   }
 });
 
@@ -204,7 +206,7 @@ test('release preserves its hash list when the requested source predates the fil
     git('commit', '-m', 'Workflow requirements');
     git('update-ref', 'refs/remotes/origin/main', 'HEAD');
     const workflow = parse(readFileSync(new URL('release.yml', workflows), 'utf8')) as Workflow;
-    const checkout = workflow.jobs.build!.steps.find(step => step.name === 'Validate and check out source')!.run!;
+    const checkout = workflow.jobs.test!.steps.find(step => step.name === 'Validate and check out source')!.run!;
     execFileSync('bash', ['-e', '-c', checkout], { cwd: source,
       env: { ...process.env, SOURCE_SHA: old, RUNNER_TEMP: runner } });
     assert.equal(git('rev-parse', 'HEAD'), old);

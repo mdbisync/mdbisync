@@ -189,7 +189,7 @@ test('the gate rejects a malformed repository or source commit before any reques
 
 test('release.yml gates final versions only and builds a final version only after the gate passed', async () => {
   const workflow = parse(await readFile(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8'));
-  const { gate: gateJob, build, tag } = workflow.jobs;
+  const { gate: gateJob, test: tests, build, tag } = workflow.jobs;
   // Every version the build accepts with a hyphen is a pre-release, so the hyphen test separates them.
   for (const version of ['v0.1.0-rc.1', 'v1.0.0-beta']) assert.ok(validateVersion(version).includes('-'));
   assert.equal(validateVersion('v1.2.3'), '1.2.3');
@@ -199,8 +199,10 @@ test('release.yml gates final versions only and builds a final version only afte
   assert.equal(step.run, 'node src/release/gate.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA"');
   assert.deepEqual(Object.keys(step.env).sort(), ['GITHUB_TOKEN', 'SECRET_SCANNING_TOKEN']);
   assert.equal(gateJob.steps[0].with['persist-credentials'], false);
-  assert.equal(build.needs, 'gate');
-  assert.equal(build.if, "${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}");
+  assert.equal(tests.needs, 'gate');
+  assert.equal(tests.if, "${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}");
+  assert.deepEqual(build.needs, ['gate', 'test']);
+  assert.equal(build.if, "${{ !cancelled() && github.ref == 'refs/heads/main' && needs.test.result == 'success' && (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}");
   assert.deepEqual(tag.needs, ['gate', 'build', 'attest']);
   assert.equal(tag.if, "${{ !cancelled() && needs.build.result == 'success' && ((needs.gate.result == 'success' && needs.attest.result == 'success') || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}",
     'the tag job must run whenever the build succeeded, and for a final version only after the gate passed and the release was attested');
