@@ -16,13 +16,13 @@ import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type IdEntry, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
-import { MARKS, reconcileDocumentMark, releasedHold } from './marks.ts';
+import { MARKS, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, type CapturedAssets } from './assets.ts';
+import { createAssetCapture, imageFindings, ImageBlockedError, type CapturedAssets } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
@@ -52,7 +52,7 @@ export interface CaptureResult {
   state: StateSnapshot;
   /** Metadata for every observed document; selected changes also have content. Never serialize these. */
   documents: Map<string, LinearDocument>;
-  blocked: Array<{ id: string; path: string; findings: SecurityFinding[] }>;
+  blocked: Array<{ id: string; path: string; findings: BlockedFinding[] }>;
   changed: string[];
   removed: string[];
   /**
@@ -321,6 +321,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(id);
       if (old !== undefined && previous.has(old.path)) targets.set(old.path, id);
     };
+    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[]) => {
+      const old = byId.get(doc.id);
+      const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
+      ids.set(old?.path ?? path, {...old?.entry, id: doc.id, saved});
+      result.blocked.push({id: doc.id, path: old?.path ?? path, findings});
+      resetTarget(doc.id);
+    };
     for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
       const old = byId.get(doc.id);
       if (!live(doc)) {
@@ -340,6 +347,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
+        const images = imageFindings(doc.content ?? '');
+        if (images.length > 0) throw new ImageBlockedError(images);
         const assets = await downloadAssets(path, doc.content ?? '', uploads, old === undefined ? undefined : prior.body, old?.path);
         const candidate: Candidate = {doc, path, head, assets, files: new Map<string, Buffer | string>([[path, head + assets.body], ...assets.files])};
         if (old?.path === path) candidate.previousBody = prior.body;
@@ -349,6 +358,16 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         documentIds.set(path, doc.id);
       } catch (error) {
         if (error instanceof LinearStoppedError) throw error;
+        if (error instanceof ImageBlockedError) {
+          const security = await gate.check(new Map([[path, head + (doc.content ?? '')]]));
+          if (security === null) {
+            result.leftOut.push({id: doc.id, rule: 'security-unchecked'});
+            resetTarget(doc.id);
+          } else {
+            recordBlocked(doc, path, [...error.findings, ...security]);
+          }
+          continue;
+        }
         result.leftOut.push({id: doc.id, rule: 'capture-translation'});
       }
     }
@@ -404,11 +423,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           break;
         }
         if (findings.length > 0) {
-          const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-          ids.set(old?.path ?? path, {...old?.entry, id, saved});
-          result.blocked.push({id, path: old?.path ?? path, findings});
+          recordBlocked(doc, path, findings);
           candidates.delete(id);
-          resetTarget(id);
           again = true;
           break;
         }
@@ -526,7 +542,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       const lostLease = new Error(message('sync.lost-lease'));
       const marked = [
-        ...[...candidates.values()].filter(({doc}) => !unmarked.has(doc.id)).map(({doc, path}) => ({doc, path, blocked: [] as SecurityFinding[]})),
+        ...[...candidates.values()].filter(({doc}) => !unmarked.has(doc.id)).map(({doc, path}) => ({doc, path, blocked: [] as BlockedFinding[]})),
         ...result.blocked.map(({id, path, findings}) => ({doc: documents.get(id)!, path, blocked: findings})),
       ];
       try {

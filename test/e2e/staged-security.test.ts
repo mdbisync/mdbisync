@@ -15,9 +15,10 @@ import { type AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { lintInTree } from '../../src/format/index.ts';
 import { loadMapping } from '../../src/mapping/index.ts';
 import { type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../../src/setup/test-helpers.ts';
-import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef } from '../../src/state/index.ts';
+import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef, listTree, readBlobs } from '../../src/state/index.ts';
 import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-helpers.ts';
 import { STAGE_FOLDER } from '../../src/sync/staged.ts';
 
@@ -275,6 +276,42 @@ for (const file of process.argv.slice(2)) {
   };
   /** The documents written to Linear so far, counted as I9 counts them. */
   const written = () => world.writes.filter((operation) => /document(Create|Update)|(Create|Update)Document/i.test(operation)).length;
+
+  it('staged image rejection preserves a lint-clean tree and clears its notice after correction', async () => {
+    Object.assign(world.linear.documents[0]!, {icon:'Fire', color:'#123456'});
+    const images = [
+      '![Image](https://example.com/a.png)',
+      '![Image](http://example.com/a.png)',
+      '![Image](data:image/png;base64,AAAA)',
+      '![Image](relative.png)',
+      '![Image](/absolute.png)',
+      '![Image]()',
+      '![Image][asset]',
+      '[![Image](https://example.com/a.png)](https://example.com)',
+    ];
+    edit(images.join('\n\n') + '\n\n[asset]: relative.png\n');
+    await stagedRun('images');
+    assert.deepEqual((await report('images-apply')).capture.blocked.map(({id}) => id), ['plan']);
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    assert.equal(world.linear.documents[0]!.icon, 'Cross');
+    const notice = [...world.linear.comments.values()][0]!;
+    assert.equal(world.linear.comments.size, 1);
+    assert.equal(notice.body, 'Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n' + images.map((_, index) => `- Image ${index + 1} of 8 (line ${index * 2 + 1}): not uploaded to this workspace. Upload the file instead of linking to it.`).join('\n'));
+    await stagedRun('images-again');
+    assert.equal(world.linear.comments.size, 1);
+    edit('[Site](https://example.com/a.png)\n');
+    await stagedRun('images-fixed');
+    assert.equal((await report('images-fixed-apply')).capture.blocked.length, 0);
+    assert.equal(notice.resolved, true);
+    assert.equal(world.linear.documents[0]!.icon, 'Fire');
+    assert.equal(world.linear.documents[0]!.color, '#123456');
+    assert.equal(await remoteText('docs/plan.md'), '---\ncategory: work\n---\n\n[Site](https://example.com/a.png)\n');
+    const tree = await listTree(fixture.remote, stateRef(config, 'linear'));
+    const files = new Set(tree.map(({path}) => path));
+    const markdown = tree.filter(({path}) => path.endsWith('.md'));
+    const blobs = await readBlobs(fixture.remote, markdown.map(({oid}) => oid));
+    for (const {path, oid} of markdown) assert.deepEqual(lintInTree(path, blobs.get(oid)!.toString(), files), []);
+  });
 
   it('a staged run reads Linear once: the apply step answers its reads from the stage step, within I9', async () => {
     edit('Edited in Linear.\n');
