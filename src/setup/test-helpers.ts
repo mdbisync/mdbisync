@@ -438,6 +438,11 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     operationName: string;
   };
   if (/^\s*mutation/.test(query)) {
+    // Linear refuses to resolve a comment on a document in its trash (seen live 2026-11-12: INPUT_ERROR with HTTP 200).
+    // The refusal changes nothing, so it is not one of the writes the fake took.
+    if (operationName === 'ResolveComment' && commentOnTrashedDocument(world, variables.id as string)) {
+      return json(200, { errors: [{ message: 'Comment cannot be resolved', extensions: { code: 'INPUT_ERROR' } }], data: null });
+    }
     world.writes.push(operationName);
     const write = world.linear.writes;
     write.count += 1;
@@ -612,6 +617,12 @@ function documentMutation(world: FakeWorld, operation: string, variables: Record
 function inDeletedProject(world: FakeWorld, id: string): boolean {
   const projectId = world.linear.documents.find((d) => d.id === id)?.projectId;
   return projectId !== undefined && world.linear.deletedProjects?.includes(projectId) === true;
+}
+
+/** Whether the comment `id` is on a document that is in the trash. */
+function commentOnTrashedDocument(world: FakeWorld, id: string): boolean {
+  const contentId = world.linear.comments.get(id)?.documentContentId;
+  return contentId !== undefined && world.linear.documents.some((d) => `content-${d.id}` === contentId && d.trashed === true);
 }
 
 let clock = 0;

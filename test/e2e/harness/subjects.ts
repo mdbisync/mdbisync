@@ -1305,6 +1305,32 @@ export const SUBJECTS: Record<string, Compute> = {
       return comments.length > 0 && comments.every((c) => typeof c.resolvedAt === 'string');
     });
   },
+  // Linear refuses to resolve the comment of a document in its trash. Each held
+  // document is then named once in a run's `holdMarks.unresolved`, with
+  // Linear's GraphQL refusal; its comment stays open, and no later run of the
+  // scenario reports hold work.
+  'suspended.commentsRefused': async (env) => {
+    const view = await env.view();
+    const before = env.ctx.observations.get(BEFORE_VIEW) as View;
+    const held = env.ctx.observations.get('suspended.documents') as Set<string> | undefined;
+    if (held === undefined || held.size === 0) return false;
+    const pathOf = new Map([...before.ids].map(([path, entry]) => [entry.id, path]));
+    const paths = [...held].map((id) => pathOf.get(id));
+    if (paths.some((path) => path === undefined)) return false;
+    const marks = ownResults(env.ctx).map((result) => (result.report?.['pullRequest'] as Record<string, unknown> | null | undefined)?.['holdMarks'] as { unresolved?: Array<{ path: string; error: string }> } | undefined);
+    const refusing = marks.flatMap((mark, index) => mark?.unresolved === undefined ? [] : [index]);
+    if (refusing.length !== 1) return false;
+    const unresolved = marks[refusing[0]!]!.unresolved!;
+    const later = marks.slice(refusing[0]! + 1);
+    const commentsOpen = [...held].every((id) => {
+      const comments = (view.holdComments?.get(id) ?? []).filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT));
+      return comments.length > 0 && comments.every((c) => c.resolvedAt === null);
+    });
+    return JSON.stringify(unresolved.map((item) => item.path).sort()) === JSON.stringify([...paths].sort())
+      && unresolved.every((item) => /^LinearGraphQLError INPUT_ERROR\b/.test(item.error))
+      && later.length > 0 && later.every((mark) => mark === undefined || mark === null)
+      && commentsOpen;
+  },
   'suspended.marksRestored': async (env) => {
     const view = await env.view();
     const before = env.ctx.observations.get(BEFORE_VIEW) as View;
