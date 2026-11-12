@@ -39,7 +39,10 @@ the execution environment, never embedded credentials or account names.
 - `converged`: complete initial sync, with matching tracked files and documents.
 - `linear-seeded`: existing documents for initial sync matching or import, no state refs.
 - `conflicted`: a converged fixture followed by an unresolved conflict, with the
-  original icon, color and body saved as `beforeConflict` observations.
+  original icon, color and body saved as `beforeConflict` observations. The
+  setup lets the runs settle after the conflict's run, so the sync pull request
+  carries the markers to the tracked branch: the scenario starts with them on
+  both sides.
 
 `fixtures` names required semantic fixture groups for the slice. Supplemental
 fixtures can extend a slice when a scenario needs more documents or constructs. The harness

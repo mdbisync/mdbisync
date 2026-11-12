@@ -48,7 +48,8 @@ export interface Estimate {
 
 /** How many times the engine runs in a scenario: setup, its run steps and the I6 re-run. */
 export function engineRuns(scenario: Scenario): number {
-  const setup = { offline: 0, empty: 0, 'no-state': 0, 'linear-seeded': 0, converged: 1, conflicted: 2 }[scenario.setup.state];
+  // A conflicted start: the initial sync, the conflict's run and a settle (up to four runs) that merges it to the tracked branch.
+  const setup = { offline: 0, empty: 0, 'no-state': 0, 'linear-seeded': 0, converged: 1, conflicted: 6 }[scenario.setup.state];
   const steps = scenario.steps.reduce((count, step) => count + (step.kind !== 'run' || ['fix', 'lint', 'scan-canaries', 'cleanup', 'pre-commit'].includes(step.action) ? 0 : step.action === 'settle' ? 4 : 1), 0);
   return setup + steps + (scenario.checks.invariants.I6.required ? 1 : 0);
 }
