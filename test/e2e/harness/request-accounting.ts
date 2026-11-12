@@ -2,6 +2,7 @@
 // repeat the same events; retries and separate workflow attempts remain distinct.
 import type { LogEntry } from '../../../src/linear/index.ts';
 import type { RunContext } from './context.ts';
+import type { ProxyRequestRecord } from './fault-proxy.ts';
 
 export interface RemoteRequests {
   runId: number;
@@ -104,4 +105,35 @@ export function requestBuckets(ctx: RunContext, entries = remoteRequests(ctx)) {
     local: { setup: count(0, start), scenario: count(start, end), I6: count(end, local.length) },
     remote: { setup: phase('setup'), scenario: phase('scenario'), I6: phase('I6') },
   };
+}
+
+/** The largest and slowest answer of one operation the engine sent through the local proxy. */
+export interface AnswerSize {
+  count: number;
+  maxBytes: number;
+  /** The duration of the answer with the most bytes. */
+  maxBytesDurationMs: number;
+  maxDurationMs: number;
+}
+
+/**
+ * Per GraphQL operation, the largest answer body (decoded bytes) and the
+ * longest time from a request's arrival to the end of its answer, over the
+ * forwarded answers the proxy measured: every engine run of the scenario,
+ * its setup's and I6's included. Sizes only, never content.
+ */
+export function answerSizes(requests: readonly ProxyRequestRecord[]): Record<string, AnswerSize> {
+  const sizes: Record<string, AnswerSize> = {};
+  for (const record of requests) {
+    // GraphQL answers only: OAuth token and revocation calls are not pages.
+    if (record.kind === 'other' || record.responseBytes === undefined || record.durationMs === undefined) continue;
+    const size = sizes[record.operation] ??= { count: 0, maxBytes: -1, maxBytesDurationMs: 0, maxDurationMs: 0 };
+    size.count += 1;
+    if (record.responseBytes > size.maxBytes) {
+      size.maxBytes = record.responseBytes;
+      size.maxBytesDurationMs = record.durationMs;
+    }
+    size.maxDurationMs = Math.max(size.maxDurationMs, record.durationMs);
+  }
+  return sizes;
 }

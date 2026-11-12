@@ -103,7 +103,7 @@ environment variables; secrets never go in arguments.
 
 | Flag | Default | Value |
 | --- | --- | --- |
-| `--release-sha` | none, required | The 40-character release SHA the workflows and the hook are pinned to. |
+| `--release-sha` | none, required | The 40-character release SHA the workflows and the hook are pinned to: `v0.1.0-rc.9` or a later release. |
 | `--release-version` | none | The release's version, written as a comment beside each pin. |
 | `--folder` | none, at least one | A folder to synchronize; the `--team` and `--project` after it apply to it. Repeat for each folder. |
 | `--team` | none | The folder's Linear team, by key or name. A folder needs a team or a project. |
@@ -114,6 +114,12 @@ environment variables; secrets never go in arguments.
 With a terminal attached and the release SHA, a folder, or a folder's
 team or project missing, `init` asks for those, and then whether to add
 the security hook examples. It changes local files only.
+
+The workflows `init` writes are made for the release their examples pin,
+`v0.1.0-rc.9`, and pass action inputs that earlier releases lack. `init`
+refuses an earlier release, given by its SHA or its `--release-version`,
+and names it; it writes any other SHA as given, since it works offline and
+cannot check one it does not know.
 
 ## Tokens left by interrupted jobs
 

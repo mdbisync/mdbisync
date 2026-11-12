@@ -19,6 +19,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, it, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
+import { MINIMUM_RELEASE, OLDER_RELEASES } from '../../src/init/releases.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const EXAMPLES = new URL('../../examples/', import.meta.url);
@@ -129,6 +130,18 @@ describe('the release the workflow templates pin', () => {
       Object.fromEntries(Object.entries(declared).map(([name, input]) => [name, { required: input.required === true }])),
       PINNED_RELEASE.inputs,
     );
+  });
+
+  it('init writes the recorded release as its oldest one', () => {
+    assert.deepEqual(MINIMUM_RELEASE, { sha: PINNED_RELEASE.sha, version: PINNED_RELEASE.version });
+  });
+
+  it('init knows every release before the recorded one by its tagged commit', (t) => {
+    const tags = git('-c', 'versionsort.suffix=-', 'tag', '--list', 'v*', '--sort=version:refname')?.split('\n').filter(Boolean) ?? [];
+    const pinned = tags.indexOf(PINNED_RELEASE.version);
+    if (pinned < 0) return missing(t, `the tag ${PINNED_RELEASE.version}`);
+    const older = Object.fromEntries(tags.slice(0, pinned).map((tag) => [git('rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`)?.trim() ?? assert.fail(`the tag ${tag} does not resolve`), tag]));
+    assert.deepEqual({ ...OLDER_RELEASES }, older);
   });
 
   it('the recorded version\'s tag names the pinned commit', (t) => {

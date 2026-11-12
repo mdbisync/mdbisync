@@ -395,6 +395,7 @@ the message. Most come from the workflow's configuration:
 | `provide --folder with --team and/or --project` | Name at least one folder, each with a team or project. |
 | `unknown option: <flag>`, `<flag> needs a value`, `<flag> must follow --folder`, `<flag> was given twice for a folder`, `<flag> was given twice`, `choose security hooks once` | Fix the flags; `mdbisync init --help` lists them. |
 | `--release-sha must be a full 40-character commit SHA`, `--release-version must be a version such as v1.2.3` | Give the release commit SHA and version (see [usage.md](usage.md#release-builds-and-pins)). |
+| `release <version> is older than <minimum>, the release these workflows are written for and checked against. Use <minimum> or later` | Pick `<minimum>` or a later release (see [`init`](configuration.md#init)): the workflows pass action inputs that the older release lacks. |
 | `paths must stay inside the repository`, `setup destinations must not contain symlinks`, `a setup folder path names a regular file` | Give folder paths inside the repository, without symbolic links. |
 | `conflicting folder options: <path>` | Give each folder its options once. |
 | `invalid YAML configuration`, `.pre-commit-config.yaml needs a repos list`, `invalid pre-commit repository entry` | Fix `.pre-commit-config.yaml` or the `README.md` front matter. |

@@ -18,7 +18,7 @@ import { runScheduled } from './schedule.ts';
 import { BudgetBlockedError, budgetFromStatus, estimate, MAX_ADMISSION, type Governor } from './governor.ts';
 import { SandboxRest, githubToken, type GitHubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
-import { engineRequestCount, requestBuckets, remoteRequests, isGraphql } from './request-accounting.ts';
+import { answerSizes, engineRequestCount, requestBuckets, remoteRequests, isGraphql } from './request-accounting.ts';
 import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
@@ -817,6 +817,8 @@ export function resultOf(
     ...(ctx.observations.has('metrics') ? { metrics: ctx.observations.get('metrics') as Record<string, unknown> } : {}),
     ...(ctx.observations.has('corpus.teams') ? { corpusTeams: ctx.observations.get('corpus.teams') as string[] } : {}),
     ...(ctx.observations.has('zone.trash') ? { teamZoneTrash: ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> } : {}),
+    ...(ctx.proxy === null ? {} : { answerSizes: answerSizes(ctx.proxy.requests) }),
+    ...(ctx.observations.has('conflictMarks') ? { conflictMarks: ctx.observations.get('conflictMarks') as NonNullable<ScenarioResult['conflictMarks']> } : {}),
   };
 }
 
