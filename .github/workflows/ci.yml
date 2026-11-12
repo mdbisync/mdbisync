@@ -49,6 +49,8 @@ jobs:
         run: pipx install pre-commit==4.6.2
       - name: Published hook and CI example integration
         run: npm run test:hooks
+      - name: Workflow templates install pre-commit from hash-checked PyPI files
+        run: npm run test:template-install
       - name: Pre-commit hooks
         env:
           SKIP: no-cyrillic # already run above
