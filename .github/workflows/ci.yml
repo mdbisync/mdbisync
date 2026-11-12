@@ -49,6 +49,8 @@ jobs:
         run: pipx install pre-commit==4.6.2
       - name: Published hook and CI example integration
         run: npm run test:hooks
+      - name: Workflow templates install pre-commit from hash-checked PyPI files
+        run: npm run test:template-install
       - name: Pre-commit hooks
         env:
           SKIP: no-cyrillic # already run above
@@ -85,6 +87,10 @@ jobs:
       # The harness tests commit through pre-commit hooks.
       - name: Install pre-commit
         run: pipx install pre-commit==4.6.2
+      # Release commits are not on main; the example pin test reads the
+      # pinned release's action.yml and tag.
+      - name: Fetch the release tags
+        run: git fetch --quiet --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
       - name: Test
         run: node --test --test-shard=${{ matrix.shard }}/4 "src/**/*.test.ts" "tools/**/*.test.ts" "test/**/*.test.ts" "test/**/*.test.mjs"
 

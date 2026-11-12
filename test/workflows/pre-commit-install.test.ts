@@ -29,7 +29,9 @@ for (const file of ['pre-commit.yml', 'mdbisync.yml', 'mdbisync-initial-sync.yml
           /bin/mkdir -p "$3/bin"
           /bin/cat > "$3/bin/python" <<'PYTHON'
 #!/bin/bash
-[ "$*" = '-m pip install pre-commit==4.6.2' ] || exit 2
+[ "$*" = '-m pip install --require-hashes --only-binary :all: -r /dev/stdin' ] || exit 2
+# The requirements arrive on standard input, pinned with hashes.
+/bin/grep -q '^pre-commit==4\\.6\\.2 --hash=sha256:[0-9a-f]\\{64\\}$' || exit 3
 ${mode === 'pip-failure' ? 'exit 7' : `
 /bin/cat > "$(/usr/bin/dirname "$0")/pre-commit" <<'PRECOMMIT'
 #!/bin/bash
