@@ -115,7 +115,7 @@ test('init refuses a release older than the templates pin and writes the pinned 
   const cwd = await fixture(t);
   const refused = await runCli(['init', '--release-sha', rc2, '--release-version', 'v0.1.0-rc.2', '--folder', 'guides', '--team', 'Planning'], { cwd });
   assert.equal(refused.exitCode, 2);
-  assert.match(refused.stderr, new RegExp(`^init: --release-sha is v0\\.1\\.0-rc\\.2, older than ${minimum}, the release these workflows are written for and checked against\\. Use ${minimum} or later\n`));
+  assert.match(refused.stderr, new RegExp(`^init: release v0\\.1\\.0-rc\\.2 is older than ${minimum}, the release these workflows are written for and checked against\\. Use ${minimum} or later\n`));
   await assert.rejects(readFile(join(cwd, '.github/workflows/mdbisync.yml')), { code: 'ENOENT' });
   await assert.rejects(readFile(join(cwd, '.pre-commit-config.yaml')), { code: 'ENOENT' });
   await assert.rejects(readFile(join(cwd, 'guides/README.md')), { code: 'ENOENT' });
@@ -125,6 +125,20 @@ test('init refuses a release older than the templates pin and writes the pinned 
   const { default: templates } = await import('./workflows.json', { with: { type: 'json' } });
   for (const [name, text] of Object.entries(templates)) assert.equal(await readFile(join(cwd, '.github/workflows', name), 'utf8'), text, name);
   assert.equal(parse(await readFile(join(cwd, '.pre-commit-config.yaml'), 'utf8')).repos[0].rev, MINIMUM_RELEASE.sha);
+});
+
+test('init refuses an older release named only by its version, and asks nothing after an older SHA', async (t) => {
+  const cwd = await fixture(t);
+  const byVersion = await runCli(['init', '--release-sha', sha, '--release-version', 'v0.1.0-rc.2', '--folder', 'guides', '--team', 'Planning'], { cwd });
+  assert.equal(byVersion.exitCode, 2);
+  assert.match(byVersion.stderr, /^init: release v0\.1\.0-rc\.2 is older than /);
+  const { runInit } = await import('./command.ts');
+  const questions: string[] = [];
+  const guided = await runInit([], { cwd, prompt: async (question) => { questions.push(question); return '79db9969462ae7f1f00c88e95b311e61db3c455e'; } });
+  assert.equal(guided.exitCode, 2);
+  assert.match(guided.stderr, /^init: release v0\.1\.0-rc\.2 is older than /);
+  assert.deepEqual(questions, ['Release commit SHA: ']);
+  await assert.rejects(readFile(join(cwd, '.pre-commit-config.yaml')), { code: 'ENOENT' });
 });
 
 test('init --help names the oldest release it writes', async () => {

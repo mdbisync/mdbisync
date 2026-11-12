@@ -117,9 +117,9 @@ the security hook examples. It changes local files only.
 
 The workflows `init` writes are made for the release their examples pin,
 `v0.1.0-rc.9`, and pass action inputs that earlier releases lack. `init`
-refuses the SHA of an earlier release and names it; it writes any other
-SHA as given, since it works offline and cannot check one it does not
-know.
+refuses an earlier release, given by its SHA or its `--release-version`,
+and names it; it writes any other SHA as given, since it works offline and
+cannot check one it does not know.
 
 ## Tokens left by interrupted jobs
 

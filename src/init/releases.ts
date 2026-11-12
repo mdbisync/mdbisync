@@ -6,8 +6,16 @@
 // not know (a later release, or a build of your own) is written as given.
 import templates from './workflows.json' with { type: 'json' };
 
-/** The release the templates pin: the oldest one `init` writes. */
-export const MINIMUM_RELEASE = templateRelease();
+/** A template's pin of the action: the release SHA and its version comment. */
+export const RELEASE_PIN = /mdbisync\/mdbisync@([a-f0-9]{40}) # (v\S+)/;
+
+/**
+ * The release the templates pin: the oldest one `init` writes. Every
+ * template pins the same release; `test/workflows/release-pin.test.ts`
+ * checks that.
+ */
+const pinned = RELEASE_PIN.exec(templates['mdbisync.yml']);
+export const MINIMUM_RELEASE = { sha: pinned?.[1] ?? '', version: pinned?.[2] ?? '' };
 
 /**
  * Every release before MINIMUM_RELEASE, by release SHA. When the templates
@@ -24,11 +32,3 @@ export const OLDER_RELEASES: Readonly<Record<string, string>> = {
   d5655bd74239d88d4323957d0945163678698858: 'v0.1.0-rc.7',
   '92a1d9ecd9c89ff18703c9d4f8476d9e3702170e': 'v0.1.0-rc.8',
 };
-
-/** The one `mdbisync/mdbisync@<sha> # <version>` pin all templates share. */
-function templateRelease(): { sha: string; version: string } {
-  const pins = new Set(Object.values(templates).flatMap((text) => [...text.matchAll(/mdbisync\/mdbisync@([a-f0-9]{40}) # (v\S+)/g)].map((pin) => `${pin[1]} ${pin[2]}`)));
-  if (pins.size !== 1) throw new Error(`the workflow templates must pin one release, found ${pins.size}`);
-  const [sha, version] = [...pins][0]!.split(' ') as [string, string];
-  return { sha, version };
-}

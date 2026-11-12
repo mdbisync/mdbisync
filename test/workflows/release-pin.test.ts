@@ -140,7 +140,7 @@ describe('the release the workflow templates pin', () => {
     const tags = git('-c', 'versionsort.suffix=-', 'tag', '--list', 'v*', '--sort=version:refname')?.split('\n').filter(Boolean) ?? [];
     const pinned = tags.indexOf(PINNED_RELEASE.version);
     if (pinned < 0) return missing(t, `the tag ${PINNED_RELEASE.version}`);
-    const older = Object.fromEntries(tags.slice(0, pinned).map((tag) => [git('rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`)?.trim(), tag]));
+    const older = Object.fromEntries(tags.slice(0, pinned).map((tag) => [git('rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`)?.trim() ?? assert.fail(`the tag ${tag} does not resolve`), tag]));
     assert.deepEqual({ ...OLDER_RELEASES }, older);
   });
 

@@ -122,7 +122,7 @@ describe('configuration reference', () => {
   it('names the oldest release init writes, in the flag table and the text below it', () => {
     assert.match(byName(table(PAGE, 'init')).get('--release-sha')?.join(' ') ?? '', new RegExp(`\`${MINIMUM_RELEASE.version.replaceAll('.', '\\.')}\` or a later release`));
     const section = PAGE.slice(PAGE.indexOf('### init'), PAGE.indexOf('## Tokens left'));
-    assert.equal(section.split(`\`${MINIMUM_RELEASE.version}\``).length - 1, 2, 'the flag table and the text below it name the release');
+    assert.match(section, new RegExp(`their examples pin,\\s+\`${MINIMUM_RELEASE.version.replaceAll('.', '\\.')}\``), 'the text below the table names the release');
   });
 
   it('lists every command', () => {
