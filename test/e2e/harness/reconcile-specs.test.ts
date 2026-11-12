@@ -3,7 +3,7 @@
 // actions and assertions remain the live ones; only the services are fakes.
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { runOnFakeServices } from './fake-services.ts';
+import { DOCUMENTS, runOnFakeServices } from './fake-services.ts';
 import { loadScenarios } from './spec.ts';
 
 const RECONCILE = /^L4-1[4-8]$/;
@@ -14,8 +14,7 @@ it('the reconciliation specs are the five scenarios this file runs', () => {
 
 for (const scenario of loadScenarios().filter((s) => RECONCILE.test(s.id))) {
   it(`${scenario.id}: live steps and assertions on fake services`, { timeout: 180_000 }, async (t) => {
-    const documents = Object.fromEntries(Array.from({ length: 2 }, (_, i) => [`eng/notes/item-${i}.md`, `# Notes ${i}\n\nFirst paragraph.\n\nSecond paragraph.\n`]));
-    const outcomes = await runOnFakeServices(t, scenario, documents);
+    const outcomes = await runOnFakeServices(t, scenario, DOCUMENTS);
     for (const outcome of outcomes) assert.equal(outcome.ok, true, JSON.stringify(outcome));
   });
 }
