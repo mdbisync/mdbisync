@@ -83,13 +83,13 @@ jobs:
             # listed and builds nothing from source.
             if ! "$environment/bin/python" -m pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then
           cfgv==3.5.0 --hash=sha256:a8dc6b26ad22ff227d2634a65cb388215ce6cc96bbcc5cfde7641ae87e8dacc0
-          distlib==0.4.3 --hash=sha256:4b0ce306c966eb73bc3a7b6abad017c556dadd92c44701562cd528ac7fde4d5b
+          distlib==0.4.4 --hash=sha256:ca4175b4ac7f71223cc30ed7248c45d2b38c2439d8ee6e498ab67ed63cf3508d --hash=sha256:cf09d55b1e85a89576b036aeb71550bfd68320f3f21761ca329eadadad918638
           filelock==4.2.10 --hash=sha256:9479aaeb4db20b5a53e3da28493edd24720b66b8a0b84030aa56ccdf243d6857
-          identify==2.6.19 --hash=sha256:20e6a87f786f768c092a721ad107fc9df0eb89347be9396cadf3f4abbd1fb78a
-          nodeenv==1.10.0 --hash=sha256:5bb13e3eed2923615535339b3c620e76779af4cb4c6a90deccc9e36b274d3827
+          identify==2.6.20 --hash=sha256:6a16b69b93187244e0548cbfd25b3e4a6f9a7a2ad784625c3bec2b8d27b81aaa --hash=sha256:ad729860a923858d26917c2f4fb0a1d83d27a75b1e090c06440c573f048f3285
+          nodeenv==1.11.0 --hash=sha256:3ce8fe5b71d16e8af7039ca65257354100bc772965d6bc549070649e53b1b146 --hash=sha256:edaa16e6c14d7cf395d75d4bbd5a26390f4dc06501a33b4e76282b02cc688a25
           packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
-          platformdirs==4.11.2 --hash=sha256:7f89089b6ea71bda7962953edcf784b2e2d9d285b40ad88be2bb75c6e9d82ab4
-          pre-commit==4.6.2 --hash=sha256:e2dde9a75d3bce11bd3831c26d134df00a2803c1d818be6a0383c3dcda25dc4e
+          platformdirs==4.14.0 --hash=sha256:1dadfc59a8a5d7565b3d9270ae8fa71c065595352c4277b41c11ee6c222c4b91 --hash=sha256:83f009c1e8c5fc36869b5171755b291887bd2cade7965233cdfabd23d754720b
+          pre-commit==4.7.0 --hash=sha256:1f3deee12b914c8fa184bd2b5953391c2e4f36763e403d4a23dc9983fa7c6e86 --hash=sha256:2e229038ad3656081b70c27913157e4b636ef306f643f024a8a8e3f0f7b2f877
           python-discovery==1.9.5 --hash=sha256:a1fae8fca11e4bc61e38491c2aafff29e430b3c5e272d51ae52fb895bc4c0fac
           pyyaml==6.0.3 \
             --hash=sha256:44edc647873928551a01e7a563d7452ccdebee747728c1080d881d68af7b997e \
@@ -124,7 +124,7 @@ jobs:
             --hash=sha256:16249ee61e95f858e83976573de0f5b2893b3677ba71c9dd36b9cf8be9ac6d65
           virtualenv==21.15.6 --hash=sha256:4b99ab9b95ff11043939bb4cad2fa0449175fa5a478372864f62160cb6c1a7ed
           REQUIREMENTS
-              echo '::error::Could not install pre-commit 4.6.2 from its pinned hashes; use Python 3.11 to 3.14 on Linux or macOS (x86-64 or arm64) with access to PyPI, or provide pre-commit on PATH.'
+              echo '::error::Could not install pre-commit 4.7.0 from its pinned hashes; use Python 3.11 to 3.14 on Linux or macOS (x86-64 or arm64) with access to PyPI, or provide pre-commit on PATH.'
               exit 1
             fi
             mkdir "$environment/commands"
