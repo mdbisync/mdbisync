@@ -341,14 +341,14 @@ release SHA and keep its version comment:
 
 ```yaml
 # In a GitHub Actions workflow:
-- uses: mdbisync/mdbisync@<release-sha> # v0.1.0-rc.1
+- uses: mdbisync/mdbisync@<release-sha> # v0.1.0-rc.9
 ```
 
 ```yaml
 # In .pre-commit-config.yaml:
 repos:
   - repo: https://github.com/mdbisync/mdbisync
-    rev: <release-sha> # v0.1.0-rc.1
+    rev: <release-sha> # v0.1.0-rc.9
     hooks:
       - id: linear-format
 ```

@@ -3,8 +3,10 @@
 // template passes must be one that release's `action.yml` declares; an
 // input it lacks makes the copied workflow fail. The release commit is
 // not on `main` (release commits are isolated), so a shallow checkout
-// cannot read it: PINNED_RELEASE records its inputs, and the last test
-// checks that record against the release commit wherever git has it.
+// cannot read it: PINNED_RELEASE records its inputs, and the last two
+// tests check that record against the release commit and its tag. CI
+// fetches the release tags for them and fails without them; elsewhere a
+// clone without the tag skips them.
 //
 // To move the pin: change the SHA and version comment of every
 // `mdbisync/mdbisync` step in `examples/` (and `src/init/workflows.json`,
@@ -14,13 +16,15 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
-import { describe, it } from 'node:test';
+import { describe, it, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const EXAMPLES = new URL('../../examples/', import.meta.url);
 const ACTION = 'mdbisync/mdbisync@';
+/** A `uses:` line of the action, with what follows the `@`. */
+const ACTION_USES = /^\s*(?:-\s+)?uses:\s*mdbisync\/mdbisync@(.*)$/;
 
 /** The release the templates pin, and the inputs its `action.yml` declares. */
 const PINNED_RELEASE = {
@@ -79,12 +83,19 @@ function git(...args: string[]): string | undefined {
   return result.status === 0 ? result.stdout : undefined;
 }
 
+/** Skips the test when this clone lacks `what`, except in CI, which fetches the release tags and must check the record. */
+function missing(t: TestContext, what: string): void {
+  const message = `${what} is not in this clone; fetch the tag ${PINNED_RELEASE.version} to check the record`;
+  if (process.env['GITHUB_ACTIONS'] === 'true') assert.fail(message);
+  t.skip(message);
+}
+
 describe('the release the workflow templates pin', () => {
   it('every mdbisync step in examples/ pins the recorded release, with its version beside it', () => {
     let steps = 0;
     for (const { file, text } of templates()) {
       for (const line of text.split('\n')) {
-        const uses = new RegExp(`^\\s*(?:-\\s+)?uses:\\s*${ACTION}(.*)$`).exec(line);
+        const uses = ACTION_USES.exec(line);
         if (uses === null) continue;
         steps += 1;
         assert.equal(uses[1], `${PINNED_RELEASE.sha} # ${PINNED_RELEASE.version}`, `${file}: ${line.trim()}`);
@@ -110,19 +121,19 @@ describe('the release the workflow templates pin', () => {
     ]);
   });
 
-  it('the recorded inputs are the release commit\'s action.yml, and its tag names that commit', (t) => {
+  it('the recorded inputs are the ones the release commit\'s action.yml declares', (t) => {
     const actionYml = git('show', `${PINNED_RELEASE.sha}:action.yml`);
-    if (actionYml === undefined) {
-      // A shallow checkout (as in CI) has no release commit; the record above stands for it there.
-      t.skip(`release commit ${PINNED_RELEASE.sha} is not in this clone; fetch the tag ${PINNED_RELEASE.version} to check the record`);
-      return;
-    }
+    if (actionYml === undefined) return missing(t, `release commit ${PINNED_RELEASE.sha}`);
     const declared = (parse(actionYml) as { inputs: Record<string, { required?: boolean }> }).inputs;
     assert.deepEqual(
       Object.fromEntries(Object.entries(declared).map(([name, input]) => [name, { required: input.required === true }])),
       PINNED_RELEASE.inputs,
     );
+  });
+
+  it('the recorded version\'s tag names the pinned commit', (t) => {
     const tagged = git('rev-parse', '--verify', '--quiet', `refs/tags/${PINNED_RELEASE.version}^{commit}`);
-    if (tagged !== undefined) assert.equal(tagged.trim(), PINNED_RELEASE.sha, `the tag ${PINNED_RELEASE.version}`);
+    if (tagged === undefined) return missing(t, `the tag ${PINNED_RELEASE.version}`);
+    assert.equal(tagged.trim(), PINNED_RELEASE.sha, `the tag ${PINNED_RELEASE.version}`);
   });
 });
