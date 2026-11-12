@@ -51,7 +51,7 @@ import { REPO_ROOT, engineEntry } from './engine.ts';
 import { canaryIsolated, type CanaryFacts } from './security-canary.ts';
 import { isAppBot } from './workflows.ts';
 import type { PushActivity } from './github.ts';
-import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
+import { isDocumentWrite, QUIET_SUBJECT, UNTOUCHED_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
 import { documentPaths, MOVE_SOURCE_FOLDER, projectFolderOf, projectFolders } from './step-helpers.ts';
@@ -1870,6 +1870,8 @@ export const SUBJECTS: Record<string, Compute> = {
     return images.length > 0 && images.every((image) => bytes.has(image));
   },
   'tracked.restoredFileExists': async (env) => (await env.view()).files.has((await target(env)).path),
+  // The file `git.add` added, on the tracked branch: kept by a run that must change nothing.
+  'tracked.addedFileExists': async (env) => (await env.view()).files.has(observed(env.ctx, 'git.added') as string),
   'tracked.bothEditorChangesPresent': async (env) => {
     // The UI session records the text each editor typed.
     const typed = observed(env.ctx, 'ui.typedTexts') as string[];
@@ -2203,7 +2205,7 @@ function setupFailureValue(ctx: RunContext, subject: string): string {
  * Subjects that also name one run, `runs.<n|last>.<subject>`: computed on the
  * world the harness snapshotted right after that run (`harness.runView.<n>`).
  */
-export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|suspended\.(?:count|contentsCurrent|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|commentsRefused|marksRestored|comments)|normal\.(?:open|merged|closedEmpty))$/;
+export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|suspended\.(?:count|contentsCurrent|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|commentsRefused|marksRestored|comments)|normal\.(?:open|merged|closedEmpty)|tracked\.addedFileExists)$/;
 
 /** The runs whose world the scenario asserts on (`runs.<n|last>.` document subjects): their indices, and whether the last. */
 function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {
@@ -2224,7 +2226,7 @@ function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {
  * (`target`, `perTarget`). A run's snapshot keeps them as they were at the
  * run's end, so a later step that picks a target changes no earlier run.
  */
-const TARGET_SELECTION = ['target.path', 'target.id', 'git.moved', 'fixture.document'] as const;
+const TARGET_SELECTION = ['target.path', 'target.id', 'git.moved', 'git.added', 'fixture.document'] as const;
 
 /** The world right after a run, with the target selection of that moment. */
 interface RunView {
@@ -2261,7 +2263,7 @@ export type SubjectSource = 'observed' | 'harness' | 'engine' | 'ui';
 /** Where a subject's value comes from, or null when nothing provides it (a harness gap). */
 export function subjectSource(subject: string): SubjectSource | null {
   const name = subject.startsWith('before.') ? subject.slice('before.'.length) : subject;
-  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || RUN_VIEW_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name)))) return 'harness';
+  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || UNTOUCHED_SUBJECT.test(name) || RUN_VIEW_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name)))) return 'harness';
   if (ENGINE_FAMILIES.some((pattern) => pattern.test(name))) return 'engine';
   if (name.startsWith('ui.')) return 'ui';
   return null;
@@ -2395,6 +2397,18 @@ function quietValue(ctx: RunContext, subject: string): string[] {
 }
 
 /**
+ * What run <n|last> of the scenario changed in the world (quiet.ts,
+ * `untouchedFailures`), empty when it changed nothing. As for quiet, the
+ * run must have been watched.
+ */
+function untouchedValue(ctx: RunContext, subject: string): string[] {
+  const index = ownRunIndex(ctx, (UNTOUCHED_SUBJECT.exec(subject) as RegExpExecArray)[1] as string, subject);
+  const changes = ctx.observations.get(`harness.untouched.${index}`) as string[] | undefined;
+  if (changes === undefined) throw new Error(`engine run ${index} was not watched for ${subject}`);
+  return changes;
+}
+
+/**
  * A document text subject on the world right after run <n|last>. The run
  * must have been snapshotted: neither the report nor the world at the end
  * stands in for that moment.
@@ -2415,6 +2429,7 @@ async function runViewValue(ctx: RunContext, subject: string): Promise<unknown> 
 export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
   if (ctx.observations.has(subject) && !NORMALIZED_OBSERVATIONS.has(subject)) return { known: true, value: ctx.observations.get(subject) };
   if (QUIET_SUBJECT.test(subject)) return { known: true, value: quietValue(ctx, subject) };
+  if (UNTOUCHED_SUBJECT.test(subject)) return { known: true, value: untouchedValue(ctx, subject) };
   if (RUN_VIEW_SUBJECT.test(subject)) return { known: true, value: await runViewValue(ctx, subject) };
   if (SETUP_FAILURE_SUBJECT.test(subject)) return { known: true, value: setupFailureValue(ctx, subject) };
   const before = subject.startsWith('before.');
