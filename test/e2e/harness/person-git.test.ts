@@ -144,7 +144,7 @@ describe('the person clone pull', () => {
 
   it('hides URL credentials and token-like query values', () => {
     assert.equal(redactCredentials('https://user:pass@host/repo.git'), 'https://***@host/repo.git');
-    assert.equal(redactCredentials('see https://x-access-token:ghs_abc@github.com/o/r and ?sig=zzz&ok=1'), 'see https://***@github.com/o/r and ?sig=***&ok=1');
+    assert.equal(redactCredentials('see https://person:token@example.com/o/r and ?sig=zzz&ok=1'), 'see https://***@example.com/o/r and ?sig=***&ok=1');
     assert.equal(redactCredentials('no secrets here: refs/heads/t/aaaaaa/main'), 'no secrets here: refs/heads/t/aaaaaa/main');
     assert.equal(withoutCredentials('https://user:pass@host/repo.git?access_token=abc'), 'https://host/repo.git');
     assert.equal(withoutCredentials('/srv/sandbox.git'), '/srv/sandbox.git');
