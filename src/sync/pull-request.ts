@@ -7,17 +7,24 @@
 // snapshot starts again from Linear. Pending edits that change the same lines
 // as a later Linear capture or tracked-branch edit are merged with the sync's
 // conflict markers, both versions kept, so the pull request still merges and
-// the conflict travels like any text. It moves only when `linear` brings the tracked branch
-// something the branch does not bring yet: `linear` gains a merge of the
-// tracked branch on every run that writes to Linear (step 5), and moving the
-// branch for those would restart the checks on every run. A new head or pull
-// request gets a bounded grace period for checks; if they pass, this run
-// merges with a merge commit. Otherwise a later run reads them again.
+// the conflict travels like any text. The branch moves for Linear only when
+// `linear` brings the tracked branch something the branch does not bring yet:
+// `linear` gains a merge of the tracked branch on every run that writes to
+// Linear (step 5), and moving the branch for those would restart the checks on
+// every run. A new head or pull request gets a bounded grace period for
+// checks; if they pass, this run merges with a merge commit. Otherwise a later
+// run reads them again.
+//
+// A head that git merges only by pairing a rename with an edit of the old
+// path gets the tracked branch merged in: GitHub's merge does not pair them
+// and refuses such a head as conflicting.
 //
 // A merge GitHub refuses is noted in the pull request's description, with
-// the head, the tracked branch and GitHub's reason. A later run that meets
-// the same refusal on the same head and tracked branch reads the note back
-// and reports a setup error: nothing will change until a person does.
+// the head, the tracked branch and GitHub's reason. A later run reads the note
+// back. When GitHub refused the head as conflicting and the head lacks the
+// tracked branch's tip, it merges the tracked branch in. Otherwise the same
+// refusal on the same head and tracked branch is a setup error: nothing will
+// change until a person does.
 
 import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import {
@@ -61,6 +68,8 @@ export const SYNC_PULL_REQUEST_TITLE = 'Changes from Linear';
 export const SYNC_BRANCH_MERGE_MESSAGE = "Merge Linear's latest changes";
 /** The message of a merge of the tracked branch into the sync branch, made when pending edits there conflict with it. */
 export const TRACKED_MERGE_MESSAGE = 'Merge the tracked branch into the sync branch';
+/** GitHub's reason for a merge it refuses because the head conflicts with the base ("Pull Request has merge conflicts"). */
+const CONFLICT_REFUSAL = /merge conflict/i;
 /** Paths listed in the pull request's description; the rest are counted. */
 const LISTED_PATHS = 200;
 
@@ -238,11 +247,19 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     }
     if (head === null) return { ...result, code: 'conflict' };
 
+    const noted = open === null ? null : readRefusal(open.body);
+    // The hold covers the branch as it came into this run, also when Linear's changes joined it below: the new head
+    // still lacks the tracked branch's fix until it is merged in.
+    let hold = held !== null && held.head === sync ? held : null;
     let headTree = await mergedTree(git, tracked, head);
-    if (headTree === null) {
+    // A held head takes in the tracked tip only once that tip passes (below), never for GitHub's sake.
+    if (headTree === null || (hold === null && (await needsTrackedMerge(git, tracked, head, noted)))) {
       // Pending edits on the sync branch and a later tracked-branch edit change
       // the same lines: the tracked branch is merged into the sync branch, both
-      // versions between conflict markers, so the pull request can merge.
+      // versions between conflict markers, so the pull request can merge. The
+      // same when only rename detection merges them, or GitHub refused this
+      // head as conflicting: the merge commit pairs the rename, so GitHub's
+      // merge is trivial.
       const merged = await merger(head, tracked, [head, tracked], TRACKED_MERGE_MESSAGE);
       // A conflicting file that cannot hold markers (it is no document) waits for a person.
       if (merged === null) return { ...result, code: 'conflict' };
@@ -250,9 +267,6 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       addResolution(resolved, merged);
       headTree = await git.text(['rev-parse', `${head}^{tree}`]);
     }
-    // The hold covers the branch as it came into this run, also when Linear's changes joined it above: the new head
-    // still lacks the tracked branch's fix until it is merged in.
-    let hold = held !== null && held.head === sync ? held : null;
     // A held branch: once the tracked branch's tip no longer fails those checks (a fix, or a person's rerun there),
     // the sync branch merges it, so the checks run again on a head that holds that tip.
     if (hold !== null && !(await isAncestor(git, tracked, head))) {
@@ -279,7 +293,6 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     result.paths = (await git.text(['diff', '--name-only', '--no-renames', trackedTree, headTree])).split('\n').filter(Boolean);
 
     // An earlier refusal stays noted while it still applies: the same head on the same tracked branch.
-    const noted = open === null ? null : readRefusal(open.body);
     const earlier = noted !== null && noted.head === head && noted.base === tracked ? noted : null;
     // The deadline runs from the push of this head, noted in the description; a new head starts it now.
     const since = headSince(open?.body, head, new Date());
@@ -406,6 +419,23 @@ async function mergedTree(git: Git, into: Oid, from: Oid): Promise<string | null
   const merged = await git.run(['merge-tree', '--write-tree', '--no-messages', into, from], { okCodes: [0, 1] });
   if (merged.code !== 0) return null;
   return merged.stdout.toString('utf8').split('\n')[0] as string;
+}
+
+/**
+ * Whether a head that git merges cleanly into the tracked branch still needs
+ * the tracked branch merged into it first. GitHub's merge does not pair a
+ * rename on one side with an edit of the old path on the other, so it
+ * refuses such a head as conflicting. A head GitHub already refused as
+ * conflicting gets the merge too, also after the tracked branch moved, so a
+ * conflict GitHub sees and git does not never becomes a setup error. A head
+ * that holds the tracked branch's tip merges trivially.
+ */
+async function needsTrackedMerge(git: Git, tracked: Oid, head: Oid, noted: MergeRefusal | null): Promise<boolean> {
+  if (await isAncestor(git, tracked, head)) return false;
+  if (noted !== null && noted.head === head && CONFLICT_REFUSAL.test(noted.reason)) return true;
+  // `merge.renames` rather than `-X no-renames`, which merge-tree does not take in every supported Git release.
+  const plain = await git.run(['-c', 'merge.renames=false', 'merge-tree', '--write-tree', '--no-messages', tracked, head], { okCodes: [0, 1] });
+  return plain.code !== 0;
 }
 
 async function isAncestor(git: Git, ancestor: Oid, descendant: Oid): Promise<boolean> {

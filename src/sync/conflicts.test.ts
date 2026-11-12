@@ -15,7 +15,7 @@ import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { detectConflicts, MARKERS, RETITLED_COMMENT } from '../merge/index.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
-import { type Fixture, createFixture } from '../state/test-helpers.ts';
+import { type Fixture, createFixture, mergeOnGitHub } from '../state/test-helpers.ts';
 import { CONFLICT_COMMENT, MARKS } from './marks.ts';
 import { stableId } from './stable-id.ts';
 
@@ -135,18 +135,7 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.fail('the sync did not settle');
   }
 
-  async function mergeOnRemote(pr: { head: string; base: string; number: number }, sha: string): Promise<{ sha: string } | { status: number }> {
-    if ((await rev(`refs/heads/${pr.head}`)) !== sha) return { status: 409 };
-    const base = await rev(`refs/heads/${pr.base}`);
-    const merged = await fixture.remote.run(['merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
-    if (merged.code !== 0) return { status: 405 };
-    const tree = merged.stdout.toString('utf8').split('\n')[0] as string;
-    const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number} from owner/${pr.head}`], {
-      env: { GIT_AUTHOR_NAME: 'sync-app[bot]', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@example.com' },
-    });
-    await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
-    return { sha: commit };
-  }
+  const mergeOnRemote = (pr: { head: string; base: string; number: number }, sha: string) => mergeOnGitHub(fixture, pr, sha);
 
   /** I3: every commit the tracked branch gained is the scenario's own or a merge of a sync branch head. */
   async function assertTrackedHistory() {
