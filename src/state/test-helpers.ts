@@ -154,3 +154,26 @@ export async function remoteRef(fixture: Fixture, ref: string): Promise<string |
   const result = await fixture.remote.run(['rev-parse', '--verify', '--quiet', ref], { okCodes: [0, 1] });
   return result.code === 0 ? result.stdout.toString('utf8').trim() : null;
 }
+
+/** The author and committer of a merge the fake GitHub makes. */
+const GITHUB_MERGER = { GIT_AUTHOR_NAME: 'sync-app[bot]', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@example.com' };
+
+/**
+ * Merges a pull request in the bare remote as GitHub does: a merge commit,
+ * only while the head is still `sha` (409 otherwise). GitHub's merge does
+ * not pair a rename on one side with an edit of the old path on the other:
+ * it refuses such a head with "Pull Request has merge conflicts" (405), even
+ * where git's own merge detects the rename. So the fake merges without
+ * rename detection.
+ */
+export async function mergeOnGitHub(fixture: Fixture, pr: { head: string; base: string; number: number }, sha: string, message?: string): Promise<{ sha: string } | { status: number; message?: string }> {
+  if ((await remoteRef(fixture, `refs/heads/${pr.head}`)) !== sha) return { status: 409 };
+  const base = await remoteRef(fixture, `refs/heads/${pr.base}`);
+  if (base === null) return { status: 422 };
+  const merged = await fixture.remote.run(['-c', 'merge.renames=false', 'merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
+  if (merged.code !== 0) return { status: 405, message: 'Pull Request has merge conflicts' };
+  const tree = merged.stdout.toString('utf8').split('\n')[0] as string;
+  const commit = (await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', message ?? `Merge pull request #${pr.number} from owner/${pr.head}`], { env: GITHUB_MERGER })).trim();
+  await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
+  return { sha: commit };
+}
