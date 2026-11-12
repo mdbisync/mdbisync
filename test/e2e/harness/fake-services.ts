@@ -12,16 +12,17 @@ import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '..
 import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs } from './checks.ts';
-import type { RunContext } from './context.ts';
+import type { LiveWorld, RunContext } from './context.ts';
 import { engineInputs, type EngineResult } from './engine.ts';
 import { SandboxRest } from './github.ts';
 import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
 import type { CheckOutcome } from './results.ts';
+import { setupState } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
-import type { Scenario } from './spec.ts';
+import type { Scenario, Step } from './spec.ts';
 import { runStep, watchRun, STEP_ACTIONS } from './steps.ts';
-import { BEFORE_VIEW, refreshView, takeStartView } from './subjects.ts';
+import { refreshView } from './subjects.ts';
 
 export interface FakeServiceOptions {
   /** Adjusts the fake world before anything runs. */
@@ -30,12 +31,17 @@ export interface FakeServiceOptions {
   inspect?: (ctx: RunContext) => Promise<void>;
 }
 
+/** Two documents of two paragraphs each, for specs that need no content of their own. */
+export const DOCUMENTS: Readonly<Record<string, string>> = Object.fromEntries(Array.from({ length: 2 }, (_, i) => [`eng/notes/item-${i}.md`, `# Notes ${i}\n\nFirst paragraph.\n\nSecond paragraph.\n`]));
+
 /**
  * Seeds `documents` into the project folder `eng/notes` (Linear project
- * "Field notes"), runs an initial sync as setup, then the scenario's steps
- * and its checks, and returns the checks' outcomes.
+ * "Field notes"), runs the live setup of the scenario's `setup.state` (for a
+ * converged start the initial sync, for a conflicted one also the setup
+ * conflict and the runs that bring it to the tracked branch), then the
+ * scenario's steps and its checks, and returns the checks' outcomes.
  */
-export async function runOnFakeServices(t: TestContext, scenario: Scenario, documents: Record<string, string>, options: FakeServiceOptions = {}): Promise<CheckOutcome[]> {
+export async function runOnFakeServices(t: TestContext, scenario: Scenario, documents: Readonly<Record<string, string>>, options: FakeServiceOptions = {}): Promise<CheckOutcome[]> {
   const fixture = await createFixture();
   try {
     const names = runNames('aaaaaa');
@@ -90,6 +96,7 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
         tree: { paths: new Map(Object.keys(documents).map((p) => [p, p])), rewritten: new Map([['eng/notes/README.md', tree['eng/notes/README.md']]]), projects: new Map([['PROJECT_ENG_1', 'Field notes']]), teams: new Set(['ENG']), teamZones: new Map() },
         manifest: { files: Object.keys(documents).map((path) => ({ path, synced: true, kind: 'markdown', class: null, canary: null })) },
         projects: new Map([['PROJECT_ENG_1', { id: 'project-api', name: 'Field notes' }]]), teams: new Map([['ENG', { id: 'team-eng', key: 'ENG' }]]), documentUrlBase: 'https://linear.app/example-team/document',
+        seededDocuments: [],
       },
       proxy: null, owned: new OwnershipLedger(join(fixture.root, 'state'), names.runId), checkpoints: new CheckpointControl(join(fixture.root, 'hooks')),
       engine: { results: [], setupRuns: 0, env: {}, restores: [] }, edits: [], ownCommits: [], observations: new Map(), sequence: 0, uiSteps: 0,
@@ -108,21 +115,25 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
         ctx.engine.results.push({ command, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, remote: { runId: ctx.engine.results.length, runAttempt: 1, linearEngine: true, requests }, report: JSON.parse(await readFile(reportFile, 'utf8')), summary: await readFile(summaryFile, 'utf8'), signal: null, durationMs: 0, timedOut: false, notImplemented: false } as EngineResult);
       });
     };
-    await sync('initial-sync');
-    ctx.engine.setupRuns = 1;
-    const history = [await snapshotRefs(ctx)];
-    ctx.observations.set('refHistory', history);
-    ctx.observations.set('start.refs', history[0]);
-    ctx.observations.set(BEFORE_VIEW, await takeStartView(ctx));
-    for (const step of scenario.steps) {
-      t.diagnostic(`${step.kind}.${step.action} ${JSON.stringify(step.args)}`);
-      if (step.kind === 'run' && step.action === 'settle') {
+    // Sync runs go to the in-process engine, the other steps to the harness's executors.
+    const step = async (stepCtx: RunContext, next: Step) => {
+      t.diagnostic(`${next.kind}.${next.action} ${JSON.stringify(next.args)}`);
+      if (next.kind === 'run' && next.action === 'settle') {
         for (let i = 0; i < 4; i++) {
           await sync();
-          if (ctx.engine.results.at(-1)?.report?.['changed'] === false) break;
+          if (stepCtx.engine.results.at(-1)?.report?.['changed'] === false) break;
         }
-      } else if (step.kind === 'run') await sync();
-      else await runStep(ctx, step);
+      } else if (next.kind === 'run' && (next.action === 'sync' || next.action === 'capture')) await sync();
+      else if (next.kind === 'run' && next.action === 'initial-sync') await sync('initial-sync');
+      // Other runs (lint, fix, workflows, cleanup) have no in-process counterpart here.
+      else if (next.kind === 'run') throw new Error(`the fake-service specs cannot run run.${next.action}`);
+      else await runStep(stepCtx, next);
+    };
+    await setupState(ctx, ctx.live as LiveWorld, { runStep: step });
+    const history = [await snapshotRefs(ctx)];
+    ctx.observations.set('refHistory', history);
+    for (const next of scenario.steps) {
+      await step(ctx, next);
       history.push(await snapshotRefs(ctx));
       refreshView(ctx);
     }
