@@ -112,9 +112,12 @@ ongoing sync runs. You do not need to wait for a run to finish:
 - Changes on both sides use the three-way merge described above. Different
   paragraphs merge; competing changes to the same paragraph keep both
   versions with [conflict markers](conflicts.md).
-- If a document changes in Linear between capture and its final re-read,
-  the run skips that document. The next run captures the newer text and
-  tries again; other documents keep syncing.
+- If an already tracked document changes in Linear between capture and its
+  final re-read, the run skips that document. The next run captures the newer text and
+  tries again; other documents keep syncing. This check does not cover adopting
+  or recreating documents left unrecorded by a stopped run: those paths can
+  overwrite edits made before the re-read too. Wait for recovery to finish
+  before editing those documents.
 - A push that arrives after the run read the tracked branch is picked up by
   a later run. Commits on the sync branch are kept too, including changes
   from a person or CI. Closing its pull request causes a later run to open
@@ -122,14 +125,16 @@ ongoing sync runs. You do not need to wait for a run to finish:
 
 There is a remaining race: Linear's document writes accept no version
 condition. An edit made after the final re-read but before the write lands
-can be lost. The run's `rereadWindowMs` measurement is the largest interval
-from a re-read's answer to a successful write's answer, including retries;
-the write lands somewhere inside it. It is an upper bound, not a guarantee
-of a fixed safe interval.
+can be lost. The run's `rereadWindowMs` measurement in the JSON report
+([`report-file`](configuration.md#action-inputs)) is the largest interval from
+receipt of a batch re-read's answer to receipt of a successful write's answer. It
+includes earlier writes in that batch and retries. It excludes the time
+between Linear reading the document and the client receiving that response,
+so it does not bound the entire race or establish a fixed safe interval.
 
 In a live race test, the run was deliberately paused after the re-read
-while 100 edit markers were written. The held interval measured **82,077 ms**
-(82.077 seconds), and all 100 markers were lost. An earlier live test held
+while 100 edit markers were written. The test harness measured a held interval
+of **82,077 ms** (82.077 seconds), and all 100 markers were lost. An earlier live test held
 the interval for 88,471 ms and also lost 100 markers. These artificial
 pauses demonstrate the risk; they are not normal write latency. Tests with
 a local fake service and no pause measured 4.4–12.9 ms across six runs;
@@ -153,8 +158,8 @@ running and one pending run in the group: a new arrival replaces an older
 pending run, and does not cancel the running one. This is not a FIFO queue
 that executes every trigger. A later ongoing-sync run reads the current
 state, so replacing a pending trigger does not discard the edits it would
-have read. A live check using push and dispatched schedule ticks observed
-at most one active run, at least one replaced pending run, and all edits
+have read. A live check using pushes and manual dispatches standing in for
+scheduled runs observed at most one active run, at least one replaced pending run, and all edits
 preserved.
 
 The group serializes these workflows in one repository. It does not lock
