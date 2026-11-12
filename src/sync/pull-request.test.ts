@@ -1204,13 +1204,15 @@ describe('sync: the sync pull request', () => {
     document.trashed = true;
     touch(document);
     await sync();
-    await releaseHeld();
+    const released = await releaseHeld();
     assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/heads/main:${path}`], {okCodes:[0,128]})).code, 128);
     assert.equal(document.trashed, true);
     assert.equal((await ids())[path], undefined);
-    // Released while in the trash: its comment is resolved before its id is forgotten.
+    // Released while in the trash: Linear refuses to resolve its comment, so the
+    // release reports the refusal once and the comment stays as it is.
+    assert.deepEqual(released.report.pullRequest?.holdMarks?.unresolved?.map(({ path: where }) => where), [path]);
     assert.equal(commentsOf(document).length, 1);
-    assert.equal(commentsOf(document)[0]?.resolved, true);
+    assert.equal(commentsOf(document)[0]?.resolved, undefined);
   });
 
   /** Suspends the plan, then trashes its document in Linear, so the batch releases while it is in the trash. */
@@ -1241,7 +1243,8 @@ describe('sync: the sync pull request', () => {
   it('L5-32: a comment Linear will not resolve on a released document in the trash is reported once and not tried again', async () => {
     const path = 'eng/notes/plan.md';
     const document = await suspendThenTrash(path);
-    const resolve = onResolve(() => linearAnswer(200, 'INPUT_ERROR'));
+    // The fake refuses as Linear does; the override only counts the requests.
+    const resolve = onResolve(() => undefined);
     const released = await releaseHeld();
     const marks = released.report.pullRequest?.holdMarks;
     assert.equal(marks?.code, undefined);
@@ -1280,7 +1283,7 @@ describe('sync: the sync pull request', () => {
     // A token refusal, then a server failure Linear reports with HTTP 200: neither is about the comment.
     const answers = [linearAnswer(401, 'AUTHENTICATION_ERROR'), linearAnswer(200, 'DEADLOCK_DETECTED')];
     let refused = true;
-    onResolve(() => (refused ? answers.shift() : undefined));
+    const resolve = onResolve(() => (refused ? answers.shift() : undefined));
     checksOn(await rev(SUSPENDED), FAILED);
     await sync();
     checksOn(await rev(SUSPENDED), PASSED);
@@ -1292,14 +1295,22 @@ describe('sync: the sync pull request', () => {
     const again = await sync();
     assert.equal(again.report.pullRequest?.holdMarks?.code, 'write-failed');
     assert.equal(again.report.pullRequest?.holdMarks?.unresolved, undefined);
+    // Then Linear answers about the comment itself: it refuses to resolve it
+    // in the trash. That answer is final: reported once, not tried again.
     refused = false;
     const next = await sync();
-    assert.deepEqual(next.report.pullRequest?.holdMarks?.cleared, [path]);
-    assert.equal(commentsOf(document)[0]?.resolved, true);
+    assert.equal(next.report.pullRequest?.holdMarks?.code, undefined);
+    assert.deepEqual(next.report.pullRequest?.holdMarks?.unresolved?.map(({ path: where }) => where), [path]);
+    assert.match(next.report.pullRequest?.holdMarks?.unresolved?.[0]?.error ?? '', /INPUT_ERROR/);
+    assert.equal(commentsOf(document)[0]?.resolved, undefined);
     assert.equal((await ids())[path], undefined);
+    assert.equal(resolve.calls, 3);
+    const quiet = await sync();
+    assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
+    assert.equal(resolve.calls, 3, 'the refused comment was tried again');
   });
 
-  it('L5-32: a comment on a released document in the trash that Linear could not resolve yet is resolved by the next run', async () => {
+  it('L5-32: a comment on a released document in the trash that Linear could not answer for yet is tried by the next run, which reports Linear\'s refusal', async () => {
     const path = 'eng/notes/plan.md';
     const document = await suspendThenTrash(path);
     let outage = true;
@@ -1312,7 +1323,7 @@ describe('sync: the sync pull request', () => {
     assert.equal(released.report.pullRequest?.holdMarks?.code, 'write-failed');
     assert.match(released.summary, /a later run goes on/);
     assert.equal(released.report.complete, false);
-    // The release is recorded, and the comment's id stays until it is resolved.
+    // The release is recorded, and the comment's id stays until Linear answers about it.
     assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/heads/main:${path}`], { okCodes: [0, 128] })).code, 128);
     const kept = (await ids())[path] as { saved?: { hold?: unknown }; releaseBase?: unknown } | undefined;
     assert.ok(kept?.saved?.hold !== undefined, 'the pending comment was forgotten');
@@ -1320,15 +1331,40 @@ describe('sync: the sync pull request', () => {
     outage = false;
     const next = await sync();
     assert.equal(next.result.exitCode, 0, next.result.stderr);
-    assert.deepEqual(next.report.pullRequest?.holdMarks?.cleared, [path]);
-    assert.match(next.summary, /Suspended documents in Linear: 1 cleared\./);
-    assert.equal(commentsOf(document)[0]?.resolved, true);
+    assert.equal(next.report.pullRequest?.holdMarks?.code, undefined);
+    assert.deepEqual(next.report.pullRequest?.holdMarks?.unresolved?.map(({ path: where }) => where), [path]);
+    assert.ok(next.summary.includes(`Linear refused to resolve the suspension comment of released documents: \`${path}\``), next.summary);
+    assert.equal(commentsOf(document)[0]?.resolved, undefined);
     assert.equal(document.trashed, true);
     assert.equal((await ids())[path], undefined);
     assert.equal(resolve.calls, 2);
     const quiet = await sync();
     assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
     assert.deepEqual(quiet.writes, []);
+  });
+
+  it('a released comment Linear could not resolve during an outage is resolved by the next run', async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne(path);
+    let outage = true;
+    const resolve = onResolve(() => (outage ? linearAnswer(500, 'INTERNAL_SERVER_ERROR') : undefined));
+    checksOn(await rev(SUSPENDED), FAILED);
+    await sync();
+    checksOn(await rev(SUSPENDED), PASSED);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.equal(released.report.pullRequest?.holdMarks?.code, 'write-failed');
+    assert.match(released.summary, /a later run goes on/);
+    assert.ok(((await ids())[path] as { saved?: { hold?: unknown } } | undefined)?.saved?.hold !== undefined, 'the pending comment was forgotten');
+    outage = false;
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.deepEqual(next.report.pullRequest?.holdMarks?.cleared, [path]);
+    assert.match(next.summary, /Suspended documents in Linear: 1 cleared\./);
+    assert.equal(commentsOf(await documentOf(path))[0]?.resolved, true);
+    assert.equal(resolve.calls, 2);
+    const quiet = await sync();
+    assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
   });
 
   /** Answers Linear's `mutation` with `answer` while it returns a response; other requests reach the fakes. */

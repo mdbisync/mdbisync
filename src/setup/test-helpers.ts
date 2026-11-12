@@ -438,7 +438,10 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     operationName: string;
   };
   if (/^\s*mutation/.test(query)) {
-    world.writes.push(operationName);
+    // Linear refuses to resolve a comment on a document in its trash (seen live 2026-11-12: INPUT_ERROR with HTTP 200).
+    // The refusal changes nothing, so it is not one of the writes the fake took; it still counts toward the rate limit.
+    const refusedResolve = operationName === 'ResolveComment' && commentOnTrashedDocument(world, variables.id as string);
+    if (!refusedResolve) world.writes.push(operationName);
     const write = world.linear.writes;
     write.count += 1;
     if (write.rateLimitAt !== undefined && write.count >= write.rateLimitAt) {
@@ -447,6 +450,7 @@ async function linear(world: FakeWorld, path: string, init: RequestInit | undefi
     if (write.reject?.(operationName, variables) === true) {
       return json(200, { errors: [{ message: 'Rejected by the fake', extensions: { code: 'INVALID_INPUT' } }], data: null });
     }
+    if (refusedResolve) return json(200, { errors: [{ message: 'Comment cannot be resolved', extensions: { code: 'INPUT_ERROR' } }], data: null });
     if (operationName === 'UpdateDocument' && !world.linear.documents.some((d) => d.id === variables.id)) {
       return json(200, { errors: [{ message: 'Entity not found: Document', extensions: { code: 'INPUT_ERROR' } }], data: null });
     }
@@ -614,6 +618,17 @@ function inDeletedProject(world: FakeWorld, id: string): boolean {
   return projectId !== undefined && world.linear.deletedProjects?.includes(projectId) === true;
 }
 
+/** Whether the comment `id` is on a document that is in the trash. */
+function commentOnTrashedDocument(world: FakeWorld, id: string): boolean {
+  const contentId = world.linear.comments.get(id)?.documentContentId;
+  return contentId !== undefined && world.linear.documents.some((d) => contentIdOf(d) === contentId && d.trashed === true);
+}
+
+/** The id of a document's content, which its comments name. */
+function contentIdOf(d: FakeDocument): string {
+  return `content-${d.id}`;
+}
+
 let clock = 0;
 
 /** Moves a document's `updatedAt` past every earlier change, as Linear does on a write. */
@@ -637,7 +652,7 @@ function documentNode(d: FakeDocument, withContent: boolean) {
     slugId: d.id,
     icon: d.icon ?? null,
     color: d.color ?? null,
-    documentContentId: `content-${d.id}`,
+    documentContentId: contentIdOf(d),
     trashed: d.trashed ?? null,
     archivedAt: d.archivedAt ?? null,
     createdAt: d.createdAt,

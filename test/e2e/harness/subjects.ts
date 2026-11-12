@@ -1305,6 +1305,34 @@ export const SUBJECTS: Record<string, Compute> = {
       return comments.length > 0 && comments.every((c) => typeof c.resolvedAt === 'string');
     });
   },
+  // Linear refuses to resolve the comment of a document in its trash. Each held
+  // document is in the trash and named once in a run's `holdMarks.unresolved`,
+  // with Linear's GraphQL refusal; its comment stays open, and every later run
+  // of the scenario finishes without hold work.
+  'suspended.commentsRefused': async (env) => {
+    const view = await env.view();
+    const before = env.ctx.observations.get(BEFORE_VIEW) as View;
+    const held = env.ctx.observations.get('suspended.documents') as Set<string> | undefined;
+    if (held === undefined || held.size === 0) return false;
+    const pathOf = new Map([...before.ids].map(([path, entry]) => [entry.id, path]));
+    const paths = [...held].map((id) => pathOf.get(id));
+    if (paths.some((path) => path === undefined)) return false;
+    const results = ownResults(env.ctx);
+    const marks = results.map((result) => (result.report?.['pullRequest'] as Record<string, unknown> | null | undefined)?.['holdMarks'] as { unresolved?: Array<{ path: string; error: string }> } | null | undefined);
+    const refusing = marks.flatMap((mark, index) => mark?.unresolved === undefined ? [] : [index]);
+    if (refusing.length !== 1) return false;
+    const unresolved = marks[refusing[0]!]!.unresolved!;
+    // A later run counts only when it finished with a report of its sync pull request and no hold work.
+    const later = results.slice(refusing[0]! + 1);
+    const quiet = later.length > 0 && later.every((result, i) => result.exitCode === 0 && result.report?.['pullRequest'] != null && marks[refusing[0]! + 1 + i] == null);
+    const trashedWithOpenComment = [...held].every((id) => {
+      const comments = (view.holdComments?.get(id) ?? []).filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT));
+      return view.documents.get(id)?.trashed === true && comments.length > 0 && comments.every((c) => c.resolvedAt === null);
+    });
+    return JSON.stringify(unresolved.map((item) => item.path).sort()) === JSON.stringify([...paths].sort())
+      && unresolved.every((item) => /^LinearGraphQLError INPUT_ERROR\b/.test(item.error))
+      && quiet && trashedWithOpenComment;
+  },
   'suspended.marksRestored': async (env) => {
     const view = await env.view();
     const before = env.ctx.observations.get(BEFORE_VIEW) as View;
@@ -2107,7 +2135,7 @@ function setupFailureValue(ctx: RunContext, subject: string): string {
  * Subjects that also name one run, `runs.<n|last>.<subject>`: computed on the
  * world the harness snapshotted right after that run (`harness.runView.<n>`).
  */
-export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|suspended\.(?:count|contentsCurrent|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|marksRestored|comments)|normal\.(?:open|merged|closedEmpty))$/;
+export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|suspended\.(?:count|contentsCurrent|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|commentsRefused|marksRestored|comments)|normal\.(?:open|merged|closedEmpty))$/;
 
 /** The runs whose world the scenario asserts on (`runs.<n|last>.` document subjects): their indices, and whether the last. */
 function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {
