@@ -80,13 +80,13 @@ for (const side of ['Linear', 'Git']) {
     world.events = [];
     const result = await world.reconcile();
     assert.equal(result.state, 'clear');
-    assert.deepEqual(world.events, ['update', 'save']);
+    assert.deepEqual(world.events, ['resolve', 'update', 'save']);
     assert.equal(world.document.icon, ':fire:');
     assert.equal(world.document.color, '#123456');
     assert.deepEqual(world.entry, { id: world.document.id });
     assert.equal(world.document.content, 'Resolved text.\n');
     await world.reconcile();
-    assert.deepEqual(world.events, ['update', 'save']);
+    assert.deepEqual(world.events, ['resolve', 'update', 'save']);
   });
 }
 
@@ -210,7 +210,7 @@ test('a failed ids cleanup after restoration resumes without losing the original
   world.failSave = false;
   world.events = [];
   await world.reconcile();
-  assert.deepEqual(world.events, ['save']);
+  assert.deepEqual(world.events, ['resolve', 'save']);
   assert.equal(world.entry.saved, undefined);
 });
 

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { detectConflicts } from '../merge/index.ts';
 import type { LinearClient, LinearDocument } from '../linear/index.ts';
 import type { HoldNotice, IdEntry } from '../state/index.ts';
+import type { ImageFinding } from './assets.ts';
 import { message } from '../messages.ts';
 
 export const MARKS = {
@@ -35,6 +36,8 @@ export interface SecurityFinding {
   line: number;
 }
 
+export type BlockedFinding = SecurityFinding | ImageFinding;
+
 export type MarkClient = Pick<LinearClient, 'updateDocument' | 'ensureDocumentComment' | 'resolveComment' | 'commentExists'>;
 export type MarkState = 'conflict' | 'blocked' | 'clear';
 
@@ -43,8 +46,8 @@ export interface MarkOptions {
   document: LinearDocument;
   entry: IdEntry;
   linear: MarkClient;
-  /** Current security-hook findings. Blocked takes precedence over conflict. */
-  blocked?: readonly SecurityFinding[];
+  /** Current image and security-hook findings. Blocked takes precedence over conflict. */
+  blocked?: readonly BlockedFinding[];
   /** Must durably record the entry in ids before resolving. Never just queue it. */
   persistEntry: (entry: IdEntry) => Promise<void>;
   /**
@@ -62,15 +65,22 @@ export interface MarkResult {
   commented: boolean;
 }
 
-function blockedComment(findings: readonly SecurityFinding[]): string {
-  const locations = [...new Set(findings.map(({ hook, line }) => {
+export const IMAGE_BLOCKED_COMMENT = 'Some images in this document cannot be synchronized. Fix the listed images and sync again.';
+
+function blockedComment(findings: readonly BlockedFinding[]): string {
+  const images = findings.filter((finding): finding is ImageFinding => 'image' in finding);
+  const hooks = findings.filter((finding): finding is SecurityFinding => 'hook' in finding);
+  const locations = [...new Set(hooks.map(({ hook, line }) => {
     // Hook configuration is untrusted input. Never copy matched text or a
     // malformed hook name into a public comment.
     const name = /^[a-zA-Z0-9_.-]{1,128}$/.test(hook) ? hook : 'security-check';
     const location = Number.isSafeInteger(line) && line > 0 ? `, line ${line}` : '';
     return `- Hook \`${name}\`${location}.`;
   }))].sort();
-  return `${BLOCKED_COMMENT}\n\n${locations.join('\n')}`;
+  const sections: string[] = [];
+  if (images.length > 0) sections.push(`${IMAGE_BLOCKED_COMMENT}\n\n${images.map(({image, total, line}) => `- Image ${image} of ${total} (line ${line}): not uploaded to this workspace. Upload the file instead of linking to it.`).join('\n')}`);
+  if (locations.length > 0) sections.push(`${BLOCKED_COMMENT}\n\n${locations.join('\n')}`);
+  return sections.join('\n\n');
 }
 
 /**
@@ -101,6 +111,8 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
     await persistEntry(entry);
     result.entry = entry;
   }
+
+  if (entry.saved?.notice !== undefined && entry.saved.notice.kind !== state) await resolveHold(linear, entry.saved.notice);
 
   if (state === 'clear') {
     if (entry.saved === undefined) return result;

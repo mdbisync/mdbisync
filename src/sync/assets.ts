@@ -3,6 +3,7 @@ import { posix } from 'node:path';
 import { destinations, findFileLinks, restoreFileLinks, type WrittenLink } from '../initial-sync/uploads.ts';
 import { type LinearReads, uploadReadKey } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
+import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
 
 export interface CapturedAssets {
@@ -15,6 +16,37 @@ const LIMIT = 10 * 1024 * 1024;
 function isUpload(url: string): boolean {
   try { const parsed = new URL(url); return parsed.protocol === 'https:' && parsed.hostname === 'uploads.linear.app' && parsed.username === '' && parsed.password === '' && parsed.port === ''; }
   catch { return false; }
+}
+
+/** Only positions are retained: a finding must never disclose a destination or alt text. */
+export interface ImageFinding {
+  image: number;
+  total: number;
+  line: number;
+  reason: 'not-uploaded';
+}
+
+export class ImageBlockedError extends Error {
+  readonly findings: ImageFinding[];
+  constructor(findings: ImageFinding[]) {
+    super('Images must be uploads.');
+    this.findings = findings;
+  }
+}
+
+/** Inspect the original Linear text, before localization or any download. */
+export function imageFindings(body: string): ImageFinding[] {
+  const tree = parse(body);
+  const definitions = new Map<string, string>();
+  visit(tree, (node) => {
+    if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
+  });
+  const images: Array<{ url: string; line: number }> = [];
+  visit(tree, (node) => {
+    if (node.type === 'image') images.push({url: node.url, line: line(node)});
+    else if (node.type === 'imageReference') images.push({url: definitions.get(node.identifier) ?? '', line: line(node)});
+  });
+  return images.flatMap((image, index) => isUpload(image.url) ? [] : [{image: index + 1, total: images.length, line: image.line, reason: 'not-uploaded' as const}]);
 }
 
 /** The caller authenticates the allowed upload host. Redirects cannot forward credentials elsewhere. */
@@ -75,6 +107,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   const downloaded = new Map<string, {bytes: Buffer; type: string}>();
 
   return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
+    const findings = imageFindings(body);
+    if (findings.length > 0) throw new ImageBlockedError(findings);
     const files = new Map<string, Buffer>();
     const additions: UploadMap = new Map();
     // Restore known URLs before restricting new downloads to the upload host.

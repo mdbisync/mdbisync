@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, afterEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY } from '../state/test-helpers.ts';
-import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds } from '../state/index.ts';
+import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { LinearClient, LinearStoppedError } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
@@ -11,6 +11,7 @@ import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
+import { lintInTree } from '../format/index.ts';
 import { capture } from './capture.ts';
 import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
@@ -355,6 +356,73 @@ describe('capture from Linear', () => {
     assert.equal(world.linear.documents[0]!.icon, 'Fire');
     assert.equal(world.linear.documents[0]!.color, '#123456');
     assert.equal((await readIds(context.git, accepted.state.ids)).get('docs/plan.md')?.saved, undefined);
+  });
+
+  for (const body of [
+    '![Image](https://example.com/a.png)\n',
+    '![Image](http://example.com/a.png)\n',
+    '![Image](data:image/png;base64,AAAA)\n',
+    '![Image](relative.png)\n',
+    '![Image](/absolute.png)\n',
+    '![Image]()\n',
+    '![Image][picture]\n\n[picture]: https://example.com/a.png\n',
+    '[![Image](https://example.com/a.png)](https://example.com)\n',
+  ]) {
+    it(`blocks non-upload images and clears the episode after correction: ${body.trim()}`, async () => {
+      Object.assign(world.linear.documents[0]!, {content:body, icon:'Fire', color:'#123456'});
+      world.linear.documents.push({id:'safe', title:'safe', projectId:'project-api', createdAt:'2026-01-02T00:00:00Z', content:'[Site](https://example.com/a.png)\n'});
+      let gets = 0;
+      const captureNow = () => capture(context, {config, state:context.fetched.state, fetch:async () => {gets++; throw new Error('Unexpected download');}});
+      const lintTree = async (commit: string) => {
+        const tree = await listTree(context.git, commit);
+        const files = new Set(tree.map(({path}) => path));
+        const markdown = tree.filter(({path}) => path.endsWith('.md'));
+        const blobs = await readBlobs(context.git, markdown.map(({oid}) => oid));
+        for (const {path, oid} of markdown) assert.deepEqual(lintInTree(path, blobs.get(oid)!.toString(), files), []);
+      };
+      const first = await captureNow();
+      assert.equal(first.ok, true);
+      assert.equal(first.blocked.length, 1);
+      assert.equal(gets, 0);
+      assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+      assert.equal(await text('docs/safe.md'), '[Site](https://example.com/a.png)\n');
+      await lintTree(first.state.linear!);
+      const comment = [...world.linear.comments.values()][0]!;
+      assert.equal(comment.body, 'Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n- Image 1 of 1 (line 1): not uploaded to this workspace. Upload the file instead of linking to it.');
+      assert.equal(world.linear.documents[0]!.icon, 'Cross');
+      assert.equal(world.linear.documents[0]!.color, '#EB5757');
+      await refresh();
+      await captureNow();
+      assert.equal(world.linear.comments.size, 1);
+      Object.assign(world.linear.documents[0]!, {content:'\n' + body, updatedAt:'2026-03-01T00:00:00Z'});
+      await refresh();
+      await captureNow();
+      assert.equal(world.linear.comments.size, 1);
+      assert.match(comment.body, /line 2/);
+      Object.assign(world.linear.documents[0]!, {content:'Corrected.\n', updatedAt:'2026-04-01T00:00:00Z'});
+      await refresh();
+      const fixed = await captureNow();
+      assert.equal(fixed.blocked.length, 0);
+      await lintTree(fixed.state.linear!);
+      assert.equal(comment.resolved, true);
+      assert.equal(world.linear.documents[0]!.icon, 'Fire');
+      assert.equal(world.linear.documents[0]!.color, '#123456');
+    });
+  }
+
+  it('combines image and security findings without downloading any asset or disclosing image text', async () => {
+    world.linear.documents[0]!.content = '![Allowed](https://uploads.linear.app/a.png)\n\n![private alt](https://example.com/private-destination)\n';
+    const result = await capture(context, {config, state:context.fetched.state,
+      fetch:async () => {throw new Error('Unexpected download');},
+      security:{configured:true, check:async () => [{hook:'secret-check', line:3}]},
+    });
+    assert.equal(result.blocked[0]!.findings.length, 2);
+    const comments = commentsOf('plan');
+    assert.equal(comments.length, 1);
+    assert.match(comments[0]!, /Image 2 of 2 \(line 3\)/);
+    assert.match(comments[0]!, /Hook `secret-check`, line 3/);
+    assert.ok(!comments[0]!.includes('private'));
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
   });
 
   it('downloads a pasted image, records an LFS pointer and populates the upload cache', async () => {
