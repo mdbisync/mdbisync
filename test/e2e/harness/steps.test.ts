@@ -1438,6 +1438,9 @@ async function localHookConfig(root: string): Promise<string> {
 }
 
 /** A finished engine run with the given report, as the harness records it. */
+/** The report of a sync that refuses with exit 4, as a pending initial pull request makes it (L1R-07). */
+const REFUSED = { operation: 'sync', ok: false, complete: false, changed: false, code: 'initial-pull-request-pending', writes: { linear: {}, git: {}, pullRequests: {} } };
+
 function engineRun(command: EngineResult['command'], report: Record<string, unknown>): EngineResult {
   return { command, exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report };
 }
@@ -4003,11 +4006,12 @@ describe('quiet runs through the harness', () => {
     }
   });
 
-  async function watchedRun(options: { moves: Array<'state' | 'tracked-tree' | 'tracked-commit' | 'sync'>; report?: Record<string, unknown>; pullRequests?: [unknown[], unknown[]]; writes?: number; watch?: boolean }) {
+  async function watchedRun(options: { moves: Array<'state' | 'tracked-tree' | 'tracked-commit' | 'sync' | 'sync-delete'>; report?: Record<string, unknown>; pullRequests?: [unknown[], unknown[]]; writes?: number; mutations?: number; unparsed?: number; syncBefore?: boolean; exitCode?: number; subject?: string; watch?: boolean }) {
     const { ctx, remoteGit } = await fakeRun();
+    if (options.syncBefore === true) await remoteGit.run(['update-ref', `refs/heads/${ctx.names.syncBranch}`, (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim()]);
     mkdirSync(await ctx.engineClone(), { recursive: true });
     mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
-    if (options.watch !== false) ctx.scenario = { ...ctx.scenario, checks: { ...ctx.scenario.checks, assertions: [{ subject: 'quiet.last', operator: 'equal', expected: [] }] } };
+    if (options.watch !== false) ctx.scenario = { ...ctx.scenario, checks: { ...ctx.scenario.checks, assertions: [{ subject: options.subject ?? 'quiet.last', operator: 'equal', expected: [] }] } };
     const lists = options.pullRequests ?? [[MERGED], [MERGED]];
     let listed = 0;
     Object.assign(ctx.live!, { rest: { pullRequests: async () => lists[Math.min(listed++, 1)] } });
@@ -4027,10 +4031,18 @@ describe('quiet runs through the harness', () => {
         if (move === 'tracked-tree') git('update-ref', ${JSON.stringify(`refs/heads/${names.trackedBranch}`)}, git('commit-tree', empty, '-p', tip, '-m', 'Change content'));
         if (move === 'tracked-commit') git('update-ref', ${JSON.stringify(`refs/heads/${names.trackedBranch}`)}, git('commit-tree', tip + '^{tree}', '-p', tip, '-m', 'Same content'));
         if (move === 'sync') git('update-ref', ${JSON.stringify(`refs/heads/${names.syncBranch}`)}, git('commit-tree', empty, '-m', 'Sync branch'));
+        if (move === 'sync-delete') git('update-ref', '-d', ${JSON.stringify(`refs/heads/${names.syncBranch}`)});
       }
       const writes = Array.from({ length: ${options.writes ?? 0} }, (_, n) => ({ n, at: 0, operation: 'documentUpdate', kind: 'mutation', status: 200, injected: false }));
-      writeFileSync(${JSON.stringify(records)}, JSON.stringify(writes));
+      // Mutations that are not document writes, one refused by Linear: a comment.
+      const others = Array.from({ length: ${options.mutations ?? 0} }, (_, n) => ({ n, at: 0, operation: 'commentCreate', kind: 'mutation', status: n === 0 ? 400 : 200, injected: false }));
+      // GraphQL bodies the proxy could not classify.
+      const unparsed = Array.from({ length: ${options.unparsed ?? 0} }, (_, n) => ({ n, at: 0, operation: 'unparsed', kind: 'other', status: 200, injected: false }));
+      // Every run mints and revokes its token: neither writes to the workspace.
+      const oauth = ['/oauth/token', '/oauth/revoke'].map((path, n) => ({ n, at: 0, operation: 'http ' + path, kind: 'other', status: 200, injected: false }));
+      writeFileSync(${JSON.stringify(records)}, JSON.stringify([...oauth, ...writes, ...others, ...unparsed]));
       writeFileSync(process.env.MDBISYNC_REPORT_FILE, JSON.stringify(${JSON.stringify({ ...QUIET_REPORT, ...options.report })}));
+      process.exitCode = ${options.exitCode ?? 0};
     `);
     const previous = process.env['MDBISYNC_ENGINE'];
     process.env['MDBISYNC_ENGINE'] = driver;
@@ -4091,6 +4103,143 @@ describe('quiet runs through the harness', () => {
     const ctx = await watchedRun({ moves: ['state'], watch: false });
     await assert.rejects(resolveSubject(ctx, 'quiet.last'), /was not watched/);
     await assert.rejects(resolveSubject(ctx, 'quiet.3'), ProductError);
+  });
+
+  describe('untouched: a run that must change nothing at all', () => {
+    const refused = (options: Parameters<typeof watchedRun>[0]) => watchedRun({ subject: 'untouched.last', exitCode: 4, report: REFUSED, ...options });
+    const CLOSED = { ...MERGED, merged_at: null };
+
+    it('is a harness subject', () => {
+      assert.equal(subjectSource('untouched.last'), 'harness');
+      assert.equal(subjectSource('untouched.1'), 'harness');
+      assert.equal(subjectSource('before.untouched.last'), null);
+    });
+
+    it('accepts a refused run that left every ref, pull request and Linear alone', async () => {
+      const ctx = await refused({ moves: [], pullRequests: [[CLOSED], [CLOSED]] });
+      assert.deepEqual(await resolveSubject(ctx, 'untouched.last'), { known: true, value: [] });
+      assert.deepEqual(await resolveSubject(ctx, 'runs.0.exitCode'), { known: true, value: 4 });
+      assert.deepEqual(await resolveSubject(ctx, 'runs.0.code'), { known: true, value: 'initial-pull-request-pending' });
+      assert.deepEqual(await resolveSubject(ctx, 'runs.0.writes.total'), { known: true, value: 0 });
+    });
+
+    it('rejects even the state ref write a quiet run may make', async () => {
+      // This world has only the ids state ref, so the merge record creates the linear one.
+      const ctx = await refused({ moves: ['state'] });
+      assert.deepEqual(await resolveSubject(ctx, 'untouched.last'), { known: true, value: [`ref ${ctx.names.refPrefix}/linear was created`] });
+    });
+
+    it('rejects a moved tracked branch and a sync branch created or deleted', async () => {
+      const moved = await refused({ moves: ['tracked-commit'] });
+      assert.deepEqual(await resolveSubject(moved, 'untouched.last'), { known: true, value: [`ref refs/heads/${moved.names.trackedBranch} moved`] });
+      const created = await refused({ moves: ['sync'] });
+      assert.deepEqual(await resolveSubject(created, 'untouched.last'), { known: true, value: [`ref refs/heads/${created.names.syncBranch} was created`] });
+      const deleted = await refused({ moves: ['sync-delete'], syncBefore: true });
+      assert.deepEqual(await resolveSubject(deleted, 'untouched.last'), { known: true, value: [`ref refs/heads/${deleted.names.syncBranch} was deleted`] });
+      // A branch made and removed within the run leaves the world as it was.
+      const gone = await refused({ moves: ['sync', 'sync-delete'] });
+      assert.deepEqual(await resolveSubject(gone, 'untouched.last'), { known: true, value: [] });
+    });
+
+    it('rejects a merged or reopened pull request, as a sync that merged the abandoned snapshot would leave', async () => {
+      const merged = await refused({ moves: ['tracked-tree'], pullRequests: [[CLOSED], [{ ...CLOSED, number: 31, merged_at: '2026-01-02T00:00:00Z' }, CLOSED]] });
+      assert.deepEqual(await resolveSubject(merged, 'untouched.last'), { known: true, value: [`ref refs/heads/${merged.names.trackedBranch} moved`, 'pull request #31 was opened'] });
+      const reopened = await refused({ moves: [], pullRequests: [[CLOSED], [{ ...CLOSED, state: 'open' }]] });
+      assert.deepEqual(await resolveSubject(reopened, 'untouched.last'), { known: true, value: ['pull request #30 was updated'] });
+    });
+
+    it('rejects every Linear mutation the proxy passed on, refused and unclassified ones included, but not the token calls', async () => {
+      const ctx = await refused({ moves: [], writes: 1, mutations: 2, unparsed: 1 });
+      assert.deepEqual(await resolveSubject(ctx, 'untouched.last'), { known: true, value: ['4 Linear mutations were sent'] });
+    });
+
+    it('gives no verdict for a run it did not watch', async () => {
+      const ctx = await refused({ moves: [], watch: false });
+      await assert.rejects(resolveSubject(ctx, 'untouched.last'), /was not watched/);
+      await assert.rejects(resolveSubject(ctx, 'untouched.2'), ProductError);
+    });
+  });
+});
+
+describe('abandoning an initial pull request from Linear (L1R-07)', () => {
+  const l1r07 = scenarios.find((item) => item.id === 'L1R-07')!;
+  const OPEN_INITIAL = { number: 40, state: 'open', title: 'Changes from Linear', body: 'The initial import.', head: { ref: '', sha: 'b'.repeat(40) }, base: { ref: 't/aaaaaa/main' }, merged_at: null, created_at: '2026-01-01T00:00:00Z' };
+  const report = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, 'run-reports', `${name}.json`), 'utf8')) as Record<string, unknown>;
+  /** Removes a file from the tracked branch, as a merge that accepted its removal would. */
+  async function removeFile(ctx: RunContext, path: string): Promise<void> {
+    const git = await ctx.person();
+    await git.run(['pull', '--quiet', 'origin', ctx.names.trackedBranch]);
+    await git.run(['rm', '--quiet', path]);
+    await git.run(['commit', '--quiet', '-m', 'Remove the notes']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+  }
+
+  it('closes the pull request and deletes its branch before the sync whose refusal it checks', () => {
+    const steps = l1r07.steps.map((step) => `${step.kind}.${step.action}`);
+    assert.deepEqual(steps, ['git.add', 'run.initial-sync', 'git.close-pr', 'git.delete-sync-branch', 'run.sync', 'run.initial-sync', 'merge.pull-request', 'run.sync']);
+    // The refusing sync is the second run: runs.1.
+    const expected = new Map(l1r07.checks.assertions.map((assertion) => [assertion.subject, assertion.expected]));
+    assert.equal(expected.get('runs.1.exitCode'), 4);
+    assert.equal(expected.get('runs.1.code'), 'initial-pull-request-pending');
+    assert.deepEqual(expected.get('untouched.1'), []);
+    assert.equal(expected.get('runs.1.tracked.addedFileExists'), true);
+    assert.deepEqual(expected.get('quiet.last'), []);
+  });
+
+  it('sees the git-only file right after the refusing sync, though a later merge removes it', async () => {
+    const run = await fakeRun();
+    run.ctx.scenario = { ...run.ctx.scenario, checks: l1r07.checks };
+    mkdirSync(run.ctx.sandbox!.cache.dir, { recursive: true });
+    await runStep(run.ctx, { kind: 'git', action: 'add', args: {} });
+    const added = run.ctx.observations.get('git.added') as string;
+    assert.ok((await run.remoteFile(added)).includes('# Notes'));
+    await watchRun(run.ctx, { throughProxy: true }, async () => void run.ctx.engine.results.push(engineRun('initial-sync', report('reverse-initial-sync'))));
+    await watchRun(run.ctx, { throughProxy: true }, async () => void run.ctx.engine.results.push({ ...engineRun('sync', REFUSED), exitCode: 4 }));
+    assert.deepEqual(await resolveSubject(run.ctx, 'untouched.1'), { known: true, value: [] });
+    // The person's merge of the replacement snapshot removes the file.
+    await removeFile(run.ctx, added);
+    refreshView(run.ctx);
+    assert.deepEqual(await resolveSubject(run.ctx, 'runs.1.tracked.addedFileExists'), { known: true, value: true });
+    assert.deepEqual(await resolveSubject(run.ctx, 'tracked.addedFileExists'), { known: true, value: false });
+    // A later git.add names another file; the run's own view still speaks of the file added before it.
+    await runStep(run.ctx, { kind: 'git', action: 'add', args: {} });
+    refreshView(run.ctx);
+    assert.notEqual(run.ctx.observations.get('git.added'), added);
+    assert.deepEqual(await resolveSubject(run.ctx, 'runs.1.tracked.addedFileExists'), { known: true, value: true });
+  });
+
+  it("retires the git-only file's edit when a person merges the initial pull request that removes it, and no other edit", async () => {
+    const run = await fakeRun();
+    await runStep(run.ctx, { kind: 'git', action: 'add', args: {} });
+    await runStep(run.ctx, { kind: 'git', action: 'edit', args: {} });
+    const [added, edited] = run.ctx.edits;
+    // The initial pull request's branch: the tracked tree without the git-only file, merged by a person.
+    const tip = (await run.remoteGit.text(['rev-parse', run.ctx.names.trackedBranch])).trim();
+    const env = { ...process.env, GIT_INDEX_FILE: join(run.ctx.runDir, 'merge-index') };
+    spawnSync('git', ['--git-dir', run.remoteGit.dir, 'read-tree', tip], { env });
+    spawnSync('git', ['--git-dir', run.remoteGit.dir, 'rm', '--cached', '--quiet', added!.path], { env });
+    const tree = spawnSync('git', ['--git-dir', run.remoteGit.dir, 'write-tree'], { env, encoding: 'utf8' }).stdout.trim();
+    const merge = (await run.remoteGit.text(['commit-tree', tree, '-p', tip, '-m', 'Merge the changes from Linear'])).trim();
+    Object.assign(run.ctx.live!, { rest: { pullRequests: async () => [{ ...OPEN_INITIAL, head: { ...OPEN_INITIAL.head, ref: run.ctx.names.syncBranch } }], mergePullRequest: async () => ({ sha: merge }) } });
+    await runStep(run.ctx, { kind: 'merge', action: 'pull-request', args: { actor: 'editor-a' } });
+    assert.equal(added!.retired, true);
+    assert.notEqual(edited!.retired, true);
+  });
+
+  it('fails the check when the refusing sync took the git-only file away', async () => {
+    const run = await fakeRun();
+    run.ctx.scenario = { ...run.ctx.scenario, checks: l1r07.checks };
+    mkdirSync(run.ctx.sandbox!.cache.dir, { recursive: true });
+    await runStep(run.ctx, { kind: 'git', action: 'add', args: {} });
+    const added = run.ctx.observations.get('git.added') as string;
+    await watchRun(run.ctx, { throughProxy: true }, async () => void run.ctx.engine.results.push(engineRun('initial-sync', report('reverse-initial-sync'))));
+    await watchRun(run.ctx, { throughProxy: true }, async () => {
+      // A sync that merged the abandoned snapshot: the file is gone from the tracked branch.
+      await removeFile(run.ctx, added);
+      run.ctx.engine.results.push(engineRun('sync', report('quiet-sync')));
+    });
+    assert.deepEqual(await resolveSubject(run.ctx, 'runs.1.tracked.addedFileExists'), { known: true, value: false });
+    assert.deepEqual(await resolveSubject(run.ctx, 'untouched.1'), { known: true, value: [`ref refs/heads/${run.ctx.names.trackedBranch} moved`] });
   });
 });
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isDocumentWrite, QUIET_SUBJECT, quietFailures, type PullRequestFacts, type QuietInput, type RunWorld } from './quiet.ts';
+import { isDocumentWrite, QUIET_SUBJECT, quietFailures, UNTOUCHED_SUBJECT, untouchedFailures, type PullRequestFacts, type QuietInput, type RunWorld } from './quiet.ts';
 
 const SHA = (n: number) => String(n).repeat(40).slice(0, 40);
 
@@ -12,6 +12,7 @@ function world(overrides: Partial<RunWorld> = {}): RunWorld {
     syncTip: SHA(3),
     stateTips: { linear: SHA(4), ids: SHA(5), uploads: null },
     pullRequests: [{ number: 30, state: 'closed', headSha: SHA(3), mergedAt: '2026-01-01T00:00:00Z', title: 'Changes from Linear', body: 'One document.' }],
+    refs: { 'refs/heads/t/aaaaaa/main': SHA(1), 'refs/heads/t/aaaaaa/sync': SHA(3), 'refs/mdbisync-t/aaaaaa/ids': SHA(5), 'refs/mdbisync-t/aaaaaa/linear': SHA(4) },
     proxyIndex: 10,
     ...overrides,
   };
@@ -145,5 +146,38 @@ describe('quiet run', () => {
     assert.equal(isDocumentWrite({ ...base, kind: 'mutation', operation: 'documentUpdate', injected: true }), false);
     assert.equal(isDocumentWrite({ ...base, kind: 'mutation', operation: 'commentCreate' }), false);
     assert.equal(isDocumentWrite({ ...base, kind: 'mutation', operation: 'documentUpdate', status: 500 }), false);
+  });
+});
+
+describe('untouched run', () => {
+  const refs = world().refs;
+
+  it('accepts a run that changed nothing', () => {
+    assert.deepEqual(untouchedFailures({ before: world(), after: world({ proxyIndex: 12 }), linearMutations: 0 }), []);
+  });
+
+  it('names every ref created, moved or deleted, the state refs included', () => {
+    const { 'refs/heads/t/aaaaaa/sync': _sync, ...withoutSync } = refs;
+    const after = world({ refs: { ...withoutSync, 'refs/mdbisync-t/aaaaaa/linear': SHA(6), 'refs/mdbisync-t/aaaaaa/uploads': SHA(7) } });
+    assert.deepEqual(untouchedFailures({ before: world(), after, linearMutations: 0 }), [
+      'ref refs/heads/t/aaaaaa/sync was deleted',
+      'ref refs/mdbisync-t/aaaaaa/linear moved',
+      'ref refs/mdbisync-t/aaaaaa/uploads was created',
+    ]);
+  });
+
+  it('names pull request changes and Linear mutations', () => {
+    const after = world({ pullRequests: [{ ...(world().pullRequests[0] as PullRequestFacts), state: 'open' }] });
+    assert.deepEqual(untouchedFailures({ before: world(), after, linearMutations: 2 }), ['2 Linear mutations were sent', 'pull request #30 was updated']);
+  });
+
+  it('gives no clean verdict when the proxy did not see the run', () => {
+    assert.deepEqual(untouchedFailures({ before: world(), after: world(), linearMutations: null }), ['the proxy did not see the run, so its Linear writes are unknown']);
+  });
+
+  it('names its subject per run', () => {
+    assert.ok(UNTOUCHED_SUBJECT.test('untouched.last'));
+    assert.ok(UNTOUCHED_SUBJECT.test('untouched.1'));
+    assert.ok(!UNTOUCHED_SUBJECT.test('untouched.last.reasons'));
   });
 });

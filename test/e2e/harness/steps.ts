@@ -47,7 +47,7 @@ import { HOOK_REPOSITORY } from '../../corpus/tree.ts';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
 import { lfsEndpoint, lfsUrlEnv, startLfsFaultProxy } from './lfs-fault-proxy.ts';
-import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
+import { mutationsBetween, quietFailures, snapshotWorld, untouchedFailures, watchesRunWorld, writesBetween } from './quiet.ts';
 import {
   commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
@@ -274,15 +274,16 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
  * Runs one engine invocation and snapshots the world around it as the
  * scenario's assertions need: in a scenario that asserts quiet, before and
  * after it, recording why the run was not quiet (`harness.quiet.<n>`, empty
- * when it was) for the `quiet.<n|last>` subject; in one that asserts on the
+ * when it was) for the `quiet.<n|last>` subject and what it changed
+ * (`harness.untouched.<n>`) for `untouched.<n|last>`; in one that asserts on the
  * world right after a run, the view after it (`harness.runView.<n>`) for the
  * `runs.<n|last>.` document subjects.
  */
 export async function watchRun(ctx: RunContext, options: { throughProxy: boolean }, run: () => Promise<void>): Promise<void> {
-  const quiet = watchesQuiet(ctx);
+  const worlds = watchesRunWorld(ctx);
   const views = watchesRunViews(ctx);
-  if (!quiet && !views) return run();
-  const before = quiet ? await snapshotWorld(ctx, options) : undefined;
+  if (!worlds && !views) return run();
+  const before = worlds ? await snapshotWorld(ctx, options) : undefined;
   const count = ctx.engine.results.length;
   await run();
   const result = ctx.engine.results.at(-1);
@@ -292,6 +293,7 @@ export async function watchRun(ctx: RunContext, options: { throughProxy: boolean
   if (before !== undefined) {
     const after = await snapshotWorld(ctx, options);
     ctx.observations.set(`harness.quiet.${n}`, quietFailures({ exitCode: result.exitCode, report: result.report, before, after, documentWrites: writesBetween(ctx, before, after) }));
+    ctx.observations.set(`harness.untouched.${n}`, untouchedFailures({ before, after, linearMutations: mutationsBetween(ctx, before, after) }));
   }
   if (views) await recordRunView(ctx, n);
 }
@@ -1934,6 +1936,7 @@ const OTHER: Record<string, Executor> = {
     if (pr === undefined) throw new ProductError('no sync pull request is open to merge');
     const merged = await world.rest.mergePullRequest(pr.number);
     ctx.observations.set('merge.commit', merged.sha);
+    await retireMergedRemovals(ctx, merged.sha);
   },
 };
 
@@ -1953,6 +1956,22 @@ export const STEP_ACTIONS: Record<string, Executor> = {
     throw new EnvBlockedError('UI steps run in the UI session from its checklist');
   }])),
 };
+
+/**
+ * Marks the git edits whose files a person's merge of the initial pull
+ * request removed: the initial sync from Linear removes files Linear does
+ * not hold, and the person who merged it accepted that. I2 then no longer
+ * expects them; every other edit stays checked.
+ */
+export async function retireMergedRemovals(ctx: RunContext, mergeCommit: string): Promise<void> {
+  const git = await ctx.person();
+  await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', mergeCommit]);
+  for (const edit of ctx.edits) {
+    if (edit.side !== 'git' || edit.removal === true) continue;
+    const kept = await git.run(['cat-file', '-e', `${mergeCommit}:${edit.path}`], { okCodes: [0, 1, 128] });
+    if (kept.code !== 0) edit.retired = true;
+  }
+}
 
 /**
  * Marks the edits of a document that the version kept no longer holds, when

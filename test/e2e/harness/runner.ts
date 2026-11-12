@@ -391,7 +391,7 @@ export async function setupState(ctx: RunContext, live: LiveWorld, tools: Fixtur
 /** The scenario's own edits and runs start here: setup's edits and runs are not the scenario's. */
 async function endSetup(ctx: RunContext, live: LiveWorld): Promise<void> {
   ctx.engine.setupRuns = ctx.engine.results.length;
-  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.|harness\.runView\.)/.test(key)) ctx.observations.delete(key);
+  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.|harness\.untouched\.|harness\.runView\.)/.test(key)) ctx.observations.delete(key);
   await recordStart(ctx, live);
 }
 

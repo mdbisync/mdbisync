@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "id": "L1R-07",
+  "slice": "mini",
+  "mode": "local",
+  "setup": {
+    "state": "linear-seeded",
+    "fixtures": [
+      "reverse-initial"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "git",
+      "action": "add",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "initial-sync",
+      "args": {
+        "direction": "linear-to-git",
+        "confirm": true
+      }
+    },
+    {
+      "kind": "git",
+      "action": "close-pr",
+      "args": {}
+    },
+    {
+      "kind": "git",
+      "action": "delete-sync-branch",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "initial-sync",
+      "args": {
+        "direction": "linear-to-git",
+        "confirm": true
+      }
+    },
+    {
+      "kind": "merge",
+      "action": "pull-request",
+      "args": {
+        "actor": "editor-a"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "runs.1.exitCode",
+        "operator": "equal",
+        "expected": 4
+      },
+      {
+        "subject": "runs.1.code",
+        "operator": "equal",
+        "expected": "initial-pull-request-pending"
+      },
+      {
+        "subject": "runs.1.writes.total",
+        "operator": "equal",
+        "expected": 0
+      },
+      {
+        "subject": "untouched.1",
+        "operator": "equal",
+        "expected": []
+      },
+      {
+        "subject": "runs.1.tracked.addedFileExists",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "pullRequests.created",
+        "operator": "equal",
+        "expected": 2
+      },
+      {
+        "subject": "pullRequests.merged",
+        "operator": "equal",
+        "expected": 1
+      },
+      {
+        "subject": "quiet.last",
+        "operator": "equal",
+        "expected": []
+      },
+      {
+        "subject": "cycle.normalEnabled",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}
