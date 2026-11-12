@@ -50,7 +50,7 @@ export interface ProxyRequestRecord {
   at: number;
   /** A forwarded answer's body size, decoded, in bytes; never its content. */
   responseBytes?: number;
-  /** From the request's arrival to the end of Linear's answer body, in ms. */
+  /** From the start of the request's arrival to the end of Linear's answer body, in ms. */
   durationMs?: number;
 }
 
@@ -191,6 +191,8 @@ export async function startFaultProxy(
   const revoked = new Set<string>();
 
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    // Measured from here: sending a large request body counts against the client's timeout too.
+    const arrived = Date.now();
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk as Buffer);
     const body = Buffer.concat(chunks);
@@ -201,7 +203,7 @@ export async function startFaultProxy(
     const isGraphql = path === '/graphql';
     const { operation, kind } = isGraphql ? operationOf(text) : { operation: `http ${path}`, kind: 'other' as const };
     const at = Date.now();
-    const record = (status: number | 'reset', injected: boolean) => requests.push({ n, operation, kind, status, injected, at });
+    const record = (status: number | 'reset', injected: boolean, extra: Partial<ProxyRequestRecord> = {}) => requests.push({ n, operation, kind, status, injected, at, ...extra });
     const bearer = /^Bearer (\S+)$/.exec(String(request.headers.authorization ?? ''))?.[1];
     if (bearer !== undefined) tokens.add(bearer);
 
@@ -300,7 +302,7 @@ export async function startFaultProxy(
       }
     }
     let payload: Buffer = Buffer.from(await upstreamResponse.arrayBuffer());
-    const measured = { responseBytes: payload.length, durationMs: Date.now() - at };
+    const measured = { responseBytes: payload.length, durationMs: Date.now() - arrived };
     if (isGraphql && options.observer !== undefined && kind === 'mutation') observeAnswer(options.observer, text, payload);
     // A lost answer only for a write Linear applied: a refused one (GraphQL errors come with HTTP 200) is passed
     // on as it is, and the fault stays armed for the next write.
@@ -308,7 +310,7 @@ export async function startFaultProxy(
       // Linear has the write and answered; the engine never hears it. The record keeps Linear's status, so the
       // write counts as written for I9 and the writes subjects, and marks the lost answer.
       dropAnswer.used = (dropAnswer.used ?? 0) + 1;
-      requests.push({ n, operation, kind, status: upstreamResponse.status, injected: false, answerDropped: true, at, ...measured });
+      record(upstreamResponse.status, false, { answerDropped: true, ...measured });
       request.socket.destroy();
       return;
     }
@@ -319,7 +321,7 @@ export async function startFaultProxy(
     const gone = faults.flatMap((fault) => (fault.kind === 'document-gone' ? [fault.id] : []));
     if (gone.length > 0 && isGraphql) payload = withoutDocuments(payload, new Set(gone));
     response.writeHead(upstreamResponse.status, out).end(payload);
-    requests.push({ n, operation, kind, status: upstreamResponse.status, injected: false, at, ...measured });
+    record(upstreamResponse.status, false, measured);
   }
 
   const server: Server = createServer((request, response) => {

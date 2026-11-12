@@ -66,7 +66,7 @@ export function renderRunMarkdown(report: HarnessReport): string {
   }
   const marks = report.results.filter((result) => result.conflictMarks !== undefined);
   if (marks.length > 0) {
-    lines.push('', '## Conflict marks at the end', '', '| Scenario | Mapped | Path | Mark | Saved own icon | Comments |', '| --- | --- | --- | --- | --- | --- |');
+    lines.push('', '## Conflict marks after the checks', '', '| Scenario | Mapped | Path | Mark | Saved own icon | Comments |', '| --- | --- | --- | --- | --- | --- |');
     for (const result of marks) {
       const { mapped, marked } = result.conflictMarks as NonNullable<typeof result.conflictMarks>;
       if (marked.length === 0) lines.push(`| ${result.id} | ${mapped} | none |  |  |  |`);

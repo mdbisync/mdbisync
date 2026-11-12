@@ -36,7 +36,7 @@ describe('answer sizes', () => {
     }
   });
 
-  it('keep per operation the largest answer, its duration and the slowest one', () => {
+  it('keep per GraphQL operation the largest answer, its duration and the slowest one', () => {
     const record = (operation: string, responseBytes: number | undefined, durationMs: number | undefined): ProxyRequestRecord => ({
       n: 0, operation, kind: 'query', status: 200, injected: false, at: 0,
       ...(responseBytes === undefined ? {} : { responseBytes }), ...(durationMs === undefined ? {} : { durationMs }),
@@ -44,6 +44,7 @@ describe('answer sizes', () => {
     assert.deepEqual(answerSizes([
       record('ListDocuments', 1000, 900), record('ListDocuments', 5000, 400), record('ListDocuments', 2000, 1200),
       record('GetDocuments', 300, 50), record('UpdateDocument', undefined, undefined),
+      { ...record('http /oauth/revoke', 10, 5), kind: 'other' },
     ]), {
       ListDocuments: { count: 3, maxBytes: 5000, maxBytesDurationMs: 400, maxDurationMs: 1200 },
       GetDocuments: { count: 1, maxBytes: 300, maxBytesDurationMs: 50, maxDurationMs: 50 },
@@ -98,6 +99,6 @@ describe('the run report', () => {
 
   it('adds no section without measurements', () => {
     const markdown = renderRunMarkdown(report([result({})]));
-    assert.doesNotMatch(markdown, /Largest engine answers|Conflict marks/);
+    assert.doesNotMatch(markdown, /Largest engine answers|Conflict marks after/);
   });
 });

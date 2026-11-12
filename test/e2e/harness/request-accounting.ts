@@ -117,14 +117,16 @@ export interface AnswerSize {
 }
 
 /**
- * Per operation, the largest answer body (decoded bytes) and the longest
- * time from a request's arrival to the end of its answer, over the
- * forwarded answers the proxy measured. Sizes only, never content.
+ * Per GraphQL operation, the largest answer body (decoded bytes) and the
+ * longest time from a request's arrival to the end of its answer, over the
+ * forwarded answers the proxy measured: every engine run of the scenario,
+ * its setup's and I6's included. Sizes only, never content.
  */
 export function answerSizes(requests: readonly ProxyRequestRecord[]): Record<string, AnswerSize> {
   const sizes: Record<string, AnswerSize> = {};
   for (const record of requests) {
-    if (record.responseBytes === undefined || record.durationMs === undefined) continue;
+    // GraphQL answers only: OAuth token and revocation calls are not pages.
+    if (record.kind === 'other' || record.responseBytes === undefined || record.durationMs === undefined) continue;
     const size = sizes[record.operation] ??= { count: 0, maxBytes: -1, maxBytesDurationMs: 0, maxDurationMs: 0 };
     size.count += 1;
     if (record.responseBytes > size.maxBytes) {
