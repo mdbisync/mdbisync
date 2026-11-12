@@ -156,8 +156,14 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     if (!destinations(body).some(({node}) => isUpload(node.url) || knownUpload(node.url))) return {body, files, uploads: additions};
     await index();
     const preferredPaths = new Map<string, string>();
+    // How the previous text wrote each link to a file of the repository, so a link to the same file keeps that spelling.
+    const written: WrittenLink[] = [];
+    // The destination as `link` wrote it, with the brackets Linear returned (`opener` is its first character).
+    const spelled = (link: WrittenLink, opener: string | undefined) => {
+      const inner = link.written.startsWith('<') ? link.written.slice(1, -1) : link.written;
+      return opener === '<' ? `<${inner}>` : inner.replace(/\s/g, encodeURIComponent);
+    };
     if (previousBody !== undefined) {
-      const written: WrittenLink[] = [];
       for (const link of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
         if (!await canRead(link.target)) continue;
         const hash = pathHashes.get(link.target)!;
@@ -182,14 +188,19 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         const index = occurrences.get(node.url) ?? 0;
         occurrences.set(node.url, index + 1);
         const link = choices[Math.min(index, choices.length - 1)]!;
-        const inner = link.written.startsWith('<') ? link.written.slice(1, -1) : link.written;
-        shaped.push({...link, written:body[outer.from] === '<' ? `<${inner}>` : inner.replace(/\s/g, encodeURIComponent)});
+        shaped.push({...link, written: spelled(link, body[outer.from])});
       }
       body = restoreFileLinks(body, shaped, new Map(uploads));
     }
     const references = destinations(body).filter(({node}) => isUpload(node.url) || knownUpload(node.url));
     const replacements: Array<{from: number; to: number; text: string}> = [];
-    for (const {node, range} of references) {
+    // An upload the cache does not know (every upload of a first initial sync) whose bytes are a file the
+    // previous text linked takes that link's spelling too, as a known one does above. Otherwise the text
+    // would depend on the cache, and a replacement initial sync would write other text for the same documents.
+    const spellingsByHash = new Map<string, WrittenLink[]>();
+    for (const link of written) spellingsByHash.set(link.hash + link.suffix, [...(spellingsByHash.get(link.hash + link.suffix) ?? []), link]);
+    const hashOccurrences = new Map<string, number>();
+    for (const {node, range, outer} of references) {
       const cached = cachedUrls.filter((known) => node.url === known || node.url.startsWith(`${known}?`) || node.url.startsWith(`${known}#`)).sort((a,b) => b.length - a.length)[0];
       const hashAt = node.url.indexOf('#');
       const url = cached ?? (hashAt === -1 ? node.url : node.url.slice(0, hashAt));
@@ -228,6 +239,13 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         files.set(assetPath, asset.bytes);
       }
       additions.set(hash!, url);
+      const choices = assetPath === preferredPaths.get(hash!) ? spellingsByHash.get(hash! + suffix) : undefined;
+      if (choices !== undefined) {
+        const index = hashOccurrences.get(hash! + suffix) ?? 0;
+        hashOccurrences.set(hash! + suffix, index + 1);
+        replacements.push({...outer, text: spelled(choices[Math.min(index, choices.length - 1)]!, body[outer.from])});
+        continue;
+      }
       replacements.push({...range, text: posix.relative(posix.dirname(path), assetPath).split('/').map(encodeURIComponent).join('/') + suffix});
     }
     if (rejected.size > 0) {
