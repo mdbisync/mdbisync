@@ -270,3 +270,22 @@ L5-34 remains selectable for planning, but its offline execution is explicitly
 skipped until the engine exposes `before-suspension-push`. Its spec names the
 required crash window; substituting an earlier checkpoint would exercise a
 different failure.
+
+## Sync-branch reconciliation
+
+L4-14 to L4-18 leave a person's commit pending on the sync branch and then
+edit the same paragraph again: in Linear (L4-14, L4-16, L4-18) or on the
+tracked branch (L4-15, L4-17), with the sync pull request open or, in L4-16
+and L4-17, closed by a person first. `git.edit-sync-branch` with a paragraph
+target edits that paragraph on the sync branch; the next sync must report the
+document in `pullRequest.marked` and merge both versions between conflict
+markers, which reach the tracked branch and Linear with the conflict mark.
+In L4-18 a person resolves the markers on the sync branch
+(`git.resolve-sync-branch`, keeping the git version) before the pull request
+merges; the resolution reaches Linear without markers. The scenarios need no
+check workflow. Run their steps and assertions against local Git and fake
+services:
+
+```sh
+node --test test/e2e/harness/reconcile-specs.test.ts
+```
