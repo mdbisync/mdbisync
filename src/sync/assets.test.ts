@@ -7,7 +7,7 @@ import { it } from 'node:test';
 import { LinearReads } from '../linear/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
-import { captureAssets, createAssetCapture } from './assets.ts';
+import { captureAssets, createAssetCapture, imageFindings } from './assets.ts';
 
 it('downloads new uploads next to the document, reuses content hashes and preserves ordinary links', async () => {
   const fixture = await createFixture();
@@ -181,4 +181,21 @@ it('a download kept by the stage step is taken by the apply step without a reque
     await rm(dir, {recursive: true, force: true});
     await fixture.cleanup();
   }
+});
+
+for (const destination of ['https://example.com/a.png', 'http://example.com/a.png', 'data:image/png;base64,AAAA', 'relative.png', '/absolute.png', '', 'https://uploads.linear.app.example.com/a.png', 'http://uploads.linear.app/a.png']) {
+  it(`rejects non-upload image destination ${JSON.stringify(destination)} in every image form`, () => {
+    const body = `![Inline](${destination})\n\n[![Linked](${destination})](https://example.com)\n\n![Reference][picture]\n\n[picture]: <${destination}>\n`;
+    const expected = 3;
+    assert.deepEqual(imageFindings(body), Array.from({length: expected}, (_, index) => ({image: index + 1, total: expected, line: index * 2 + 1, reason: 'not-uploaded'})));
+  });
+}
+
+it('counts upload images and repeated reference occurrences without treating links or code as images', () => {
+  const body = '![Good](https://uploads.linear.app/a.png)\n\n![Bad][asset]\n\n![Bad again][asset]\n\n[asset]: https://example.com/a.png\n\n[Link](data:text/plain,hello)\n\n`![Code](bad.png)`\n';
+  assert.deepEqual(imageFindings(body), [
+    {image:2, total:3, line:3, reason:'not-uploaded'},
+    {image:3, total:3, line:5, reason:'not-uploaded'},
+  ]);
+  assert.deepEqual(imageFindings('![Good][asset]\n\n[asset]: https://uploads.linear.app/a.png\n'), []);
 });
