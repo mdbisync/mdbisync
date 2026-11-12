@@ -63,6 +63,42 @@ describe('workflow templates', () => {
     }
   });
 
+  it('every template installs Python packages only from hash-checked wheels, the same list everywhere', () => {
+    const lists = new Set<string>();
+    for (const file of readdirSync(EXAMPLES).filter((name) => name.endsWith('.yml'))) {
+      for (const step of steps(file)) {
+        const run = step.run ?? '';
+        assert.doesNotMatch(run, /\b(?:pipx|uv|easy_install)\b/, `${file}: ${step.name}: an installer other than pip`);
+        const installs = run.match(/\bpip3? install\b.*/g) ?? [];
+        if (installs.length === 0) continue;
+        assert.deepEqual(installs, ["pip install --require-hashes --only-binary :all: -r /dev/stdin <<'REQUIREMENTS'; then"], `${file}: ${step.name}`);
+        const list = /<<'REQUIREMENTS'; then\n([\s\S]*?)\nREQUIREMENTS\n/.exec(run)?.[1];
+        assert.ok(list !== undefined, `${file}: ${step.name}: no requirements list`);
+        const requirements = list.replace(/ \\\n\s*/g, ' ').split('\n');
+        for (const requirement of requirements) {
+          assert.match(requirement, /^[a-z0-9-]+==\d+(?:\.\d+)+(?: ; python_version < "\d+\.\d+")?(?: --hash=sha256:[0-9a-f]{64})+$/, `${file}: ${requirement}`);
+        }
+        assert.ok(requirements.some((requirement) => requirement.startsWith('pre-commit==')), `${file}: pre-commit is not in the list`);
+        lists.add(list);
+      }
+    }
+    assert.equal(lists.size, 1, 'the templates install different requirements lists');
+  });
+
+  it('every template installs npm by exact version, without scripts, at a release with patched tar and undici', () => {
+    for (const file of readdirSync(EXAMPLES).filter((name) => name.endsWith('.yml'))) {
+      for (const step of steps(file)) {
+        for (const install of (step.run ?? '').match(/\bnpm (?:install|i|add)\b.*/g) ?? []) {
+          const version = /^npm install --global --ignore-scripts npm@(\d+)\.(\d+)\.(\d+)$/.exec(install);
+          assert.ok(version !== null, `${file}: ${install}`);
+          const [major, minor, patch] = version.slice(1).map(Number) as [number, number, number];
+          // 11.21.2 is the first npm 11 whose bundled tar and undici have no published advisory.
+          assert.ok(major > 11 || (major === 11 && (minor > 21 || (minor === 21 && patch >= 2))), `${file}: ${install}`);
+        }
+      }
+    }
+  });
+
   for (const file of SYNC_TEMPLATES) {
     describe(file, () => {
       it('grants the workflow token nothing and runs one at a time in the shared group, never cancelled', () => {
@@ -131,7 +167,7 @@ describe('workflow templates', () => {
         const all = steps(file);
         const action = all.findIndex((step) => step.uses?.startsWith(ACTION));
         // A runner that brings its own pre-commit keeps it; otherwise the pinned version is installed.
-        const install = all.findIndex((step) => step.name === 'Install pre-commit' && /pip install pre-commit==\d+\.\d+\.\d+/.test(step.run ?? ''));
+        const install = all.findIndex((step) => step.name === 'Install pre-commit' && /^pre-commit==\d+\.\d+\.\d+ --hash=/m.test(step.run ?? ''));
         assert.ok(install >= 0 && install < action, `${file}: pre-commit is not installed before the sync`);
         assert.equal(all[install]?.env, undefined, `${file}: the install step gets an environment`);
       });
