@@ -687,6 +687,45 @@ export function expectsDocument(s: Pick<Sides, 'omitted' | 'kept'>, path: string
 const ok = (name: string): CheckOutcome => ({ name, ok: true });
 const bad = (name: string, detail: string): CheckOutcome => ({ name, ok: false, detail });
 
+/** The observation that holds I4's non-forward moves, which the run's evidence writes to `ref-moves.json`. */
+export const REF_MOVES = 'harness.refMoves';
+/** The most bytes of one move's patch the evidence keeps; a longer patch is cut there and says so. */
+export const REF_MOVE_PATCH_LIMIT = 256 * 1024;
+
+/** A ref that moved to a commit that does not descend from its old one, and what differs between the two. */
+export interface RefMove {
+  /** The ref without the run's prefix, or `sync branch`. */
+  ref: string;
+  /**
+   * The ref snapshot it moved before: snapshot 0 is taken when setup ends and one
+   * more after each step and each follow-up run, so with no follow-up runs it is the step's number plus one.
+   */
+  snapshot: number;
+  old: string;
+  next: string;
+  /** `git diff --name-status` between the two trees; empty when git could not compare them. */
+  paths: string[];
+  /** The text patch between the two trees: Markdown and LFS pointers in full, other binary files named only. */
+  patch: string;
+  /** Why the trees or the patch could not be compared (a commit or blob git could not read). */
+  error?: string;
+}
+
+/** What differs between two commits' trees, renames not paired, so each path is compared by its own content. */
+export async function refMoveDiff(git: Git, old: string, next: string): Promise<Pick<RefMove, 'paths' | 'patch' | 'error'>> {
+  const names = await git.run(['diff', '--no-renames', '--name-status', old, next], { okCodes: [0, 128] });
+  if (names.code !== 0) return { paths: [], patch: '', error: 'the two commits could not be compared' };
+  const paths = names.stdout.toString('utf8').split('\n').filter(Boolean);
+  // The trees can be present without every blob (a clone that borrows a partial cache): the paths stay, the patch says why it is missing.
+  const patch = await git.run(['diff', '--no-renames', '--no-ext-diff', '--no-textconv', old, next], { okCodes: [0, 128] });
+  if (patch.code !== 0) return { paths, patch: '', error: 'the patch could not be read' };
+  const bytes = patch.stdout;
+  return {
+    paths,
+    patch: bytes.length > REF_MOVE_PATCH_LIMIT ? `${bytes.subarray(0, REF_MOVE_PATCH_LIMIT).toString('utf8')}\n[cut at ${REF_MOVE_PATCH_LIMIT} bytes]\n` : bytes.toString('utf8'),
+  };
+}
+
 export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   async I1(ctx, sides) {
     const s = await sides();
@@ -738,17 +777,25 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     const history = (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined) ?? [];
     const git = await ctx.person();
     const backwards: string[] = [];
+    const moves: RefMove[] = [];
     for (let index = 1; index < history.length; index += 1) {
       const before = history[index - 1] as Record<string, string>;
       const after = history[index] as Record<string, string>;
       for (const [ref, old] of Object.entries(before)) {
         const next = after[ref];
         if (next === undefined || next === old) continue;
-        await git.run(['fetch', '--quiet', 'origin', old, next], { okCodes: [0, 1, 128] });
+        // The snapshots keep each commit they saw; the remote is asked only for one still missing.
+        const present = await git.run(['cat-file', '-e', `${old}^{commit}`], { okCodes: [0, 1, 128] }).then((r) => r.code === 0) && await git.run(['cat-file', '-e', `${next}^{commit}`], { okCodes: [0, 1, 128] }).then((r) => r.code === 0);
+        if (!present) await git.run(['fetch', '--quiet', 'origin', old, next], { okCodes: [0, 1, 128] });
         const result = await git.run(['merge-base', '--is-ancestor', old, next], { okCodes: [0, 1, 128] });
-        if (result.code !== 0) backwards.push(ref.replace(`${ctx.names.refPrefix}/`, '').replace(`refs/heads/${ctx.names.syncBranch}`, 'sync branch'));
+        if (result.code === 0) continue;
+        const name = ref.replace(`${ctx.names.refPrefix}/`, '').replace(`refs/heads/${ctx.names.syncBranch}`, 'sync branch');
+        backwards.push(name);
+        moves.push({ ref: name, snapshot: index, old, next, ...(await refMoveDiff(git, old, next)) });
       }
     }
+    // The evidence keeps what differs between the two commits, since the remote may drop the old one.
+    if (moves.length > 0) ctx.observations.set(REF_MOVES, moves);
     return backwards.length === 0 ? ok('I4') : bad('I4', `refs moved other than forward: ${[...new Set(backwards)].join(', ')}`);
   },
 
@@ -1017,7 +1064,27 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
   const world = ctx.live;
   if (world === null) return {};
   const refs = await world.sandbox.runRefs();
-  return Object.fromEntries(refs.filter((ref) => ref.runId === ctx.names.runId && ref.ref !== `refs/heads/${ctx.names.trackedBranch}`).map((ref) => [ref.ref, ref.oid]));
+  const snapshot = Object.fromEntries(refs.filter((ref) => ref.runId === ctx.names.runId && ref.ref !== `refs/heads/${ctx.names.trackedBranch}`).map((ref) => [ref.ref, ref.oid]));
+  // Evidence only: a commit not kept leaves I4 to fetch it as before, so a failure here never fails the run.
+  await keepSeenCommits(world.sandbox, snapshot).catch((error: unknown) => ctx.log(`ref snapshot: commits not kept in the sandbox cache: ${(error as Error).message}`));
+  return snapshot;
+}
+
+/**
+ * Fetches each commit a snapshot lists into the sandbox cache while the remote
+ * still holds it. A later step can leave a commit without any ref on the
+ * remote (an initial sync replacing its record after the sync branch was
+ * deleted), and I4 then still compares it with its successor: the person's
+ * clone borrows the cache's objects. The objects need no ref; the cache keeps
+ * them until it prunes objects weeks old. Each commit is fetched on its own,
+ * so one that has gone since the listing does not keep the others out.
+ */
+async function keepSeenCommits(sandbox: { cache: Git; url: string }, snapshot: Readonly<Record<string, string>>): Promise<void> {
+  const oids = [...new Set(Object.values(snapshot))];
+  if (oids.length === 0) return;
+  const known = await sandbox.cache.run(['cat-file', '--batch-check'], { input: `${oids.join('\n')}\n` });
+  const missing = oids.filter((oid) => !known.stdout.toString('utf8').includes(`${oid} commit `));
+  for (const oid of missing) await sandbox.cache.run(['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', sandbox.url, oid], { okCodes: [0, 1, 128] });
 }
 
 /** The placeholder that stands for the run's own id in isolation evidence. */

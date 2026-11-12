@@ -12,7 +12,7 @@ import { contentTypeOf, destinations, resolveTarget } from '../../../src/initial
 import { isRegularFile, MARKDOWN_EXTENSION } from '../../../src/mapping/index.ts';
 import { Git, lfsReader, listTree, parseLfsPointer, readBlobs, readIds, type LfsRead } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
+import { REF_MOVES, runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, CORPUS_DIR, inheritedTeam, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
@@ -1047,6 +1047,9 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
 export function writeRunRefs(ctx: RunContext, runDir: string): void {
   const runs = Object.fromEntries([...ctx.observations].filter(([key]) => key.startsWith(RUN_REFS)).map(([key, value]) => [key.slice(RUN_REFS.length), value]));
   if (Object.keys(runs).length > 0) writeFileSync(join(runDir, 'run-refs.json'), `${JSON.stringify(runs, null, 2)}\n`);
+  // I4's non-forward moves, with what differs between the two commits.
+  const moves = ctx.observations.get(REF_MOVES);
+  if (moves !== undefined) writeFileSync(join(runDir, 'ref-moves.json'), `${JSON.stringify(moves, null, 2)}\n`);
 }
 
 /** A check that does not hold fails the scenario as a product error; the outcomes stay in the result either way. */
