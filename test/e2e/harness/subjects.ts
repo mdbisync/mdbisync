@@ -1615,6 +1615,28 @@ export const SUBJECTS: Record<string, Compute> = {
 
   // --- the sync branch, CI and workflows ------------------------------------------------------
   'syncBranch.personCommitRetained': async (env) => retained(env, [observed(env.ctx, 'syncBranch.personCommit') as string]),
+  // Strictly on the tracked branch: the pull request merged the person's commit, not only kept it on the sync branch.
+  'syncBranch.personCommitMerged': async (env) => onTracked(env, observed(env.ctx, 'syncBranch.personCommit') as string),
+  'syncBranch.resolutionMerged': async (env) => onTracked(env, observed(env.ctx, 'syncBranch.resolutionCommit') as string),
+  'syncBranch.editedPaths': async (env) => [(observed(env.ctx, 'syncBranch.personEdit') as { path: string }).path],
+  // The sync-branch edit and the later edit of the same paragraph each appear
+  // once in the document, in different versions of its one marker set, on
+  // the tracked branch and in Linear alike.
+  'conflicts.pendingEditsBetweenMarkers': async (env) => {
+    const pending = observed(env.ctx, 'syncBranch.personEdit') as { path: string; token: string };
+    const later = env.ctx.edits.filter((edit) => edit.path === pending.path && edit.token !== pending.token).at(-1)?.token;
+    if (later === undefined) throw new Error('the scenario made no later edit of the document edited on the sync branch');
+    const [first] = await conflictTexts(env);
+    return [first?.git, first?.linear].every((text) => {
+      if (text === null || text === undefined) return false;
+      const { sets } = scanMarkers(text);
+      const [set] = sets;
+      if (set === undefined || sets.length !== 1) return false;
+      const once = (token: string) => text.split(token).length === 2;
+      const version = (token: string) => (set.git.includes(token) ? 'git' : set.linear.includes(token) ? 'linear' : null);
+      return once(pending.token) && once(later) && version(pending.token) !== null && version(later) !== null && version(pending.token) !== version(later);
+    });
+  },
   'syncBranch.ciFixRetained': async (env) => retained(env, observed(env.ctx, 'ciFix.commits') as string[]),
   'syncBranch.ciFixCommitCount': async (env) => {
     const commits = observed(env.ctx, 'ciFix.commits') as string[];
@@ -1857,6 +1879,10 @@ async function editsOnSide(env: Env, from: 'git' | 'linear', side: 'git' | 'line
   const view = await env.view();
   const text = side === 'git' ? [...view.files.values()].join('\n') : [...view.documents.values()].map((document) => document.content ?? '').join('\n');
   return env.ctx.edits.filter((edit) => edit.side === from && text.includes(edit.token)).length;
+}
+
+async function onTracked(env: Env, commit: string): Promise<boolean> {
+  return isAncestor(await person(env.ctx), commit, (await env.view()).tip);
 }
 
 async function retained(env: Env, commits: readonly string[]): Promise<boolean> {
