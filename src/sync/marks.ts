@@ -78,7 +78,11 @@ function blockedComment(findings: readonly BlockedFinding[]): string {
     return `- Hook \`${name}\`${location}.`;
   }))].sort();
   const sections: string[] = [];
-  if (images.length > 0) sections.push(`${IMAGE_BLOCKED_COMMENT}\n\n${images.map(({image, total, line}) => `- Image ${image} of ${total} (line ${line}): not uploaded to this workspace. Upload the file instead of linking to it.`).join('\n')}`);
+  const imageReasons: Record<ImageFinding['reason'], string> = {
+    'not-uploaded': 'not uploaded to this workspace. Upload the file instead of linking to it.',
+    'unsupported-type': 'the uploaded file is not a supported image or document. Remove it or upload the original file.',
+  };
+  if (images.length > 0) sections.push(`${IMAGE_BLOCKED_COMMENT}\n\n${images.map(({image, total, line, reason}) => `- Image ${image} of ${total} (line ${line}): ${imageReasons[reason]}`).join('\n')}`);
   if (locations.length > 0) sections.push(`${BLOCKED_COMMENT}\n\n${locations.join('\n')}`);
   return sections.join('\n\n');
 }

@@ -5,6 +5,7 @@ import { type LinearReads, uploadReadKey } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
 import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
+import { uploadExtension } from './upload-type.ts';
 
 export interface CapturedAssets {
   body: string;
@@ -23,7 +24,7 @@ export interface ImageFinding {
   image: number;
   total: number;
   line: number;
-  reason: 'not-uploaded';
+  reason: 'not-uploaded' | 'unsupported-type';
 }
 
 export class ImageBlockedError extends Error {
@@ -35,7 +36,7 @@ export class ImageBlockedError extends Error {
 }
 
 /** Inspect the original Linear text, before localization or any download. */
-export function imageFindings(body: string): ImageFinding[] {
+function imagesOf(body: string): Array<{ url: string; line: number }> {
   const tree = parse(body);
   const definitions = new Map<string, string>();
   visit(tree, (node) => {
@@ -46,6 +47,11 @@ export function imageFindings(body: string): ImageFinding[] {
     if (node.type === 'image') images.push({url: node.url, line: line(node)});
     else if (node.type === 'imageReference') images.push({url: definitions.get(node.identifier) ?? '', line: line(node)});
   });
+  return images;
+}
+
+export function imageFindings(body: string): ImageFinding[] {
+  const images = imagesOf(body);
   return images.flatMap((image, index) => isUpload(image.url) ? [] : [{image: index + 1, total: images.length, line: image.line, reason: 'not-uploaded' as const}]);
 }
 
@@ -69,8 +75,6 @@ async function download(url: string, fetcher: typeof fetch, reads: LinearReads |
   reads?.keep(key, { status: response.status, type: asset.type, body: asset.bytes });
   return asset;
 }
-
-const EXTENSIONS: Readonly<Record<string, string>> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp', 'image/svg+xml': '.svg', 'image/avif': '.avif', 'application/pdf': '.pdf' };
 
 /** One lazily built hash index per capture, read in bounded batches. */
 export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fetcher: typeof fetch = fetch, reads?: LinearReads) {
@@ -109,6 +113,8 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
     const files = new Map<string, Buffer>();
     const additions: UploadMap = new Map();
+    const images = imagesOf(body);
+    const unsupported = new Set<string>();
     // Restore known URLs before restricting new downloads to the upload host.
     const cachedUrls = [...uploads.values()];
     const knownUpload = (url: string) => cachedUrls.some((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`));
@@ -164,9 +170,9 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         hash = createHash('sha256').update(asset.bytes).digest('hex');
         assetPath = preferredPaths.get(hash) ?? hashPaths.get(hash);
         if (assetPath === undefined) {
-          const extension = posix.extname(new URL(url).pathname).toLowerCase();
-          const suffix = EXTENSIONS[asset.type] ?? (/^\.[a-z0-9]{1,8}$/.test(extension) && extension !== '.md' ? extension : '.bin');
-          assetPath = posix.join(posix.dirname(path), `${hash}${suffix}`);
+          const extension = uploadExtension(asset.bytes);
+          if (extension === null) { unsupported.add(node.url); continue; }
+          assetPath = posix.join(posix.dirname(path), `${hash}${extension}`);
           if (pathHashes.has(assetPath)) throw new Error(message('assets.destination-exists'));
         }
         // Each document owns its candidate bytes until its security check passes.
@@ -174,6 +180,11 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       }
       additions.set(hash!, url);
       replacements.push({...range, text: posix.relative(posix.dirname(path), assetPath).split('/').map(encodeURIComponent).join('/') + suffix});
+    }
+    if (unsupported.size > 0) {
+      const findings = images.flatMap((image, index) => unsupported.has(image.url) ? [{image:index + 1, total:images.length, line:image.line, reason:'unsupported-type' as const}] : []);
+      if (findings.length > 0) throw new ImageBlockedError(findings);
+      throw new Error(message('assets.not-allowed'));
     }
     let result = body;
     for (const replacement of replacements.sort((a,b) => b.from - a.from)) result = result.slice(0,replacement.from) + replacement.text + result.slice(replacement.to);

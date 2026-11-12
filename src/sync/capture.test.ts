@@ -17,6 +17,8 @@ import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 
+const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
+
 const TREE = {
   'docs/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n\n# Notes\n',
   'other/README.md': '---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\n# Handbook\n',
@@ -445,7 +447,7 @@ describe('capture from Linear', () => {
     await refresh();
     const url = 'https://uploads.linear.app/workspace/pasted.png';
     Object.assign(world.linear.documents[0]!, {content: `![Image](${url})\n`, updatedAt: '2026-01-05T00:00:00Z'});
-    const result = await capture(context, { config, state: context.fetched.state, identity: IDENTITY, fetch: async () => new Response('image-bytes') });
+    const result = await capture(context, { config, state: context.fetched.state, identity: IDENTITY, fetch: async () => new Response(png) });
     assert.equal(result.ok, true);
     assert.equal(result.leftOut.length, 0);
     const image = result.changed.find((path) => path.endsWith('.png'));
@@ -456,7 +458,7 @@ describe('capture from Linear', () => {
     assert.ok(uploads.includes(url));
     const read = (await (await import('../state/index.ts')).readFiles(context.git, config, result.state.linear!, [image])).get(image)!;
     assert.equal(read.ok, true);
-    if(read.ok) assert.equal(read.content.toString(), 'image-bytes');
+    if(read.ok) assert.deepEqual(read.content, png);
   });
 
   it('restores links between documents using the shared inverse', async () => {
@@ -474,7 +476,7 @@ describe('capture from Linear', () => {
     assert.equal(first.leftOut.length, 1);
     assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
     await refresh();
-    const next = await capture(context, { config, state: context.fetched.state, fetch: async () => new Response('image') });
+    const next = await capture(context, { config, state: context.fetched.state, fetch: async () => new Response(png) });
     assert.equal(next.leftOut.length, 0);
     assert.ok(next.changed.includes('docs/plan.md'));
   });
@@ -664,7 +666,7 @@ describe('capture from Linear', () => {
     const secret = ['query','canary','731'].join('-');
     const url = `https://uploads.linear.app/workspace/image.png?access=${secret}`;
     world.linear.documents[0]!.content = `![Image](${url})\n`;
-    const result = await capture(context,{config, state: context.fetched.state,fetch:async()=>new Response('image'),security:{configured:true,check:async(files)=>[...files.values()].some((value)=>String(value).includes(secret))?[{hook:'secret-check',line:5}]:[]}});
+    const result = await capture(context,{config, state: context.fetched.state,fetch:async()=>new Response(png),security:{configured:true,check:async(files)=>[...files.values()].some((value)=>String(value).includes(secret))?[{hook:'secret-check',line:5}]:[]}});
     assert.equal(result.blocked.length,1);
     assert.equal(await text('docs/plan.md'),TREE['docs/plan.md']);
     const remoteObjects = await fixture.remote.text(['cat-file','--batch-all-objects','--batch']);

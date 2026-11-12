@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { it } from 'node:test';
 import { LinearReads } from '../linear/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
-import { captureAssets, createAssetCapture, imageFindings } from './assets.ts';
+import { captureAssets, createAssetCapture, imageFindings, ImageBlockedError } from './assets.ts';
+
+const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
 it('downloads new uploads next to the document, reuses content hashes and preserves ordinary links', async () => {
   const fixture = await createFixture();
@@ -27,9 +29,9 @@ it('downloads new uploads next to the document, reuses content hashes and preser
     assert.ok(cached.body.includes('[Site](https://example.com/guide)'));
     assert.ok(cached.body.includes(`\`![code](${url})\``));
     const otherUrl = 'https://uploads.linear.app/workspace/new.png';
-    const fresh = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${otherUrl})`, new Map(), async () => new Response('new-image'));
-    const newHash = createHash('sha256').update('new-image').digest('hex');
-    assert.deepEqual(fresh.files.get(`docs/${newHash}.png`), Buffer.from('new-image'));
+    const fresh = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${otherUrl})`, new Map(), async () => new Response(png));
+    const newHash = createHash('sha256').update(png).digest('hex');
+    assert.deepEqual(fresh.files.get(`docs/${newHash}.png`), png);
     assert.equal(fresh.uploads.get(newHash), otherUrl);
   } finally { await fixture.cleanup(); }
 });
@@ -59,7 +61,7 @@ it('authenticates extensionless uploads, infers their image type and preserves f
       assert.equal(String(input),'https://uploads.linear.app/workspace/opaque');
       assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer test-access-token');
       assert.equal(init?.redirect, 'manual');
-      return new Response('image-bytes',{headers:{'content-type':'image/png'}});
+      return new Response(png,{headers:{'content-type':'image/png'}});
     }});
     const result = await captureAssets(git, resolveStateConfig({}), base, 'plan.md', '[Image](https://uploads.linear.app/workspace/opaque#page=3)', new Map(), (input,init) => transport.fetchUpload(String(input),init));
     assert.match(result.body, /\.png#page=3\)$/);
@@ -165,7 +167,7 @@ it('a download kept by the stage step is taken by the apply step without a reque
     const base = await git.text(['rev-parse', 'origin/main']);
     const body = '![Image](https://uploads.linear.app/workspace/image.png)';
     let gets = 0;
-    const fetcher: typeof fetch = async () => { gets++; return new Response('image-bytes', {headers: {'content-type': 'image/png'}}); };
+    const fetcher: typeof fetch = async () => { gets++; return new Response(png, {headers: {'content-type': 'image/png'}}); };
     const recording = LinearReads.recording();
     recording.tokenMinted(['read', 'write'], {grantType: 'client_credentials', requestedScopes: ['read', 'write'], returnedScopes: ['read', 'write']});
     const staged = await createAssetCapture(git, resolveStateConfig({}), base, fetcher, recording)('plan.md', body, new Map());
@@ -198,4 +200,45 @@ it('counts upload images and repeated reference occurrences without treating lin
     {image:3, total:3, line:5, reason:'not-uploaded'},
   ]);
   assert.deepEqual(imageFindings('![Good][asset]\n\n[asset]: https://uploads.linear.app/a.png\n'), []);
+});
+
+it('uses detected extensions despite MIME type and URL, and reuses unrecognized tracked bytes', async () => {
+  const fixture = await createFixture();
+  try {
+    const existing = Buffer.from('<html>Already tracked</html>');
+    await fixture.seed({'docs/plan.md':'Plan.', 'assets/existing.html':existing});
+    const git = await fixture.clone('byte-types');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const jpeg = await readFile(new URL('../../test/fixtures/assets/photo.jpg', import.meta.url));
+    for (const suffix of ['png', 'md', 'html']) {
+      const result = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](https://uploads.linear.app/file.${suffix})`, new Map(), async () => new Response(jpeg, {headers:{'content-type':'image/png'}}));
+      const hash = createHash('sha256').update(jpeg).digest('hex');
+      assert.equal(result.body, `![Image](${hash}.jpg)`);
+      assert.deepEqual([...result.files], [[`docs/${hash}.jpg`, jpeg]]);
+    }
+    const url = 'https://uploads.linear.app/existing.png';
+    const result = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${url})`, new Map(), async () => new Response(existing));
+    assert.equal(result.body, '![Image](../assets/existing.html)');
+    const hash = createHash('sha256').update(existing).digest('hex');
+    const mapped = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `![Image](${url})`, new Map([[hash,url]]), async () => {throw new Error('Unexpected download');});
+    assert.equal(mapped.body, result.body);
+    assert.equal(mapped.files.size, 0);
+  } finally {await fixture.cleanup();}
+});
+
+it('reports every unsupported image at its original occurrence, including references and linked images', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('unsupported');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const url = 'https://uploads.linear.app/page.html';
+    const body = `![Good](https://uploads.linear.app/pixel.png)\n\n![Hidden text][page]\n\n[![Again](${url})](https://example.com)\n\n[page]: ${url}\n`;
+    await assert.rejects(captureAssets(git, resolveStateConfig({}), base, 'plan.md', body, new Map(), async (input) => new Response(String(input).endsWith('pixel.png') ? png : Buffer.from('<!-- page --><html/>'), {headers:{'content-type':'image/png'}})), (error) => {
+      assert.ok(error instanceof ImageBlockedError);
+      assert.deepEqual(error.findings, [{image:2,total:3,line:3,reason:'unsupported-type'}, {image:3,total:3,line:5,reason:'unsupported-type'}]);
+      assert.ok(!error.message.includes('Hidden'));
+      return true;
+    });
+  } finally {await fixture.cleanup();}
 });
