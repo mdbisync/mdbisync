@@ -421,7 +421,7 @@ describe('capture from Linear', () => {
     world.linear.documents.push({id:'future-document', title:'future', projectId:'project-api', createdAt:'2026-01-02T00:00:00Z', content:'![Image](https://example.com/a.png)\n'});
     const result = await run();
     assert.equal(result.blocked.length, 1);
-    assert.ok((await text('docs/plan.md')).includes(url));
+    assert.equal(await text('docs/plan.md'), `---\ncategory: work\n---\n\n[Future](${url})\n`);
     assert.equal((await fixture.remote.run(['cat-file','-e',`${result.state.linear}:docs/future.md`],{okCodes:[0,128]})).code, 128);
   });
 
