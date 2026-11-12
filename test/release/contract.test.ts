@@ -26,7 +26,9 @@ test('CI and release install the same pinned pre-commit before tests', async () 
     const tests = steps.flatMap((step, index) => /\b(?:npm (?:test|run test:hooks)|node --test)\b/.test(step.run ?? '') ? [index] : []);
     assert.ok(tests.length > 0, `${file} must run tests`);
     assert.ok(tests.every(index => installs[0]!.index < index), `${file} must install pre-commit before tests`);
-    const requirements = await readFile(join(root, installs[0]!.requirements), 'utf8');
+    const requirementsPath = installs[0]!.requirements === '"$RUNNER_TEMP/pre-commit-requirements.txt"'
+      ? '.github/requirements/pre-commit.txt' : installs[0]!.requirements;
+    const requirements = await readFile(join(root, requirementsPath), 'utf8');
     const version = /^pre-commit==(\d+\.\d+\.\d+) --hash=sha256:[0-9a-f]{64}$/m.exec(requirements);
     assert.ok(version, `${file} must pin pre-commit with a hash`);
     versions.push(version[1]!);

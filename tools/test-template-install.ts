@@ -50,6 +50,8 @@ try {
   const run = async (name: string, script: string, cwd = root) => {
     const home = join(temporary, name);
     await mkdir(home);
+    // Release preserves the workflow revision's list before checking out source.
+    await writeFile(join(home, 'pre-commit-requirements.txt'), await readFile(join(cwd, '.github/requirements/pre-commit.txt')));
     const githubPath = join(home, 'github-path');
     await writeFile(githubPath, '');
     const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {

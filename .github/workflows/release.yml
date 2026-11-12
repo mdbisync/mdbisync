@@ -67,6 +67,7 @@ jobs:
         run: |
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
           git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+          cp .github/requirements/pre-commit.txt "$RUNNER_TEMP/pre-commit-requirements.txt"
           git checkout --detach "$SOURCE_SHA"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -87,7 +88,7 @@ jobs:
         run: |
           environment=$(mktemp -d "$RUNNER_TEMP/pre-commit.XXXXXX")
           python3 -m venv "$environment"
-          "$environment/bin/python" -m pip install --require-hashes --only-binary :all: -r .github/requirements/pre-commit.txt
+          "$environment/bin/python" -m pip install --require-hashes --only-binary :all: -r "$RUNNER_TEMP/pre-commit-requirements.txt"
           mkdir "$environment/commands"
           ln -s "$environment/bin/pre-commit" "$environment/commands/pre-commit"
           echo "$environment/commands" >> "$GITHUB_PATH"
