@@ -26,7 +26,7 @@ async function installStep(file: string) {
     assert.ok(pin, `${file}: ${line}`);
     return { pin: pin.toLowerCase(), below };
   });
-  return { script, pins };
+  return { script, pins, list };
 }
 
 const temporary = await mkdtemp(join(tmpdir(), 'template-install-'));
@@ -41,17 +41,22 @@ try {
   }
   const version = spawnSync(join(bin, 'python3'), ['-c', 'import sys; print("%d.%d" % sys.version_info[:2])'], { encoding: 'utf8' }).stdout.trim();
   const older = (a: string, b: string) => a.split('.').map(Number).reduce((order, part, index) => order || part - Number(b.split('.')[index]), 0) < 0;
+  // A proxy, an index mirror or a CA bundle the contributor set still applies; one cache serves every run.
+  const network = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+    /^(?:https?_proxy|no_proxy|all_proxy|pip_index_url|pip_extra_index_url|pip_cert|ssl_cert_file|ssl_cert_dir|requests_ca_bundle)$/i.test(name)));
+  const cache = join(temporary, 'pip-cache');
   const run = async (name: string, script: string) => {
     const home = join(temporary, name);
     await mkdir(home);
     const githubPath = join(home, 'github-path');
     await writeFile(githubPath, '');
     const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {
-      env: { PATH: bin, HOME: home, RUNNER_TEMP: home, GITHUB_PATH: githubPath, PIP_NO_CACHE_DIR: '1' }, encoding: 'utf8',
+      env: { ...network, PATH: bin, HOME: home, RUNNER_TEMP: home, GITHUB_PATH: githubPath, PIP_CACHE_DIR: cache }, encoding: 'utf8',
     });
     return { result, added: (await readFile(githubPath, 'utf8')).trim() };
   };
 
+  let installedPython = '';
   for (const file of TEMPLATES) {
     const { script, pins } = await installStep(file);
     const { result, added } = await run(file, script);
@@ -60,12 +65,31 @@ try {
     const shown = spawnSync(preCommit, ['--version'], { encoding: 'utf8' });
     assert.equal(shown.stdout, 'pre-commit 4.6.2\n', `${file}: ${shown.stderr}`);
     const python = join(dirname(await readlink(preCommit)), 'python');
+    installedPython = python;
     const listed = spawnSync(python, ['-m', 'pip', 'list', '--format=freeze', '--disable-pip-version-check', '--exclude', 'pip', '--exclude', 'setuptools'], { encoding: 'utf8' });
     const installed = listed.stdout.trim().split('\n').map((line) => line.toLowerCase().replace(/_/g, '-')).sort();
     const expected = pins.filter(({ below }) => below === undefined || older(version, below)).map(({ pin }) => pin).sort();
     assert.deepEqual(installed, expected, `${file}: the environment holds other packages than the list`);
     console.log(`${file}: installed ${installed.length} hash-checked packages on Python ${version}`);
   }
+
+  // Every supported interpreter and platform finds a listed wheel for each package, with a matching hash.
+  const { list } = await installStep('mdbisync.yml');
+  const requirements = join(temporary, 'requirements.txt');
+  await writeFile(requirements, `${list}\n`);
+  const platforms = ['manylinux2014_x86_64', 'manylinux2014_aarch64', 'musllinux_1_2_x86_64', 'musllinux_1_2_aarch64', 'macosx_10_13_x86_64', 'macosx_11_0_arm64'];
+  for (const target of ['3.10', '3.11', '3.12', '3.13', '3.14', '3.14t']) {
+    const pythonVersion = target.replace('t', '');
+    const abi = `cp${pythonVersion.replace('.', '')}${target.endsWith('t') ? 't' : ''}`;
+    for (const platform of platforms) {
+      const directory = join(temporary, 'downloads', `${abi}-${platform}`);
+      const result = spawnSync(installedPython, ['-m', 'pip', 'download', '--disable-pip-version-check', '--quiet', '--dest', directory,
+        '--python-version', pythonVersion, '--implementation', 'cp', '--abi', abi, '--platform', platform,
+        '--only-binary', ':all:', '--require-hashes', '-r', requirements], { env: { ...process.env, ...network, PIP_CACHE_DIR: cache }, encoding: 'utf8' });
+      assert.equal(result.status, 0, `${abi} ${platform}\n${result.stdout}${result.stderr}`);
+    }
+  }
+  console.log(`requirements list: hash-checked wheels found for Python 3.10 to 3.14 and 3.14t on ${platforms.length} platforms`);
 
   // One wrong hash: pip refuses the file, and the step adds nothing to PATH.
   const { script } = await installStep('pre-commit.yml');
