@@ -30,6 +30,9 @@ import type { ProxyRequestRecord } from './fault-proxy.ts';
 
 export const QUIET_SUBJECT = /^quiet\.(\d+|last)$/;
 
+/** What one run changed in the world, empty when it changed nothing (`untouchedFailures`). */
+export const UNTOUCHED_SUBJECT = /^untouched\.(\d+|last)$/;
+
 export const STATE_STORES = ['linear', 'ids', 'uploads'] as const;
 
 export interface PullRequestFacts {
@@ -48,6 +51,8 @@ export interface RunWorld {
   syncTip: string | null;
   stateTips: Record<(typeof STATE_STORES)[number], string | null>;
   pullRequests: PullRequestFacts[];
+  /** Every ref of the run on the sandbox, by name: branches and state refs alike. */
+  refs: Record<string, string>;
   /** Linear requests the proxy had seen; null when the run does not go through it. */
   proxyIndex: number | null;
 }
@@ -79,6 +84,19 @@ function nonEmpty(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0;
 }
 
+/** The sync pull requests opened, updated or gone between two snapshots. */
+function pullRequestChanges(before: RunWorld, after: RunWorld): string[] {
+  const changes: string[] = [];
+  const earlier = new Map(before.pullRequests.map((pr) => [pr.number, pr]));
+  for (const pr of after.pullRequests) {
+    const was = earlier.get(pr.number);
+    if (was === undefined) changes.push(`pull request #${pr.number} was opened`);
+    else if (JSON.stringify(was) !== JSON.stringify(pr)) changes.push(`pull request #${pr.number} was updated`);
+  }
+  for (const pr of before.pullRequests) if (!after.pullRequests.some((other) => other.number === pr.number)) changes.push(`pull request #${pr.number} disappeared`);
+  return changes;
+}
+
 /** Why a run was not quiet; empty when it was. */
 export function quietFailures(input: QuietInput): string[] {
   const { report, before, after } = input;
@@ -100,13 +118,7 @@ export function quietFailures(input: QuietInput): string[] {
     if (nonEmpty(field(report, ['capture', list]))) failures.push(`the run captured ${list} documents into git`);
   }
 
-  const earlier = new Map(before.pullRequests.map((pr) => [pr.number, pr]));
-  for (const pr of after.pullRequests) {
-    const was = earlier.get(pr.number);
-    if (was === undefined) failures.push(`pull request #${pr.number} was opened`);
-    else if (JSON.stringify(was) !== JSON.stringify(pr)) failures.push(`pull request #${pr.number} was updated`);
-  }
-  for (const pr of before.pullRequests) if (!after.pullRequests.some((other) => other.number === pr.number)) failures.push(`pull request #${pr.number} disappeared`);
+  failures.push(...pullRequestChanges(before, after));
   if (field(report, ['pullRequest', 'pullRequest', 'opened']) === true) failures.push('the report says it opened a pull request');
   if (field(report, ['pullRequest', 'branchMoved']) === true || before.syncTip !== after.syncTip) failures.push('the sync branch moved');
   const merged = field(report, ['pullRequest', 'merged']);
@@ -120,11 +132,39 @@ export function quietFailures(input: QuietInput): string[] {
   return failures;
 }
 
+/**
+ * What one run changed in the world, empty when it changed nothing: the
+ * check for a run that must refuse and write nothing at all, where even
+ * the state ref move a quiet run may make is a change.
+ *
+ * - `linearMutations`: Linear mutations the run sent through the proxy,
+ *   whatever their answer; null when the proxy did not see the run, which
+ *   proves nothing.
+ * - every ref of the run: none created, moved or deleted (the tracked
+ *   branch, the sync branch, the state refs and any other);
+ * - pull requests: none opened, updated or gone.
+ */
+export function untouchedFailures(input: { before: RunWorld; after: RunWorld; linearMutations: number | null }): string[] {
+  const { before, after } = input;
+  const failures: string[] = [];
+  if (input.linearMutations === null) failures.push('the proxy did not see the run, so its Linear writes are unknown');
+  else if (input.linearMutations > 0) failures.push(`${input.linearMutations} Linear mutations were sent`);
+  for (const ref of [...new Set([...Object.keys(before.refs), ...Object.keys(after.refs)])].sort()) {
+    const was = before.refs[ref];
+    const now = after.refs[ref];
+    if (was === undefined) failures.push(`ref ${ref} was created`);
+    else if (now === undefined) failures.push(`ref ${ref} was deleted`);
+    else if (was !== now) failures.push(`ref ${ref} moved`);
+  }
+  failures.push(...pullRequestChanges(before, after));
+  return failures;
+}
+
 // --- snapshots of the live world -----------------------------------------------------------
 
-/** The scenario asserts quiet on some run, so its runs are snapshotted. */
-export function watchesQuiet(ctx: RunContext): boolean {
-  return ctx.live !== null && ctx.scenario.checks.assertions.some((assertion) => QUIET_SUBJECT.test(assertion.subject));
+/** The scenario asserts quiet or untouched on some run, so the world around each of its runs is snapshotted. */
+export function watchesRunWorld(ctx: RunContext): boolean {
+  return ctx.live !== null && ctx.scenario.checks.assertions.some((assertion) => QUIET_SUBJECT.test(assertion.subject) || UNTOUCHED_SUBJECT.test(assertion.subject));
 }
 
 /**
@@ -155,6 +195,7 @@ export async function snapshotWorld(ctx: RunContext, options: { throughProxy: bo
     syncTip: tip(`refs/heads/${ctx.names.syncBranch}`),
     stateTips,
     pullRequests,
+    refs: Object.fromEntries([...refs].sort(([a], [b]) => a.localeCompare(b))),
     proxyIndex: !options.throughProxy || ctx.proxy === null ? null : ctx.proxy.requests.length,
   };
 }
@@ -163,4 +204,16 @@ export async function snapshotWorld(ctx: RunContext, options: { throughProxy: bo
 export function writesBetween(ctx: RunContext, before: RunWorld, after: RunWorld): number | null {
   if (ctx.proxy === null || before.proxyIndex === null || after.proxyIndex === null) return null;
   return ctx.proxy.requests.slice(before.proxyIndex, after.proxyIndex).filter(isDocumentWrite).length;
+}
+
+/**
+ * Linear requests between two snapshots that may have written, whatever
+ * their answer: every request but a recognized GraphQL query, so one the
+ * proxy could not classify and any other HTTP call (an upload) count too.
+ * OAuth calls (minting and revoking the run's token) and injected answers,
+ * which never reached Linear, do not.
+ */
+export function mutationsBetween(ctx: RunContext, before: RunWorld, after: RunWorld): number | null {
+  if (ctx.proxy === null || before.proxyIndex === null || after.proxyIndex === null) return null;
+  return ctx.proxy.requests.slice(before.proxyIndex, after.proxyIndex).filter((record) => !record.injected && record.kind !== 'query' && !record.operation.startsWith('http /oauth/')).length;
 }
