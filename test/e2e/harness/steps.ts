@@ -1823,7 +1823,7 @@ const OTHER: Record<string, Executor> = {
 };
 
 const UI_ACTIONS = [
-  'ui.assert-dom', 'ui.inspect-blocked', 'ui.inspect-conflict', 'ui.inspect-rendering', 'ui.paste-image',
+  'ui.assert-dom', 'ui.follow-document-links', 'ui.inspect-blocked', 'ui.inspect-conflict', 'ui.inspect-rendering', 'ui.paste-image',
   'ui.rename-trash-restore', 'ui.resolve-markers', 'ui.type-during-write', 'ui.type-two-editors', 'ui.verify-editor',
 ];
 

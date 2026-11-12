@@ -11,6 +11,7 @@
 import type { RunContext } from './context.ts';
 import type { RunNames } from './isolation.ts';
 import type { Scenario, Step } from './spec.ts';
+import { LINK_PAIR } from './fixtures.ts';
 
 const INSTRUCTIONS: Record<string, (args: Record<string, unknown>) => string> = {
   'verify-editor': (a) => `Check that the signed-in user is ${String(a.actor)}; wait until the screen has been idle at least ${String(a.requireIdleSeconds)} seconds before any input.`,
@@ -22,6 +23,7 @@ const INSTRUCTIONS: Record<string, (args: Record<string, unknown>) => string> = 
   'type-two-editors': (a) => `Have ${Array.isArray(a.actors) ? a.actors.join(' and ') : 'both editors'} type in the same document during a run; record both texts.`,
   'paste-image': () => 'Paste a small image into the document and wait until it shows.',
   'rename-trash-restore': (a) => `Rename the document to "${String(a.title ?? 'renamed')}", then move it to the trash and restore it.`,
+  'follow-document-links': () => `Open the document "${LINK_PAIR.source}" in the run's project. It links the document "${LINK_PAIR.target}" twice: "the route notes" to the whole document, and "depot hours" to its heading "Depot hours" (\`#${LINK_PAIR.anchor}\`). In the document view, click each link, going back to "${LINK_PAIR.source}" between the clicks. Record in the values below whether each click opened "${LINK_PAIR.target}" (in place or in a new tab, with no "not found" page) and whether the second one scrolled to the heading. Answer pass once both links are clicked and recorded, whatever they did.`,
   'assert-dom': () => 'Check the page for the expected state below and describe what it shows.',
 };
 
@@ -29,6 +31,8 @@ const INSTRUCTIONS: Record<string, (args: Record<string, unknown>) => string> = 
 const RECORDS: Record<string, string[]> = {
   // tracked.bothEditorChangesPresent looks for each editor's text on the tracked branch.
   'type-two-editors': ['ui.typedTexts'],
+  // Whether the link with a heading anchor scrolled to the heading: recorded, not required (the link opening is).
+  'follow-document-links': ['ui.anchorScrolls'],
 };
 
 export function describeUiStep(step: Step): string {

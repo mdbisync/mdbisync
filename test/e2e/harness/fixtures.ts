@@ -213,11 +213,42 @@ export const SLICE_FIXTURES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Two documents for the link check in the browser (L6-12): the index links
+ * the notes twice, once to the whole document and once to one of its
+ * headings. No corpus document links one target both ways, so the step adds
+ * its own pair. Paths are relative to the run's first project folder; the
+ * titles in Linear are those paths without `.md`.
+ */
+export const LINK_PAIR = { source: 'guides/route-index', target: 'guides/route-notes', anchor: 'depot-hours' } as const;
+
+/** What `ui.follow-document-links` records about the pair it added: tracked paths, and the anchor. */
+export interface LinkPairFixture {
+  source: string;
+  target: string;
+  anchor: string;
+}
+
+/**
  * Starting state some steps need that the slice does not have: a left-out
- * document to fix (L2-12) and a folder of N documents to rename (L2-14).
- * Both are made before the initial sync, so the converged start holds them.
+ * document to fix (L2-12), a folder of N documents to rename (L2-14) and two
+ * documents linked by id (L6-12). Each is made before the initial sync, so
+ * the converged start holds it.
  */
 export const STEP_PREPARATION: Record<string, SetupFixture> = {
+  'ui.follow-document-links': {
+    async beforeSync(ctx) {
+      const folder = projectFolders(ctx)[0]?.folder;
+      if (folder === undefined) throw new EnvBlockedError('the slice has no project folder');
+      const source = `${folder}/${LINK_PAIR.source}.md`;
+      const target = `${folder}/${LINK_PAIR.target}.md`;
+      const link = relative(source, target);
+      await commitAsPerson(ctx, new Map([
+        [target, '# Route notes\n\nPlanners build the routes the evening before and check them again at seven.\n\n## Loading order\n\nVans load in the reverse order of their stops.\n\n## Depot hours\n\nThe depot opens at six and closes at eight. Late vans call the night desk.\n'],
+        [source, `# Route index\n\nStart with [the route notes](${link}).\n\nThe [depot hours](${link}#${LINK_PAIR.anchor}) changed this week.\n`],
+      ]), 'Add the route notes and their index', true);
+      ctx.observations.set('fixture.linkPair', { source, target, anchor: LINK_PAIR.anchor } satisfies LinkPairFixture);
+    },
+  },
   'git.remove-footnote': {
     async beforeSync(ctx) {
       const folder = projectFolders(ctx)[0]?.folder;
