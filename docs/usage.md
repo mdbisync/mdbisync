@@ -374,7 +374,7 @@ To update to a specific release, resolve its annotated tag and use the
 first column as both pins:
 
 ```sh
-git ls-remote https://github.com/mdbisync/mdbisync 'refs/tags/v0.1.0-rc.2^{}'
+git ls-remote https://github.com/mdbisync/mdbisync 'refs/tags/v0.1.0-rc.9^{}'
 ```
 
 `pre-commit autoupdate` follows source history and cannot discover these
