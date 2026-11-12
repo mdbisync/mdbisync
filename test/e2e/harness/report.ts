@@ -4,7 +4,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { RESULTS, type Result, type ScenarioResult } from './results.ts';
+import { RESULTS, unexpectedPasses, type Result, type ScenarioResult } from './results.ts';
 import { LEVELS, levelOf, type Level } from './spec.ts';
 
 export const LEVEL_TITLES: Record<Level, string> = {
@@ -55,8 +55,8 @@ export function renderRunMarkdown(report: HarnessReport): string {
   for (const result of report.results) {
     lines.push(`| ${result.id} | ${result.runId} | ${result.result}${result.unexpectedPass ? ' (expected red)' : ''} | ${cell(result.reason ?? '')} | ${result.engineRequests} | ${result.harnessAppRequests} | ${Math.round(result.durationMs / 1000)} | ${result.cleanup.ok ? 'ok' : cell(result.cleanup.detail ?? 'failed')} |`);
   }
-  const passing = report.results.filter((result) => result.unexpectedPass);
-  if (passing.length > 0) lines.push('', `Passing while on the expected-red list (remove them from the list): ${passing.map((result) => result.id).join(', ')}.`);
+  const passing = unexpectedPasses(report.results);
+  if (passing.length > 0) lines.push('', `Passing while on the expected-red list, which fails the run (remove them from the list): ${passing.join(', ')}.`);
   const answers = report.results.flatMap((result) => Object.entries(result.answerSizes ?? {}).map(([operation, size]) => ({ id: result.id, operation, size })));
   if (answers.length > 0) {
     // The largest answers: content pages near the transport's timeout show here.
@@ -184,6 +184,7 @@ export function evidenceSummary(report: HarnessReport): string {
   const appReads = report.results.reduce((sum, result) => sum + result.harnessAppRequests, 0);
   const waited = report.results.reduce((sum, result) => sum + result.budgetWaitMs, 0);
   const cleanupFailures = report.results.filter((result) => !result.cleanup.ok).map((result) => result.id);
+  const passing = unexpectedPasses(report.results);
   const lines = [
     `# Evidence: scenario run ${report.harnessRunId}`,
     '',
@@ -192,6 +193,7 @@ export function evidenceSummary(report: HarnessReport): string {
     `- Scenarios: ${report.results.length}; ${RESULTS.map((result) => `${result}: ${counts[result]}`).join(', ')}.`,
     `- Linear requests: engine ${engine}, harness editors ${harness}, harness app reads ${appReads}; budget waits ${Math.round(waited / 1000)} s.`,
     `- Cleanup failures: ${cleanupFailures.length === 0 ? 'none' : cleanupFailures.join(', ')}.`,
+    `- Unexpected passes (fail the run; remove them from the expected-red list): ${passing.length === 0 ? 'none' : passing.join(', ')}.`,
     '',
     '| Scenario | Result | Harness app reads | Reason |',
     '| --- | --- | --- | --- |',
