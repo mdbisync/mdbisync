@@ -135,7 +135,7 @@ async function main(argv: string[]): Promise<number> {
       shared = new SharedAdmission(new GitStateStore({ stateDir, url: config.gitUrl, env: refreshingGitEnv(async () => {
         const token = await githubToken(config, 'local');
         return new Sandbox({ url: config.gitUrl, token: token.token, stateDir, runId: 'control' }).env();
-      }) }));
+      }), log }));
     }
     return shared;
   };

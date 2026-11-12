@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, it } from 'node:test';
 import { Git, GitError, type RunOptions, type RunResult } from '../../../src/state/git.ts';
-import { GitStateStore, SharedAdmission, parseSharedState, redactGitOutput } from './shared-state.ts';
+import { GitStateStore, NOT_FOUND_RETRY_MS, SharedAdmission, parseSharedState, redactGitOutput } from './shared-state.ts';
 import { BudgetBlockedError, Governor } from './governor.ts';
 import { loadScenarios } from './spec.ts';
 import { selectTeams, buildRunTree } from './corpus.ts';
@@ -633,4 +633,110 @@ it('removes credentials from git output', () => {
   assert.doesNotMatch(out, new RegExp(Buffer.from('x-access-token:installation-token-1').toString('base64')));
   assert.match(out, /https:\/\/\*\*\*@github.com\/example\/repo.git/);
   assert.ok(redactGitOutput('x'.repeat(5000)).length <= 2001);
+});
+
+// A fake git whose `command` (`ls-remote` by default) gives GitHub's answer for
+// a repository the credential cannot see, for as many calls as `missing` says;
+// every other call goes to the real git. It records the credential each call
+// of `command` used.
+type Answer = (command: string, token: string) => GitError;
+const notFound: Answer = (command, token) => new GitError([command, 'https://github.com/example/sandbox/'], 128,
+  `remote: Repository not found.\nfatal: repository 'https://x-access-token:${token}@github.com/example/sandbox/' not found\n`);
+class MissingRepositoryGit extends Git {
+  readonly listings: string[] = [];
+  missing: number;
+  readonly answer: Answer;
+  readonly command: string;
+  constructor(dir: string, env: Record<string, string>, missing: number, answer: Answer, command: string) { super(dir, env); this.missing = missing; this.answer = answer; this.command = command; }
+  override run(args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
+    if (args[0] !== this.command) return super.run(args, options);
+    const token = options.env?.TOKEN ?? '';
+    this.listings.push(token);
+    if (this.missing-- > 0) return Promise.reject(this.answer(this.command, token));
+    return super.run(args, options);
+  }
+}
+async function missingRepository(missing: number, answer: Answer = notFound, command = 'ls-remote') {
+  const { root, remote, first } = await fixture();
+  const { refreshingGitEnv } = await import('./shared-state.ts');
+  let minted = 0;
+  const env = refreshingGitEnv(async () => ({ TOKEN: `minted-token-${++minted}` }));
+  const lines: string[] = [];
+  const waits: number[] = [];
+  let git!: MissingRepositoryGit;
+  const store = new GitStateStore({
+    stateDir: join(root, `missing-${command}-${missing}`), url: remote, env,
+    git: (dir, base) => (git = new MissingRepositoryGit(dir, base, missing, answer, command)),
+    log: (line) => lines.push(line),
+    sleep: async (ms) => { waits.push(ms); },
+  });
+  return { first, shared: new SharedAdmission(store), store, git, lines, waits, minted: () => minted };
+}
+
+it('retries admission once with fresh credentials after the sandbox answers "Repository not found", logging both answers without the token', async () => {
+  const { first, shared, git, lines, waits, minted } = await missingRepository(1);
+  assert.ok((await shared.reserve(options('aaaaaa'))).admitted);
+  assert.deepEqual([...await first.liveRuns()], ['aaaaaa']);
+  assert.deepEqual(waits, [NOT_FOUND_RETRY_MS], 'one short wait before the retry');
+  assert.equal(git.listings[0], 'minted-token-1');
+  assert.equal(git.listings[1], 'minted-token-2', 'the retry reads with a newly minted token');
+  assert.equal(minted(), 2, 'exactly one new token for the retry');
+  assert.equal(lines.length, 2);
+  assert.match(lines[0]!, /^shared admission read: git ls-remote exited with 128: remote: Repository not found\..*retrying once in \d+ s with fresh credentials$/s);
+  assert.equal(lines[1], 'shared admission read: the retry succeeded');
+  for (const line of lines) assert.doesNotMatch(line, /minted-token|x-access-token:/);
+});
+
+it('also retries a plain read of the state once after "Repository not found"', async () => {
+  const { shared, git, waits } = await missingRepository(1);
+  assert.deepEqual((await shared.store.read()).runs, []);
+  assert.equal(git.listings.length, 2);
+  assert.deepEqual(waits, [NOT_FOUND_RETRY_MS]);
+});
+
+it('ends admission on a second "Repository not found", naming the error without the token', async () => {
+  const { first, shared, git, lines, waits } = await missingRepository(2);
+  await assert.rejects(shared.reserve(options('aaaaaa')), (error: Error) => {
+    assert.match(error.message, /^shared admission state unavailable or invalid: git ls-remote exited with 128: remote: Repository not found\./);
+    assert.match(error.message, /\(again, after one retry with fresh credentials\)$/);
+    assert.doesNotMatch(error.message, /minted-token|x-access-token:/);
+    return true;
+  });
+  assert.equal(git.listings.length, 2, 'retried once, not more');
+  assert.deepEqual(waits, [NOT_FOUND_RETRY_MS]);
+  assert.equal(lines.length, 2);
+  assert.match(lines[1]!, /^shared admission read: the retry failed: git ls-remote exited with 128: remote: Repository not found\./);
+  for (const line of lines) assert.doesNotMatch(line, /minted-token|x-access-token:/);
+  assert.equal((await first.liveRuns()).size, 0);
+});
+
+it('retries once when the fetch of the state answers "Repository not found"', async () => {
+  const { first, shared, git, lines, waits, minted } = await missingRepository(1, notFound, 'fetch');
+  assert.ok((await first.reserve(options('aaaaaa'))).admitted, 'a tip to fetch');
+  assert.ok((await shared.reserve(options('bbbbbb'))).admitted);
+  assert.deepEqual([...await first.liveRuns()].sort(), ['aaaaaa', 'bbbbbb']);
+  assert.deepEqual(git.listings, ['minted-token-1', 'minted-token-2']);
+  assert.equal(minted(), 2);
+  assert.deepEqual(waits, [NOT_FOUND_RETRY_MS]);
+  assert.match(lines[0]!, /^shared admission read: git fetch exited with 128: remote: Repository not found\./);
+  assert.equal(lines[1], 'shared admission read: the retry succeeded');
+});
+
+it('does not retry any other failure of the admission read', async () => {
+  const denied: Answer = () => new GitError(['ls-remote', '--refs', 'https://github.com/example/sandbox/', 'refs/heads/scenario-control'], 128,
+    "remote: Permission to example/sandbox.git denied to harness-bot.\nfatal: unable to access 'https://github.com/example/sandbox/': The requested URL returned error: 403\n");
+  const { shared, git, lines, waits } = await missingRepository(1, denied);
+  await assert.rejects(shared.reserve(options('aaaaaa')), /^Error: shared admission state unavailable or invalid: git ls-remote exited with 128: remote: Permission to example\/sandbox.git denied/);
+  assert.equal(git.listings.length, 1);
+  assert.deepEqual(waits, []);
+  assert.deepEqual(lines, []);
+});
+
+it('mints new credentials when asked for fresh ones', async () => {
+  const { refreshingGitEnv } = await import('./shared-state.ts');
+  let calls = 0;
+  const env = refreshingGitEnv(async () => ({ GENERATION: String(++calls) }), () => 0);
+  assert.deepEqual(await env(), { GENERATION: '1' });
+  assert.deepEqual(await env({ fresh: true }), { GENERATION: '2' });
+  assert.deepEqual(await env(), { GENERATION: '2' });
 });
