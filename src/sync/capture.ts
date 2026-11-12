@@ -22,7 +22,7 @@ import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, ImageBlockedError, type CapturedAssets } from './assets.ts';
+import { createAssetCapture, imageFindings, ImageBlockedError, type CapturedAssets } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
@@ -321,6 +321,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(id);
       if (old !== undefined && previous.has(old.path)) targets.set(old.path, id);
     };
+    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[]) => {
+      const old = byId.get(doc.id);
+      const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
+      ids.set(old?.path ?? path, {...old?.entry, id: doc.id, saved});
+      result.blocked.push({id: doc.id, path: old?.path ?? path, findings});
+      resetTarget(doc.id);
+    };
     for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
       const old = byId.get(doc.id);
       if (!live(doc)) {
@@ -340,6 +347,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
+        const images = imageFindings(doc.content ?? '');
+        if (images.length > 0) throw new ImageBlockedError(images);
         const assets = await downloadAssets(path, doc.content ?? '', uploads, old === undefined ? undefined : prior.body, old?.path);
         const candidate: Candidate = {doc, path, head, assets, files: new Map<string, Buffer | string>([[path, head + assets.body], ...assets.files])};
         if (old?.path === path) candidate.previousBody = prior.body;
@@ -353,10 +362,9 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           const security = await gate.check(new Map([[path, head + (doc.content ?? '')]]));
           if (security === null) {
             result.leftOut.push({id: doc.id, rule: 'security-unchecked'});
+            resetTarget(doc.id);
           } else {
-            const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-            ids.set(old?.path ?? path, {...old?.entry, id: doc.id, saved});
-            result.blocked.push({id: doc.id, path: old?.path ?? path, findings: [...error.findings, ...security]});
+            recordBlocked(doc, path, [...error.findings, ...security]);
           }
           continue;
         }
@@ -415,11 +423,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           break;
         }
         if (findings.length > 0) {
-          const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-          ids.set(old?.path ?? path, {...old?.entry, id, saved});
-          result.blocked.push({id, path: old?.path ?? path, findings});
+          recordBlocked(doc, path, findings);
           candidates.delete(id);
-          resetTarget(id);
           again = true;
           break;
         }

@@ -112,7 +112,11 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
     result.entry = entry;
   }
 
-  if (entry.saved?.notice !== undefined && entry.saved.notice.kind !== state) await resolveHold(linear, entry.saved.notice);
+  if (entry.saved?.notice !== undefined && entry.saved.notice.kind !== state) {
+    // A person can delete the notice before fixing the document. Check for
+    // its absence; failed reads or resolutions retain the notice for retry.
+    if (await linear.commentExists(entry.saved.notice.id)) await linear.resolveComment(entry.saved.notice.id);
+  }
 
   if (state === 'clear') {
     if (entry.saved === undefined) return result;

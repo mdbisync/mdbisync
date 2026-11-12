@@ -410,6 +410,21 @@ describe('capture from Linear', () => {
     });
   }
 
+  it('keeps links to an image-blocked reserved document as Linear URLs', async () => {
+    const state = context.fetched.state;
+    const reserved = new Map([['docs/future.md', 'future-document']]);
+    const next = await commitIds(context.git, state.ids, await readIds(context.git, state.ids), IDENTITY, {reserved});
+    assert.equal((await pushAtomic(context.git, config, [{ref:stateRef(config,'ids'), expected:state.ids, next}])).ok, true);
+    await refresh();
+    const url = 'https://linear.app/example-team/document/future-document';
+    world.linear.documents[0]!.content = `[Future](${url})\n`;
+    world.linear.documents.push({id:'future-document', title:'future', projectId:'project-api', createdAt:'2026-01-02T00:00:00Z', content:'![Image](https://example.com/a.png)\n'});
+    const result = await run();
+    assert.equal(result.blocked.length, 1);
+    assert.ok((await text('docs/plan.md')).includes(url));
+    assert.equal((await fixture.remote.run(['cat-file','-e',`${result.state.linear}:docs/future.md`],{okCodes:[0,128]})).code, 128);
+  });
+
   it('combines image and security findings without downloading any asset or disclosing image text', async () => {
     world.linear.documents[0]!.content = '![Allowed](https://uploads.linear.app/a.png)\n\n![private alt](https://example.com/private-destination)\n';
     const result = await capture(context, {config, state:context.fetched.state,

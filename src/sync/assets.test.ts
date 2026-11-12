@@ -7,7 +7,7 @@ import { it } from 'node:test';
 import { LinearReads } from '../linear/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
-import { captureAssets, createAssetCapture, imageFindings, ImageBlockedError } from './assets.ts';
+import { captureAssets, createAssetCapture, imageFindings } from './assets.ts';
 
 it('downloads new uploads next to the document, reuses content hashes and preserves ordinary links', async () => {
   const fixture = await createFixture();
@@ -90,19 +90,19 @@ it('returns replacement bytes when a cached LFS pointer has no readable object',
 it('restores cached upload spellings before restricting new downloads to the upload host', async () => {
   const fixture = await createFixture();
   try {
-    const previous = '[File](<./image.png?download=1#page=2>)\n';
+    const previous = '![Image](<./image.png?download=1#page=2>)\n';
     await fixture.seed({'docs/plan.md': previous, 'docs/image.png': Buffer.from('image')});
     const git = await fixture.clone('cached-links');
     const base = await git.text(['rev-parse', 'origin/main']);
     const hash = createHash('sha256').update('image').digest('hex');
     const url = 'https://storage.example.test/image.png';
-    const current = `[File](<${url}?download=1#page=2>)\n`;
+    const current = `![Image](<${url}?download=1#page=2>)\n`;
     const read = createAssetCapture(git, resolveStateConfig({}), base, async () => { throw new Error('a cached link must not be downloaded'); });
     const result = await read('docs/plan.md', current, new Map([[hash, url]]), previous);
     assert.equal(result.body, previous);
     assert.equal(result.files.size, 0);
     const fresh = await read('docs/other.md', current, new Map([[hash, url]]));
-    assert.equal(fresh.body, '[File](<image.png?download=1#page=2>)\n');
+    assert.equal(fresh.body, '![Image](<image.png?download=1#page=2>)\n');
     assert.equal(fresh.files.size, 0);
   } finally { await fixture.cleanup(); }
 });
@@ -198,18 +198,4 @@ it('counts upload images and repeated reference occurrences without treating lin
     {image:3, total:3, line:5, reason:'not-uploaded'},
   ]);
   assert.deepEqual(imageFindings('![Good][asset]\n\n[asset]: https://uploads.linear.app/a.png\n'), []);
-});
-
-it('rejects the entire document before downloading an upload, including a cached non-upload image URL', async () => {
-  const fixture = await createFixture();
-  try {
-    await fixture.seed({'plan.md':'Original.\n'});
-    const git = await fixture.clone('image-gate');
-    const base = await git.text(['rev-parse', 'HEAD']);
-    let gets = 0;
-    await assert.rejects(captureAssets(git, resolveStateConfig({}), base, 'plan.md',
-      '![Good](https://uploads.linear.app/a.png)\n\n![Bad](https://example.com/a.png)\n',
-      new Map([['hash','https://example.com/a.png']]), async () => { gets++; return new Response('image'); }), ImageBlockedError);
-    assert.equal(gets, 0);
-  } finally { await fixture.cleanup(); }
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { LinearDocument, DocumentPatch } from '../linear/index.ts';
+import { LinearError, type LinearDocument, type DocumentPatch } from '../linear/index.ts';
 import type { IdEntry } from '../state/index.ts';
 import { MARKERS } from '../merge/index.ts';
 import { CONFLICT_COMMENT, MARKS, reconcileDocumentMark, type MarkClient } from './marks.ts';
@@ -80,13 +80,13 @@ for (const side of ['Linear', 'Git']) {
     world.events = [];
     const result = await world.reconcile();
     assert.equal(result.state, 'clear');
-    assert.deepEqual(world.events, ['resolve', 'update', 'save']);
+    assert.deepEqual(world.events, ['find', 'resolve', 'update', 'save']);
     assert.equal(world.document.icon, ':fire:');
     assert.equal(world.document.color, '#123456');
     assert.deepEqual(world.entry, { id: world.document.id });
     assert.equal(world.document.content, 'Resolved text.\n');
     await world.reconcile();
-    assert.deepEqual(world.events, ['resolve', 'update', 'save']);
+    assert.deepEqual(world.events, ['find', 'resolve', 'update', 'save']);
   });
 }
 
@@ -210,7 +210,7 @@ test('a failed ids cleanup after restoration resumes without losing the original
   world.failSave = false;
   world.events = [];
   await world.reconcile();
-  assert.deepEqual(world.events, ['resolve', 'save']);
+  assert.deepEqual(world.events, ['find', 'resolve', 'save']);
   assert.equal(world.entry.saved, undefined);
 });
 
@@ -406,3 +406,23 @@ test('a released comment never confirmed posted is looked up and resolved when i
   assert.ok(other.events.includes('find'));
   assert.equal(other.entry.saved?.hold, undefined);
 });
+
+for (const missing of [false, true]) {
+  test(`clearing a notice whose resolution fails ${missing ? 'tolerates a deleted comment' : 'retries while the comment exists'}`, async () => {
+    const world = new World();
+    world.document.content = 'Rejected.\n';
+    await world.reconcile([{hook:'check-key', line:1}]);
+    if (missing) world.comments.clear();
+    world.document.content = 'Corrected.\n';
+    world.resolveComment = async () => {throw new LinearError('ResolveComment', 'Unavailable');};
+    if (missing) {
+      await world.reconcile();
+      assert.equal(world.document.icon, ':fire:');
+      assert.equal(world.entry.saved, undefined);
+    } else {
+      await assert.rejects(world.reconcile(), /Unavailable/);
+      assert.equal(world.document.icon, 'Cross');
+      assert.ok(world.entry.saved?.notice);
+    }
+  });
+}

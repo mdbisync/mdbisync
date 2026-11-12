@@ -107,8 +107,6 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   const downloaded = new Map<string, {bytes: Buffer; type: string}>();
 
   return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
-    const findings = imageFindings(body);
-    if (findings.length > 0) throw new ImageBlockedError(findings);
     const files = new Map<string, Buffer>();
     const additions: UploadMap = new Map();
     // Restore known URLs before restricting new downloads to the upload host.
