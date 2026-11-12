@@ -55,8 +55,12 @@ test('repository requirements track templates with pinned security updates', () 
     ['python-discovery', 'python-discovery==1.9.5 --hash=sha256:a1fae8fca11e4bc61e38491c2aafff29e430b3c5e272d51ae52fb895bc4c0fac'],
     ['virtualenv', 'virtualenv==21.15.6 --hash=sha256:4b99ab9b95ff11043939bb4cad2fa0449175fa5a478372864f62160cb6c1a7ed'],
   ]);
-  const entries = (text: string) => new Map(text.replace(/ \\\n\s*/g, ' ').split('\n')
-    .map(line => [line.split('==')[0]!, line]));
+  const entries = (text: string) => {
+    const lines = text.replace(/ \\\n\s*/g, ' ').split('\n');
+    const pins = new Map(lines.map(line => [line.split('==')[0]!, line]));
+    assert.equal(pins.size, lines.length, 'each package must appear exactly once');
+    return pins;
+  };
   const expected = entries(list);
   for (const [name, pin] of updates) expected.set(name, pin);
   assert.deepEqual(entries(requirements), expected);
