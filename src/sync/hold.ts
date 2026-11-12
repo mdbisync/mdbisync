@@ -249,7 +249,7 @@ export async function reconcileHoldMarks(context: RunContext, options: HoldMarks
     const document = options.documents.get(entry.id);
     if (document === undefined || document.trashed || document.archivedAt !== null) {
       if (episode !== undefined) result.removed.push(path);
-      // Released while in the trash: its comment is resolved before the write step may drop the entry.
+      // Released while in the trash: its comment is resolved (or Linear's refusal reported) before the write step may drop the entry.
       else work.push({ kind: 'clear', path, entry });
       continue;
     }

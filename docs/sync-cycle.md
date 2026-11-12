@@ -232,7 +232,9 @@ that document in Linear. Edit the document in Linear to fix an annotated
 problem, or fix CI on the tracked branch. Either change updates the
 suspended lane and its new head gets checks. Once the suspended head
 contains the current tracked tip and its checks pass, the sync merges it,
-resolves the comments and clears the suspended marks. Any remaining
+resolves the comments and clears the suspended marks. Linear refuses to
+resolve a comment on a document in its trash: such a comment stays open,
+and the run summary names the document once. Any remaining
 blocked or conflict mark still applies. The normal three-way merge
 resumes using the recorded base, so changes waiting on either side meet
 without dropping an edit; overlapping edits can still create a conflict.

@@ -12,13 +12,22 @@ const REFUSAL = { path: PATH, error: 'LinearGraphQLError INPUT_ERROR HTTP 200' }
 const COMMENT = `${HOLD_FAILED}\n\n- Check \`format\`.`;
 
 type Marks = Record<string, unknown> | undefined;
+/** A later run that failed, or finished without a report of its sync pull request. */
+const FAILED = Symbol('failed');
+const NO_PULL_REQUEST = Symbol('no pull request');
 
-async function refused(runs: Marks[], resolvedAt: string | null = null): Promise<unknown> {
+async function refused(runs: Array<Marks | typeof FAILED | typeof NO_PULL_REQUEST>, options: { resolvedAt?: string | null; trashed?: boolean } = {}): Promise<unknown> {
   const before = { ids: new Map([[PATH, { id: 'doc' }]]) };
-  const now = { holdComments: new Map([['doc', [{ id: 'c1', body: COMMENT, resolvedAt }]]]) };
+  const now = {
+    documents: new Map([['doc', { id: 'doc', trashed: options.trashed ?? true }]]),
+    holdComments: new Map([['doc', [{ id: 'c1', body: COMMENT, resolvedAt: options.resolvedAt ?? null }]]]),
+  };
+  const result = (run: Marks | typeof FAILED | typeof NO_PULL_REQUEST) => run === FAILED ? { exitCode: 1, report: null }
+    : run === NO_PULL_REQUEST ? { exitCode: 0, report: {} }
+    : { exitCode: 0, report: { pullRequest: run === undefined ? {} : { holdMarks: run } } };
   const ctx = {
     observations: new Map<string, unknown>([[BEFORE_VIEW, before], ['suspended.documents', new Set(['doc'])]]),
-    engine: { setupRuns: 1, results: [{ report: {} }, ...runs.map((holdMarks) => ({ report: { pullRequest: holdMarks === undefined ? {} : { holdMarks } } }))] },
+    engine: { setupRuns: 1, results: [{ exitCode: 0, report: {} }, ...runs.map(result)] },
   } as unknown as RunContext;
   const env = { ctx, which: 'now' as const, view: async () => now } as unknown as Parameters<(typeof SUBJECTS)[string]>[0];
   return SUBJECTS['suspended.commentsRefused']!(env);
@@ -30,8 +39,9 @@ it('holds when the release names the document once with Linear\'s refusal and la
   assert.equal(await refused([{ set: [PATH] }, released, undefined, undefined]), true);
 });
 
-it('fails when the comment was resolved, when no run reported the refusal, or when the error is not Linear\'s refusal', async () => {
-  assert.equal(await refused([{ set: [PATH] }, released, undefined], '2026-11-12T00:00:00Z'), false);
+it('fails when the comment was resolved, the document is not in the trash, no run reported the refusal, or when the error is not Linear\'s refusal', async () => {
+  assert.equal(await refused([{ set: [PATH] }, released, undefined], { resolvedAt: '2026-11-12T00:00:00Z' }), false);
+  assert.equal(await refused([{ set: [PATH] }, released, undefined], { trashed: false }), false);
   assert.equal(await refused([{ set: [PATH] }, { cleared: [PATH] }, undefined]), false);
   assert.equal(await refused([{ set: [PATH] }, { ...released, unresolved: [{ path: PATH, error: 'LinearHttpError HTTP 502' }] }, undefined]), false);
 });
@@ -41,4 +51,9 @@ it('fails when the document is named twice, a later run reports hold work, or no
   assert.equal(await refused([released, released, undefined]), false);
   assert.equal(await refused([released, { code: 'write-failed' }]), false);
   assert.equal(await refused([released]), false);
+});
+
+it('fails when a later run failed or did not report its sync pull request', async () => {
+  assert.equal(await refused([released, FAILED]), false);
+  assert.equal(await refused([released, undefined, NO_PULL_REQUEST]), false);
 });

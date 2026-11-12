@@ -1343,6 +1343,30 @@ describe('sync: the sync pull request', () => {
     assert.deepEqual(quiet.writes, []);
   });
 
+  it('a released comment Linear could not resolve during an outage is resolved by the next run', async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne(path);
+    let outage = true;
+    const resolve = onResolve(() => (outage ? linearAnswer(500, 'INTERNAL_SERVER_ERROR') : undefined));
+    checksOn(await rev(SUSPENDED), FAILED);
+    await sync();
+    checksOn(await rev(SUSPENDED), PASSED);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.equal(released.report.pullRequest?.holdMarks?.code, 'write-failed');
+    assert.match(released.summary, /a later run goes on/);
+    assert.ok(((await ids())[path] as { saved?: { hold?: unknown } } | undefined)?.saved?.hold !== undefined, 'the pending comment was forgotten');
+    outage = false;
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.deepEqual(next.report.pullRequest?.holdMarks?.cleared, [path]);
+    assert.match(next.summary, /Suspended documents in Linear: 1 cleared\./);
+    assert.equal(commentsOf(await documentOf(path))[0]?.resolved, true);
+    assert.equal(resolve.calls, 2);
+    const quiet = await sync();
+    assert.equal(quiet.report.pullRequest?.holdMarks, undefined);
+  });
+
   /** Answers Linear's `mutation` with `answer` while it returns a response; other requests reach the fakes. */
   function onMutation(mutation: string, answer: () => Response | undefined): { calls: number } {
     const seen = { calls: 0 };
