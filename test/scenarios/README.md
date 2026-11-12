@@ -61,7 +61,7 @@ Steps execute in order. `kind`, `action` and `args` form the adapter call:
 | `run` | Invoke the named command or orchestration operation and collect observations. |
 | `fault` | Configure a proxy response, engine checkpoint, setup failure or check result. `clear` removes injected faults; `resume` releases a paused engine. |
 | `kill` | Terminate the engine at the named checkpoint; wait for actual termination. |
-| `merge` | Merge the initial pull request as the specified person. |
+| `merge` | Merge the initial pull request as the specified person. Git edits whose files the merge removes were accepted as removed and are no longer expected by I2. |
 | `ui` | Verify the signed-in editor, perform the stated browser action, and collect DOM evidence. |
 
 A step's `target` names the document it acts on: a path or path suffix,
@@ -164,6 +164,19 @@ and reports `changed: true` while staying quiet. That internal catch-up is the
 only write a quiet run may make: `changed: true` with no state ref moved is not
 quiet. The harness snapshots the world before and after every run of a scenario
 that asserts `quiet`; an unwatched run gives no verdict.
+
+`untouched.<n|last>` lists what that run changed in the world, and a scenario
+asserts it equal to `[]` for a run that must refuse and write nothing at all:
+no Linear request seen by the proxy that may write, whatever its answer (every
+request but a recognized GraphQL query, the OAuth calls for the run's token
+aside); no ref of the run
+created, moved or deleted (the tracked branch, the sync branch and every state
+ref, so not even the catch-up a quiet run may make); and no pull request
+opened, updated or gone. It uses the same snapshots as `quiet`, taken around
+every run of a scenario that asserts either subject.
+
+`runs.<n|last>.tracked.addedFileExists` tells whether the file a `git.add` step
+added was on the tracked branch right after that run.
 
 `runs.<n|last>.setupFailure.item` and `runs.<n|last>.setupFailure.fixLink` are
 computed by the harness, not read from the report, although they start with
