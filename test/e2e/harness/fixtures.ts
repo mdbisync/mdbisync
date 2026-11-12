@@ -12,15 +12,15 @@
 import { CANARY_FILE, CANARY_TOKEN_OBSERVER_FILE, CANARY_TOKEN_OBSERVER, CANARY_FIXTURE, CANARY_KEY_ENV, canaryScript } from './security-canary.ts';
 import { parse, stringify } from 'yaml';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
-import { editBlock, editParagraph, noteSentence, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
+import { editBlock, editParagraph, noteSentence, scanMarkers, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { pullTracked } from './person-git.ts';
 import { CHECK_MARKER } from '../../corpus/check-workflow.ts';
-import { EnvBlockedError } from './results.ts';
+import { EnvBlockedError, ProductError } from './results.ts';
 import { commitAsPerson, documentId, documentPaths, projectFolders, targetPath } from './step-helpers.ts';
 import type { Step } from './spec.ts';
 
@@ -133,6 +133,28 @@ async function addReviewDocument(ctx: RunContext): Promise<void> {
   const path = `${folder}/${REVIEW_NAME}`;
   await commitAsPerson(ctx, new Map([[path, reviewDocument({ lookalikes: ctx.scenario.setup.fixtures.includes('marker-lookalikes') })]]), 'Add the weekly review', true);
   ctx.observations.set('fixture.document', path);
+}
+
+/**
+ * The setup conflict of a `conflicted` start: both sides edit the same
+ * paragraph of the same document, and a sync marks the conflict. That run
+ * writes the markers to Linear only; the runs after it push them to the sync
+ * branch, open the sync pull request and merge it, as the cycle does for any
+ * change from Linear. The scenario starts with the markers on both sides, so
+ * its git steps find them on the tracked branch.
+ */
+export async function openSetupConflict(ctx: RunContext, tools: FixtureTools): Promise<void> {
+  await tools.runStep(ctx, { kind: 'git', action: 'edit', args: { fixture: 'same-paragraph' } });
+  await tools.runStep(ctx, { kind: 'linear', action: 'edit', args: { actor: 'editor-a', fixture: 'same-paragraph' } });
+  await tools.runStep(ctx, { kind: 'run', action: 'sync', args: {} });
+  await tools.runStep(ctx, { kind: 'run', action: 'settle', args: {} });
+  const git = await ctx.person();
+  await pullTracked(git, ctx);
+  const path = targetPath(ctx);
+  const file = join(git.dir, path);
+  // A whole set of markers outside code fences: lookalikes in a fence are not the conflict.
+  const reached = existsSync(file) && scanMarkers(readFileSync(file, 'utf8')).sets.some((set) => set.kinds.length === 3);
+  if (!reached) throw new ProductError(`the setup conflict did not reach the tracked branch: ${path} holds no complete set of conflict markers after the runs settled`);
 }
 
 /** A document's own icon and color, which a conflict's mark must give back. */

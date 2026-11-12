@@ -30,7 +30,7 @@ import { assertCurrentCorpus } from './corpus-drift.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { requiredActionSha, runStep, settleFollowUpRuns } from './steps.ts';
-import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtures.ts';
+import { openSetupConflict, prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES, type FixtureTools } from './fixtures.ts';
 import { projectFolders } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
@@ -366,22 +366,30 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     live.projects.set(placeholder, project);
   }
 
-  const state = ctx.scenario.setup.state;
   ctx.phase('setup state');
-  const tools = { runStep };
+  await setupState(ctx, live, { runStep });
+}
+
+/**
+ * The setup's state on a world whose tracked branch and projects exist: the
+ * fixtures, the initial sync and the setup conflict, as the scenario's
+ * `setup.state` asks. `tools.runStep` runs each step; the offline specs pass
+ * one that runs the engine in process.
+ */
+export async function setupState(ctx: RunContext, live: LiveWorld, tools: FixtureTools): Promise<void> {
+  const state = ctx.scenario.setup.state;
   await prepareFixtures(ctx, live, 'beforeSync', tools);
   if (state === 'linear-seeded') await seedLinear(ctx, live);
   if (state === 'converged' || state === 'conflicted') {
-    await runStep(ctx, { kind: 'run', action: 'initial-sync', args: { direction: 'git-to-linear', confirm: true } });
+    await tools.runStep(ctx, { kind: 'run', action: 'initial-sync', args: { direction: 'git-to-linear', confirm: true } });
     await prepareFixtures(ctx, live, 'afterSync', tools);
   }
-  if (state === 'conflicted') {
-    // Both sides edit the same paragraph of the same document: an open conflict.
-    await runStep(ctx, { kind: 'git', action: 'edit', args: { fixture: 'same-paragraph' } });
-    await runStep(ctx, { kind: 'linear', action: 'edit', args: { actor: 'editor-a', fixture: 'same-paragraph' } });
-    await runStep(ctx, { kind: 'run', action: 'sync', args: {} });
-  }
-  // The scenario's own edits and runs start here: setup's edits are not the scenario's.
+  if (state === 'conflicted') await openSetupConflict(ctx, tools);
+  await endSetup(ctx, live);
+}
+
+/** The scenario's own edits and runs start here: setup's edits and runs are not the scenario's. */
+async function endSetup(ctx: RunContext, live: LiveWorld): Promise<void> {
   ctx.engine.setupRuns = ctx.engine.results.length;
   for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.|harness\.runView\.)/.test(key)) ctx.observations.delete(key);
   await recordStart(ctx, live);

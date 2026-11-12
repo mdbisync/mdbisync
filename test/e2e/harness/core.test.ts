@@ -181,6 +181,8 @@ describe('budget governor', () => {
   it('estimates from the slice, the engine runs and I9', () => {
     const l104 = byId('L1-04');
     assert.equal(engineRuns(l104), 2); // initial sync and the I6 re-run
+    // A conflicted start: initial sync, the conflict's run and a settle of four; L3-10's own settle and the I6 re-run.
+    assert.equal(engineRuns(byId('L3-10')), 6 + 4 + 1);
     assert.equal(estimate(byId('L0-01')).requests, 0);
     const mini = estimate(byId('L2-01'));
     const bank = estimate(l104);
