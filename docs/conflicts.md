@@ -3,7 +3,8 @@
 What happens when git and Linear change the same document between two sync
 runs, what a conflict looks like on each side, and how to resolve it. Nothing
 ever waits for you: every run finishes, every other document keeps syncing,
-and no edit from either side is thrown away.
+and the merge keeps both captured versions. Edits made while a run writes
+to Linear still face the [concurrent-write limits](sync-cycle.md#editing-while-sync-runs).
 
 In this page, "git" means the tracked branch (usually `main`), and "the run
 summary" is the summary of the sync workflow's run in the Actions tab
