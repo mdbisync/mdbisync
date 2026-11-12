@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
-import { editBlock, editParagraph, noteSentence, scanMarkers, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
+import { appendParagraph, editBlock, editParagraph, noteSentence, scanMarkers, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { pullTracked } from './person-git.ts';
 import { CHECK_MARKER } from '../../corpus/check-workflow.ts';
@@ -385,7 +385,7 @@ function frontMatterOf(text: string): string | null {
 function insertAfterFirstParagraph(text: string, line: string): string {
   const { blocks, separators } = splitBlocks(text);
   const index = paragraphIndexes(text)[0];
-  if (index === undefined) return `${text.replace(/\n*$/, '\n')}\n${line}\n`;
+  if (index === undefined) return appendParagraph(text, line);
   blocks.splice(index + 1, 0, line);
   separators.splice(index, 0, '\n\n');
   return joinBlocks(blocks, separators);
@@ -454,8 +454,8 @@ export async function fixtureEdit(ctx: RunContext, fixture: unknown, side: 'git'
   }
 }
 
-/** The default paragraph edit for an ordinal target (`first-paragraph` …), else a new paragraph at the end. */
+/** The default paragraph edit for an ordinal target (`first-paragraph` …), else a new paragraph at the end; the text keeps its final line ending. */
 export function paragraphEdit(text: string, target: unknown, token: string): string {
   if (typeof target === 'string' && target.endsWith('paragraph')) return editParagraph(text, ordinalOf(target) ?? 0, token);
-  return `${text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n`;
+  return appendParagraph(text, noteSentence(token));
 }
