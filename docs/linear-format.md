@@ -404,7 +404,7 @@ how to find its SHA):
 ```yaml
 repos:
   - repo: https://github.com/mdbisync/mdbisync
-    rev: <release-sha> # v0.1.0-rc.1
+    rev: <release-sha> # v0.1.0-rc.9
     hooks:
       - id: linear-format
 ```
