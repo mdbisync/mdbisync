@@ -368,7 +368,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           }
           continue;
         }
-        result.leftOut.push({id: doc.id, rule: error instanceof DownloadRetryError ? 'download-retry' : 'capture-translation'});
+        if (error instanceof DownloadRetryError) result.leftOut.push({id: doc.id, rule: 'download-retry'});
+        else result.leftOut.push({id: doc.id, rule: 'capture-translation'});
       }
     }
     // A rejected target may change other documents' relative links. Recheck
