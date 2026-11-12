@@ -221,6 +221,40 @@ export const SLICE_FIXTURES: ReadonlySet<string> = new Set([
  */
 export const LINK_PAIR = { source: 'guides/route-index', target: 'guides/route-notes', anchor: 'depot-hours' } as const;
 
+/**
+ * The pair's texts, keyed like `LINK_PAIR`, in Linear's form: no final
+ * newline, as Linear drops it and as the corpus files are written, so I1
+ * finds each file equal to its document. The notes run longer than one
+ * browser window, with text after their "Depot hours" heading too, so a
+ * link to that heading has somewhere to scroll.
+ */
+export function linkPairTexts(link: string): { source: string; target: string } {
+  const target = [
+    '# Route notes',
+    'Planners build the routes the evening before and check them again at seven. A route that changes after seven goes to the shift lead, who tells the drivers at the morning briefing.',
+    'Each route lists its stops in the order the van reaches them, with the time window the customer agreed to. Stops without a window go last, unless the planner moves them up to fill a gap.',
+    'When a customer cancels before seven, the planner removes the stop and closes the gap. After seven the stop stays on the list, and the driver marks it as cancelled on arrival.',
+    '## Loading order',
+    'Vans load in the reverse order of their stops, so the first delivery sits nearest the doors. The loading team works from the printed route sheet, not from memory.',
+    'Heavy boxes go on the floor along the walls, and fragile ones on the shelves above them. Cold boxes load last and travel in the insulated bags by the doors.',
+    'A van leaves only when its lead loader has signed the sheet. If a box is missing, the loader notes it on the sheet and the planner calls the customer before the van reaches the stop.',
+    'Returns ride in the crates at the back. The driver stacks them so they do not block the doors, and the evening team empties the crates before the next loading.',
+    '## Depot hours',
+    'The depot opens at six and closes at eight. Late vans call the night desk.',
+    'On Saturdays the depot opens at seven and closes at four, and only the weekend routes run. Sunday is closed, apart from the cold store, which the night desk checks twice a day.',
+    'On public holidays the depot keeps Saturday hours. The planner posts the holiday routes a week ahead, on the board by the loading doors.',
+    '## Night desk',
+    'The night desk takes calls from late vans, from drivers who cannot finish a route and from customers who missed a delivery. It writes each call in the desk log for the morning team.',
+    'A van that returns after eight parks in the outer yard. The driver hands the keys and the route sheet to the night desk and leaves the returns in the crate by the gate.',
+  ].join('\n\n');
+  const source = [
+    '# Route index',
+    `Start with [the route notes](${link}).`,
+    `The [depot hours](${link}#${LINK_PAIR.anchor}) changed this week.`,
+  ].join('\n\n');
+  return { source, target };
+}
+
 /** What `ui.follow-document-links` records about the pair it added: tracked paths, the anchor, and the project that holds them. */
 export type LinkPairFixture = { [K in keyof typeof LINK_PAIR]: string } & { project: string };
 
@@ -238,11 +272,8 @@ export const STEP_PREPARATION: Record<string, SetupFixture> = {
       const { folder, project } = home;
       const source = `${folder}/${LINK_PAIR.source}.md`;
       const target = `${folder}/${LINK_PAIR.target}.md`;
-      const link = relative(source, target);
-      await commitAsPerson(ctx, new Map([
-        [target, '# Route notes\n\nPlanners build the routes the evening before and check them again at seven.\n\n## Loading order\n\nVans load in the reverse order of their stops.\n\n## Depot hours\n\nThe depot opens at six and closes at eight. Late vans call the night desk.\n'],
-        [source, `# Route index\n\nStart with [the route notes](${link}).\n\nThe [depot hours](${link}#${LINK_PAIR.anchor}) changed this week.\n`],
-      ]), 'Add the route notes and their index', true);
+      const texts = linkPairTexts(relative(source, target));
+      await commitAsPerson(ctx, new Map([[target, texts.target], [source, texts.source]]), 'Add the route notes and their index', true);
       ctx.observations.set('fixture.linkPair', { source, target, anchor: LINK_PAIR.anchor, project } satisfies LinkPairFixture);
     },
   },

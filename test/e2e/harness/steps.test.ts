@@ -2180,6 +2180,42 @@ describe('git executors', () => {
     assert.deepEqual(ctx.observations.get('metrics'), { anchorScrolls: null });
   });
 
+  it('prepare the L6-12 pair in Linear\'s form, so I1 finds both files equal to their documents', async () => {
+    const { ctx, linear, ids, rawFile, remoteGit } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, steps: [{ kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } }] };
+    await prepareFixtures(ctx, ctx.live as LiveWorld, 'beforeSync', { runStep });
+    const { source, target, project } = ctx.observations.get('fixture.linkPair') as { source: string; target: string; project: string };
+    const { folder } = projectFolders(ctx)[0] as { folder: string };
+    const projectId = [...(ctx.live as LiveWorld).projects.values()].find((item) => item.name === project)?.id as string;
+    const files = { [source]: await rawFile(source), [target]: await rawFile(target) };
+    // No final newline: Linear drops it, so a file that ends with one never equals its document.
+    for (const text of Object.values(files)) assert.ok(!/[\r\n]$/.test(text), JSON.stringify(text.slice(-20)));
+    // The notes run past one browser window, with text after the heading the anchored link points to.
+    const notes = files[target] as string;
+    const heading = notes.indexOf('\n## Depot hours\n');
+    assert.ok(heading > 0);
+    assert.ok(notes.slice(0, heading).split('\n\n').length >= 8, 'paragraphs before the heading');
+    assert.ok(notes.slice(heading).split('\n\n').length >= 5, 'paragraphs from the heading on');
+
+    // The documents as a sync leaves them: links by id, and the text as Linear keeps it, without a final newline.
+    for (const path of [target, source]) ids[path] = { id: linear.add({ projectId }, path.slice(folder.length + 1).replace(/\.md$/, ''), '').id };
+    const git = await ctx.person();
+    const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(ids) })).trim();
+    const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tids.json\n` })).trim();
+    const parent = (await remoteGit.text(['rev-parse', `${ctx.names.refPrefix}/ids`])).trim();
+    await git.run(['fetch', '--quiet', 'origin', parent]);
+    await git.run(['push', '--quiet', 'origin', `${(await git.text(['commit-tree', tree, '-p', parent, '-m', 'ids'])).trim()}:${ctx.names.refPrefix}/ids`]);
+    const base = (ctx.live as LiveWorld).documentUrlBase;
+    const kept = (text: string) => text.replace(/\]\(route-notes\.md(#[^)]*)?\)/g, (_link, anchor: string | undefined) => `](<${base}/${ids[target]?.id}${anchor ?? ''}>)`).replace(/\n+$/, '');
+    for (const path of [target, source]) await linear.updateDocument(ids[path]?.id as string, { content: kept(files[path] as string) });
+    assert.match(linear.documents.get(ids[source]?.id as string)?.content ?? '', new RegExp(`\\(<${base}/${ids[target]?.id}#${LINK_PAIR.anchor}>\\)`));
+
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const sides = await readSides(ctx);
+    assert.deepEqual([source, target].map((path) => sides.files.has(path)), [true, true]);
+    assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
+  });
+
   it('check that Linear holds the index linking the notes by id, whole and with the anchor (L6-12)', async () => {
     const { ctx, linear, ids } = await fakeRun();
     const plan = ids['eng/platform/plan.md']?.id as string;
