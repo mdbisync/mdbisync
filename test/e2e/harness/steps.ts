@@ -1201,14 +1201,38 @@ const GIT: Record<string, Executor> = {
     const pr = await world.rest.openPullRequest(ctx.names.syncBranch, ctx.names.trackedBranch, 'Add the format check page', 'A small page for the weekly review.');
     ctx.observations.set('ci.pullRequest', { number: pr.number, head: commit, openedAt });
   },
-  'git.edit-sync-branch': async (ctx) => {
-    const path = targetPath(ctx);
+  'git.edit-sync-branch': async (ctx, args) => {
+    // A person's commit on the pending sync branch: a new paragraph, or with a
+    // paragraph target an edit of that paragraph, which a later edit of the
+    // same paragraph on another side conflicts with.
+    const path = targetPath(ctx, args.target);
+    setTarget(ctx, path);
     const token = nextToken(ctx);
     const commit = await commitToSyncBranch(ctx, async (git) => {
-      writeFileSync(join(git.dir, path), paragraphEdit(readFileSync(join(git.dir, path), 'utf8'), undefined, token));
+      writeFileSync(join(git.dir, path), paragraphEdit(readFileSync(join(git.dir, path), 'utf8'), args.target, token));
     }, 'Add a note to the pending changes');
     ctx.edits.push({ side: 'git', path, token });
     ctx.observations.set('syncBranch.personCommit', commit);
+    ctx.observations.set('syncBranch.personEdit', { path, token });
+  },
+  'git.resolve-sync-branch': async (ctx) => {
+    // A person resolves the conflict markers a run merged into the pending sync
+    // branch, keeping the git version, before the pull request merges: the
+    // document edited on the sync branch, else the scenario's target.
+    const path = (ctx.observations.get('syncBranch.personEdit') as { path: string } | undefined)?.path ?? targetPath(ctx);
+    setTarget(ctx, path);
+    let conflicted = '';
+    let committed = '';
+    const commit = await commitToSyncBranch(ctx, async (git) => {
+      conflicted = readFileSync(join(git.dir, path), 'utf8');
+      const resolved = resolveKeeping(conflicted, 'git');
+      if (resolved === conflicted) throw new ProductError('the sync branch holds no conflict markers to resolve');
+      writeFileSync(join(git.dir, path), resolved);
+      committed = resolved;
+    }, 'Resolve the conflict');
+    retireDiscarded(ctx, conflicted, committed);
+    ctx.observations.set('resolved.body', bodyOf(committed));
+    ctx.observations.set('syncBranch.resolutionCommit', commit);
   },
   'git.ci-fix': async (ctx, args) => {
     // Fix commits a CI job makes on the sync pull request's branch.
