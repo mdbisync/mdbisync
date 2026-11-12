@@ -11,6 +11,7 @@ import type { HelperPurpose } from './isolation.ts';
 import type { Project } from './linear-world.ts';
 import { nextToken, type Editor, type RunContext } from './context.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
+import { pullTracked } from './person-git.ts';
 import { personCommit } from './sandbox.ts';
 
 export function live(ctx: RunContext) {
@@ -145,7 +146,7 @@ export async function readWorking(git: Git, path: string): Promise<string> {
 }
 
 export async function pull(git: Git, ctx: RunContext): Promise<void> {
-  await git.run(['pull', '--quiet', '--no-rebase', '--no-edit', 'origin', ctx.names.trackedBranch]);
+  await pullTracked(git, ctx);
 }
 
 export async function commitAsPerson(ctx: RunContext, changes: Map<string, string | Buffer | null>, message: string, bypassHook = false): Promise<string> {
@@ -164,7 +165,8 @@ export async function readRunIds(ctx: RunContext): Promise<IdMap | null> {
   const config = resolveStateConfig({ trackedBranch: ctx.names.trackedBranch, syncBranch: ctx.names.syncBranch, refPrefix: ctx.names.refPrefix });
   const ref = stateRef(config, 'ids');
   try {
-    await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+    // Not into FETCH_HEAD: a load test's git edit pulls in the same clone while its Linear edits read the ids.
+    await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]);
   } catch {
     return null;
   }

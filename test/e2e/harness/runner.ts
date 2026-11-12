@@ -25,6 +25,7 @@ import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.t
 import { OwnershipLedger, readOwnership, type WriteObserver } from './ownership.ts';
 import { retryGitHubCleanup } from './cleanup-retry.ts';
 import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
+import { finishPersonClone } from './person-git.ts';
 import { assertCurrentCorpus } from './corpus-drift.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
@@ -492,7 +493,7 @@ async function recordedIds(ctx: RunContext): Promise<string[]> {
   const ref = `${ctx.names.refPrefix}/ids`;
   if (!(await retryGitHubCleanup(() => sandbox.runRefs())).some((entry) => entry.ref === ref)) return [];
   const git = await ctx.person();
-  await retryGitHubCleanup(() => git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]));
+  await retryGitHubCleanup(() => git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]));
   const ids = await readIds(git, (await git.text(['rev-parse', ref])).trim());
   return [...ids.values()].map((entry) => entry.id);
 }
@@ -934,10 +935,10 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     clearInterval(heartbeat);
     if (setupStuck) cleanupOutcome = { ok: false, detail: `setup did not stop; ${cleanupOutcome.detail ?? 'cleaned up'}; shared admission keeps its resources reserved for verified recovery` };
     if (cleanupOutcome.ok && !heldForUi && !setupStuck) registration.done();
-    rmSync(join(runDir, 'person'), { recursive: true, force: true });
     rmSync(join(runDir, 'engine'), { recursive: true, force: true });
   }
   const outcome = classify(error, deps.expectedRed.has(scenario.id));
+  finishPersonClone(runDir, outcome.result, log);
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   writeFileSync(join(runDir, 'harness.log'), logLines.join('\n'));
   rmSync(join(runDir, 'canary-pending'), { force: true });

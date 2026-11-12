@@ -579,8 +579,10 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
           return;
         } catch (error) {
           // The sync may push to the tracked branch between the pull and the push: try again on top of it.
+          ctx.log(`git edit, try ${attempt + 1}: ${(error as Error).message.split('\n')[0]}`);
           if (attempt >= 3) throw error;
-          await git.run(['reset', '--quiet', '--hard', `origin/${ctx.names.trackedBranch}`], { okCodes: [0, 128] });
+          const reset = await git.run(['reset', '--quiet', '--hard', `origin/${ctx.names.trackedBranch}`], { okCodes: [0, 128] });
+          if (reset.code !== 0) ctx.log(`git edit: could not reset the person clone to origin/${ctx.names.trackedBranch}: ${reset.stderr.trim()}`);
         }
       }
     },
@@ -1708,7 +1710,7 @@ const FAULT: Record<string, Executor> = {
       checkpoint: 'after-write-before-record',
       action: async () => {
         const git = await ctx.person();
-        await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+        await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]);
         const tip = (await git.text(['rev-parse', ref])).trim();
         const tree = (await git.text(['rev-parse', `${tip}^{tree}`])).trim();
         const moved = (await git.text(['commit-tree', tree, '-p', tip, '-m', 'Unrelated update'])).trim();
