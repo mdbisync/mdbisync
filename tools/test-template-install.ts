@@ -3,9 +3,11 @@
 // hash-checked list from PyPI into its own virtual environment and put
 // pre-commit 4.6.2 on GITHUB_PATH; a list with a wrong hash must install
 // nothing. Requires Python 3.11 to 3.14 with venv support and access to PyPI.
+// TEMPLATE_INSTALL_PYTHON picks another interpreter; with Python 3.10 or older it
+// checks that every template refuses it with a clear error and installs nothing.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parse } from 'yaml';
@@ -24,9 +26,9 @@ async function installStep(file: string, job?: string) {
     : /<<'REQUIREMENTS'; then\n([\s\S]*?)\nREQUIREMENTS\n/.exec(script)?.[1];
   assert.ok(list, `${file}: no requirements list`);
   const pins = list.replace(/ \\\n\s*/g, ' ').split('\n').map((line) => {
-    const [, pin, below] = /^(\S+==\S+)(?: ; python_version < "(\d+\.\d+)")?/.exec(line) ?? [];
+    const [, pin] = /^(\S+==\S+) --hash=/.exec(line) ?? [];
     assert.ok(pin, `${file}: ${line}`);
-    return { pin: pin.toLowerCase(), below };
+    return pin.toLowerCase();
   });
   return { script, pins, list };
 }
@@ -37,7 +39,8 @@ try {
   const bin = join(temporary, 'bin');
   await mkdir(bin);
   for (const command of ['python3', 'mktemp', 'mkdir', 'ln']) {
-    const found = spawnSync('bash', ['-c', `command -v ${command}`], { encoding: 'utf8' }).stdout.trim();
+    const found = command === 'python3' && process.env.TEMPLATE_INSTALL_PYTHON
+      || spawnSync('bash', ['-c', `command -v ${command}`], { encoding: 'utf8' }).stdout.trim();
     assert.ok(found, `${command} is not on PATH`);
     await symlink(found, join(bin, command));
   }
@@ -60,6 +63,20 @@ try {
     return { result, added: (await readFile(githubPath, 'utf8')).trim() };
   };
 
+  if (older(version, '3.11')) {
+    for (const file of TEMPLATES) {
+      const { script } = await installStep(file);
+      const { result, added } = await run(`${file}-old-python`, script);
+      assert.notEqual(result.status, 0, file);
+      assert.match(result.stdout, new RegExp(`^::error::Python 3\\.11 or later is required, found Python ${version.replace('.', '\\.')}\\.\\d+; `), file);
+      assert.equal(added, '', file);
+      assert.deepEqual((await readdir(join(temporary, `${file}-old-python`))).filter(name => name.startsWith('pre-commit.')), [], file);
+      console.log(`${file}: Python ${version} is refused before anything is installed`);
+    }
+    await rm(temporary, { recursive: true, force: true });
+    process.exit(0);
+  }
+
   let installedPython = '';
   const installs = [...TEMPLATES.map(file => ({ file, job: undefined as string | undefined })),
     { file: 'ci.yml', job: 'validate' }, { file: 'ci.yml', job: 'test' }, { file: 'release.yml', job: 'build' }];
@@ -74,7 +91,7 @@ try {
     installedPython = python;
     const listed = spawnSync(python, ['-m', 'pip', 'list', '--format=freeze', '--disable-pip-version-check', '--exclude', 'pip', '--exclude', 'setuptools'], { encoding: 'utf8' });
     const installed = listed.stdout.trim().split('\n').map((line) => line.toLowerCase().replace(/_/g, '-')).sort();
-    const expected = pins.filter(({ below }) => below === undefined || older(version, below)).map(({ pin }) => pin).sort();
+    const expected = [...pins].sort();
     assert.deepEqual(installed, expected, `${file}: the environment holds other packages than the list`);
     console.log(`${file}: installed ${installed.length} hash-checked packages on Python ${version}`);
   }
@@ -84,7 +101,7 @@ try {
   const requirements = join(temporary, 'requirements.txt');
   await writeFile(requirements, `${list}\n`);
   const platforms = ['manylinux2014_x86_64', 'manylinux2014_aarch64', 'musllinux_1_2_x86_64', 'musllinux_1_2_aarch64', 'macosx_10_13_x86_64', 'macosx_11_0_arm64'];
-  for (const target of ['3.10', '3.11', '3.12', '3.13', '3.14', '3.14t']) {
+  for (const target of ['3.11', '3.12', '3.13', '3.14', '3.14t']) {
     const pythonVersion = target.replace('t', '');
     const abi = `cp${pythonVersion.replace('.', '')}${target.endsWith('t') ? 't' : ''}`;
     for (const platform of platforms) {
@@ -95,7 +112,7 @@ try {
       assert.equal(result.status, 0, `${abi} ${platform}\n${result.stdout}${result.stderr}`);
     }
   }
-  console.log(`requirements list: hash-checked wheels found for Python 3.10 to 3.14 and 3.14t on ${platforms.length} platforms`);
+  console.log(`requirements list: hash-checked wheels found for Python 3.11 to 3.14 and 3.14t on ${platforms.length} platforms`);
 
   // One wrong hash: pip refuses the file, and the step adds nothing to PATH.
   const { script } = await installStep('pre-commit.yml');

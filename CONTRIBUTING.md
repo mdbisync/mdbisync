@@ -17,6 +17,7 @@ npm run build              # bundles dist/, checks bundled licenses, writes the 
 npm test
 npm run test:hooks         # needs pre-commit; offline scratch hook and CI checks
 npm run test:template-install  # needs Python 3.11 to 3.14 with venv, and PyPI; template and repository pre-commit installs
+                               # TEMPLATE_INSTALL_PYTHON=<python3.10> checks that templates refuse an older Python
 pre-commit run --all-files
 ```
 

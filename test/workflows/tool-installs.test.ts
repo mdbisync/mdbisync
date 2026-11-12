@@ -42,28 +42,22 @@ test('repository workflows install only hashed Python wheels and patched npm', (
   }
 });
 
-test('repository requirements track templates with pinned security updates', () => {
-  const template = parse(readFileSync(new URL('../../examples/pre-commit.yml', import.meta.url), 'utf8')) as Workflow;
-  const script = Object.values(template.jobs).flatMap(job => job.steps).find(step => step.name === 'Install pre-commit')!.run!;
-  const list = /<<'REQUIREMENTS'; then\n([\s\S]*?)\nREQUIREMENTS\n/.exec(script)?.[1];
-  assert.ok(list);
-  // Hosted CI can use patched filelock (Python 3.11+) and its compatible virtualenv.
-  // Every other requirement, including hashes and environment markers, stays aligned.
-  const updates = new Map([
-    ['filelock', 'filelock==4.2.10 --hash=sha256:9479aaeb4db20b5a53e3da28493edd24720b66b8a0b84030aa56ccdf243d6857'],
-    ['packaging', 'packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c'],
-    ['python-discovery', 'python-discovery==1.9.5 --hash=sha256:a1fae8fca11e4bc61e38491c2aafff29e430b3c5e272d51ae52fb895bc4c0fac'],
-    ['virtualenv', 'virtualenv==21.15.6 --hash=sha256:4b99ab9b95ff11043939bb4cad2fa0449175fa5a478372864f62160cb6c1a7ed'],
-  ]);
+test('repository requirements and every template install the same pins', () => {
   const entries = (text: string) => {
     const lines = text.replace(/ \\\n\s*/g, ' ').split('\n');
     const pins = new Map(lines.map(line => [line.split('==')[0]!, line]));
     assert.equal(pins.size, lines.length, 'each package must appear exactly once');
+    for (const line of lines) assert.match(line, /^[a-z0-9-]+==\S+ --hash=sha256:[0-9a-f]{64}(?: --hash=sha256:[0-9a-f]{64})*$/, 'exact pins with hashes, no markers');
     return pins;
   };
-  const expected = entries(list);
-  for (const [name, pin] of updates) expected.set(name, pin);
-  assert.deepEqual(entries(requirements), expected);
+  const expected = entries(requirements);
+  for (const file of ['mdbisync.yml', 'mdbisync-initial-sync.yml', 'pre-commit.yml']) {
+    const template = parse(readFileSync(new URL(`../../examples/${file}`, import.meta.url), 'utf8')) as Workflow;
+    const script = Object.values(template.jobs).flatMap(job => job.steps).find(step => step.name === 'Install pre-commit')!.run!;
+    const list = /<<'REQUIREMENTS'; then\n([\s\S]*?)\nREQUIREMENTS\n/.exec(script)?.[1];
+    assert.ok(list, file);
+    assert.deepEqual(entries(list), expected, file);
+  }
 });
 
 for (const run of [
