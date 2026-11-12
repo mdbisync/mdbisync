@@ -292,3 +292,12 @@ services:
 ```sh
 node --test test/e2e/harness/reconcile-specs.test.ts
 ```
+
+L3-17 (renamed in Linear, edited in git) and L3-18 (moved in git, edited in
+Linear) run the same way. Their fake GitHub merges as GitHub does, without
+pairing a rename on one side with an edit on the other, so the sync pull
+request merges only after the sync branch has taken in the tracked branch:
+
+```sh
+node --test test/e2e/harness/rename-edit-specs.test.ts
+```
