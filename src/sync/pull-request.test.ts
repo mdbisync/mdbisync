@@ -1159,7 +1159,7 @@ describe('sync: the sync pull request', () => {
     const path = 'eng/notes/plan.md';
     await suspendOne();
     const url = 'https://uploads.linear.app/workspace/photo.png';
-    const bytes = Buffer.from('new image bytes');
+    const bytes = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
     world.linear.uploads.push({ filename: 'photo.png', contentType: 'image/png', size: bytes.length, assetUrl: url, bytes });
     await editInLinear(path, `# Plan\n\nA repaired edit.\n\n![Photo](${url})\n`);
     await editInLinear('combined/guide.md', '# Guide\n\nIndependent edit.\n');
@@ -1169,7 +1169,7 @@ describe('sync: the sync pull request', () => {
     const link = /!\[Photo\]\(<?([^)>]+)>?\)/.exec(captured)?.[1];
     assert.ok(link, captured);
     const asset = `eng/notes/${link}`;
-    assert.equal(await show(`${SUSPENDED}:${asset}`), bytes.toString());
+    assert.deepEqual((await fixture.remote.run(['show', `${SUSPENDED}:${asset}`])).stdout, bytes);
     assert.ok((await show('refs/mdbisync/ids:ids.json')).includes(asset));
     assert.equal((await fixture.remote.run(['cat-file', '-e', `${SYNC_BRANCH}:${asset}`], { okCodes: [0, 128] })).code, 128);
     assert.match(await show(`${SYNC_BRANCH}:combined/guide.md`), /Independent edit/);
@@ -1178,7 +1178,7 @@ describe('sync: the sync pull request', () => {
     await sync();
     assert.equal((await fixture.remote.run(['cat-file', '-e', `refs/heads/main:${asset}`], { okCodes: [0, 128] })).code, 128);
     await releaseHeld();
-    assert.equal(await show(`refs/heads/main:${asset}`), bytes.toString());
+    assert.deepEqual((await fixture.remote.run(['show', `refs/heads/main:${asset}`])).stdout, bytes);
     assert.match((await documentOf(path)).content ?? '', /Photo/);
   });
 
