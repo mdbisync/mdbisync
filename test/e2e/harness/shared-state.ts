@@ -133,17 +133,33 @@ export function redactGitOutput(text: string, env: Record<string, string> = {}):
   return out.length > 2000 ? `${out.slice(0, 2000)}…` : out;
 }
 
+/**
+ * GitHub's answer to a read of the sandbox when the credential cannot see it.
+ * A freshly minted installation token has met it once, and a new token read
+ * the same repository minutes later.
+ */
+export function isRepositoryNotFound(error: unknown): boolean {
+  return error instanceof GitError && (error.args[0] === 'ls-remote' || error.args[0] === 'fetch') && error.code === 128 &&
+    /^remote: Repository not found\.?$/m.test(error.stderr);
+}
+
+/** Wait before the single read retried after "Repository not found". */
+export const NOT_FOUND_RETRY_MS = 10_000;
+
 /** What a failed git call said: its exit code and error output for a GitError, the message otherwise. */
 function gitFailure(error: unknown): string {
   if (error instanceof GitError) return `git ${error.args[0] ?? ''} exited with ${error.code}: ${error.stderr}`;
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Cache short-lived installation credentials, sharing in-flight refreshes. */
-export function refreshingGitEnv(load: () => Promise<Record<string, string>>, now: () => number = Date.now): () => Promise<Record<string, string>> {
+/** Credentials for git; `fresh` asks for new ones instead of cached ones. */
+export type GitEnvSource = (options?: { fresh?: boolean }) => Promise<Record<string, string>>;
+
+/** Cache short-lived installation credentials, sharing in-flight refreshes; `fresh` mints new ones. */
+export function refreshingGitEnv(load: () => Promise<Record<string, string>>, now: () => number = Date.now): GitEnvSource {
   let cached: { until: number; value: Promise<Record<string, string>> } | undefined;
-  return async () => {
-    if (cached === undefined || now() >= cached.until) cached = { until: now() + 45 * 60_000, value: Promise.resolve().then(load) };
+  return async (options = {}) => {
+    if (cached === undefined || now() >= cached.until || options.fresh === true) cached = { until: now() + 45 * 60_000, value: Promise.resolve().then(load) };
     const current = cached;
     try { return await current.value; }
     catch (error) { if (cached === current) cached = undefined; throw error; }
@@ -154,10 +170,23 @@ export class GitStateStore implements StateStore {
   readonly #git: Git;
   readonly #url: string;
   readonly #dir: string;
-  readonly #env: Record<string, string> | (() => Promise<Record<string, string>>);
+  readonly #env: Record<string, string> | GitEnvSource;
   readonly #ready: Promise<unknown>;
-  /** `git` replaces the git runner, for tests that give the push GitHub's failure forms. */
-  constructor(options: { stateDir: string; url: string; env?: Record<string, string> | (() => Promise<Record<string, string>>); git?: (dir: string, env: Record<string, string>) => Git }) {
+  readonly #log: (line: string) => void;
+  readonly #sleep: (ms: number) => Promise<unknown>;
+  /**
+   * `git` replaces the git runner, for tests that give the push GitHub's
+   * failure forms; `log` receives the retry of a read after "Repository not
+   * found", and `sleep` the wait before it.
+   */
+  constructor(options: {
+    stateDir: string;
+    url: string;
+    env?: Record<string, string> | GitEnvSource;
+    git?: (dir: string, env: Record<string, string>) => Git;
+    log?: (line: string) => void;
+    sleep?: (ms: number) => Promise<unknown>;
+  }) {
     // Each process gets its own object directory: no fetch/index locks can
     // serialize unrelated hosts or accidentally overwrite another fetch.
     const dir = join(options.stateDir, 'control', randomUUID());
@@ -166,36 +195,62 @@ export class GitStateStore implements StateStore {
     this.#env = options.env ?? {};
     this.#git = (options.git ?? ((at, env) => new Git(at, env)))(dir, { GIT_AUTHOR_NAME: 'Scenario Harness', GIT_AUTHOR_EMAIL: 'harness@example.com', GIT_COMMITTER_NAME: 'Scenario Harness', GIT_COMMITTER_EMAIL: 'harness@example.com' });
     this.#url = options.url;
+    this.#log = options.log ?? (() => {});
+    this.#sleep = options.sleep ?? sleep;
     this.#ready = this.#git.run(['init', '--bare', '--quiet']);
   }
   /** The credentials of the last successful `#auth`, kept to remove them from error output without fetching new ones. */
   #lastEnv: Record<string, string> = {};
-  async #auth(): Promise<Record<string, string>> {
-    this.#lastEnv = typeof this.#env === 'function' ? await this.#env() : this.#env;
+  async #auth(fresh = false): Promise<Record<string, string>> {
+    this.#lastEnv = typeof this.#env === 'function' ? await this.#env({ fresh }) : this.#env;
     return this.#lastEnv;
   }
   async close(): Promise<void> {
     try { await this.#ready; } finally { rmSync(this.#dir, { recursive: true, force: true }); }
   }
-  async #tip(): Promise<string | null> {
+  async #tip(fresh = false): Promise<string | null> {
     await this.#ready;
-    const listing = await this.#git.text(['ls-remote', '--refs', this.#url, CONTROL_REF], { env: await this.#auth() });
+    const listing = await this.#git.text(['ls-remote', '--refs', this.#url, CONTROL_REF], { env: await this.#auth(fresh) });
     const tip = listing.trim().split(/\s+/)[0] || null;
     if (tip !== null && !/^[0-9a-f]{40,64}$/.test(tip)) throw new Error('invalid shared admission ref');
     return tip;
   }
-  async #snapshot(): Promise<{ tip: string | null; state: SharedState }> {
-    const tip = await this.#tip();
+  async #snapshot(fresh = false): Promise<{ tip: string | null; state: SharedState }> {
+    const tip = await this.#tip(fresh);
     if (tip === null) return { tip, state: { version: 1, runs: [] } };
     await this.#git.run(['fetch', '--quiet', '--no-write-fetch-head', this.#url, tip], { env: await this.#auth() });
     return { tip, state: parseSharedState(await this.#git.text(['show', `${tip}:state.json`])) };
   }
-  #unavailable(error: unknown): Error {
-    return new Error(`shared admission state unavailable or invalid: ${redactGitOutput(gitFailure(error), this.#lastEnv)}`);
+  #unavailable(error: unknown, note = ''): Error {
+    return new Error(`shared admission state unavailable or invalid: ${redactGitOutput(gitFailure(error), this.#lastEnv)}${note}`);
+  }
+  /**
+   * Reads the state. When the sandbox answers "Repository not found" and
+   * `retry.left` allows it, waits, asks the credential source for fresh
+   * credentials (a fixed record stays the same) and reads once more; both
+   * answers are logged without credentials. Any other failure, and a
+   * second "Repository not found", ends the read.
+   */
+  async #read(retry: { left: boolean }): Promise<{ tip: string | null; state: SharedState }> {
+    try { return await this.#snapshot(); }
+    catch (error) {
+      if (!retry.left || !isRepositoryNotFound(error)) throw this.#unavailable(error);
+      retry.left = false;
+      this.#log(`shared admission read: ${redactGitOutput(gitFailure(error), this.#lastEnv)}; retrying once in ${NOT_FOUND_RETRY_MS / 1000} s with fresh credentials`);
+    }
+    await this.#sleep(NOT_FOUND_RETRY_MS);
+    try {
+      const snapshot = await this.#snapshot(true);
+      this.#log('shared admission read: the retry succeeded');
+      return snapshot;
+    } catch (error) {
+      const note = isRepositoryNotFound(error) ? ' (again, after one retry with fresh credentials)' : ' (on the retry with fresh credentials)';
+      this.#log(`shared admission read: the retry failed: ${redactGitOutput(gitFailure(error), this.#lastEnv)}`);
+      throw this.#unavailable(error, note);
+    }
   }
   async read(): Promise<SharedState> {
-    try { return (await this.#snapshot()).state; }
-    catch (error) { throw this.#unavailable(error); }
+    return (await this.#read({ left: true })).state;
   }
   /** Whether the ref's tip is the pushed commit or was built on it. */
   async #landed(tip: string | null, commit: string, env: Record<string, string>): Promise<boolean> {
@@ -216,10 +271,9 @@ export class GitStateStore implements StateStore {
   async update<T>(change: (state: SharedState) => T | Promise<T>): Promise<T> {
     let unchanged = 0;
     let last = '';
+    const retry = { left: true };
     for (let attempt = 0; attempt < 30; attempt++) {
-      let snapshot;
-      try { snapshot = await this.#snapshot(); }
-      catch (error) { throw this.#unavailable(error); }
+      const snapshot = await this.#read(retry);
       const before = JSON.stringify(snapshot.state);
       const result = await change(snapshot.state);
       const content = JSON.stringify(snapshot.state);
