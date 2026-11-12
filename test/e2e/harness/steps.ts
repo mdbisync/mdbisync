@@ -25,7 +25,8 @@ import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
 import { INVARIANT_CHECKS, editsFound, expectsDocument, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
-import { faultChecks, rerunSuspendedCheck, ageCheck, waitForCheckCompleted, CHECK_WAIT_MS } from './check-fault.ts';
+import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
+import type { CheckState } from '../../../src/pull-request/merge.ts';
 import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
@@ -295,14 +296,46 @@ export async function watchRun(ctx: RunContext, options: { throughProxy: boolean
   if (views) await recordRunView(ctx, n);
 }
 
-/** Runs the sync until a run changes nothing more (at most `limit` runs). */
+/**
+ * Runs the sync until a run changes nothing more (at most `limit` runs). A
+ * run that changed nothing while its open sync pull request still waits for
+ * a check has not settled: the next run, once the check completes, may merge
+ * the pull request. Settle waits for the head's checks (bounded, as
+ * `fault.checks` waits) and runs again; those runs come on top of `limit`,
+ * and settle waits at most `limit` times.
+ */
 async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit = 4): Promise<void> {
-  for (let attempt = 0; attempt < limit; attempt += 1) {
+  let waits = 0;
+  for (let attempt = 0; attempt < limit + waits; attempt += 1) {
     if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) await workflowRun(ctx, { event: 'workflow_dispatch' });
     else await runCommand(ctx, 'sync', args);
-    const last = ctx.engine.results.at(-1);
-    if (last?.report?.['changed'] === false) return;
+    const report = ctx.engine.results.at(-1)?.report;
+    if (report?.['changed'] !== false) continue;
+    if (waits >= limit || !(await waitForSyncPullRequestChecks(ctx, report))) return;
+    waits += 1;
   }
+}
+
+/**
+ * Waits until the open sync pull request that the run reports with pending
+ * checks has none pending on its head, and returns whether it waited. A head
+ * that carries the scenario's own `pending` marker sleeps by design, so
+ * nothing is waited for there.
+ */
+async function waitForSyncPullRequestChecks(ctx: RunContext, report: Record<string, unknown>): Promise<boolean> {
+  const reported = report['pullRequest'] as { pullRequest?: { number?: number } | null; checks?: Pick<CheckState, 'state'> | null } | null | undefined;
+  const number = reported?.pullRequest?.number;
+  if (ctx.live === null || typeof number !== 'number' || reported?.checks?.state !== 'pending') return false;
+  const world = live(ctx);
+  const pr = await world.rest.pullRequest(number);
+  if (pr.state !== 'open' || pr.head.ref !== ctx.names.syncBranch) return false;
+  const git = await ctx.person();
+  await git.run(['fetch', '--quiet', 'origin', `refs/heads/${ctx.names.syncBranch}`]);
+  if (await sleepsByDesign(git, pr.head.sha)) return false;
+  ctx.log(`waiting up to ${CHECK_WAIT_MS / 60_000} minutes for the checks on the head of sync pull request ${number}`);
+  await waitForHeadChecks(world.rest, pr.head.sha, { signal: ctx.signal, pollMs: ctx.checkPollMs, timeoutMs: CHECK_WAIT_MS });
+  ctx.observations.set('settle.checkWaits', Number(ctx.observations.get('settle.checkWaits') ?? 0) + 1);
+  return true;
 }
 
 /**
