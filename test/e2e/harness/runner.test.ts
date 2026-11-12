@@ -8,7 +8,7 @@ import type { EngineResult } from './engine.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
 import { Git } from '../../../src/state/index.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
-import { budgetHolds, reportedHoldChanges, compare, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
+import { budgetHolds, reportedHoldChanges, compare, firstDifference, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
 import { loadTestConfig, parseEnvFile, parseRepoUrl } from './config.ts';
 import { Governor } from './governor.ts';
@@ -107,6 +107,17 @@ describe('results', () => {
 
   it('has an executor for every step action', () => {
     assert.equal(HARNESS_GAPS.size, 0);
+  });
+});
+
+describe('I1 differences', () => {
+  it('names where a file and its document first differ, and a final newline on its own', () => {
+    // As in the live L4-12 burst: a conflict block at the end, the file with a final newline, Linear without.
+    const marked = '**Sync conflict: git version**\n\nOurs.\n\n**Sync conflict: Linear version**\n\nTheirs.\n\n**Sync conflict: end**';
+    assert.equal(firstDifference(`${marked}\n`, marked), 'only the final newline differs (file has one, document has none)');
+    assert.equal(firstDifference('One.\n\nTwo.', 'One.\n\nTwo, edited.'), 'line 3: file "Two.", document "Two, edited."');
+    assert.equal(firstDifference('One.\n\nTwo.', 'One.'), 'line 2: file "", document (end)');
+    assert.match(firstDifference(`a\n${'x'.repeat(300)}`, 'a\ny'), /^line 2: file "x{120}…", document "y"$/);
   });
 });
 

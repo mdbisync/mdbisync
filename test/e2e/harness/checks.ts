@@ -4,7 +4,7 @@
 
 import { engineRequestCount, remoteRequests, isDocumentWrite } from './request-accounting.ts';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import type { Definition, Image, Link, Nodes } from 'mdast';
@@ -255,6 +255,25 @@ export function gitLinks(content: string, documentPath: string, targets: Require
 /** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
 export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
   return linearLinks(bodyOf(text), path, sides) === content;
+}
+
+/** The file in the run folder where a failing I1 lists how each file differs from its document. */
+export const I1_DIFFERENCES_FILE = 'i1-differences.txt';
+
+/**
+ * Where a file's expected document text and the document's text first differ, as one line: a final newline only,
+ * or the first differing line on each side (shortened).
+ */
+export function firstDifference(expected: string, actual: string): string {
+  if (expected.replace(/\n$/, '') === actual.replace(/\n$/, '')) {
+    return `only the final newline differs (file ${expected.endsWith('\n') ? 'has one' : 'has none'}, document ${actual.endsWith('\n') ? 'has one' : 'has none'})`;
+  }
+  const a = expected.split('\n');
+  const b = actual.split('\n');
+  let line = 0;
+  while (line < a.length && line < b.length && a[line] === b[line]) line += 1;
+  const show = (text: string | undefined) => (text === undefined ? '(end)' : JSON.stringify(text.length > 120 ? `${text.slice(0, 120)}…` : text));
+  return `line ${line + 1}: file ${show(a[line])}, document ${show(b[line])}`;
 }
 
 /**
@@ -630,9 +649,10 @@ const ok = (name: string): CheckOutcome => ({ name, ok: true });
 const bad = (name: string, detail: string): CheckOutcome => ({ name, ok: false, detail });
 
 export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
-  async I1(_ctx, sides) {
+  async I1(ctx, sides) {
     const s = await sides();
     const differing: string[] = [];
+    const details: string[] = [];
     for (const [path, text] of s.files) {
       // A file left out on purpose, or a kept annotation README, has no document to match.
       if (!expectsDocument(s, path)) continue;
@@ -640,11 +660,19 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
       const document = entry === undefined ? undefined : s.documents.get(entry.id);
       if (document === undefined || document.trashed) {
         differing.push(`${path} (no document)`);
+        details.push(`${path}: no document`);
         continue;
       }
-      if (!sameAsFile(text, document.content ?? '', path, s)) differing.push(path);
+      const expected = linearLinks(bodyOf(text), path, s);
+      if (expected !== (document.content ?? '')) {
+        differing.push(path);
+        details.push(`${path}: ${firstDifference(expected, document.content ?? '')}`);
+      }
     }
-    return differing.length === 0 ? ok('I1') : bad('I1', `${differing.length} files differ from their documents: ${differing.slice(0, 10).join(', ')}`);
+    if (differing.length === 0) return ok('I1');
+    // Every difference, kept in the run folder: the documents are archived at cleanup.
+    writeFileSync(join(ctx.runDir, I1_DIFFERENCES_FILE), `${details.join('\n')}\n`);
+    return bad('I1', `${differing.length} files differ from their documents (each in ${I1_DIFFERENCES_FILE}): ${differing.slice(0, 10).join(', ')}`);
   },
 
   async I2(ctx, sides) {

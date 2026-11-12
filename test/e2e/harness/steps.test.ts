@@ -2794,7 +2794,7 @@ describe('subjects', () => {
     const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
     const sides = await readSides(ctx);
     assert.deepEqual([...sides.omitted], [['eng/platform/large.md', 'write: upload-too-large']]);
-    assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => sides)).detail, '1 files differ from their documents: eng/platform/lost.md (no document)');
+    assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => sides)).detail, '1 files differ from their documents (each in i1-differences.txt): eng/platform/lost.md (no document)');
     assert.equal((await INVARIANT_CHECKS.I7(ctx, async () => sides)).detail, '1 problems: eng/platform/lost.md has no id');
     // Once the run also leaves the second file out with its rule, both checks hold.
     initialSync.leftOutAtWrite.push({ path: 'eng/platform/lost.md', rule: 'content-too-long' });
@@ -2835,7 +2835,7 @@ describe('subjects', () => {
       return [(await INVARIANT_CHECKS.I1(ctx, async () => sides)).detail, (await INVARIANT_CHECKS.I7(ctx, async () => sides)).detail];
     };
     const bothMissing = [
-      '2 files differ from their documents: docs/handbook/README.md (no document), eng/platform/README.md (no document)',
+      '2 files differ from their documents (each in i1-differences.txt): docs/handbook/README.md (no document), eng/platform/README.md (no document)',
       '2 problems: docs/handbook/README.md has no id; eng/platform/README.md has no id',
     ];
 
@@ -2860,24 +2860,24 @@ describe('subjects', () => {
 
     // Only one named: the other README is genuinely without a document.
     await recordIds(documents, final(['eng/platform/README.md']));
-    assert.deepEqual(await check(), ['1 files differ from their documents: docs/handbook/README.md (no document)', '1 problems: docs/handbook/README.md has no id']);
+    assert.deepEqual(await check(), ['1 files differ from their documents (each in i1-differences.txt): docs/handbook/README.md (no document)', '1 problems: docs/handbook/README.md has no id']);
 
     // A trailer never excuses a synchronized file that is not an annotation README, nor a mapped document Linear lacks.
     const { 'eng/platform/notes.md': _notes, ...withoutNotes } = documents;
     await recordIds({ ...withoutNotes, 'docs/handbook/start.md': { id: 'gone' } }, final([...both, 'eng/platform/notes.md', 'docs/handbook/start.md']));
     assert.deepEqual(await check(), [
-      '2 files differ from their documents: docs/handbook/start.md (no document), eng/platform/notes.md (no document)',
+      '2 files differ from their documents (each in i1-differences.txt): docs/handbook/start.md (no document), eng/platform/notes.md (no document)',
       '2 problems: docs/handbook/start.md: its document is not in Linear; eng/platform/notes.md has no id',
     ]);
 
     // A kept README that later gained an id is checked like any mapped file: its document must exist.
     await recordIds({ ...documents, 'eng/platform/README.md': { id: 'gone' } }, final(both));
-    assert.deepEqual(await check(), ['1 files differ from their documents: eng/platform/README.md (no document)', '1 problems: eng/platform/README.md: its document is not in Linear']);
+    assert.deepEqual(await check(), ['1 files differ from their documents (each in i1-differences.txt): eng/platform/README.md (no document)', '1 problems: eng/platform/README.md: its document is not in Linear']);
 
     // A body edited on the tracked branch after the record is a new document: without one it fails, named or not.
     await recordIds(documents, final(both));
     await commitReadmes({ 'eng/platform/README.md': ENG.replace('owns', 'runs') }, 'Edit the platform README');
-    assert.deepEqual(await check(), ['1 files differ from their documents: eng/platform/README.md (no document)', '1 problems: eng/platform/README.md has no id']);
+    assert.deepEqual(await check(), ['1 files differ from their documents (each in i1-differences.txt): eng/platform/README.md (no document)', '1 problems: eng/platform/README.md has no id']);
 
     // An annotation-only README the record holds needs no trailer: the engine keeps it, as capture does after its document leaves.
     await commitReadmes({ 'eng/platform/README.md': `---\nlinear-project: ${PROJECT.name}\n---\n` }, 'Only the annotation');
@@ -2894,7 +2894,9 @@ describe('subjects', () => {
     await git.run(['commit', '--quiet', '-am', 'Add a footnote']);
     await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
     const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
-    assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => readSides(ctx))).detail, '1 files differ from their documents: docs/handbook/start.md');
+    assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => readSides(ctx))).detail, '1 files differ from their documents (each in i1-differences.txt): docs/handbook/start.md');
+    // The run folder keeps where each file differs: the documents are archived at cleanup.
+    assert.equal(readFileSync(join(ctx.runDir, 'i1-differences.txt'), 'utf8'), 'docs/handbook/start.md: line 3: file "Welcome.[^1]", document "Welcome."\n');
     const sync = (leftOut: unknown[]) => engineRun('sync', { initialSync: null, sync: { updated: [], created: [], adopted: [], restored: [], leftOut, leftOutAtWrite: [] } });
     ctx.engine.results.push(sync([{ path: 'docs/handbook/start.md', rules: ['footnote'] }]));
     const sides = await readSides(ctx);

@@ -239,7 +239,13 @@ export async function mergeMarkdown(base: string, ours: string, theirs: string):
     ], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
     const raw = result.stdout.toString('utf8');
     const tokens = tokenize(raw.replaceAll('\r\n', '\n'), size);
-    const text = head + (result.code === 0 ? raw : render(tokens, conflictRanges(tokens))).replaceAll('\n', eol);
+    // A conflict that runs to the end closes with a marker line; the result keeps the git file's final newline, or
+    // its absence (a file in Linear's form has none, and Linear keeps none), as a clean merge does. With no git
+    // body (a document only Linear has), Linear's text decides.
+    const rendered = result.code === 0 ? raw : render(tokens, conflictRanges(tokens));
+    const ending = ours !== '' ? ours : theirs;
+    const body = ending === '' || ending.endsWith('\n') ? rendered : rendered.replace(/\n$/, '');
+    const text = head + body.replaceAll('\n', eol);
     return { text, conflicts: detectConflicts(text) };
   } finally {
     await rm(dir, { recursive: true, force: true });

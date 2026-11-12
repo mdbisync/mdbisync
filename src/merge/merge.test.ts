@@ -12,6 +12,21 @@ test('L3-01: edits to separate paragraphs merge without markers', async () => {
   assert.deepEqual(result.conflicts, []);
 });
 
+test('a conflict at the end keeps the git file\'s final newline, or its absence, as a clean merge does', async () => {
+  // Files in Linear's form, as the sync writes them, end without a newline; Linear keeps no final newline either.
+  const linearForm = await mergeMarkdown('Intro.\n\nold', 'Intro.\n\ngit edit', 'Intro.\n\nLinear edit');
+  assert.equal(linearForm.text, `Intro.\n\n${conflict('git edit', 'Linear edit').replace(/\n$/, '')}`);
+  assert.equal(linearForm.conflicts.length, 1);
+  const clean = await mergeMarkdown('one\n\nold', 'two\n\nold', 'one\n\nnew');
+  assert.equal(clean.text, 'two\n\nnew', 'a clean merge of such files ends without a newline too');
+  // A file that ends with a newline keeps it.
+  const withNewline = await mergeMarkdown('Intro.\n\nold\n', 'Intro.\n\ngit edit\n', 'Intro.\n\nLinear edit');
+  assert.equal(withNewline.text, `Intro.\n\n${conflict('git edit', 'Linear edit')}`);
+  // Content after the conflict keeps the git file's ending as it was.
+  const after = await mergeMarkdown('old\n\nTail.', 'git edit\n\nTail.', 'Linear edit\n\nTail.');
+  assert.equal(after.text, `${conflict('git edit', 'Linear edit')}\nTail.`);
+});
+
 test('front matter is merged apart from the body: either side\'s change is kept, overlapping changes keep git\'s', async () => {
   const file = (head: string, body: string) => `---\n${head}---\n\n${body}`;
   const head = (owner: string, team: string) => `owner: ${owner}\nstatus: open\nteam: ${team}\n`;
