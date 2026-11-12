@@ -2,7 +2,7 @@
 // as written on a runner without pre-commit. It must install exactly the
 // hash-checked list from PyPI into its own virtual environment and put
 // pre-commit 4.6.2 on GITHUB_PATH; a list with a wrong hash must install
-// nothing. Requires Python 3.10 to 3.14 with venv support and access to PyPI.
+// nothing. Requires Python 3.11 to 3.14 with venv support and access to PyPI.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
