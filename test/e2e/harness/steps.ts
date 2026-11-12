@@ -11,6 +11,8 @@
 import { randomUUID } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
+import { delayDistribution, observedTokens } from './soak-report.ts';
 import { cleanupKilledTokens } from './token-cleanup.ts';
 import { recordRunView, tokenActive, watchesRunViews } from './subjects.ts';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
@@ -34,7 +36,7 @@ import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineC
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
-import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver } from './load.ts';
+import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver, type SoakResult } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, runFailure } from './results.ts';
 import { commitStaged, HARNESS, hookEnv, installHooks, personCommit } from './sandbox.ts';
@@ -362,6 +364,7 @@ async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'):
     refPrefix: ctx.names.refPrefix,
     group: runGroup(ctx.names.runId),
     securityCanary: ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE),
+    scheduledOnly: ctx.scenario.steps.some((step) => step.kind === 'run' && step.action === 'soak'),
     actionSha,
   }, wanted);
   if (files.size === 0) return;
@@ -372,6 +375,7 @@ async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'):
   await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
   ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
   ctx.observations.set('workflows.installed', [...installed, ...files.keys()]);
+  if (ctx.scenario.steps.some((step) => step.kind === 'run' && step.action === 'soak')) ctx.observations.set('workflows.scheduledOnly', true);
 }
 
 async function requireWorkflows(ctx: RunContext, command: CommandName = 'sync'): Promise<void> {
@@ -446,6 +450,7 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
     throw new Error(`run.workflow cannot start a ${event} run`);
   }
   recordWorkflowRun(ctx, run);
+  ctx.observations.set('workflows.last', run);
   await settleWorkflowRun(ctx, run, command);
 }
 
@@ -470,6 +475,7 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
  * the runs that `runs.<n|last>` name. Returns how many runs it recorded.
  */
 export async function settleFollowUpRuns(ctx: RunContext, limit = 5): Promise<number> {
+  if (ctx.observations.get('workflows.scheduledOnly') === true) return 0;
   const sync = workflowFor('sync');
   const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
   if (ctx.scenario.mode !== 'actions' || ctx.live === null || !installed.includes(sync)) return 0;
@@ -588,9 +594,10 @@ async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: Com
 
 // --- the executors -------------------------------------------------------
 
-function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
+function loadDriver(ctx: RunContext, sync: () => Promise<void | number>): LoadDriver {
   return {
     ...realClock,
+    sleep: (ms) => delay(Math.max(0, ms), undefined, { signal: ctx.signal }),
     linearEdit: async (actor, path) => {
       await editorEdit(ctx, actor, path, (text, token) => paragraphEdit(text, undefined, token));
     },
@@ -896,21 +903,87 @@ const RUN: Record<string, Executor> = {
     ctx.observations.set('report.generatedGitPushes', result.gitPushes);
   },
   'run.soak': async (ctx, args) => {
-    // The sync runs every `scheduleSeconds`. In actions mode the harness starts
-    // each run by dispatch, as an external trigger would (a schedule never runs
-    // on a run's branch); the report says so.
+    // Scheduled runs use the sandbox scheduler's request mechanism, scoped to this run.
     const actions = ctx.scenario.mode === 'actions';
+    if (actions && scheduleTick() !== 'workflow_dispatch') throw new EnvBlockedError('the timed soak needs dispatched scheduler ticks; set MDBISYNC_TEST_SCHEDULE_TICK=dispatch');
     if (actions) await installWorkflows(ctx);
-    const sync = actions ? () => workflowRun(ctx, { event: 'workflow_dispatch' }) : () => runCommand(ctx, 'sync', {});
+    const firstRun = ctx.engine.results.length;
+    let runnerMs = 0;
+    const triggers = new Set<string>();
+    const accounted = new Set<number>();
+    const collectUsage = async () => {
+      const world = live(ctx);
+      const runs = await world.rest.workflowRuns(ctx.names.trackedBranch);
+      const scheduled = ctx.observations.get('soak.workflow') as WorkflowRun | undefined;
+      if (scheduled !== undefined) runs.push(scheduled);
+      for (const run of runs) {
+        if (run.status !== 'completed' || accounted.has(run.id)) continue;
+        const jobs = await world.rest.runJobs(run.id);
+        if (jobs.some((job) => job.started_at !== null && job.completed_at === null)) continue;
+        for (const job of jobs) if (job.started_at !== null && job.completed_at !== null) runnerMs += Date.parse(job.completed_at) - Date.parse(job.started_at);
+        accounted.add(run.id);
+      }
+    };
+    const sync = async () => {
+      if (actions) {
+        const before = ctx.engine.results.length;
+        let failure: unknown;
+        try { await workflowRun(ctx, { event: 'schedule' }); }
+        catch (error) { failure = error; }
+        const result = ctx.engine.results.at(-1)!;
+        let started: number | undefined;
+        if (ctx.engine.results.length > before) {
+          const run = ctx.observations.get('workflows.last') as WorkflowRun;
+          triggers.add(run.event);
+          ctx.observations.set('soak.workflow', run);
+          try {
+            await collectUsage();
+            const spans = await jobSpans(live(ctx).rest, [run]);
+            if (spans.length === 0) throw new EnvBlockedError('scheduled soak workflow has no runner timing evidence');
+            started = Math.min(...spans.map((span) => span.started));
+          } catch (error) { failure ??= error; }
+        }
+        if (failure !== undefined) throw failure;
+        if (result.exitCode !== 0) throw new ProductError(`scheduled soak workflow ${result.remote?.runId ?? 'unknown'} failed (exit ${String(result.exitCode)})`);
+        const tokens = observedTokens(ctx.engine.results.slice(firstRun));
+        if (tokens.outstanding === null) throw new EnvBlockedError('soak stopped: workflow token lifecycle diagnostics are missing');
+        if (tokens.outstanding !== 0) throw new ProductError('soak stopped: workflow token revocation is unconfirmed');
+        return started;
+      } else await runCommand(ctx, 'sync', {});
+    };
+    const progress = async (result: SoakResult) => {
+      ctx.observations.set('report.hourlyInvariantChecks', result.invariantChecks);
+      ctx.observations.set('soak.maxLostEdits', result.lostEdits);
+      const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+      const own = ctx.engine.results.slice(firstRun);
+      const tokens = actions ? observedTokens(own) : null;
+      metrics.scheduleDelay = Math.max(0, ...result.scheduleDelays);
+      metrics.scheduleDelayDistribution = delayDistribution(result.scheduleDelays);
+      metrics.scheduleDelayScope = 'planned slot to runner job start, including dispatch and queue delay';
+      metrics.runnerMinutes = Math.round((actions ? runnerMs : own.reduce((sum, run) => sum + run.durationMs, 0)) / 600) / 100;
+      metrics.runnerUsageScope = 'completed run-branch workflows and requested scheduler jobs, including request jobs; excludes unrelated idle scheduler ticks';
+      metrics.workflowsAccounted = accounted.size;
+      metrics.tokenLifecycle = tokens;
+      const active = actions ? tokens!.outstanding : ctx.proxy?.unrevokedTokens().length ?? null;
+      metrics.activeLinearTokens = active;
+      metrics.triggers = [...triggers];
+      metrics.trigger = actions ? (triggers.size === 1 ? [...triggers][0] : triggers.size === 0 ? null : 'mixed') : 'local';
+      metrics.hourlyLostEditsMax = result.lostEdits;
+      metrics.hourlyChecks = ctx.observations.get('soak.checks') ?? [];
+      metrics.soak = result;
+      ctx.observations.set('metrics', metrics);
+      writeFileSync(join(ctx.runDir, 'soak-progress.json'), `${JSON.stringify({ at: new Date().toISOString(), metrics }, null, 2)}\n`);
+    };
     const driver = {
       ...loadDriver(ctx, sync),
+      progress,
       checkInvariants: async () => {
         const sides = await readSides(ctx);
         const lost = lostEdits(ctx, sides).length;
         const converged = await INVARIANT_CHECKS.I1(ctx, async () => sides);
         const checks = (ctx.observations.get('soak.checks') as Array<{ I1: boolean; lost: number }> | undefined) ?? [];
         ctx.observations.set('soak.checks', [...checks, { I1: converged.ok, lost }]);
-        return { lostEdits: lost };
+        return { lostEdits: lost, converged: converged.ok };
       },
     };
     const options = {
@@ -922,22 +995,7 @@ const RUN: Record<string, Executor> = {
     };
     const documents = await loadCandidates(ctx, 'soak');
     const lastToken = (edits: Record<Actor, number>) => lastLoadToken(ctx, edits['editor-a'] + edits['editor-b'], edits.git);
-    const result = await soak(driver, { ...options, documents, lastToken });
-    ctx.observations.set('report.hourlyInvariantChecks', result.invariantChecks);
-    const own = ctx.engine.results.slice(ctx.engine.setupRuns);
-    const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
-    metrics.scheduleDelay = Math.max(0, ...result.scheduleDelays);
-    metrics.runnerMinutes = Math.round(own.reduce((sum, run) => sum + run.durationMs, 0) / 600) / 100;
-    // Tokens are visible to the harness only through its proxy (local runs).
-    metrics.activeLinearTokens = actions ? null : ctx.proxy?.tokens().length ?? 0;
-    metrics.trigger = actions ? 'dispatch' : 'local';
-    metrics.hourlyLostEditsMax = result.lostEdits;
-    ctx.observations.set('metrics', metrics);
-    ctx.observations.set('soak.maxLostEdits', result.lostEdits);
-    // An hourly check that failed fails the soak, even when later runs repaired the state.
-    const failed = ((ctx.observations.get('soak.checks') as Array<{ I1: boolean; lost: number }> | undefined) ?? [])
-      .flatMap((check, hour) => (check.I1 && check.lost === 0 ? [] : [`hour ${hour + 1}: ${check.I1 ? '' : 'I1 failed, '}${check.lost} edits lost`]));
-    if (failed.length > 0) throw new ProductError(`hourly checks failed: ${failed.join('; ')}`);
+    await soak(driver, { ...options, documents, lastToken });
   },
 };
 
