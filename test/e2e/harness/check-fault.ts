@@ -67,6 +67,33 @@ export async function waitForCheckCompleted(rest: SandboxRest, sha: string, opti
 }
 
 /**
+ * Wait until no check run and no commit status on this head is still
+ * pending, whichever workflow or app it belongs to.
+ */
+export async function waitForHeadChecks(rest: SandboxRest, sha: string, options: WaitOptions = {}): Promise<void> {
+  const deadline = Date.now() + (options.timeoutMs ?? CHECK_WAIT_MS);
+  for (;;) {
+    options.signal?.throwIfAborted();
+    const { check_runs: runs } = await rest.request<{ check_runs: Array<{ name: string; status: string }> }>('GET', `/commits/${sha}/check-runs?filter=latest&per_page=100`);
+    const { statuses } = await rest.request<{ statuses: Array<{ context: string; state: string }> }>('GET', `/commits/${sha}/status?per_page=100`);
+    const pending = [...runs.filter((run) => run.status !== 'completed').map((run) => run.name), ...statuses.filter((status) => status.state === 'pending').map((status) => status.context)];
+    if (pending.length === 0) return;
+    if (Date.now() >= deadline) throw new EnvBlockedError(`the checks on the sync pull request's head ${sha} did not complete (still pending: ${[...new Set(pending)].sort().join(', ')})`);
+    await sleep(options.pollMs ?? 2_000, undefined, { signal: options.signal });
+  }
+}
+
+/**
+ * Whether this head's marker job sleeps by design: its tree selects
+ * `pending` and no person fixed the check. The commit must be fetched.
+ */
+export async function sleepsByDesign(git: Git, sha: string): Promise<boolean> {
+  const marker = await git.run(['show', `${sha}:${CHECK_MARKER}`], { okCodes: [0, 128] });
+  const fixed = await git.run(['cat-file', '-e', `${sha}:.harness-check-fixed`], { okCodes: [0, 128] });
+  return marker.code === 0 && marker.stdout.toString('utf8').trim() === 'pending' && fixed.code !== 0;
+}
+
+/**
  * The head of this scenario's `pending` check fault. Its marker job sleeps on
  * the sandbox's single runner, and the product carries the marker on into
  * later heads (a suspended batch's head), so it is never cleared.
@@ -137,9 +164,7 @@ async function sleepingHeads(ctx: RunContext, person: Git, refs: Array<{ ref: st
   for (const sha of candidates) {
     // A head in the target branch's history runs in that branch's group: this push, or an earlier one, cancels it.
     if (target !== undefined && (await person.run(['merge-base', '--is-ancestor', sha, target], { okCodes: [0, 1] })).code === 0) continue;
-    const marker = await person.run(['show', `${sha}:${CHECK_MARKER}`], { okCodes: [0, 128] });
-    const fixed = await person.run(['cat-file', '-e', `${sha}:.harness-check-fixed`], { okCodes: [0, 128] });
-    if (marker.code !== 0 || marker.stdout.toString('utf8').trim() !== 'pending' || fixed.code === 0) continue;
+    if (!(await sleepsByDesign(person, sha))) continue;
     if ((await readCheck(live(ctx).rest, sha)).actual === 'pending') heads.push(sha);
   }
   return heads;
