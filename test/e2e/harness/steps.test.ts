@@ -21,7 +21,9 @@ import { OwnershipLedger } from './ownership.ts';
 import { burst, burstDocuments, burstEditCounts, editCapacity, soak, soakEditCounts, type Actor, type SoakDriver } from './load.ts';
 import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
 import { fixText } from '../../../src/format/fix.ts';
-import { blockedBySetupStop, EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
+import { blockedBySetupStop, classify, EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
+import { finishPersonClone } from './person-git.ts';
+import type { SoakFailureReport } from './soak-evidence.ts';
 import { bodyOf, compare, editsFound, holdsToken, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, probedFixtures, readFixture } from '../../probe/bank.ts';
@@ -1102,6 +1104,83 @@ describe('load', () => {
     await assert.rejects(runStep(ctx, { kind: 'run', action: 'soak', args: { durationSeconds: 0 } }), /soak target is missing/);
     assert.equal(ctx.edits.length, 0);
     assert.equal(ctx.engine.results.length, 0);
+  });
+
+  it('keeps a self-contained report of a failed hourly check before cleanup, as a failure and as expected red', async () => {
+    // Seed s23 makes one editor-a edit and one git edit before the first check, and no sync run: each edit is on one side only.
+    const args = { durationSeconds: 2, scheduleSeconds: 5, invariantIntervalSeconds: 2, actors: ['editor-a', 'git'], randomSeed: 's23' };
+    assert.deepEqual(soakEditCounts({ durationMs: 2000, scheduleMs: 5000, invariantIntervalMs: 2000, actors: ['editor-a', 'git'], seed: 's23' }), { 'editor-a': 1, 'editor-b': 0, git: 1 });
+    for (const expectedRed of [false, true]) {
+      const { ctx, linear, ids, remoteGit, docs } = await fakeRun();
+      // A sync branch whose files hold both tokens, as a waiting sync pull request would, with its pull request and check.
+      const lane = fresh('soak-lane-');
+      spawnSync('git', ['clone', '--quiet', '--branch', ctx.names.trackedBranch, remoteGit.dir, lane]);
+      for (const path of docs) writeFileSync(join(lane, path), `${readFileSync(join(lane, path), 'utf8')}\nWaiting: aaaaaa-001, aaaaaa-002.\n`);
+      spawnSync('git', ['commit', '--quiet', '--all', '-m', 'Waiting'], { cwd: lane, env: { ...process.env, ...IDENTITY } });
+      spawnSync('git', ['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.syncBranch}`], { cwd: lane });
+      const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: lane, encoding: 'utf8' }).stdout.trim();
+      const run = { id: 7, event: 'pull_request', status: 'completed', conclusion: 'failure', created_at: '2026-01-01T00:00:00Z', head_branch: ctx.names.syncBranch, head_sha: head, path: '.github/workflows/checks.yml' };
+      (ctx.live as { rest: unknown }).rest = {
+        pullRequests: async () => [{ number: 3, state: 'open', title: 'Sync', body: 'Files it changes: 3.', head: { ref: ctx.names.syncBranch, sha: head }, base: { ref: ctx.names.trackedBranch }, merged_at: null, created_at: '2026-01-01T00:00:00Z' }],
+        // A second run of the same head whose jobs cannot be read: it is named, and the other run's jobs stay.
+        workflowRuns: async (branch: string) => (branch === ctx.names.syncBranch ? [run, { ...run, id: 8 }] : []),
+        runJobs: async (id: number) => {
+          if (id === 8) throw new Error('jobs read failed');
+          return [{ id: 1, name: 'pre-commit', conclusion: 'failure', started_at: '2026-01-01T00:00:01Z', completed_at: '2026-01-01T00:00:09Z' }];
+        },
+      };
+      // An earlier step's edit that never reached either side: I2 counts it, and the report keeps its path's versions.
+      const early = { side: 'linear' as const, path: 'docs/handbook/start.md', token: 'aaaaaa-early' };
+      ctx.edits.push(early);
+      const error = await runStep(ctx, { kind: 'run', action: 'soak', args }).then(() => undefined, (thrown: unknown) => thrown);
+      assert.ok(error instanceof ProductError && /soak stopped at hour 1: I1=false, 3 edits lost/.test(error.message), String(error));
+
+      // The ledger: each edit with its measured write window, the git edit with its commit.
+      const ledger = readFileSync(join(ctx.runDir, 'soak-edits.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+      assert.deepEqual(ledger.map((entry) => entry.actor).sort(), ['editor-a', 'git']);
+      for (const entry of ledger) {
+        assert.ok(Date.parse(entry.startedAt as string) <= Date.parse(entry.completedAt as string));
+        assert.equal(entry.syncsBefore, 0);
+      }
+      assert.equal(ledger.find((entry) => entry.actor === 'git')?.commit, ctx.ownCommits.at(-1));
+
+      // The run ends as the runner ends it: the classification decides whether the person's clone stays.
+      const outcome = classify(error, expectedRed);
+      assert.equal(outcome.result, expectedRed ? 'expected-red' : 'fail');
+      finishPersonClone(ctx.runDir, outcome.result, () => {});
+      assert.equal(existsSync(join(ctx.runDir, 'person')), !expectedRed);
+      linear.documents.clear();
+
+      // The report holds every missing-side edit with its payloads, from the files alone.
+      const report = JSON.parse(readFileSync(join(ctx.runDir, 'soak-failure-hour-1.json'), 'utf8')) as SoakFailureReport;
+      assert.deepEqual(report.verdict.I1, false);
+      assert.equal(report.verdict.lostEdits, 3);
+      assert.deepEqual(report.evidenceErrors, ['jobs of run 8: jobs read failed', 'lost edits not in the soak ledger: linear aaaaaa-early docs/handbook/start.md']);
+      assert.equal(report.missing.length, 2);
+      const earlyVersions = report.payloads.find((payload) => payload.path === early.path);
+      assert.ok(earlyVersions !== undefined && earlyVersions.trackedFile !== null && earlyVersions.document !== null);
+      for (const token of report.tokens) {
+        const git = token.actor === 'git';
+        assert.equal(token.lost, true);
+        assert.deepEqual([token.inGit, token.inLinear], git ? [true, false] : [false, true]);
+        assert.deepEqual(git ? token.gitPaths : token.linearDocuments, [token.path]);
+        assert.equal(token.inSyncBranch, true);
+        assert.equal(token.inSuspendedBranch, null);
+        assert.equal(token.syncBefore, null);
+        const versions = report.payloads.find((payload) => payload.path === token.path);
+        assert.ok(versions !== undefined);
+        assert.equal(versions.documentId, ids[token.path]?.id);
+        assert.equal(holdsToken(versions.trackedFile ?? '', token.token), git);
+        assert.equal(holdsToken(versions.document ?? '', token.token), !git);
+        assert.ok(holdsToken(versions.syncBranchFile ?? '', token.token));
+        assert.equal(versions.suspendedBranchFile, null);
+      }
+      assert.equal(report.refs[`refs/heads/${ctx.names.syncBranch}`], head);
+      assert.ok(report.refs[`refs/heads/${ctx.names.trackedBranch}`] !== undefined && report.refs[`${ctx.names.refPrefix}/ids`] !== undefined);
+      assert.deepEqual(report.pullRequests.map((pr) => (pr as { number: number }).number), [3]);
+      const checks = report.checks as Array<{ id: number; jobs: Array<{ name: string; conclusion: string }> | null }>;
+      assert.deepEqual(checks.map((check) => [check.id, check.jobs?.map((job) => [job.name, job.conclusion]) ?? null]), [[7, [['pre-commit', 'failure']]], [8, null]]);
+    }
   });
 });
 
