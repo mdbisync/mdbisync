@@ -1,12 +1,12 @@
 {
   "version": 1,
   "id": "L4-13",
-  "slice": "full",
+  "slice": "mid",
   "mode": "actions",
   "setup": {
     "state": "converged",
     "fixtures": [
-      "full"
+      "mid"
     ],
     "teamZoneLock": true
   },

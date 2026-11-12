@@ -5,6 +5,21 @@ import { githubRequestBody } from './github-request.ts';
 import { blockerEvidence, workflowEvidence } from './workflows.ts';
 import type { WorkflowRun } from './github.ts';
 
+it('aborts an in-flight HTTP request when its scoped workflow deadline expires', async () => {
+  const controller = new AbortController();
+  let observed: AbortSignal | null | undefined;
+  const fetchImpl = (async (_input, init) => {
+    observed = init?.signal;
+    await new Promise((_, reject) => observed!.addEventListener('abort', () => reject(observed!.reason), { once: true }));
+    return Response.json({});
+  }) as typeof fetch;
+  const rest = new SandboxRest({ owner: 'acme', repo: 'sandbox' }, 'test-token', fetchImpl).withSignal(controller.signal);
+  const pending = rest.request('GET', '/actions/runs');
+  controller.abort(new Error('deadline expired'));
+  await assert.rejects(pending, /deadline expired/);
+  assert.equal(observed?.aborted, true);
+});
+
 it('sends only checked GitHub fields and refuses malformed data before making a request', async () => {
   const sent: RequestInit[] = [];
   const fetchImpl = (async (_url, init) => { sent.push(init!); return Response.json({ ok: true }); }) as typeof fetch;

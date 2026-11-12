@@ -21,6 +21,13 @@ const freshStateDir = () => {
 after(() => stateDirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 describe('scenario selection', () => {
+  it('plans the 24-hour Actions soak on mid with all 288 scheduled syncs', () => {
+    const soak = byId('L4-13');
+    assert.equal(soak.slice, 'mid');
+    assert.equal(soak.mode, 'actions');
+    assert.equal(engineRuns(soak), 294); // initial sync, 288 ticks, up to four settle runs, I6
+    assert.ok(estimate(soak).requests > 90000);
+  });
   it('loads every spec of the catalog, validated', () => {
     assert.ok(scenarios.length >= 137);
     assert.equal(new Set(scenarios.map((scenario) => scenario.id)).size, scenarios.length);

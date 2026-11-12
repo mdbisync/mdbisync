@@ -8,16 +8,23 @@ import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
 import { paragraphEdit } from './fixtures.ts';
 import { MARKERS } from './conflicts.ts';
 import { Rng } from '../../corpus/rng.ts';
+import { ProductError, EnvBlockedError } from './results.ts';
 
 export type Actor = 'editor-a' | 'editor-b' | 'git';
+
+export interface SyncOutcome {
+  completed: boolean;
+  startedAt?: number | undefined;
+  error?: unknown;
+}
 
 export interface LoadDriver {
   /** One Linear edit by an editor on a document. */
   linearEdit(actor: 'editor-a' | 'editor-b', path: string): Promise<void>;
   /** One git push that edits these documents. */
   gitEdit(paths: readonly string[]): Promise<void>;
-  /** One sync run; resolves when it ends. */
-  sync(): Promise<void>;
+  /** One sync run; resolves when it ends, optionally with the actual runner start time. */
+  sync(deadlineAt?: number): Promise<void | number | SyncOutcome>;
   now(): number;
   sleep(ms: number): Promise<void>;
 }
@@ -130,7 +137,9 @@ export interface SoakOptions {
 
 export interface SoakDriver extends LoadDriver {
   /** Checks I1 and I2 now; returns how many edits are lost. */
-  checkInvariants(): Promise<{ lostEdits: number }>;
+  checkInvariants(): Promise<{ lostEdits: number; converged?: boolean }>;
+  /** Saves completed events, including the final hourly verdict, before the next wait. */
+  progress?(result: SoakResult): Promise<void>;
 }
 
 export interface SoakResult {
@@ -197,27 +206,45 @@ export async function soak(driver: SoakDriver, options: SoakOptions): Promise<So
   if (room < edits) throw new Error(`the documents have room for ${room} of the ${edits} soak edits`);
   const start = driver.now();
   const result: SoakResult = { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 0, invariantChecks: 0, lostEdits: 0, scheduleDelays: [] };
+  await driver.progress?.(result);
   for (const event of events) {
     const at = start + event.at;
     await driver.sleep(at - driver.now());
-    if (event.kind === 'edit') {
-      const open = [...remaining.keys()];
-      const path = open[rng.int(0, open.length - 1)] as string;
-      const left = (remaining.get(path) as number) - 1;
-      if (left === 0) remaining.delete(path);
-      else remaining.set(path, left);
-      if (event.actor === 'git') await driver.gitEdit([path]);
-      else await driver.linearEdit(event.actor, path);
-      result.edits[event.actor] += 1;
-    } else if (event.kind === 'sync') {
-      result.scheduleDelays.push(Math.max(0, driver.now() - at));
-      await driver.sync();
-      result.syncRuns += 1;
-    } else {
-      const { lostEdits } = await driver.checkInvariants();
-      result.invariantChecks += 1;
-      result.lostEdits = Math.max(result.lostEdits, lostEdits);
+    if (driver.now() > start + options.durationMs + options.scheduleMs) throw new EnvBlockedError('soak exceeded its wall-clock duration plus one schedule interval');
+    let converged = true;
+    try {
+      if (event.kind === 'edit') {
+        const open = [...remaining.keys()];
+        const path = open[rng.int(0, open.length - 1)] as string;
+        const left = (remaining.get(path) as number) - 1;
+        if (left === 0) remaining.delete(path);
+        else remaining.set(path, left);
+        if (event.actor === 'git') await driver.gitEdit([path]);
+        else await driver.linearEdit(event.actor, path);
+        result.edits[event.actor] += 1;
+      } else if (event.kind === 'sync') {
+        const invoked = driver.now();
+        const outcome = await driver.sync(start + options.durationMs + options.scheduleMs);
+        const completed = typeof outcome === 'object' ? outcome.completed : true;
+        const started = typeof outcome === 'object' ? outcome.startedAt : outcome ?? invoked;
+        if (completed) {
+          if (started !== undefined) result.scheduleDelays.push(Math.max(0, started - at));
+          result.syncRuns += 1;
+        }
+        if (typeof outcome === 'object' && outcome.error !== undefined) throw outcome.error;
+      } else {
+        const check = await driver.checkInvariants();
+        result.invariantChecks += 1;
+        result.lostEdits = Math.max(result.lostEdits, check.lostEdits);
+        converged = check.converged ?? true;
+      }
+    } catch (error) {
+      await driver.progress?.(result);
+      throw error;
     }
+    await driver.progress?.(result);
+    if (!converged || result.lostEdits > 0) throw new ProductError(`soak stopped at hour ${result.invariantChecks}: I1=${String(converged)}, ${result.lostEdits} edits lost`);
+    if (driver.now() > start + options.durationMs + options.scheduleMs) throw new EnvBlockedError('soak exceeded its wall-clock duration plus one schedule interval');
   }
   return result;
 }

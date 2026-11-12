@@ -19,6 +19,15 @@ type Step = { name?: string; run?: string; env?: Record<string, string>; uses?: 
 const jobsOf = (text: string) => Object.values((parse(text) as { jobs: Record<string, { 'runs-on': unknown; steps: Step[] }> }).jobs);
 
 describe('workflow templates rendered for a run', () => {
+  it('keeps a timed soak sync on scheduler ticks while push events only register it', () => {
+    const parsed = parse(renderForRun(readTemplate(WORKFLOW_FILES.sync), { ...RUN, scheduledOnly: true })) as { on: Record<string, unknown>; jobs: Record<string, { if?: string }> };
+    assert.deepEqual(parsed.on['push'], { branches: [RUN.trackedBranch] });
+    assert.equal(parsed.on['schedule'], undefined);
+    assert.ok(Object.values(parsed.jobs).every((job) => job.if === DISPATCH_GUARD));
+    // Formatting checks still run on pushes; only the sync job is schedule-only.
+    const checks = parse(renderForRun(readTemplate(WORKFLOW_FILES['pre-commit']), { ...RUN, scheduledOnly: true })) as { on: Record<string, unknown> };
+    assert.ok('push' in checks.on || 'pull_request' in checks.on);
+  });
   it('the initial sync: the run\'s group, runner, names, branches and refs, and a report artifact', () => {
     const template = readTemplate(WORKFLOW_FILES['initial-sync']);
     const text = renderForRun(template, { ...RUN, actionSha: SHA });
