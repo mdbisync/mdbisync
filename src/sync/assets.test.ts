@@ -109,6 +109,38 @@ it('restores cached upload spellings before restricting new downloads to the upl
   } finally { await fixture.cleanup(); }
 });
 
+it('keeps the previous spelling of each linked file whether or not the cache knows its upload', async () => {
+  const fixture = await createFixture();
+  try {
+    // One file linked twice in two spellings, one with a query, a file whose name holds a parenthesis,
+    // and one whose name holds an angle bracket, which Linear returns in brackets.
+    const previous = '![A](./img.png)\n\n![B](<img.png>)\n\n![C](./img.png?raw=1)\n\n![D](<./shot (1).png>)\n\n![E](a<b.png)\n';
+    await fixture.seed({'docs/plan.md': previous, 'docs/img.png': Buffer.from('same-image'), 'docs/shot (1).png': Buffer.from('shot'), 'docs/a<b.png': Buffer.from('angle')});
+    const git = await fixture.clone('spelling-cache');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+    // The person pasted the image twice in Linear: two upload URLs for the same bytes.
+    const first = 'https://uploads.linear.app/workspace/first';
+    const second = 'https://uploads.linear.app/workspace/second';
+    const shot = 'https://uploads.linear.app/workspace/shot';
+    const angle = 'https://uploads.linear.app/workspace/angle';
+    const bytes = new Map([[first, 'same-image'], [second, 'same-image'], [shot, 'shot'], [angle, 'angle']]);
+    const content = `![A](${first})\n\n![B](${second})\n\n![C](${first}?raw=1)\n\n![D](${shot})\n\n![E](<${angle}>)\n`;
+    const capture = () => createAssetCapture(git, resolveStateConfig({}), base, async (input) => new Response(bytes.get(String(input).replace(/[?#].*/, ''))));
+    const expected = '![A](./img.png)\n\n![B](img.png)\n\n![C](./img.png?raw=1)\n\n![D](<./shot (1).png>)\n\n![E](a<b.png)\n';
+    // A first initial sync's empty cache, one URL cached (only the last one a hash gets is kept), and both.
+    for (const uploads of [new Map<string, string>(), new Map([[sha('same-image'), second]]), new Map([[sha('same-image'), second], [sha('shot'), shot]])]) {
+      const result = await capture()('docs/plan.md', content, uploads, previous);
+      assert.equal(result.body, expected, `cache ${JSON.stringify([...uploads.values()])}`);
+      // A downloaded upload lands on the tracked file it equals, so the tree does not change either.
+      const tracked: Record<string, string> = {'docs/img.png': 'same-image', 'docs/shot (1).png': 'shot', 'docs/a<b.png': 'angle'};
+      for (const [file, content] of result.files) assert.equal(content.toString(), tracked[file]);
+      // The parser reads all five as images again (each a local file, so none is an upload).
+      assert.equal(imageFindings(result.body).length, 5);
+    }
+  } finally { await fixture.cleanup(); }
+});
+
 it('prefers previously linked files for cached links, images and definitions across runs', async () => {
   const fixture = await createFixture();
   try {

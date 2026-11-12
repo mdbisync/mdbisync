@@ -18,15 +18,16 @@ const GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA
 
 // The last document seeded is the newest in Linear: the first sync after the
 // person's merge reads it again at the capture cursor, so its images decide
-// whether that sync stays quiet. The images are linked with `./`, as the
-// corpus writes them: the first initial sync, whose upload cache is empty,
-// must keep that spelling, or the replacement makes a different record and
-// moves the `linear` ref to a commit that does not descend from the first (I4).
+// whether that sync stays quiet. The inline image is linked with `./`, as the
+// corpus writes it, the reference without: the first initial sync, whose upload
+// cache is empty, must keep each spelling, or the replacement makes a different
+// record and moves the `linear` ref to a commit that does not descend from the
+// first (I4).
 const DOCUMENTS: Readonly<Record<string, string | Buffer>> = {
   'eng/notes/images/diagram.png': PNG,
   'eng/notes/images/chart.gif': GIF,
   'eng/notes/item-0.md': '# Notes 0\n\nFirst paragraph.\n\nSecond paragraph.\n',
-  'eng/notes/item-1.md': '# Notes 1\n\nFirst paragraph.\n\n![Diagram](./images/diagram.png)\n\n*Diagram*\n\n![Chart][chart]\n\n*Chart*\n\n[chart]: ./images/chart.gif\n',
+  'eng/notes/item-1.md': '# Notes 1\n\nFirst paragraph.\n\n![Diagram](./images/diagram.png)\n\n*Diagram*\n\n![Chart][chart]\n\n*Chart*\n\n[chart]: images/chart.gif\n',
 };
 
 /** A watched run's refs before and after it, as `run-refs.json` keeps them. */
