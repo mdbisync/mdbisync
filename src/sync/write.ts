@@ -426,8 +426,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const blobs = await readBlobs(git, rest.map(([, oid]) => oid));
     for (const [path, oid] of rest) linked(path, (blobs.get(oid) as Buffer).toString('utf8'));
   }
+  /** Superseded ids that a document this run left unmapped in Linear links (an edited one it did not take over). */
+  const keptSuperseded = new Set<string>();
   /** The superseded ids to keep: a document that links the path was neither written with the new id nor trashed. */
-  const nextSuperseded = () => new Map([...superseded].filter(([, path]) => [...relinks].some(([document, paths]) => paths.has(path) && !stored.has(document) && !result.trashed.includes(document))));
+  const nextSuperseded = () => new Map([...superseded].filter(([id, path]) => keptSuperseded.has(id) || [...relinks].some(([document, paths]) => paths.has(path) && !stored.has(document) && !result.trashed.includes(document))));
 
   let written = 0;
   /** When the current batch's re-read answered. */
@@ -696,18 +698,24 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   function withCurrentIds(document: LinearDocument): LinearDocument {
     if (superseded.size === 0 || document.content == null) return document;
     const held = document.content;
-    // Only link destinations: a URL quoted in code or prose is text, and stays as it is.
     let content = '';
     let at = 0;
-    for (const { from, to, url } of linkDestinations(held)) {
-      const id = /^https:\/\/linear\.app\/[^/]+\/document\/([^/#?]+)/.exec(url)?.[1];
-      const path = id === undefined ? undefined : superseded.get(id);
-      if (id === undefined || path === undefined) continue;
+    for (const { from, to, id, path } of supersededLinks(held)) {
       content += held.slice(at, from) + held.slice(from, to).replace(id, documentIds.get(path) as string);
       at = to;
     }
     content += held.slice(at);
     return content === held ? document : { ...document, content };
+  }
+
+  /** The links in a text by a superseded id, with the path each id names. */
+  function supersededLinks(text: string): Array<{ from: number; to: number; id: string; path: string }> {
+    // Only link destinations: a URL quoted in code or prose is text, and stays as it is.
+    return linkDestinations(text).flatMap(({ from, to, url }) => {
+      const id = /^https:\/\/linear\.app\/[^/]+\/document\/([^/#?]+)/.exec(url)?.[1];
+      const path = id === undefined ? undefined : superseded.get(id);
+      return id === undefined || path === undefined ? [] : [{ from, to, id, path }];
+    });
   }
 
   /**
@@ -830,7 +838,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       // text may be a person's edit made since an interrupted run created it: it is left for the next capture, which
       // takes it in as a new document at this path for the merge with git's file.
       const held = withCurrentIds(adopted);
-      if (!sameMarkdown(held.content ?? '', body)) return skip(change.path, 'edited-in-linear');
+      if (!sameMarkdown(held.content ?? '', body)) {
+        // The next capture reads its links by superseded ids as links to their paths only while those ids are kept.
+        for (const { id } of supersededLinks(adopted.content ?? '')) keptSuperseded.add(id);
+        return skip(change.path, 'edited-in-linear');
+      }
       // Equal only with its links by superseded ids read as current ones: the links are written with the current ids.
       document = held === adopted ? adopted : await timed(() => linear.updateDocument(adopted.id, { content: body }));
       if (recreated === undefined) result.adopted.push(change.path);
