@@ -351,8 +351,34 @@ export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): 
   }
   const paths = assertion.subject === 'summary.collisionPaths' && ['same-as', 'equal'].includes(assertion.operator)
     ? differingCollisionPaths(actual.value, expected)
-    : differingPaths(actual.value, expected);
+    : differingPaths(actual.value, expected) ?? differingValue(actual.value, expected, CODE_SUBJECT.test(assertion.subject));
   return { holds: false, reason: `${assertion.operator} did not hold${paths === undefined ? '' : `: ${paths}`}` };
+}
+
+/** Subjects whose value is a rule or summary code (`summary.code`, `runs.0.summary.code`, `decided.code`), never document text. */
+export const CODE_SUBJECT = /(?:^|\.)code$/;
+
+/**
+ * How two single values differ, never by document content (I5): nothing, a
+ * flag or a count by itself; a string only when the subject is a code
+ * (`isCode`), since any other string may be a document's text; two other
+ * texts by where they first differ. Undefined for other values.
+ */
+export function differingValue(actual: unknown, expected: unknown, isCode: boolean): string | undefined {
+  if (actual === null || typeof actual === 'boolean' || typeof actual === 'number') return `actual ${JSON.stringify(actual)}`;
+  if (typeof actual === 'string' && isCode && /^[a-z0-9][a-z0-9-]{0,63}$/.test(actual)) return `actual ${JSON.stringify(actual)}`;
+  if (typeof actual !== 'string' || typeof expected !== 'string') return undefined;
+  const ending = (text: string) => /[\r\n]*$/.exec(text)![0];
+  if (actual.slice(0, actual.length - ending(actual).length) === expected.slice(0, expected.length - ending(expected).length)) {
+    return `only the line breaks at the end differ (actual ends ${JSON.stringify(ending(actual))}, expected ${JSON.stringify(ending(expected))})`;
+  }
+  // Lines as a text has them: a final line break ends the last line and opens no new one.
+  const lines = (text: string) => text.replace(/\n$/, '').split('\n');
+  const a = lines(actual);
+  const b = lines(expected);
+  let line = 0;
+  while (line < a.length && line < b.length && a[line] === b[line]) line += 1;
+  return `the texts first differ at line ${line + 1} (actual has ${a.length} lines, expected ${b.length})`;
 }
 
 /** Collision lists preserve raw Git path spelling, including Unicode form. */

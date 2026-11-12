@@ -184,22 +184,28 @@ function firstDocument(ctx: RunContext): string {
   return path;
 }
 
-/** The document the scenario acted on: its path and id in this view. */
-async function target(env: Env): Promise<{ path: string; id: string | undefined; document: LinearDocument | undefined }> {
+/** The path and id of the document the scenario acted on in this view, without reading Linear. */
+function targetIn(env: Env, view: View): { path: string; id: string | undefined } {
   const { ctx } = env;
-  const view = await env.view();
   const origin = (ctx.observations.get('target.path') as string | undefined) ?? firstDocument(ctx);
   const moved = ctx.observations.get('git.moved') as { from: string; to: string } | undefined;
   if (env.which === 'before') {
     const path = moved?.from ?? origin;
-    const id = view.ids.get(path)?.id;
-    return { path, id, document: id === undefined ? undefined : view.documents.get(id) };
+    return { path, id: view.ids.get(path)?.id };
   }
   const before = ctx.observations.get(BEFORE_VIEW) as View | undefined;
   const knownId = (ctx.observations.get('target.id') as string | undefined) ?? before?.ids.get(moved?.from ?? origin)?.id;
   const byId = knownId === undefined ? undefined : [...view.ids].find(([, entry]) => entry.id === knownId)?.[0];
   const path = byId ?? moved?.to ?? origin;
-  const id = view.ids.get(path)?.id ?? knownId;
+  return { path, id: view.ids.get(path)?.id ?? knownId };
+}
+
+/** The document the scenario acted on: its path and id in this view. */
+async function target(env: Env): Promise<{ path: string; id: string | undefined; document: LinearDocument | undefined }> {
+  const { ctx } = env;
+  const view = await env.view();
+  const { path, id } = targetIn(env, view);
+  if (env.which === 'before') return { path, id, document: id === undefined ? undefined : view.documents.get(id) };
   let document = id === undefined ? undefined : view.documents.get(id);
   // Only the world now may be read again; a snapshot answers from what it holds.
   if (document === undefined && id !== undefined && env.which === 'now' && ctx.live !== null) {
@@ -1084,6 +1090,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const sync = run.report?.['sync'] as { leftOut?: Array<{ hooks?: string[] }> } | null | undefined;
     return sync?.leftOut?.some((file) => file.hooks?.includes('aligned-table')) === true && run.summary.includes('aligned-table');
   }),
+  'decided.code': async (env) => decidedCode(env.ctx),
 
   // --- the tracked branch ----------------------------------------------------------------
   'tracked.body': (env) => perTarget(env, (path, _document, view) => fileBody(view, path)),
@@ -1147,6 +1154,12 @@ export const SUBJECTS: Record<string, Compute> = {
   'oracle.gitMerge': async (env) => observed(env.ctx, 'oracle.gitMerge'),
   'resolved.body': async (env) => observed(env.ctx, 'resolved.body'),
   'edited.linearBody': async (env) => observed(env.ctx, 'edited.linearBody'),
+  // The editor's text as Linear stored it (the update's answer), in the file's form as I1 reads a document:
+  // Linear keeps its own spelling of what an editor sends, such as no final newline.
+  'edited.linearStoredBody': normalizedObservation('edited.linearStoredBody', async (stored, env) => {
+    const view = await env.view();
+    return documentBody(view, targetIn(env, view).path, { content: stored } as LinearDocument);
+  }),
   'edited.gitBody': async (env) => observed(env.ctx, 'edited.gitBody'),
   'edited.frontMatter': async (env) => observed(env.ctx, 'edited.frontMatter'),
 
@@ -2333,6 +2346,32 @@ function engineValue(ctx: RunContext, subject: string): unknown {
   const found = pathValue(result.report, path);
   if (!found.found) throw new ProductError(`the engine's report gives no ${path.join('.')}`);
   return found.value;
+}
+
+/**
+ * The summary code of the conflict rule that decided the target's path, from
+ * the run that decided it: its report's `sync.decided[]`. That run is the
+ * one that met the conflict, not always the last; a later run that carries
+ * the decision out (a pull request that restores the file) decides nothing.
+ * A rename's decision is reported under the new path, so a target the
+ * scenario moved in git matches by either path. No deciding run, or runs
+ * that disagree, fail as a product error.
+ */
+function decidedCode(ctx: RunContext): string {
+  const path = (ctx.observations.get('target.path') as string | undefined) ?? firstDocument(ctx);
+  const moved = ctx.observations.get('git.moved') as { from: string; to: string } | undefined;
+  const paths = new Set([path, ...(moved === undefined ? [] : [moved.from, moved.to])]);
+  const codes = new Set<unknown>();
+  for (const result of ownResults(ctx)) {
+    const decided = (result.report?.['sync'] as { decided?: unknown } | null | undefined)?.decided;
+    if (!Array.isArray(decided)) continue;
+    for (const entry of decided as Array<{ path?: unknown; summary?: { code?: unknown } }>) if (paths.has(entry?.path as string)) codes.add(entry.summary?.code);
+  }
+  if (codes.size === 0) throw new ProductError(`no engine run of the scenario decided ${path} by a conflict rule`);
+  if (codes.size > 1) throw new ProductError(`the engine's runs decided ${path} by different rules: ${[...codes].map((code) => JSON.stringify(code)).join(', ')}`);
+  const [code] = codes;
+  if (typeof code !== 'string') throw new ProductError(`the engine's decision on ${path} gives no rule code`);
+  return code;
 }
 
 /** The index among the scenario's own runs that `<n|last>` names in `subject`. */
