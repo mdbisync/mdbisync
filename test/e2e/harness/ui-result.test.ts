@@ -223,8 +223,12 @@ describe('UI checklist answers', () => {
     const links = byId('L6-12');
     assert.deepEqual(links.setup.fixtures, ['document-links']);
     assert.deepEqual(uiValueSubjects(links), ['ui.plainLinkOpensTarget', 'ui.anchorLinkOpensTarget', 'ui.anchorScrolls']);
-    const checklist = renderUiChecklist(links, runNames(RUN), { live: null, runDir: 'run' });
-    assert.match(checklist, /^2\. \[ \] As editor-a: Open the document "guides\/route-index" .* links the document "guides\/route-notes" twice: .*`#depot-hours`/m);
+    // Without the run's record (`cli.ts checklist`), the project line is left out.
+    assert.doesNotMatch(renderUiChecklist(links, runNames(RUN), { live: null, runDir: 'run' }), /are in project/);
+    const pair = { source: 'p/guides/route-index.md', target: 'p/guides/route-notes.md', anchor: 'depot-hours', project: 'Field notes a1b2c3' };
+    const checklist = renderUiChecklist(links, runNames(RUN), { live: null, runDir: 'run', observations: new Map([['fixture.linkPair', pair]]) });
+    assert.match(checklist, /^- "guides\/route-index" and "guides\/route-notes" are in project Field notes a1b2c3$/m);
+    assert.match(checklist, /^2\. \[ \] As editor-a: Open the document "guides\/route-index" in the project named above\. .* links the document "guides\/route-notes" twice: .*`#depot-hours`/m);
     assert.match(checklist, /scrolled to the heading/);
     assert.match(checklist, /^- `ui\.anchorLinkOpensTarget` expected equal `true`$/m);
     assert.match(checklist, /^- `ui\.anchorScrolls` \(recorded for the harness's checks\)$/m);

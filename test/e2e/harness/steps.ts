@@ -1859,6 +1859,12 @@ const UI_AFTERMATH: Record<string, Executor> = {
     const path = targetPath(ctx, args.target);
     retireMissingFrom(ctx, path, (await linearContent(ctx, path)).content);
   },
+  // No check reads whether the anchored link scrolled: keep the session's answer in the report (null when not given).
+  'ui.follow-document-links': async (ctx) => {
+    const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+    metrics.anchorScrolls = ctx.observations.get('ui.anchorScrolls') ?? null;
+    ctx.observations.set('metrics', metrics);
+  },
 };
 
 export async function afterUiStep(ctx: RunContext, step: Step): Promise<void> {

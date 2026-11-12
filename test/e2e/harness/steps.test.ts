@@ -35,7 +35,7 @@ import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/
 import { cancelPendingRuns, faultChecks, waitForCheck, waitForCheckCompleted } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
-import { ACTION_SHA_ENV, editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, requiredActionSha, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
+import { ACTION_SHA_ENV, afterUiStep, editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, requiredActionSha, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
 import { commitAsPerson, folderTeam, projectFolders, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { engineNotImplemented, environmentBlocker, hadReplaceableRun, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
@@ -2161,23 +2161,30 @@ describe('git executors', () => {
     const { ctx, remoteFile } = await fakeRun();
     ctx.scenario = { ...ctx.scenario, steps: [{ kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } }] };
     await prepareFixtures(ctx, ctx.live as LiveWorld, 'beforeSync', { runStep });
-    const folder = projectFolders(ctx)[0]?.folder as string;
+    const { folder, project } = projectFolders(ctx)[0] as { folder: string; project: string };
     const source = `${folder}/${LINK_PAIR.source}.md`;
     const target = `${folder}/${LINK_PAIR.target}.md`;
-    assert.deepEqual(ctx.observations.get('fixture.linkPair'), { source, target, anchor: LINK_PAIR.anchor });
+    assert.deepEqual(ctx.observations.get('fixture.linkPair'), { source, target, anchor: LINK_PAIR.anchor, project });
     // The index links the notes by a relative path, once whole and once to a heading the notes have.
     const index = await remoteFile(source);
     assert.deepEqual([...index.matchAll(/\]\(([^)]+)\)/g)].map((match) => match[1]), ['route-notes.md', `route-notes.md#${LINK_PAIR.anchor}`]);
     assert.match(await remoteFile(target), /^## Depot hours$/m);
     // UI steps run in the browser session, never here.
     await assert.rejects(runStep(ctx, { kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } }), EnvBlockedError);
+    // Once the session answered, whether the anchored link scrolled goes to the report, which no check reads.
+    ctx.observations.set('ui.anchorScrolls', false);
+    await afterUiStep(ctx, { kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } });
+    assert.deepEqual(ctx.observations.get('metrics'), { anchorScrolls: false });
+    ctx.observations.delete('ui.anchorScrolls');
+    await afterUiStep(ctx, { kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } });
+    assert.deepEqual(ctx.observations.get('metrics'), { anchorScrolls: null });
   });
 
   it('check that Linear holds the index linking the notes by id, whole and with the anchor (L6-12)', async () => {
     const { ctx, linear, ids } = await fakeRun();
     const plan = ids['eng/platform/plan.md']?.id as string;
     const notes = ids['eng/platform/notes.md']?.id as string;
-    ctx.observations.set('fixture.linkPair', { source: 'eng/platform/plan.md', target: 'eng/platform/notes.md', anchor: 'dates' });
+    ctx.observations.set('fixture.linkPair', { source: 'eng/platform/plan.md', target: 'eng/platform/notes.md', anchor: 'dates', project: 'unused' });
     const holds = async (content: string) => {
       (linear.documents.get(plan) as LinearDocument).content = content;
       refreshView(ctx);
@@ -2189,9 +2196,13 @@ describe('git executors', () => {
     assert.equal(await holds(`# Plan\n\nSee [notes](notes.md) and [the dates](${url}#dates).\n`), false);
     assert.equal(await holds(`# Plan\n\nSee [notes](${url}) and [the dates](${url}).\n`), false);
     assert.equal(await holds(`# Plan\n\nSee [notes](${url}), [again](${url}) and [the dates](${url}#dates).\n`), false);
+    // A document the sync did not write is named, not reported as a link mismatch.
+    ctx.observations.set('fixture.linkPair', { source: 'eng/platform/plan.md', target: 'eng/platform/missing.md', anchor: 'dates', project: 'unused' });
+    refreshView(ctx);
+    await assert.rejects(resolveSubject(ctx, 'documents.linkPairById'), /wrote no document for eng\/platform\/missing\.md/);
     ctx.observations.delete('fixture.linkPair');
     refreshView(ctx);
-    await assert.rejects(resolveSubject(ctx, 'documents.linkPairById'), /no linked pair/);
+    await assert.rejects(resolveSubject(ctx, 'documents.linkPairById'), /recorded no fixture\.linkPair/);
   });
 });
 

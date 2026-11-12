@@ -221,12 +221,8 @@ export const SLICE_FIXTURES: ReadonlySet<string> = new Set([
  */
 export const LINK_PAIR = { source: 'guides/route-index', target: 'guides/route-notes', anchor: 'depot-hours' } as const;
 
-/** What `ui.follow-document-links` records about the pair it added: tracked paths, and the anchor. */
-export interface LinkPairFixture {
-  source: string;
-  target: string;
-  anchor: string;
-}
+/** What `ui.follow-document-links` records about the pair it added: tracked paths, the anchor, and the project that holds them. */
+export type LinkPairFixture = { [K in keyof typeof LINK_PAIR]: string } & { project: string };
 
 /**
  * Starting state some steps need that the slice does not have: a left-out
@@ -237,8 +233,9 @@ export interface LinkPairFixture {
 export const STEP_PREPARATION: Record<string, SetupFixture> = {
   'ui.follow-document-links': {
     async beforeSync(ctx) {
-      const folder = projectFolders(ctx)[0]?.folder;
-      if (folder === undefined) throw new EnvBlockedError('the slice has no project folder');
+      const home = projectFolders(ctx)[0];
+      if (home === undefined) throw new EnvBlockedError('the slice has no project folder');
+      const { folder, project } = home;
       const source = `${folder}/${LINK_PAIR.source}.md`;
       const target = `${folder}/${LINK_PAIR.target}.md`;
       const link = relative(source, target);
@@ -246,7 +243,7 @@ export const STEP_PREPARATION: Record<string, SetupFixture> = {
         [target, '# Route notes\n\nPlanners build the routes the evening before and check them again at seven.\n\n## Loading order\n\nVans load in the reverse order of their stops.\n\n## Depot hours\n\nThe depot opens at six and closes at eight. Late vans call the night desk.\n'],
         [source, `# Route index\n\nStart with [the route notes](${link}).\n\nThe [depot hours](${link}#${LINK_PAIR.anchor}) changed this week.\n`],
       ]), 'Add the route notes and their index', true);
-      ctx.observations.set('fixture.linkPair', { source, target, anchor: LINK_PAIR.anchor } satisfies LinkPairFixture);
+      ctx.observations.set('fixture.linkPair', { source, target, anchor: LINK_PAIR.anchor, project } satisfies LinkPairFixture);
     },
   },
   'git.remove-footnote': {

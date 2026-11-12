@@ -913,12 +913,12 @@ export const SUBJECTS: Record<string, Compute> = {
   },
   // L6-12: the index Linear holds links the notes by document id exactly twice, once whole and once with the heading anchor.
   'documents.linkPairById': async (env) => {
-    const pair = env.ctx.observations.get('fixture.linkPair') as LinkPairFixture | undefined;
-    if (pair === undefined) throw new Error('the run added no linked pair (step ui.follow-document-links)');
+    const pair = observed(env.ctx, 'fixture.linkPair') as LinkPairFixture;
     const view = await env.view();
     const source = view.ids.get(pair.source)?.id;
     const target = view.ids.get(pair.target)?.id;
-    if (source === undefined || target === undefined) return false;
+    // A pair the sync did not write is not a link mismatch: name what is missing.
+    if (source === undefined || target === undefined) throw new ProductError(`the initial sync wrote no document for ${source === undefined ? pair.source : pair.target}`);
     const links = documentLinks(view.documents.get(source)?.content ?? '', view.documentUrlBase);
     return JSON.stringify(sorted(links)) === JSON.stringify(sorted([target, `${target}#${pair.anchor}`]));
   },
