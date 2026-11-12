@@ -91,7 +91,10 @@ and git's path beats Linear's title
   maps it to a Linear team and project; deeper folders become title paths.
 - **Images and files:** files a document links are uploaded to Linear once;
   images pasted in Linear land in the repository next to the document, in
-  Git LFS when your `.gitattributes` says so.
+  Git LFS when your `.gitattributes` says so. An image written in Linear must
+  be an upload: an external URL, `data:` URI or path blocks that document
+  with a red mark and a comment showing which images to fix. Upload the
+  files instead; the next sync clears the comment and restores the icon.
 - **The `linear-format` hook:** `lint` and `fix` keep Markdown in the form
   Linear stores, so a round trip changes nothing
   ([docs/linear-format.md](docs/linear-format.md)).
