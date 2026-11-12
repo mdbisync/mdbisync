@@ -145,6 +145,10 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
   const failed = new Map<string, DownloadBlockedError | DownloadRetryError>();
 
   return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
+    // The image gate, before any download: every path that takes a document's text from Linear into git
+    // (the capture and the initial sync from Linear) reads its embedded files here, so they cannot disagree.
+    const notUploaded = imageFindings(body);
+    if (notUploaded.length > 0) throw new ImageBlockedError(notUploaded);
     const files = new Map<string, Buffer>();
     const additions: UploadMap = new Map();
     const originalBody = body;
