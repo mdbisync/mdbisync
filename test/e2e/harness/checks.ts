@@ -254,7 +254,12 @@ export function gitLinks(content: string, documentPath: string, targets: Require
 
 /** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
 export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
-  return linearLinks(bodyOf(text), path, sides) === content;
+  return expectedDocumentText(text, path, sides) === content;
+}
+
+/** The text a file's document must hold: the file's body, its links in Linear's form. */
+export function expectedDocumentText(text: string, path: string, sides: LinkTargets): string {
+  return linearLinks(bodyOf(text), path, sides);
 }
 
 /** The file in the run folder where a failing I1 lists how each file differs from its document. */
@@ -265,8 +270,9 @@ export const I1_DIFFERENCES_FILE = 'i1-differences.txt';
  * or the first differing line on each side (shortened).
  */
 export function firstDifference(expected: string, actual: string): string {
-  if (expected.replace(/\n$/, '') === actual.replace(/\n$/, '')) {
-    return `only the final newline differs (file ${expected.endsWith('\n') ? 'has one' : 'has none'}, document ${actual.endsWith('\n') ? 'has one' : 'has none'})`;
+  const ending = (text: string) => /[\r\n]*$/.exec(text)![0];
+  if (expected.slice(0, expected.length - ending(expected).length) === actual.slice(0, actual.length - ending(actual).length)) {
+    return `only the line breaks at the end differ (file ends ${JSON.stringify(ending(expected))}, document ends ${JSON.stringify(ending(actual))})`;
   }
   const a = expected.split('\n');
   const b = actual.split('\n');
@@ -651,28 +657,29 @@ const bad = (name: string, detail: string): CheckOutcome => ({ name, ok: false, 
 export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   async I1(ctx, sides) {
     const s = await sides();
-    const differing: string[] = [];
-    const details: string[] = [];
+    const differing: Array<{ name: string; detail: string }> = [];
     for (const [path, text] of s.files) {
       // A file left out on purpose, or a kept annotation README, has no document to match.
       if (!expectsDocument(s, path)) continue;
       const entry = s.ids.get(path);
       const document = entry === undefined ? undefined : s.documents.get(entry.id);
       if (document === undefined || document.trashed) {
-        differing.push(`${path} (no document)`);
-        details.push(`${path}: no document`);
+        differing.push({ name: `${path} (no document)`, detail: `${path}: no document` });
         continue;
       }
-      const expected = linearLinks(bodyOf(text), path, s);
-      if (expected !== (document.content ?? '')) {
-        differing.push(path);
-        details.push(`${path}: ${firstDifference(expected, document.content ?? '')}`);
-      }
+      const expected = expectedDocumentText(text, path, s);
+      if (expected !== (document.content ?? '')) differing.push({ name: path, detail: `${path}: ${firstDifference(expected, document.content ?? '')}` });
     }
     if (differing.length === 0) return ok('I1');
-    // Every difference, kept in the run folder: the documents are archived at cleanup.
-    writeFileSync(join(ctx.runDir, I1_DIFFERENCES_FILE), `${details.join('\n')}\n`);
-    return bad('I1', `${differing.length} files differ from their documents (each in ${I1_DIFFERENCES_FILE}): ${differing.slice(0, 10).join(', ')}`);
+    // Every difference, kept in the run folder: the documents are archived at cleanup. A file that cannot be
+    // written must not turn the failed check into a crash that skips the other checks.
+    let where = `each in ${I1_DIFFERENCES_FILE}`;
+    try {
+      writeFileSync(join(ctx.runDir, I1_DIFFERENCES_FILE), `${differing.map((item) => item.detail).join('\n')}\n`);
+    } catch (error) {
+      where = `${I1_DIFFERENCES_FILE} not written: ${(error as Error).message}`;
+    }
+    return bad('I1', `${differing.length} files differ from their documents (${where}): ${differing.slice(0, 10).map((item) => item.name).join(', ')}`);
   },
 
   async I2(ctx, sides) {

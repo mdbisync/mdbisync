@@ -2897,6 +2897,10 @@ describe('subjects', () => {
     assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => readSides(ctx))).detail, '1 files differ from their documents (each in i1-differences.txt): docs/handbook/start.md');
     // The run folder keeps where each file differs: the documents are archived at cleanup.
     assert.equal(readFileSync(join(ctx.runDir, 'i1-differences.txt'), 'utf8'), 'docs/handbook/start.md: line 3: file "Welcome.[^1]", document "Welcome."\n');
+    // A differences file that cannot be written leaves a failed check, not a crash.
+    const unwritable = await INVARIANT_CHECKS.I1({ ...ctx, runDir: join(ctx.runDir, 'missing') } as RunContext, async () => readSides(ctx));
+    assert.equal(unwritable.ok, false);
+    assert.match(unwritable.detail ?? '', /^1 files differ from their documents \(i1-differences\.txt not written: .*\): docs\/handbook\/start\.md$/);
     const sync = (leftOut: unknown[]) => engineRun('sync', { initialSync: null, sync: { updated: [], created: [], adopted: [], restored: [], leftOut, leftOutAtWrite: [] } });
     ctx.engine.results.push(sync([{ path: 'docs/handbook/start.md', rules: ['footnote'] }]));
     const sides = await readSides(ctx);

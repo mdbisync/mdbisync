@@ -175,7 +175,8 @@ function closedHtmlBlock(value: string): boolean {
   return parse(`${value}\nx`).children.length > 1;
 }
 
-function render(tokens: Token[], ranges: Range[]): string {
+/** `finalNewline`: whether a conflict block that ends the document ends with a newline. */
+function render(tokens: Token[], ranges: Range[], finalNewline: boolean): string {
   let text = '';
   let cursor = 0;
   const armsWithoutMarkers = { ours: withoutMarkers(tokens, 'ours'), theirs: withoutMarkers(tokens, 'theirs') };
@@ -183,8 +184,9 @@ function render(tokens: Token[], ranges: Range[]): string {
     text += tokens.slice(cursor, range.start).map((token) => content(token, 'ours').join('')).join('');
     if (text && !text.endsWith('\n\n')) text += text.endsWith('\n') ? '\n' : '\n\n';
     const arms = (side: Side) => completeBlocks(armsWithoutMarkers[side].slice(range.start, range.end).flat().join('').replace(/^\n|\n$/g, ''));
-    text += `${MARKERS.git}\n\n${arms('ours')}\n\n${MARKERS.linear}\n\n${arms('theirs')}\n\n${MARKERS.end}\n`;
     cursor = range.end;
+    const last = tokens.slice(cursor).every((token) => content(token, 'ours').join('') === '');
+    text += `${MARKERS.git}\n\n${arms('ours')}\n\n${MARKERS.linear}\n\n${arms('theirs')}\n\n${MARKERS.end}${last && !finalNewline ? '' : '\n'}`;
     const next = tokens[cursor];
     if (next?.kind === 'line' && lineText(next.text) !== '') text += '\n';
   }
@@ -239,13 +241,12 @@ export async function mergeMarkdown(base: string, ours: string, theirs: string):
     ], { okCodes: Array.from({ length: 128 }, (_, i) => i) });
     const raw = result.stdout.toString('utf8');
     const tokens = tokenize(raw.replaceAll('\r\n', '\n'), size);
-    // A conflict that runs to the end closes with a marker line; the result keeps the git file's final newline, or
-    // its absence (a file in Linear's form has none, and Linear keeps none), as a clean merge does. With no git
-    // body (a document only Linear has), Linear's text decides.
-    const rendered = result.code === 0 ? raw : render(tokens, conflictRanges(tokens));
+    // A conflict that runs to the end of the document closes with a marker line, which ends with a newline only when
+    // the git body does (a file in Linear's form has none, and Linear keeps none). With no git body (a document only
+    // Linear has), Linear's text decides. A clean merge stays as git made it.
     const ending = ours !== '' ? ours : theirs;
-    const body = ending === '' || ending.endsWith('\n') ? rendered : rendered.replace(/\n$/, '');
-    const text = head + body.replaceAll('\n', eol);
+    const finalNewline = ending === '' || ending.endsWith('\n');
+    const text = head + (result.code === 0 ? raw : render(tokens, conflictRanges(tokens), finalNewline)).replaceAll('\n', eol);
     return { text, conflicts: detectConflicts(text) };
   } finally {
     await rm(dir, { recursive: true, force: true });

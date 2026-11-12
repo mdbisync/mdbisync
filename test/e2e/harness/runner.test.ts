@@ -114,7 +114,9 @@ describe('I1 differences', () => {
   it('names where a file and its document first differ, and a final newline on its own', () => {
     // As in the live L4-12 burst: a conflict block at the end, the file with a final newline, Linear without.
     const marked = '**Sync conflict: git version**\n\nOurs.\n\n**Sync conflict: Linear version**\n\nTheirs.\n\n**Sync conflict: end**';
-    assert.equal(firstDifference(`${marked}\n`, marked), 'only the final newline differs (file has one, document has none)');
+    assert.equal(firstDifference(`${marked}\n`, marked), 'only the line breaks at the end differ (file ends "\\n", document ends "")');
+    assert.equal(firstDifference('x\n\n', 'x\n'), 'only the line breaks at the end differ (file ends "\\n\\n", document ends "\\n")');
+    assert.equal(firstDifference('a\r\n', 'a'), 'only the line breaks at the end differ (file ends "\\r\\n", document ends "")');
     assert.equal(firstDifference('One.\n\nTwo.', 'One.\n\nTwo, edited.'), 'line 3: file "Two.", document "Two, edited."');
     assert.equal(firstDifference('One.\n\nTwo.', 'One.'), 'line 2: file "", document (end)');
     assert.match(firstDifference(`a\n${'x'.repeat(300)}`, 'a\ny'), /^line 2: file "x{120}…", document "y"$/);
