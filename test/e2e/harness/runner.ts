@@ -313,6 +313,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names, {
       validate: (selected) => assertCurrentCorpus(manifest, selected, (path) => sandbox.readMain(`corpus/${path}`), deps.teams),
       checks: publishesCheckWorkflow(ctx.scenario),
+      ...(ctx.scenario.steps.some((step) => step.kind === 'run' && step.action === 'soak') ? { soak: manifest } : {}),
       ...(deps.teams === undefined ? {} : { teams: deps.teams }),
     });
   } catch (error) {
