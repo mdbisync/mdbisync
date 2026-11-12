@@ -9,7 +9,7 @@ import type { TestContext } from 'node:test';
 import { runCli } from '../../../src/cli.ts';
 import { LinearClient, type LogEntry } from '../../../src/linear/index.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
-import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
+import { createFixture, mergeOnGitHub } from '../../../src/state/test-helpers.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs } from './checks.ts';
 import type { LiveWorld, RunContext } from './context.ts';
@@ -75,14 +75,8 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
       };
       return Response.json(Array.isArray(data) ? await Promise.all(data.map(enrich)) : await enrich(data), { status: response.status });
     };
-    world.github.merge = async (pr, sha) => {
-      const base = (await fixture.remote.text(['rev-parse', `refs/heads/${pr.base}`])).trim();
-      const result = await fixture.remote.run(['merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
-      if (result.code !== 0) return { status: 405 };
-      const commit = (await fixture.remote.text(['commit-tree', result.stdout.toString().split('\n')[0]!, '-p', base, '-p', sha, '-m', 'Merge the reviewed changes'], { env: { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email } })).trim();
-      await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
-      return { sha: commit };
-    };
+    // GitHub's merge, which refuses a rename against an edit that only git's rename detection pairs.
+    world.github.merge = (pr, sha) => mergeOnGitHub(fixture, pr, sha, 'Merge the reviewed changes');
     const rest = new SandboxRest({ owner: 'owner', repo: 'repo' }, 'app-token', serve);
     const app = new LinearClient({ token: 'fake-token', baseUrl: LINEAR_API, fetch: serve });
     const sandbox = new Sandbox({ url: fixture.url, token: 'unused', stateDir: join(fixture.root, 'state'), runId: names.runId });

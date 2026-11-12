@@ -18,7 +18,7 @@ import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from
 import { type RunReport } from '../run/finish.ts';
 import { FAKE_APP_IDENTITY, FAKE_APP_SLUG, type FakeCheck, type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { INITIAL_SYNC_FROM_LINEAR_RECORD } from '../state/index.ts';
-import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
+import { type Fixture, IDENTITY, createFixture, mergeOnGitHub } from '../state/test-helpers.ts';
 import { DEFAULT_MERGE_GRACE_SECONDS, SYNC_PULL_REQUEST_TITLE } from './pull-request.ts';
 import { type CheckClock } from '../pull-request/index.ts';
 import { DEFAULT_CHECK_DEADLINE_MINUTES } from './deadline.ts';
@@ -153,18 +153,7 @@ describe('sync: the sync pull request', () => {
   }
 
   /** GitHub's merge with a merge commit, done on the bare remote: parents (base, head), refused when the head moved. */
-  async function mergeOnRemote(pr: { head: string; base: string; number: number }, sha: string): Promise<{ sha: string } | { status: number }> {
-    if ((await rev(`refs/heads/${pr.head}`)) !== sha) return { status: 409 };
-    const base = await rev(`refs/heads/${pr.base}`);
-    const merged = await fixture.remote.run(['merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
-    if (merged.code !== 0) return { status: 405 };
-    const tree = merged.stdout.toString('utf8').split('\n')[0] as string;
-    const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number} from owner/${pr.head}`], {
-      env: { GIT_AUTHOR_NAME: 'sync-app[bot]', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@example.com' },
-    });
-    await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
-    return { sha: commit };
-  }
+  const mergeOnRemote = (pr: { head: string; base: string; number: number }, sha: string) => mergeOnGitHub(fixture, pr, sha);
 
   /** I3: every commit the tracked branch gained is a two-parent merge whose second parent was a head of the sync branch. */
   async function assertTrackedHistory() {
@@ -2171,6 +2160,35 @@ describe('sync: the sync pull request', () => {
     const repeated = await sync();
     assert.equal(repeated.result.exitCode, SETUP_FAILED_EXIT_CODE, repeated.result.stderr);
     assert.equal(repeated.report.pullRequest?.code, 'merge-blocked');
+  });
+
+  it('a head GitHub refuses as conflicting gets the tracked branch merged in on the next run, never a setup error', async () => {
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nConflicts on GitHub. ${CANARY}\n`);
+    await sync();
+    // A person pushes to the tracked branch, so the head no longer holds its tip; GitHub sees a conflict git does not.
+    const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: `# Guide\n\nMoved on. ${CANARY}\n` });
+    const base = await rev('refs/heads/main');
+    const commit = await commitFile(base, 'combined/guide.md', blob);
+    await fixture.remote.run(['update-ref', 'refs/heads/main', commit, base]);
+    start = commit;
+    world.github.merge = async () => ({ status: 405, message: 'Pull Request has merge conflicts' });
+    const refused = await sync();
+    assert.equal(refused.report.pullRequest?.code, 'merge-refused');
+    const head = await rev(SYNC_BRANCH);
+
+    world.github.merge = mergeOnRemote;
+    const next = await sync();
+    assert.equal(next.result.exitCode, 0, next.result.stderr);
+    assert.equal(next.report.pullRequest?.code, undefined);
+    assert.equal(next.report.pullRequest?.branchMoved, true);
+    const moved = await rev(SYNC_BRANCH);
+    assert.deepEqual((await fixture.remote.text(['rev-list', '--parents', '-n', '1', moved])).trim().split(' ').slice(1), [head, commit], 'the tracked branch was merged into the refused head');
+    // The new head's checks are read by the run after it, which merges.
+    const merged = await sync();
+    assert.equal(merged.result.exitCode, 0, merged.result.stderr);
+    assert.deepEqual(merged.writes, ['PUT /pulls/1/merge']);
+    assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Conflicts on GitHub\./);
+    assert.match(await show('refs/heads/main:combined/guide.md'), /Moved on\./);
   });
 
   it('a refusal noted in a description saved with CRLF line endings is still read back', async () => {
