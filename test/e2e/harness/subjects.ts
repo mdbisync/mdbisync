@@ -55,7 +55,7 @@ import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
 import { documentPaths, MOVE_SOURCE_FOLDER, projectFolderOf, projectFolders } from './step-helpers.ts';
-import { UNSAFE_TITLES } from './fixtures.ts';
+import { UNSAFE_TITLES, type LinkPairFixture } from './fixtures.ts';
 
 // --- views of the world ---------------------------------------------------------------
 
@@ -910,6 +910,17 @@ export const SUBJECTS: Record<string, Compute> = {
     }
     if (anchored === 0) throw new Error('the slice has no link with a fragment to another synchronized document');
     return true;
+  },
+  // L6-12: the index Linear holds links the notes by document id exactly twice, once whole and once with the heading anchor.
+  'documents.linkPairById': async (env) => {
+    const pair = observed(env.ctx, 'fixture.linkPair') as LinkPairFixture;
+    const view = await env.view();
+    const source = view.ids.get(pair.source)?.id;
+    const target = view.ids.get(pair.target)?.id;
+    // A pair the sync did not write is not a link mismatch: name what is missing.
+    if (source === undefined || target === undefined) throw new ProductError(`the initial sync wrote no document for ${source === undefined ? pair.source : pair.target}`);
+    const links = documentLinks(view.documents.get(source)?.content ?? '', view.documentUrlBase);
+    return JSON.stringify(sorted(links)) === JSON.stringify(sorted([target, `${target}#${pair.anchor}`]));
   },
   'documents.oversizeAssetReferences': async (env) => {
     const view = await env.view();
