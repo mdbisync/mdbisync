@@ -100,7 +100,10 @@ and git's path beats Linear's title
   animation elements, event attributes, `xml:base` or non-fragment `href`
   references are blocked. Files already
   in the repository keep working. Downloaded files use the detected extension, regardless of
-  the upload URL or declared content type.
+  the upload URL or declared content type. Unreadable uploads (including redirects)
+  and files larger than 10 MB block the document with a comment. Access errors
+  stop capture; temporary download failures leave the document unmarked and
+  listed as `download-retry` in the run summary until a later run succeeds.
 - **The `linear-format` hook:** `lint` and `fix` keep Markdown in the form
   Linear stores, so a round trip changes nothing
   ([docs/linear-format.md](docs/linear-format.md)).

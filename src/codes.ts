@@ -63,7 +63,7 @@ export const RECORD_LEFT_OUT_RULES = ['download-failed', 'front-matter-boundary'
 export type RecordLeftOutRule = (typeof RECORD_LEFT_OUT_RULES)[number];
 
 /** Why the sync's capture leaves a Linear document out. */
-export const CAPTURE_LEFT_OUT_RULES = ['capture-translation', 'security-unchecked'] as const;
+export const CAPTURE_LEFT_OUT_RULES = ['capture-translation', 'download-retry', 'security-unchecked'] as const;
 export type CaptureLeftOutRule = (typeof CAPTURE_LEFT_OUT_RULES)[number];
 
 /** The rule a file name read from Linear follows. */

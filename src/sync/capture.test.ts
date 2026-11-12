@@ -3,7 +3,7 @@ import { beforeEach, afterEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY } from '../state/test-helpers.ts';
 import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
-import { LinearClient, LinearStoppedError } from '../linear/index.ts';
+import { LinearClient, LinearStoppedError, LinearHttpError } from '../linear/index.ts';
 import { fakeWorld, fakeFetch, LINEAR_API } from '../setup/test-helpers.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { runCli } from '../cli.ts';
@@ -69,6 +69,29 @@ describe('capture from Linear', () => {
     assert.ok(!reportText.includes('Private body canary'));
     assert.equal(JSON.parse(reportText).capture.ok, true);
     assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nPrivate body canary.\n');
+  });
+
+  it('reports a blocked upload and a retry separately through the sync CLI', async () => {
+    await fixture.seed({'.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/mdbisync\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n'});
+    world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/dead.png)';
+    world.linear.documents.push({id:'retry', title:'retry', projectId:'project-api', content:'![Image](https://uploads.linear.app/workspace/retry.png)', createdAt:'2026-01-04T00:00:00Z'});
+    const reportFile = join(fixture.root, 'download-report.json');
+    const network = fakeFetch(world);
+    const result = await runCli(['sync'], {cwd:context.git.dir, fetch:async (input, init) => {
+      if (String(input).startsWith('https://uploads.linear.app/')) return new Response(null, {status:String(input).endsWith('dead.png') ? 404 : 503});
+      return network(input, init);
+    }, env:{
+      MDBISYNC_LINEAR_CLIENT_ID:'client', MDBISYNC_LINEAR_CLIENT_SECRET:'secret', MDBISYNC_LINEAR_API_URL:LINEAR_API,
+      MDBISYNC_MERGE_GRACE_SECONDS:'0', MDBISYNC_GITHUB_TOKEN:'token', MDBISYNC_GITHUB_API_URL:GITHUB_API, MDBISYNC_REPOSITORY:'example/repository', MDBISYNC_REPORT_FILE:reportFile,
+    }});
+    assert.equal(result.exitCode, 0, result.stderr);
+    const report = JSON.parse(await readFile(reportFile, 'utf8'));
+    assert.equal(report.capture.blocked.length, 1);
+    assert.deepEqual(report.capture.leftOut, [{id:'retry', rule:'download-retry'}]);
+    assert.match(result.stdout, /download-retry/);
+    assert.equal(world.linear.comments.size, 1);
+    assert.equal(world.linear.documents[0]!.icon, 'Cross');
+    assert.notEqual(world.linear.documents[1]!.icon, 'Cross');
   });
 
   it('captures edits with previous front matter; repeated capture makes no content commit', async () => {
@@ -469,16 +492,89 @@ describe('capture from Linear', () => {
     assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\n[Target](<guides/target.md#intro>)\n');
   });
 
-  it('retries an asset failure on an older document after accepting a newer document', async () => {
-    world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/retry.png)\n';
-    world.linear.documents.push({id: 'later', title: 'later', projectId: 'project-api', content: 'Later.\n', createdAt: '2026-01-04T00:00:00Z'});
-    const first = await capture(context, { config, state: context.fetched.state, fetch: async () => { throw new Error('Unavailable'); } });
-    assert.equal(first.leftOut.length, 1);
-    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+  for (const status of [301, 302, 307, 308, 400, 404, 410, 422]) {
+    it(`blocks unreadable upload HTTP ${status} and clears after correction`, async () => {
+      const doc = world.linear.documents[0]!;
+      Object.assign(doc, {content:'![Image](https://uploads.linear.app/workspace/file.png)\n', icon:'Fire', color:'#123456'});
+      const captureNow = (fetch: typeof globalThis.fetch) => capture(context, {config, state:context.fetched.state, fetch});
+      const blocked = await captureNow(async () => new Response('Untrusted response body', {status}));
+      assert.deepEqual(blocked.leftOut, []);
+      assert.deepEqual(blocked.blocked[0]?.findings, [{image:1, total:1, line:1, reason:'unreadable'}]);
+      assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+      assert.match(commentsOf('plan')[0]!, /Image 1 of 1 \(line 1\): the uploaded file cannot be read\. Remove it or upload it again\./);
+      assert.equal(doc.icon, 'Cross');
+      assert.match(blocked.summary, /blocked 1; left out 0/);
+      assert.ok(!JSON.stringify(blocked).includes('Untrusted response body'));
+      await refresh();
+      const fixed = await captureNow(async () => new Response(png));
+      assert.equal(fixed.blocked.length, 0);
+      assert.equal(doc.icon, 'Fire');
+      assert.equal(doc.color, '#123456');
+      assert.equal([...world.linear.comments.values()][0]!.resolved, true);
+      const tree = await listTree(context.git, fixed.state.linear!);
+      const files = new Set(tree.map(({path}) => path));
+      assert.deepEqual(lintInTree('docs/plan.md', await text('docs/plan.md'), files), []);
+    });
+  }
+
+  it('blocks an unreadable attachment link with a file notice and recovers', async () => {
+    const doc = world.linear.documents[0]!;
+    Object.assign(doc, {content:'[Specification][attachment]\n\n[attachment]: https://uploads.linear.app/workspace/spec.pdf', icon:'Fire', color:'#123456'});
+    const blocked = await capture(context, {config, state:context.fetched.state, fetch:async () => new Response(null, {status:404})});
+    assert.deepEqual(blocked.blocked[0]?.findings, [{file:1, total:1, line:1, reason:'unreadable'}]);
+    assert.deepEqual(blocked.leftOut, []);
+    assert.match(commentsOf('plan')[0]!, /File 1 of 1 \(line 1\): the uploaded file cannot be read/);
+    assert.equal(doc.icon, 'Cross');
     await refresh();
-    const next = await capture(context, { config, state: context.fetched.state, fetch: async () => new Response(png) });
-    assert.equal(next.leftOut.length, 0);
-    assert.ok(next.changed.includes('docs/plan.md'));
+    const fixed = await capture(context, {config, state:context.fetched.state, fetch:async () => new Response('%PDF-1.7\n')});
+    assert.deepEqual(fixed.blocked, []);
+    assert.equal(doc.icon, 'Fire');
+    assert.equal([...world.linear.comments.values()][0]!.resolved, true);
+  });
+
+  for (const status of [401, 403]) {
+    it(`stops capture on upload HTTP ${status} without marking any document or publishing`, async () => {
+      world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/file.png)';
+      world.linear.documents.push({id:'aaa', title:'blocked', projectId:'project-api', content:'![External](https://example.com/file.png)', createdAt:'2026-01-04T00:00:00Z'});
+      const before = context.fetched.state;
+      await assert.rejects(capture(context, {config, state:before, fetch:async () => new Response(null, {status})}), (error) => error instanceof LinearHttpError && error.httpStatus === status && error.operation === 'DownloadUpload');
+      await refresh();
+      assert.deepEqual(context.fetched.state, before);
+      assert.deepEqual(world.writes, []);
+      assert.equal(world.linear.comments.size, 0);
+    });
+  }
+
+  for (const failure of ['connection', 'timeout', 'stream', 429, 500, 503] as const) {
+    it(`retries an older document after download ${failure} and reports why it was left out`, async () => {
+      world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/retry.png)\n';
+      world.linear.documents.push({id:'later', title:'later', projectId:'project-api', content:'Later.\n', createdAt:'2026-01-04T00:00:00Z'});
+      const first = await capture(context, {config, state:context.fetched.state, fetch:async () => {
+        if (failure === 'connection') throw new TypeError('Connection unavailable');
+        if (failure === 'timeout') throw new DOMException('Timed out', 'TimeoutError');
+        if (failure === 'stream') return new Response(new ReadableStream({start(controller) {controller.error(new Error('Connection reset'));}}));
+        return new Response(null, {status:failure});
+      }});
+      assert.deepEqual(first.leftOut, [{id:'plan', rule:'download-retry'}]);
+      assert.deepEqual(first.blocked, []);
+      assert.match(first.summary, /blocked 0; left out 1/);
+      assert.match(first.summary, /download-retry: "plan"/);
+      assert.equal(world.linear.comments.size, 0);
+      assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
+      assert.equal(await text('docs/later.md'), 'Later.\n');
+      await refresh();
+      const next = await capture(context, {config, state:context.fetched.state, fetch:async () => new Response(png)});
+      assert.equal(next.leftOut.length, 0);
+      assert.ok(next.changed.includes('docs/plan.md'));
+    });
+  }
+
+  it('blocks oversized uploads with the size notice', async () => {
+    world.linear.documents[0]!.content = '![Image](https://uploads.linear.app/workspace/large.png)';
+    const result = await capture(context, {config, state:context.fetched.state, fetch:async () => new Response(png, {headers:{'content-length':String(10 * 1024 * 1024 + 1)}})});
+    assert.deepEqual(result.blocked[0]?.findings, [{image:1, total:1, line:1, reason:'too-large'}]);
+    assert.match(commentsOf('plan')[0]!, /the uploaded file is larger than 10 MB\./);
+    assert.equal(await text('docs/plan.md'), TREE['docs/plan.md']);
   });
 
   it('refreshes unchanged inbound links and keeps the accepted target when a rename is blocked', async () => {
