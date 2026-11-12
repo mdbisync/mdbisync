@@ -242,3 +242,107 @@ it('reports every unsupported image at its original occurrence, including refere
     });
   } finally {await fixture.cleanup();}
 });
+
+it('enforces the size boundary from headers and streamed bytes, and cancels rejected streams', async () => {
+  const fixture = await createFixture();
+  try {
+    const limit = 10 * 1024 * 1024;
+    const bytes = Buffer.concat([png, Buffer.alloc(limit - png.length)]);
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('size-limit');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const body = '![Image](https://uploads.linear.app/file.png)';
+    const read = (fetcher: typeof fetch) => captureAssets(git, resolveStateConfig({}), base, 'plan.md', body, new Map(), fetcher);
+    assert.equal((await read(async () => new Response(bytes))).files.values().next().value?.length, limit);
+    for (const declared of [undefined, '1', String(limit + 1)]) {
+      let cancelled = false;
+      const stream = new ReadableStream({
+        start(controller) {controller.enqueue(bytes); controller.enqueue(Buffer.from([0]));},
+        cancel() {cancelled = true;},
+      });
+      await assert.rejects(read(async () => new Response(stream, {headers:declared === undefined ? {} : {'content-length':declared}})), (error) => {
+        assert.ok(error instanceof ImageBlockedError);
+        assert.deepEqual(error.findings, [{image:1, total:1, line:1, reason:'too-large'}]);
+        return true;
+      });
+      assert.equal(cancelled, true);
+    }
+  } finally { await fixture.cleanup(); }
+});
+
+it('reports all permanent download failures at original image occurrences', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('download-findings');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const body = '![Dead](https://uploads.linear.app/dead#fragment)\n\n![Large][asset]\n\n[![Dead again](https://uploads.linear.app/dead)](https://example.com)\n\n[asset]: https://uploads.linear.app/large\n';
+    await assert.rejects(captureAssets(git, resolveStateConfig({}), base, 'plan.md', body, new Map(), async (input) => String(input).endsWith('/large') ? new Response(png, {headers:{'content-length':String(10 * 1024 * 1024 + 1)}}) : new Response(null, {status:410})), (error) => {
+      assert.ok(error instanceof ImageBlockedError);
+      assert.deepEqual(error.findings, [
+        {image:1, total:3, line:1, reason:'unreadable'},
+        {image:2, total:3, line:3, reason:'too-large'},
+        {image:3, total:3, line:5, reason:'unreadable'},
+      ]);
+      return true;
+    });
+  } finally { await fixture.cleanup(); }
+});
+
+it('keeps permanent image findings when another download needs a retry', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('mixed-answers');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    for (const statuses of [[404, 503], [503, 404]]) {
+      let index = 0;
+      await assert.rejects(captureAssets(git, resolveStateConfig({}), base, 'plan.md', '![First](https://uploads.linear.app/first)\n![Second](https://uploads.linear.app/second)', new Map(), async () => new Response(null, {status:statuses[index++]!})), (error) => {
+        assert.ok(error instanceof ImageBlockedError);
+        assert.deepEqual(error.findings, [{image:statuses.indexOf(404) + 1, total:2, line:statuses.indexOf(404) + 1, reason:'unreadable'}]);
+        return true;
+      });
+    }
+  } finally { await fixture.cleanup(); }
+});
+
+it('cancels error responses and reuses failures across repeated upload destinations', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('failure-cache');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const body = '![First](https://uploads.linear.app/file#first)\n![Second](https://uploads.linear.app/file#second)';
+    for (const status of [302, 401, 403, 404, 429, 503]) {
+      let requests = 0;
+      let cancelled = false;
+      const read = createAssetCapture(git, resolveStateConfig({}), base, async () => {
+        requests++;
+        return new Response(new ReadableStream({cancel() {cancelled = true;}}), {status});
+      });
+      await assert.rejects(read('plan.md', body, new Map()));
+      assert.equal(requests, 1);
+      assert.equal(cancelled, true);
+      if (status !== 401 && status !== 403) {
+        await assert.rejects(read('other.md', body, new Map()));
+        assert.equal(requests, 1, 'failures are cached for the rest of this capture');
+      }
+    }
+  } finally { await fixture.cleanup(); }
+});
+
+it('classifies oversized attachments and empty upload responses as permanent findings', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'plan.md':'Plan.'});
+    const git = await fixture.clone('attachment-findings');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    for (const reason of ['too-large', 'unreadable'] as const) {
+      await assert.rejects(captureAssets(git, resolveStateConfig({}), base, 'plan.md', '[File](https://uploads.linear.app/file)', new Map(), async () => reason === 'too-large' ? new Response(png, {headers:{'content-length':String(10 * 1024 * 1024 + 1)}}) : new Response(null)), (error) => {
+        assert.ok(error instanceof ImageBlockedError);
+        assert.deepEqual(error.findings, [{file:1, total:1, line:1, reason}]);
+        return true;
+      });
+    }
+  } finally { await fixture.cleanup(); }
+});

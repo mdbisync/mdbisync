@@ -208,9 +208,7 @@ export const MESSAGES = {
   'sync.write-before-record': 'the sync writes to Linear only after initial sync has recorded `linear`',
   'sync.merge-conflict-output': 'Invalid merge-file conflict output',
   'assets.not-allowed': 'asset destination is not allowed',
-  'assets.redirect-not-allowed': 'asset redirect destination is not allowed',
   'assets.download-failed': 'asset could not be downloaded',
-  'assets.too-large': 'asset exceeds the download limit',
   'assets.destination-exists': 'asset destination already exists',
 } as const;
 

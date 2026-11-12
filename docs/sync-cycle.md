@@ -378,12 +378,13 @@ moved out of the synchronized projects, and the old paths of documents
 renamed or moved in Linear (a rename counts once as captured and once as
 removed); *blocked* documents got the
 [blocked mark](#the-blocked-mark); *left out* documents were not taken this
-run (`capture-translation` or `security-unchecked`,
+run (`capture-translation`, `download-retry` or `security-unchecked`,
 [files left out](troubleshooting.md#files-left-out)). Lines that follow
 only when they apply:
 
 | Line | Where it is explained |
 | --- | --- |
+| `download-retry: "<document id>"` | [Files left out](troubleshooting.md#files-left-out); an upload download failed temporarily and the next run retries it without marking the document. |
 | Removal held for N files | [`removal-held`](troubleshooting.md#partial-sync-runs) |
 | The document id map was lost | [Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync) |
 | Capture partial, will continue | [`stopped` and `linear-failed`](troubleshooting.md#partial-sync-runs) |

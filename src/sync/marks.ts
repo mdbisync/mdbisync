@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { detectConflicts } from '../merge/index.ts';
 import type { LinearClient, LinearDocument } from '../linear/index.ts';
 import type { HoldNotice, IdEntry } from '../state/index.ts';
-import type { ImageFinding } from './assets.ts';
+import type { ImageFinding, FileFinding } from './assets.ts';
 import { message } from '../messages.ts';
 
 export const MARKS = {
@@ -36,7 +36,7 @@ export interface SecurityFinding {
   line: number;
 }
 
-export type BlockedFinding = SecurityFinding | ImageFinding;
+export type BlockedFinding = SecurityFinding | ImageFinding | FileFinding;
 
 export type MarkClient = Pick<LinearClient, 'updateDocument' | 'ensureDocumentComment' | 'resolveComment' | 'commentExists'>;
 export type MarkState = 'conflict' | 'blocked' | 'clear';
@@ -69,6 +69,7 @@ export const IMAGE_BLOCKED_COMMENT = 'Some images in this document cannot be syn
 
 function blockedComment(findings: readonly BlockedFinding[]): string {
   const images = findings.filter((finding): finding is ImageFinding => 'image' in finding);
+  const files = findings.filter((finding): finding is FileFinding => 'file' in finding);
   const hooks = findings.filter((finding): finding is SecurityFinding => 'hook' in finding);
   const locations = [...new Set(hooks.map(({ hook, line }) => {
     // Hook configuration is untrusted input. Never copy matched text or a
@@ -80,9 +81,12 @@ function blockedComment(findings: readonly BlockedFinding[]): string {
   const sections: string[] = [];
   const imageReasons: Record<ImageFinding['reason'], string> = {
     'not-uploaded': 'not uploaded to this workspace. Upload the file instead of linking to it.',
+    'unreadable': 'the uploaded file cannot be read. Remove it or upload it again.',
+    'too-large': 'the uploaded file is larger than 10 MB.',
     'unsupported-type': 'the uploaded file is not a supported image or document. Remove it or upload the original file.',
   };
   if (images.length > 0) sections.push(`${IMAGE_BLOCKED_COMMENT}\n\n${images.map(({image, total, line, reason}) => `- Image ${image} of ${total} (line ${line}): ${imageReasons[reason]}`).join('\n')}`);
+  if (files.length > 0) sections.push(`Some files in this document cannot be synchronized. Fix the listed files and sync again.\n\n${files.map(({file, total, line, reason}) => `- File ${file} of ${total} (line ${line}): ${imageReasons[reason]}`).join('\n')}`);
   if (locations.length > 0) sections.push(`${BLOCKED_COMMENT}\n\n${locations.join('\n')}`);
   return sections.join('\n\n');
 }

@@ -22,7 +22,7 @@ import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, imageFindings, ImageBlockedError, type CapturedAssets } from './assets.ts';
+import { createAssetCapture, imageFindings, ImageBlockedError, DownloadRetryError, type CapturedAssets } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
@@ -357,7 +357,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (old !== undefined) documentIds.delete(old.path);
         documentIds.set(path, doc.id);
       } catch (error) {
-        if (error instanceof LinearStoppedError) throw error;
+        if (error instanceof LinearError) throw error;
         if (error instanceof ImageBlockedError) {
           const security = await gate.check(new Map([[path, head + (doc.content ?? '')]]));
           if (security === null) {
@@ -368,7 +368,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           }
           continue;
         }
-        result.leftOut.push({id: doc.id, rule: 'capture-translation'});
+        result.leftOut.push({id: doc.id, rule: error instanceof DownloadRetryError ? 'download-retry' : 'capture-translation'});
       }
     }
     // A rejected target may change other documents' relative links. Recheck
@@ -479,7 +479,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body);
       } catch (error) {
         // An image that version did not have: the document changed.
-        if (error instanceof NotDownloaded) return false;
+        if (error instanceof DownloadRetryError && error.cause instanceof NotDownloaded) return false;
         throw error;
       }
       // Linear's spelling of that version reads back as its text.
@@ -658,6 +658,7 @@ function placeKeyOf(place: {projectId?: string | null; teamId?: string | null}):
 
 function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
+  for (const item of result.leftOut) if (item.rule === 'download-retry') summary += `\ndownload-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
   if (result.heldRemovals.length > 0) {
     summary += `\nRemoval held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path) => JSON.stringify(path)).join(', ')}.`;
   }

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import { destinations, findFileLinks, restoreFileLinks, type WrittenLink } from '../initial-sync/uploads.ts';
-import { type LinearReads, uploadReadKey } from '../linear/index.ts';
+import { type LinearReads, uploadReadKey, LinearError, LinearHttpError } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
 import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
@@ -24,12 +24,19 @@ export interface ImageFinding {
   image: number;
   total: number;
   line: number;
-  reason: 'not-uploaded' | 'unsupported-type';
+  reason: 'not-uploaded' | 'unsupported-type' | 'unreadable' | 'too-large';
+}
+
+export interface FileFinding {
+  file: number;
+  total: number;
+  line: number;
+  reason: Exclude<ImageFinding['reason'], 'not-uploaded'>;
 }
 
 export class ImageBlockedError extends Error {
-  readonly findings: ImageFinding[];
-  constructor(findings: ImageFinding[]) {
+  readonly findings: Array<ImageFinding | FileFinding>;
+  constructor(findings: Array<ImageFinding | FileFinding>) {
     super(message('assets.not-allowed'));
     this.findings = findings;
   }
@@ -55,25 +62,51 @@ export function imageFindings(body: string): ImageFinding[] {
   return images.flatMap((image, index) => isUpload(image.url) ? [] : [{image: index + 1, total: images.length, line: image.line, reason: 'not-uploaded' as const}]);
 }
 
+/** A download that can succeed on a later run; never expose the URL or response body. */
+export class DownloadRetryError extends Error {
+  constructor(cause?: unknown) { super(message('assets.download-failed'), {cause}); }
+}
+
+class DownloadBlockedError extends Error {
+  readonly reason: 'unreadable' | 'too-large';
+  constructor(reason: 'unreadable' | 'too-large') {
+    super(message('assets.download-failed'));
+    this.reason = reason;
+  }
+}
+
 /** The caller authenticates the allowed upload host. Redirects cannot forward credentials elsewhere. */
 async function download(url: string, fetcher: typeof fetch, reads: LinearReads | undefined): Promise<{ bytes: Buffer; type: string }> {
   if (!isUpload(url)) throw new Error(message('assets.not-allowed'));
   const key = uploadReadKey(url);
   const kept = reads?.take(key);
   if (kept !== undefined && kept.body.length <= LIMIT) return { bytes: kept.body, type: kept.type };
-  const response = await fetcher(url, { redirect: 'manual', signal: AbortSignal.timeout(30_000) });
-  if (response.status >= 300 && response.status < 400) throw new Error(message('assets.redirect-not-allowed'));
-  if (!response.ok || response.body === null || Number(response.headers.get('content-length') ?? 0) > LIMIT) throw new Error(message('assets.download-failed'));
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.length;
-    if (size > LIMIT) throw new Error(message('assets.too-large'));
-    chunks.push(Buffer.from(chunk));
+  try {
+    const response = await fetcher(url, { redirect: 'manual', signal: AbortSignal.timeout(30_000) });
+    // Access failures belong to the client, never to an individual document.
+    if (response.status !== 200) await response.body?.cancel().catch(() => {});
+    if (response.status === 401 || response.status === 403) throw new LinearHttpError('DownloadUpload', response.status);
+    if (response.status === 429 || response.status >= 500) throw new DownloadRetryError();
+    if (response.status !== 200 || response.body === null) throw new DownloadBlockedError('unreadable');
+    if (Number(response.headers.get('content-length') ?? 0) > LIMIT) {
+      await response.body.cancel().catch(() => {});
+      throw new DownloadBlockedError('too-large');
+    }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+      size += chunk.length;
+      if (size > LIMIT) throw new DownloadBlockedError('too-large');
+      chunks.push(Buffer.from(chunk));
+    }
+    const asset = {bytes: Buffer.concat(chunks), type: response.headers.get('content-type')?.split(';')[0]?.trim() ?? ''};
+    reads?.keep(key, { status: response.status, type: asset.type, body: asset.bytes });
+    return asset;
+  } catch (error) {
+    if (error instanceof LinearError || error instanceof DownloadBlockedError || error instanceof DownloadRetryError) throw error;
+    // Fetch failures and interrupted response streams are retried without quoting their messages.
+    throw new DownloadRetryError(error);
   }
-  const asset = {bytes: Buffer.concat(chunks), type: response.headers.get('content-type')?.split(';')[0]?.trim() ?? ''};
-  reads?.keep(key, { status: response.status, type: asset.type, body: asset.bytes });
-  return asset;
 }
 
 /** One lazily built hash index per capture, read in bounded batches. */
@@ -109,12 +142,14 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     return readable.get(path)!;
   };
   const downloaded = new Map<string, {bytes: Buffer; type: string}>();
+  const failed = new Map<string, DownloadBlockedError | DownloadRetryError>();
 
   return async (path: string, body: string, uploads: ReadonlyMap<string, string>, previousBody?: string, previousPath = path): Promise<CapturedAssets> => {
     const files = new Map<string, Buffer>();
     const additions: UploadMap = new Map();
     const originalBody = body;
-    const unsupported = new Set<string>();
+    const rejected = new Map<string, ImageFinding['reason']>();
+    let retry: DownloadRetryError | undefined;
     // Restore known URLs before restricting new downloads to the upload host.
     const cachedUrls = [...uploads.values()];
     const knownUpload = (url: string) => cachedUrls.some((known) => url === known || url.startsWith(`${known}?`) || url.startsWith(`${known}#`));
@@ -166,12 +201,26 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       }
       if (assetPath === undefined) {
         let asset = downloaded.get(url);
-        if (asset === undefined) { asset = await download(url, fetcher, reads); downloaded.set(url, asset); }
+        if (asset === undefined) {
+          try {
+            const failure = failed.get(url);
+            if (failure !== undefined) throw failure;
+            asset = await download(url, fetcher, reads);
+          }
+          catch (error) {
+            if (error instanceof DownloadBlockedError || error instanceof DownloadRetryError) failed.set(url, error);
+            if (error instanceof DownloadRetryError) { retry = error; continue; }
+            if (!(error instanceof DownloadBlockedError)) throw error;
+            rejected.set(node.url, error.reason);
+            continue;
+          }
+          downloaded.set(url, asset);
+        }
         hash = createHash('sha256').update(asset.bytes).digest('hex');
         assetPath = preferredPaths.get(hash) ?? hashPaths.get(hash);
         if (assetPath === undefined) {
           const extension = uploadExtension(asset.bytes);
-          if (extension === null) { unsupported.add(node.url); continue; }
+          if (extension === null) { rejected.set(node.url, 'unsupported-type'); continue; }
           assetPath = posix.join(posix.dirname(path), `${hash}${extension}`);
           if (pathHashes.has(assetPath)) throw new Error(message('assets.destination-exists'));
         }
@@ -181,12 +230,27 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
       additions.set(hash!, url);
       replacements.push({...range, text: posix.relative(posix.dirname(path), assetPath).split('/').map(encodeURIComponent).join('/') + suffix});
     }
-    if (unsupported.size > 0) {
+    if (rejected.size > 0) {
       const images = imagesOf(originalBody);
-      const findings = images.flatMap((image, index) => unsupported.has(image.url) ? [{image:index + 1, total:images.length, line:image.line, reason:'unsupported-type' as const}] : []);
+      const findings: Array<ImageFinding | FileFinding> = images.flatMap((image, index) => rejected.has(image.url) ? [{image:index + 1, total:images.length, line:image.line, reason:rejected.get(image.url)!}] : []);
+      // Ordinary upload links are attachments, and need the same actionable
+      // download findings without calling them images or quoting destinations.
+      const tree = parse(originalBody);
+      const definitions = new Map<string, string>();
+      visit(tree, (node) => { if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url); });
+      const files: Array<{url:string; line:number}> = [];
+      visit(tree, (node) => {
+        const url = node.type === 'link' ? node.url : node.type === 'linkReference' ? definitions.get(node.identifier) : undefined;
+        if (url !== undefined && isUpload(url)) files.push({url, line:line(node)});
+      });
+      files.forEach((file, index) => {
+        const reason = rejected.get(file.url);
+        if (reason !== undefined && reason !== 'not-uploaded') findings.push({file:index + 1, total:files.length, line:file.line, reason});
+      });
       if (findings.length > 0) throw new ImageBlockedError(findings);
       throw new Error(message('assets.not-allowed'));
     }
+    if (retry !== undefined) throw retry;
     let result = body;
     for (const replacement of replacements.sort((a,b) => b.from - a.from)) result = result.slice(0,replacement.from) + replacement.text + result.slice(replacement.to);
     return {body: result, files, uploads: additions};
