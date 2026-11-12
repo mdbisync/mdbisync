@@ -194,7 +194,8 @@ export async function editorEdit(ctx: RunContext, editor: Editor, path: string, 
   if (document === undefined) throw new ProductError('a recorded document does not exist in Linear');
   const token = nextToken(ctx);
   const content = await change(document.content ?? '', token);
-  await client.updateDocument(id, { content });
+  const stored = await client.updateDocument(id, { content });
+  ctx.observations.set('edited.linearStoredBody', stored.content ?? '');
   // Only an edit that wrote its token counts for I2 (a resolution or a removal writes none).
   if (removal || content.includes(token)) ctx.edits.push({ side: 'linear', path, token, ...(removal ? { removal } : {}) });
   ctx.observations.set('edited.linearBody', content);
