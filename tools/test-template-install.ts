@@ -8,7 +8,8 @@
 // and installs nothing.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, readdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, mkdtemp, mkdir, readdir, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parse } from 'yaml';
@@ -34,6 +35,20 @@ async function installStep(file: string, job?: string) {
   return { script, pins, list };
 }
 
+/** The absolute path of the executable file a command name or path names, found as the shell would. */
+async function executable(name: string) {
+  const candidates = name.includes('/') ? [name] : (process.env.PATH ?? '').split(':').filter(Boolean).map((directory) => join(directory, name));
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.X_OK);
+      if ((await stat(candidate)).isFile()) return resolve(candidate);
+    } catch {
+      // Not here; try the next directory.
+    }
+  }
+  return undefined;
+}
+
 const temporary = await mkdtemp(join(tmpdir(), 'template-install-'));
 try {
   // Only the commands the step uses: a runner's own pre-commit or pipx stays out of reach.
@@ -42,9 +57,9 @@ try {
   for (const command of ['python3', 'mktemp', 'mkdir', 'ln']) {
     // A name or a relative path in TEMPLATE_INSTALL_PYTHON resolves like a command would.
     const name = command === 'python3' && process.env.TEMPLATE_INSTALL_PYTHON || command;
-    const found = spawnSync('bash', ['-c', 'command -v -- "$1"', 'bash', name], { encoding: 'utf8' }).stdout.trim();
+    const found = await executable(name);
     assert.ok(found, `${name} is not on PATH`);
-    await symlink(resolve(found), join(bin, command));
+    await symlink(found, join(bin, command));
   }
   const version = spawnSync(join(bin, 'python3'), ['-c', 'import sys; print("%d.%d" % sys.version_info[:2])'], { encoding: 'utf8' }).stdout.trim();
   assert.match(version, /^\d+\.\d+$/, 'the selected Python does not run');
