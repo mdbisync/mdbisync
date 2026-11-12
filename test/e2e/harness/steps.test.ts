@@ -2849,6 +2849,12 @@ describe('subjects', () => {
     Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Alert', color: '#F2994A' });
     refreshView(ctx);
     assert.deepEqual(await resolveSubject(ctx, 'conflicts.markCount'), { known: true, value: 1 });
+    const failed = await evaluateAssertion(ctx, { subject: 'conflicts.markCount', operator: 'equal', expected: 0 });
+    assert.equal(failed.holds, false);
+    if (!failed.holds) {
+      assert.ok(failed.reason.includes('docs/handbook/start.md'));
+      assert.ok(!failed.reason.includes('missing marks'));
+    }
     assert.deepEqual(await resolveSubject(ctx, 'conflicts.color'), { known: true, value: 'orange' });
     assert.equal(colorLabel('#eb5757'), 'red');
     assert.equal(colorLabel('#123456'), '#123456');
