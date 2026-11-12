@@ -40,6 +40,7 @@ import { countAppRequest } from './app-reads.ts';
 import { loadTestConfig } from './config.ts';
 import { REPO_ROOT } from './engine.ts';
 import { Governor, budgetFromStatus, estimate, type App } from './governor.ts';
+import { tokenLease } from './token-lease.ts';
 import { SandboxRest, githubToken } from './github.ts';
 import { newRunId, runNames, RUN_ID_PATTERN } from './isolation.ts';
 import { LinearWorld, editorClient } from './linear-world.ts';
@@ -128,7 +129,7 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  // Live commands mint one token per OAuth app for the harness's own reads and revoke it at the end.
+  // Long runs renew harness app tokens before expiry and revoke every minted token.
   let shared: SharedAdmission | undefined;
   const sharedAdmission = async () => {
     if (shared === undefined) {
@@ -151,7 +152,17 @@ async function main(argv: string[]): Promise<number> {
       const hooks = hooksFor(app.name);
       const token = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
       tokens.push({ token, hooks });
-      appClients.set(app.name, new LinearClient({ token: token.accessToken, auth: token.context, hooks }));
+      let previous = token;
+      const current = tokenLease(token, (value) => value.expiresIn * 1000, async () => {
+        const next = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
+        tokens.push({ token: next, hooks });
+        // Keep the previous token tracked until its revocation is confirmed.
+        await revokeToken(previous.accessToken, { hooks, auth: previous.context });
+        tokens.splice(tokens.findIndex((entry) => entry.token === previous), 1);
+        previous = next;
+        return next;
+      });
+      appClients.set(app.name, new LinearClient({ token: async () => (await current()).accessToken, auth: token.context, hooks }));
     }
 
     if (command === 'sweep' || command === 'recover') {

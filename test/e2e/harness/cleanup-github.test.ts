@@ -14,6 +14,17 @@ import { loadScenarios } from './spec.ts';
 const scenario = loadScenarios().find((item) => item.id === 'L2-11');
 assert.ok(scenario, 'L2-11 must exist as the live setup fixture');
 
+it('leaves resources untouched when a scheduled writer cannot be proven stopped', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'scheduled-cleanup-'));
+  try {
+    const { ctx } = createRunContext(scenario, 'abcdef', root, { config: {} as TestConfig, stateDir: root, outDir: root, log: () => {} });
+    ctx.observations.set('workflows.unstopped', true);
+    const outcome = await cleanupAndCount(ctx);
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.detail!, /retain resources and shared reservation/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 for (const phase of ['cache', 'push']) {
   it(`handles the reservation after a failed ${phase} with a conservative remote-write proof`, async (t) => {
     const root = mkdtempSync(join(tmpdir(), 'empty-cleanup-'));

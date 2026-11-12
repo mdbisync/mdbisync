@@ -35,6 +35,7 @@ export function diagnosticRequests(logs: ReadonlyMap<string, string>): LogEntry[
         .filter(([key, value]) => /^x-(?:ratelimit-[a-z0-9-]+|complexity)$/i.test(key) && typeof value === 'string')),
       ...(Array.isArray(entry.errorCodes) ? { errorCodes: entry.errorCodes.filter((code) => typeof code === 'string') } : {}),
       ...(typeof entry.requestId === 'string' ? { requestId: entry.requestId } : {}),
+      ...(typeof entry.revocationConfirmed === 'boolean' ? { revocationConfirmed: entry.revocationConfirmed } : {}),
     };
     if (safe.requestId !== undefined) unique.set(requestKey(safe), safe);
     else {

@@ -972,6 +972,64 @@ describe('load', () => {
     assert.deepEqual((await run()).edited, first.edited);
   });
 
+  it('records runner queue delay and saves the failing hourly check before stopping further edits', async () => {
+    const clock = fakeClock();
+    const saved: unknown[] = [];
+    let syncs = 0;
+    const driver: SoakDriver = {
+      ...clock, linearEdit: async () => {}, gitEdit: async () => {},
+      sync: async () => { syncs++; const started = clock.now() + 50; await clock.sleep(100); return started; },
+      checkInvariants: async () => ({ lostEdits: 1 }),
+      progress: async (result) => { saved.push(structuredClone(result)); },
+    };
+    await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), /edits lost/);
+    assert.equal(syncs, 1);
+    assert.deepEqual(saved.at(-1), { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 1, lostEdits: 1, scheduleDelays: [50] });
+  });
+
+  it('stops an overrun instead of stretching a timed soak into a longer passing run', async () => {
+    const clock = fakeClock();
+    let saved = 0;
+    const driver: SoakDriver = { ...clock, linearEdit: async () => {}, gitEdit: async () => {}, sync: async () => { await clock.sleep(10000); }, checkInvariants: async () => ({ lostEdits: 0 }), progress: async () => { saved++; } };
+    await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), EnvBlockedError);
+    assert.equal(saved, 2, 'initial state and completed invocation survive the deadline stop');
+  });
+
+  it('saves failed invocation evidence and preserves its original error classification', async () => {
+    const clock = fakeClock();
+    const failure = new EnvBlockedError('runner logs unavailable');
+    let failed = false;
+    const saved: boolean[] = [];
+    const driver: SoakDriver = { ...clock, linearEdit: async () => {}, gitEdit: async () => {}, sync: async () => { failed = true; throw failure; }, checkInvariants: async () => ({ lostEdits: 0 }), progress: async () => { saved.push(failed); } };
+    await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), (error) => error === failure);
+    assert.deepEqual(saved, [false, true]);
+  });
+
+  it('retains a completed failing invocation in the count and delay distribution', async () => {
+    const clock = fakeClock();
+    const failure = new EnvBlockedError('workflow diagnostics missing');
+    let saved: unknown;
+    const driver: SoakDriver = {
+      ...clock, linearEdit: async () => {}, gitEdit: async () => {},
+      sync: async (deadlineAt) => {
+        assert.equal(deadlineAt, 4000);
+        return { completed: true, startedAt: 1025, error: failure };
+      },
+      checkInvariants: async () => ({ lostEdits: 0 }), progress: async (result) => { saved = structuredClone(result); },
+    };
+    await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), (error) => error === failure);
+    assert.deepEqual(saved, { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 0, lostEdits: 0, scheduleDelays: [25] });
+  });
+
+  it('persists the soak step report even when no timed events are requested', async () => {
+    const { ctx } = await fakeRun();
+    await runStep(ctx, { kind: 'run', action: 'soak', args: { durationSeconds: 0 } });
+    const saved = JSON.parse(readFileSync(join(ctx.runDir, 'soak-progress.json'), 'utf8')) as { metrics: Record<string, unknown> };
+    assert.equal(saved.metrics.activeLinearTokens, 0);
+    assert.deepEqual(saved.metrics.scheduleDelayDistribution, { samples: [], count: 0, p50: null, p95: null, p99: null, max: null });
+    assert.equal(ctx.observations.get('report.hourlyInvariantChecks'), 0);
+  });
+
   it('keeps the seeded soak off near-limit documents and within each document\'s room, without dropping an edit', async () => {
     const counts = soakEditCounts(SOAK);
     const total = counts['editor-a'] + counts['editor-b'] + counts.git;

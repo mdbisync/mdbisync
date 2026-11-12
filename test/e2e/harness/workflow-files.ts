@@ -63,6 +63,8 @@ export interface RunWorkflowOptions {
    */
   actionSha?: string;
   securityCanary?: boolean;
+  /** A timed soak runs sync only on scheduler ticks, so edits do not start extra syncs. */
+  scheduledOnly?: boolean;
 }
 
 export function readTemplate(file: string): string {
@@ -106,8 +108,8 @@ export function renderForRun(template: string, options: RunWorkflowOptions): str
   // gets a group of its own, so it never replaces a pending dispatch of the
   // run's group. The default branch and the repository's settings stay as
   // they are.
-  if (options.securityCanary && isMap(on) && isMap(doc.getIn(['jobs', 'sync']))) {
-    // This canary observes dispatched runs only; pushes register the workflow with no job.
+  if ((options.securityCanary || options.scheduledOnly) && isMap(on) && isMap(doc.getIn(['jobs', 'sync']))) {
+    // These drivers observe requested runs only; pushes register the workflow with no job.
     on.delete('push');
     on.delete('schedule');
   }
