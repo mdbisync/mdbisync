@@ -48,12 +48,72 @@ jobs:
           SECRET_SCANNING_TOKEN: ${{ secrets.SECRET_SCANNING_READ_TOKEN }}
         run: node src/release/gate.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA"
 
-  build:
+  # The full suite on the source commit, in the same four shards as CI: one
+  # runner needs about 20 minutes for it, four need under 10. Builds nothing
+  # that the release ships.
+  test:
+    name: test (${{ matrix.shard }}/4)
     needs: gate
-    # Builds after a passed gate, or without one only for a pre-release.
+    # Runs after a passed gate, or without one only for a pre-release.
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}
     runs-on: ubuntu-latest
-    # The full test suite needs headroom alongside setup, bundling and release smoke tests.
+    # Keep headroom as the suite grows, including setup and hook installs in each shard.
+    timeout-minutes: 20
+    # Every shard runs to the end, as in CI, so one run shows every failure.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      SOURCE_SHA: ${{ inputs.source-sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate and check out source
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+          cp .github/requirements/pre-commit.txt "$RUNNER_TEMP/pre-commit-requirements.txt"
+          git checkout --detach "$SOURCE_SHA"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install compatible npm
+        run: npm install --global --ignore-scripts npm@11.21.2
+      - name: Install locked build dependencies without scripts
+        run: |
+          node --input-type=module -e 'import { validateVersion, validateSha } from "./src/release/package.ts"; validateVersion(process.env.RELEASE_VERSION); validateSha(process.env.SOURCE_SHA);'
+          npm ci --ignore-scripts
+      - name: Verify dependency admission
+        run: |
+          npm audit signatures
+          npm run check:install-scripts
+          npm run check:cyrillic
+      # Unlike CI, no pre-commit cache is restored: a release does not reuse hook environments that other runs wrote.
+      - name: Install pre-commit
+        run: |
+          environment=$(mktemp -d "$RUNNER_TEMP/pre-commit.XXXXXX")
+          python3 -m venv "$environment"
+          "$environment/bin/python" -m pip install --require-hashes --only-binary :all: -r "$RUNNER_TEMP/pre-commit-requirements.txt"
+          mkdir "$environment/commands"
+          ln -s "$environment/bin/pre-commit" "$environment/commands/pre-commit"
+          echo "$environment/commands" >> "$GITHUB_PATH"
+      # Bundle tests need the release entry points on this runner too.
+      - name: Build test bundles
+        run: npm run build
+      - name: Test
+        run: node --test --test-shard=${{ matrix.shard }}/4 "src/**/*.test.ts" "tools/**/*.test.ts" "test/**/*.test.ts" "test/**/*.test.mjs"
+
+  build:
+    needs: [gate, test]
+    # Builds only after every test shard passed, and after a passed gate or without one only for a pre-release.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.test.result == 'success' && (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}
+    runs-on: ubuntu-latest
+    # Leave headroom for setup, type checking, bundling and the release smoke tests.
     timeout-minutes: 20
     env:
       RELEASE_VERSION: ${{ inputs.version }}
@@ -84,6 +144,7 @@ jobs:
           npm audit signatures
           npm run check:install-scripts
           npm run check:cyrillic
+      # The staged flow below runs the templates' security hooks through pre-commit.
       - name: Install pre-commit
         run: |
           environment=$(mktemp -d "$RUNNER_TEMP/pre-commit.XXXXXX")
@@ -92,11 +153,10 @@ jobs:
           mkdir "$environment/commands"
           ln -s "$environment/bin/pre-commit" "$environment/commands/pre-commit"
           echo "$environment/commands" >> "$GITHUB_PATH"
-      - name: Check, build and test source
+      - name: Check and build source
         run: |
           npm run typecheck
           npm run build
-          npm test
       - name: Stage and verify self-contained release
         run: |
           MDBISYNC_RELEASE_VERSION="${RELEASE_VERSION#v}" npm run build

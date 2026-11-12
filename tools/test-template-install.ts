@@ -103,7 +103,7 @@ try {
   } else {
     let installedPython = '';
     const installs = [...TEMPLATES.map(file => ({ file, job: undefined as string | undefined })),
-      { file: 'ci.yml', job: 'validate' }, { file: 'ci.yml', job: 'test' }, { file: 'release.yml', job: 'build' }];
+      { file: 'ci.yml', job: 'validate' }, { file: 'ci.yml', job: 'test' }, { file: 'release.yml', job: 'test' }, { file: 'release.yml', job: 'build' }];
     for (const { file, job } of installs) {
       const { script, pins } = await installStep(file, job);
       const { result, added } = await run(`${file}-${job ?? 'template'}`, script);
