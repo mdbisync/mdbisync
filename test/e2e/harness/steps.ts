@@ -1823,7 +1823,7 @@ const OTHER: Record<string, Executor> = {
 };
 
 const UI_ACTIONS = [
-  'ui.assert-dom', 'ui.inspect-blocked', 'ui.inspect-conflict', 'ui.inspect-rendering', 'ui.paste-image',
+  'ui.assert-dom', 'ui.follow-document-links', 'ui.inspect-blocked', 'ui.inspect-conflict', 'ui.inspect-rendering', 'ui.paste-image',
   'ui.rename-trash-restore', 'ui.resolve-markers', 'ui.type-during-write', 'ui.type-two-editors', 'ui.verify-editor',
 ];
 
@@ -1858,6 +1858,12 @@ const UI_AFTERMATH: Record<string, Executor> = {
   'ui.resolve-markers': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
     retireMissingFrom(ctx, path, (await linearContent(ctx, path)).content);
+  },
+  // No check reads whether the anchored link scrolled: keep the session's answer in the report (null when not given).
+  'ui.follow-document-links': async (ctx) => {
+    const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+    metrics.anchorScrolls = ctx.observations.get('ui.anchorScrolls') ?? null;
+    ctx.observations.set('metrics', metrics);
   },
 };
 

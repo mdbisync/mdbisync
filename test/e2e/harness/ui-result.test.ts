@@ -219,6 +219,31 @@ describe('UI checklist answers', () => {
     assert.match(renderUiChecklist(byId('L6-05'), runNames(RUN), { live: null, runDir: 'run' }), /^- `ui\.resolvedText` \(compared with `tracked\.body`\)\n  - value:$/m);
   });
 
+  it('asks the link check (L6-12) to click both links to the notes and record what they did', () => {
+    const links = byId('L6-12');
+    assert.deepEqual(links.setup.fixtures, ['document-links']);
+    assert.deepEqual(uiValueSubjects(links), ['ui.plainLinkOpensTarget', 'ui.anchorLinkOpensTarget', 'ui.anchorScrolls']);
+    // Without the run's record (`cli.ts checklist`), the project line is left out.
+    assert.doesNotMatch(renderUiChecklist(links, runNames(RUN), { live: null, runDir: 'run' }), /are in project/);
+    const pair = { source: 'p/guides/route-index.md', target: 'p/guides/route-notes.md', anchor: 'depot-hours', project: 'Field notes a1b2c3' };
+    const checklist = renderUiChecklist(links, runNames(RUN), { live: null, runDir: 'run', observations: new Map([['fixture.linkPair', pair]]) });
+    assert.match(checklist, /^- "guides\/route-index" and "guides\/route-notes" are in project Field notes a1b2c3$/m);
+    assert.match(checklist, /^2\. \[ \] As editor-a: Open the document "guides\/route-index" in the project named above\. .* links the document "guides\/route-notes" twice: .*`#depot-hours`/m);
+    assert.match(checklist, /scrolled to the heading/);
+    assert.match(checklist, /^- `ui\.anchorLinkOpensTarget` expected equal `true`$/m);
+    assert.match(checklist, /^- `ui\.anchorScrolls` \(recorded for the harness's checks\)$/m);
+    // Both links opened the notes; the anchor did not scroll: recorded, and not a failed check.
+    const filled = checklist
+      .replaceAll('   - result: pass | fail', '   - result: pass')
+      .replace(/(`ui\.plainLinkOpensTarget`[^\n]*\n  - value:)/, '$1 true')
+      .replace(/(`ui\.anchorLinkOpensTarget`[^\n]*\n  - value:)/, '$1 true')
+      .replace(/(`ui\.anchorScrolls`[^\n]*\n  - value:)/, '$1 false');
+    const answers = parseUiAnswers(filled);
+    assert.equal(answers.scenarioId, 'L6-12');
+    assert.deepEqual(answers.items.map((item) => item.result), ['pass', 'pass']);
+    assert.deepEqual([...answers.values], [['ui.plainLinkOpensTarget', true], ['ui.anchorLinkOpensTarget', true], ['ui.anchorScrolls', false]]);
+  });
+
   it('reads which scenario and run the checklist is for', () => {
     const { checklist } = heldRun();
     const answers = parseUiAnswers(checklist);

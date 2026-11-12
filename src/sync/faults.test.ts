@@ -764,6 +764,74 @@ describe('sync: rate limits and transport faults', () => {
     assert.deepEqual(await supersededIds(), { [created]: 'combined/new.md' });
   });
 
+  it('a document an interrupted run created with a link by a superseded id is taken over with the link written by the new id', async () => {
+    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    transport.arm(lostCreate('reset-after'));
+    assertPartial(await sync());
+    transport.clear();
+    const [lost] = withNewPage();
+    assert.ok(lost !== undefined);
+    // Its reserved id is taken by a trashed document: the next run creates the page under a new id.
+    lost.trashed = true;
+    lost.archivedAt = new Date().toISOString();
+    const linker = 'combined/linker.md';
+    const text = `# Linker\n\nSee [the new page](new.md). ${CANARY}\n`;
+    await commit({ [linker]: text });
+    // After this run's capture, an interrupted run's document for the new file, linking the page by the taken id.
+    const orphan: FakeDocument = { id: 'orphan-linker', title: 'linker', projectId: 'project-handbook', createdAt: new Date().toISOString(), content: body(linearForm(linker, text, { 'combined/new.md': { id: lost.id } })) };
+    const operations: string[] = [];
+    world.linear.beforeQuery = (operation) => {
+      operations.push(operation);
+      if (operation === 'ListDocuments' && operations.filter((name) => name === 'ListDocuments').length === 2) world.linear.documents.push(orphan);
+    };
+    const run = await sync();
+    delete world.linear.beforeQuery;
+    assert.equal(run.result.exitCode, 0, `${run.result.stderr} ${operations.join(',')}`);
+    assert.deepEqual(run.report.sync?.adopted, [linker], operations.join(','));
+    assert.deepEqual(run.report.sync?.skipped, []);
+    const page = await idOf('combined/new.md');
+    assert.notEqual(page, lost.id);
+    assert.equal(await idOf(linker), orphan.id);
+    assert.deepEqual(await linkedIds(linker), [page], 'Linear holds the link by the new id');
+    assert.match(await recorded(linker), /\]\(new\.md\)/, 'the record holds the link as the file has it');
+    assert.deepEqual(await supersededIds(), {});
+    await assertNextRunConverges();
+  });
+
+  it('an edited document an interrupted run created keeps its link by a superseded id readable until the next capture', async () => {
+    await commit({ 'combined/new.md': `# New\n\nA new page. ${CANARY}\n` });
+    transport.arm(lostCreate('reset-after'));
+    assertPartial(await sync());
+    transport.clear();
+    const [lost] = withNewPage();
+    assert.ok(lost !== undefined);
+    lost.trashed = true;
+    lost.archivedAt = new Date().toISOString();
+    const linker = 'combined/linker.md';
+    const text = `# Linker\n\nSee [the new page](new.md). ${CANARY}\n`;
+    await commit({ [linker]: text });
+    // The interrupted run's document links the page by the taken id, and a person has edited it.
+    const edited = `${body(linearForm(linker, text, { 'combined/new.md': { id: lost.id } }))}\nAdded in Linear.\n`;
+    const orphan: FakeDocument = { id: 'orphan-linker', title: 'linker', projectId: 'project-handbook', createdAt: new Date().toISOString(), content: edited };
+    let lists = 0;
+    world.linear.beforeQuery = (operation) => {
+      if (operation === 'ListDocuments' && ++lists === 2) world.linear.documents.push(orphan);
+    };
+    const run = await sync();
+    delete world.linear.beforeQuery;
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(run.report.sync?.skipped, [{ path: linker, reason: 'edited-in-linear' }]);
+    assert.equal(orphan.content, edited, 'the edited document is not written');
+    assert.deepEqual(await supersededIds(), { [lost.id]: 'combined/new.md' }, 'the taken id still names the page');
+
+    await sync();
+    // The next capture takes the document in with its link as the file has it, not as a link to the trashed document.
+    const captured = await recorded(linker);
+    assert.match(captured, /Added in Linear\./);
+    assert.match(captured, /\]\(new\.md\)/);
+    assert.ok(!captured.includes(lost.id), 'the captured file links the trashed document');
+  });
+
   it('a 500 on the read before writing leaves the batch unwritten and unrecorded; the next run converges', async () => {
     await editAll(3, 'Second text.');
     // The write step's re-read asks for exactly the edited documents.
