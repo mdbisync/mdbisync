@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
-import { destinations, findFileLinks, restoreFileLinks, type WrittenLink } from '../initial-sync/uploads.ts';
+import { destinations, findFileLinks } from '../initial-sync/uploads.ts';
 import { type LinearReads, uploadReadKey, LinearError, LinearHttpError } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
 import { parse, visit, line } from '../format/markdown.ts';
@@ -156,40 +156,44 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
     if (!destinations(body).some(({node}) => isUpload(node.url) || knownUpload(node.url))) return {body, files, uploads: additions};
     await index();
     const preferredPaths = new Map<string, string>();
+    // How the previous text wrote each link to a file of the repository, by the file's hash and the link's
+    // query and fragment: a link to the same file keeps that spelling. Every upload takes it alike, whether the
+    // cache knew its URL or it was downloaded, so the text never depends on the cache (a first initial sync
+    // starts with an empty one; a replacement after its pull request was abandoned does not).
+    const spellings = new Map<string, string[]>();
     if (previousBody !== undefined) {
-      const written: WrittenLink[] = [];
       for (const link of findFileLinks(previousPath, previousBody, (target) => pathHashes.has(target))) {
         if (!await canRead(link.target)) continue;
         const hash = pathHashes.get(link.target)!;
         if (!preferredPaths.has(hash)) preferredPaths.set(hash, link.target);
         const raw = previousPath === path ? link.written : posix.relative(posix.dirname(path), link.target).split('/').map(encodeURIComponent).join('/') + link.suffix;
-        written.push({written: previousPath !== path && link.written.startsWith('<') ? `<${raw}>` : raw, hash, suffix: link.suffix});
+        const key = hash + link.suffix;
+        if (!spellings.has(key)) spellings.set(key, []);
+        spellings.get(key)!.push(previousPath !== path && link.written.startsWith('<') ? `<${raw}>` : raw);
       }
-      // Capture keeps the brackets Linear returned; the shared inverse now
-      // replaces the whole destination, so give it that occurrence's brackets.
-      const spellings = new Map<string, WrittenLink[]>();
-      for (const link of written) {
-        const url = uploads.get(link.hash);
-        if (url === undefined) continue;
-        const key = url + link.suffix;
-        spellings.set(key, [...(spellings.get(key) ?? []), link]);
-      }
-      const occurrences = new Map<string, number>();
-      const shaped: WrittenLink[] = [];
-      for (const {node, outer} of destinations(body)) {
-        const choices = spellings.get(node.url);
-        if (choices === undefined) continue;
-        const index = occurrences.get(node.url) ?? 0;
-        occurrences.set(node.url, index + 1);
-        const link = choices[Math.min(index, choices.length - 1)]!;
-        const inner = link.written.startsWith('<') ? link.written.slice(1, -1) : link.written;
-        shaped.push({...link, written:body[outer.from] === '<' ? `<${inner}>` : inner.replace(/\s/g, encodeURIComponent)});
-      }
-      body = restoreFileLinks(body, shaped, new Map(uploads));
     }
+    const occurrences = new Map<string, number>();
+    /**
+     * The previous text's spelling of the next link to this file with this query and fragment, in the
+     * brackets Linear returned (`opener` is the destination's first character). Without Linear's brackets
+     * a space is encoded; a parenthesis keeps the brackets, since it could end the destination early.
+     * Brackets are never added around an angle bracket, which they cannot hold.
+     */
+    const spelling = (key: string, opener: string | undefined): string | undefined => {
+      const choices = spellings.get(key);
+      if (choices === undefined) return undefined;
+      const index = occurrences.get(key) ?? 0;
+      occurrences.set(key, index + 1);
+      const written = choices[Math.min(index, choices.length - 1)]!;
+      const inner = written.startsWith('<') ? written.slice(1, -1) : written;
+      // Only a bare destination can hold an angle bracket: it stays as the previous text wrote it.
+      if (/[<>]/.test(inner)) return written;
+      if (opener === '<' || (written.startsWith('<') && /[()]/.test(inner))) return `<${inner}>`;
+      return inner.replace(/\s/g, encodeURIComponent);
+    };
     const references = destinations(body).filter(({node}) => isUpload(node.url) || knownUpload(node.url));
     const replacements: Array<{from: number; to: number; text: string}> = [];
-    for (const {node, range} of references) {
+    for (const {node, range, outer} of references) {
       const cached = cachedUrls.filter((known) => node.url === known || node.url.startsWith(`${known}?`) || node.url.startsWith(`${known}#`)).sort((a,b) => b.length - a.length)[0];
       const hashAt = node.url.indexOf('#');
       const url = cached ?? (hashAt === -1 ? node.url : node.url.slice(0, hashAt));
@@ -228,6 +232,13 @@ export function createAssetCapture(git: Git, config: StateConfig, base: Oid, fet
         files.set(assetPath, asset.bytes);
       }
       additions.set(hash!, url);
+      // The link's query and fragment as Linear wrote them, whatever part of the URL the cache holds.
+      const cut = node.url.search(/[?#]/);
+      const spelled = preferredPaths.get(hash!) === assetPath ? spelling(hash! + (cut === -1 ? '' : node.url.slice(cut)), body[outer.from]) : undefined;
+      if (spelled !== undefined) {
+        replacements.push({...outer, text: spelled});
+        continue;
+      }
       replacements.push({...range, text: posix.relative(posix.dirname(path), assetPath).split('/').map(encodeURIComponent).join('/') + suffix});
     }
     if (rejected.size > 0) {

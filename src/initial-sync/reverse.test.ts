@@ -436,6 +436,41 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.linear.documents.find((d) => d.id === 'doc-runbook')?.content, contents['doc-runbook']);
   });
 
+  it('keeps the tracked spelling of links to embedded files on a first run, so a replacement after abandoning it reuses the same record', async () => {
+    // The tracked plan links its pictures as people write them: with `./`, and in angle brackets around a space.
+    const wide = Buffer.from('a wide picture');
+    const plan = `---\nowner: platform\n---\n\n# Plan\n\n![Diagram](./diagram.png)\n\n![Wide](<./my shots/wide shot.png>)\n`;
+    await fixture.seed({ 'eng/notes/plan.md': plan, 'eng/notes/my shots/wide shot.png': wide.toString() });
+    const world = fakeWorld();
+    // Linear holds each picture as an upload of the same bytes; the upload cache is empty, as before any first run.
+    const upload = (name: string, bytes: Buffer) => {
+      const assetUrl = `${UPLOADS_HOST}/${world.linear.uploads.length}/${name}`;
+      world.linear.uploads.push({ filename: name, contentType: 'image/png', size: bytes.length, assetUrl, bytes });
+      return assetUrl;
+    };
+    const diagramUrl = upload('diagram.png', Buffer.from(TREE['eng/notes/diagram.png'] as string));
+    const wideUrl = upload('wide.png', wide);
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Diagram](${diagramUrl})\n\n![Wide](${wideUrl})\n` } : d));
+
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    // The tracked path, in Linear's brackets: Linear returned none, so the space is encoded, as for a link the cache knows.
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), plan.trimEnd().replace('<./my shots/wide shot.png>', './my%20shots/wide%20shot.png'));
+    assert.deepEqual((await files('refs/mdbisync/linear')).filter((path) => path.endsWith('.png')), ['eng/notes/diagram.png', 'eng/notes/my shots/wide shot.png']);
+    const record = (await refs())['refs/mdbisync/linear'];
+
+    // A person closes the pull request and deletes its branch; a new initial sync from Linear replaces the record.
+    const initial = world.github.pullRequests[0];
+    assert.ok(initial);
+    initial.state = 'closed';
+    await fixture.remote.run(['update-ref', '-d', 'refs/heads/mdbisync/linear']);
+    const replaced = await run(world);
+    assert.equal(replaced.result.exitCode, 0, replaced.result.stderr);
+    // The same documents give the same record: the state ref stays where it was instead of moving to a sibling.
+    assert.equal((await refs())['refs/mdbisync/linear'], record);
+    assert.equal((await refs())['refs/heads/mdbisync/linear'], record);
+  });
+
   it('maps links to synchronized documents back to relative links, keeping the tracked spelling', async () => {
     // The tracked plan already links the README in its own spelling; Linear holds the document URL.
     await fixture.seed({ 'eng/notes/plan.md': `---\nowner: platform\n---\n\n# Plan\n\nSee [the notes](./README.md#top). ${CANARY}` });
