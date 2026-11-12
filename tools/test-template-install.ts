@@ -39,12 +39,14 @@ try {
   const bin = join(temporary, 'bin');
   await mkdir(bin);
   for (const command of ['python3', 'mktemp', 'mkdir', 'ln']) {
-    const found = command === 'python3' && process.env.TEMPLATE_INSTALL_PYTHON
-      || spawnSync('bash', ['-c', `command -v ${command}`], { encoding: 'utf8' }).stdout.trim();
-    assert.ok(found, `${command} is not on PATH`);
-    await symlink(found, join(bin, command));
+    // A name or a relative path in TEMPLATE_INSTALL_PYTHON resolves like a command would.
+    const name = command === 'python3' && process.env.TEMPLATE_INSTALL_PYTHON || command;
+    const found = spawnSync('bash', ['-c', 'command -v -- "$1"', 'bash', name], { encoding: 'utf8' }).stdout.trim();
+    assert.ok(found, `${name} is not on PATH`);
+    await symlink(resolve(found), join(bin, command));
   }
   const version = spawnSync(join(bin, 'python3'), ['-c', 'import sys; print("%d.%d" % sys.version_info[:2])'], { encoding: 'utf8' }).stdout.trim();
+  assert.match(version, /^\d+\.\d+$/, 'the selected Python does not run');
   const older = (a: string, b: string) => a.split('.').map(Number).reduce((order, part, index) => order || part - Number(b.split('.')[index]), 0) < 0;
   // A proxy, an index mirror or a CA bundle the contributor set still applies; one cache serves every run.
   const network = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
