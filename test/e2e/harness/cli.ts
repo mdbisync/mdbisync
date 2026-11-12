@@ -11,6 +11,13 @@
 //   node test/e2e/harness/cli.ts scheduler [--install]
 //        prints the sandbox's scheduled sync workflow for the release under test; --install commits it
 //        to the sandbox's default branch (workflow-files.ts, renderScheduler)
+//   node test/e2e/harness/cli.ts walkthrough prepare|push|dispatch|wait|list|cancel
+//        --run <six hex> [--dir <clone>] [--ref t/<run>/main]
+//        [--workflow mdbisync-initial-sync.yml] [--input direction=git-to-linear]
+//        [--input confirm=false] [--run-number <id>]
+//        prepare adapts local copied workflows; review and commit before push.
+//        dispatch waits up to 30 minutes and prints the conclusion and summary.
+//        Live commands need an admitted manual run's isolation/cleanup window.
 //
 // The test configuration comes from the environment and the test
 // configuration folder (see config.ts).
@@ -42,10 +49,12 @@ import { OwnershipLedger, ownedRuns } from './ownership.ts';
 import { loadHeldRun } from './held-run.ts';
 import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-result.ts';
 import { readTemplate, renderScheduler, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
+import { walkthrough } from './walkthrough.ts';
 
 const list = (value: string | undefined) => (value === undefined ? undefined : value.split(',').map((item) => item.trim()).filter(Boolean));
 
 async function main(argv: string[]): Promise<number> {
+  if (argv[0] === 'walkthrough') return walkthrough(argv.slice(1));
   const { positionals, values } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -274,7 +283,7 @@ async function main(argv: string[]): Promise<number> {
       return result.result === 'fail' || !result.cleanup.ok ? 1 : 0;
     }
 
-    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|scheduler [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
+    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|scheduler|walkthrough [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
     return command === 'help' ? 0 : 2;
   } finally {
     try { await shared?.store.close?.(); }
