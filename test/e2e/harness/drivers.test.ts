@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -59,6 +59,36 @@ describe('engine checkpoints (MDBISYNC_TEST_HOOKS)', () => {
     control.resume('before-write');
     assert.equal(await exited, 0);
     for (const name of CHECKPOINTS) assert.equal(control.reached(name), 1, name);
+  });
+
+  it('never show the harness a visit half written', async () => {
+    const control = new CheckpointControl(fresh('hooks-whole-'));
+    const visits = 2_000;
+    const repeat = `
+      const { checkpoint } = await import(${JSON.stringify(new URL('../../../src/test-hooks.ts', import.meta.url).href)});
+      for (let i = 0; i < ${visits}; i += 1) await checkpoint('before-write');
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', repeat], { env: { ...process.env, [HOOKS_ENV]: '1', [HOOKS_DIR_ENV]: control.dir }, stdio: ['ignore', 'ignore', 'inherit'] });
+    let done = false;
+    const exited = new Promise<number | null>((resolve, reject) => {
+      child.once('exit', (code) => { done = true; resolve(code); });
+      child.once('error', (error) => { done = true; reject(error); });
+    });
+    // The harness reads the count while the engine rewrites it: every read is a whole visit.
+    let last = 0;
+    try {
+      while (!done) {
+        const count = control.reached('before-write');
+        assert.ok(count >= last, `the count went back from ${last} to ${count}`);
+        last = count;
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    } finally {
+      if (!done) child.kill('SIGKILL');
+    }
+    assert.equal(await exited, 0);
+    assert.equal(control.reached('before-write'), visits);
+    assert.deepEqual(readdirSync(join(control.dir, 'reached')), ['before-write']);
   });
 
   it('forget an earlier engine\'s visit when a pause is armed', async () => {

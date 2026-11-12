@@ -403,6 +403,51 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     await assertSettled(['Findings, edited in Linear.', 'Second paragraph, edited in git.']);
   });
 
+  it('L4-01: a run whose new pull request loses to one the other run opened meanwhile uses that one', async () => {
+    await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
+    await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
+    // The first run pushes the sync branch and finds no pull request; that answer reaches it only once the second run,
+    // started meanwhile from that branch, has opened one. Its own request to open one then comes second.
+    // With no sync branch yet, the first run's only look for the pull request is the one right before it opens it.
+    assert.equal(await remoteRef('refs/heads/mdbisync/linear'), null);
+    const { promise: found, resolve: listed } = Promise.withResolvers<void>();
+    let held = false;
+    let secondEnded = false;
+    /** Whether the held answer went out once the second run had opened the pull request. */
+    let releasedAfterOpen = false;
+    let refused = 0;
+    server.hold = async (method, path, text) => {
+      if (method === 'POST' && path === '/github/repos/owner/repo/pulls' && text.includes('A pull request already exists')) refused += 1;
+      if (held || method !== 'GET' || !path.startsWith('/github/repos/owner/repo/pulls?') || !path.includes('head=owner%3Amdbisync%2Flinear&') || text !== '[]') return;
+      held = true;
+      listed();
+      const until = Date.now() + RUN_TIMEOUT_MS / 4;
+      while (world.github.pullRequests.length === 0 && !secondEnded && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 20));
+      releasedAfterOpen = world.github.pullRequests.length > 0;
+    };
+    const first = await startRun();
+    await Promise.race([found, first.ended]);
+    if (!held) assert.fail(`the first run did not look for the pull request: ${(await first.ended).stderr}`);
+    const second = await sync().finally(() => (secondEnded = true));
+    const late = await first.ended;
+    delete server.hold;
+    assert.ok(releasedAfterOpen, `the second run did not open the pull request while the first waited: ${second.stderr}`);
+    assert.equal(second.report?.pullRequest?.pullRequest?.opened, true, second.stderr);
+    assert.equal(refused, 1, 'the first run did not try to open a second pull request');
+    assert.equal(world.github.pullRequests.length, 1);
+
+    // GitHub refused the late run's pull request as a duplicate: it takes the open one instead of failing.
+    assert.equal(late.report?.pullRequest?.code, undefined, late.stderr);
+    assert.deepEqual(late.report?.pullRequest?.pullRequest, { number: 1, url: 'https://github.test/owner/repo/pull/1', opened: false });
+    // Their write steps still meet each other's records, as in two runs started together.
+    for (const run of [second, late]) {
+      assert.ok(run.code === 0 || run.code === INCOMPLETE_EXIT_CODE, run.stderr);
+      assert.equal(run.report?.partialRefUpdates, 0, run.stderr);
+      if (run.code === INCOMPLETE_EXIT_CODE) assert.equal(run.report?.atomicPushRefused, true, run.stderr);
+    }
+    await assertSettled(['Findings, edited in Linear.', 'Second paragraph, edited in git.']);
+  });
+
   it('L4-02: a document edited in Linear while the run waits to write is skipped; the record is an ordinary commit and the next run merges the edit', async () => {
     await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
     // Another document the run does write, so it records what it did.
@@ -599,6 +644,8 @@ interface Served {
   url: string;
   /** Answers a request before the fake world does, for a fault; undefined lets the world answer. */
   fault?: (body: string) => Response | undefined;
+  /** Holds an answer before it is sent, to order two runs' requests; undefined sends it at once. */
+  hold?: (method: string, path: string, text: string) => Promise<void>;
   close: () => Promise<void>;
 }
 
@@ -618,6 +665,7 @@ async function serve(world: FakeWorld): Promise<Served> {
         const body = Buffer.concat(chunks).toString('utf8');
         const reply = served.fault?.(body) ?? (await answer(target, { method, headers, ...(method === 'GET' || method === 'HEAD' ? {} : { body }) }));
         const bytes = Buffer.from(await reply.arrayBuffer());
+        await served.hold?.(method, path, bytes.toString('utf8'));
         response.writeHead(reply.status, { ...Object.fromEntries(reply.headers), 'content-type': reply.headers.get('content-type') ?? 'application/json', 'content-length': String(bytes.length) });
         response.end(bytes);
       } catch (error) {
