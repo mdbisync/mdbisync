@@ -82,6 +82,13 @@ per-invocation evidence. `parallel` bypasses workflow serialization on purpose;
 `workflow-parallel` tests the actual concurrency group. A timeout is a failure,
 not convergence. `probe`, `lint`, `fix`, `pre-commit`, `scan-canaries`, `cleanup`,
 `burst`, `soak` and `token-lifecycle` invoke their respective test adapters.
+`soak` appends each edit (token, actor, path, measured write window, commit)
+to `soak-edits.jsonl` and each sync invocation (workflow run, exit, summary)
+to `soak-syncs.jsonl` in the run folder as they end. A failed hourly check
+writes `soak-failure-hour-<n>.json` before cleanup, whether the run ends as
+a failure or expected red: each token's presence on both sides and on the
+sync and suspended branches, the versions of every path with a lost edit, the
+run's refs, its sync pull requests and the checks of their heads.
 `check` runs the engine's setup check with the run's credentials; it counts as
 a run, and a failed check is recorded as that run's result rather than stopping
 the scenario. Its report has no sync fields and is never quiet, so a subject
