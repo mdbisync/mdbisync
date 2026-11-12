@@ -185,12 +185,12 @@ export function linkDestinations(body: string): Destination[] {
 }
 
 /** What a fragment cannot hold as it is in a link destination, percent-encoded. */
-function encodeFragment(fragment: string): string {
+export function encodeFragment(fragment: string): string {
   return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/g, (char) => encodeURIComponent(char));
 }
 
 /** Replaces destinations by offset; `replace` returns the new raw destination, or undefined to keep it. */
-function rewriteDestinations(body: string, replace: (destination: Destination) => string | undefined): string {
+export function rewriteDestinations(body: string, replace: (destination: Destination) => string | undefined): string {
   let result = '';
   let at = 0;
   for (const destination of linkDestinations(body)) {

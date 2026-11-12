@@ -81,6 +81,8 @@ export function projectFolders(ctx: RunContext): Array<{ folder: string; project
   const world = live(ctx);
   const result: Array<{ folder: string; project: string }> = [];
   for (const [readme, text] of world.tree.rewritten) {
+    // Relinked Markdown files are rewritten too; only a README annotates a folder.
+    if (!/(^|\/)README\.md$/.test(readme)) continue;
     const name = [...world.tree.projects.values()].find((project) => text.includes(project));
     if (name !== undefined) result.push({ folder: readme.replace(/\/?README\.md$/, ''), project: name });
   }

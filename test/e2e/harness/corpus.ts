@@ -9,7 +9,8 @@
 // A run's tracked branch holds one slice at the repository root, with the
 // project placeholders of the annotations replaced by the run's projects,
 // and the team-zone files moved below a folder named after the run, so their
-// titles start with the run id.
+// titles start with the run id. Relative links between moved and unmoved files
+// are pointed at the run's paths (`run-links.ts`).
 
 import { runNames, type RunNames } from './isolation.ts';
 import { CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
@@ -143,7 +144,7 @@ export function teamZones(folders: readonly Folder[]): Folder[] {
 export interface RunTree {
   /** New path → source path in `corpus/` (null source: content given in `rewritten`). */
   paths: Map<string, string>;
-  /** New path → new text, for annotation READMEs whose placeholders were replaced. */
+  /** New path → new text: annotation READMEs whose placeholders were replaced, and Markdown files whose links `relinkRunTree` pointed at the run's paths. */
   rewritten: Map<string, string>;
   /** Placeholder → the run's project name, for the placeholders the slice uses. */
   projects: Map<string, string>;
