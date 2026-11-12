@@ -185,7 +185,7 @@ export function linkDestinations(body: string): Destination[] {
 }
 
 /** What a fragment cannot hold as it is in a link destination, percent-encoded. */
-function encodeFragment(fragment: string): string {
+export function encodeFragment(fragment: string): string {
   return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/g, (char) => encodeURIComponent(char));
 }
 

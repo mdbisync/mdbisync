@@ -550,6 +550,10 @@ describe('run tree from a slice', () => {
     // A moved zone file's link into an unmoved project folder still reaches its file.
     assert.equal(await new Git(remote).text(['show', `${names.trackedBranch}:eng/4f1a9c/guides/start.md`]), '# Start — über\n\nkx-00000001\n\nSee [the plan](../../alpha/plan.md).');
     assert.ok(!files.some((file) => file.startsWith('corpus')));
+    // Bytes that are not UTF-8 are never decoded into a text the run tree could rewrite.
+    const notUtf8 = (await sandbox.cache.text(['hash-object', '-w', '--stdin'], { input: Buffer.from([0x23, 0xff, 0xfe, 0x0a]) })).trim();
+    const plain = (await sandbox.cache.text(['hash-object', '-w', '--stdin'], { input: 'ü\n' })).trim();
+    assert.deepEqual(await sandbox.blobTexts([notUtf8, plain]), [undefined, 'ü\n']);
     assert.ok(!files.some((file) => file.startsWith('.github/')));
     const enabled = runNames('abcdef');
     await sandbox.createTrackedBranch('mini', enabled, { checks: true });

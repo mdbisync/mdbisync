@@ -6,7 +6,7 @@
 // corpus means it to leave out.
 
 import { posix } from 'node:path';
-import { linkedFile, rewriteDestinations } from './checks.ts';
+import { encodeFragment, linkedFile, rewriteDestinations } from './checks.ts';
 import type { RunTree } from './corpus.ts';
 
 /**
@@ -20,12 +20,13 @@ export function relinkRunTree(tree: RunTree, texts: ReadonlyMap<string, string>)
   const rewritten = new Map(tree.rewritten);
   for (const [target, source] of tree.paths) {
     const text = rewritten.get(target) ?? texts.get(source);
-    if (text === undefined) continue;
+    // Only an inline link or a definition has a destination; most files have neither.
+    if (text === undefined || (!text.includes('](') && !text.includes(']:'))) continue;
     const relinked = rewriteDestinations(text, (destination) => {
       const linked = linkedFile(source, destination.url);
       const place = linked === undefined ? undefined : placeOf.get(linked.path);
-      if (place === undefined || linkedFile(target, destination.url)?.path === place) return undefined;
-      return destinationTo(text.slice(destination.from, destination.to), target, place);
+      if (linked === undefined || place === undefined || linkedFile(target, destination.url)?.path === place) return undefined;
+      return destinationTo(text.slice(destination.from, destination.to), target, place, linked.fragment);
     });
     if (relinked !== text) rewritten.set(target, relinked);
   }
@@ -35,14 +36,15 @@ export function relinkRunTree(tree: RunTree, texts: ReadonlyMap<string, string>)
 /**
  * A raw destination rewritten to reach `place` from the file at `from`: in
  * the same form (angle brackets, root-relative or relative) and with its
- * fragment kept, each path segment percent-encoded.
+ * fragment kept (as written when the raw text ends with it, else encoded).
+ * Path segments are percent-encoded, parentheses included, so a bare
+ * destination never ends early.
  */
-function destinationTo(raw: string, from: string, place: string): string {
+function destinationTo(raw: string, from: string, place: string, fragment: string | undefined): string {
   const bracketed = raw.startsWith('<');
   const inner = bracketed ? raw.slice(1, -1) : raw;
-  const hash = inner.indexOf('#');
-  const fragment = hash === -1 ? '' : inner.slice(hash);
+  const suffix = fragment === undefined ? '' : inner.endsWith(`#${fragment}`) ? `#${fragment}` : `#${encodeFragment(fragment)}`;
   const path = inner.startsWith('/') ? `/${place}` : posix.relative(posix.dirname(from), place);
-  const encoded = path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
-  return bracketed ? `<${encoded}${fragment}>` : `${encoded}${fragment}`;
+  const encoded = path.split('/').map((segment) => encodeURIComponent(segment).replace(/\(/g, '%28').replace(/\)/g, '%29')).join('/');
+  return bracketed ? `<${encoded}${suffix}>` : `${encoded}${suffix}`;
 }

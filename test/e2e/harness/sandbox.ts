@@ -104,17 +104,22 @@ export class Sandbox {
       const match = /^(\d+) blob ([0-9a-f]+)\t(.+)$/s.exec(record);
       if (match !== null) entries.set(match[3] as string, { mode: match[1] as string, oid: match[2] as string });
     }
-    const readmes = new Map<string, string>();
     for (const path of list.paths) {
       if (!entries.has(path)) throw new CorpusMissingError(`slice ${slice} names ${path}, which is not in ${CORPUS_DIR}/`);
-      if (/(^|\/)README\.md$/.test(path)) readmes.set(path, (await this.readMain(`${CORPUS_DIR}/${path}`)) ?? '');
     }
+    // Markdown texts, for the annotations and for the links the run tree relinks.
+    const markdown = list.paths.filter((path) => path.endsWith('.md'));
+    const read = await this.blobTexts(markdown.map((path) => (entries.get(path) as { oid: string }).oid));
+    const texts = new Map<string, string>();
+    markdown.forEach((path, index) => {
+      const text = read[index];
+      if (text !== undefined) texts.set(path, text);
+    });
+    const readmes = new Map(markdown.filter((path) => /(^|\/)README\.md$/.test(path)).map((path) => [path, texts.get(path) ?? '']));
     const selected = options.teams === undefined ? list : selectTeams(list, readmes, options.teams);
     await options.validate?.(selected);
     const selectedReadmes = new Map([...readmes].filter(([path]) => selected.paths.includes(path)));
-    const markdown = selected.paths.filter((path) => path.endsWith('.md'));
-    const texts = await this.blobTexts(markdown.map((path) => (entries.get(path) as { oid: string }).oid));
-    const tree = relinkRunTree(buildRunTree(selected, selectedReadmes, names), new Map(markdown.map((path, index) => [path, texts[index] as string])));
+    const tree = relinkRunTree(buildRunTree(selected, selectedReadmes, names), texts);
     // Only check-fault scenarios opt into runner jobs. Other scenarios keep
     // their workflow-free starting tree.
     if (options.checks !== true) tree.paths.delete(CHECK_WORKFLOW_PATH);
@@ -135,18 +140,20 @@ export class Sandbox {
     return { tree, commit };
   }
 
-  /** The UTF-8 text of each blob, in order, read from the cache in one call. */
-  async blobTexts(oids: readonly string[]): Promise<string[]> {
+  /** The text of each blob, in order, read from the cache in one call; undefined for bytes that are not valid UTF-8. */
+  async blobTexts(oids: readonly string[]): Promise<Array<string | undefined>> {
     if (oids.length === 0) return [];
     const { stdout } = await this.cache.run(['cat-file', '--batch'], { input: `${oids.join('\n')}\n` });
-    const texts: string[] = [];
+    const texts: Array<string | undefined> = [];
     let at = 0;
     for (const oid of oids) {
       const end = stdout.indexOf(0x0a, at);
       const header = /^([0-9a-f]+) blob (\d+)$/.exec(stdout.subarray(at, end).toString('utf8'));
       if (header === null || header[1] !== oid) throw new Error(`the sandbox cache has no blob ${oid}`);
       const size = Number(header[2]);
-      texts.push(stdout.subarray(end + 1, end + 1 + size).toString('utf8'));
+      const bytes = stdout.subarray(end + 1, end + 1 + size);
+      const text = bytes.toString('utf8');
+      texts.push(Buffer.from(text, 'utf8').equals(bytes) ? text : undefined);
       at = end + 1 + size + 1;
     }
     return texts;

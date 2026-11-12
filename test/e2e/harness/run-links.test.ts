@@ -28,13 +28,15 @@ describe('run tree links', () => {
   const corpus = new Map([
     ['eng/README.md', README('linear-team: ENG')],
     ['eng/platform/README.md', README('linear-project: PROJECT_ENG_1')],
-    [projectFile, '# Notes\n\nBack to [who to ask](../on-call%20(rotation)/reference/who-to-ask.md#owners).\n'],
+    [projectFile, '# Notes\n\nBack to [who to ask](../on-call%20(rotation)/reference/who-to-ask.md#owners) and [its neighbour](/eng/on-call%20(rotation)/reference/neighbour.md).\n'],
     [zoneFile, [
       '# Who to ask',
       '',
       '![status](../../platform/assets/status-icon.png)',
       '',
       'See [the notes](<../../platform/notes.md#setup>), [a neighbour](./neighbour.md) and [the site](https://example.com/x).',
+      '',
+      'Also [from the root](/eng/platform/notes.md), [an entity](../../platform/notes.md&#35;setup), [a draft](../../platform/draft%29.md) and [über](../../platform/%C3%BCber.md#start).',
       '',
       '[ref]: ../../platform/assets/status-icon.png',
       '',
@@ -43,6 +45,8 @@ describe('run tree links', () => {
     ].join('\n')],
     ['eng/on-call (rotation)/reference/neighbour.md', '# Neighbour\n'],
     ['eng/platform/assets/status-icon.png', ''],
+    ['eng/platform/draft).md', '# Draft\n'],
+    ['eng/platform/über.md', '# Über\n'],
   ]);
   const readmes = new Map([...corpus].filter(([path]) => path.endsWith('README.md')));
   const tree = relinkRunTree(buildRunTree({ slice: 'mini', paths: [...corpus.keys()] }, readmes, names), corpus);
@@ -58,6 +62,10 @@ describe('run tree links', () => {
       'eng/platform/notes.md',
       'eng/on-call (rotation)/reference/neighbour.md',
       undefined,
+      'eng/platform/notes.md',
+      'eng/platform/notes.md',
+      'eng/platform/draft).md',
+      'eng/platform/über.md',
       'eng/platform/assets/status-icon.png',
     ]);
     // Only the paths change: angle brackets and fragments stay, links within the zone, URLs and code stay as written.
@@ -65,6 +73,11 @@ describe('run tree links', () => {
     assert.match(text, /\[the notes\]\(<\.\.\/\.\.\/\.\.\/platform\/notes\.md#setup>\)/);
     assert.match(text, /\[a neighbour\]\(\.\/neighbour\.md\)/);
     assert.match(text, /\(https:\/\/example\.com\/x\)/);
+    // A root-relative link already reaches its file; an entity's `#` is a fragment; parentheses and non-ASCII are encoded.
+    assert.match(text, /\[from the root\]\(\/eng\/platform\/notes\.md\)/);
+    assert.match(text, /\[an entity\]\(\.\.\/\.\.\/\.\.\/platform\/notes\.md#setup\)/);
+    assert.match(text, /\[a draft\]\(\.\.\/\.\.\/\.\.\/platform\/draft%29\.md\)/);
+    assert.match(text, /\[über\]\(\.\.\/\.\.\/\.\.\/platform\/%C3%BCber\.md#start\)/);
     assert.match(text, /^\[ref\]: \.\.\/\.\.\/\.\.\/platform\/assets\/status-icon\.png$/m);
     assert.match(text, /^`\.\.\/\.\.\/platform\/assets\/status-icon\.png` in code stays\.$/m);
   });
@@ -72,8 +85,9 @@ describe('run tree links', () => {
   it('points an unmoved project file\'s link into a moved zone folder at the run\'s path', () => {
     const text = tree.rewritten.get(projectFile);
     assert.ok(text !== undefined);
-    assert.deepEqual(resolvedSources(tree, projectFile, text), [zoneFile]);
-    assert.match(text, /\(\.\.\/abc123\/on-call%20\(rotation\)\/reference\/who-to-ask\.md#owners\)/);
+    assert.deepEqual(resolvedSources(tree, projectFile, text), [zoneFile, 'eng/on-call (rotation)/reference/neighbour.md']);
+    assert.match(text, /\(\/eng\/abc123\/on-call%20%28rotation%29\/reference\/neighbour\.md\)/);
+    assert.match(text, /\(\.\.\/abc123\/on-call%20%28rotation%29\/reference\/who-to-ask\.md#owners\)/);
   });
 
   it('leaves files whose links already reach their targets unrewritten, and keeps the annotation READMEs', () => {
