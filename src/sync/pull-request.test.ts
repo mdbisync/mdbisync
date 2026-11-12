@@ -58,6 +58,7 @@ describe('sync: the sync pull request', () => {
   let world: FakeWorld;
   let fetchOverride: typeof fetch | undefined;
   let concurrentMove = false;
+  let concurrentSyncMove = false;
   let deletedSuspendedDuringRun = false;
   /** The tracked branch after initial sync: every later commit on it must be the scenario's own or a sync merge (I3). */
   let start: string;
@@ -78,6 +79,7 @@ describe('sync: the sync pull request', () => {
     world = fakeWorld();
     fetchOverride = undefined;
     concurrentMove = false;
+    concurrentSyncMove = false;
     world.github.checks = new Map();
     world.github.merge = mergeOnRemote;
     world.github.pullRequestHead = (pr) => rev(`refs/heads/${pr.head}`);
@@ -128,7 +130,7 @@ describe('sync: the sync pull request', () => {
     const report = JSON.parse(await readFile(reportFile(), 'utf8')) as RunReport;
     const texts = [result.stdout, result.stderr, summary, JSON.stringify(report), ...world.github.pullRequests.map((pr) => `${pr.title}\n${pr.body}`)];
     for (const text of texts) assert.ok(!text.includes(CANARY), 'content reached the output or a pull request (I5)');
-    await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined, movedByOthers: [...(concurrentMove ? ['ids'] as const : []), ...(deletedSuspendedDuringRun ? ['suspendedBranch'] as const : [])] });
+    await assertWritesMatchWorld(world, fixture, mark, report.writes, { faults: fetchOverride !== undefined, movedByOthers: [...(concurrentMove ? ['ids'] as const : []), ...(deletedSuspendedDuringRun ? ['suspendedBranch'] as const : []), ...(concurrentSyncMove ? ['syncBranch'] as const : [])] });
     return { result, report, summary, clock, writes: world.writes.slice(writesBefore), linearRequests: linearRequests.length - linearBefore, linearApiRequests: linearRequests.slice(linearBefore).filter((url) => !url.startsWith(`${LINEAR_API}/oauth/`)).length };
   }
 
@@ -217,7 +219,7 @@ describe('sync: the sync pull request', () => {
     fetchOverride = async (input, init) => {
       if (String(input).includes('/check-runs?')) {
         const head = await rev(SYNC_BRANCH);
-        checksOn(head, [{ name: 'ci', status: 'completed', conclusion: 'success' }]);
+        checksOn(head, [{ name: 'ci', status: head === firstHead ? 'in_progress' : 'completed', conclusion: 'success' }]);
       }
       return transport(input, init);
     };
@@ -227,6 +229,129 @@ describe('sync: the sync pull request', () => {
     assert.ok(run.report.pullRequest?.merged);
     assert.notEqual(await rev(SYNC_BRANCH), firstHead);
     assert.equal(world.github.pullRequests.length, 1);
+  });
+
+  it('makes repeated checked progress while every cycle captures fresh edits', async () => {
+    const path = 'eng/notes/plan.md';
+    const tokens: string[] = [];
+    const mergedHeads: string[] = [];
+    const transport = fakeFetch(world);
+    fetchOverride = async (input, init) => {
+      const match = String(input).match(/\/commits\/([0-9a-f]+)\/check-runs/);
+      if (match && !world.github.checks?.has(match[1]!)) {
+        checksOn(match[1]!, [{ name: 'format', status: 'in_progress' }]);
+      }
+      return transport(input, init);
+    };
+    world.github.merge = async (pr, sha) => {
+      assert.deepEqual(world.github.checks?.get(sha), [{ name: 'format', status: 'completed', conclusion: 'success' }]);
+      const answer = await mergeOnRemote(pr, sha);
+      if ('sha' in answer) mergedHeads.push(sha);
+      return answer;
+    };
+    for (let cycle = 0; cycle < 8; cycle += 1) {
+      // CI finishes after the previous invocation's grace and before this one.
+      if (openPullRequests().length > 0) checksOn(await rev(SYNC_BRANCH), [{ name: 'format', status: 'completed', conclusion: 'success' }]);
+      tokens.push(`edit-${cycle}`);
+      await editInLinear(path, `# Plan\n\n${tokens.join('\n\n')}\n`);
+      const before = await rev('refs/heads/main');
+      const run = await sync({ MDBISYNC_MERGE_GRACE_SECONDS: '20' });
+      assert.equal(run.result.exitCode, 0, run.result.stderr);
+      if (cycle % 2 === 1) {
+        assert.notEqual(await rev('refs/heads/main'), before, 'a passed head starved behind a fresh capture');
+        assert.equal(run.report.pullRequest?.branchMoved, false);
+        assert.ok(run.report.pullRequest?.merged);
+      }
+      for (const token of tokens) assert.ok((await documentOf(path)).content?.includes(token), `Linear lost ${token}`);
+    }
+    for (let drain = 0; drain < 5; drain += 1) {
+      if (openPullRequests().length > 0) checksOn(await rev(SYNC_BRANCH), [{ name: 'format', status: 'completed', conclusion: 'success' }]);
+      const run = await sync({ MDBISYNC_MERGE_GRACE_SECONDS: '20' });
+      assert.equal(run.result.exitCode, 0, run.result.stderr);
+      if (!run.report.changed) break;
+      assert.ok(drain < 4, 'quiet drain did not converge');
+    }
+    assert.ok(mergedHeads.length >= 4);
+    const tracked = await show(`refs/heads/main:${path}`);
+    for (const token of tokens) assert.ok(tracked.includes(token), `tracked branch lost ${token}`);
+    assert.equal((await documentOf(path)).content, tracked.slice(tracked.indexOf('# ')));
+    assert.equal(openPullRequests().length, 0);
+  });
+
+  it('advances a passed head after a recorded merge refusal so new CI can run', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    const checked = await rev(SYNC_BRANCH);
+    checksOn(checked, [{ name: 'format', status: 'completed', conclusion: 'success' }]);
+    world.github.merge = async () => ({ status: 405, message: 'Required status check is expected' });
+    const refused = await sync();
+    assert.equal(refused.report.pullRequest?.code, 'merge-refused');
+    await editInLinear(path, '# Plan\n\nFirst edit.\n\nLater edit.\n');
+    const advanced = await sync();
+    assert.equal(advanced.result.exitCode, 0, advanced.result.stderr);
+    assert.equal(advanced.report.pullRequest?.branchMoved, true);
+    assert.equal(advanced.report.pullRequest?.merged, null);
+    const next = await rev(SYNC_BRANCH);
+    assert.notEqual(next, checked);
+    assert.match(await show(`${SYNC_BRANCH}:${path}`), /Later edit/);
+    world.github.merge = mergeOnRemote;
+    checksOn(next, [{ name: 'format', status: 'completed', conclusion: 'success' }]);
+    const merged = await sync();
+    assert.ok(merged.report.pullRequest?.merged);
+    assert.match(await show(`refs/heads/main:${path}`), /Later edit/);
+  });
+
+  it('refuses an overtaken checked head and retains the replacement and fresh capture', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    const checked = await rev(SYNC_BRANCH);
+    checksOn(checked, [{ name: 'format', status: 'completed', conclusion: 'success' }]);
+    await editInLinear('combined/guide.md', '# Guide\n\nFresh capture.\n');
+    const transport = fakeFetch(world);
+    let replacement: string | undefined;
+    fetchOverride = async (input, init) => {
+      if (replacement === undefined && String(input).includes(`/commits/${checked}/check-runs`)) {
+        concurrentSyncMove = true;
+        replacement = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nReview edit.\n');
+      }
+      return transport(input, init);
+    };
+    const run = await sync();
+    assert.equal(run.report.pullRequest?.merged, null);
+    assert.equal(run.report.pullRequest?.code, 'merge-refused');
+    assert.equal(await rev('refs/heads/main'), start);
+    assert.equal(await rev(SYNC_BRANCH), replacement);
+    assert.match(await show('refs/mdbisync/linear:combined/guide.md'), /Fresh capture/);
+    fetchOverride = undefined;
+    concurrentSyncMove = false;
+    await settle();
+    assert.match(await show(`refs/heads/main:${path}`), /Review edit/);
+    assert.match(await show('refs/heads/main:combined/guide.md'), /Fresh capture/);
+  });
+
+  it('requires fresh checks when a passed head must reconcile a tracked conflict', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear('combined/guide.md', '# Guide\n\nFirst capture.\n');
+    await sync();
+    const checked = await editRef(SYNC_BRANCH, path, '---\nowner: example\n---\n\n# Plan\n\nLinear version.\n');
+    checksOn(checked, [{ name: 'format', status: 'completed', conclusion: 'success' }]);
+    const person = await editRef('refs/heads/main', path, '---\nowner: example\n---\n\n# Plan\n\nTracked version.\n');
+    await editInLinear('combined/guide.md', '# Guide\n\nFresh capture.\n');
+    const run = await cli('sync');
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.pullRequest?.merged, null);
+    assert.equal(run.report.pullRequest?.branchMoved, true);
+    const reconciled = await rev(SYNC_BRANCH);
+    assert.notEqual(reconciled, checked);
+    assert.equal(await rev('refs/heads/main'), person);
+    assertOneConflict(await show(`${SYNC_BRANCH}:${path}`), 'Tracked version.', 'Linear version.');
+    checksOn(reconciled, [{ name: 'format', status: 'completed', conclusion: 'success' }]);
+    const merged = await cli('sync');
+    assert.equal(merged.result.exitCode, 0, merged.result.stderr);
+    assert.ok(merged.report.pullRequest?.merged);
+    assertOneConflict(await show(`refs/heads/main:${path}`), 'Tracked version.', 'Linear version.');
   });
 
   it('leaves pending checks open at the grace deadline, and suspends failed checks', async () => {

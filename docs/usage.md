@@ -232,7 +232,11 @@ remain after release; its presence alone does not mean a batch is on hold.
 - Later Linear changes join the open pull request's branch by fast-forward or
   merge commit; the branch is never force-pushed. The branch moves only when
   Linear brings something new, so the checks on its head are not restarted by
-  every run.
+  every run. When an existing head's registered checks have passed, a run
+  tries to merge it before adding fresh captures, so ongoing edits cannot
+  continually replace a checked head. Those captures remain saved for the
+  next batch. A head needing reconciliation, recovering from a merge refusal,
+  or waiting for the suspended lane can still take in new captures.
 - After opening the pull request or moving its branch, a run waits up to
   `merge-grace-seconds` (default `60`, range `0`–`120`) for the head's check
   runs and commit statuses. When every check has finished and passed, it

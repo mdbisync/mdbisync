@@ -402,7 +402,11 @@ What step 2 did with the sync pull request. An ordinary run says one of:
 | The tracked branch already holds every change from Linear | No pull request is needed. |
 | Opened the sync pull request | Opened this run. It names the checks still running at the end of the grace period; a later run merges it. |
 | Added new Linear changes to the sync pull request | New captures joined the open pull request. |
-| The sync pull request waits for its checks | Nothing new; its checks are still running, and a later run merges it. |
+| The sync pull request waits for its checks | Its checks are still running, and a later run merges it. |
+
+An existing head with passing registered checks gets a merge attempt before
+fresh captures join the branch. Captures remain on Linear's state ref for
+the next batch; a successful merge can therefore leave newer changes pending.
 
 The suspended lane and its marks add these lines when applicable:
 
