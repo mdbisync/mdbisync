@@ -114,10 +114,14 @@ ongoing sync runs. You do not need to wait for a run to finish:
   versions with [conflict markers](conflicts.md).
 - If an already tracked document changes in Linear between capture and its
   final re-read, the run skips that document. The next run captures the newer text and
-  tries again; other documents keep syncing. This check does not cover adopting
-  or recreating documents left unrecorded by a stopped run: those paths can
-  overwrite edits made before the re-read too. Wait for recovery to finish
-  before editing those documents.
+  tries again; other documents keep syncing.
+- A run that stops after creating a document but before recording its id
+  leaves the document in Linear. If you edit that document, nothing
+  overwrites your edit: a later run takes the document over only if it
+  still holds the text the run would write. Otherwise the next run captures
+  it as a new document at the file's path and merges it with the file in
+  git; text that differs on both sides becomes a
+  [conflict](conflicts.md).
 - A push that arrives after the run read the tracked branch is picked up by
   a later run. Commits on the sync branch are kept too, including changes
   from a person or CI. Closing its pull request causes a later run to open

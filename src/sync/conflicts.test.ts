@@ -17,6 +17,7 @@ import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture } from '../state/test-helpers.ts';
 import { CONFLICT_COMMENT, MARKS } from './marks.ts';
+import { stableId } from './stable-id.ts';
 
 const CANARY = 'kx-5e1f0a93';
 const NOTES = 'eng/notes';
@@ -573,6 +574,33 @@ describe('sync: conflicts through the cycle (L3)', () => {
     const live = world.linear.documents.filter((d) => !d.trashed && d.title === document.title);
     assert.equal(live.length, 1, 'the document was created twice');
     await assertBothSides(DOC, PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.'));
+  });
+
+  it('a gone document an interrupted run recreated and a person then edited is not overwritten; the next run takes the edit in', async () => {
+    const document = await documentOf(DOC);
+    document.trashed = true;
+    document.archivedAt = new Date().toISOString();
+    touch(document);
+    const gitText = PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.');
+    // After this run's capture: Linear removes the document for good, and an interrupted run has already created it
+    // again under the id derived from the old one, which a person then edits.
+    const recreated: FakeDocument = {
+      id: stableId('recreated', document.id), title: document.title, projectId: document.projectId as string, createdAt: new Date().toISOString(),
+      content: body(gitText).replace('Alpha paragraph.', 'Alpha paragraph, Linear.'),
+    };
+    afterCapture(() => {
+      world.linear.documents.splice(world.linear.documents.indexOf(document), 1);
+      world.linear.documents.push(recreated);
+      touch(recreated);
+    });
+    await commitGit({ [DOC]: gitText });
+    const first = await sync();
+    assert.deepEqual(first.report.sync?.created, []);
+    assert.deepEqual(first.report.sync?.skipped, [{ path: DOC, reason: 'edited-in-linear' }]);
+    assert.match(recreated.content ?? '', /Alpha paragraph, Linear\./);
+    await settle();
+    assert.deepEqual(world.linear.documents.filter((d) => !d.trashed && d.title === document.title).map((d) => d.id), [recreated.id]);
+    await assertBothSides(DOC, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, Linear.').replace('Gamma paragraph.', 'Gamma paragraph, git.'));
   });
 
   it('L3-17: renamed in Linear and edited in git, both apply', async () => {

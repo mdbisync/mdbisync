@@ -821,10 +821,13 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const adopted = adoptable.get(change.path) ?? recreated;
     let document: LinearDocument;
     if (adopted !== undefined) {
+      // Only a document that already holds this run's text is taken over. The capture did not see this one, so any
+      // other text may be a person's edit made since an interrupted run created it: it is left for the next capture,
+      // which takes it in as a new document at this path, and the merge with git's file keeps both sides.
       const live = current.get(adopted.id);
-      const write = () => linear.updateDocument(adopted.id, { content: body });
-      // Only a document the re-read returned has a window.
-      document = live === undefined ? await write() : live.content != null && sameMarkdown(live.content, body) ? live : await timed(write);
+      if (live === undefined || live.trashed || live.archivedAt !== null) return skip(change.path, 'missing-in-linear');
+      if (live.content == null || !sameMarkdown(live.content, body)) return skip(change.path, 'edited-in-linear');
+      document = live;
       if (recreated === undefined) result.adopted.push(change.path);
     } else {
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });
