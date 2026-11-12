@@ -35,8 +35,10 @@ Edit in Linear or in git, and both stay in sync.
 - **The same checks as everyone else.** Linear's changes reach `main` through
   a sync pull request, with the same checks as the pull requests of people and
   agents.
-- **No lost edits.** `main` flows back to Linear through a three-way merge in
-  the runner, so edits made on both sides are merged, not replaced.
+- **Merge edits from both sides.** `main` flows back to Linear through a
+  three-way merge in the runner. A re-read before writing catches edits made
+  during a run; a small race remains after that read
+  ([editing while sync runs](docs/sync-cycle.md#editing-while-sync-runs)).
 
 ## How it works
 

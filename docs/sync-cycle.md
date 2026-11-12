@@ -19,7 +19,8 @@ warning is in [troubleshooting.md](troubleshooting.md).
 
 The sync workflow runs on every push to the tracked branch, every five
 minutes, and by hand ([workflows](usage.md#workflows)). Runs of one
-repository never overlap. Each run makes these steps, in this order:
+repository share a concurrency group in the supplied workflows
+([overlapping runs](#overlapping-runs)). Each run makes these steps, in this order:
 
 0. **Setup check.** The run checks its tokens, the repository settings and
    the folder annotations, and stops before any write when one fails
@@ -102,6 +103,71 @@ When both sides changed the same document between two runs, git merges the
 two edits. Edits of different paragraphs both arrive on both sides; edits
 of the same lines become a conflict, written into the document on both
 sides ([conflicts.md](conflicts.md)).
+
+## Editing while sync runs
+
+Keep editing in Linear and pushing or merging into the tracked branch while
+ongoing sync runs. You do not need to wait for a run to finish:
+
+- Changes on both sides use the three-way merge described above. Different
+  paragraphs merge; competing changes to the same paragraph keep both
+  versions with [conflict markers](conflicts.md).
+- If a document changes in Linear between capture and its final re-read,
+  the run skips that document. The next run captures the newer text and
+  tries again; other documents keep syncing.
+- A push that arrives after the run read the tracked branch is picked up by
+  a later run. Commits on the sync branch are kept too, including changes
+  from a person or CI. Closing its pull request causes a later run to open
+  a replacement from the same branch.
+
+There is a remaining race: Linear's document writes accept no version
+condition. An edit made after the final re-read but before the write lands
+can be lost. The run's `rereadWindowMs` measurement is the largest interval
+from a re-read's answer to a successful write's answer, including retries;
+the write lands somewhere inside it. It is an upper bound, not a guarantee
+of a fixed safe interval.
+
+In a live race test, the run was deliberately paused after the re-read
+while 100 edit markers were written. The held interval measured **82,077 ms**
+(82.077 seconds), and all 100 markers were lost. An earlier live test held
+the interval for 88,471 ms and also lost 100 markers. These artificial
+pauses demonstrate the risk; they are not normal write latency. Tests with
+a local fake service and no pause measured 4.4–12.9 ms across six runs;
+those timings do not measure live Linear latency.
+
+Separate live checks kept three edits to different paragraphs from two
+Linear editors and git. A burst targeting 15 minutes generated 750 Linear
+edits and 15 git pushes: after editing stopped and sync settled, all 765
+edit markers were present in both git and Linear, with no lost marker and
+no content difference. These results show convergence for those runs;
+they do not remove the re-read-to-write race or establish a sustained-load
+limit. For a critical edit where that residual risk is unacceptable, stop
+ongoing sync, wait for the active run to finish, edit, then enable it again.
+
+## Overlapping runs
+
+The supplied sync and initial-sync workflows use the same repository-scoped
+group, `concurrency: { group: mdbisync, cancel-in-progress: false }`.
+Keep that shared group when adapting the workflows. GitHub allows one
+running and one pending run in the group: a new arrival replaces an older
+pending run, and does not cancel the running one. This is not a FIFO queue
+that executes every trigger. A later ongoing-sync run reads the current
+state, so replacing a pending trigger does not discard the edits it would
+have read. A live check using push and dispatched schedule ticks observed
+at most one active run, at least one replaced pending run, and all edits
+preserved.
+
+The group serializes these workflows in one repository. It does not lock
+Linear editors, another repository, or a CLI run outside Actions. State-ref
+pushes also use atomic updates with leases: if another writer moved a ref,
+the push is refused rather than partly overwriting state. The next run
+can read the newer state and retry; this does not close the Linear write
+race above. Avoid running an independent writer against the same documents.
+
+Before initial sync or recovery, disable the ongoing-sync workflow and
+wait for its active run to finish. Otherwise a newly queued ongoing-sync
+run can replace the pending initial-sync run. Follow the initial-sync
+direction's instructions before confirming its writes.
 
 ## What people see
 
