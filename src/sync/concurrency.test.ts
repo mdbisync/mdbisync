@@ -537,6 +537,52 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.equal(world.github.pullRequests.length, 1);
   });
 
+  it('a document an interrupted run created and a person then edited is not overwritten by a run that adopts it; the next run takes the edit in', async () => {
+    const path = 'eng/notes/draft.md';
+    await person.run(['pull', '--quiet', '--ff-only']);
+    await writeFile(join(personDir, path), `# Draft\n\nA new page from git. ${CANARY}\n`);
+    await person.run(['add', path]);
+    await person.run(['commit', '--quiet', '-m', 'Add a page']);
+    await person.run(['push', '--quiet', 'origin', 'HEAD:main']);
+    personCommits.push(await person.text(['rev-parse', 'HEAD']));
+    // The recovering run has captured Linear before the interrupted run creates the document, so its capture never saw it.
+    const recovering = await startRun('after-capture-push-before-pr');
+    await reached(recovering, 'after-capture-push-before-pr');
+    const interrupted = await startRun('document-created-before-ids-push');
+    await reached(interrupted, 'document-created-before-ids-push');
+    interrupted.kill();
+    assert.equal((await interrupted.ended).signal, 'SIGKILL');
+    const created = world.linear.documents.filter((document) => document.title === 'draft' && document.trashed !== true);
+    assert.equal(created.length, 1, 'the interrupted run created the document');
+    const orphan = created[0] as FakeDocument;
+    assert.equal((await ids())[path], undefined, 'its id is not recorded');
+    // A person edits the new document in Linear before the recovering run reads it again.
+    orphan.content = (orphan.content ?? '').replace('A new page from git.', 'A new page, typed in Linear.');
+    touch(orphan);
+    const writesBefore = world.writes.length;
+    recovering.hooks.resume('after-capture-push-before-pr');
+    const run = await recovering.ended;
+
+    assert.equal(run.code, 0, run.stderr);
+    assert.deepEqual(run.report?.sync?.adopted, []);
+    assert.deepEqual(run.report?.sync?.created, []);
+    assert.deepEqual(run.report?.sync?.skipped, [{ path, reason: 'edited-in-linear' }]);
+    assert.equal(run.report?.skippedConcurrentDocument, true);
+    assert.deepEqual(world.writes.slice(writesBefore).filter((write) => /Document/.test(write)), [], 'the run wrote a document');
+    assert.match(orphan.content ?? '', /typed in Linear/);
+
+    await assertSettled([]);
+    // Created once, and both versions reach the tracked branch and Linear: none is lost and the conflict is shown.
+    assert.deepEqual(world.linear.documents.filter((document) => document.title === 'draft' && document.trashed !== true).map((document) => document.id), [orphan.id]);
+    assert.equal((await ids())[path]?.id, orphan.id);
+    const tracked = await show(`refs/heads/main:${path}`);
+    for (const text of [tracked, orphan.content ?? '']) {
+      assert.match(text, /A new page, typed in Linear\./);
+      assert.match(text, /A new page from git\./);
+    }
+    assert.equal(orphan.content, body(tracked));
+  });
+
   it('L4-06: a push to the tracked branch during a run: the record merges the commit the run took in, and the next run takes the new one', async () => {
     const first = await editInGit(NOTES, 'First paragraph.', 'First paragraph, edited in git.');
     const linearBefore = await rev('refs/mdbisync/linear');
