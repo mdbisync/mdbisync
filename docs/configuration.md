@@ -20,7 +20,7 @@ only" has no command-line form.
 | `linear-client-id` | yes | none | `MDBISYNC_LINEAR_CLIENT_ID` | Client ID of the [Linear OAuth app](quickstart.md#linear-oauth-app). |
 | `linear-client-secret` | yes | none | `MDBISYNC_LINEAR_CLIENT_SECRET` | Client secret of that app. |
 | `linear-api-url` | no | none | `MDBISYNC_LINEAR_API_URL` | Linear API origin; empty means Linear itself (`https://api.linear.app`). |
-| `cleanup-tokens` | no | `false` | action only | `true` replaces Linear tokens left by runs that were killed. Only with a Linear app used by nothing but these workflows in this repository, and never with `security-step: apply`: on the stage step, or on the only mdbisync step when `security-step` is empty ([tokens left by interrupted jobs](../README.md#tokens-left-by-interrupted-jobs)). |
+| `cleanup-tokens` | no | `false` | action only | `true` replaces Linear tokens left by runs that were killed. Only with a Linear app used by nothing but these workflows in this repository, and never with `security-step: apply`: on the stage step, or on the only mdbisync step when `security-step` is empty ([tokens left by interrupted jobs](#tokens-left-by-interrupted-jobs)). |
 | `github-token` | yes | none | `MDBISYNC_GITHUB_TOKEN` | Installation token of the sync's [GitHub App](quickstart.md#github-app), from `actions/create-github-app-token`. |
 | `app-slug` | yes | none | `MDBISYNC_APP_SLUG` | The App's slug, the token step's output `app-slug`; the sync's commits name the App's bot account. Optional on the command line, whose commits then name a neutral author. |
 | `github-api-url` | no | none | `MDBISYNC_GITHUB_API_URL` | GitHub REST API URL; empty means the runner's (`GITHUB_API_URL`), else `https://api.github.com`. |
@@ -114,3 +114,19 @@ environment variables; secrets never go in arguments.
 With a terminal attached and the release SHA, a folder, or a folder's
 team or project missing, `init` asks for those, and then whether to add
 the security hook examples. It changes local files only.
+
+## Tokens left by interrupted jobs
+
+The action revokes each run's Linear token when it ends and retries in its
+`post` step, including failed and cancelled jobs. A runner that disappears
+before post can execute can leave an active token behind.
+
+The example workflows leave `cleanup-tokens: false`. To clean orphan tokens
+automatically, set `cleanup-tokens: true` on the stage step, or on the only
+mdbisync step when `security-step` is empty; never on the apply step. This
+requires a **dedicated Linear OAuth app** used only by this repository's
+sync and initial-sync workflows, both in the same `concurrency` group. Cleanup requests
+read-only scopes and then restores read/write scopes, replacing the app's
+existing tokens in that workspace. Do not enable it when another repository,
+process or test worker uses the same app; leave it false and revoke stale
+tokens during an exclusive maintenance window instead.
