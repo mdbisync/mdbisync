@@ -43,6 +43,7 @@ import { engineNotImplemented, environmentBlocker, hadReplaceableRun, maxOverlap
 import type { WorkflowJob, WorkflowRun } from './github.ts';
 import { engineSteps, pinnedActionSha, prerequisiteErrors, readTemplate, WORKFLOW_FILES } from './workflow-files.ts';
 import { parse as parseYaml } from 'yaml';
+import { buildCorpus } from '../../corpus/generate.ts';
 
 const roots: string[] = [];
 const fresh = (prefix: string) => {
@@ -1340,7 +1341,7 @@ async function writeIds(ctx: RunContext, entries: Record<string, { id: string }>
   await git.run(['push', '--quiet', 'origin', `${commit}:${ref}`]);
 }
 
-async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: boolean } = {}) {
+async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: boolean; files?: Record<string, string> } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
   const names = runNames('aaaaaa');
@@ -1359,6 +1360,7 @@ async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: b
     ...(options.review === undefined ? {} : { 'eng/platform/guides/weekly-plan.md': options.review }),
     // A team-zone folder: its README's document sits in team ENG's zone with the plain title README.
     ...(options.teamZone === true ? { 'zone/README.md': '---\nlinear-team: ENG\n---\n\n# Zone\n\nTeam notes.\n' } : {}),
+    ...options.files,
   };
   for (const [path, text] of Object.entries(files)) {
     spawnSync('mkdir', ['-p', join(seed.dir, path, '..')]);
@@ -2847,9 +2849,61 @@ describe('subjects', () => {
     Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Alert', color: '#F2994A' });
     refreshView(ctx);
     assert.deepEqual(await resolveSubject(ctx, 'conflicts.markCount'), { known: true, value: 1 });
+    const failed = await evaluateAssertion(ctx, { subject: 'conflicts.markCount', operator: 'equal', expected: 0 });
+    assert.equal(failed.holds, false);
+    if (!failed.holds) {
+      assert.ok(failed.reason.includes('docs/handbook/start.md'));
+      assert.ok(!failed.reason.includes('missing marks'));
+    }
     assert.deepEqual(await resolveSubject(ctx, 'conflicts.color'), { known: true, value: 'orange' });
     assert.equal(colorLabel('#eb5757'), 'red');
     assert.equal(colorLabel('#123456'), '#123456');
+  });
+
+  it('L3-24 counts only its twenty conflicted documents on the mid slice and names missing marks', async () => {
+    const scenario = scenarios.find((candidate) => candidate.id === 'L3-24')!;
+    assert.equal(scenario.slice, 'mid');
+    const corpus = buildCorpus('0'.repeat(40));
+    const mid = new Set(corpus.slices.mid);
+    const marker = 'docs/reference/conflict-markers/sync-markers-code.md';
+    assert.ok(mid.has(marker));
+    const files = Object.fromEntries(corpus.files.filter((file) => mid.has(file.path) && file.path.endsWith('.md')).map((file) => [file.path, file.content.toString('utf8')]));
+    const { ctx, linear, ids } = await fakeRun({ files });
+    ctx.scenario = scenario;
+    // Initial sync already decorated the corpus's marker example before the scenario edits.
+    const mark = (path: string) => Object.assign(linear.documents.get(ids[path]!.id)!, { icon: 'Alert', color: '#F2994A' });
+    mark(marker);
+    ctx.observations.set(BEFORE_VIEW, await takeStartView(ctx));
+    await runStep(ctx, scenario.steps[0]!);
+    await runStep(ctx, scenario.steps[1]!);
+    const paths = ctx.observations.get('conflict.paths') as string[];
+    assert.equal(paths.length, 20);
+    assert.ok(!paths.includes(marker));
+    for (const path of paths) mark(path);
+    refreshView(ctx);
+    const assertion = scenario.checks.assertions.find((item) => item.subject === 'conflicts.markCount')!;
+    assert.equal(assertion.expected, 20);
+    assert.deepEqual(await resolveSubject(ctx, assertion.subject), { known: true, value: 20 });
+    assert.deepEqual(await evaluateAssertion(ctx, assertion), { holds: true });
+
+    // The corpus mark must never replace a missing scenario mark, mapping or document.
+    const path = paths[0]!;
+    const id = ids[path]!.id;
+    const document = linear.documents.get(id)!;
+    Object.assign(document, { icon: null, color: null });
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, assertion.subject), { known: true, value: 19 });
+    const failed = await evaluateAssertion(ctx, assertion);
+    assert.equal(failed.holds, false);
+    if (!failed.holds) {
+      assert.ok(failed.reason.includes(path));
+      assert.match(failed.reason, /expected 20, actual 19/);
+      assert.ok(!failed.reason.includes(marker));
+    }
+    mark(path);
+    linear.documents.delete(id);
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, assertion.subject), { known: true, value: 19 });
   });
 
   it('retire the edits a resolution discards on purpose, so I2 does not count them as lost', async () => {
