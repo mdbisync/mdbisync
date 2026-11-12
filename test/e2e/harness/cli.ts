@@ -46,7 +46,7 @@ import { newRunId, runNames, RUN_ID_PATTERN } from './isolation.ts';
 import { LinearWorld, editorClient } from './linear-world.ts';
 import { acquireLock, defaultStateDir, forgetRun, registerRun, requireStoppedLocalRun } from './locks.ts';
 import { updateStatusPage, writeEvidence, writeRunReport, type HarnessReport } from './report.ts';
-import { loadExpectedRed } from './results.ts';
+import { gateExitCode, loadExpectedRed } from './results.ts';
 import { requireLiveConfig, runScenarios, skippedResult } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios, selectScenarios } from './spec.ts';
@@ -266,7 +266,7 @@ async function main(argv: string[]): Promise<number> {
       log(`report: ${files.markdown}`);
       if (values['status-page'] !== undefined) updateStatusPage(values['status-page'], all.map((scenario) => scenario.id), report);
       if (values['evidence-dir'] !== undefined) log(`evidence: ${writeEvidence(report, values['evidence-dir'])}`);
-      return results.some((result) => result.result === 'fail' || !result.cleanup.ok) ? 1 : 0;
+      return gateExitCode(results, log);
     }
 
     if (command === 'ui-result') {
@@ -298,7 +298,7 @@ async function main(argv: string[]): Promise<number> {
       });
       if (statusPage === 'kept-newer') log(`status page: kept a newer result of ${result.id} from another run`);
       process.stdout.write(`${result.id} ${result.runId}: ${result.result}${result.reason === undefined ? '' : ` (${result.reason})`}; cleanup ${result.cleanup.ok ? 'ok' : `failed: ${result.cleanup.detail ?? ''}`}; report ${files.markdown}\n`);
-      return result.result === 'fail' || !result.cleanup.ok ? 1 : 0;
+      return gateExitCode([result], log);
     }
 
     process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|scheduler|walkthrough [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');

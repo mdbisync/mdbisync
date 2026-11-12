@@ -103,8 +103,10 @@ node test/e2e/harness/cli.ts sweep                            # remove leftovers
 `Ctrl-C` lets the running scenarios finish with their cleanup and skips the
 rest; a second `Ctrl-C` stops at once and keeps shared reservations for
 verified recovery.
-`run` exits with 1 when a scenario or its cleanup fails and 0 otherwise, even when
-scenarios are env-blocked or expected-red. Any command also exits with 1
+`run` exits with 1 when a scenario or its cleanup fails, or when a scenario
+on the expected-red list passes, and 0 otherwise, even when scenarios are
+env-blocked or expected-red. When one of these fails the run, it first prints
+a `run fails:` line for each reason, with the ids. Any command also exits with 1
 when the harness itself stops with an error, 2 for an unknown command and
 130 after a second `Ctrl-C`.
 
@@ -281,8 +283,14 @@ proxy; `Harness app reads` counts the harness's own reads through the OAuth
 app; `Cleanup` says whether the run left nothing behind.
 
 A scenario on the expected-red list that passes is marked as an unexpected
-pass. The change that made it pass removes its id from
-`e2e/expected-red.json`.
+pass, and it fails the run: `run` (and `ui-result` for a held run) exits with
+1 and prints `run fails: unexpected pass: <ids> passed while on the
+expected-red list; remove them from test/e2e/expected-red.json` (`it` for a
+single id). The run report and the evidence summary list the same ids.
+Otherwise a listed scenario could keep passing unnoticed, and a later regression in it would
+count as expected-red and stay hidden. The change that made it pass removes
+its id from `e2e/expected-red.json`; a listed scenario that still fails for a
+product reason stays expected-red and does not fail the run.
 
 ## Credentials for live runs
 
