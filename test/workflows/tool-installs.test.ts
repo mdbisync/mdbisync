@@ -42,21 +42,76 @@ test('repository workflows install only hashed Python wheels and patched npm', (
   }
 });
 
-test('repository requirements and every template install the same pins', () => {
-  const entries = (text: string) => {
-    const lines = text.replace(/ \\\n\s*/g, ' ').split('\n');
-    const pins = new Map(lines.map(line => [line.split('==')[0]!, line]));
-    assert.equal(pins.size, lines.length, 'each package must appear exactly once');
-    return pins;
-  };
-  const expected = entries(requirements);
-  for (const file of ['mdbisync.yml', 'mdbisync-initial-sync.yml', 'pre-commit.yml']) {
-    const template = parse(readFileSync(new URL(`../../examples/${file}`, import.meta.url), 'utf8')) as Workflow;
-    const script = Object.values(template.jobs).flatMap(job => job.steps).find(step => step.name === 'Install pre-commit')!.run!;
-    const list = /<<'REQUIREMENTS'; then\n([\s\S]*?)\nREQUIREMENTS\n/.exec(script)?.[1];
-    assert.ok(list, file);
-    assert.deepEqual(entries(list), expected, file);
+// GitHub's dependency graph, and so dependency review and Dependabot alerts,
+// reads only the requirements file: the lists written inline in the templates
+// are invisible to it. Every template list must therefore be exactly the
+// scanned file's lines. templates.test.ts holds the templates to that one
+// hashed install form, and init.test.ts holds the init copies equal to the
+// templates.
+function entries(text: string) {
+  const lines = text.replace(/ \\\n\s*/g, ' ').split('\n');
+  const pins = new Map(lines.map(line => [line.split('==')[0]!, line]));
+  assert.equal(pins.size, lines.length, 'each package must appear exactly once');
+  return pins;
+}
+
+/** The templates that carry a requirements list; throws on a list that differs from the scanned file. */
+function checkTemplateLists(templates: [string, string][], scanned = requirements) {
+  const expected = entries(scanned);
+  const preCommit = /^pre-commit==([^\s\\]+)/m.exec(scanned)?.[1];
+  assert.ok(preCommit, `${requirementsPath} must pin pre-commit`);
+  const listing: string[] = [];
+  for (const [name, text] of templates) {
+    for (const step of Object.values((parse(text) as Workflow).jobs).flatMap(job => job.steps)) {
+      const list = /<<'REQUIREMENTS'; then\n([\s\S]*?)\nREQUIREMENTS\n/.exec(step.run ?? '')?.[1];
+      if (list === undefined) continue;
+      const where = `${name}, step "${step.name}"`;
+      assert.deepEqual(entries(list), expected, `${where}: copy the lines of ${requirementsPath} into this list`);
+      // The step's messages (and pre-commit.yml's version check) name the installed pre-commit.
+      const named = [...step.run!.matchAll(/\bpre-commit (\d+(?:\.\d+)+)\b/g)].map(match => match[1]);
+      assert.ok(named.length > 0 && named.every(version => version === preCommit), `${where}: name pre-commit ${preCommit}, the version the list installs`);
+      listing.push(name);
+    }
   }
+  return listing;
+}
+
+const examples = new URL('../../examples/', import.meta.url);
+const templates = readdirSync(examples).filter(file => file.endsWith('.yml'))
+  .map((file): [string, string] => [file, readFileSync(new URL(file, examples), 'utf8')]);
+
+test('every template list is exactly the scanned requirements file', () => {
+  assert.deepEqual(checkTemplateLists(templates).sort(), ['mdbisync-initial-sync.yml', 'mdbisync.yml', 'pre-commit.yml']);
+});
+
+// Mutations of whole entries (a package line with its continued hash lines),
+// to versions that differ from whatever the current pins are.
+const [first, ...rest] = requirements.split(/\n(?=\S)/) as [string, ...string[]];
+const bump = (entry: string) => entry.replace(/==([^\s\\]+)/, '==$1.1');
+const template = templates.find(([file]) => file === 'pre-commit.yml')!;
+const preCommitEntry = /\bpre-commit==[^\s\\]+/;
+for (const [change, copy, scanned, reason] of [
+  ['a list with another version', template[1], [bump(first), ...rest].join('\n'), /copy the lines/],
+  ['a list with another hash', template[1], [first.replace(/[0-9a-f]{64}/, '0'.repeat(64)), ...rest].join('\n'), /copy the lines/],
+  ['a list without a scanned package', template[1], `${requirements}\nextra==1.0 --hash=sha256:${'1'.repeat(64)}`, /copy the lines/],
+  ['a list with a package the scanned file lacks', template[1], rest.join('\n'), /copy the lines/],
+  ['a pre-commit update the step does not name', template[1].replace(preCommitEntry, entry => bump(entry)), requirements.replace(preCommitEntry, entry => bump(entry)), /name pre-commit /],
+] as const) {
+  test(`template list check rejects ${change}`, () => {
+    assert.notEqual(copy + scanned, template[1] + requirements);
+    assert.throws(() => checkTemplateLists([[template[0], copy]], scanned), reason);
+  });
+}
+
+test('Dependabot keeps the scanned requirements file up to date', () => {
+  type Update = { 'package-ecosystem': string; directory?: string; directories?: string[] };
+  const config = parse(readFileSync(new URL('../../.github/dependabot.yml', import.meta.url), 'utf8')) as { updates: Update[] };
+  // Dependabot reads requirement files in its directory and one level of
+  // subfolders, and accepts without further parsing a file whose path names
+  // `requirements`; from `/.github` the path is `requirements/pre-commit.txt`.
+  const directories = config.updates.filter(update => update['package-ecosystem'] === 'pip')
+    .flatMap(update => [update.directory, ...update.directories ?? []]);
+  assert.ok(directories.includes('/.github'), `Dependabot must update ${requirementsPath} from /.github`);
 });
 
 for (const run of [
