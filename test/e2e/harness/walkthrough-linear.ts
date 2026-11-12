@@ -47,6 +47,8 @@ export interface RunGit {
   deleteRefs(runId: string, refs: readonly string[]): Promise<void>;
   /** Path → Linear document id, from the run's ids state ref; empty when it has none. */
   ids(runId: string): Promise<Map<string, string>>;
+  /** Run ids that hold a shared reservation (scenario runs on any host); throws when it cannot be read. */
+  sharedRuns(): Promise<string[]>;
 }
 
 export type WalkthroughWorld = Pick<LinearWorld, 'teams' | 'createProject' | 'projects' | 'runProjects' | 'deleteProject' | 'archiveRunTeamDocuments' | 'runTeamDocuments' | 'trashedInZone'> & {
@@ -195,6 +197,8 @@ async function cleanup(input: LinearActionInput): Promise<number> {
   const rest = input.rest!;
   const names = runNames(runId);
   if (liveRuns(stateDir).has(runId)) throw new WalkthroughRefusal('the run is a registered scenario run; use recover or sweep');
+  // Scenario runs on other hosts or state folders are only in the shared state; an unreadable state stops here.
+  if ((await git.sharedRuns()).includes(runId)) throw new WalkthroughRefusal('the run holds a shared reservation; use recover or sweep');
   const running = [];
   for (const branch of [names.trackedBranch, names.syncBranch, names.scheduleRequest, `t/${runId}/suspended`]) {
     running.push(...(await rest.workflowRuns(branch)).filter((run) => run.head_branch === branch && run.status !== 'completed'));
@@ -212,9 +216,11 @@ async function cleanup(input: LinearActionInput): Promise<number> {
   const teamIds = new Set(teams.map((team) => team.id));
   for (const document of await world.client.getDocuments(ids)) {
     const archived = document.archivedAt !== null && !document.trashed;
+    // A project recorded for the run counts even when an earlier cleanup already deleted it.
+    const recordedProject = document.projectId === null ? undefined : recorded?.projects.get(document.projectId);
     const own = document.projectId === null
       ? document.teamId !== null && teamIds.has(document.teamId) && runOfTeamTitle(document.title) === runId
-      : projects.some((project) => project.id === document.projectId);
+      : projects.some((project) => project.id === document.projectId) || (recordedProject !== undefined && runOfProject(recordedProject) === runId);
     if (!archived && !own) throw new WalkthroughRefusal(`document ${document.id} of the ids state ref is outside the run's projects and the given team zones`);
   }
   // Record what the run made before changing anything: its synced documents and every project named for it.

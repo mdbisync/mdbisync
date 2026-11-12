@@ -16,6 +16,7 @@ import { appInstallationToken, gitAuthEnv, SandboxRest, type WorkflowRun } from 
 import { runNames, runOfRef } from './isolation.ts';
 import { editorClient, LinearWorld, RunWorldError } from './linear-world.ts';
 import { defaultStateDir } from './locks.ts';
+import { GitStateStore } from './shared-state.ts';
 import { OwnershipRefusal } from './ownership.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { readIds, resolveStateConfig, stateRef } from '../../../src/state/index.ts';
@@ -101,6 +102,15 @@ async function inScratchRepo<T>(env: Record<string, string>, use: (git: Git) => 
 }
 
 export function runGit(url: string, env: Record<string, string>): RunGit {
+  const sharedRuns = async () => {
+    // A private object folder for this one read, removed afterwards.
+    const stateDir = mkdtempSync(join(tmpdir(), 'walkthrough-shared-'));
+    const store = new GitStateStore({ stateDir, url, env });
+    try { return (await store.read()).runs.map((entry) => entry.runId); }
+    finally {
+      try { await store.close(); } finally { rmSync(stateDir, { recursive: true, force: true }); }
+    }
+  };
   const refs = async (git: Git, runId: string) => {
     const names = runNames(runId);
     const text = await git.text(['ls-remote', '--refs', url, `refs/heads/t/${runId}/*`, `${names.refPrefix}/*`]);
@@ -110,6 +120,7 @@ export function runGit(url: string, env: Record<string, string>): RunGit {
     });
   };
   return {
+    sharedRuns,
     refs: (runId) => inScratchRepo(env, (git) => refs(git, runId)),
     deleteRefs: async (runId, list) => {
       if (list.length === 0) return;

@@ -87,6 +87,7 @@ let ids: Map<string, string>;
 let pulls: Array<{ number: number; head: { ref: string } }>;
 let runs: Array<{ id: number; head_branch: string; status: string }>;
 let deleted: string[][];
+let shared: string[] | Error;
 let output: string[];
 
 beforeEach(() => {
@@ -97,6 +98,7 @@ beforeEach(() => {
   pulls = [{ number: 5, head: { ref: `t/${RUN}/sync` } }];
   runs = [{ id: 1, head_branch: `t/${RUN}/main`, status: 'completed' }];
   deleted = [];
+  shared = [];
   output = [];
 });
 afterEach(() => { rmSync(stateDir, { recursive: true, force: true }); });
@@ -106,6 +108,7 @@ function options(): WalkthroughOptions {
     refs: async (runId: string) => refs.filter((ref) => ref.includes(`/${runId}/`)),
     deleteRefs: async (_runId: string, list: readonly string[]) => { deleted.push([...list]); refs = refs.filter((ref) => !list.includes(ref)); },
     ids: async () => ids,
+    sharedRuns: async () => { if (shared instanceof Error) throw shared; return shared; },
   };
   const rest = {
     workflowRuns: async (branch: string) => runs.filter((run) => run.head_branch === branch),
@@ -231,6 +234,12 @@ it('refuses cleanup while a run is in progress or when the ids name a document o
     await assert.rejects(call('cleanup', '--team', 'ENG'), /runs 2 of the run are not completed/);
     runs.pop();
   }
+  // A scenario run on another host, seen only in the shared state; an unreadable state also stops cleanup.
+  shared = [RUN];
+  await assert.rejects(call('cleanup', '--team', 'ENG'), /shared reservation/);
+  shared = new Error('control ref unreadable');
+  await assert.rejects(call('cleanup', '--team', 'ENG'));
+  shared = [OTHER];
   await assert.rejects(call('cleanup'), /needs --team/);
   ids = new Map([['docs/a.md', 'doc-other']]);
   await assert.rejects(call('cleanup', '--team', 'ENG'), /outside the run's projects/);
@@ -242,6 +251,19 @@ it('refuses cleanup while a run is in progress or when the ids name a document o
   assert.deepEqual(linear.writes, []);
   assert.deepEqual(deleted, []);
   assert.equal(pulls.length, 1);
+});
+
+it('retries a cleanup whose project an earlier attempt already deleted', async () => {
+  await call('project', '--team', 'ENG');
+  const project = [...linear.projects.values()][0]!;
+  linear.document('doc-trashed', { projectId: project.id, teamId: 'team-eng', trashed: true });
+  ids = new Map([['docs/a.md', 'doc-trashed']]);
+  // The earlier attempt deleted the project but stopped before its refs.
+  linear.projects.delete(project.id);
+  output.length = 0;
+  assert.equal(await call('cleanup', '--team', 'ENG'), 0);
+  assert.deepEqual(JSON.parse(output.join('')).problems, []);
+  assert.deepEqual(refs, []);
 });
 
 it('reads, fetches and deletes only the selected run\'s refs in a real repository', async () => {
@@ -259,6 +281,7 @@ it('reads, fetches and deletes only the selected run\'s refs in a real repositor
     assert.deepEqual((await runRefs.refs(RUN)).sort(), [`refs/heads/t/${RUN}/main`, `refs/mdbisync-t/${RUN}/ids`]);
     assert.deepEqual([...(await runRefs.ids(RUN))], [['docs/a.md', 'doc-1']]);
     assert.deepEqual([...(await runRefs.ids(OTHER))], []);
+    assert.deepEqual(await runRefs.sharedRuns(), []);
     await assert.rejects(runRefs.deleteRefs(RUN, [`refs/heads/t/${OTHER}/main`]), /not the selected run's/);
     await assert.rejects(runRefs.deleteRefs(RUN, ['refs/heads/main']), /not the selected run's/);
     await runRefs.deleteRefs(RUN, await runRefs.refs(RUN));
