@@ -14,6 +14,7 @@ import { parse } from 'yaml';
 import { parseOperation } from '../../src/action/main.ts';
 import { COMMANDS } from '../../src/commands.ts';
 import { INIT_SECURITY_FLAGS, INIT_USAGE, INIT_VALUE_FLAGS } from '../../src/init/command.ts';
+import { MINIMUM_RELEASE } from '../../src/init/releases.ts';
 import templates from '../../src/init/workflows.json' with { type: 'json' };
 import { PROJECT_KEY, TEAM_KEY } from '../../src/mapping/annotations.ts';
 import { DEFAULT_DOCUMENT_CAP } from '../../src/run/capacity.ts';
@@ -116,6 +117,12 @@ describe('configuration reference', () => {
     const accepted = [...INIT_VALUE_FLAGS, ...INIT_SECURITY_FLAGS].sort();
     assert.deepEqual([...byName(table(PAGE, 'init')).keys()].sort(), accepted);
     assert.deepEqual([...new Set(INIT_USAGE.match(/--[a-z][a-z-]+/g))].sort(), accepted, 'init --help');
+  });
+
+  it('names the oldest release init writes, in the flag table and the text below it', () => {
+    assert.match(byName(table(PAGE, 'init')).get('--release-sha')?.join(' ') ?? '', new RegExp(`\`${MINIMUM_RELEASE.version.replaceAll('.', '\\.')}\` or a later release`));
+    const section = PAGE.slice(PAGE.indexOf('### init'), PAGE.indexOf('## Tokens left'));
+    assert.match(section, new RegExp(`their examples pin,\\s+\`${MINIMUM_RELEASE.version.replaceAll('.', '\\.')}\``), 'the text below the table names the release');
   });
 
   it('lists every command', () => {

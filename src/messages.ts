@@ -39,6 +39,7 @@ export const MESSAGES = {
   'init.format-hook-differs': 'existing linear-format hook uses a different repository or release',
   'init.security-hook-differs': 'existing {hook} hook differs from the security example; reconcile it first',
   'init.release-sha': '--release-sha must be a full 40-character commit SHA',
+  'init.release-too-old': 'release {version} is older than {minimum}, the release these workflows are written for and checked against. Use {minimum} or later',
   'init.release-version': '--release-version must be a version such as v1.2.3',
   'init.needs-folder': 'provide --folder with --team and/or --project',
   'init.not-at-root': 'run init at the repository root',
