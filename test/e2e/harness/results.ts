@@ -96,6 +96,10 @@ export interface ScenarioResult {
   metrics?: Record<string, unknown>;
   /** Trashed documents per team zone the run used, before it and after its cleanup; a run should leave them unchanged. */
   teamZoneTrash?: Record<string, { before: number; after?: number }>;
+  /** Per operation, the largest and slowest answer the engine got through the local proxy; sizes only. */
+  answerSizes?: Record<string, import('./request-accounting.ts').AnswerSize>;
+  /** The mapped documents Linear shows with the conflict mark after the checks; absent when the run did not reach them or the read failed. */
+  conflictMarks?: { mapped: number; marked: import('./subjects.ts').ConflictMarkRecord[] };
 }
 
 export const EXPECTED_RED_FILE = fileURLToPath(new URL('../expected-red.json', import.meta.url));

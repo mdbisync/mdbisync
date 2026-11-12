@@ -686,6 +686,38 @@ function markRetained(document: LinearDocument | undefined): boolean {
   return document?.icon === CONFLICT_MARK.icon && colorLabel(document.color) === CONFLICT_MARK.color;
 }
 
+/** A synchronized document the run's final view shows with the conflict mark. */
+export interface ConflictMarkRecord {
+  path: string;
+  icon: string;
+  color: string;
+  /** The own icon and color the ids ref saved before the mark replaced them; null when it saved none. */
+  saved: { icon: string | null; color: string | null } | null;
+  comments: number;
+}
+
+/**
+ * The documents of the run's ids ref that carry the conflict mark, with
+ * their saved own decoration and comment count: what a report shows of the
+ * marks without their content. A document not listed has no mark. One
+ * comment read per marked document.
+ */
+export async function conflictMarks(ctx: RunContext, sides: Sides): Promise<{ mapped: number; marked: ConflictMarkRecord[] }> {
+  const marked: ConflictMarkRecord[] = [];
+  for (const [path, entry] of sides.ids) {
+    const document = sides.documents.get(entry.id);
+    if (document === undefined || !markRetained(document)) continue;
+    marked.push({
+      path,
+      icon: document.icon as string,
+      color: colorLabel(document.color) as string,
+      saved: entry.saved === undefined ? null : { icon: entry.saved.icon, color: entry.saved.color },
+      comments: (await documentComments(ctx, entry.id)).length,
+    });
+  }
+  return { mapped: sides.ids.size, marked };
+}
+
 async function metrics(env: Env): Promise<Record<string, unknown>> {
   const { ctx } = env;
   const values = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};

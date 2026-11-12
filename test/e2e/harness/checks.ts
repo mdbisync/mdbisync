@@ -21,7 +21,7 @@ import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome }
 import { zoneConcurrent } from './concurrency.ts';
 import { RUN_ID_PATTERN } from './isolation.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
-import { encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
+import { conflictMarks, encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
 
 // --- pure helpers ----------------------------------------------------------
 
@@ -1026,5 +1026,10 @@ export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
     }
   }
   if (zoneConcurrent(ctx.scenario)) ctx.observations.set('isolation.snapshot', isolationSnapshot(ctx, await readSides(ctx)));
+  // The conflict marks of the world after I6, for the report only: a failed read never decides the result.
+  if (ctx.live !== null) {
+    try { ctx.observations.set('conflictMarks', await conflictMarks(ctx, await readSides(ctx))); }
+    catch (error) { ctx.log(`conflict marks not recorded: ${(error as Error).message}`); }
+  }
   return outcomes;
 }
