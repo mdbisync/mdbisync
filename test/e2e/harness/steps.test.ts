@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { deflateRawSync } from 'node:zlib';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { LinearGraphQLError, LinearHttpError, LinearNetworkError, LinearStoppedError, LinearTokenError, type LinearDocument } from '../../../src/linear/index.ts';
 import { Git, GitError, lfsReader, parseLfsPointer } from '../../../src/state/index.ts';
@@ -20,6 +20,7 @@ import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
 import { burst, burstDocuments, burstEditCounts, editCapacity, soak, soakEditCounts, type Actor, type SoakDriver } from './load.ts';
 import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
+import { fixText } from '../../../src/format/fix.ts';
 import { blockedBySetupStop, EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
 import { bodyOf, compare, editsFound, holdsToken, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
@@ -1328,6 +1329,17 @@ async function writeUploads(ctx: RunContext, entries: Record<string, string>): P
   refreshView(ctx);
 }
 
+/** The ids state ref as the engine pushes it: a new commit on the current one. */
+async function writeIds(ctx: RunContext, entries: Record<string, { id: string }>): Promise<void> {
+  const git = await ctx.person();
+  const ref = `${ctx.names.refPrefix}/ids`;
+  const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(entries) })).trim();
+  const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tids.json\n` })).trim();
+  await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]);
+  const commit = (await git.text(['commit-tree', tree, '-p', ref, '-m', 'ids'])).trim();
+  await git.run(['push', '--quiet', 'origin', `${commit}:${ref}`]);
+}
+
 async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: boolean } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
@@ -2167,7 +2179,7 @@ describe('git executors', () => {
     assert.deepEqual(ctx.observations.get('fixture.linkPair'), { source, target, anchor: LINK_PAIR.anchor, project });
     // The index links the notes by a relative path, once whole and once to a heading the notes have.
     const index = await remoteFile(source);
-    assert.deepEqual([...index.matchAll(/\]\(([^)]+)\)/g)].map((match) => match[1]), ['route-notes.md', `route-notes.md#${LINK_PAIR.anchor}`]);
+    assert.deepEqual([...index.matchAll(/\]\(<([^>]+)>\)/g)].map((match) => match[1]), ['route-notes.md', `route-notes.md#${LINK_PAIR.anchor}`]);
     assert.match(await remoteFile(target), /^## Depot hours$/m);
     // UI steps run in the browser session, never here.
     await assert.rejects(runStep(ctx, { kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } }), EnvBlockedError);
@@ -2181,39 +2193,34 @@ describe('git executors', () => {
   });
 
   it('prepare the L6-12 pair in Linear\'s form, so I1 finds both files equal to their documents', async () => {
-    const { ctx, linear, ids, rawFile, remoteGit } = await fakeRun();
+    const { ctx, linear, ids, rawFile } = await fakeRun();
     ctx.scenario = { ...ctx.scenario, steps: [{ kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } }] };
     await prepareFixtures(ctx, ctx.live as LiveWorld, 'beforeSync', { runStep });
     const { source, target, project } = ctx.observations.get('fixture.linkPair') as { source: string; target: string; project: string };
     const { folder } = projectFolders(ctx)[0] as { folder: string };
     const projectId = [...(ctx.live as LiveWorld).projects.values()].find((item) => item.name === project)?.id as string;
     const files = { [source]: await rawFile(source), [target]: await rawFile(target) };
-    // No final newline: Linear drops it, so a file that ends with one never equals its document.
-    for (const text of Object.values(files)) assert.ok(!/[\r\n]$/.test(text), JSON.stringify(text.slice(-20)));
-    // The notes run past one browser window, with text after the heading the anchored link points to.
-    const notes = files[target] as string;
-    const heading = notes.indexOf('\n## Depot hours\n');
-    assert.ok(heading > 0);
-    assert.ok(notes.slice(0, heading).split('\n\n').length >= 8, 'paragraphs before the heading');
-    assert.ok(notes.slice(heading).split('\n\n').length >= 5, 'paragraphs from the heading on');
 
     // The documents as a sync leaves them: links by id, and the text as Linear keeps it, without a final newline.
     for (const path of [target, source]) ids[path] = { id: linear.add({ projectId }, path.slice(folder.length + 1).replace(/\.md$/, ''), '').id };
-    const git = await ctx.person();
-    const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(ids) })).trim();
-    const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tids.json\n` })).trim();
-    const parent = (await remoteGit.text(['rev-parse', `${ctx.names.refPrefix}/ids`])).trim();
-    await git.run(['fetch', '--quiet', 'origin', parent]);
-    await git.run(['push', '--quiet', 'origin', `${(await git.text(['commit-tree', tree, '-p', parent, '-m', 'ids'])).trim()}:${ctx.names.refPrefix}/ids`]);
+    await writeIds(ctx, ids);
     const base = (ctx.live as LiveWorld).documentUrlBase;
-    const kept = (text: string) => text.replace(/\]\(route-notes\.md(#[^)]*)?\)/g, (_link, anchor: string | undefined) => `](<${base}/${ids[target]?.id}${anchor ?? ''}>)`).replace(/\n+$/, '');
+    const link = new RegExp(`\\]\\(<${basename(target).replace(/\./g, '\\.')}(#[^>]*)?>\\)`, 'g');
+    const kept = (text: string) => text.replace(link, (_link, anchor: string | undefined) => `](<${base}/${ids[target]?.id}${anchor ?? ''}>)`).replace(/\n+$/, '');
     for (const path of [target, source]) await linear.updateDocument(ids[path]?.id as string, { content: kept(files[path] as string) });
-    assert.match(linear.documents.get(ids[source]?.id as string)?.content ?? '', new RegExp(`\\(<${base}/${ids[target]?.id}#${LINK_PAIR.anchor}>\\)`));
-
+    assert.ok((linear.documents.get(ids[source]?.id as string)?.content ?? '').includes(`(<${base}/${ids[target]?.id}#${LINK_PAIR.anchor}>)`));
     const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
     const sides = await readSides(ctx);
     assert.deepEqual([source, target].map((path) => sides.files.has(path)), [true, true]);
     assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
+
+    // Both files are already in Linear's form, as the corpus is: the fix command changes nothing, final newline included.
+    for (const text of Object.values(files)) assert.equal(fixText(text), text);
+    // The notes run past one browser window: about forty lines of text above the anchored heading, and more below it.
+    const notes = files[target] as string;
+    const heading = notes.indexOf('\n## Depot hours\n');
+    assert.ok(heading >= 2500, `${heading} characters above the heading`);
+    assert.ok(notes.length - heading >= 600, `${notes.length - heading} characters from the heading on`);
   });
 
   it('check that Linear holds the index linking the notes by id, whole and with the anchor (L6-12)', async () => {

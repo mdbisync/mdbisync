@@ -222,11 +222,11 @@ export const SLICE_FIXTURES: ReadonlySet<string> = new Set([
 export const LINK_PAIR = { source: 'guides/route-index', target: 'guides/route-notes', anchor: 'depot-hours' } as const;
 
 /**
- * The pair's texts, keyed like `LINK_PAIR`, in Linear's form: no final
- * newline, as Linear drops it and as the corpus files are written, so I1
- * finds each file equal to its document. The notes run longer than one
- * browser window, with text after their "Depot hours" heading too, so a
- * link to that heading has somewhere to scroll.
+ * The pair's texts, keyed like `LINK_PAIR`, in Linear's form, as the
+ * corpus files are written: links in angle brackets and no final newline,
+ * which Linear drops, so I1 finds each file equal to its document. The
+ * notes run longer than one browser window, with text after their "Depot
+ * hours" heading too, so a link to that heading has somewhere to scroll.
  */
 export function linkPairTexts(link: string): { source: string; target: string } {
   const target = [
@@ -234,11 +234,19 @@ export function linkPairTexts(link: string): { source: string; target: string } 
     'Planners build the routes the evening before and check them again at seven. A route that changes after seven goes to the shift lead, who tells the drivers at the morning briefing.',
     'Each route lists its stops in the order the van reaches them, with the time window the customer agreed to. Stops without a window go last, unless the planner moves them up to fill a gap.',
     'When a customer cancels before seven, the planner removes the stop and closes the gap. After seven the stop stays on the list, and the driver marks it as cancelled on arrival.',
+    'Routes for the far villages start first, because their last stop is two hours from the depot. The planner keeps those vans to fewer stops, so a late ferry does not push the whole route into the evening.',
+    'A new driver rides along with an experienced one for the first week. On the second week the new driver takes a short route alone, and the planner checks the times with them at the end of each day.',
     '## Loading order',
     'Vans load in the reverse order of their stops, so the first delivery sits nearest the doors. The loading team works from the printed route sheet, not from memory.',
     'Heavy boxes go on the floor along the walls, and fragile ones on the shelves above them. Cold boxes load last and travel in the insulated bags by the doors.',
     'A van leaves only when its lead loader has signed the sheet. If a box is missing, the loader notes it on the sheet and the planner calls the customer before the van reaches the stop.',
     'Returns ride in the crates at the back. The driver stacks them so they do not block the doors, and the evening team empties the crates before the next loading.',
+    'Large orders for one customer load on a pallet of their own, wrapped and labelled with the stop number. The driver unloads the pallet with the lift at the back and takes the wrap back to the depot.',
+    '## Checks before leaving',
+    'Before a van leaves the yard, the driver walks around it once: tyres, lights, mirrors and the side doors. Anything that looks wrong goes on the defect card in the cab.',
+    'A van with a defect card that names the brakes, the tyres or the lights stays in the yard until the workshop has seen it. The planner moves its stops to the spare van.',
+    'Fuel is topped up on the way back, never on the way out, so the first stop is not late. Each van keeps its fuel card in the glove box with the route sheet.',
+    'The driver checks that the scanner is charged and that the day\'s route has loaded on it. A scanner that shows the wrong day goes back to the desk before the van leaves.',
     '## Depot hours',
     'The depot opens at six and closes at eight. Late vans call the night desk.',
     'On Saturdays the depot opens at seven and closes at four, and only the weekend routes run. Sunday is closed, apart from the cold store, which the night desk checks twice a day.',
@@ -249,8 +257,8 @@ export function linkPairTexts(link: string): { source: string; target: string } 
   ].join('\n\n');
   const source = [
     '# Route index',
-    `Start with [the route notes](${link}).`,
-    `The [depot hours](${link}#${LINK_PAIR.anchor}) changed this week.`,
+    `Start with [the route notes](<${link}>).`,
+    `The [depot hours](<${link}#${LINK_PAIR.anchor}>) changed this week.`,
   ].join('\n\n');
   return { source, target };
 }
