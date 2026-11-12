@@ -18,6 +18,13 @@
 //        prepare adapts local copied workflows; review and commit before push.
 //        dispatch waits up to 30 minutes and prints the conclusion and summary.
 //        Live commands need an admitted manual run's isolation/cleanup window.
+//   node test/e2e/harness/cli.ts walkthrough project|trash|linear-edit|linear-read|cleanup
+//        --run <six hex> [--team ENG] [--path docs/notes.md] [--text <line>]
+//        project creates "Field notes <run>" in the team; trash reads zone trash
+//        counts (the first reading is the baseline); linear-edit appends one
+//        neutral line to a synced document; linear-read prints it; cleanup
+//        archives the run's projects and documents (never trashes them),
+//        closes its pull requests and deletes its refs, with trash counts.
 //
 // The test configuration comes from the environment and the test
 // configuration folder (see config.ts).
