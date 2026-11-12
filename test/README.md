@@ -245,6 +245,13 @@ A run writes `report.md` and `report.json` in its report folder, and one
 folder per scenario under `runs/<scenario>-<run id>/` with the harness log,
 the engine's inputs and outputs, and the evidence the checks read.
 
+When a pull in the person's clone fails, that folder gets a
+`person-git-*.txt` file with the clone's state at that moment (HEAD, the
+remote branch, merge bases, reflog, a connectivity check). A scenario that
+ends in `fail` also keeps the clone itself as `person/`, without
+credentials in its remote URL and with its own copy of the objects it
+borrowed from the shared cache. Other results remove it.
+
 ```text
 | pass | fail | expected-red | env-blocked | skipped |
 | --- | --- | --- | --- | --- |

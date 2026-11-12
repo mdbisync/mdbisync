@@ -16,6 +16,7 @@ import type { RunContext } from './context.ts';
 import { annotatedFolders, annotationPath, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
 import { ownedDocuments } from './ownership.ts';
+import { pullTracked } from './person-git.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
 import { RUN_ID_PATTERN } from './isolation.ts';
@@ -477,7 +478,8 @@ export function lfsSize(bytes: Buffer): number | null {
 
 export async function fetchRef(git: Git, ref: string): Promise<string | null> {
   try {
-    await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+    // Not into FETCH_HEAD: a pull or another reader in the same clone may be using it at the same time.
+    await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]);
     return (await git.text(['rev-parse', ref])).trim();
   } catch {
     return null;
@@ -547,7 +549,7 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   const world = ctx.live;
   if (world === null) throw new Error('offline scenarios have no sides');
   const git = await ctx.person();
-  await git.run(['pull', '--quiet', '--no-rebase', '--no-edit', 'origin', ctx.names.trackedBranch]);
+  await pullTracked(git, ctx);
   const config = resolveStateConfig({ trackedBranch: ctx.names.trackedBranch, syncBranch: ctx.names.syncBranch, refPrefix: ctx.names.refPrefix });
   const idsCommit = await fetchRef(git, stateRef(config, 'ids'));
   const uploadsCommit = await fetchRef(git, stateRef(config, 'uploads'));
