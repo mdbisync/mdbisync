@@ -670,9 +670,9 @@ describe('sync: conflicts through the cycle (L3)', () => {
   it('L3-20: different images added at the same spot become a conflict whose versions keep both images working', async () => {
     const path = `${NOTES}/gallery.md`;
     const text = TREE[path] as string;
-    // Bytes above 0x7F, as in a real PNG signature, so an encoding slip shows.
-    const gitBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0x01, 0x80]);
-    const linearBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xfe, 0x02, 0x81]);
+    // Distinct real PNGs retain binary bytes, so an encoding slip shows.
+    const gitBytes = await readFile(new URL('../../test/fixtures/assets/banner.png', import.meta.url));
+    const linearBytes = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
     // alice pastes a picture in Linear: Linear stores it and links its upload URL.
     const url = `${UPLOADS_HOST}/pasted/photo.png`;
     world.linear.uploads.push({ filename: 'photo.png', contentType: 'image/png', size: linearBytes.length, assetUrl: url, bytes: linearBytes });
