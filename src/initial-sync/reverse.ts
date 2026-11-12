@@ -24,7 +24,7 @@
 
 import { posix } from 'node:path';
 import { splitFile } from '../format/index.ts';
-import { type LinearDocument, LinearStoppedError } from '../linear/index.ts';
+import { type LinearDocument, LinearError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
 import {
@@ -60,7 +60,7 @@ import {
   readUploads,
   stateRef,
 } from '../state/index.ts';
-import { createAssetCapture } from '../sync/assets.ts';
+import { createAssetCapture, ImageBlockedError } from '../sync/assets.ts';
 import { captureCursorTrailer, cursorTime, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
 import { type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titlePath } from '../sync/paths.ts';
@@ -249,10 +249,13 @@ export interface ReverseResult {
    * Planned files left out once their text was known: `front-matter-boundary`
    * when the document's text would not stay the file's body (it starts with
    * what reads as front matter), `title-not-a-path` when the new tree maps the
-   * file to another document, `download-failed` when a file the document
-   * embeds could not be downloaded (gone, over 10 MB, redirected elsewhere).
-   * Such a file keeps the tracked branch's version; an existing one also keeps
-   * its document's id (`front-matter-boundary`, `download-failed`).
+   * file to another document, `image-blocked` when an image or file the
+   * document embeds is one the capture blocks (not an upload of the
+   * workspace, gone, over 10 MB, redirected, not a supported type),
+   * `download-failed` when one could not be downloaded this run (a network
+   * error, a rate limit, a server error) or placed. Such a file keeps the
+   * tracked branch's version; an existing one also keeps its document's id
+   * (`front-matter-boundary`, `image-blocked`, `download-failed`).
    */
   leftOutAtRecord: Array<{ path: string; rule: RecordLeftOutRule }>;
   notAttempted: string[];
@@ -469,6 +472,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     const uploads = await readUploads(git, expected.uploads);
     const download = createAssetCapture(git, options.config, fetched.tracked, options.fetch ?? ((url, init) => context.linear.transport.fetchUpload(String(url), init)), context.linear.transport.reads);
     const failed: string[] = [];
+    const imageBlocked: string[] = [];
     if (entries.some((entry) => linksLinearDocuments((documents.get(entry.documentId) as LinearDocument).content ?? ''))) {
       linkBase = documentUrlBase(await workspaceUrlKey(context.linear));
     }
@@ -481,9 +485,14 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         const captured = await download(entry.path, restoreBody(transforms, entry.path, content, content), uploads, trackedBody);
         bodies.set(entry.path, captured);
       } catch (error) {
-        if (error instanceof LinearStoppedError) throw error;
-        // Not downloadable (gone, over the size limit, a redirect elsewhere): the file keeps the tracked branch's version.
-        failed.push(entry.path);
+        // A stop, or Linear refusing the run's own access (a 401 or 403 on an upload), ends the run, as in the capture.
+        if (error instanceof LinearError) throw error;
+        // An image the capture would block (not an upload, a dead, oversized or unsupported one): the
+        // document's text does not enter git. This sync writes nothing to Linear, so the first sync
+        // after the merge reads the document again and marks it there.
+        if (error instanceof ImageBlockedError) imageBlocked.push(entry.path);
+        // Not downloaded this run (a network error, a rate limit, a server error, a file it could not place): the file keeps the tracked branch's version.
+        else failed.push(entry.path);
       }
     }
     const created = new Set(plan.create.map((entry) => entry.path));
@@ -501,6 +510,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       leaveOut(paths.filter((path) => created.has(path)), rule);
     };
     keepTracked(failed, 'download-failed');
+    keepTracked(imageBlocked, 'image-blocked');
     // The document's text must stay the file's body: text that reads as front
     // matter would become the file's metadata (or a folder's annotation).
     keepTracked(entries.filter((entry) => splitFile(textOf(entry)).body !== restored(entry)).map((entry) => entry.path), 'front-matter-boundary');
@@ -597,6 +607,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
 
     const synced = new Set([...entries.map((entry) => entry.path), ...keptTracked]);
     const finalIds: IdMap = new Map([...ids].filter(([path]) => synced.has(path)));
+    // A new document left out has no id: the capture reads every such document on every run, whatever the cursor.
     const through = captureCursor([...keptTracked].map((path) => documentOf.get(path) as string));
     // The READMEs kept without a document are named, so the sync does not take them for new documents.
     const kept = plan.kept.map((entry) => entry.path);

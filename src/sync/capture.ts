@@ -22,7 +22,7 @@ import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, imageFindings, ImageBlockedError, DownloadRetryError, type CapturedAssets } from './assets.ts';
+import { createAssetCapture, ImageBlockedError, DownloadRetryError, type CapturedAssets } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
@@ -347,8 +347,6 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const prior = splitFile(old === undefined ? '' : previous.get(old.path)?.toString('utf8') ?? '');
       const head = old !== undefined && path !== old.path && annotationHead(old.path) !== undefined ? relocatedHead(prior.head) : prior.head;
       try {
-        const images = imageFindings(doc.content ?? '');
-        if (images.length > 0) throw new ImageBlockedError(images);
         const assets = await downloadAssets(path, doc.content ?? '', uploads, old === undefined ? undefined : prior.body, old?.path);
         const candidate: Candidate = {doc, path, head, assets, files: new Map<string, Buffer | string>([[path, head + assets.body], ...assets.files])};
         if (old?.path === path) candidate.previousBody = prior.body;

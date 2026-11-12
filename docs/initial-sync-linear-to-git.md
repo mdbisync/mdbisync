@@ -70,7 +70,13 @@ What it writes to git:
   relatively. A file the branch already holds with the same content is linked
   instead of copied. The repository's `.gitattributes` decides whether a file
   goes to Git LFS, as for a person's commit. The sync records where each file
-  came from, so it never uploads it to Linear again;
+  came from, so it never uploads it to Linear again. Images pass the same
+  check as in every sync: a document with an image that is not an upload of
+  the workspace (an external URL, a `data:` URI, a path), or with an upload
+  that is gone, over 10 MB, redirected or not a supported type, stays out of
+  the pull request (`image-blocked` below). The initial sync writes nothing to
+  Linear; the first sync after it (after its pull request is merged) reads
+  that document again, marks it red and comments which images to fix;
 - a link to another synchronized document's Linear URL becomes a relative
   link to that document's file;
 - state refs (under `refs/mdbisync/` by default) that tie each file to its
@@ -114,7 +120,8 @@ file keeps the tracked branch's text and stays tied to its document.
 
 | Rule | Why |
 | --- | --- |
-| `download-failed` | A file the document embeds could not be downloaded (gone, over 10 MB, or redirected elsewhere). |
+| `image-blocked` | An image or file the document embeds is one the sync blocks: not an upload of the workspace (an external URL, a `data:` URI, a path), or an upload that is gone, over 10 MB, redirected or not a supported type. The first sync afterwards marks the document and comments which images to fix. |
+| `download-failed` | A file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed next to it. The first sync afterwards reads the document again. |
 | `front-matter-boundary` | The document's text starts with something that reads as front matter, so it would not stay the file's body. |
 | `title-not-a-path` | The new file would map back to another document or another folder's team or project. |
 | `security-hook` | A security hook reported a finding in the document's text or its files. |
