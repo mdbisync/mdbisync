@@ -94,6 +94,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "run.workflow": ["command", "confirm", "direction", "event"],
   "run.workflow-parallel": ["events", "replacePending"],
   "ui.assert-dom": ["actor"],
+  "ui.follow-document-links": ["actor"],
   "ui.inspect-blocked": ["actor"],
   "ui.inspect-conflict": ["actor"],
   "ui.inspect-rendering": ["actor", "coverAllConstructs", "group", "sampleCount"],
