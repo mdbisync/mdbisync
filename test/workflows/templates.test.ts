@@ -76,7 +76,7 @@ describe('workflow templates', () => {
         assert.ok(list !== undefined, `${file}: ${step.name}: no requirements list`);
         const requirements = list.replace(/ \\\n\s*/g, ' ').split('\n');
         for (const requirement of requirements) {
-          assert.match(requirement, /^[a-z0-9-]+==\d+(?:\.\d+)+(?: ; python_version < "\d+\.\d+")?(?: --hash=sha256:[0-9a-f]{64})+$/, `${file}: ${requirement}`);
+          assert.match(requirement, /^[a-z0-9-]+==\d+(?:\.\d+)+(?: --hash=sha256:[0-9a-f]{64})+$/, `${file}: ${requirement}`);
         }
         assert.ok(requirements.some((requirement) => requirement.startsWith('pre-commit==')), `${file}: pre-commit is not in the list`);
         lists.add(list);

@@ -39,9 +39,10 @@ jobs:
               echo '::error::Install Python 3 with venv support, or provide pre-commit on PATH.'
               exit 1
             fi
-            # The patched filelock in this list needs Python 3.11 or later.
-            if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
-              echo "::error::Python 3.11 or later is required, found $(python3 -V 2>&1); install it, or provide pre-commit on PATH."
+            # The patched filelock in this list needs Python 3.11; the hashed wheels stop at 3.14.
+            if ! python3 -c 'import sys; sys.exit(not (3, 11) <= sys.version_info[:2] <= (3, 14))'; then
+              echo "Found $(python3 -V 2>&1)."
+              echo '::error::Python 3.11 to 3.14 is required; install it, or provide pre-commit on PATH.'
               exit 1
             fi
             environment=$(mktemp -d "$RUNNER_TEMP/pre-commit.XXXXXX")

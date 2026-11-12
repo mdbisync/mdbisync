@@ -3,8 +3,9 @@
 // hash-checked list from PyPI into its own virtual environment and put
 // pre-commit 4.6.2 on GITHUB_PATH; a list with a wrong hash must install
 // nothing. Requires Python 3.11 to 3.14 with venv support and access to PyPI.
-// TEMPLATE_INSTALL_PYTHON picks another interpreter; with Python 3.10 or older it
-// checks that every template refuses it with a clear error and installs nothing.
+// TEMPLATE_INSTALL_PYTHON picks another interpreter; given one outside 3.11 to 3.14
+// (Python 3.10, say), it checks that every template refuses it with a clear error
+// and installs nothing.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
@@ -47,7 +48,10 @@ try {
   }
   const version = spawnSync(join(bin, 'python3'), ['-c', 'import sys; print("%d.%d" % sys.version_info[:2])'], { encoding: 'utf8' }).stdout.trim();
   assert.match(version, /^\d+\.\d+$/, 'the selected Python does not run');
-  const older = (a: string, b: string) => a.split('.').map(Number).reduce((order, part, index) => order || part - Number(b.split('.')[index]), 0) < 0;
+  const [major, minor] = version.split('.').map(Number) as [number, number];
+  const supported = major === 3 && minor >= 11 && minor <= 14;
+  assert.ok(supported || process.env.TEMPLATE_INSTALL_PYTHON,
+    `Python ${version} is outside 3.11 to 3.14; use a supported one, or set TEMPLATE_INSTALL_PYTHON to check its refusal`);
   // A proxy, an index mirror or a CA bundle the contributor set still applies; one cache serves every run.
   const network = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
     /^(?:https?_proxy|no_proxy|all_proxy|pip_index_url|pip_extra_index_url|pip_cert|ssl_cert_file|ssl_cert_dir|requests_ca_bundle)$/i.test(name)));
@@ -65,81 +69,80 @@ try {
     return { result, added: (await readFile(githubPath, 'utf8')).trim() };
   };
 
-  if (older(version, '3.11')) {
+  if (!supported) {
     for (const file of TEMPLATES) {
       const { script } = await installStep(file);
-      const { result, added } = await run(`${file}-old-python`, script);
+      const { result, added } = await run(`${file}-unsupported`, script);
       assert.notEqual(result.status, 0, file);
-      assert.match(result.stdout, new RegExp(`^::error::Python 3\\.11 or later is required, found Python ${version.replace('.', '\\.')}\\.\\d+; `), file);
+      const found = version.replace('.', '\\.');
+      assert.match(result.stdout, new RegExp(`^Found Python ${found}\\.\\d+\\.\n::error::Python 3\\.11 to 3\\.14 is required; install it, or provide pre-commit on PATH\\.\n$`), file);
       assert.equal(added, '', file);
-      assert.deepEqual((await readdir(join(temporary, `${file}-old-python`))).filter(name => name.startsWith('pre-commit.')), [], file);
+      assert.deepEqual((await readdir(join(temporary, `${file}-unsupported`))).filter(name => name.startsWith('pre-commit.')), [], file);
       console.log(`${file}: Python ${version} is refused before anything is installed`);
     }
-    await rm(temporary, { recursive: true, force: true });
-    process.exit(0);
-  }
-
-  let installedPython = '';
-  const installs = [...TEMPLATES.map(file => ({ file, job: undefined as string | undefined })),
-    { file: 'ci.yml', job: 'validate' }, { file: 'ci.yml', job: 'test' }, { file: 'release.yml', job: 'build' }];
-  for (const { file, job } of installs) {
-    const { script, pins } = await installStep(file, job);
-    const { result, added } = await run(`${file}-${job ?? 'template'}`, script);
-    assert.equal(result.status, 0, `${file}\n${result.stdout}${result.stderr}`);
-    const preCommit = join(added, 'pre-commit');
-    const shown = spawnSync(preCommit, ['--version'], { encoding: 'utf8' });
-    assert.equal(shown.stdout, 'pre-commit 4.6.2\n', `${file}: ${shown.stderr}`);
-    const python = join(dirname(await readlink(preCommit)), 'python');
-    installedPython = python;
-    const listed = spawnSync(python, ['-m', 'pip', 'list', '--format=freeze', '--disable-pip-version-check', '--exclude', 'pip', '--exclude', 'setuptools'], { encoding: 'utf8' });
-    const installed = listed.stdout.trim().split('\n').map((line) => line.toLowerCase().replace(/_/g, '-')).sort();
-    const expected = [...pins].sort();
-    assert.deepEqual(installed, expected, `${file}: the environment holds other packages than the list`);
-    console.log(`${file}: installed ${installed.length} hash-checked packages on Python ${version}`);
-  }
-
-  // Every supported interpreter and platform finds a listed wheel for each package, with a matching hash.
-  const { list } = await installStep('mdbisync.yml');
-  const requirements = join(temporary, 'requirements.txt');
-  await writeFile(requirements, `${list}\n`);
-  const platforms = ['manylinux2014_x86_64', 'manylinux2014_aarch64', 'musllinux_1_2_x86_64', 'musllinux_1_2_aarch64', 'macosx_10_13_x86_64', 'macosx_11_0_arm64'];
-  for (const target of ['3.11', '3.12', '3.13', '3.14', '3.14t']) {
-    const pythonVersion = target.replace('t', '');
-    const abi = `cp${pythonVersion.replace('.', '')}${target.endsWith('t') ? 't' : ''}`;
-    for (const platform of platforms) {
-      const directory = join(temporary, 'downloads', `${abi}-${platform}`);
-      const result = spawnSync(installedPython, ['-m', 'pip', 'download', '--disable-pip-version-check', '--quiet', '--dest', directory,
-        '--python-version', pythonVersion, '--implementation', 'cp', '--abi', abi, '--platform', platform,
-        '--only-binary', ':all:', '--require-hashes', '-r', requirements], { env: { ...process.env, ...network, PIP_CACHE_DIR: cache }, encoding: 'utf8' });
-      assert.equal(result.status, 0, `${abi} ${platform}\n${result.stdout}${result.stderr}`);
+  } else {
+    let installedPython = '';
+    const installs = [...TEMPLATES.map(file => ({ file, job: undefined as string | undefined })),
+      { file: 'ci.yml', job: 'validate' }, { file: 'ci.yml', job: 'test' }, { file: 'release.yml', job: 'build' }];
+    for (const { file, job } of installs) {
+      const { script, pins } = await installStep(file, job);
+      const { result, added } = await run(`${file}-${job ?? 'template'}`, script);
+      assert.equal(result.status, 0, `${file}\n${result.stdout}${result.stderr}`);
+      const preCommit = join(added, 'pre-commit');
+      const shown = spawnSync(preCommit, ['--version'], { encoding: 'utf8' });
+      assert.equal(shown.stdout, 'pre-commit 4.6.2\n', `${file}: ${shown.stderr}`);
+      const python = join(dirname(await readlink(preCommit)), 'python');
+      installedPython = python;
+      const listed = spawnSync(python, ['-m', 'pip', 'list', '--format=freeze', '--disable-pip-version-check', '--exclude', 'pip', '--exclude', 'setuptools'], { encoding: 'utf8' });
+      const installed = listed.stdout.trim().split('\n').map((line) => line.toLowerCase().replace(/_/g, '-')).sort();
+      const expected = [...pins].sort();
+      assert.deepEqual(installed, expected, `${file}: the environment holds other packages than the list`);
+      console.log(`${file}: installed ${installed.length} hash-checked packages on Python ${version}`);
     }
-  }
-  console.log(`requirements list: hash-checked wheels found for Python 3.11 to 3.14 and 3.14t on ${platforms.length} platforms`);
 
-  // One wrong hash: pip refuses the file, and the step adds nothing to PATH.
-  const { script } = await installStep('pre-commit.yml');
-  const tampered = script.replace(/^(pre-commit==\S+ --hash=sha256:)[0-9a-f]{64}$/m, `$1${'0'.repeat(64)}`);
-  assert.notEqual(tampered, script);
-  const { result, added } = await run('tampered', tampered);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /THESE PACKAGES DO NOT MATCH THE HASHES/);
-  assert.match(result.stdout, /::error::Could not install pre-commit 4\.6\.2 from its pinned hashes/);
-  assert.equal(added, '');
-  console.log('pre-commit.yml: a wrong hash installs nothing');
+    // Every supported interpreter and platform finds a listed wheel for each package, with a matching hash.
+    const { list } = await installStep('mdbisync.yml');
+    const requirements = join(temporary, 'requirements.txt');
+    await writeFile(requirements, `${list}\n`);
+    const platforms = ['manylinux2014_x86_64', 'manylinux2014_aarch64', 'musllinux_1_2_x86_64', 'musllinux_1_2_aarch64', 'macosx_10_13_x86_64', 'macosx_11_0_arm64'];
+    for (const target of ['3.11', '3.12', '3.13', '3.14', '3.14t']) {
+      const pythonVersion = target.replace('t', '');
+      const abi = `cp${pythonVersion.replace('.', '')}${target.endsWith('t') ? 't' : ''}`;
+      for (const platform of platforms) {
+        const directory = join(temporary, 'downloads', `${abi}-${platform}`);
+        const result = spawnSync(installedPython, ['-m', 'pip', 'download', '--disable-pip-version-check', '--quiet', '--dest', directory,
+          '--python-version', pythonVersion, '--implementation', 'cp', '--abi', abi, '--platform', platform,
+          '--only-binary', ':all:', '--require-hashes', '-r', requirements], { env: { ...process.env, ...network, PIP_CACHE_DIR: cache }, encoding: 'utf8' });
+        assert.equal(result.status, 0, `${abi} ${platform}\n${result.stdout}${result.stderr}`);
+      }
+    }
+    console.log(`requirements list: hash-checked wheels found for Python 3.11 to 3.14 and 3.14t on ${platforms.length} platforms`);
 
-  // The repository steps must also fail closed when their shared file is tampered with.
-  const tamperedRoot = join(temporary, 'tampered-repository');
-  await mkdir(join(tamperedRoot, '.github/requirements'), { recursive: true });
-  const repositoryList = (await readFile(join(root, '.github/requirements/pre-commit.txt'), 'utf8'))
-    .replace(/^(pre-commit==\S+ --hash=sha256:)[0-9a-f]{64}$/m, `$1${'0'.repeat(64)}`);
-  await writeFile(join(tamperedRoot, '.github/requirements/pre-commit.txt'), repositoryList);
-  for (const { file, job } of installs.filter(install => install.job)) {
-    const { script } = await installStep(file, job);
-    const { result, added } = await run(`tampered-${file}-${job}`, script, tamperedRoot);
+    // One wrong hash: pip refuses the file, and the step adds nothing to PATH.
+    const { script } = await installStep('pre-commit.yml');
+    const tampered = script.replace(/^(pre-commit==\S+ --hash=sha256:)[0-9a-f]{64}$/m, `$1${'0'.repeat(64)}`);
+    assert.notEqual(tampered, script);
+    const { result, added } = await run('tampered', tampered);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /THESE PACKAGES DO NOT MATCH THE HASHES/);
+    assert.match(result.stdout, /::error::Could not install pre-commit 4\.6\.2 from its pinned hashes/);
     assert.equal(added, '');
-    console.log(`${file} ${job}: a wrong hash installs nothing`);
+    console.log('pre-commit.yml: a wrong hash installs nothing');
+
+    // The repository steps must also fail closed when their shared file is tampered with.
+    const tamperedRoot = join(temporary, 'tampered-repository');
+    await mkdir(join(tamperedRoot, '.github/requirements'), { recursive: true });
+    const repositoryList = (await readFile(join(root, '.github/requirements/pre-commit.txt'), 'utf8'))
+      .replace(/^(pre-commit==\S+ --hash=sha256:)[0-9a-f]{64}$/m, `$1${'0'.repeat(64)}`);
+    await writeFile(join(tamperedRoot, '.github/requirements/pre-commit.txt'), repositoryList);
+    for (const { file, job } of installs.filter(install => install.job)) {
+      const { script } = await installStep(file, job);
+      const { result, added } = await run(`tampered-${file}-${job}`, script, tamperedRoot);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /THESE PACKAGES DO NOT MATCH THE HASHES/);
+      assert.equal(added, '');
+      console.log(`${file} ${job}: a wrong hash installs nothing`);
+    }
   }
 } finally {
   await rm(temporary, { recursive: true, force: true });
