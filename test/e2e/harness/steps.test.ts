@@ -2205,8 +2205,8 @@ describe('git executors', () => {
     for (const path of [target, source]) ids[path] = { id: linear.add({ projectId }, path.slice(folder.length + 1).replace(/\.md$/, ''), '').id };
     await writeIds(ctx, ids);
     const base = (ctx.live as LiveWorld).documentUrlBase;
-    const link = new RegExp(`\\]\\(<${basename(target).replace(/\./g, '\\.')}(#[^>]*)?>\\)`, 'g');
-    const kept = (text: string) => text.replace(link, (_link, anchor: string | undefined) => `](<${base}/${ids[target]?.id}${anchor ?? ''}>)`).replace(/\n+$/, '');
+    // The index's links to the notes, `<route-notes.md>` and `<route-notes.md#…>`, become links to the notes' document.
+    const kept = (text: string) => text.replaceAll(`](<${basename(target)}`, `](<${base}/${ids[target]?.id}`).replace(/\n+$/, '');
     for (const path of [target, source]) await linear.updateDocument(ids[path]?.id as string, { content: kept(files[path] as string) });
     assert.ok((linear.documents.get(ids[source]?.id as string)?.content ?? '').includes(`(<${base}/${ids[target]?.id}#${LINK_PAIR.anchor}>)`));
     const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
