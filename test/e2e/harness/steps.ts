@@ -270,6 +270,9 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
   await watchRun(ctx, { throughProxy: true }, async () => settleResult(ctx, await runEngine(call)));
 }
 
+/** The observation prefix of a watched run's refs before and after it: run → ref → SHA. */
+export const RUN_REFS = 'harness.refs.';
+
 /**
  * Runs one engine invocation and snapshots the world around it as the
  * scenario's assertions need: in a scenario that asserts quiet, before and
@@ -294,6 +297,8 @@ export async function watchRun(ctx: RunContext, options: { throughProxy: boolean
     const after = await snapshotWorld(ctx, options);
     ctx.observations.set(`harness.quiet.${n}`, quietFailures({ exitCode: result.exitCode, report: result.report, before, after, documentWrites: writesBetween(ctx, before, after) }));
     ctx.observations.set(`harness.untouched.${n}`, untouchedFailures({ before, after, linearMutations: mutationsBetween(ctx, before, after) }));
+    // The raw maps behind that comparison, kept for the run's evidence (`run-refs.json`).
+    ctx.observations.set(`${RUN_REFS}${n}`, { before: before.refs, after: after.refs });
   }
   if (views) await recordRunView(ctx, n);
 }

@@ -5,9 +5,12 @@
 import { collectCanaryEvidence } from './checks.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts';
-import { Git, readIds } from '../../../src/state/index.ts';
+import { parse, visit } from '../../../src/format/markdown.ts';
+import { contentTypeOf, destinations, resolveTarget } from '../../../src/initial-sync/uploads.ts';
+import { isRegularFile, MARKDOWN_EXTENSION } from '../../../src/mapping/index.ts';
+import { Git, lfsReader, listTree, parseLfsPointer, readBlobs, readIds, type LfsRead } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
@@ -29,7 +32,7 @@ import { finishPersonClone } from './person-git.ts';
 import { assertCurrentCorpus } from './corpus-drift.ts';
 import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
 import { levelOf, type Scenario } from './spec.ts';
-import { requiredActionSha, runStep, settleFollowUpRuns } from './steps.ts';
+import { requiredActionSha, RUN_REFS, runStep, settleFollowUpRuns } from './steps.ts';
 import { openSetupConflict, prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES, type FixtureTools } from './fixtures.ts';
 import { projectFolders } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
@@ -392,7 +395,7 @@ export async function setupState(ctx: RunContext, live: LiveWorld, tools: Fixtur
 /** The scenario's own edits and runs start here: setup's edits and runs are not the scenario's. */
 async function endSetup(ctx: RunContext, live: LiveWorld): Promise<void> {
   ctx.engine.setupRuns = ctx.engine.results.length;
-  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.|harness\.untouched\.|harness\.runView\.)/.test(key)) ctx.observations.delete(key);
+  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.|harness\.untouched\.|harness\.refs\.|harness\.runView\.)/.test(key)) ctx.observations.delete(key);
   await recordStart(ctx, live);
 }
 
@@ -419,6 +422,7 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
   const folders = annotatedFolders(readmes);
   const synced = new Set(live.manifest.files.filter((file) => file.synced && file.class !== 'lint-error').map((file) => file.path));
   const seededPaths = new Map<string, string>();
+  const images = trackedImageUploads(ctx, live);
   for (const [target, source] of live.tree.paths) {
     if (!synced.has(source) || !target.endsWith('.md')) continue;
     const folder = owningFolder(target, folders);
@@ -429,13 +433,83 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
     const team = folder.team === null ? undefined : live.teams.get(folder.team);
     const place = project !== undefined ? { projectId: project.id } : team !== undefined ? { teamId: team.id } : null;
     if (place === null) continue;
-    const document = await live.editors['editor-a'].createDocument(place, { id: randomUUID(), title: titleOf(target, folder.folder), content: bodyOf(texts.get(target) ?? '') });
+    const content = await uploadImages(target, bodyOf(texts.get(target) ?? ''), images);
+    const document = await live.editors['editor-a'].createDocument(place, { id: randomUUID(), title: titleOf(target, folder.folder), content });
     live.seededDocuments.push(document.id);
     seededPaths.set(target, document.id);
   }
   ctx.observations.set('setup.seededPaths', seededPaths);
   for (const fixture of ctx.scenario.setup.fixtures) await FIXTURE_PREPARATION[fixture]?.(ctx, live);
   ctx.observations.set('setup.seeded', [...live.seededDocuments]);
+}
+
+/** Uploads a tracked file once, by its path, and gives its upload URL; null for a path that is not a tracked file. */
+type ImageUploads = (path: string) => Promise<string | null>;
+
+/**
+ * A synchronized document in Linear holds its images as uploads of the
+ * workspace, as a pasted image or the sync's own write makes them; a relative
+ * path there is an image Linear cannot show, and the capture blocks the
+ * document. The seeded documents therefore embed each tracked image as an
+ * upload of the tracked file's own bytes, so the initial sync from Linear
+ * maps it back to that file. The tracked tree is read on the first image.
+ */
+function trackedImageUploads(ctx: RunContext, live: LiveWorld): ImageUploads {
+  let tracked: Promise<{ git: Git; files: Map<string, string> }> | undefined;
+  const read = async () => {
+    const git = await ctx.person();
+    const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
+    // Files as the initial sync sees them: regular files that are not documents.
+    const files = new Map((await listTree(git, tip)).filter((entry) => isRegularFile(entry) && !entry.path.endsWith(MARKDOWN_EXTENSION)).map((entry) => [entry.path, entry.oid]));
+    return { git, files };
+  };
+  const urls = new Map<string, Promise<string>>();
+  let readLfs: LfsRead | undefined;
+  const upload = async (git: Git, path: string, oid: string): Promise<string> => {
+    const blob = (await readBlobs(git, [oid])).get(oid) as Buffer;
+    const pointer = parseLfsPointer(blob);
+    let bytes = blob;
+    if (pointer !== null) {
+      readLfs ??= await lfsReader(git, 'origin');
+      const lfs = await readLfs(pointer, path);
+      if (!lfs.ok) throw new EnvBlockedError(`the seeded image ${path} cannot be read from LFS: ${lfs.reason}`);
+      bytes = lfs.content;
+    }
+    const uploaded = await live.editors['editor-a'].uploadFile({ filename: posix.basename(path), contentType: contentTypeOf(path), bytes: new Uint8Array(bytes) });
+    return uploaded.assetUrl;
+  };
+  return async (path) => {
+    tracked ??= read();
+    const { git, files } = await tracked;
+    const oid = files.get(path);
+    if (oid === undefined) return null;
+    if (!urls.has(path)) urls.set(path, upload(git, path, oid));
+    return urls.get(path) as Promise<string>;
+  };
+}
+
+/**
+ * `body` with each image that names a tracked file pointing at that file's
+ * upload instead: inline images, and the definitions reference-style images
+ * use. Links stay as they are; only images must be uploads.
+ */
+async function uploadImages(documentPath: string, body: string, images: ImageUploads): Promise<string> {
+  const referenced = new Set<string>();
+  visit(parse(body), (node) => {
+    if (node.type === 'imageReference') referenced.add(node.identifier);
+  });
+  let result = '';
+  let at = 0;
+  for (const { node, range } of destinations(body)) {
+    if (node.type !== 'image' && !(node.type === 'definition' && referenced.has(node.identifier))) continue;
+    const target = resolveTarget(documentPath, node.url);
+    const url = target === null ? null : await images(target);
+    if (url === null) continue;
+    const cut = node.url.search(/[?#]/);
+    result += `${body.slice(at, range.from)}${url}${cut === -1 ? '' : node.url.slice(cut)}`;
+    at = range.to;
+  }
+  return result + body.slice(at);
 }
 
 /** A 1×1 PNG, for an image that exists only in Linear. */
@@ -958,9 +1032,20 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   finishPersonClone(runDir, outcome.result, log);
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   writeFileSync(join(runDir, 'harness.log'), logLines.join('\n'));
+  writeRunRefs(ctx, runDir);
   rmSync(join(runDir, 'canary-pending'), { force: true });
   const result = resultOf(ctx, outcome, { startedAt: started, budgetWaitMs: grant?.waitedMs ?? 0, checks, cleanup: cleanupOutcome });
   return grant?.owner !== undefined && !released ? { ...result, sharedReservationKept: true } : result;
+}
+
+/**
+ * The run's refs before and after each watched run, by the scenario's run
+ * index: the raw maps that `untouched.<n>` and `quiet.<n>` compare, so the
+ * run's evidence keeps what was compared and not only the outcome.
+ */
+export function writeRunRefs(ctx: RunContext, runDir: string): void {
+  const runs = Object.fromEntries([...ctx.observations].filter(([key]) => key.startsWith(RUN_REFS)).map(([key, value]) => [key.slice(RUN_REFS.length), value]));
+  if (Object.keys(runs).length > 0) writeFileSync(join(runDir, 'run-refs.json'), `${JSON.stringify(runs, null, 2)}\n`);
 }
 
 /** A check that does not hold fails the scenario as a product error; the outcomes stay in the result either way. */
