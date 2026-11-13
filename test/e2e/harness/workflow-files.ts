@@ -48,6 +48,9 @@ export const SANDBOX_NAMES: Readonly<Record<string, string>> = {
 
 export const SANDBOX_RUNNER = ['self-hosted', 'mdbisync-sandbox'];
 
+/** The sandbox's secret that holds the security canary's hook key. */
+export const CANARY_SECRET = 'CANARY_HOOK_KEY';
+
 const REPORT_DIR = '${{ runner.temp }}/mdbisync-report';
 
 export interface RunWorkflowOptions {
@@ -308,7 +311,7 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
     const hooks = steps.items.find(item => (item as YAMLMap).get('name') === CANARY_HOOK_STEP) as YAMLMap | undefined;
     if (hooks === undefined) throw new Error('Security canary needs a separate hooks step');
     hooks.setIn(['env', CANARY_ENABLED], '1');
-    hooks.setIn(['env', CANARY_KEY], '${{ secrets.CANARY_HOOK_KEY }}');
+    hooks.setIn(['env', CANARY_KEY], `\${{ secrets.${CANARY_SECRET} }}`);
     const stage = steps.items.findIndex(isAction);
     (steps.items[stage] as YAMLMap).setIn(['env', 'NODE_OPTIONS'], `--import \"\${{ github.workspace }}/${CANARY_TOKEN_OBSERVER_FILE}\"`);
     steps.items.splice(stage, 0, doc.createNode({

@@ -36,6 +36,8 @@ export interface LiveWorld {
   githubTokenSource: 'app' | 'host';
   /** The bot login of the App the harness and the workflows authenticate as (`<slug>[bot]`); App tokens only. */
   githubAppLogin?: string;
+  /** The client id of that App, which the workflows' App token steps must name; App tokens only. */
+  githubAppClientId?: string;
   /** owner/name of the sandbox. */
   repository: string;
   manifest: Manifest;

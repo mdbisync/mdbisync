@@ -19,7 +19,7 @@
 import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { withAppRequests } from './app-reads.ts';
-import { snapshotRefs } from './checks.ts';
+import { recordRefs } from './checks.ts';
 import { runChecks } from './checks.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { startFaultProxy } from './fault-proxy.ts';
@@ -221,8 +221,6 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
 
   ctx.log(`taken up for the UI session's answers at step ${held.stepIndex + 1}`);
   const step = deps.runStep ?? runStep;
-  const history = (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined) ?? [];
-  ctx.observations.set('refHistory', history);
   let error: unknown;
   let checks: CheckOutcome[] = [];
   let waitingAt: number | undefined;
@@ -244,7 +242,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
       ctx.log(`step ${current.kind}.${current.action}`);
       ran.push(`${current.kind}.${current.action}`);
       await step(ctx, current);
-      history.push(await snapshotRefs(ctx));
+      await recordRefs(ctx);
     }
     if (waitingAt === undefined) {
       checks = await runChecks(ctx);
