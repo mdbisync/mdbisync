@@ -20,6 +20,7 @@ import { appendParagraph, editBlock, editParagraph, noteSentence, scanMarkers, o
 import type { LiveWorld, RunContext } from './context.ts';
 import { pullTracked } from './person-git.ts';
 import { CHECK_MARKER } from '../../corpus/check-workflow.ts';
+import { recordPendingHead } from './check-fault.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { commitAsPerson, documentId, documentPaths, projectFolders, targetPath } from './step-helpers.ts';
 import type { Step } from './spec.ts';
@@ -195,7 +196,8 @@ export const SETUP_FIXTURES: Record<string, SetupFixture> = {
   'pending-check': {
     async beforeSync(ctx) {
       // The check workflow keeps a head with this marker pending; `fault.checks` with `passed` removes it.
-      await commitAsPerson(ctx, new Map([[CHECK_MARKER, 'pending\n']]), 'Hold the pull request check', true);
+      // The push to the tracked branch starts a sleeping job too, which that fault cancels first.
+      recordPendingHead(ctx, await commitAsPerson(ctx, new Map([[CHECK_MARKER, 'pending\n']]), 'Hold the pull request check', true));
     },
   },
   'custom-icon-color': {
