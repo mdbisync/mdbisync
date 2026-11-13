@@ -2,7 +2,8 @@
 // run recover from, and how many. Only a GitHub server error (HTTP 5xx) in
 // the sync pull request step qualifies: the engine ends that run incomplete
 // on purpose and the next run repeats the step. Every other failure stops the
-// soak, as does a bound used up (`soak` in load.ts).
+// soak, as does a bound used up (`soak` in load.ts). `run.settle` runs again
+// after the same failure, within its own bound (`settleServerError`).
 
 import type { EngineResult } from './engine.ts';
 import { observedTokens } from './soak-report.ts';
@@ -62,7 +63,19 @@ export function recoverableServerError(result: EngineResult): ServerErrorVerdict
     return { refused: `the run did not end on its own failure (conclusion ${String(result.conclusion)})` };
   }
   if (!result.stdout.includes(ENGINE_LINE)) return { refused: 'the logs lack the sync step\'s own GitHub failure' };
-  const report = result.report;
+  const verdict = serverErrorInReport(result.report);
+  if ('refused' in verdict) return verdict;
+  const tokens = observedTokens([result]);
+  if (tokens.outstanding !== 0) return { refused: 'the run\'s token revocation is unconfirmed' };
+  return { recoverable: { ...verdict.recoverable, workflowRunId: result.remote.runId } };
+}
+
+/**
+ * Whether an engine report shows a sync run that failed only on a GitHub server error (HTTP 5xx) in the sync pull
+ * request step: the report says so and holds no suspended lane, and nothing else in it failed or stopped. It
+ * judges the report alone; `recoverableServerError` adds what a workflow run must show around it.
+ */
+export function serverErrorInReport(report: Readonly<Record<string, unknown>> | null): ServerErrorVerdict {
   if (report === null) return { refused: 'the run left no engine report' };
   if (report.operation !== 'sync' || report.code !== 'github-failed' || report.exitStatus !== 'failure') {
     return { refused: `the run ended with code ${String(report.code)}, not a GitHub failure of the sync pull request` };
@@ -88,16 +101,24 @@ export function recoverableServerError(result: EngineResult): ServerErrorVerdict
   if (sync !== undefined && (sync.complete !== true || !empty(sync.failed) || !empty(sync.notAttempted) || (sync.stopped !== null && sync.stopped !== undefined))) {
     return { refused: 'the write to Linear did not complete' };
   }
-  const tokens = observedTokens([result]);
-  if (tokens.outstanding !== 0) return { refused: 'the run\'s token revocation is unconfirmed' };
   const number = record(pullRequest.pullRequest)?.number;
-  return {
-    recoverable: {
-      status,
-      workflowRunId: result.remote.runId,
-      ...(typeof number === 'number' ? { pullRequest: number } : {}),
-    },
-  };
+  return { recoverable: { status, ...(typeof number === 'number' ? { pullRequest: number } : {}) } };
+}
+
+/**
+ * Whether a settle run failed only on a GitHub server error in the sync pull request step. A workflow run must show
+ * what the soak asks of it (`recoverableServerError`: its own failure, the engine's line, tokens confirmed revoked);
+ * a local run must have ended on its own failure (not killed or timed out) with a report that shows nothing else
+ * failed (`serverErrorInReport`). The run stays a failed run among the scenario's results; this only lets the settle
+ * run again.
+ */
+export function settleServerError(result: EngineResult): ServerErrorVerdict {
+  if (result.remote !== undefined) return recoverableServerError(result);
+  if (result.exitCode === 0) return { refused: 'the run succeeded' };
+  if (result.timedOut || result.signal !== null || result.exitCode === null) {
+    return { refused: `the run did not end on its own failure (exit ${String(result.exitCode)}, signal ${String(result.signal)})` };
+  }
+  return serverErrorInReport(result.report);
 }
 
 /**
