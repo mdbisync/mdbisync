@@ -57,6 +57,8 @@ export interface EngineCall {
 export interface EngineResult {
   /** Present for Actions runs, including failed runs with no diagnostics. */
   remote?: RemoteRequests;
+  /** An Actions run's conclusion (`success`, `failure`, `cancelled`, `timed_out`, …). */
+  conclusion?: string | null;
   command: CommandName;
   exitCode: number | null;
   signal: NodeJS.Signals | null;

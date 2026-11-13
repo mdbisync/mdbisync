@@ -53,7 +53,7 @@ export async function assertWritesMatchWorld(
     const moved = (await remoteRef(fixture, ref)) !== mark.refs[role as keyof typeof REFS];
     assert.equal((writes.git[role as keyof typeof REFS] ?? 0) > 0, moved, `reported ${role} moves (${writes.git[role as keyof typeof REFS] ?? 0}) against the remote (${moved ? 'moved' : 'unchanged'})`);
   }
-  if (options.faults || world.linear.writes.reject !== undefined || world.linear.writes.rateLimitAt !== undefined || world.github.reset !== undefined) return;
+  if (options.faults || world.linear.writes.reject !== undefined || world.linear.writes.rateLimitAt !== undefined || world.github.reset !== undefined || world.github.serverError !== undefined) return;
   const seen = world.writes.slice(mark.writes);
   const linear = { ...writes.linear };
   delete linear['FileUpload'];
