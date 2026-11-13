@@ -97,7 +97,7 @@ class SharedLinear {
         .filter((document) => filter.id === undefined || filter.id.in.includes(document.id))
         .map((document) => {
           const bodies = (!document.trashed && document.archivedAt === null) || archivedComments ? (this.comments.get(document.id) ?? []) : [];
-          return { id: document.id, project: document.projectId === null ? null : { id: document.projectId }, comments: { nodes: bodies.map((body) => ({ body })) } };
+          return { id: document.id, title: document.title, trashed: document.trashed, archivedAt: document.archivedAt, team: document.teamId === null ? null : { id: document.teamId }, project: document.projectId === null ? null : { id: document.projectId }, comments: { nodes: bodies.map((body) => ({ body })) } };
         });
       return { documents: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } as T;
     }

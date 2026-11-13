@@ -119,8 +119,9 @@ export function heldRunOf(ctx: RunContext, extra: Pick<HeldRun, 'stepIndex' | 'a
     ownCommits: ctx.ownCommits,
     sequence: ctx.sequence,
     uiSteps: ctx.uiSteps,
-    // Remote texts read for the canary scan are read again after the take-up: steps run then may add to them.
-    observations: new Map([...ctx.observations].filter(([key]) => key !== 'canary.remoteTexts')),
+    // Remote texts read for the canary scan, and the documents they came from, are read again after the
+    // take-up: steps run then may add to them.
+    observations: new Map([...ctx.observations].filter(([key]) => key !== 'canary.remoteTexts' && key !== 'canary.documents')),
     proxyRequests: [...(ctx.proxy?.requests ?? [])],
     live: {
       githubTokenSource: live.githubTokenSource,

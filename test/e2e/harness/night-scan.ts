@@ -1,9 +1,12 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
+import type { ScannedDocument } from './checks.ts';
 
 export interface CanaryEvidence {
   canaries: string[];
   texts: Record<string, string>;
+  /** The document behind each `comments on <id>` text, keyed by id; never comment text. */
+  documents?: Record<string, ScannedDocument>;
   /** A failed remote read must never turn into a clean scan. */
   error?: string;
 }

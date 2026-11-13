@@ -11,7 +11,7 @@ it('includes comments beyond the first page in the canary evidence', async () =>
       assert.match(query, /comments\([^)]*includeArchived: true/, `${operation} asks for archived comments`);
       if (operation === 'RunComments') assert.match(query, /documents\([^)]*includeArchived: true/, 'RunComments asks for archived documents');
       if (operation === 'RunComments') return { documents: {
-        nodes: [{ id: 'doc', project: null, comments: { nodes: [{ body: 'clean' }], pageInfo: { hasNextPage: true, endCursor: 'next' } } }],
+        nodes: [{ id: 'doc', title: 'README', trashed: false, archivedAt: null, team: { id: 'team' }, project: null, comments: { nodes: [{ body: 'clean' }], pageInfo: { hasNextPage: true, endCursor: 'next' } } }],
         pageInfo: { hasNextPage: false, endCursor: null },
       } };
       return { document: { comments: { nodes: [{ body: 'kx-last-comment' }], pageInfo: { hasNextPage: false, endCursor: null } } } };

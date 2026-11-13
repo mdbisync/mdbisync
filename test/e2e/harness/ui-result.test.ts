@@ -284,7 +284,9 @@ describe('held run file', () => {
     assert.equal(decodeHeldRun(text).observations.get('target.path'), 'eng/guide.md');
     assert.doesNotMatch(text, /not-a-token|secret/);
     ctx.observations.set('canary.remoteTexts', { 'pull request #1': 'text' });
+    ctx.observations.set('canary.documents', { 'doc-1': { title: 'README', teamId: 'team-eng', projectId: null, trashed: false, archived: false, reason: 'ownership record' } });
     assert.equal(heldRunOf(ctx, extra).observations.has('canary.remoteTexts'), false, 'remote texts are read again after the take-up');
+    assert.equal(heldRunOf(ctx, extra).observations.has('canary.documents'), false, 'their documents are read again with them');
     ctx.observations.set('tokens.seen', ['bearer']);
     assert.throws(() => heldRunOf(ctx, extra), /credentials \(tokens\.seen\)/);
   });
