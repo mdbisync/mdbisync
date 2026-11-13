@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { EngineResult } from './engine.ts';
 import type { LogEntry } from '../../../src/linear/index.ts';
-import { describeServerError, failedWorkflow, pullRequestStepClean, recoverableServerError, soakServerErrorPolicy, STRICT_SERVER_ERRORS } from './soak-recovery.ts';
+import { describeServerError, failedWorkflow, pullRequestStepClean, recoverableServerError, settleServerError, soakServerErrorPolicy, STRICT_SERVER_ERRORS } from './soak-recovery.ts';
 import { ProductError } from './results.ts';
 
 const entry = (operation: string, extra: Partial<LogEntry> = {}): LogEntry => ({
@@ -146,5 +146,31 @@ describe('soak recovery from GitHub server errors', () => {
       assert.throws(() => soakServerErrorPolicy({ serverErrorTicks: bad, serverErrorTotal: 3 }), /serverErrorTicks must be a nonnegative whole number/);
       assert.throws(() => soakServerErrorPolicy({ serverErrorTicks: 2, serverErrorTotal: bad }), /serverErrorTotal must be a nonnegative whole number/);
     }
+  });
+});
+
+describe('settle runs after GitHub server errors', () => {
+  it('lets a settle run again after a local or workflow run that failed only on a server error in the sync pull request step', () => {
+    const { remote: _remote, conclusion: _conclusion, ...local } = run({ stdout: '' });
+    assert.deepEqual(settleServerError(local), { recoverable: { status: 500, pullRequest: 328 } });
+    assert.deepEqual(settleServerError(run()), { recoverable: { status: 500, workflowRunId: 43, pullRequest: 328 } });
+    assert.deepEqual(settleServerError({ ...local, report: report({ pullRequest: { status: 502, pullRequest: { number: 412, opened: false } } }) }), { recoverable: { status: 502, pullRequest: 412 } });
+  });
+
+  it('asks of a workflow run what the soak asks: the engine\'s own line and every token confirmed revoked', () => {
+    assert.deepEqual(settleServerError(run({ stdout: '' })), { refused: 'the logs lack the sync step\'s own GitHub failure' });
+    assert.deepEqual(settleServerError(run({ remote: { runId: 43, runAttempt: 1, linearEngine: true, requests: [entry('oauth.token')] } })), { refused: 'the run\'s token revocation is unconfirmed' });
+  });
+
+  it('refuses a run that succeeded, was killed, timed out or cancelled, and a report with any other failure', () => {
+    assert.deepEqual(settleServerError(run({ exitCode: 0 })), { refused: 'the run succeeded' });
+    for (const changes of [{ timedOut: true }, { signal: 'SIGTERM' as const }, { exitCode: null }, { conclusion: 'cancelled' }, { conclusion: 'timed_out' }]) {
+      assert.ok('refused' in settleServerError(run(changes)), JSON.stringify(changes));
+    }
+    for (const changes of [{ pullRequest: { status: 422 } }, { pullRequest: { status: undefined } }, { code: 'merge-blocked' }, { stop: { reason: 'rate-limited' } },
+      { sync: { complete: true, failed: ['b.md'], notAttempted: [], stopped: null } }, { pullRequest: { suspended: { paths: ['x.md'], checks: [] } } }]) {
+      assert.ok('refused' in settleServerError(run({}, changes)), JSON.stringify(changes));
+    }
+    assert.deepEqual(settleServerError(run({ report: null })), { refused: 'the run left no engine report' });
   });
 });
