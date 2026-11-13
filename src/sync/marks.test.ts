@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { LinearError, type LinearDocument, type DocumentPatch } from '../linear/index.ts';
 import type { IdEntry } from '../state/index.ts';
 import { MARKERS } from '../merge/index.ts';
-import { CONFLICT_COMMENT, MARKS, reconcileDocumentMark, type MarkClient } from './marks.ts';
+import { CONFLICT_COMMENT, MARKS, noConflictNotices, reconcileDocumentMark, type MarkClient } from './marks.ts';
 
 const conflicted = `${MARKERS.git}\n\nfirst\n\n${MARKERS.linear}\n\nsecond\n\n${MARKERS.end}\n`;
 
@@ -426,3 +426,38 @@ for (const missing of [false, true]) {
     }
   });
 }
+
+test('a mark reports the conflict notice it set or resolved, and never a blocked notice', async () => {
+  const world = new World();
+  const notices = noConflictNotices();
+  const reconcile = (blocked?: readonly { hook: string; line: number }[]) => reconcileDocumentMark({
+    document: structuredClone(world.document), entry: structuredClone(world.entry), linear: world,
+    persistEntry: (entry) => world.save(entry), onConflictNotice: (change) => notices[change].push('notes.md'),
+    ...(blocked ? { blocked } : {}),
+  });
+  // The conflict notice is posted once; the next run finds it posted and reports nothing.
+  await reconcile();
+  await reconcile();
+  assert.deepEqual(notices, { set: ['notes.md'], resolved: [] });
+  // A blocked finding replaces it: the conflict notice is resolved, the blocked notice is not a conflict notice.
+  await reconcile([{ hook: 'secret-scan', line: 3 }]);
+  assert.deepEqual(notices, { set: ['notes.md'], resolved: ['notes.md'] });
+  // Cleared from blocked: a blocked notice's resolution is not counted either.
+  world.document.content = 'Resolved text.\n';
+  assert.equal((await reconcile()).state, 'clear');
+  assert.deepEqual(notices, { set: ['notes.md'], resolved: ['notes.md'] });
+});
+
+test('a conflict notice posted before a failed save is still reported: its requests were made', async () => {
+  const world = new World();
+  const notices: string[] = [];
+  let saves = 0;
+  await assert.rejects(reconcileDocumentMark({
+    document: structuredClone(world.document), entry: structuredClone(world.entry), linear: world,
+    // The save before the mark succeeds; the save of the posted receipt fails (a lost lease).
+    persistEntry: async (entry) => { saves += 1; if (saves > 1) throw new Error('lease lost'); await world.save(entry); },
+    onConflictNotice: (change) => notices.push(change),
+  }), /lease lost/);
+  assert.equal(world.comments.size, 1);
+  assert.deepEqual(notices, ['set']);
+});
