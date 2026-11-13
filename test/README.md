@@ -377,7 +377,10 @@ skipped, so nothing runs on its own and the dispatched run ends at once.
 Before it writes anything the check registers itself on the host, with an
 empty ownership record, and takes an exclusive shared reservation, so no
 scenario run uses the repository meanwhile; it is refused (exit 3) while
-any other run holds one. The reservation's pushes use App tokens with
+any other run holds one. Since only `recover`, which reads Linear, can
+release that reservation after a crash, `--with-workflow` also needs the
+whole live test configuration and is refused (exit 3) without it, though
+the check itself uses nothing of Linear. The reservation's pushes use App tokens with
 only Contents write. A third App token, with only Contents write and
 Workflows write, adds the file to `main` in one commit that GitHub
 refuses if the file appeared meanwhile; the check waits up to a minute

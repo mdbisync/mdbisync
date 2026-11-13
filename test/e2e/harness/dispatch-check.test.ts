@@ -246,7 +246,7 @@ describe('dispatch-check against a mock endpoint', { skip: realCurl === '' ? 'cu
   const check = async (mock: MockGitHub, options: { keepRun?: boolean; lookForMs?: number; shared?: SharedAdmission; registerMs?: number } = {}) => {
     const lines: string[] = [];
     const report = await dispatchCheck({
-      config: { owner: OWNER, repo: REPO, sandboxUrl: `https://github.com/${OWNER}/${REPO}`, githubApp: { clientId: 'Iv1.test', privateKey }, githubAppMissing: [] },
+      config: { owner: OWNER, repo: REPO, sandboxUrl: `https://github.com/${OWNER}/${REPO}`, githubApp: { clientId: 'Iv1.test', privateKey }, githubAppMissing: [], missing: [] },
       stateDir, fetch: mock.fetch, env: { PATH: pathTo(mock) }, log: (line) => lines.push(line),
       ...(options.keepRun === undefined ? {} : { keepRun: options.keepRun }),
       ...(options.shared === undefined ? {} : { withWorkflow: { admission: (gitToken: () => Promise<string>) => {
@@ -531,7 +531,7 @@ describe('dispatch-check against a mock endpoint', { skip: realCurl === '' ? 'cu
     };
     const shared = new SharedAdmission(store);
     await assert.rejects(dispatchCheck({
-      config: { owner: OWNER, repo: REPO, sandboxUrl: `https://github.com/${OWNER}/${REPO}`, githubApp: { clientId: 'Iv1.test', privateKey }, githubAppMissing: [] },
+      config: { owner: OWNER, repo: REPO, sandboxUrl: `https://github.com/${OWNER}/${REPO}`, githubApp: { clientId: 'Iv1.test', privateKey }, githubAppMissing: [], missing: [] },
       stateDir, fetch: raced, env: { PATH: pathTo(mock) },
       withWorkflow: { admission: () => shared }, timing: { lookForMs: 500, pollMs: 50, registerMs: 500 },
     }), (error) => error instanceof LeftOnSandboxError && /no longer the stand-in/.test(error.message));
@@ -549,7 +549,7 @@ describe('dispatch-check against a mock endpoint', { skip: realCurl === '' ? 'cu
     bare(mock);
     const failing = new SharedAdmission({ read: async () => ({ version: 1, runs: [] }), update: async () => { throw new Error('shared admission push failed: HTTP 500'); } });
     await assert.rejects(dispatchCheck({
-      config: { owner: OWNER, repo: REPO, sandboxUrl: `https://github.com/${OWNER}/${REPO}`, githubApp: { clientId: 'Iv1.test', privateKey }, githubAppMissing: [] },
+      config: { owner: OWNER, repo: REPO, sandboxUrl: `https://github.com/${OWNER}/${REPO}`, githubApp: { clientId: 'Iv1.test', privateKey }, githubAppMissing: [], missing: [] },
       stateDir, fetch: mock.fetch, env: { PATH: pathTo(mock) }, withWorkflow: { admission: () => failing },
     }), (error) => error instanceof LeftOnSandboxError && /taking the shared reservation [0-9a-f]{6} failed, and it may be held/.test(error.message));
     const [reservation] = ownedRuns(stateDir);
@@ -558,6 +558,18 @@ describe('dispatch-check against a mock endpoint', { skip: realCurl === '' ? 'cu
     assert.deepEqual(writes(mock), []);
     rmSync(join(stateDir, 'runs', `${reservation}.json`), { force: true });
     rmSync(join(stateDir, 'owned'), { recursive: true, force: true });
+  }));
+
+  it('with --with-workflow, writes nothing on a host whose configuration could not recover the reservation', () => withMock(async (mock) => {
+    bare(mock);
+    const store = new MemoryStore();
+    await assert.rejects(dispatchCheck({
+      config: { owner: OWNER, repo: REPO, sandboxUrl: `https://github.com/${OWNER}/${REPO}`, githubApp: { clientId: 'Iv1.test', privateKey }, githubAppMissing: [], missing: ['LINEAR_TEST_ALICE_API_KEY'] },
+      stateDir, fetch: mock.fetch, env: { PATH: pathTo(mock) }, withWorkflow: { admission: () => new SharedAdmission(store) },
+    }), (error) => error instanceof EnvBlockedError && /only `recover` with the whole test configuration can release, and it is missing: LINEAR_TEST_ALICE_API_KEY; nothing was written/.test(error.message));
+    assert.deepEqual(mock.seen, []);
+    assert.deepEqual(store.state.runs, []);
+    assert.deepEqual(ownedRuns(stateDir), []);
   }));
 
   it('without --with-workflow, dispatches nothing while main holds a stand-in', () => withMock(async (mock) => {

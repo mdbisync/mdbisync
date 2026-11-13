@@ -215,7 +215,8 @@ export interface DispatchCheckReport {
 }
 
 export interface DispatchCheckDeps {
-  config: Pick<TestConfig, 'owner' | 'repo' | 'githubApp' | 'githubAppMissing' | 'sandboxUrl'>;
+  /** `missing` matters only with `withWorkflow`: recovering its reservation takes the whole live configuration. */
+  config: Pick<TestConfig, 'owner' | 'repo' | 'githubApp' | 'githubAppMissing' | 'sandboxUrl'> & Partial<Pick<TestConfig, 'missing'>>;
   /** The harness state folder that holds the check's lock: one check at a time on this host. */
   stateDir: string;
   fetch?: typeof fetch;
@@ -362,6 +363,11 @@ export async function dispatchCheck(deps: DispatchCheckDeps): Promise<DispatchCh
   if (config.sandboxUrl === '' || config.owner === '') throw new EnvBlockedError('test configuration is missing: MDBISYNC_TEST_SANDBOX_URL');
   if (config.githubApp === null) throw new EnvBlockedError(`the dispatch check needs the GitHub App: ${config.githubAppMissing.join(' and ')} not in the test secrets`);
 
+  // A reservation this host could not recover would block every run: `recover` reads Linear, so the
+  // stand-in needs the whole live configuration, though the check itself uses none of Linear.
+  if (deps.withWorkflow !== undefined && (config.missing?.length ?? 0) > 0) {
+    throw new EnvBlockedError(`--with-workflow takes a reservation that only \`recover\` with the whole test configuration can release, and it is missing: ${config.missing?.join(', ')}; nothing was written or dispatched`);
+  }
   const published = documentedScript(readFileSync(join(REPO_ROOT, SCRIPT_PAGE), 'utf8'));
   const script = scriptFor(published, config.owner, config.repo);
   let lock: Lock;
