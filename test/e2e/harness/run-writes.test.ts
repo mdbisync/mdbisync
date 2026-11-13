@@ -29,7 +29,7 @@ const REPORT_KEYS = {
   pullRequest: true, capture: true, writtenCount: true, skippedCompletedCount: true, oversizeFiles: true,
   leftOutRules: true, paths: true, resumed: true, writtenDocuments: true, writesAfterLimit: true,
   failedWriteRecorded: true, endpointLimitHeadersPresent: true, rejectedDocumentNamed: true, stoppedEarly: true,
-  progressRecorded: true, record: true, atomicPushRefused: true, partialRefUpdates: true,
+  progressRecorded: true, record: true, atomicPushRefused: true, partialRefUpdates: true, refusedPushes: true,
   skippedConcurrentDocument: true, capturedTrackedTip: true, rereadWindowMs: true, linearToGit: true, writes: true,
   conflictNotices: true,
 } satisfies Record<keyof RunReport, true>;

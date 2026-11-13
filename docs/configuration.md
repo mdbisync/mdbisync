@@ -31,7 +31,7 @@ only" has no command-line form.
 | `document-cap` | no | `1000` | `MDBISYNC_DOCUMENT_CAP` | Maximum documents per Linear project or team, trash included. A run warns at 90% and stops before writing above it. |
 | `merge-grace-seconds` | no | `60` | `MDBISYNC_MERGE_GRACE_SECONDS` | Seconds, 0 to 120, a run waits for checks after it opens or moves the sync pull request; 0 leaves the merge to a later run. |
 | `check-deadline-minutes` | no | `60` | `MDBISYNC_CHECK_DEADLINE_MINUTES` | Minutes, 10 to 1440, the sync pull request's checks may stay pending before its batch is suspended. |
-| `report-file` | no | none | `MDBISYNC_REPORT_FILE` | Path for the run's report as JSON (names and states only), with the job summary beside it as `summary.md`; empty writes none. |
+| `report-file` | no | none | `MDBISYNC_REPORT_FILE` | Path for the run's report as JSON (names and states only, and git's output for a refused push git reports partly applied), with the job summary beside it as `summary.md`; empty writes none. |
 | `direction` | no | none | `MDBISYNC_DIRECTION` | Initial sync only, and required there: `git-to-linear` or `linear-to-git`. |
 | `confirm` | no | none | `MDBISYNC_CONFIRM` | Initial sync only: `true` writes; anything else is a dry run that writes nothing. |
 | `security-step` | no | none | action only | `stage` or `apply`: runs the security hooks in a step of their own, between the two ([workflows](usage.md#workflows)). Empty runs them inside this step. |
