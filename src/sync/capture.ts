@@ -1,5 +1,6 @@
 // Step one of a run: read Linear's changes, scan them, then record and push
 // accepted content and its identities in one atomic transaction.
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
@@ -14,7 +15,7 @@ import { documentUrlBase, linksFromLinear, linksLinearDocuments, linksToLinear, 
 import { annotatedPlaces, placeId } from '../initial-sync/plan.ts';
 import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
-import { type CommitIdentity, type IdEntry, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
+import { type CommitIdentity, type IdEntry, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
 import { MARKS, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
@@ -685,10 +686,18 @@ export async function prepareLfs(git: RunContext['git'], tracked: Oid, changes: 
       if (content === null) continue;
       const attributes = await git.run(['check-attr', '--cached', '-z', '--stdin', 'filter'], { input: `${path}\0`, env });
       if (attributes.stdout.toString('utf8').split('\0')[2] !== 'lfs') continue;
-      const cleaned = await git.run(['lfs', 'clean', '--', path], { input: content });
-      const hash = /\noid sha256:([a-f0-9]{64})\n/.exec(cleaned.stdout.toString('utf8'))?.[1];
-      if (hash === undefined) throw new Error(message('sync.no-lfs-pointer'));
-      oids.push(hash);
+      // No path: git-lfs takes the size of a file at that path in the working copy for the size of
+      // its input, and a checkout without LFS content holds the pointer there, so it would store only
+      // the first kilobyte of the content. The content given here is never the file on disk.
+      const cleaned = await git.run(['lfs', 'clean'], { input: content });
+      const bytes = typeof content === 'string' ? Buffer.from(content) : content;
+      const pointer = parseLfsPointer(cleaned.stdout);
+      // Content that already is a pointer, or is empty, comes back as it is; any other becomes a pointer to the whole content.
+      if (!cleaned.stdout.equals(bytes)) {
+        if (pointer === null) throw new Error(message('sync.no-lfs-pointer'));
+        if (pointer.size !== bytes.length || pointer.oid !== createHash('sha256').update(bytes).digest('hex')) throw new Error(message('sync.lfs-pointer-mismatch'));
+      }
+      if (pointer !== null) oids.push(pointer.oid);
       result.set(path, cleaned.stdout);
     }
     return { changes: result, oids: [...new Set(oids)] };
