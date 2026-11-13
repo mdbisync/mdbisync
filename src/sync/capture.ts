@@ -187,7 +187,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     };
     const inPlaces = await linear.listDocumentsInPlaces(places, {includeArchived:true});
     for (const document of inPlaces) listed.set(document.id, document);
-    // The write step counts its containers from this listing when it has nothing to write.
+    // The write step counts its containers from this listing when it can write nothing.
     if (!changedPlace) result.containers = containersOf(context, inPlaces);
     // Looking up known ids also finds trash, project moves and moves out of scope.
     const missing = [...byId.keys()].filter((id) => !listed.has(id));

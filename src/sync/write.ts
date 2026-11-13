@@ -75,9 +75,11 @@ export interface WriteOptions {
   documentCap?: number | undefined;
   /**
    * The containers' documents as this run's capture listed them, by
-   * `containerKey`. Used only for the capacity report of a run whose
-   * tracked branch already holds `linear` (it returns before any write);
-   * every other run lists the containers again.
+   * `containerKey`. Used only for the capacity report of a run that can
+   * write nothing: one whose tracked branch already holds `linear`, or one
+   * that `writesNothing` finds (its merge result is the tree Linear holds
+   * already, and no upload rebuild, hold release or relink is due). Every
+   * other run lists the containers again.
    */
   containers?: Map<string, LinearDocument[]> | undefined;
   config: StateConfig;
@@ -257,8 +259,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   result.leftOut = merge.leftOut;
   await nameFixingHooks(git, tracked, result.leftOut);
   // Anything from here may write (linked-file changes are found later too): capacity, adoption and
-  // reserved ids are decided on the containers as Linear lists them now, not as capture saw them.
-  const containerListing = await readContainers();
+  // reserved ids are decided on the containers as Linear lists them now, not as capture saw them. A run
+  // that can write nothing (`writesNothing`) takes capture's listing for its capacity report, as a run
+  // with nothing new does.
+  const containerListing = (await writesNothing() ? options.containers : undefined) ?? await readContainers();
   if (containerListing === undefined) return result;
   // A separate const: the hoisted `adoptableDocuments` below does not see the narrowing above.
   const containers: Map<string, LinearDocument[]> = containerListing;
@@ -881,6 +885,17 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     nextIds.set(change.path, previous?.id === document.id ? previous : { id: document.id });
     await reconcileMark(change.path, document);
     return true;
+  }
+
+  /**
+   * Whether this run can write nothing to Linear: the merge result is the tree Linear holds already (no document
+   * or linked file differs and nothing moved), no upload is rebuilt, no hold is released and no document must be
+   * written again with a superseded id. So it is after the sync pull request's merge, which only moves `linear`.
+   */
+  async function writesNothing(): Promise<boolean> {
+    if (merge.changes.length > 0 || cacheLost || releasing || supersededBefore.size > 0) return false;
+    if ([...reserved].some(([path, id]) => ids.has(path) && ids.get(path)?.id !== id)) return false;
+    return merge.tree === await git.text(['rev-parse', `${linearTip}^{tree}`]);
   }
 
   /**
