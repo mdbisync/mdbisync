@@ -212,8 +212,8 @@ describe('check helpers', () => {
     const { commentsOf, COMMENT_DOCUMENTS_PER_PAGE, COMMENTS_PER_DOCUMENT } = await import('./checks.ts');
     assert.ok(COMMENT_DOCUMENTS_PER_PAGE * COMMENTS_PER_DOCUMENT <= 2_500, 'a page must stay far below the 250 x 50 that Linear refused');
     const pages = [
-      { nodes: [{ id: 'd1', project: { id: 'p' }, comments: { nodes: [{ body: 'one' }] } }], pageInfo: { hasNextPage: true, endCursor: 'c1' } },
-      { nodes: [{ id: 'd2', project: null, comments: { nodes: [] } }], pageInfo: { hasNextPage: false, endCursor: null } },
+      { nodes: [{ id: 'd1', title: 'Plan', trashed: null, archivedAt: null, team: { id: 't' }, project: { id: 'p' }, comments: { nodes: [{ body: 'one' }] } }], pageInfo: { hasNextPage: true, endCursor: 'c1' } },
+      { nodes: [{ id: 'd2', title: 'README', trashed: true, archivedAt: '2026-11-13T00:00:00.000Z', team: { id: 't' }, project: null, comments: { nodes: [] } }], pageInfo: { hasNextPage: false, endCursor: null } },
     ];
     const afters: unknown[] = [];
     const client = {
@@ -225,7 +225,10 @@ describe('check helpers', () => {
     };
     const documents = await commentsOf(client as never, { project: { id: { eq: 'p' } } });
     assert.deepEqual(afters, [null, 'c1']);
-    assert.deepEqual(documents, [{ id: 'd1', inProject: true, bodies: ['one'] }, { id: 'd2', inProject: false, bodies: [] }]);
+    assert.deepEqual(documents, [
+      { id: 'd1', title: 'Plan', teamId: 't', projectId: 'p', trashed: false, archived: false, bodies: ['one'] },
+      { id: 'd2', title: 'README', teamId: 't', projectId: null, trashed: true, archived: true, bodies: [] },
+    ]);
   });
 
   it('look only for canaries in content, since paths may be listed', async () => {

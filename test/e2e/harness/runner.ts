@@ -809,7 +809,7 @@ export async function captureCanaryEvidence(ctx: RunContext): Promise<void> {
     writeFileSync(join(ctx.runDir, 'canary-evidence.tmp'), JSON.stringify(evidence));
     renameSync(join(ctx.runDir, 'canary-evidence.tmp'), join(ctx.runDir, 'canary-evidence.json'));
   } catch {
-    writeFileSync(join(ctx.runDir, 'canary-evidence.json'), JSON.stringify({ canaries: [], texts: {}, error: 'could not collect remote output' }));
+    writeFileSync(join(ctx.runDir, 'canary-evidence.json'), JSON.stringify({ canaries: [], texts: {}, documents: {}, error: 'could not collect remote output' }));
   }
 }
 

@@ -994,6 +994,16 @@ export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documen
   });
 }
 
+/** A document the canary scan read comments on, as `readSides` would place it. */
+export type CommentedDocument = Pick<LinearDocument, 'id' | 'title' | 'teamId' | 'projectId' | 'trashed'> & { archived: boolean; bodies: string[] };
+
+/**
+ * What the canary evidence keeps about a scanned document, keyed by its id: where it was and why the scan
+ * took it: a run project, the run's title prefix (asked for per team zone; such a document may since sit in a
+ * project the run no longer lists), or the run's ownership record.
+ */
+export type ScannedDocument = Omit<CommentedDocument, 'id' | 'bodies'> & { reason: 'project' | 'run prefix' | 'ownership record' };
+
 /** Canary tokens of the run's slice in run logs and summaries and, unless `summariesOnly`, in pull request texts and Linear comments. */
 export async function collectCanaryEvidence(ctx: RunContext, options: { summariesOnly: boolean }) {
   const world = ctx.live;
@@ -1012,9 +1022,12 @@ export async function collectCanaryEvidence(ctx: RunContext, options: { summarie
     texts.set(`run ${index} stdout`, result.stdout);
     texts.set(`run ${index} stderr`, result.stderr);
   });
+  // Which document each `comments on <id>` text came from, and why the scan took it. No comment text here.
+  let documents: Record<string, ScannedDocument> = {};
   const cached = ctx.observations.get('canary.remoteTexts') as Record<string, string> | undefined;
   if (!options.summariesOnly && cached !== undefined) {
     for (const [source, text] of Object.entries(cached)) texts.set(source, text);
+    documents = (ctx.observations.get('canary.documents') as Record<string, ScannedDocument> | undefined) ?? {};
   } else if (world !== null && !options.summariesOnly) {
     for (const pr of await world.rest.pullRequests(`t/${ctx.names.runId}/`)) texts.set(`pull request #${pr.number}`, `${pr.title}\n${pr.body ?? ''}`);
     // Linear comments on the run's documents: project documents, and team-zone documents that carry the
@@ -1022,21 +1035,21 @@ export async function collectCanaryEvidence(ctx: RunContext, options: { summarie
     // keep their plain title, so only the record shows they are the run's; another run's README is not in it.
     // Every read takes trashed and archived documents with their archived comments: a comment stays on a
     // document the engine trashed, and Linear archives it with the document. Each document is read once.
-    const scanned = new Set<string>();
+    const scanned = new Map<string, ScannedDocument>();
+    const take = (document: CommentedDocument, reason: ScannedDocument['reason']) => {
+      const { bodies, id, ...place } = document;
+      scanned.set(id, { ...place, reason });
+      texts.set(`comments on ${id}`, bodies.join('\n'));
+    };
     for (const project of world.projects.values()) {
-      for (const document of await commentsOf(world.app, { project: { id: { eq: project.id } } })) {
-        scanned.add(document.id);
-        texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
-      }
+      for (const document of await commentsOf(world.app, { project: { id: { eq: project.id } } })) take(document, 'project');
     }
     for (const team of world.tree.teamZones.keys()) {
       const teamId = world.teams.get(team)?.id;
       if (teamId === undefined) continue;
       for (const document of await commentsOf(world.app, { team: { id: { eq: teamId } }, title: { startsWith: ctx.names.teamZonePrefix } })) {
         // The prefix is the run's own, so a prefixed document in a project the run no longer lists is its too.
-        if (scanned.has(document.id)) continue;
-        scanned.add(document.id);
-        texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
+        if (!scanned.has(document.id)) take(document, 'run prefix');
       }
     }
     // Owned documents neither query returned, read by id. The ids are the run's own, so no team or project
@@ -1044,15 +1057,15 @@ export async function collectCanaryEvidence(ctx: RunContext, options: { summarie
     const unscanned = [...ownedDocuments(ctx.owned).keys()].filter((id) => !scanned.has(id));
     for (let start = 0; start < unscanned.length; start += OWNED_IDS_PER_COMMENT_QUERY) {
       const ids = unscanned.slice(start, start + OWNED_IDS_PER_COMMENT_QUERY);
-      for (const document of await commentsOf(world.app, { id: { in: ids } })) {
-        texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
-      }
+      for (const document of await commentsOf(world.app, { id: { in: ids } })) take(document, 'ownership record');
     }
+    documents = Object.fromEntries(scanned);
   }
   if (!options.summariesOnly && cached === undefined && world !== null) {
     ctx.observations.set('canary.remoteTexts', Object.fromEntries([...texts].filter(([source]) => source.startsWith('pull request #') || source.startsWith('comments on '))));
+    ctx.observations.set('canary.documents', documents);
   }
-  return { canaries: [...canaries], texts: Object.fromEntries(texts) };
+  return { canaries: [...canaries], texts: Object.fromEntries(texts), documents };
 }
 
 export async function canaryScan(ctx: RunContext, options: { summariesOnly: boolean }): Promise<CanaryHit[]> {
@@ -1084,13 +1097,15 @@ export const COMMENTS_PER_DOCUMENT = 50;
 export async function commentsOf(
   client: Pick<LinearClient, 'request'>,
   filter: Record<string, unknown>,
-): Promise<Array<{ id: string; inProject: boolean; bodies: string[] }>> {
-  const result: Array<{ id: string; inProject: boolean; bodies: string[] }> = [];
+): Promise<CommentedDocument[]> {
+  const result: CommentedDocument[] = [];
   let after: string | null = null;
   for (;;) {
     const data: {
       documents: {
-        nodes: Array<{ id: string; project: { id: string } | null; comments: { nodes: Array<{ body: string }>; pageInfo?: { hasNextPage: boolean; endCursor: string | null } } }>;
+        nodes: Array<{
+          id: string; title: string; trashed: boolean | null; archivedAt: string | null; team: { id: string } | null; project: { id: string } | null; comments: { nodes: Array<{ body: string }>; pageInfo?: { hasNextPage: boolean; endCursor: string | null } };
+        }>;
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
       };
     } = await client.request(
@@ -1098,7 +1113,7 @@ export async function commentsOf(
       'query',
       `query RunComments($filter: DocumentFilter, $after: String) {
         documents(first: ${COMMENT_DOCUMENTS_PER_PAGE}, after: $after, filter: $filter, includeArchived: true) {
-          nodes { id project { id } comments(first: ${COMMENTS_PER_DOCUMENT}, includeArchived: true) { nodes { body } pageInfo { hasNextPage endCursor } } }
+          nodes { id title trashed archivedAt team { id } project { id } comments(first: ${COMMENTS_PER_DOCUMENT}, includeArchived: true) { nodes { body } pageInfo { hasNextPage endCursor } } }
           pageInfo { hasNextPage endCursor }
         }
       }`,
@@ -1119,7 +1134,10 @@ export async function commentsOf(
         bodies.push(...more.document.comments.nodes.map((comment) => comment.body));
         page = more.document.comments.pageInfo;
       }
-      result.push({ id: document.id, inProject: document.project !== null, bodies });
+      result.push({
+        id: document.id, title: document.title, teamId: document.team?.id ?? null, projectId: document.project?.id ?? null,
+        trashed: document.trashed === true, archived: typeof document.archivedAt === 'string', bodies,
+      });
     }
     if (!data.documents.pageInfo.hasNextPage) return result;
     after = data.documents.pageInfo.endCursor;
