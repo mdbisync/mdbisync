@@ -127,7 +127,13 @@ export interface FaultProxy {
 }
 
 const WRITE_OPERATIONS = /^(?:documentCreate|documentUpdate|CreateDocument|UpdateDocument)$/i;
-const UPLOAD_OPERATIONS = /^(?:fileUpload|FileUpload|Upload.*)$/;
+/** Upload targets: the engine asks for one (`FileUpload`) or for a batch with one request (`FileUploads`). */
+const UPLOAD_OPERATIONS = /^(?:fileUpload|FileUploads?|Upload.*)$/;
+
+/** Whether the `upload-error` fault fails a request of this GraphQL operation. */
+export function isUploadOperation(operation: string): boolean {
+  return UPLOAD_OPERATIONS.test(operation);
+}
 
 export function operationOf(body: string): { operation: string; kind: ProxyRequestRecord['kind'] } {
   try {
@@ -259,7 +265,7 @@ export async function startFaultProxy(
         );
         record(200, true);
         return;
-      } else if (fault.kind === 'upload-error' && UPLOAD_OPERATIONS.test(operation) && used < fault.times) {
+      } else if (fault.kind === 'upload-error' && isUploadOperation(operation) && used < fault.times) {
         fault.used = used + 1;
         response.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ errors: [{ message: 'injected fault' }] }));
         record(500, true);

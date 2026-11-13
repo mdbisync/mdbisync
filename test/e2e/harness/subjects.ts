@@ -165,6 +165,9 @@ async function newComments(env: Env, id: string | undefined): Promise<string[]> 
 
 // --- small helpers ---------------------------------------------------------------------
 
+/** A link destination without its query or fragment, which an upload keeps after the asset URL. */
+const withoutSuffix = (url: string) => url.replace(/[?#].*$/s, '');
+
 const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 const sorted = <T>(items: Iterable<T>) => [...items].sort();
 
@@ -1037,6 +1040,33 @@ export const SUBJECTS: Record<string, Compute> = {
     const fresh = (await env.view()).uploadsByHash.get(observed(env.ctx, 'git.imageHash') as string);
     return urls.find((url) => url === fresh) ?? urls[0] ?? null;
   },
+  // An image link in a document that shows no image: neither an upload the cache holds nor a destination the
+  // file itself writes so (an outside image, or a link git already breaks). A link to a file of the tree that
+  // reached Linear as written, or an upload URL the cache does not hold (a failed or lost upload), is broken.
+  'documents.brokenImageUrls': async (env) => {
+    const view = await env.view();
+    const cached = new Set(view.uploadsByHash.values());
+    let broken = 0;
+    for (const [path, text] of view.files) {
+      const id = view.ids.get(path)?.id;
+      const content = id === undefined ? undefined : view.documents.get(id)?.content;
+      if (content == null) continue;
+      const asWritten = new Set(linkDestinations(text).filter((destination) => destination.image).map((destination) => destination.url));
+      for (const { url, image } of linkDestinations(content)) {
+        // The upload keeps a link's query or fragment after the asset URL, as the file's link had it.
+        if (!image || cached.has(withoutSuffix(url))) continue;
+        const file = linkedFile(path, url)?.path;
+        if (!asWritten.has(url) || (file !== undefined && view.hashes.has(file))) broken += 1;
+      }
+    }
+    return broken;
+  },
+  // The scenario's image reached Linear: the cache holds its upload, and the target's document links that upload.
+  'documents.imageUploaded': async (env) => {
+    const url = (await env.view()).uploadsByHash.get(observed(env.ctx, 'git.imageHash') as string);
+    const { document } = await target(env);
+    return url !== undefined && linkDestinations(document?.content ?? '').some((destination) => destination.image && withoutSuffix(destination.url) === url);
+  },
   'uploads.newUrl': async (env) => (await env.view()).uploadsByHash.get(observed(env.ctx, 'git.imageHash') as string) ?? null,
   'documents.newCount': async (env) => {
     const view = await env.view();
@@ -1061,7 +1091,8 @@ export const SUBJECTS: Record<string, Compute> = {
   'tracked.updatedDocuments': async (env) => editsOnSide(env, 'linear', 'git'),
   'documents.otherChangesSynced': async (env) => {
     const view = await env.view();
-    const edits = env.ctx.edits.filter((edit) => edit.side === 'git');
+    // The edit of a file the runs left out on purpose is not one of the other changes (I2 keeps it in git).
+    const edits = env.ctx.edits.filter((edit) => edit.side === 'git' && !view.omitted.has(edit.path));
     return edits.length > 0 && edits.every((edit) => [...view.documents.values()].some((document) => (document.content ?? '').includes(edit.token)));
   },
   'documents.allEditsPreserved': async (env) => lostEdits(env.ctx, await env.view()).length === 0,
@@ -2206,15 +2237,18 @@ function setupFailureValue(ctx: RunContext, subject: string): string {
  * Subjects that also name one run, `runs.<n|last>.<subject>`: computed on the
  * world the harness snapshotted right after that run (`harness.runView.<n>`).
  */
-export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|suspended\.(?:count|contentsCurrent|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|commentsRefused|marksRestored|comments)|normal\.(?:open|merged|closedEmpty)|tracked\.addedFileExists)$/;
+export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|documents\.brokenImageUrls|documents\.imageUploaded|suspended\.(?:count|contentsCurrent|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|commentsRefused|marksRestored|comments)|normal\.(?:open|merged|closedEmpty)|tracked\.addedFileExists)$/;
 
-/** The runs whose world the scenario asserts on (`runs.<n|last>.` document subjects): their indices, and whether the last. */
+/**
+ * The runs whose world the scenario asserts on (`runs.<n|last>.` document subjects, and the target outcome
+ * subjects, which need the target selection of that moment): their indices, and whether the last.
+ */
 function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {
   const indices = new Set<number>();
   let last = false;
   for (const assertion of ctx.scenario.checks.assertions) {
     for (const subject of [assertion.subject, ...(assertion.operator === 'same-as' ? [String(assertion.expected)] : [])]) {
-      const which = RUN_VIEW_SUBJECT.exec(subject)?.[1];
+      const which = (RUN_VIEW_SUBJECT.exec(subject) ?? RUN_TARGET_SUBJECT.exec(subject))?.[1];
       if (which === 'last') last = true;
       else if (which !== undefined) indices.add(Number(which));
     }
@@ -2264,7 +2298,7 @@ export type SubjectSource = 'observed' | 'harness' | 'engine' | 'ui';
 /** Where a subject's value comes from, or null when nothing provides it (a harness gap). */
 export function subjectSource(subject: string): SubjectSource | null {
   const name = subject.startsWith('before.') ? subject.slice('before.'.length) : subject;
-  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || UNTOUCHED_SUBJECT.test(name) || RUN_VIEW_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name)))) return 'harness';
+  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || UNTOUCHED_SUBJECT.test(name) || RUN_VIEW_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name) || RUN_TARGET_SUBJECT.test(name)))) return 'harness';
   if (ENGINE_FAMILIES.some((pattern) => pattern.test(name))) return 'engine';
   if (name.startsWith('ui.')) return 'ui';
   return null;
@@ -2402,6 +2436,37 @@ function decidedCode(ctx: RunContext): string {
   return code;
 }
 
+/**
+ * What run <n|last> of the scenario decided about the target's document, from
+ * its report's `sync` lists, as `decided.code` reads them: `failed` when the
+ * run lists it among the writes that failed, `written` when the run wrote it
+ * (updated, created, restored, adopted, or relocated to it). The target is
+ * the one selected when the run ended (its snapshot keeps that selection), so
+ * a later step that picks another changes no earlier run. A target the
+ * scenario moved in git matches by either path. A run without a sync report
+ * fails as a product error.
+ */
+export const RUN_TARGET_SUBJECT = /^runs\.(\d+|last)\.target\.(failed|written)$/;
+
+function runTargetValue(ctx: RunContext, subject: string): boolean {
+  const [, which, outcome] = RUN_TARGET_SUBJECT.exec(subject) as RegExpExecArray;
+  const index = ownRunIndex(ctx, which as string, subject);
+  const sync = ownResults(ctx)[index]?.report?.['sync'] as Record<string, unknown> | null | undefined;
+  if (sync === null || sync === undefined || typeof sync !== 'object') throw new ProductError(`engine run ${index}'s report gives no sync for ${subject}`);
+  const record = ctx.observations.get(`harness.runView.${index}`) as RunView | undefined;
+  if (record === undefined) throw new Error(`engine run ${index} has no snapshot of the world right after it for ${subject}`);
+  const selection = new Map(record.selection);
+  const path = (selection.get('target.path') as string | undefined) ?? firstDocument(ctx);
+  const moved = selection.get('git.moved') as { from: string; to: string } | undefined;
+  const paths = new Set([path, ...(moved === undefined ? [] : [moved.from, moved.to])]);
+  const list = (key: string): unknown[] => (Array.isArray(sync[key]) ? (sync[key] as unknown[]) : []);
+  const entryPath = (key: string, field: string) => list(key).map((entry) => (entry !== null && typeof entry === 'object' ? (entry as Record<string, unknown>)[field] : undefined));
+  const named = outcome === 'failed'
+    ? entryPath('failed', 'path')
+    : [...['updated', 'created', 'restored', 'adopted'].flatMap(list), ...entryPath('relocated', 'to')];
+  return named.some((candidate) => typeof candidate === 'string' && paths.has(candidate));
+}
+
 /** The index among the scenario's own runs that `<n|last>` names in `subject`. */
 function ownRunIndex(ctx: RunContext, which: string, subject: string): number {
   const count = ownResults(ctx).length;
@@ -2458,6 +2523,7 @@ export async function resolveSubject(ctx: RunContext, subject: string): Promise<
   if (UNTOUCHED_SUBJECT.test(subject)) return { known: true, value: untouchedValue(ctx, subject) };
   if (RUN_VIEW_SUBJECT.test(subject)) return { known: true, value: await runViewValue(ctx, subject) };
   if (SETUP_FAILURE_SUBJECT.test(subject)) return { known: true, value: setupFailureValue(ctx, subject) };
+  if (RUN_TARGET_SUBJECT.test(subject)) return { known: true, value: runTargetValue(ctx, subject) };
   const before = subject.startsWith('before.');
   const name = before ? subject.slice('before.'.length) : subject;
   const compute = SUBJECTS[name];

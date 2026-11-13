@@ -375,7 +375,11 @@ describe('fault proxy', () => {
 
       proxy.setFaults([{ kind: 'upload-error', times: 1 }]);
       assert.equal((await post(proxy.url, 'mutation FileUpload { a }')).status, 500);
-      assert.ok(proxy.counts().injected >= 3);
+      // The engine asks for a batch of upload targets with one request: the fault fails that one too.
+      proxy.setFaults([{ kind: 'upload-error', times: 1 }]);
+      assert.equal((await post(proxy.url, 'mutation FileUploads { f0: a }')).status, 500);
+      assert.equal((await post(proxy.url, 'mutation FileUploads { f0: a }')).status, 200, 'the fault fails one request');
+      assert.ok(proxy.counts().injected >= 4);
     } finally {
       await proxy.close();
       await up.close();

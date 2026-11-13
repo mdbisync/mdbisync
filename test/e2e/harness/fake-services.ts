@@ -7,6 +7,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { runCli } from '../../../src/cli.ts';
+import { INCOMPLETE_EXIT_CODE } from '../../../src/commands.ts';
 import { LinearClient, type LogEntry } from '../../../src/linear/index.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
 import { createFixture, mergeOnGitHub } from '../../../src/state/test-helpers.ts';
@@ -29,6 +30,15 @@ export interface FakeServiceOptions {
   prepare?: (world: FakeWorld) => void;
   /** Reads the run once its checks ran, while its fixture still exists. */
   inspect?: (ctx: RunContext) => Promise<void>;
+  /**
+   * Stand-ins for steps that need a live proxy (`fault.*` on the Linear or
+   * LFS proxy), by `kind.action`; every other step runs as the harness runs it.
+   */
+  steps?: Readonly<Record<string, (ctx: RunContext, args: Record<string, unknown>) => Promise<void>>>;
+  /** The scenario expects partial runs (a failed write): an engine run may end with exit 5, for its checks to judge. */
+  partialRuns?: boolean;
+  /** Answers a request to the fakes in their place, as a proxy in front of them would; undefined passes it on. */
+  intercept?: (url: string, init: RequestInit | undefined) => Response | undefined;
 }
 
 /** Two documents of two paragraphs each, for specs that need no content of their own. */
@@ -57,6 +67,8 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
     const prTimes = new Map<number, { created: string; merged: string | null; head: string | undefined }>();
     const serve = async (input: Parameters<typeof fetch>[0], init: RequestInit | undefined): Promise<Response> => {
       const url = String(input).replace('https://api.github.com', GITHUB_API);
+      const intercepted = options.intercept?.(url, init);
+      if (intercepted !== undefined) return intercepted;
       // The harness reads a document's comments with a query of its own, which the shared fake lacks.
       if (init?.body && url.endsWith('/graphql') && JSON.parse(String(init.body)).operationName === 'DocumentComments') {
         const id = `content-${JSON.parse(String(init.body)).variables.id}`;
@@ -129,8 +141,9 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
       await watchRun(ctx, { throughProxy: false }, async () => {
         const requests: LogEntry[] = [];
         const result = await runCli([command], { cwd: engine.dir, env: { ...env, PATH: process.env.PATH!, HOME: process.env.HOME!, MDBISYNC_GITHUB_API_URL: GITHUB_API, GITHUB_STEP_SUMMARY: summaryFile }, fetch: serve, log: (entry) => requests.push(entry) });
-        // Exit 4 is a refusal the report names (a pending initial pull request); the scenario's checks judge it.
-        assert.ok(result.exitCode === 0 || result.exitCode === 4, result.stderr);
+        // Exit 4 is a refusal the report names (a pending initial pull request); the scenario's checks judge it. Exit 5,
+        // a partial run that the next run continues, only where the scenario expects one.
+        assert.ok(result.exitCode === 0 || result.exitCode === 4 || (options.partialRuns === true && result.exitCode === INCOMPLETE_EXIT_CODE), result.stderr);
         ctx.engine.results.push({ command, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, remote: { runId: ctx.engine.results.length, runAttempt: 1, linearEngine: true, requests }, report: JSON.parse(await readFile(reportFile, 'utf8')), summary: await readFile(summaryFile, 'utf8'), signal: null, durationMs: 0, timedOut: false, notImplemented: false } as EngineResult);
       });
     };
@@ -146,6 +159,7 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
       else if (next.kind === 'run' && next.action === 'initial-sync') await sync('initial-sync', next.args.direction === 'linear-to-git' ? 'linear-to-git' : 'git-to-linear');
       // Other runs (lint, fix, workflows, cleanup) have no in-process counterpart here.
       else if (next.kind === 'run') throw new Error(`the fake-service specs cannot run run.${next.action}`);
+      else if (options.steps?.[`${next.kind}.${next.action}`] !== undefined) await options.steps[`${next.kind}.${next.action}`]!(stepCtx, next.args);
       else await runStep(stepCtx, next);
     };
     await setupState(ctx, ctx.live as LiveWorld, { runStep: step });
