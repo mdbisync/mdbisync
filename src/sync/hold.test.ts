@@ -1,6 +1,6 @@
 // The suspended document's comment: what it says, what it quotes and what
-// it leaves out. The lane scenarios (pull-request.test.ts) cover when it is
-// posted, edited and resolved.
+// it leaves out. The lane scenarios in pull-request-suspension.test.ts and
+// pull-request-release.test.ts cover when it is posted, edited and resolved.
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
