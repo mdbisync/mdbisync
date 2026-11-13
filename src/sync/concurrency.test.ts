@@ -1,4 +1,5 @@
-// Races inside a sync run and its pull request (L4-01 to L4-09), against a local git remote and
+// Races inside a sync run and its pull request (L4-01 to L4-09), and the run the token
+// scenario kills (L5-20), against a local git remote and
 // a fake GitHub and Linear served over HTTP. Every run is a real engine
 // process in its own clone, as a workflow job is: a test pauses it at a
 // checkpoint (test hooks on), acts as a person meanwhile, then resumes it or
@@ -15,7 +16,8 @@ import { type AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, it, type TestContext } from 'node:test';
-import { CheckpointControl } from '../../test/e2e/harness/checkpoints.ts';
+import { CheckpointControl, KILLED_RUN_CHECKPOINT } from '../../test/e2e/harness/checkpoints.ts';
+import { cleanupKilledTokens } from '../../test/e2e/harness/token-cleanup.ts';
 import { runCli } from '../cli.ts';
 import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
@@ -57,6 +59,8 @@ interface Ended {
   summary: string;
   /** Null when the process was killed before it wrote one. */
   report: RunReport | null;
+  /** The run's checkpoint files: which checkpoints it reached. */
+  hooks: CheckpointControl;
 }
 
 interface Running {
@@ -151,7 +155,7 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
           const report = text === null ? null : (JSON.parse(text) as RunReport);
           for (const output of [stderr, summary, text ?? '']) assert.ok(!output.includes(CANARY), 'content reached the output (I5)');
           await observeRefs();
-          return { code, signal, stderr, summary, report };
+          return { code, signal, stderr, summary, report, hooks };
         };
         finish().then(resolve, reject);
       });
@@ -569,6 +573,30 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.equal(next?.report?.pullRequest?.pullRequest?.opened, true);
     assert.deepEqual(next?.report?.pullRequest?.paths, [REVIEW]);
     assert.equal(world.github.pullRequests.length, 1);
+  });
+
+  it('L5-20: on a converged setup a run killed where the token scenario kills it leaves its token, and post revokes it', async () => {
+    // The precondition of the scenario: a sync with nothing to write still reaches the checkpoint, never before-write.
+    const idle = (await settle()).at(-1)!;
+    assert.equal(idle.hooks.reached(KILLED_RUN_CHECKPOINT), 1);
+    assert.equal(idle.hooks.reached('before-write'), 0);
+    assert.equal(world.minted, world.revoked, 'a run that ends revokes its token');
+
+    const running = await startRun(KILLED_RUN_CHECKPOINT);
+    await reached(running, KILLED_RUN_CHECKPOINT);
+    running.kill();
+    const killed = await running.ended;
+    assert.equal(killed.signal, 'SIGKILL');
+    assert.equal(world.minted - world.revoked, 1, 'the killed run leaves one token');
+
+    const output = await cleanupKilledTokens(['fake-token'], { cwd: fixture.root, env: env('post', server.url), linearUrl: `${server.url}/linear`, retryDelayMs: 0 });
+    assert.match(output, /revoked the run's Linear token/);
+    assert.equal(world.minted - world.revoked, 0, 'post revoked the killed run\'s token');
+
+    // Killed with nothing to write, the run left the sides as they were.
+    const [next] = await settle();
+    assert.equal(next?.report?.changed, false);
+    assert.equal(world.minted, world.revoked);
   });
 
   it('a document an interrupted run created and a person then edited is not overwritten by a run that adopts it; the next run takes the edit in', async () => {
