@@ -351,6 +351,27 @@ async function syncTip(ctx: RunContext): Promise<string | null> {
   return fetchRef(await person(ctx), `refs/heads/${ctx.names.syncBranch}`);
 }
 
+/**
+ * The sync branch and `linear` in the first ref snapshot (`refHistory`, taken
+ * after each step) after the scenario's `git.delete-sync-branch` step that
+ * has the branch again: where the run that recreated it left it. A later
+ * settle merges the recreated branch and records the merge on `linear`, so
+ * the end state no longer shows where the branch came back. Undefined when
+ * the scenario deletes no sync branch or no snapshot after the deletion has
+ * it: the subject then reads the current tips.
+ */
+function refsWhereSyncBranchCameBack(ctx: RunContext): { sync: string; linear: string | null } | undefined {
+  const deleted = ctx.scenario.steps.findIndex((step) => step.kind === 'git' && step.action === 'delete-sync-branch');
+  if (deleted === -1) return undefined;
+  const history = (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined) ?? [];
+  // history[0] is the start; history[i + 1] is taken right after step i.
+  for (const snapshot of history.slice(deleted + 1)) {
+    const sync = snapshot[`refs/heads/${ctx.names.syncBranch}`];
+    if (sync !== undefined) return { sync, linear: snapshot[`${ctx.names.refPrefix}/linear`] ?? null };
+  }
+  return undefined;
+}
+
 /** Files of a commit: path → bytes. */
 async function treeFiles(git: Git, commit: string, filter: (path: string) => boolean = () => true): Promise<Map<string, Buffer>> {
   const entries = (await listTree(git, commit)).filter((entry) => entry.type === 'blob' && filter(entry.path));
@@ -1740,8 +1761,7 @@ export const SUBJECTS: Record<string, Compute> = {
     return token !== undefined && [...view.files.values()].some((text) => text.includes(token));
   },
   'syncBranch.recreatedFrom': async (env) => {
-    const sync = await syncTip(env.ctx);
-    const linear = await stateTip(env.ctx, 'linear');
+    const { sync, linear } = refsWhereSyncBranchCameBack(env.ctx) ?? { sync: await syncTip(env.ctx), linear: await stateTip(env.ctx, 'linear') };
     if (sync === null) return 'missing';
     const git = await person(env.ctx);
     return linear !== null && (sync === linear || (await isAncestor(git, linear, sync))) ? 'linear' : 'other';
