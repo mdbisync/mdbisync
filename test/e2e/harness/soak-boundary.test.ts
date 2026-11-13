@@ -101,14 +101,16 @@ describe('soak hourly boundary', () => {
     const result = await soak(world.driver, OPTIONS);
 
     // Each hour's first look found edits retained but not yet on the tracked branch.
-    const first = world.boundaries.filter((boundary) => boundary.drainSyncs === 0);
-    assert.equal(first.length, 2);
+    const first = world.boundaries.filter((boundary) => boundary.hour === 1 && boundary.drainSyncs === 0);
+    assert.equal(first.length, 1);
     assert.ok(first.every((boundary) => !boundary.settled && !boundary.final), 'the hour ends with edits still in the sync pull request');
     // The drain merged them, and the hour's verdict is the settled look after it.
     assert.ok(world.syncs.some((sync) => sync.phase === 'drain' && sync.merged), 'a drain run merged the checked head');
     const verdicts = world.boundaries.filter((boundary) => boundary.settled || boundary.final);
     assert.equal(verdicts.length, 2);
-    assert.ok(verdicts.every((boundary) => boundary.settled && boundary.drainSyncs >= 1 && boundary.drainSyncs <= 3));
+    // The first hour drains; the last edits come 15 minutes before the second hour ends, so its runs settle it.
+    assert.ok(verdicts[0]!.settled && verdicts[0]!.drainSyncs >= 1 && verdicts[0]!.drainSyncs <= 3);
+    assert.deepEqual([verdicts[1]!.settled, verdicts[1]!.drainSyncs, verdicts[1]!.final], [true, 0, true]);
     assert.equal(world.editsDuringDrain(), 0, 'no edit is made while a check drains');
 
     // Every edit survives on both sides, every scheduled edit is still made, and the drain runs count.
@@ -118,10 +120,11 @@ describe('soak hourly boundary', () => {
     assert.deepEqual(result.edits, soakEditCounts(OPTIONS));
     const drained = verdicts.reduce((sum, boundary) => sum + boundary.drainSyncs, 0);
     assert.equal(result.drainSyncs, drained);
-    assert.equal(result.syncRuns, 24 + drained);
+    // The drain runs are scheduled runs: the soak makes the schedule's 24 runs and no more.
+    assert.equal(result.syncRuns, 24);
     assert.equal(result.scheduleDelays.length, result.syncRuns);
-    // The drain moves the rest of the schedule, so the wall clock stays within the duration, one interval and the drains.
-    assert.ok(world.now() <= OPTIONS.durationMs + SCHEDULE + drained * SCHEDULE, String(world.now()));
+    // The wall clock does not move: the soak ends within the duration plus one interval.
+    assert.ok(world.now() <= OPTIONS.durationMs + SCHEDULE, String(world.now()));
   });
 
   it('fails without a drain, as before, when the hour ends with edits pending', async () => {
@@ -152,7 +155,7 @@ describe('soak hourly boundary', () => {
     assert.match(error.message, /^soak stopped at hour 1: I1=false, \d+ edits lost \((\d+) retained pending, 0 absent everywhere\) after 3 of 3 drain syncs$/);
     // Looks before each of the three drain runs, then the final, strict look.
     assert.deepEqual(world.boundaries.map((boundary) => [boundary.hour, boundary.drainSyncs, boundary.final]), [[1, 0, false], [1, 1, false], [1, 2, false], [1, 3, true]]);
-    assert.deepEqual(world.syncs.filter((sync) => sync.phase === 'drain').map((sync) => sync.at - HOUR), [SCHEDULE, 2 * SCHEDULE, 3 * SCHEDULE], 'drain runs keep the schedule');
+    assert.deepEqual(world.syncs.filter((sync) => sync.phase === 'drain').map((sync) => sync.at - HOUR), [SCHEDULE, 2 * SCHEDULE, 3 * SCHEDULE], 'drain runs are the scheduled runs');
     assert.equal(world.made.length, editsAtCheck, 'no edit after the hour');
     assert.equal(world.pr()?.tokens.size, Number(/\((\d+) retained/.exec(error.message)?.[1]));
     assert.equal(saved.at(-1), 3, 'the drain runs are saved before the stop');
@@ -177,26 +180,100 @@ describe('soak hourly boundary', () => {
     }
   });
 
-  it('moves the rest of the schedule and its hard end by the drain, and gives drain runs the whole drain', async () => {
+  it('keeps every event at its wall-clock time and every run at the fixed hard end, and makes the drain\'s edits after the verdict', async () => {
     const world = pipeline({ checkDelayMs: 120_000 });
-    await soak(world.driver, OPTIONS);
+    const edits: number[] = [];
+    const driver: SoakDriver = {
+      ...world.driver,
+      linearEdit: async (actor, path) => { edits.push(world.now()); return world.driver.linearEdit(actor, path); },
+      gitEdit: async (paths) => { edits.push(world.now()); return world.driver.gitEdit(paths); },
+    };
+    const result = await soak(driver, OPTIONS);
     const firstHour = world.boundaries.filter((boundary) => boundary.hour === 1);
     const drained = firstHour.at(-1)?.drainSyncs ?? 0;
     assert.ok(drained >= 1);
     const end = OPTIONS.durationMs + SCHEDULE;
-    // Before the first drain: the scheduled runs' deadline is the plain hard end.
-    const before = world.syncs.filter((sync) => sync.phase === undefined && sync.at < HOUR);
-    assert.ok(before.length > 0 && before.every((sync) => sync.deadlineAt === end));
-    // A drain run may take until the hard end grown by the whole drain allowance.
-    const drains = world.syncs.filter((sync) => sync.phase === 'drain' && sync.at < 2 * HOUR);
-    assert.deepEqual(drains.slice(0, drained).map((sync) => [sync.at, sync.deadlineAt]), Array.from({ length: drained }, (_, index) => [HOUR + (index + 1) * SCHEDULE, end + 3 * SCHEDULE]));
-    // The next scheduled run comes one interval after the last drain slot, with the hard end moved by the drain.
-    const next = world.syncs.find((sync) => sync.phase === undefined && sync.at > HOUR);
-    assert.deepEqual([next?.at, next?.deadlineAt], [HOUR + (drained + 1) * SCHEDULE, end + drained * SCHEDULE]);
+    assert.deepEqual(result.clock, { startedAt: 0, editsEndAt: OPTIONS.durationMs - 3 * SCHEDULE, expectedEndAt: OPTIONS.durationMs, hardEndAt: end });
+    // Every run, drain runs included, starts at its own scheduled time and may take until the plain hard end.
+    assert.deepEqual(world.syncs.map((sync) => [sync.at, sync.deadlineAt]), Array.from({ length: 24 }, (_, index) => [(index + 1) * SCHEDULE, end]));
+    // The drain took the first hour's next scheduled runs; the next plain run keeps its own slot.
+    assert.deepEqual(world.syncs.filter((sync) => sync.phase === 'drain').map((sync) => sync.at), Array.from({ length: drained }, (_, index) => HOUR + (index + 1) * SCHEDULE));
+    // The edits whose time came during the drain are made after the verdict, and none comes in the quiet tail.
+    const verdictAt = firstHour.at(-1)!.at;
+    assert.ok(edits.some((at) => at === verdictAt), 'a deferred edit is made at the verdict');
+    assert.ok(edits.every((at) => at < HOUR || at >= verdictAt));
+    assert.ok(edits.every((at) => at < result.clock.editsEndAt));
+    assert.deepEqual(result.edits, soakEditCounts(OPTIONS));
   });
 
-  it('keeps the hard end when runs fall behind the schedule moved by the drains', async () => {
-    // Runs take two schedule intervals, so the soak falls behind its schedule: the overrun stop still applies.
+  it('ends a day within 24 hours and one interval with zero, typical or the most hourly drains, and every edit and verdict', async () => {
+    const day: SoakOptions = { ...OPTIONS, durationMs: 24 * HOUR, documents: new Map(Array.from({ length: 40 }, (_, index) => [`d${index}.md`, ['# D\n']])) };
+    const counts = soakEditCounts(day);
+    for (const needs of [() => 0, (hour: number) => hour % 3, () => 3]) {
+      const world = pipeline({ checkDelayMs: 0 });
+      // An hour settles after the drain runs it needs; the last check has no run left and is strict at once.
+      const driver: SoakDriver = {
+        ...world.driver,
+        checkInvariants: async (boundary) => {
+          await world.driver.checkInvariants(boundary);
+          const settled = boundary.hour === 24 || boundary.drainSyncs >= needs(boundary.hour);
+          return { lostEdits: settled ? 0 : 1, converged: settled };
+        },
+      };
+      const result = await soak(driver, day);
+      const expected = Array.from({ length: 23 }, (_, index) => needs(index + 1)).reduce((sum, count) => sum + count, 0);
+      assert.equal(result.drainSyncs, expected);
+      assert.equal(result.syncRuns, 288, 'drain runs are scheduled runs');
+      assert.equal(result.invariantChecks, 24);
+      assert.deepEqual(result.edits, counts, 'every scheduled edit is made');
+      assert.deepEqual(world.boundaries.filter((boundary) => boundary.hour === 24).map((boundary) => [boundary.drainSyncs, boundary.final]), [[0, true]]);
+      // The last run starts at 24 hours and ends a minute later: well within the hard end.
+      assert.equal(world.syncs.at(-1)?.at, 24 * HOUR);
+      assert.ok(world.now() <= result.clock.hardEndAt && result.clock.hardEndAt === 24 * HOUR + SCHEDULE, String(world.now()));
+    }
+  });
+
+  it('refuses a drain of half a check interval or more, which could reach the quiet tail, before the first edit', async () => {
+    const world = pipeline({ checkDelayMs: 0 });
+    await assert.rejects(soak(world.driver, { ...OPTIONS, drainSyncs: 6 }), /takes half the 3600000 ms check interval or more/);
+    assert.equal(world.made.length, 0);
+    assert.throws(() => soakEditCounts({ ...OPTIONS, drainSyncs: 6 }), /takes half the 3600000 ms check interval or more/);
+    // With a drain, the soak lasts whole check intervals, so its last check is at its end.
+    await assert.rejects(soak(world.driver, { ...OPTIONS, durationMs: 2 * HOUR + SCHEDULE }), /lasts whole check intervals/);
+    assert.equal(world.made.length, 0);
+  });
+
+  it('settles the last hour strictly at the longest drain, when the hour before it drains up to the quiet tail', async () => {
+    // Five five-minute drain runs, and a 25-minute quiet tail. The checks pass 25 minutes after a push, so the first
+    // hour drains to its fifth run and its held-back edits come just before the tail starts.
+    const world = pipeline({ checkDelayMs: 25 * 60_000 });
+    const result = await soak(world.driver, { ...OPTIONS, drainSyncs: 5 });
+    const hours = (hour: number) => world.boundaries.filter((boundary) => boundary.hour === hour);
+    assert.equal(hours(1).at(-1)?.drainSyncs, 5);
+    assert.ok(hours(1).at(-1)?.settled);
+    assert.deepEqual(hours(2).map((boundary) => [boundary.settled, boundary.drainSyncs, boundary.final]), [[true, 0, true]]);
+    assert.deepEqual([result.lostEdits, result.syncRuns, result.clock.editsEndAt], [0, 24, OPTIONS.durationMs - 5 * SCHEDULE]);
+    assert.deepEqual(result.edits, soakEditCounts({ ...OPTIONS, drainSyncs: 5 }));
+  });
+
+  it('keeps the hour\'s evidence when the soak is past its hard end at a drain slot, and stops as blocked', async () => {
+    // The checks never pass and the first hour's look itself takes until past the hard end.
+    const world = pipeline({ checkDelayMs: Number.POSITIVE_INFINITY });
+    const driver: SoakDriver = {
+      ...world.driver,
+      checkInvariants: async (boundary) => {
+        const check = await world.driver.checkInvariants(boundary);
+        if (boundary.hour === 1 && boundary.drainSyncs === 0 && !boundary.final) await world.driver.sleep(OPTIONS.durationMs);
+        return check;
+      },
+    };
+    await assert.rejects(soak(driver, OPTIONS), (error: unknown) => error instanceof EnvBlockedError && /wall-clock duration/.test(error.message));
+    assert.deepEqual(world.boundaries.map((boundary) => [boundary.hour, boundary.drainSyncs, boundary.final]), [[1, 0, false], [1, 0, true]], 'a final look keeps the evidence');
+    assert.equal(world.syncs.filter((sync) => sync.phase === 'drain').length, 0, 'no run starts past the hard end');
+  });
+
+  it('fails as blocked when runs fall behind the fixed wall clock', async () => {
+    // Runs take two schedule intervals, so the soak falls behind its schedule and past its hard end.
     const world = pipeline({ checkDelayMs: 0, runMs: 2 * SCHEDULE });
     await assert.rejects(soak(world.driver, OPTIONS), EnvBlockedError);
   });
@@ -256,8 +333,8 @@ describe('soak recovery from GitHub server errors', () => {
     assert.equal(result.lostEdits, 0);
     assert.ok(world.made.every((item) => world.linear.has(item) && world.tracked.has(item)), 'every edit reached both sides');
     assert.deepEqual(result.edits, soakEditCounts(OPTIONS));
-    // The failed runs kept their slots: every run is a scheduled or a drain run, and all of them count.
-    assert.equal(failing.runs(), 24 + result.drainSyncs);
+    // The failed runs kept their slots: every run is a scheduled run (drain runs included), and all of them count.
+    assert.equal(failing.runs(), 24);
     assert.equal(result.syncRuns, failing.runs());
   });
 
