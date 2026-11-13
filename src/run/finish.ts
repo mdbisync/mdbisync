@@ -13,7 +13,7 @@ import { cell } from './summary.ts';
 import { type OperationOutcome, type RunWrites } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 import { type RecordLeftOutRule } from '../codes.ts';
-import { type RefusedPush } from '../state/index.ts';
+import { type RefusedPush, landedRefs } from '../state/index.ts';
 import { type ConflictNotices } from '../sync/marks.ts';
 
 export interface RunReport {
@@ -103,9 +103,12 @@ export interface RunReport {
   } | null;
   /** A push of this run was refused because a ref had moved under it: another run recorded first. */
   atomicPushRefused: boolean;
-  /** Refs git reported updated in a refused push; 0 expected, since every push is atomic. */
+  /**
+   * Refs of refused pushes that the remote holds at the value pushed (`landedRefs`); 0 expected, since every
+   * push is atomic. A ref git reported updated while the remote kept another value is not counted.
+   */
   partialRefUpdates: number;
-  /** Each push refused for its leases, with git's output and the remote's refs when git reported one updated. */
+  /** Each push refused for its leases; when git reported a ref updated, git's output, the value sent and the remote's refs. */
   refusedPushes: RefusedPush[];
   /** A sync run skipped a document because it changed in Linear after the capture. */
   skippedConcurrentDocument: boolean;
@@ -355,7 +358,7 @@ function raceFacts(outcome: OperationOutcome) {
   const write = outcome.sync?.write;
   return {
     atomicPushRefused: outcome.refusedPushes.length > 0,
-    partialRefUpdates: outcome.refusedPushes.reduce((sum, push) => sum + push.moved.length, 0),
+    partialRefUpdates: outcome.refusedPushes.reduce((sum, push) => sum + landedRefs(push).length, 0),
     refusedPushes: [...outcome.refusedPushes],
     skippedConcurrentDocument: write?.skipped.some((entry) => entry.reason === 'edited-in-linear' || entry.reason === 'missing-in-linear') ?? false,
     capturedTrackedTip: outcome.sync?.trackedTip ?? null,

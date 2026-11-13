@@ -44,6 +44,7 @@ export {
   type RefUpdate,
   type RefRole,
   type RefusedPush,
+  landedRefs,
   movedRefs,
   refusedPushes,
   type StateSnapshot,
