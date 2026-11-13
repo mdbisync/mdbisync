@@ -7,7 +7,7 @@ import type { EngineResult } from './engine.ts';
 import { ProductError } from './results.ts';
 import { settle, SETTLE_SERVER_ERROR_RETRIES } from './steps.ts';
 
-type Ending = 'changed' | 'settled' | 'server-error' | 'client-error' | 'server-error-and-failed-write';
+type Ending = 'changed' | 'merged' | 'settled' | 'server-error' | 'client-error' | 'server-error-and-failed-write';
 
 /** The report a sync run leaves for each ending; the server error is an HTTP 502. */
 function report(ending: Ending): Record<string, unknown> {
@@ -18,6 +18,7 @@ function report(ending: Ending): Record<string, unknown> {
     pullRequest: { needed: false, pullRequest: null, checks: null, merged: null },
     sync: { complete: true, failed: [], notAttempted: [], stopped: null },
   };
+  if (ending === 'merged') return { ...base, changed: true, pullRequest: { ...base.pullRequest, needed: true, pullRequest: { number: 412, opened: false }, merged: 'a'.repeat(40) } };
   if (ending === 'changed' || ending === 'settled') return base;
   return {
     ...base, code: 'github-failed', exitStatus: 'failure', changed: false,
@@ -38,11 +39,11 @@ async function settleWith(endings: Ending[], limit?: number) {
   } as unknown as RunContext;
   const runOnce = async () => {
     const ending = endings[Math.min(results.length, endings.length - 1)]!;
-    const failed = !['changed', 'settled'].includes(ending);
+    const failed = !['changed', 'merged', 'settled'].includes(ending);
     results.push({ command: 'sync', exitCode: failed ? 1 : 0, signal: null, timedOut: false, notImplemented: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: report(ending) });
   };
   const outcome = await settle(ctx, {}, limit, runOnce).then(() => undefined, (error: unknown) => error);
-  return { outcome, runs: results.map((result) => (result.exitCode === 0 ? (result.report!.changed ? 'changed' : 'settled') : `failed ${String((result.report!.pullRequest as { status: number }).status)}`)), ctx, log };
+  return { outcome, runs: results.map((result) => (result.exitCode === 0 ? (result.report!.changed ? ((result.report!.pullRequest as { merged: unknown }).merged ? 'merged' : 'changed') : 'settled') : `failed ${String((result.report!.pullRequest as { status: number }).status)}`)), ctx, log };
 }
 
 describe('run.settle after a GitHub server error', () => {
@@ -71,6 +72,12 @@ describe('run.settle after a GitHub server error', () => {
     const { outcome, runs } = await settleWith(['changed', 'changed', 'changed', 'server-error', 'settled']);
     assert.equal(outcome, undefined);
     assert.deepEqual(runs, ['changed', 'changed', 'changed', 'failed 502', 'settled']);
+  });
+
+  it('keeps the run after a merge on the last attempt as its own bound next to the server error retries', async () => {
+    const { outcome, runs } = await settleWith(['changed', 'server-error', 'changed', 'changed', 'merged', 'settled']);
+    assert.equal(outcome, undefined);
+    assert.deepEqual(runs, ['changed', 'failed 502', 'changed', 'changed', 'merged', 'settled']);
   });
 
   it('judges only a run the attempt recorded, never an earlier step\'s failed run', async () => {

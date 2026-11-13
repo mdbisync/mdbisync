@@ -569,12 +569,14 @@ describe('workflows', () => {
 
   const pending = { hasChecks: true, state: 'pending', failed: [], pending: [CHECK_NAME] };
   const passed = { hasChecks: true, state: 'passed', failed: [], pending: [] };
+  /** A run that merged the sync pull request. */
+  const merging = { changed: true, checks: passed, merged: 'a'.repeat(40) };
   /** Reports in turn; the last one repeats. */
-  const reportsOf = (...reports: Array<{ changed: boolean; checks: Record<string, unknown> }>) => {
+  const reportsOf = (...reports: Array<{ changed: boolean; checks: Record<string, unknown>; merged?: string }>) => {
     let next = 0;
     return () => {
-      const { changed, checks } = reports[Math.min(next++, reports.length - 1)]!;
-      return { changed, pullRequest: { needed: true, pullRequest: { number: 261, opened: false }, checks, merged: null } };
+      const { changed, checks, merged } = reports[Math.min(next++, reports.length - 1)]!;
+      return { changed, pullRequest: { needed: true, pullRequest: { number: 261, opened: false }, checks, merged: merged ?? null } };
     };
   };
   const settleScenario = async (report: () => Record<string, unknown>, options: Parameters<typeof pendingPullRequest>[1]) => {
@@ -598,6 +600,36 @@ describe('workflows', () => {
     const changed = { changed: true, checks: passed };
     const { dispatched } = await settleScenario(reportsOf(changed, changed, changed, { changed: false, checks: pending }, { changed: false, checks: passed }), { pendingReads: 1 });
     assert.equal(dispatched.length, 5, 'the run after the wait comes on top of the four runs');
+  });
+
+  it('settle runs again after its last run merged the sync pull request, so the merge is recorded before I6 (L4-09)', async () => {
+    // L4-09's live shape: three runs that change, one that waits for `format`, the run after the wait merges,
+    // and only the run after the merge moves `linear`. Settle ends on that record run; I6's own run is then quiet.
+    const changed = { changed: true, checks: passed };
+    const quiet = { changed: false, checks: passed };
+    const { ctx, dispatched } = await settleScenario(reportsOf(changed, changed, changed, { changed: false, checks: pending }, merging, changed, quiet), { pendingReads: 1 });
+    assert.equal(dispatched.length, 6, 'the record run comes on top of the four runs and the run after the wait');
+    const last = ctx.engine.results.at(-1)?.report?.['pullRequest'] as { merged?: unknown } | undefined;
+    assert.equal(last?.merged, null, 'settle does not end on the run that merged');
+    assert.equal(ctx.observations.get('settle.checkWaits'), 1);
+  });
+
+  it('settle runs on to a quiet run after a merge when runs are left', async () => {
+    const changed = { changed: true, checks: passed };
+    const { ctx, dispatched } = await settleScenario(reportsOf(merging, changed, { changed: false, checks: passed }), { pendingReads: 0 });
+    assert.equal(dispatched.length, 3);
+    assert.equal(ctx.engine.results.at(-1)?.report?.['changed'], false);
+  });
+
+  it('an early merge does not add a run to a scenario that never settles', async () => {
+    const changed = { changed: true, checks: passed };
+    const { dispatched } = await settleScenario(reportsOf(merging, changed), { pendingReads: 0 });
+    assert.equal(dispatched.length, 4, 'only a merge on the last allowed run earns one more');
+  });
+
+  it('settle stops at its bound when every run merges', async () => {
+    const { dispatched } = await settleScenario(reportsOf(merging), { pendingReads: 0 });
+    assert.equal(dispatched.length, 8, 'at most four runs on top of the limit for merges');
   });
 
   it('settle waits for every pending check and status on the head, not only the marker check', async () => {
@@ -4474,7 +4506,9 @@ describe('document text right after a run', () => {
     await assert.rejects(resolveSubject(ctx, 'runs.last.documents.content'), /engine run 2 has no snapshot/);
     await assert.rejects(resolveSubject(ctx, 'runs.5.documents.content'), ProductError);
     // Other run subjects still come from the report.
-    assert.equal(subjectSource('runs.0.documents.brokenImageUrls'), 'engine');
+    assert.equal(subjectSource('runs.0.sync.failed'), 'engine');
+    // A document's image links are computed on the world right after the run, as its text is.
+    assert.equal(subjectSource('runs.0.documents.brokenImageUrls'), 'harness');
   });
 
   it('compares with the golden form of the files at the same moment, so a later git edit fails no correct run', async () => {

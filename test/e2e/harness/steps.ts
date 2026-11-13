@@ -27,7 +27,7 @@ import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } 
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
 import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, editsFound, expectsDocument, holdsToken, lostEdits, readSides, snapshotRefs, bodyOf, type Sides } from './checks.ts';
-import { isCheckpoint } from './checkpoints.ts';
+import { isCheckpoint, KILLED_RUN_CHECKPOINT } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
 import type { CheckState } from '../../../src/pull-request/merge.ts';
 import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
@@ -50,7 +50,7 @@ import { HOOK_REPOSITORY } from '../../corpus/tree.ts';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
 import { lfsEndpoint, lfsUrlEnv, startLfsFaultProxy } from './lfs-fault-proxy.ts';
-import { mutationsBetween, quietFailures, snapshotWorld, untouchedFailures, watchesRunWorld, writesBetween } from './quiet.ts';
+import { field, mutationsBetween, quietFailures, snapshotWorld, untouchedFailures, watchesRunWorld, writesBetween } from './quiet.ts';
 import {
   commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
@@ -315,7 +315,11 @@ export const SETTLE_SERVER_ERROR_RETRIES = 2;
  * a check has not settled: the next run, once the check completes, may merge
  * the pull request. Settle waits for the head's checks (bounded, as
  * `fault.checks` waits) and runs again; those runs come on top of `limit`,
- * and settle waits at most `limit` times.
+ * and settle waits at most `limit` times. A run that merged the sync pull
+ * request on the last allowed attempt is not the last either: the engine
+ * takes the tracked branch in as it was at the run's start, so the next run
+ * records the merge on `linear`. That run also comes on top of `limit`, at
+ * most `limit` times.
  *
  * A run that failed only on a GitHub server error in the sync pull request
  * step (`settleServerError`) has not settled either: the engine ends it
@@ -326,8 +330,9 @@ export const SETTLE_SERVER_ERROR_RETRIES = 2;
  */
 export async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit = 4, runOnce: () => Promise<void> = () => settleRun(ctx, args)): Promise<void> {
   let waits = 0;
+  let merges = 0;
   let serverErrors = 0;
-  for (let attempt = 0; attempt < limit + waits + serverErrors; attempt += 1) {
+  for (let attempt = 0; attempt < limit + waits + merges + serverErrors; attempt += 1) {
     const count = ctx.engine.results.length;
     await runOnce();
     // Only a run this attempt recorded is judged: an earlier step's failed run is not this settle's.
@@ -344,7 +349,12 @@ export async function settle(ctx: RunContext, args: Record<string, unknown> = {}
       continue;
     }
     const report = result?.report;
-    if (report?.['changed'] !== false) continue;
+    if (report?.['changed'] !== false) {
+      const last = attempt + 1 === limit + waits + merges + serverErrors;
+      if (last && typeof field(report, ['pullRequest', 'merged']) === 'string' && merges < limit) merges += 1;
+      else if (last) ctx.log(`settle: the last of ${String(attempt + 1)} runs still changed; the scenario did not settle`);
+      continue;
+    }
     if (waits >= limit || !(await waitForSyncPullRequestChecks(ctx, report))) return;
     waits += 1;
   }
@@ -913,10 +923,11 @@ const RUN: Record<string, Executor> = {
           proxy.clearFaults();
         }
       } else if (outcome === 'killed') {
-        ctx.checkpoints.pause('before-write');
-        const running = await startPaused(ctx, await engineCall(ctx, 'sync', {}), 'before-write');
+        // A checkpoint every sync reaches with its token in hand: on a converged setup there is nothing to write.
+        ctx.checkpoints.pause(KILLED_RUN_CHECKPOINT);
+        const running = await startPaused(ctx, await engineCall(ctx, 'sync', {}), KILLED_RUN_CHECKPOINT);
         running.kill();
-        ctx.checkpoints.resume('before-write');
+        ctx.checkpoints.resume(KILLED_RUN_CHECKPOINT);
         delete ctx.engine.pending;
         ctx.engine.results.push(await running.done);
       }
