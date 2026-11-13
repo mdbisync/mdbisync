@@ -38,6 +38,7 @@ import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { soakDrainSyncs } from './soak-drain.ts';
+import { failedWorkflow, pullRequestStepClean, soakServerErrorPolicy } from './soak-recovery.ts';
 import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver, type SoakBoundary, type SoakDriver, type SoakResult } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, runFailure, type CheckOutcome } from './results.ts';
@@ -970,15 +971,23 @@ const RUN: Record<string, Executor> = {
           } catch (error) { failure ??= error; }
         }
         const completed = ctx.engine.results.length > before;
+        let recoverable: string | undefined;
+        let recovers = true;
         if (failure === undefined && completed) {
-          if (result.exitCode !== 0) failure = new ProductError(`scheduled soak workflow ${result.remote?.runId ?? 'unknown'} failed (exit ${String(result.exitCode)})`);
-          else {
+          if (result.exitCode !== 0) {
+            // Only a GitHub server error in the sync pull request step, with the run's tokens confirmed revoked.
+            const failed = failedWorkflow(result);
+            failure = failed.error;
+            recoverable = failed.recoverable;
+            ctx.log(`soak: workflow ${result.remote?.runId ?? 'unknown'} failed; ${failed.note}`);
+          } else {
+            recovers = pullRequestStepClean(result);
             const tokens = observedTokens(ctx.engine.results.slice(firstRun));
             if (tokens.outstanding === null) failure = new EnvBlockedError('soak stopped: workflow token lifecycle diagnostics are missing');
             else if (tokens.outstanding !== 0) failure = new ProductError('soak stopped: workflow token revocation is unconfirmed');
           }
         }
-        return { completed, startedAt: started, error: failure };
+        return { completed, startedAt: started, error: failure, ...(recoverable === undefined ? {} : { recoverable }), ...(recovers ? {} : { recovers }) };
       } else await runCommand(ctx, 'sync', {});
     };
     // Each invocation goes into the ledger as it ends, with the workflow run and the summary that says what waits.
@@ -986,6 +995,7 @@ const RUN: Record<string, Executor> = {
     const sync: SoakDriver['sync'] = async (deadlineAt, phase) => {
       const invokedAt = new Date().toISOString();
       const before = ctx.engine.results.length;
+      let recoverable: string | undefined;
       const record = (error: unknown) => {
         const result = ctx.engine.results.length > before ? ctx.engine.results.at(-1) : undefined;
         ledger.sync({
@@ -996,6 +1006,7 @@ const RUN: Record<string, Executor> = {
           ...(result?.remote === undefined ? {} : { workflowRunId: result.remote.runId }),
           ...(result === undefined ? {} : { exitCode: result.exitCode, summary: result.summary }),
           ...(error === undefined ? {} : { error: error instanceof Error ? error.message : String(error) }),
+          ...(recoverable === undefined ? {} : { recoverable }),
         });
       };
       let outcome: Awaited<ReturnType<LoadDriver['sync']>>;
@@ -1005,6 +1016,7 @@ const RUN: Record<string, Executor> = {
         record(error);
         throw error;
       }
+      if (typeof outcome === 'object') recoverable = outcome.recoverable;
       record(typeof outcome === 'object' ? outcome.error : undefined);
       return outcome;
     };
@@ -1033,6 +1045,7 @@ const RUN: Record<string, Executor> = {
     };
     const base = loadDriver(ctx, sync);
     const drainLimit = soakDrainSyncs(args);
+    const serverErrors = soakServerErrorPolicy(args);
     // The looks of the current hour that found the sides apart, each before a drain run.
     let looks: Array<{ drainSyncs: number; I1: boolean; lost: number }> = [];
     // Each edit that landed goes into the ledger with its measured write window, before the soak goes on.
@@ -1088,6 +1101,7 @@ const RUN: Record<string, Executor> = {
       actors: Array.isArray(args.actors) ? (args.actors as Actor[]) : (['editor-a', 'editor-b', 'git'] as Actor[]),
       seed: String(args.randomSeed ?? ctx.names.runId),
       drainSyncs: drainLimit,
+      serverErrors,
     };
     const documents = await loadCandidates(ctx, 'soak');
     const lastToken = (edits: Record<Actor, number>) => lastLoadToken(ctx, edits['editor-a'] + edits['editor-b'], edits.git);

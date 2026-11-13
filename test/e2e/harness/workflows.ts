@@ -347,6 +347,7 @@ export async function runResult(rest: SandboxRest, run: WorkflowRun, command: Co
       requests: diagnosticRequests(files),
     },
     exitCode: run.conclusion === 'success' ? 0 : 1,
+    conclusion: run.conclusion ?? null,
     signal: null,
     notImplemented: run.conclusion !== 'success' && engineNotImplemented(files, command),
     timedOut: false,

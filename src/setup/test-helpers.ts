@@ -141,6 +141,12 @@ export interface FakeWorld {
      * required fields.
      */
     reset?: (request: string, body: Record<string, unknown>) => 'before' | 'after' | undefined;
+    /**
+     * Answers a request (as for `reset`) with HTTP 500, as in a GitHub
+     * outage: `before` GitHub handles it, or `after` it applied the request,
+     * so the answer hides a change that happened.
+     */
+    serverError?: (request: string, body: Record<string, unknown>) => 'before' | 'after' | undefined;
   };
   /**
    * `unavailable`: the token endpoint answers 503, as in an outage.
@@ -232,10 +238,14 @@ export function fakeFetch(world: FakeWorld): typeof fetch {
     if (parsed.origin === githubUrl.origin && (parsed.pathname === githubUrl.pathname || parsed.pathname.startsWith(`${githubUrl.pathname}/`))) {
       const path = parsed.pathname.slice(githubUrl.pathname.length) + parsed.search;
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
-      const reset = world.github.reset?.(`${method} ${path.replace(/^\/repos\/[^/]+\/[^/]+/, '')}`, body);
+      const request = `${method} ${path.replace(/^\/repos\/[^/]+\/[^/]+/, '')}`;
+      const reset = world.github.reset?.(request, body);
+      const serverError = world.github.serverError?.(request, body);
       if (reset === 'before') throw new TypeError('fetch failed', { cause: new Error('read ECONNRESET') });
+      if (serverError === 'before') return json(500, { message: 'Server Error' });
       const answer = await github(world, method, path, init);
       if (reset === 'after') throw new TypeError('fetch failed', { cause: new Error('read ECONNRESET') });
+      if (serverError === 'after') return json(500, { message: 'Server Error' });
       return answer;
     }
     if (parsed.origin === linearUrl.origin) return linear(world, parsed.pathname + parsed.search, init);

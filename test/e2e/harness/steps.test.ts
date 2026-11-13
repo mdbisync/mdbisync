@@ -986,7 +986,7 @@ describe('load', () => {
     };
     await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), /edits lost/);
     assert.equal(syncs, 1);
-    assert.deepEqual(saved.at(-1), { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 1, lostEdits: 1, drainSyncs: 0, scheduleDelays: [50] });
+    assert.deepEqual(saved.at(-1), { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 1, lostEdits: 1, drainSyncs: 0, scheduleDelays: [50], serverErrors: { tolerated: 0, recovered: 0 } });
   });
 
   it('stops an overrun instead of stretching a timed soak into a longer passing run', async () => {
@@ -1020,7 +1020,7 @@ describe('load', () => {
       checkInvariants: async () => ({ lostEdits: 0 }), progress: async (result) => { saved = structuredClone(result); },
     };
     await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), (error) => error === failure);
-    assert.deepEqual(saved, { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 0, lostEdits: 0, drainSyncs: 0, scheduleDelays: [25] });
+    assert.deepEqual(saved, { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 0, lostEdits: 0, drainSyncs: 0, scheduleDelays: [25], serverErrors: { tolerated: 0, recovered: 0 } });
   });
 
   it('persists the soak step report even when no timed events are requested', async () => {

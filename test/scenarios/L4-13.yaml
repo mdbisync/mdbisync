@@ -23,7 +23,9 @@
           "editor-b",
           "git"
         ],
-        "randomSeed": 173
+        "randomSeed": 173,
+        "serverErrorTicks": 2,
+        "serverErrorTotal": 3
       }
     },
     {

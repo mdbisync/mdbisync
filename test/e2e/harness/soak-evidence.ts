@@ -53,6 +53,8 @@ export interface SoakSyncEntry {
   error?: string;
   /** A run an hourly check waited for, with no edit made since the check's first look. */
   phase?: 'drain';
+  /** The failure was a GitHub server error a later scheduled run may recover from (whether the soak tolerated it is in its result). */
+  recoverable?: string;
 }
 
 /** JSON with credentials redacted in each string value, so redaction never runs across escapes or field boundaries. */

@@ -91,6 +91,7 @@ it('does not claim a zero-cost successful remote run when diagnostics are missin
   ctx.proxy = null;
   for (const conclusion of ['success', 'failure']) {
     ctx.engine.results = [await runResult(rest, { ...run(3), conclusion }, 'initial-sync', new Map([['job', 'unrelated output']]))];
+    assert.equal(ctx.engine.results[0]?.conclusion, conclusion, 'the run keeps its conclusion');
     const check = await INVARIANT_CHECKS.I9(ctx, async () => { throw new Error('unexpected world read'); });
     assert.equal(check.ok, false);
     assert.match(check.detail!, /diagnostics are missing/);
