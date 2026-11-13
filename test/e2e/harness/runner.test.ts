@@ -308,7 +308,7 @@ describe('configuration and GitHub App', () => {
       paths.push(path);
       return path === '/repos/acme/sandbox/installation' ? Response.json({ id: 7, app_slug: 'sync-app' }) : Response.json({ token: 'installation-token' }, { status: 201 });
     }) as typeof fetch;
-    assert.deepEqual(await appInstallationToken(config, fetchImpl), { token: 'installation-token', appLogin: 'sync-app[bot]' });
+    assert.deepEqual(await appInstallationToken(config, fetchImpl), { token: 'installation-token', appLogin: 'sync-app[bot]', appClientId: 'Iv1.test' });
     assert.deepEqual(paths, ['/repos/acme/sandbox/installation', '/app/installations/7/access_tokens']);
   });
 });

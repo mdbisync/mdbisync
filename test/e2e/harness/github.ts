@@ -30,6 +30,8 @@ export interface GitHubToken {
   getToken?: () => Promise<string>;
   /** The App's bot login (`<slug>[bot]`), which GitHub names as the actor of what this token writes; App tokens only. */
   appLogin?: string;
+  /** The App's client id, which the workflows' App token steps name; App tokens only. */
+  appClientId?: string;
 }
 
 export class GitHubError extends Error {
@@ -66,12 +68,12 @@ async function call<T>(token: string, method: string, path: string, body?: unkno
 }
 
 /** The App's installation token for the sandbox, and the bot login GitHub shows for what that token writes. */
-export async function appInstallationToken(config: TestConfig, fetchImpl: typeof fetch = fetch): Promise<{ token: string; appLogin: string }> {
+export async function appInstallationToken(config: TestConfig, fetchImpl: typeof fetch = fetch): Promise<{ token: string; appLogin: string; appClientId: string }> {
   if (config.githubApp === null) throw new Error('the GitHub App key or client id is missing');
   const jwt = appJwt(config.githubApp.clientId, config.githubApp.privateKey);
   const installation = await call<{ id: number; app_slug: string }>(jwt, 'GET', `/repos/${config.owner}/${config.repo}/installation`, undefined, fetchImpl);
   const created = await call<{ token: string }>(jwt, 'POST', `/app/installations/${installation.id}/access_tokens`, { repositories: [config.repo] }, fetchImpl);
-  return { token: created.token, appLogin: `${installation.app_slug}[bot]` };
+  return { token: created.token, appLogin: `${installation.app_slug}[bot]`, appClientId: config.githubApp.clientId };
 }
 
 /** The host's git credential for the sandbox, through git's credential helper. */

@@ -90,18 +90,34 @@ export type PushResult =
  * A push refused for its leases, and any of its refs git reported as updated
  * anyway (none expected: the push is atomic). A ref reported updated keeps
  * the evidence to tell a real partial update from a misreport: git's output
- * for the push, and where the remote held each such ref right after.
+ * for the push, the value it sent, and where the remote held each such ref
+ * right after (`landedRefs`).
  */
 export interface RefusedPush {
   refs: string[];
   moved: string[];
   /** git's output for the push, its porcelain lines and then its errors; kept only when `moved` is not empty. */
   output: string[];
+  /** Each ref in `moved`, with the value this push sent for it; empty when `moved` is. */
+  pushed: Record<string, Oid>;
   /**
    * Each ref in `moved`, as the remote held it after the refusal (null: the
    * ref is absent); empty when `moved` is; null when the remote could not be read.
    */
   remoteAfter: Record<string, Oid | null> | null;
+}
+
+/**
+ * The refs of a refused push that did update: those git reported updated
+ * whose value on the remote after the refusal is the one this push sent.
+ * git can report a ref of a refused push as updated while the remote kept
+ * another run's value; such a ref did not move and is left out. When the
+ * remote could not be read, every reported ref counts, since none can be
+ * ruled out.
+ */
+export function landedRefs(push: RefusedPush): string[] {
+  const after = push.remoteAfter;
+  return after === null ? [...push.moved] : push.moved.filter((ref) => after[ref] === push.pushed[ref]);
 }
 
 const refusals = new WeakMap<Git, RefusedPush[]>();
@@ -183,7 +199,7 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   const skipped = updates.filter((update) => update.next !== update.expected && before.get(update.ref) === update.next);
   if (skipped.length > 0) {
     // Nothing was sent, so nothing moved.
-    logRefusal(git, { refs: changing.map((update) => update.ref), moved: [], output: [], remoteAfter: {} });
+    logRefusal(git, { refs: changing.map((update) => update.ref), moved: [], output: [], pushed: {}, remoteAfter: {} });
     return { ok: false, reason: 'stale', refs: skipped.map((update) => ({ ref: update.ref, message: 'already at the new value, not at the expected one' })) };
   }
 
@@ -219,9 +235,10 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
     ? undefined
     : await lsRemote(git, config.remote, updates.map((update) => update.ref));
   const stale = remote === undefined || updates.some((update) => (remote.get(update.ref) ?? null) !== update.expected);
-  // What git reports it updated in the refused push. A ref found at this push's value proves nothing: another run
-  // that took in the same changes in the same second makes the same commits. So the refusal keeps git's output and
-  // where the remote held those refs, for a person to tell a partial update from a misreport.
+  // What git reports it updated in the refused push. A ref the remote holds at another value did not move and is
+  // not counted (`landedRefs`). A ref at this push's value is counted, though it proves no partial update: another
+  // run that took in the same changes in the same second makes the same commits. So the refusal keeps git's output
+  // and where the remote held those refs, for a person to tell a partial update from a misreport.
   if (stale) {
     const moved = lines.filter((line) => line.flag !== '!' && line.flag !== '=').map((line) => line.ref);
     // The evidence must not turn a lost lease into a failed run: a remote that cannot be read leaves it out.
@@ -230,6 +247,7 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
       refs: changing.map((update) => update.ref),
       moved,
       output: moved.length === 0 ? [] : outputLines(stdout, result.stderr),
+      pushed: Object.fromEntries(updates.filter((update) => moved.includes(update.ref)).map((update) => [update.ref, update.next])),
       remoteAfter: after === undefined ? {} : after === null ? null : Object.fromEntries(moved.map((ref) => [ref, after.get(ref) ?? null])),
     });
   }

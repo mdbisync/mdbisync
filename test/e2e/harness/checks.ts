@@ -1156,6 +1156,32 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
 }
 
 /**
+ * Beside each `refHistory` snapshot, when the harness began to read it (ms
+ * since the epoch): a ref that differs between two snapshots moved between
+ * those times, and only a run GitHub shows running then can have moved it.
+ */
+export const REF_HISTORY_TIMES = 'refHistory.times';
+
+/** Starts `refHistory` (and `REF_HISTORY_TIMES`) afresh with a snapshot taken now. */
+export async function startRefHistory(ctx: RunContext): Promise<void> {
+  ctx.observations.set('refHistory', []);
+  ctx.observations.set(REF_HISTORY_TIMES, []);
+  await recordRefs(ctx);
+}
+
+/** Adds a snapshot taken now to `refHistory`, with the time it was taken. */
+export async function recordRefs(ctx: RunContext): Promise<void> {
+  const at = Date.now();
+  const snapshot = await snapshotRefs(ctx);
+  const history = (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined) ?? [];
+  const times = (ctx.observations.get(REF_HISTORY_TIMES) as number[] | undefined) ?? [];
+  history.push(snapshot);
+  times.push(at);
+  ctx.observations.set('refHistory', history);
+  ctx.observations.set(REF_HISTORY_TIMES, times);
+}
+
+/**
  * Fetches each commit a snapshot lists into the sandbox cache while the remote
  * still holds it. A later step can leave a commit without any ref on the
  * remote (an initial sync replacing its record after the sync branch was
