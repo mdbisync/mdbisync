@@ -11,6 +11,14 @@
 //   node test/e2e/harness/cli.ts scheduler [--install]
 //        prints the sandbox's scheduled sync workflow for the release under test; --install commits it
 //        to the sandbox's default branch (workflow-files.ts, renderScheduler)
+//   node test/e2e/harness/cli.ts dispatch-check [--keep-run]
+//        runs docs/own-scheduler.md's dispatch script, as published, against the
+//        sandbox: with an App token without Actions write (expects HTTP 403 and
+//        exit 1), then with one with it (expects a run of mdbisync.yml on main
+//        within a minute, cancelled at once unless --keep-run). Prints the
+//        record as JSON; exit 0 when both cases behave as the page says, 1 when
+//        not, 3 when the check could not run and dispatched nothing
+//        (dispatch-check.ts). Needs the GitHub App; it dispatches live.
 //   node test/e2e/harness/cli.ts walkthrough prepare|push|dispatch|wait|list|cancel
 //        --run <six hex> [--dir <clone>] [--ref t/<run>/main]
 //        [--workflow mdbisync-initial-sync.yml] [--input direction=git-to-linear]
@@ -46,7 +54,7 @@ import { newRunId, runNames, RUN_ID_PATTERN } from './isolation.ts';
 import { LinearWorld, editorClient } from './linear-world.ts';
 import { acquireLock, defaultStateDir, forgetRun, registerRun, requireStoppedLocalRun } from './locks.ts';
 import { updateStatusPage, writeEvidence, writeRunReport, type HarnessReport } from './report.ts';
-import { gateExitCode, loadExpectedRed } from './results.ts';
+import { EnvBlockedError, gateExitCode, loadExpectedRed } from './results.ts';
 import { requireLiveConfig, runScenarios, skippedResult } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios, selectScenarios } from './spec.ts';
@@ -58,6 +66,7 @@ import { loadHeldRun } from './held-run.ts';
 import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-result.ts';
 import { readTemplate, renderScheduler, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
 import { walkthrough } from './walkthrough.ts';
+import { dispatchCheck } from './dispatch-check.ts';
 
 const list = (value: string | undefined) => (value === undefined ? undefined : value.split(',').map((item) => item.trim()).filter(Boolean));
 
@@ -79,6 +88,7 @@ async function main(argv: string[]): Promise<number> {
       'evidence-dir': { type: 'string' },
       defer: { type: 'string' },
       install: { type: 'boolean' },
+      'keep-run': { type: 'boolean' },
     },
   });
   const command = positionals[0] ?? 'help';
@@ -127,6 +137,19 @@ async function main(argv: string[]): Promise<number> {
     const { commit } = await rest.putFile(path, text, 'Install the scheduled sync workflow');
     log(`installed ${path} on the default branch in ${commit}`);
     return 0;
+  }
+
+  if (command === 'dispatch-check') {
+    try {
+      const report = await dispatchCheck({ config, stateDir, keepRun: values['keep-run'] === true, log });
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+      return report.ok ? 0 : 1;
+    } catch (error) {
+      // Not run: nothing was dispatched, which says nothing about the page.
+      if (!(error instanceof EnvBlockedError)) throw error;
+      process.stdout.write(`${JSON.stringify({ result: 'env-blocked', reason: error.message }, null, 2)}\n`);
+      return 3;
+    }
   }
 
   // Long runs renew harness app tokens before expiry and revoke every minted token.
@@ -301,7 +324,7 @@ async function main(argv: string[]): Promise<number> {
       return gateExitCode([result], log);
     }
 
-    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|scheduler|walkthrough [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
+    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|scheduler|dispatch-check|walkthrough [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
     return command === 'help' ? 0 : 2;
   } finally {
     try { await shared?.store.close?.(); }

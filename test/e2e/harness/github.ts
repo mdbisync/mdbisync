@@ -67,13 +67,24 @@ async function call<T>(token: string, method: string, path: string, body?: unkno
   return (text === '' ? undefined : JSON.parse(text)) as T;
 }
 
-/** The App's installation token for the sandbox, and the bot login GitHub shows for what that token writes. */
-export async function appInstallationToken(config: TestConfig, fetchImpl: typeof fetch = fetch): Promise<{ token: string; appLogin: string; appClientId: string }> {
+/** A permission of an installation token: GitHub's permission name and its level. */
+export type TokenPermissions = Record<string, 'read' | 'write'>;
+
+/**
+ * The App's installation token for the sandbox, and the bot login GitHub shows for what that token writes.
+ * With `permissions`, the token has only those of the App's permissions.
+ */
+export async function appInstallationToken(config: Pick<TestConfig, 'githubApp' | 'owner' | 'repo'>, fetchImpl: typeof fetch = fetch, permissions?: TokenPermissions): Promise<{ token: string; appLogin: string; appClientId: string }> {
   if (config.githubApp === null) throw new Error('the GitHub App key or client id is missing');
   const jwt = appJwt(config.githubApp.clientId, config.githubApp.privateKey);
   const installation = await call<{ id: number; app_slug: string }>(jwt, 'GET', `/repos/${config.owner}/${config.repo}/installation`, undefined, fetchImpl);
-  const created = await call<{ token: string }>(jwt, 'POST', `/app/installations/${installation.id}/access_tokens`, { repositories: [config.repo] }, fetchImpl);
+  const created = await call<{ token: string }>(jwt, 'POST', `/app/installations/${installation.id}/access_tokens`, { repositories: [config.repo], ...(permissions === undefined ? {} : { permissions }) }, fetchImpl);
   return { token: created.token, appLogin: `${installation.app_slug}[bot]`, appClientId: config.githubApp.clientId };
+}
+
+/** Revokes an installation token before it expires, with the token itself. */
+export async function revokeInstallationToken(token: string, fetchImpl: typeof fetch = fetch): Promise<void> {
+  await call(token, 'DELETE', '/installation/token', undefined, fetchImpl);
 }
 
 /** The host's git credential for the sandbox, through git's credential helper. */
