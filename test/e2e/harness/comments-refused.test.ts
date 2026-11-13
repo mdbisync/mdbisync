@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { HOLD_FAILED } from '../../../src/sync/hold.ts';
 import type { RunContext } from './context.ts';
-import { BEFORE_VIEW, SUBJECTS } from './subjects.ts';
+import { BEFORE_VIEW, documentHoldComments, SUBJECTS } from './subjects.ts';
 
 const PATH = 'docs/a.md';
 const REFUSAL = { path: PATH, error: 'LinearGraphQLError INPUT_ERROR HTTP 200' };
@@ -56,4 +56,14 @@ it('fails when the document is named twice, a later run reports hold work, or no
 it('fails when a later run failed or did not report its sync pull request', async () => {
   assert.equal(await refused([released, FAILED]), false);
   assert.equal(await refused([released, undefined, NO_PULL_REQUEST]), false);
+});
+
+it('the view keeps an archived comment only on a document in the trash or archived, whose comments Linear archived with it', () => {
+  const open = { id: 'c1', body: COMMENT, resolvedAt: null, archivedAt: null };
+  const archived = { id: 'c2', body: COMMENT, resolvedAt: null, archivedAt: '2026-11-13T12:44:00Z' };
+  const live = { trashed: false, archivedAt: null };
+  assert.deepEqual(documentHoldComments([open, archived], { trashed: true, archivedAt: '2026-11-13T12:44:00Z' }), [open, archived]);
+  assert.deepEqual(documentHoldComments([open, archived], { trashed: false, archivedAt: '2026-11-13T12:44:00Z' }), [open, archived]);
+  assert.deepEqual(documentHoldComments([open, archived], live), [open]);
+  assert.deepEqual(documentHoldComments([archived], undefined), []);
 });
