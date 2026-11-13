@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"See ","marks":{"attribution":"user"}},{"text":"config.yaml","marks":{"attribution":"user","code":{},"link":{"href":"https://example.com/config","noEmbed":null}}},{"text":" for defaults.","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-3e2f41b7","marks":{"attribution":"user"}}]}
-  ]
-}
