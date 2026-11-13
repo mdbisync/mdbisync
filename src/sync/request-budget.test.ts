@@ -12,6 +12,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
+import { detectConflicts } from '../merge/index.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { type Fixture, createFixture, mergeOnGitHub } from '../state/test-helpers.ts';
@@ -41,8 +42,10 @@ const TREE: Record<string, string> = {
   'docs/handbook/tools.md': '# Tools\n\nThe editor and the terminal.\n',
 };
 
+/** I9's allowance per run: also the most a run that changes nothing may make. */
+const PER_RUN = 5;
 /** I9 as the scenarios check it. */
-const allowance = (written: number, runs: number) => 1.5 * written + 5 * runs;
+const allowance = (written: number, runs: number) => 1.5 * written + PER_RUN * runs;
 
 describe('sync: the Linear request budget (I9)', () => {
   let fixture: Fixture;
@@ -137,7 +140,7 @@ describe('sync: the Linear request budget (I9)', () => {
     // A run that changes nothing stays within one run's allowance on its own, so settled runs never eat into the budget.
     for (const run of runReports) {
       if (run.report.changed !== false) continue;
-      assert.ok(run.requests.length <= 5, `a run that changed nothing made ${run.requests.length} requests: ${run.requests.join(', ')}`);
+      assert.ok(run.requests.length <= PER_RUN, `a run that changed nothing made ${run.requests.length} requests: ${run.requests.join(', ')}`);
     }
   }
 
@@ -148,12 +151,83 @@ describe('sync: the Linear request budget (I9)', () => {
     return shown.code === 0 ? shown.stdout.toString('utf8') : undefined;
   };
 
+  /** A person's commit on the tracked branch, straight into the remote: new text by path. */
+  async function commitGit(files: Record<string, string>) {
+    const base = await rev('refs/heads/main');
+    const env = { GIT_INDEX_FILE: join(fixture.root, 'scratch.index'), GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' };
+    await fixture.remote.run(['read-tree', base], { env });
+    for (const [path, text] of Object.entries(files)) {
+      const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: text });
+      await fixture.remote.run(['update-index', '--add', '--cacheinfo', `100644,${blob},${path}`], { env });
+    }
+    const tree = await fixture.remote.text(['write-tree'], { env });
+    const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-m', 'Edit'], { env });
+    await fixture.remote.run(['update-ref', 'refs/heads/main', commit, base]);
+  }
+
+  /** A same-line conflict on the runbook, settled: the run that writes the markers, the pull request opened and merged, the run that takes the merge in. */
+  async function conflictOnRunbook() {
+    const document = byTitle('runbook');
+    document.content = '# Runbook\n\nRestart the service, Linear.\n';
+    touch(document);
+    await commitGit({ 'eng/runbook.md': '# Runbook\n\nRestart the service, git.\n' });
+    const runReports = await syncAndSettle();
+    assert.equal(detectConflicts((await tracked('eng/runbook.md')) ?? '').length, 1);
+    assert.equal(detectConflicts(byTitle('runbook').content ?? '').length, 1);
+    return runReports;
+  }
+
+  /**
+   * The runs that only take a merged sync pull request in: they move `linear` and nothing else, since Linear holds the
+   * merge's text already. Each costs no more than a quiet run: capture's listing serves its capacity report.
+   */
+  function assertTakeIns(runReports: Array<{ requests: string[]; report: RunReport }>, expected: number) {
+    const takeIns = runReports.filter((run) => run.report.changed !== false && Object.keys(run.report.writes.linear).length === 0 && run.report.writes.git.linear === 1 && Object.keys(run.report.writes.pullRequests).length === 0);
+    assert.equal(takeIns.length, expected, 'runs that took a merged sync pull request in');
+    for (const run of takeIns) assert.ok(run.requests.length <= PER_RUN, `a run that took the merge in made ${run.requests.length} requests: ${run.requests.join(', ')}`);
+  }
+
+  it('a conflict resolved in git: the run that takes the sync pull request\'s merge in costs no more than a quiet run (L3-10)', async () => {
+    const conflict = await conflictOnRunbook();
+    await commitGit({ 'eng/runbook.md': '# Runbook\n\nRestart the service, git.\n' });
+    const resolve = await syncAndSettle();
+    assert.equal(byTitle('runbook').content, '# Runbook\n\nRestart the service, git.\n');
+    assertTakeIns([...conflict, ...resolve], 1);
+    assertBudget([...conflict, ...resolve]);
+  });
+
+  it('a new conflict on both sides of an open one replaces it, and each merge is taken in as cheaply (L3-12)', async () => {
+    const conflict = await conflictOnRunbook();
+    const document = byTitle('runbook');
+    document.content = (document.content ?? '').replace('Restart the service, git.', 'Restart the service, git, Linear again.');
+    touch(document);
+    await commitGit({ 'eng/runbook.md': ((await tracked('eng/runbook.md')) ?? '').replace('Restart the service, git.', 'Restart the service, git, git again.') });
+    const again = await syncAndSettle();
+    const text = (await tracked('eng/runbook.md')) ?? '';
+    assert.equal(detectConflicts(text).length, 1, text);
+    assert.equal(byTitle('runbook').content, text);
+    assertTakeIns([...conflict, ...again], 2);
+    assertBudget([...conflict, ...again]);
+  });
+
+  it('a run that writes lists the containers again before it writes', async () => {
+    await commitGit({ 'eng/notes/added.md': '# Added\n\nWritten in git.\n' });
+    const run = await cli('sync');
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.deepEqual(run.report.sync?.created, ['eng/notes/added.md']);
+    assert.equal(run.requests.filter((operation) => operation === 'ListDocuments').length, 2, run.requests.join(', '));
+    await commitGit({ 'eng/notes/added.md': '# Added\n\nChanged in git.\n' });
+    const update = await cli('sync');
+    assert.deepEqual(update.report.sync?.updated, ['eng/notes/added.md']);
+    assert.equal(update.requests.filter((operation) => operation === 'ListDocuments').length, 2, update.requests.join(', '));
+  });
+
   it('a settled run resolves its targets, lists its containers once and writes nothing', async () => {
     const run = await cli('sync');
     assert.equal(run.result.exitCode, 0, run.result.stderr);
     assert.equal(run.report.changed, false);
     assert.deepEqual(run.requests.filter((operation) => operation !== 'GetDocuments'), ['oauth/token', 'SetupTargets', 'ListDocuments', 'oauth/revoke']);
-    assert.ok(run.requests.length <= 5);
+    assert.ok(run.requests.length <= PER_RUN);
   });
 
   it('the initial sync lists its five containers in one request', async () => {
