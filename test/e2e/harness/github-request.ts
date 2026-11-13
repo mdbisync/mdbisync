@@ -2,7 +2,7 @@ import { outputText } from '../../../src/run/output.ts';
 
 /** Only the JSON fields used by the harness's GitHub operations can leave it. */
 const TEXT_FIELDS = ['ref', 'sha', 'message', 'head', 'base', 'title', 'body'] as const;
-const FIELDS = new Set<string>([...TEXT_FIELDS, 'content', 'state', 'merge_method', 'repositories', 'inputs']);
+const FIELDS = new Set<string>([...TEXT_FIELDS, 'content', 'state', 'merge_method', 'repositories', 'inputs', 'permissions']);
 
 export function githubRequestBody(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid GitHub request body');
@@ -32,6 +32,16 @@ export function githubRequestBody(value: unknown): Record<string, unknown> {
       if (name.trim() !== name || !/^[A-Za-z0-9_.-]+$/.test(name) || name === '.' || name === '..') throw new Error('Invalid repository name');
       return name;
     });
+  }
+  if (input.permissions !== undefined) {
+    // An installation token scoped down to some of the App's permissions.
+    if (input.permissions === null || typeof input.permissions !== 'object' || Array.isArray(input.permissions)) throw new Error('Invalid token permissions');
+    const entries = Object.entries(input.permissions);
+    if (entries.length === 0 || entries.length > 50) throw new Error('Invalid token permissions');
+    result.permissions = Object.fromEntries(entries.map(([key, value]) => {
+      if (!/^[a-z_]{1,50}$/.test(key) || (value !== 'read' && value !== 'write')) throw new Error('Invalid token permission');
+      return [key, value];
+    }));
   }
   if (input.inputs !== undefined) {
     if (input.inputs === null || typeof input.inputs !== 'object' || Array.isArray(input.inputs)) throw new Error('Invalid workflow inputs');

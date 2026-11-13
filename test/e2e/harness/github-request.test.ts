@@ -53,6 +53,13 @@ it('preserves file upload bytes, workflow inputs and repository selection', () =
   assert.deepEqual(githubRequestBody({ repositories: ['sandbox', '.github', '_notes', '-notes'] }), { repositories: ['sandbox', '.github', '_notes', '-notes'] });
 });
 
+it('passes only named read or write token permissions', () => {
+  assert.deepEqual(githubRequestBody({ repositories: ['sandbox'], permissions: { actions: 'read' } }), { repositories: ['sandbox'], permissions: { actions: 'read' } });
+  for (const permissions of [{}, { actions: 'admin' }, { 'Actions!': 'write' }, ['actions'], null]) {
+    assert.throws(() => githubRequestBody({ permissions }));
+  }
+});
+
 it('projects bounded workflow evidence and rejects malformed remote metadata', () => {
   const run = { id: 42, event: 'push', status: 'completed', conclusion: 'failure', created_at: '2026-01-01', extra: 'discarded' } as WorkflowRun;
   assert.equal(workflowEvidence(run).id, 42);

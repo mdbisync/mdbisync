@@ -353,6 +353,22 @@ uploaded:
   is recorded as `workflow_dispatch`, so a scenario that asserts the
   `schedule` event still fails.
 
+`node test/e2e/harness/cli.ts dispatch-check` checks the dispatch script
+of `docs/own-scheduler.md` against the test repository. It takes the
+script from the page as published, fills in the repository as the page
+tells a reader to, and runs it twice with installation tokens of the
+GitHub App that it mints for the check and revokes at the end: one with
+only Actions read and Contents read, which must get `HTTP 403` and exit 1
+with the page's message, and one with only Actions write, which must start
+a run of `mdbisync.yml` on `main` that appears within a minute. Each token
+reaches the script as the page says, in a `dispatch-token` file named by
+`CREDENTIALS_DIRECTORY` in a private folder that is removed afterwards. The
+check cancels the run it started unless given `--keep-run`, and prints a
+JSON record of exit codes, HTTP statuses and runs; it exits 0 when both
+cases behave as the page says and 1 when not. It needs the GitHub App and
+`mdbisync.yml` on the repository's `main`, takes a lock so only one check
+runs on a host, and otherwise dispatches nothing and exits 3.
+
 `ui` mode is a checklist for a person or a browser session signed in as
 the two members.
 
