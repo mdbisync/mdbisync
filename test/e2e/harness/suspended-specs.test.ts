@@ -16,6 +16,7 @@ import { runChecks, snapshotRefs, budgetHolds } from './checks.ts';
 import { faultChecks, rerunCheckAsPerson, type WorkflowRun } from './check-fault.ts';
 import type { RunContext } from './context.ts';
 import { engineInputs, type EngineResult } from './engine.ts';
+import { SETUP_FIXTURES, type FixtureTools } from './fixtures.ts';
 import { SandboxRest } from './github.ts';
 import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
@@ -24,18 +25,24 @@ import { loadScenarios } from './spec.ts';
 import { runStep, watchRun, STEP_ACTIONS } from './steps.ts';
 import { BEFORE_VIEW, refreshView, takeStartView } from './subjects.ts';
 
-for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2[3-9]|3[0-5])$/.test(s.id))) {
+// L2-40 holds its pull request check with a marker on the tracked branch,
+// whose push job sleeps on the same single runner.
+for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id === 'L2-40' || /^L5-(2[3-9]|3[0-5])$/.test(s.id))) {
   it(`${scenario.id}: live steps and assertions on fake services`, { timeout: 180_000, skip: scenario.id === 'L5-34' ? 'requires the engine checkpoint before-suspension-push' : false }, async (t) => {
     const fixture = await createFixture();
     try {
       const names = runNames('aaaaaa');
       const count = scenario.id === 'L5-35' ? 65 : 3;
-      const documents = Object.fromEntries(Array.from({ length: count }, (_, i) => [`eng/notes/item-${String(i).padStart(2, '0')}.md`, `# Notes ${i}\n\nFirst paragraph.\n\nSecond paragraph.\n`]));
+      // L2-40 edits a document under the folder its live slice uses.
+      const folder = scenario.id === 'L2-40' ? 'docs/handbook' : 'eng/notes';
+      const documents = Object.fromEntries(Array.from({ length: count }, (_, i) => [`${folder}/item-${String(i).padStart(2, '0')}.md`, `# Notes ${i}\n\nFirst paragraph.\n\nSecond paragraph.\n`]));
       // As in the live corpus, one of L5-35's held documents holds a conflict
       // from git, which the initial sync writes to Linear without the conflict
       // mark; the sync marks it once it reconciles the edited document.
+      if (scenario.id === 'L2-40') documents[`${folder}/briefs/equipment.md`] = '# Equipment\n\nFirst paragraph.\n\nSecond paragraph.\n';
       if (scenario.id === 'L5-35') documents['eng/notes/item-03.md'] = '**Sync conflict: git version**\n\n```sh\nnpm ci\n```\n\n**Sync conflict: Linear version**\n\n```sh\nnpm install\n```\n\n**Sync conflict: end**\n\nFirst paragraph.\n';
-      const tree = { 'eng/notes/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n', ...documents, '.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/hooks\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n', [CHECK_WORKFLOW_PATH]: CHECK_WORKFLOW };
+      const readme = '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n';
+      const tree = { [`${folder}/README.md`]: readme, ...documents, '.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/hooks\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n', [CHECK_WORKFLOW_PATH]: CHECK_WORKFLOW };
       await fixture.seed(tree, { branch: names.trackedBranch });
       const world = fakeWorld();
       const transport = fakeFetch(world);
@@ -69,6 +76,8 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         }
         return holder();
       };
+      // Each pull request's times and merge commit, taken once, so two answers about an unchanged pull request are the same.
+      const prFacts = new Map<number, { created: string; merged: string | null; mergeCommit: string | null }>();
       const serve = async (input: Parameters<typeof fetch>[0], init: RequestInit | undefined, byHarness: boolean): Promise<Response> => {
         const url = String(input);
         const sha = /\/commits\/([0-9a-f]+)\/check-runs/.exec(url)?.[1];
@@ -124,8 +133,12 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           const enrich = async (node: Record<string, any>) => {
             const pr = world.github.pullRequests.find((p) => p.number === node.number);
             if (pr !== undefined) {
-              node.merged_at = pr.merged ? new Date().toISOString() : null;
-              node.created_at = new Date().toISOString();
+              const facts = prFacts.get(pr.number) ?? { created: new Date().toISOString(), merged: null, mergeCommit: null };
+              if (pr.merged) facts.merged ??= new Date().toISOString();
+              prFacts.set(pr.number, facts);
+              node.merged_at = facts.merged;
+              node.created_at = facts.created;
+              node.merge_commit_sha = facts.mergeCommit;
               node.head.sha = (await fixture.remote.text(['rev-parse', `refs/heads/${pr.head}`])).trim();
             }
             return node;
@@ -154,6 +167,8 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         if (result.code !== 0) return { status: 405 };
         const commit = (await fixture.remote.text(['commit-tree', result.stdout.toString().split('\n')[0]!, '-p', base, '-p', sha, '-m', 'Merge the reviewed changes'], { env: { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email } })).trim();
         await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
+        const facts = prFacts.get(pr.number) ?? { created: new Date().toISOString(), merged: null, mergeCommit: null };
+        prFacts.set(pr.number, { ...facts, mergeCommit: commit });
         return { sha: commit };
       };
       const rest = new SandboxRest({ owner: 'owner', repo: 'repo' }, 'app-token', (input, init) => serve(input, init, true));
@@ -166,7 +181,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
       const ctx = {
         scenario, names, runDir: fixture.root, sandbox, live: {
           sandbox, rest, repository: 'owner/repo', githubToken: 'app-token', githubTokenSource: 'app', app, editors: { 'editor-a': app, 'editor-b': app },
-          tree: { paths: new Map(Object.keys(documents).map((p) => [p, p])), rewritten: new Map([['eng/notes/README.md', tree['eng/notes/README.md']]]), projects: new Map([['PROJECT_ENG_1', 'Field notes']]), teams: new Set(['ENG']), teamZones: new Map() },
+          tree: { paths: new Map(Object.keys(documents).map((p) => [p, p])), rewritten: new Map([[`${folder}/README.md`, readme]]), projects: new Map([['PROJECT_ENG_1', 'Field notes']]), teams: new Set(['ENG']), teamZones: new Map() },
           manifest: { files: Object.keys(documents).map((path) => ({ path, synced: true, kind: 'markdown', class: null, canary: null })) },
           projects: new Map([['PROJECT_ENG_1', { id: 'project-api', name: 'Field notes' }]]), teams: new Map([['ENG', { id: 'team-eng', key: 'ENG' }]]), documentUrlBase: 'https://linear.app/example-team/document',
         },
@@ -207,6 +222,8 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           }
         });
       };
+      // L2-40's marker on the tracked branch is committed before the initial sync, as live.
+      if (scenario.setup.fixtures.includes('pending-check')) await SETUP_FIXTURES['pending-check']!.beforeSync!(ctx, ctx.live!, {} as FixtureTools);
       await sync('initial-sync');
       ctx.engine.setupRuns = 1;
       if (scenario.id === 'L5-24') world.linear.comments.set('ordinary-comment', { documentContentId: `content-${world.linear.documents[0]!.id}`, body: 'Looks good to me.' });
@@ -233,6 +250,11 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
       }
       // L5-27: the suspended head carries the batch's `pending` marker, so its
       // job held the runner until a person cancelled it before the tracked-lane fault.
+      // L2-40: the tracked tip's push job is the one a person cancels before the release.
+      if (scenario.id === 'L2-40') {
+        assert.equal(ctx.observations.get('checks.cancelledPending'), 1);
+        assert.deepEqual([...markerRuns.values()].filter((run) => run.cancelledBy === 'person').map((run) => run.branch), [names.trackedBranch]);
+      }
       if (scenario.id === 'L5-27') {
         assert.equal(ctx.observations.get('checks.cancelledPending'), 1);
         assert.deepEqual([...markerRuns.values()].filter((run) => run.cancelledBy === 'person').map((run) => run.branch), [suspendedBranch(resolveStateConfig(names))]);
