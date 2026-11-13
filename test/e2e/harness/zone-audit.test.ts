@@ -79,20 +79,26 @@ class SharedLinear {
     return { ...document };
   }
 
-  async request<T>(operation: string, _kind: string, _query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  async request<T>(operation: string, _kind: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
     await this.onRead?.();
     if (operation === 'DocumentComments') {
       return { document: { comments: { nodes: (this.comments.get(String(variables.id)) ?? []).map((body, index) => ({ body, createdAt: new Date(index).toISOString() })) } } } as T;
     }
     if (operation === 'RunComments') {
       const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } }; title?: { startsWith: string }; id?: { in: string[] } };
+      // Trashed and archived documents, and their comments, only when the query asks for archived ones, as Linear does.
+      const archivedDocuments = /documents\([^)]*includeArchived:\s*true/.test(query);
+      const archivedComments = /comments\([^)]*includeArchived:\s*true/.test(query);
       const nodes = [...this.documents.values()]
-        .filter((document) => variables.includeArchived === true || (!document.trashed && document.archivedAt === null))
+        .filter((document) => archivedDocuments || (!document.trashed && document.archivedAt === null))
         .filter((document) => filter.project === undefined || document.projectId === filter.project.id.eq)
         .filter((document) => filter.team === undefined || document.teamId === filter.team.id.eq)
         .filter((document) => filter.title === undefined || document.title.startsWith(filter.title.startsWith))
         .filter((document) => filter.id === undefined || filter.id.in.includes(document.id))
-        .map((document) => ({ id: document.id, project: document.projectId === null ? null : { id: document.projectId }, comments: { nodes: (this.comments.get(document.id) ?? []).map((body) => ({ body })) } }));
+        .map((document) => {
+          const bodies = (!document.trashed && document.archivedAt === null) || archivedComments ? (this.comments.get(document.id) ?? []) : [];
+          return { id: document.id, project: document.projectId === null ? null : { id: document.projectId }, comments: { nodes: bodies.map((body) => ({ body })) } };
+        });
       return { documents: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } as T;
     }
     throw new Error(`the shared fake Linear has no ${operation}`);

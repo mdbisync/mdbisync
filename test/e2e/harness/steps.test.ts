@@ -1592,7 +1592,10 @@ class FakeLinear {
     return { assetUrl: `https://uploads.linear.app/test/${input.filename}` };
   }
 
-  async request<T>(operation: string, _kind: string, _query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  /** Ids of the documents each `RunComments` answer held, in order: how often the canary scan read each one. */
+  commentReads: string[] = [];
+
+  async request<T>(operation: string, _kind: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
     this.requests.push(operation);
     if (operation === 'DocumentComments' || operation === 'BlockedComments') {
       return { document: { comments: { nodes: (this.comments.get(String(variables.id)) ?? []).map((body, index) => ({ body, createdAt: new Date(index).toISOString() })) } } } as T;
@@ -1601,13 +1604,21 @@ class FakeLinear {
       // The filter shapes the canary scan sends: by project, or by team with a title prefix or a list of ids.
       const filter = variables.filter as { project?: { id: { eq: string } }; team?: { id: { eq: string } }; title?: { startsWith: string }; id?: { in: string[] } };
       this.commentQueries.push(variables);
+      // Linear archives a document's comments with it and hides them unless the comments connection asks for archived ones.
+      const archivedDocuments = /documents\([^)]*includeArchived:\s*true/.test(query);
+      const archivedComments = /comments\([^)]*includeArchived:\s*true/.test(query);
       const nodes = [...this.documents.values()]
-        .filter((document) => variables.includeArchived === true || (!document.trashed && document.archivedAt === null))
+        .filter((document) => archivedDocuments || (!document.trashed && document.archivedAt === null))
         .filter((document) => filter.project === undefined || document.projectId === filter.project.id.eq)
         .filter((document) => filter.team === undefined || document.teamId === filter.team.id.eq)
         .filter((document) => filter.title === undefined || document.title.startsWith(filter.title.startsWith))
         .filter((document) => filter.id === undefined || filter.id.in.includes(document.id))
-        .map((document) => ({ id: document.id, project: document.projectId === null ? null : { id: document.projectId }, comments: { nodes: (this.comments.get(document.id) ?? []).map((body) => ({ body })) } }));
+        .map((document) => {
+          const live = !document.trashed && document.archivedAt === null;
+          const bodies = live || archivedComments ? (this.comments.get(document.id) ?? []) : [];
+          return { id: document.id, project: document.projectId === null ? null : { id: document.projectId }, comments: { nodes: bodies.map((body) => ({ body })) } };
+        });
+      this.commentReads.push(...nodes.map((node) => node.id));
       return { documents: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } as T;
     }
     if (operation === 'DeleteDocumentForGood') throw new Error('Unknown argument "permanentlyDelete"');
@@ -3841,6 +3852,33 @@ describe('crash-created document adoption (L1-17)', () => {
     await linear.trashDocument(readme);
     const { canaryScan } = await import('./checks.ts');
     assert.deepEqual(await canaryScan(ctx, { summariesOnly: false }), [{ source: `comments on ${readme}`, canary: 'kx-zone-readme-canary' }]);
+  });
+
+  it('find a canary in a comment on a trashed project document, and read each document once', async () => {
+    const { ctx, linear, ids } = await crashed();
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    const start = ids['docs/handbook/start.md']?.id as string;
+    const file = ctx.live?.manifest.files.find((entry) => entry.path === 'eng/platform/plan.md');
+    if (file === undefined) throw new Error('the plan is not in the manifest');
+    file.canary = 'kx-trashed-plan-canary';
+    await linear.commentOnDocument(`content-${plan}`, 'Quoted kx-trashed-plan-canary here.');
+    await linear.trashDocument(plan);
+    // An archived project document keeps its comments archived too.
+    await linear.commentOnDocument(`content-${start}`, 'Archived note.');
+    await linear.updateDocument(start, { archivedAt: new Date().toISOString() });
+    // Another run's trashed document in its own project, with the same canary: never read.
+    const foreign = linear.add({ projectId: 'project-foreign' }, 'plan', 'Another run\'s plan.\n');
+    await linear.commentOnDocument(`content-${foreign.id}`, 'Also kx-trashed-plan-canary.');
+    await linear.trashDocument(foreign.id);
+    const { INVARIANT_CHECKS, collectCanaryEvidence } = await import('./checks.ts');
+    const evidence = await collectCanaryEvidence(ctx, { summariesOnly: false });
+    assert.equal(evidence.texts[`comments on ${plan}`], 'Quoted kx-trashed-plan-canary here.');
+    assert.equal(evidence.texts[`comments on ${start}`], 'Archived note.');
+    assert.equal(evidence.texts[`comments on ${foreign.id}`], undefined);
+    assert.ok(!linear.commentReads.includes(foreign.id), 'another run\'s document is not read');
+    assert.equal(new Set(linear.commentReads).size, linear.commentReads.length, `a document is read once: ${linear.commentReads.join(', ')}`);
+    ctx.observations.delete('canary.remoteTexts');
+    assert.deepEqual(await INVARIANT_CHECKS.I5(ctx, async () => { throw new Error('I5 reads no sides'); }), { name: 'I5', ok: false, detail: `canary tokens found in: comments on ${plan}` });
   });
 
   it('ask for the owned ids in bounded queries and still reach the last one', async () => {
