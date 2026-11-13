@@ -24,7 +24,7 @@ import { fixText } from '../../../src/format/fix.ts';
 import { blockedBySetupStop, classify, EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
 import { finishPersonClone } from './person-git.ts';
 import type { SoakFailureReport } from './soak-evidence.ts';
-import { bodyOf, compare, editsFound, holdsToken, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { bodyOf, compare, editsFound, holdsToken, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, REF_HISTORY_TIMES, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, probedFixtures, readFixture } from '../../probe/bank.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
@@ -43,7 +43,7 @@ import { commitAsPerson, folderTeam, projectFolders, readRunIds, setTarget } fro
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
 import { engineNotImplemented, environmentBlocker, hadReplaceableRun, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
-import { engineSteps, pinnedActionSha, prerequisiteErrors, readTemplate, WORKFLOW_FILES } from './workflow-files.ts';
+import { engineSteps, pinnedActionSha, prerequisiteErrors, readTemplate, runGroup, runWorkflows, WORKFLOW_FILES } from './workflow-files.ts';
 import { parse as parseYaml } from 'yaml';
 import { buildCorpus } from '../../corpus/generate.ts';
 
@@ -249,6 +249,41 @@ describe('edit fixtures', () => {
   });
 });
 
+/** A zip with stored and deflated entries, built the way zip tools write them. */
+function zip(files: Record<string, { data: Buffer; deflate: boolean }>): Buffer {
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
+  let offset = 0;
+  for (const [name, { data, deflate }] of Object.entries(files)) {
+    const body = deflate ? deflateRawSync(data) : data;
+    const nameBytes = Buffer.from(name);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(deflate ? 8 : 0, 8);
+    local.writeUInt32LE(body.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    locals.push(local, nameBytes, body);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(deflate ? 8 : 0, 10);
+    central.writeUInt32LE(body.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, nameBytes);
+    offset += 30 + nameBytes.length + body.length;
+  }
+  const directory = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(Object.keys(files).length, 8);
+  end.writeUInt16LE(Object.keys(files).length, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, directory, end]);
+}
+
 describe('workflows', () => {
   // Actions mode runs the release under test; these fakes name one.
   const RELEASE_SHA = 'c'.repeat(40);
@@ -262,40 +297,6 @@ describe('workflows', () => {
     else process.env[ACTION_SHA_ENV] = savedActionSha;
   });
 
-  /** A zip with stored and deflated entries, built the way zip tools write them. */
-  function zip(files: Record<string, { data: Buffer; deflate: boolean }>): Buffer {
-    const locals: Buffer[] = [];
-    const centrals: Buffer[] = [];
-    let offset = 0;
-    for (const [name, { data, deflate }] of Object.entries(files)) {
-      const body = deflate ? deflateRawSync(data) : data;
-      const nameBytes = Buffer.from(name);
-      const local = Buffer.alloc(30);
-      local.writeUInt32LE(0x04034b50, 0);
-      local.writeUInt16LE(deflate ? 8 : 0, 8);
-      local.writeUInt32LE(body.length, 18);
-      local.writeUInt32LE(data.length, 22);
-      local.writeUInt16LE(nameBytes.length, 26);
-      locals.push(local, nameBytes, body);
-      const central = Buffer.alloc(46);
-      central.writeUInt32LE(0x02014b50, 0);
-      central.writeUInt16LE(deflate ? 8 : 0, 10);
-      central.writeUInt32LE(body.length, 20);
-      central.writeUInt32LE(data.length, 24);
-      central.writeUInt16LE(nameBytes.length, 28);
-      central.writeUInt32LE(offset, 42);
-      centrals.push(central, nameBytes);
-      offset += 30 + nameBytes.length + body.length;
-    }
-    const directory = Buffer.concat(centrals);
-    const end = Buffer.alloc(22);
-    end.writeUInt32LE(0x06054b50, 0);
-    end.writeUInt16LE(Object.keys(files).length, 8);
-    end.writeUInt16LE(Object.keys(files).length, 10);
-    end.writeUInt32LE(directory.length, 12);
-    end.writeUInt32LE(offset, 16);
-    return Buffer.concat([...locals, directory, end]);
-  }
 
   it('read the report artifact', () => {
     const files = unzip(zip({ 'report.json': { data: Buffer.from('{"changed":false}'), deflate: true }, 'summary.md': { data: Buffer.from('# Sync\n'), deflate: false } }));
@@ -3599,23 +3600,60 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
   // As recorded in the actions run of L1-20: the engine names itself as the author of its state commits, and
   // GitHub names the sandbox's App as the author of the sync pull request it opened.
   const APP = 'mdbisync-sandbox[bot]';
+  const CLIENT_ID = 'Iv23liSandboxApp';
   const ENGINE_AUTHOR = { GIT_AUTHOR_NAME: NEUTRAL_IDENTITY.name, GIT_AUTHOR_EMAIL: NEUTRAL_IDENTITY.email, GIT_COMMITTER_NAME: NEUTRAL_IDENTITY.name, GIT_COMMITTER_EMAIL: NEUTRAL_IDENTITY.email };
+  const HEAD_SHA = 'e'.repeat(40);
+  const WORKFLOW_PATH = `.github/workflows/${WORKFLOW_FILES['initial-sync']}`;
   type Actor = { login: string; type: string } | null;
+  const app: Actor = { login: APP, type: 'Bot' };
+  /** A time `minutes` into the scenario. */
+  const at = (minutes: number) => Date.parse('2026-11-13T12:00:00Z') + minutes * 60_000;
+  const iso = (minutes: number) => new Date(at(minutes)).toISOString();
+
+  /** The runner's log of an App token step, as GitHub serves it: each line after its timestamp. */
+  const tokenStepLog = (clientId: string) => [
+    '##[group]Run actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510',
+    'with:',
+    `  client-id: ${clientId}`,
+    '  private-key: ***',
+    '##[endgroup]',
+    '##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+    'with:',
+    '  token: ***',
+    '##[endgroup]',
+  ].map((line) => `2026-11-13T12:59:01.1234567Z ${line}`).join('\n');
+
+  /** The initial sync workflow as the harness renders it for the run, with the security canary. */
+  function renderedWorkflow(ctx: RunContext): string {
+    return runWorkflows({ trackedBranch: ctx.names.trackedBranch, syncBranch: ctx.names.syncBranch, refPrefix: ctx.names.refPrefix, group: runGroup(ctx.names.runId), actionSha: 'c'.repeat(40), securityCanary: true }, [WORKFLOW_FILES['initial-sync']]).get(WORKFLOW_FILES['initial-sync'])!;
+  }
 
   /**
-   * A confirmed initial sync to Linear as the workflow writes it: two pushes
-   * of `ids` (a progress commit, then the final one) and one of `linear`. Each
-   * push is recorded by GitHub with `actors[ref][n]` as its actor; `null` for a
-   * push GitHub has no record of.
+   * A confirmed initial sync to Linear as the workflow writes it, in run 102
+   * (minutes 13 to 18) after the dry run 101 (minutes 2 to 7): two pushes of
+   * `ids` (a progress commit, then the final one) and one of `linear`. The ref
+   * snapshots after setup (minute 1) and the two steps (minutes 10 and 25)
+   * show those refs. GitHub serves its record of each run with those times,
+   * its jobs, the workflow file at the run's commit (`workflow`, the rendered
+   * template by default) and the runner's log (`logs`). The sync branch gets
+   * two pushes only when `branch` gives their recorded actors (`undefined`
+   * for a push GitHub has no record of).
    */
   async function writerCase(
-    actors: { ids: [Actor | undefined, Actor | undefined]; linear: Actor | undefined },
     author: Record<string, string> = ENGINE_AUTHOR,
-    extra: { onLinear?: Array<{ env: Record<string, string>; merged?: boolean; twoParents?: boolean }>; mergedBy?: string } = {},
+    extra: {
+      onLinear?: Array<{ env: Record<string, string>; merged?: boolean; twoParents?: boolean }>;
+      mergedBy?: string;
+      branch?: [Actor | undefined, Actor | undefined];
+      workflow?: string;
+      logs?: string;
+      runs?: Record<number, { from: number; to: number; path?: string; started?: boolean }>;
+    } = {},
   ) {
     const { ctx, remoteGit } = await fakeRun();
     const idsRef = `${ctx.names.refPrefix}/ids`;
     const linearRef = `${ctx.names.refPrefix}/linear`;
+    const branchRef = `refs/heads/${ctx.names.syncBranch}`;
     const startIds = (await remoteGit.text(['rev-parse', idsRef])).trim();
     ctx.observations.set('start.refs', { [idsRef]: startIds });
     ctx.observations.set('start.trackedTip', (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim());
@@ -3633,51 +3671,213 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
     }
     await engine.run(['update-ref', idsRef, final]);
     await engine.run(['update-ref', linearRef, record]);
-    const activity: Record<string, Array<{ ref: string; before: string; after: string; activity_type: string; actor: Actor }>> = { [idsRef]: [], [linearRef]: [] };
-    const recorded = (ref: string, before: string, after: string, actor: Actor | undefined) => {
-      if (actor !== undefined) activity[ref]!.unshift({ ref, before, after, activity_type: 'push', actor });
-    };
-    recorded(idsRef, startIds, progress, actors.ids[0]);
-    recorded(idsRef, progress, final, actors.ids[1]);
-    recorded(linearRef, '0'.repeat(40), record, actors.linear);
+    const activity: Record<string, Array<{ ref: string; before: string; after: string; activity_type: string; actor: Actor }>> = { [branchRef]: [] };
+    let branchFirst: string | undefined;
+    let branchTip: string | undefined;
+    if (extra.branch !== undefined) {
+      branchFirst = (await engine.text(['commit-tree', tree, '-p', record, '-m', "Linear's changes"])).trim();
+      branchTip = (await engine.text(['commit-tree', tree, '-p', branchFirst, '-m', "More of Linear's changes"])).trim();
+      await engine.run(['update-ref', branchRef, branchTip]);
+      const recorded = (before: string, after: string, actor: Actor | undefined) => {
+        if (actor !== undefined) activity[branchRef]!.unshift({ ref: branchRef, before, after, activity_type: 'push', actor });
+      };
+      recorded('0'.repeat(40), branchFirst, extra.branch[0]);
+      recorded(branchFirst, branchTip, extra.branch[1]);
+    }
+    // The refs after setup, after the dry run 101 and after the confirmed run 102.
+    const confirmed = { [idsRef]: final, [linearRef]: record, ...(branchTip === undefined ? {} : { [branchRef]: branchTip }) };
+    ctx.observations.set('refHistory', [{ [idsRef]: startIds }, { [idsRef]: startIds }, confirmed]);
+    ctx.observations.set(REF_HISTORY_TIMES, [at(1), at(10), at(25)]);
+    ctx.observations.set('start.time', at(0));
+    const runs = extra.runs ?? { 101: { from: 2, to: 7 }, 102: { from: 13, to: 18 } };
+    ctx.observations.set('workflows.runs', Object.keys(runs).map((id) => ({ id: Number(id), event: 'workflow_dispatch' })));
+    const workflow = extra.workflow ?? renderedWorkflow(ctx);
+    const logs = extra.logs ?? tokenStepLog(CLIENT_ID);
     const asked: string[] = [];
     ctx.live!.rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', (async (input: string | URL | Request) => {
       const url = new URL(String(input));
-      if (url.pathname === '/repos/example/sandbox/pulls') return Response.json(pulls);
-      if (/^\/repos\/example\/sandbox\/pulls\/\d+$/.test(url.pathname)) return Response.json({ merged_by: { login: extra.mergedBy ?? APP } });
-      assert.equal(url.pathname, '/repos/example/sandbox/activity');
+      const path = url.pathname.replace('/repos/example/sandbox', '');
+      asked.push(`${path}${url.search}`);
+      if (path === '/pulls') return Response.json(pulls);
+      if (/^\/pulls\/\d+$/.test(path)) return Response.json({ merged_by: { login: extra.mergedBy ?? APP } });
+      const run = /^\/actions\/runs\/(\d+)$/.exec(path);
+      if (run !== null) {
+        const times = runs[Number(run[1])]!;
+        return Response.json({ id: Number(run[1]), status: 'completed', conclusion: 'success', event: 'workflow_dispatch', created_at: iso(times.from), run_started_at: iso(times.from), updated_at: iso(times.to), head_sha: HEAD_SHA, path: times.path ?? WORKFLOW_PATH });
+      }
+      const jobs = /^\/actions\/runs\/(\d+)\/jobs$/.exec(path);
+      if (jobs !== null) return Response.json({ jobs: [{ id: 1, name: 'initial-sync', conclusion: null, started_at: runs[Number(jobs[1])]!.started === false ? null : iso(runs[Number(jobs[1])]!.from), completed_at: null }] });
+      if (/^\/actions\/runs\/\d+\/logs$/.test(path)) return logs === '' ? new Response('', { status: 410 }) : new Response(zip({ 'initial-sync/1_Get the GitHub App token.txt': { data: Buffer.from(logs), deflate: true } }));
+      if (path === `/contents/${WORKFLOW_PATH}`) {
+        assert.equal(url.searchParams.get('ref'), HEAD_SHA);
+        return Response.json({ encoding: 'base64', content: Buffer.from(workflow).toString('base64') });
+      }
+      assert.equal(path, '/activity');
       const ref = url.searchParams.get('ref') as string;
-      asked.push(ref);
       // Another ref's push in the same answer is not this ref's.
       return Response.json([...(activity[ref] ?? []), { ref: 'refs/heads/main', before: final, after: record, activity_type: 'push', actor: { login: 'someone', type: 'User' } }]);
     }) as typeof fetch);
     ctx.live!.githubAppLogin = APP;
-    return { ctx, asked, activity, idsRef, startIds, progress, final, record };
+    ctx.live!.githubAppClientId = CLIENT_ID;
+    return { ctx, asked, activity, idsRef, linearRef, branchRef, startIds, progress, final, record, branchFirst, branchTip, remoteGit };
   }
-  const app: Actor = { login: APP, type: 'Bot' };
 
-  it('fail another credential\'s push to a sync ref even when it set the ref to a commit that is not the sync\'s', async () => {
-    const { ctx, activity, idsRef, startIds, progress } = await writerCase({ ids: [app, app], linear: app });
-    // A person force-pushes ids back to its start between the App's two pushes.
-    activity[idsRef]!.splice(1, 0, { ref: idsRef, before: progress, after: startIds, activity_type: 'force_push', actor: { login: 'someone', type: 'User' } });
-    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/ids: GitHub records a force_push to [0-9a-f]{12} by a user account/.test(error.message));
+  /** A product failure whose message matches. */
+  const productError = (pattern: RegExp) => (error: Error) => error instanceof ProductError && pattern.test(error.message);
+
+  it('prove the state refs\' writer through the run that moved them, from GitHub\'s records of that run', async () => {
+    const { ctx, asked } = await writerCase();
+    assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
+    // Only the confirmed run's window moved a ref; the dry run's is quiet. No push records are asked for a state ref.
+    assert.deepEqual(asked.sort(), ['/actions/runs/101', '/actions/runs/102', '/actions/runs/102/jobs?per_page=100', '/actions/runs/102/logs', `/contents/${WORKFLOW_PATH}?ref=${HEAD_SHA}`]);
+    assert.deepEqual(await resolveSubject(ctx, 'writes.commitIdentity'), { known: true, value: 'mdbisync <mdbisync@sync.invalid>' });
   });
 
-  it('accept the App as the writer from GitHub\'s push records while the commits name the engine as their author', async () => {
-    const { ctx, asked } = await writerCase({ ids: [app, app], linear: app });
+  it('fail a state ref that moved while no workflow run ran', async () => {
+    // The ref moved between the snapshots of minutes 1 and 10, and the only run ran from minute 13.
+    const { ctx, idsRef, remoteGit } = await writerCase(ENGINE_AUTHOR, { runs: { 102: { from: 13, to: 18 } } });
+    (ctx.observations.get('refHistory') as Array<Record<string, string>>)[1] = { [idsRef]: (await remoteGit.text(['rev-parse', idsRef])).trim() };
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/\/ids: moved to [0-9a-f]{12} while no workflow run ran, so the writer of the sync's commits is unproven$/));
+  });
+
+  it('fail a state ref that moved after the last snapshot, outside every run', async () => {
+    const { ctx, idsRef, progress } = await writerCase();
+    // The confirmed run left ids at its progress commit; the final commit came after the scenario's runs.
+    const history = ctx.observations.get('refHistory') as Array<Record<string, string>>;
+    history[2] = { ...history[2], [idsRef]: progress };
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/\/ids: moved to [0-9a-f]{12} while no workflow run ran/));
+  });
+
+  it('need no run for a window that brought only the harness\'s own commits', async () => {
+    // Only the confirmed run ran (minutes 13 to 18); the harness moved ids itself before it.
+    const { ctx, idsRef, linearRef, startIds, record, remoteGit } = await writerCase(ENGINE_AUTHOR, { runs: { 102: { from: 13, to: 18 } } });
+    const own = (await remoteGit.text(['commit-tree', `${startIds}^{tree}`, '-p', startIds, '-m', 'The harness'])).trim();
+    ctx.ownCommits.push(own);
+    // The sync's commits are on top of the harness's.
+    const rebased = (await new Git(remoteGit.dir, ENGINE_AUTHOR).text(['commit-tree', `${startIds}^{tree}`, '-p', own, '-m', 'Initial sync: final ids'])).trim();
+    await remoteGit.run(['update-ref', idsRef, rebased]);
+    ctx.observations.set('refHistory', [{ [idsRef]: startIds }, { [idsRef]: own }, { [idsRef]: own }, { [idsRef]: rebased, [linearRef]: record }]);
+    ctx.observations.set(REF_HISTORY_TIMES, [at(1), at(5), at(10), at(25)]);
     assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
-    assert.deepEqual(asked.sort(), [`${ctx.names.refPrefix}/ids`, `${ctx.names.refPrefix}/linear`]);
-    assert.deepEqual(await resolveSubject(ctx, 'writes.commitIdentity'), { known: true, value: 'mdbisync <mdbisync@sync.invalid>' });
+    // A foreign commit in the same place is not the harness's: its move needs a run, and none ran then.
+    ctx.ownCommits.pop();
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/\/ids: moved to [0-9a-f]{12} while no workflow run ran/));
+  });
+
+  it('fail a foreign force push of a state ref back to its start, which brings none of the sync\'s commits', async () => {
+    // Between the snapshots of minutes 1 and 10 ids went to a person's commit, then back to the start; no run ran then.
+    const { ctx, idsRef, startIds, remoteGit } = await writerCase(ENGINE_AUTHOR, { runs: { 102: { from: 13, to: 18 } } });
+    const foreign = (await new Git(remoteGit.dir, IDENTITY).text(['commit-tree', `${startIds}^{tree}`, '-p', startIds, '-m', 'Not the sync'])).trim();
+    const history = ctx.observations.get('refHistory') as Array<Record<string, string>>;
+    history.splice(1, 0, { [idsRef]: foreign });
+    ctx.observations.set(REF_HISTORY_TIMES, [at(1), at(5), at(10), at(25)]);
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/\/ids: moved to [0-9a-f]{12} while no workflow run ran/));
+    // A deletion needs a writer too.
+    history[1] = {};
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/\/ids: deleted while no workflow run ran/));
+  });
+
+  it('pass over a run none of whose jobs started, never counting it as a writer, and block the check when GitHub serves no logs for a run that did', async () => {
+    // Run 103 was cancelled while queued in the confirmed run's window: it ran nothing, and its workflow file is not read.
+    const { ctx, asked } = await writerCase(ENGINE_AUTHOR, { runs: { 101: { from: 2, to: 7 }, 102: { from: 13, to: 18 }, 103: { from: 14, to: 14, path: '.github/workflows/gone.yml', started: false } } });
+    assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
+    assert.ok(asked.includes('/actions/runs/103/jobs?per_page=100') && !asked.some((path) => path.includes('gone.yml')));
+    // A move whose only run never started has no writer.
+    const { ctx: unstarted } = await writerCase(ENGINE_AUTHOR, { runs: { 101: { from: 2, to: 7 }, 102: { from: 13, to: 18, started: false } } });
+    await assert.rejects(resolveSubject(unstarted, 'writes.githubActor'), productError(/: moved to [0-9a-f]{12} while no workflow run ran/));
+    const { ctx: noLogs } = await writerCase(ENGINE_AUTHOR, { logs: '' });
+    await assert.rejects(resolveSubject(noLogs, 'writes.githubActor'), (error: Error) => error instanceof EnvBlockedError && /no logs for workflow run 102/.test(error.message));
+  });
+
+  it('fail a run whose job token can write contents or keeps the repository\'s default permissions', async () => {
+    const { ctx: probe } = await writerCase();
+    const rendered = renderedWorkflow(probe);
+    const writable = rendered.replace(/^permissions: \{\}$/m, 'permissions:\n  contents: write');
+    assert.notEqual(writable, rendered);
+    const { ctx } = await writerCase(ENGINE_AUTHOR, { workflow: writable });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/\/(linear|ids): workflow run 102 ran while it was moved to [0-9a-f]{12}, and its workflow lets job "[^"]+" write contents with the job's own token, so the writer/));
+    const { ctx: defaults } = await writerCase(ENGINE_AUTHOR, { workflow: rendered.replace(/^permissions: \{\}\n/m, '') });
+    await assert.rejects(resolveSubject(defaults, 'writes.githubActor'), productError(/its workflow gives job "[^"]+" the repository's default token permissions/));
+  });
+
+  it('fail a run that hands its jobs a secret other than the App\'s key, the Linear app and the canary key', async () => {
+    const { ctx: probe } = await writerCase();
+    const rendered = renderedWorkflow(probe);
+    const tokenInput = /^(\s+)github-token: .*$/m.exec(rendered)!;
+    const { ctx } = await writerCase(ENGINE_AUTHOR, { workflow: rendered.replace(tokenInput[0], `${tokenInput[1]}github-token: \${{ secrets.PERSONAL_TOKEN }}`) });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/its workflow hands a job the secret PERSONAL_TOKEN/));
+    const { ctx: all } = await writerCase(ENGINE_AUTHOR, { workflow: rendered.replace(tokenInput[0], `${tokenInput[1]}github-token: \${{ toJSON(secrets) }}`) });
+    await assert.rejects(resolveSubject(all, 'writes.githubActor'), productError(/its workflow hands a job the whole secrets context/));
+  });
+
+  it('fail a run whose App token step minted for another App, or that logged none', async () => {
+    const { ctx } = await writerCase(ENGINE_AUTHOR, { logs: `${tokenStepLog(CLIENT_ID)}\n${tokenStepLog('Iv23liAnotherApp')}` });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/its workflow minted an App token for another App than the harness's/));
+    const { ctx: none } = await writerCase(ENGINE_AUTHOR, { logs: '2026-11-13T12:59:01.1234567Z ##[group]Run mdbisync/mdbisync@x\n2026-11-13T12:59:01.1234567Z ##[endgroup]\n' });
+    await assert.rejects(resolveSubject(none, 'writes.githubActor'), productError(/its workflow logged no App token step/));
+  });
+
+  it('block the check when the harness holds no App token or client id to compare with', async () => {
+    const { ctx } = await writerCase();
+    delete ctx.live!.githubAppClientId;
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), EnvBlockedError);
+    const { ctx: noApp } = await writerCase();
+    delete noApp.live!.githubAppLogin;
+    await assert.rejects(resolveSubject(noApp, 'writes.githubActor'), EnvBlockedError);
+  });
+
+  it('accept the App as the sync branch\'s writer from GitHub\'s push records, the progress push through the final one', async () => {
+    const { ctx, asked, branchRef } = await writerCase(ENGINE_AUTHOR, { branch: [app, app] });
+    assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
+    assert.ok(asked.includes(`/activity?ref=${encodeURIComponent(branchRef)}&per_page=100&direction=desc`));
+    // Only the final push is recorded: its commit carries the first one too.
+    const { ctx: finalOnly } = await writerCase(ENGINE_AUTHOR, { branch: [undefined, app] });
+    assert.deepEqual(await resolveSubject(finalOnly, 'writes.githubActor'), { known: true, value: 'app-bot' });
+  });
+
+  it('fail another credential\'s push to the sync branch even when it set the branch to a commit that is not the sync\'s', async () => {
+    const { ctx, activity, branchRef, branchFirst, record } = await writerCase(ENGINE_AUTHOR, { branch: [app, app] });
+    // A person force-pushes the branch back between the App's two pushes.
+    activity[branchRef]!.splice(1, 0, { ref: branchRef, before: branchFirst!, after: record, activity_type: 'force_push', actor: { login: 'someone', type: 'User' } });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/: GitHub records a force_push to [0-9a-f]{12} by a user account/));
+  });
+
+  it('fail a sync branch push made with a person\'s credential, the job\'s own token, or a user that took the App\'s login', async () => {
+    const { ctx } = await writerCase(ENGINE_AUTHOR, { branch: [app, { login: 'someone', type: 'User' }] });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError
+      && /: GitHub records a push to [0-9a-f]{12} by a user account, not by the App mdbisync-sandbox\[bot\]$/.test(error.message) && !error.message.includes('someone'));
+    const { ctx: job } = await writerCase(ENGINE_AUTHOR, { branch: [app, { login: 'github-actions[bot]', type: 'Bot' }] });
+    await assert.rejects(resolveSubject(job, 'writes.githubActor'), productError(/: GitHub records a push to [0-9a-f]{12} by github-actions\[bot\], not by the App/));
+    const { ctx: named } = await writerCase(ENGINE_AUTHOR, { branch: [app, { login: APP, type: 'User' }] });
+    await assert.rejects(resolveSubject(named, 'writes.githubActor'), productError(/ by a user account/));
+  });
+
+  it('leave a sync branch commit unproven when GitHub has no record of the push that brought it, whatever its author is called', async () => {
+    const { ctx } = await writerCase(ENGINE_AUTHOR, { branch: [app, undefined] });
+    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/: GitHub has no push record for 1 of the sync's 3 commits/));
+    // A commit author that looks like the App's bot proves nothing on its own.
+    const botName = { GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: APP, GIT_COMMITTER_EMAIL: 'bot@example.com' };
+    const { ctx: named } = await writerCase(botName, { branch: [undefined, undefined] });
+    await assert.rejects(resolveSubject(named, 'writes.githubActor'), productError(/GitHub has no push record/));
+    assert.deepEqual(await resolveSubject(named, 'writes.commitIdentity'), { known: true, value: 'mdbisync-sandbox[bot] <bot@example.com>' });
+  });
+
+  it('have nothing to prove without the sync\'s commits', async () => {
+    const { ctx: quiet, remoteGit } = await fakeRun();
+    quiet.observations.set('start.refs', { [`${quiet.names.refPrefix}/ids`]: (await remoteGit.text(['rev-parse', `${quiet.names.refPrefix}/ids`])).trim() });
+    quiet.live!.githubAppLogin = APP;
+    assert.deepEqual(await resolveSubject(quiet, 'writes.githubActor'), { known: true, value: null });
+    assert.deepEqual(await resolveSubject(quiet, 'writes.commitIdentity'), { known: true, value: null });
   });
 
   it('read the App as the commits\' author and committer only when every commit names the App as GitHub links it', async () => {
     const appAuthor = (email: string) => ({ GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: APP, GIT_COMMITTER_EMAIL: email });
-    const { ctx: linked } = await writerCase({ ids: [app, app], linear: app }, appAuthor(`4242+${APP}@users.noreply.github.com`));
+    const { ctx: linked } = await writerCase(appAuthor(`4242+${APP}@users.noreply.github.com`));
     assert.deepEqual(await resolveSubject(linked, 'writes.commitIdentity'), { known: true, value: 'app-bot' });
     // A bot name with an address GitHub does not link to the App is reported as it is.
-    const { ctx: unlinked } = await writerCase({ ids: [app, app], linear: app }, appAuthor(`${APP}@users.noreply.github.com`));
+    const { ctx: unlinked } = await writerCase(appAuthor(`${APP}@users.noreply.github.com`));
     assert.deepEqual(await resolveSubject(unlinked, 'writes.commitIdentity'), { known: true, value: `${APP} <${APP}@users.noreply.github.com>` });
-    const { ctx: other } = await writerCase({ ids: [app, app], linear: app }, appAuthor('4242+other-app[bot]@users.noreply.github.com'));
+    const { ctx: other } = await writerCase(appAuthor('4242+other-app[bot]@users.noreply.github.com'));
     assert.notEqual((await resolveSubject(other, 'writes.commitIdentity')).value, 'app-bot');
   });
 
@@ -3686,69 +3886,25 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
     const app4242 = appAuthor(`4242+${APP}@users.noreply.github.com`);
     const githubMerge = { GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: `4242+${APP}@users.noreply.github.com`, GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@github.com' };
     const ciFix = { GIT_AUTHOR_NAME: 'github-actions[bot]', GIT_AUTHOR_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com', GIT_COMMITTER_NAME: 'github-actions[bot]', GIT_COMMITTER_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com' };
-    const { ctx } = await writerCase({ ids: [app, app], linear: app }, app4242, { onLinear: [{ env: ciFix }, { env: githubMerge, merged: true }, { env: app4242 }] });
+    const { ctx } = await writerCase(app4242, { onLinear: [{ env: ciFix }, { env: githubMerge, merged: true }, { env: app4242 }] });
     assert.deepEqual(await resolveSubject(ctx, 'writes.commitIdentity'), { known: true, value: 'app-bot' });
     // The same merge commit, but no pull request merged it: GitHub's committer is then not the App's.
-    const { ctx: unmerged } = await writerCase({ ids: [app, app], linear: app }, app4242, { onLinear: [{ env: githubMerge }] });
+    const { ctx: unmerged } = await writerCase(app4242, { onLinear: [{ env: githubMerge }] });
     assert.match(String((await resolveSubject(unmerged, 'writes.commitIdentity')).value), /GitHub <noreply@github\.com>/);
   });
 
   it('name the App as the merger only by its exact login, and the merge kind by every merged pull request', async () => {
     const githubMerge = { GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: `4242+${APP}@users.noreply.github.com`, GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@github.com' };
     const both = { onLinear: [{ env: githubMerge, merged: true, twoParents: true }, { env: githubMerge, merged: true, twoParents: true }] };
-    const { ctx } = await writerCase({ ids: [app, app], linear: app }, ENGINE_AUTHOR, both);
+    const { ctx } = await writerCase(ENGINE_AUTHOR, both);
     assert.deepEqual(await resolveSubject(ctx, 'pullRequests.merger'), { known: true, value: 'app-bot' });
     assert.deepEqual(await resolveSubject(ctx, 'pullRequests.mergeKind'), { known: true, value: 'merge' });
     // The job's own token merged: a bot, but not the App.
-    const { ctx: job } = await writerCase({ ids: [app, app], linear: app }, ENGINE_AUTHOR, { ...both, mergedBy: 'github-actions[bot]' });
+    const { ctx: job } = await writerCase(ENGINE_AUTHOR, { ...both, mergedBy: 'github-actions[bot]' });
     assert.deepEqual(await resolveSubject(job, 'pullRequests.merger'), { known: true, value: 'github-actions[bot]' });
     // The first merged with a merge commit, the second squashed.
-    const { ctx: mixed } = await writerCase({ ids: [app, app], linear: app }, ENGINE_AUTHOR, { onLinear: [{ env: githubMerge, merged: true, twoParents: true }, { env: githubMerge, merged: true }] });
+    const { ctx: mixed } = await writerCase(ENGINE_AUTHOR, { onLinear: [{ env: githubMerge, merged: true, twoParents: true }, { env: githubMerge, merged: true }] });
     assert.deepEqual(await resolveSubject(mixed, 'pullRequests.mergeKind'), { known: true, value: 'squash-or-rebase' });
-  });
-
-  it('fail a push made with a person\'s credential, without naming the person', async () => {
-    const { ctx } = await writerCase({ ids: [app, { login: 'someone', type: 'User' }], linear: app });
-    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError
-      && /\/ids: GitHub records a push to [0-9a-f]{12} by a user account, not by the App mdbisync-sandbox\[bot\]$/.test(error.message) && !error.message.includes('someone'));
-  });
-
-  it('fail a run that asked for the App\'s token but pushed with the job\'s own token', async () => {
-    const { ctx } = await writerCase({ ids: [app, app], linear: { login: 'github-actions[bot]', type: 'Bot' } });
-    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/linear: GitHub records a push to [0-9a-f]{12} by github-actions\[bot\], not by the App/.test(error.message));
-  });
-
-  it('fail a user account that took the App\'s login as its name', async () => {
-    const { ctx } = await writerCase({ ids: [app, app], linear: { login: APP, type: 'User' } });
-    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/linear: .* by a user account/.test(error.message));
-  });
-
-  it('leave a commit unproven when GitHub has no record of the push that brought it, whatever its author is called', async () => {
-    // The final ids push has no record: the progress push alone does not reach the final commit.
-    const { ctx: missingFinal } = await writerCase({ ids: [app, undefined], linear: app });
-    await assert.rejects(resolveSubject(missingFinal, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /\/ids: GitHub has no push record for 1 of the sync's 2 commits/.test(error.message));
-    // A commit author that looks like the App's bot proves nothing on its own.
-    const botName = { GIT_AUTHOR_NAME: APP, GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: APP, GIT_COMMITTER_EMAIL: 'bot@example.com' };
-    const { ctx: named } = await writerCase({ ids: [undefined, undefined], linear: undefined }, botName);
-    await assert.rejects(resolveSubject(named, 'writes.githubActor'), (error: Error) => error instanceof ProductError && /GitHub has no push record/.test(error.message));
-    assert.deepEqual(await resolveSubject(named, 'writes.commitIdentity'), { known: true, value: 'mdbisync-sandbox[bot] <bot@example.com>' });
-  });
-
-  it('cover the progress push through the final one, and have nothing to prove without the sync\'s commits', async () => {
-    // Only the final push is recorded for ids: its commit carries the progress commit too.
-    const { ctx } = await writerCase({ ids: [undefined, app], linear: app });
-    assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
-    const { ctx: quiet, remoteGit } = await fakeRun();
-    quiet.observations.set('start.refs', { [`${quiet.names.refPrefix}/ids`]: (await remoteGit.text(['rev-parse', `${quiet.names.refPrefix}/ids`])).trim() });
-    quiet.live!.githubAppLogin = APP;
-    assert.deepEqual(await resolveSubject(quiet, 'writes.githubActor'), { known: true, value: null });
-    assert.deepEqual(await resolveSubject(quiet, 'writes.commitIdentity'), { known: true, value: null });
-  });
-
-  it('block the check when the harness holds no App token to compare with', async () => {
-    const { ctx } = await writerCase({ ids: [app, app], linear: app });
-    delete ctx.live!.githubAppLogin;
-    await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), EnvBlockedError);
   });
 
   it('refuse a full page of push records rather than read it as complete', async () => {

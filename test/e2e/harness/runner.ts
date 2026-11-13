@@ -12,7 +12,7 @@ import { contentTypeOf, destinations, resolveTarget } from '../../../src/initial
 import { isRegularFile, MARKDOWN_EXTENSION } from '../../../src/mapping/index.ts';
 import { Git, lfsReader, listTree, parseLfsPointer, readBlobs, readIds, type LfsRead } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { REF_MOVES, runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
+import { REF_MOVES, runChecks, snapshotRefs, recordRefs, startRefHistory, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, CORPUS_DIR, inheritedTeam, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
@@ -226,6 +226,7 @@ export async function liveWorld(
     githubToken: parts.token.token,
     githubTokenSource: parts.token.source,
     ...(parts.token.appLogin === undefined ? {} : { githubAppLogin: parts.token.appLogin }),
+    ...(parts.token.appClientId === undefined ? {} : { githubAppClientId: parts.token.appClientId }),
     repository: `${config.owner}/${config.repo}`,
     manifest: parts.manifest,
     tree: parts.tree,
@@ -973,8 +974,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       setupEnded = true;
       ctx.phase('steps');
     }
-    const history: Array<Record<string, string>> = [await snapshotRefs(ctx)];
-    ctx.observations.set('refHistory', history);
+    await startRefHistory(ctx);
     for (const [index, step] of scenario.steps.entries()) {
       if (step.kind === 'ui') {
         writeFileSync(join(runDir, UI_CHECKLIST_FILE), renderUiChecklist(scenario, names, ctx));
@@ -983,7 +983,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       }
       log(`step ${step.kind}.${step.action}`);
       await runStep(ctx, step);
-      history.push(await snapshotRefs(ctx));
+      await recordRefs(ctx);
     }
     await settleFollowUpRuns(ctx);
     checks = await runChecks(ctx);
