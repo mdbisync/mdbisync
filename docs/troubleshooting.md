@@ -496,8 +496,9 @@ each linked file. Lost state is handled like this:
 
 To recover with an initial sync:
 
-1. Disable the sync workflow, so a scheduled sync cannot replace the
-   initial sync while it waits in the queue.
+1. Disable the sync workflow and stop your own dispatch timer, if you run
+   one ([own scheduler](own-scheduler.md#stop-the-timer-during-an-initial-sync)),
+   so a sync cannot replace the initial sync while it waits in the queue.
 2. Choose the side that is right. `git-to-linear` makes Linear equal to the
    tracked branch: documents keep their ids and comments and get the file's
    text, and documents that match no file go to Linear's trash.
@@ -512,7 +513,7 @@ To recover with an initial sync:
    with the same inputs until it finishes.
 5. For `linear-to-git`, review and merge its pull request with a merge
    commit.
-6. Enable the sync workflow.
+6. Enable the sync workflow, and start your timer again if you run one.
 
 To abandon an initial sync from Linear whose pull request is still open,
 close the pull request, delete the sync branch (`mdbisync/linear` by
