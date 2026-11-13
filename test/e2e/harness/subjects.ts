@@ -465,9 +465,9 @@ export const CI_IDENTITY = 'github-actions[bot] <41898282+github-actions[bot]@us
  * (`refHistory`, `REF_HISTORY_TIMES`); the last window ends at the ref's tip
  * now. Every window in which the ref moved, other than to a commit the
  * harness pushed itself with none of the sync's commits, must overlap at
- * least one workflow run the harness recorded, by GitHub's times for the run,
- * and every such run must be one that can only have written as the
- * harness's App (runWriteProof). A move back to an older commit, or a foreign
+ * least one workflow run the harness recorded that started a job, by
+ * GitHub's times for the run, and every such run must be one that can only
+ * have written as the harness's App (runWriteProof). A move back to an older commit, or a foreign
  * force push, needs a writer as much as one that brings the sync's commits.
  * Throws a product error naming the ref.
  *
@@ -502,20 +502,27 @@ async function writtenByRuns(ctx: RunContext, ref: string, commits: readonly str
     }
     const window = runs.filter((run) => run.from <= after.at + CLOCK_MARGIN_MS && run.to >= before.at - CLOCK_MARGIN_MS);
     const to = after.oid === null ? 'deleted' : `moved to ${after.oid.slice(0, 12)}`;
-    if (window.length === 0) throw new ProductError(`${ref}: ${to} while no workflow run ran, so the writer of the sync's commits is unproven`);
+    let writers = 0;
     for (const run of window) {
       if (!evidence.proofs.has(run.id)) evidence.proofs.set(run.id, runWriteProof(ctx, run.record));
-      const problem = await evidence.proofs.get(run.id)!;
-      if (problem !== null) throw new ProductError(`${ref}: workflow run ${run.id} ran while it was ${to}, and its workflow ${problem}, so the writer of the sync's commits is unproven`);
+      const proof = await evidence.proofs.get(run.id)!;
+      // A run none of whose jobs started ran nothing: it is no possible writer, and proves no move either.
+      if (proof === NOT_STARTED) continue;
+      if (proof !== null) throw new ProductError(`${ref}: workflow run ${run.id} ran while it was ${to}, and its workflow ${proof}, so the writer of the sync's commits is unproven`);
+      writers += 1;
     }
+    if (writers === 0) throw new ProductError(`${ref}: ${to} while no workflow run ran, so the writer of the sync's commits is unproven`);
   }
 }
 
 /** What one check read of the recorded workflow runs, shared by the refs it proves: each run's times and its proof. */
 interface RunEvidence {
   runs?: Promise<Array<{ id: number; from: number; to: number; record: WorkflowRun }>>;
-  proofs: Map<number, Promise<string | null>>;
+  proofs: Map<number, Promise<string | null | typeof NOT_STARTED>>;
 }
+
+/** runWriteProof's answer for a run none of whose jobs started. */
+const NOT_STARTED = Symbol('not started');
 
 /** How far the harness's clock and GitHub's may disagree, for comparing a run's times with a ref snapshot's. */
 const CLOCK_MARGIN_MS = 2 * 60_000;
@@ -540,9 +547,9 @@ async function recordedRunTimes(ctx: RunContext): Promise<Array<{ id: number; fr
 
 /**
  * Why a workflow run, as GitHub records it, could have written with a
- * credential other than the harness's App; null when it could not. A run
- * none of whose jobs started (one its concurrency group cancelled while
- * queued) ran nothing and wrote nothing. Otherwise GitHub's record of the run
+ * credential other than the harness's App; null when it could not;
+ * NOT_STARTED for a run none of whose jobs started (one its concurrency
+ * group cancelled while queued), which ran nothing. Otherwise GitHub's record of the run
  * names its workflow file and commit; that file, read from GitHub at that
  * commit, must give no job's own token contents write and hand the jobs no
  * secret but the App's key, the Linear app and the canary key
@@ -550,12 +557,12 @@ async function recordedRunTimes(ctx: RunContext): Promise<Array<{ id: number; fr
  * App token step minting for the harness's App's client id
  * (appTokenClientIds).
  */
-async function runWriteProof(ctx: RunContext, run: WorkflowRun): Promise<string | null> {
+async function runWriteProof(ctx: RunContext, run: WorkflowRun): Promise<string | null | typeof NOT_STARTED> {
   const live = ctx.live!;
   const clientId = live.githubAppClientId;
   if (clientId === undefined) throw new EnvBlockedError('the workflow runs\' App is compared with the harness\'s, and the harness holds no App client id');
   const jobs = await live.rest.runJobs(run.id);
-  if (jobs.every((job) => job.started_at === null)) return null;
+  if (jobs.every((job) => job.started_at === null)) return NOT_STARTED;
   const path = run.path?.split('@')[0];
   if (path === undefined || path === '' || run.head_sha === undefined) return 'is not named in GitHub\'s record of the run';
   const text = await live.rest.fileText(path, run.head_sha);

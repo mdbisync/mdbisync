@@ -3777,11 +3777,14 @@ describe('the authenticated writer of the sync\'s pushes (L1-20)', () => {
     await assert.rejects(resolveSubject(ctx, 'writes.githubActor'), productError(/\/ids: deleted while no workflow run ran/));
   });
 
-  it('pass over a run none of whose jobs started, and block the check when GitHub serves no logs for a run that did', async () => {
+  it('pass over a run none of whose jobs started, never counting it as a writer, and block the check when GitHub serves no logs for a run that did', async () => {
     // Run 103 was cancelled while queued in the confirmed run's window: it ran nothing, and its workflow file is not read.
     const { ctx, asked } = await writerCase(ENGINE_AUTHOR, { runs: { 101: { from: 2, to: 7 }, 102: { from: 13, to: 18 }, 103: { from: 14, to: 14, path: '.github/workflows/gone.yml', started: false } } });
     assert.deepEqual(await resolveSubject(ctx, 'writes.githubActor'), { known: true, value: 'app-bot' });
     assert.ok(asked.includes('/actions/runs/103/jobs?per_page=100') && !asked.some((path) => path.includes('gone.yml')));
+    // A move whose only run never started has no writer.
+    const { ctx: unstarted } = await writerCase(ENGINE_AUTHOR, { runs: { 101: { from: 2, to: 7 }, 102: { from: 13, to: 18, started: false } } });
+    await assert.rejects(resolveSubject(unstarted, 'writes.githubActor'), productError(/: moved to [0-9a-f]{12} while no workflow run ran/));
     const { ctx: noLogs } = await writerCase(ENGINE_AUTHOR, { logs: '' });
     await assert.rejects(resolveSubject(noLogs, 'writes.githubActor'), (error: Error) => error instanceof EnvBlockedError && /no logs for workflow run 102/.test(error.message));
   });
