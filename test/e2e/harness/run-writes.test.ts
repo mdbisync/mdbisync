@@ -6,7 +6,7 @@ import type { ConfirmedReport, ReverseReport, RunReport, SyncReport } from '../.
 import type { RunWrites as ReportedWrites } from '../../../src/run/operation.ts';
 import type { PullRequestResult } from '../../../src/sync/index.ts';
 import { ProductError } from './results.ts';
-import { runWrites, type RunWrites } from './subjects.ts';
+import { runPullRequestWrites, runWrites, type RunWrites } from './subjects.ts';
 
 // Engine run reports, fixed: the three runs of L1R-03 as the engine reported
 // them live (the reverse initial sync, the first sync after a person merged
@@ -135,5 +135,19 @@ describe('a run\'s writes, from its report', () => {
     assert.throws(() => runWrites({ ...report, writes: { linear: {}, git: {} } }), /gives no writes\.pullRequests/);
     assert.throws(() => runWrites({ ...report, writes: { linear: { CreateDocument: -1 }, git: {}, pullRequests: {} } }), ProductError);
     assert.throws(() => runWrites({ ...report, writes: { linear: {}, git: { ids: '1' }, pullRequests: {} } }), /writes\.git\.ids that is not a count/);
+  });
+});
+
+describe('a run\'s pull request writes of one kind', () => {
+  it('reads the count, and 0 for a kind the run did not write', () => {
+    assert.equal(runPullRequestWrites(runReport('sync-pull-request-opened'), 'opened'), 1);
+    assert.equal(runPullRequestWrites(runReport('sync-pull-request-opened'), 'merged'), 0);
+    assert.equal(runPullRequestWrites(runReport('quiet-sync'), 'opened'), 0);
+  });
+
+  it('refuses a kind the engine does not count, and a report whose writes are not counts', () => {
+    assert.throws(() => runPullRequestWrites(runReport('quiet-sync'), 'created'), (error) => !(error instanceof ProductError) && /writes\.pullRequests\.created: a run's pull request writes are writes\.pullRequests\.opened, writes\.pullRequests\.updated, writes\.pullRequests\.merged, writes\.pullRequests\.closed$/.test((error as Error).message));
+    assert.throws(() => runPullRequestWrites({ summary: null }, 'opened'), /the engine's report gives no writes$/);
+    assert.throws(() => runPullRequestWrites({ ...runReport('quiet-sync'), writes: { linear: {}, git: {}, pullRequests: { opened: '1' } } }, 'opened'), /writes\.pullRequests\.opened that is not a count/);
   });
 });

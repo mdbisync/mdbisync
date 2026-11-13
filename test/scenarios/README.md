@@ -130,6 +130,12 @@ sync and capture before checking that it wrote nothing. A partial capture,
 stopped run or missing completion report cannot establish idempotence.
 Transient assertions such as `runs.0.writes.total` inspect that invocation,
 including failed runs; later recovery must not erase that evidence.
+A run's own writes are `runs.<n|last>.writes.linear`, `.git`,
+`.pullRequests` and `.total`, summed from its report's `writes`.
+`runs.<n|last>.writes.pullRequests.opened`, `.updated`, `.merged` and
+`.closed` count one kind of pull request call; a kind the run did not make
+is 0. The world-wide `pullRequests.*` subjects count pull requests since
+setup instead.
 Most `runs.<n|last>.*` subjects come from that run's report. The document
 text subjects `runs.<n|last>.documents.content`, `runs.<n|last>.documents.body`
 and `runs.<n|last>.linear.body` do not: a report holds no document bodies.

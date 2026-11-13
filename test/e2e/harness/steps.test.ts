@@ -1975,6 +1975,35 @@ describe('marker-driven checks', () => {
     assert.equal(await holds(moved, linear), true);
   });
 
+  it("checks L2-34's opened pull requests against the last run's reported writes, absent meaning none", async () => {
+    const report = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, 'run-reports', `${name}.json`), 'utf8')) as Record<string, unknown>;
+    const run = (name: string) => ({ command: 'sync' as const, exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: report(name) });
+    const l2_34 = scenarios.find((item) => item.id === 'L2-34')!;
+    const opened = l2_34.checks.assertions.find((item) => item.subject === 'runs.last.writes.pullRequests.opened')!;
+    assert.deepEqual({ operator: opened.operator, expected: opened.expected }, { operator: 'equal', expected: 0 });
+    assert.equal(subjectSource(opened.subject), 'engine');
+
+    // The reverse initial sync opened the pull request; the run after the merge writes nothing and its report has no `opened`.
+    const quiet = (await fakeRun()).ctx;
+    quiet.engine.results.push(run('reverse-initial-sync'), run('quiet-sync'));
+    assert.deepEqual(await resolveSubject(quiet, opened.subject), { known: true, value: 0 });
+    assert.equal((await evaluateAssertion(quiet, opened)).holds, true);
+    assert.deepEqual(await resolveSubject(quiet, 'runs.0.writes.pullRequests.opened'), { known: true, value: 1 });
+
+    // A last run that opened a pull request fails the assertion with the engine's count.
+    const reopened = (await fakeRun()).ctx;
+    reopened.engine.results.push(run('reverse-initial-sync'), run('sync-pull-request-opened'));
+    assert.equal((await evaluateAssertion(reopened, opened)).holds, false);
+    // A description update or a merge is not an opened pull request.
+    const updated = (await fakeRun()).ctx;
+    updated.engine.results.push({ ...run('quiet-sync'), report: { ...report('quiet-sync'), writes: { linear: {}, git: {}, pullRequests: { merged: 1, updated: 1 } } } });
+    assert.deepEqual(await resolveSubject(updated, opened.subject), { known: true, value: 0 });
+    assert.deepEqual(await resolveSubject(updated, 'runs.last.writes.pullRequests.merged'), { known: true, value: 1 });
+
+    // The subject this assertion used to name, which the report never had, is a scenario error, never a silent 0.
+    await assert.rejects(resolveSubject(quiet, 'runs.last.writes.pullRequests.created'), (error) => !(error instanceof ProductError) && /a run's pull request writes are writes\.pullRequests\.opened, /.test((error as Error).message));
+  });
+
   it('keeps the L5-17 suspension and unrelated write visible to scenario assertions', async () => {
     const { ctx } = await fakeRun();
     ctx.engine.results.push({ command: 'sync', exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report: { pullRequest: { pullRequest: { number: 1, opened: true } } } });
