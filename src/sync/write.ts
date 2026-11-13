@@ -57,7 +57,7 @@ import {
 import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments } from '../test-hooks.ts';
 import { nameFixingHooks } from './fix-hooks.ts';
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
-import { reconcileDocumentMark, releasedHold } from './marks.ts';
+import { type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold } from './marks.ts';
 import { stableId } from './stable-id.ts';
 import { suspendedPaths } from './suspended.ts';
 import { recordedTrailers } from './recorded.ts';
@@ -149,6 +149,8 @@ export interface WriteResult {
    * again was written.
    */
   rereadWindowMs: number | null;
+  /** Documents whose conflict notice this step's marks set or resolved. */
+  conflictNotices: ConflictNotices;
   record: SyncRecord | null;
   /** The state refs after this step. */
   state: StateSnapshot;
@@ -197,6 +199,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     failed: [],
     notAttempted: [],
     rereadWindowMs: null,
+    conflictNotices: noConflictNotices(),
     record: null,
     state: { ...expected },
   };
@@ -938,6 +941,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       document,
       entry,
       linear,
+      onConflictNotice: (change) => result.conflictNotices[change].push(path),
       persistEntry: async (next) => {
         nextIds.set(path, next);
         await pushIds();

@@ -31,6 +31,7 @@ const REPORT_KEYS = {
   failedWriteRecorded: true, endpointLimitHeadersPresent: true, rejectedDocumentNamed: true, stoppedEarly: true,
   progressRecorded: true, record: true, atomicPushRefused: true, partialRefUpdates: true,
   skippedConcurrentDocument: true, capturedTrackedTip: true, rereadWindowMs: true, linearToGit: true, writes: true,
+  conflictNotices: true,
 } satisfies Record<keyof RunReport, true>;
 const WRITES_KEYS = { linear: true, git: true, pullRequests: true } satisfies Record<keyof ReportedWrites, true>;
 const SYNC_KEYS = {
