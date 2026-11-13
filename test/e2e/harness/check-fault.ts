@@ -100,6 +100,14 @@ export async function sleepsByDesign(git: Git, sha: string): Promise<boolean> {
  */
 const PENDING_HEAD = 'checks.pendingHead';
 
+/**
+ * Record a head that a setup fixture committed with the `pending` marker, as
+ * a `pending` fault does. Its job sleeps on the runner like the fault's.
+ */
+export function recordPendingHead(ctx: RunContext, sha: string): void {
+  ctx.observations.set(PENDING_HEAD, sha);
+}
+
 export type WorkflowRun = { id: number; head_sha: string; path: string; status: string; conclusion: string | null };
 
 async function markerRuns(person: SandboxRest, sha: string): Promise<WorkflowRun[]> {
@@ -145,10 +153,11 @@ export async function cancelPendingRuns(
 }
 
 /**
- * Heads whose marker job may still sleep outside `branch`'s history: the
- * pending fault's own head and this run's other lane tips. Only a head whose tree still selects `pending` and whose check is
- * still pending counts, so a check that a scenario fixed or failed is never
- * cancelled. Nothing is read before the scenario's first `pending` fault.
+ * Heads whose marker job may still sleep where a push to `branch` does not
+ * cancel it: the pending head and this run's other lane tips. Only a head
+ * whose tree still selects `pending` and whose check is still pending counts,
+ * so a check that a scenario fixed or failed is never cancelled. Nothing is
+ * read before the scenario's first pending head.
  */
 async function sleepingHeads(ctx: RunContext, person: Git, refs: Array<{ ref: string; oid: string }>, branch: string): Promise<string[]> {
   const recorded = ctx.observations.get(PENDING_HEAD) as string | undefined;
@@ -159,11 +168,13 @@ async function sleepingHeads(ctx: RunContext, person: Git, refs: Array<{ ref: st
   const present = branches.filter((name) => tipOf(name) !== undefined);
   if (present.length > 0) await person.run(['fetch', '--quiet', 'origin', ...present.map((name) => `refs/heads/${name}`)]);
   const target = tipOf(branch);
+  const trackedTip = branch === ctx.names.trackedBranch ? undefined : tipOf(ctx.names.trackedBranch);
   const candidates = [...new Set([recorded, ...present.filter((name) => name !== branch).map((name) => tipOf(name)!)])];
   const heads: string[] = [];
   for (const sha of candidates) {
     // A head in the target branch's history runs in that branch's group: this push, or an earlier one, cancels it.
-    if (target !== undefined && (await person.run(['merge-base', '--is-ancestor', sha, target], { okCodes: [0, 1] })).code === 0) continue;
+    // The tracked tip's push run is the exception: it runs in the tracked branch's group, which only a push there cancels.
+    if (sha !== trackedTip && target !== undefined && (await person.run(['merge-base', '--is-ancestor', sha, target], { okCodes: [0, 1] })).code === 0) continue;
     if (!(await sleepsByDesign(person, sha))) continue;
     if ((await readCheck(live(ctx).rest, sha)).actual === 'pending') heads.push(sha);
   }
@@ -211,7 +222,8 @@ export async function faultChecks(
   try {
     const workflow = await git.run(['cat-file', '-e', `HEAD:${CHECK_WORKFLOW_PATH}`], { okCodes: [0, 128] });
     if (workflow.code !== 0) throw new EnvBlockedError('the run tree has no marker check workflow; publish the updated corpus first');
-    {
+    // Only a failing marker reads the target; a release leaves the head's files to the scenario's own change.
+    if (state !== 'passed') {
       const path = typeof args.target === 'string' ? targetPath(ctx, args.target) : (ctx.observations.get('target.path') as string | undefined) ?? targetPath(ctx);
       writeFileSync(join(dir, '.harness-check-target'), `${path}\n`);
       await git.run(['add', '--', '.harness-check-target']);
