@@ -198,6 +198,7 @@ export async function faultChecks(
   const state = args.status;
   if (state !== 'pending' && state !== 'failed' && state !== 'passed') throw new Error('invalid check status');
   if (args.name !== undefined && args.name !== CHECK_NAME) throw new Error(`the marker workflow provides only the ${CHECK_NAME} check`);
+  if (state === 'passed' && args.target !== undefined) throw new Error('a check release takes no target');
   if (args.lane !== undefined && args.lane !== 'normal' && args.lane !== 'suspended' && args.lane !== 'tracked') throw new Error('invalid check lane');
   const branch = args.lane === 'suspended' ? suspendedBranch(resolveStateConfig({trackedBranch:ctx.names.trackedBranch,syncBranch:ctx.names.syncBranch,refPrefix:ctx.names.refPrefix})) : args.lane === 'tracked' ? ctx.names.trackedBranch : ctx.names.syncBranch;
   const world = live(ctx);
@@ -222,7 +223,8 @@ export async function faultChecks(
   try {
     const workflow = await git.run(['cat-file', '-e', `HEAD:${CHECK_WORKFLOW_PATH}`], { okCodes: [0, 128] });
     if (workflow.code !== 0) throw new EnvBlockedError('the run tree has no marker check workflow; publish the updated corpus first');
-    // Only a failing marker reads the target; a release leaves the head's files to the scenario's own change.
+    // Only the `failed` and `document` markers read the target; a release removes the marker, so it never
+    // writes the target and leaves the head's files to the scenario's own change.
     if (state !== 'passed') {
       const path = typeof args.target === 'string' ? targetPath(ctx, args.target) : (ctx.observations.get('target.path') as string | undefined) ?? targetPath(ctx);
       writeFileSync(join(dir, '.harness-check-target'), `${path}\n`);

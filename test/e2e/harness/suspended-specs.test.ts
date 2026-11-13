@@ -76,6 +76,8 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
         }
         return holder();
       };
+      // Each pull request's times and merge commit, taken once, so two answers about an unchanged pull request are the same.
+      const prFacts = new Map<number, { created: string; merged: string | null; mergeCommit: string | null }>();
       const serve = async (input: Parameters<typeof fetch>[0], init: RequestInit | undefined, byHarness: boolean): Promise<Response> => {
         const url = String(input);
         const sha = /\/commits\/([0-9a-f]+)\/check-runs/.exec(url)?.[1];
@@ -131,9 +133,12 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
           const enrich = async (node: Record<string, any>) => {
             const pr = world.github.pullRequests.find((p) => p.number === node.number);
             if (pr !== undefined) {
-              node.merged_at = pr.merged ? merges.get(pr.number)?.at ?? new Date().toISOString() : null;
-              node.merge_commit_sha = merges.get(pr.number)?.sha ?? null;
-              node.created_at = new Date().toISOString();
+              const facts = prFacts.get(pr.number) ?? { created: new Date().toISOString(), merged: null, mergeCommit: null };
+              if (pr.merged) facts.merged ??= new Date().toISOString();
+              prFacts.set(pr.number, facts);
+              node.merged_at = facts.merged;
+              node.created_at = facts.created;
+              node.merge_commit_sha = facts.mergeCommit;
               node.head.sha = (await fixture.remote.text(['rev-parse', `refs/heads/${pr.head}`])).trim();
             }
             return node;
@@ -156,15 +161,14 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
         return transport(String(input).replace('https://api.github.com', GITHUB_API), init);
       };
       const fetchImpl: typeof fetch = (input, init) => serve(input, init, false);
-      // Each merge's commit and time by pull request number, as GitHub reports them on every read.
-      const merges = new Map<number, { sha: string; at: string }>();
       world.github.merge = async (pr, sha) => {
         const base = (await fixture.remote.text(['rev-parse', `refs/heads/${pr.base}`])).trim();
         const result = await fixture.remote.run(['merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
         if (result.code !== 0) return { status: 405 };
         const commit = (await fixture.remote.text(['commit-tree', result.stdout.toString().split('\n')[0]!, '-p', base, '-p', sha, '-m', 'Merge the reviewed changes'], { env: { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email } })).trim();
         await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
-        merges.set(pr.number, { sha: commit, at: new Date().toISOString() });
+        const facts = prFacts.get(pr.number) ?? { created: new Date().toISOString(), merged: null, mergeCommit: null };
+        prFacts.set(pr.number, { ...facts, mergeCommit: commit });
         return { sha: commit };
       };
       const rest = new SandboxRest({ owner: 'owner', repo: 'repo' }, 'app-token', (input, init) => serve(input, init, true));
