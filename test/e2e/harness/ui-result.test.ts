@@ -321,6 +321,9 @@ describe('ui-result', () => {
   it('runs the checks once every item is answered, records the result in place of env-blocked, cleans up and releases the hold', async () => {
     const { runDir, stateDir, outDir, remote, checklist, deps, steps } = heldRun();
     await takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 2)), scenarios, deps);
+    // A resumed engine can provision npm again before the run finishes.
+    mkdirSync(join(runDir, 'hook-npm', 'cache'), { recursive: true });
+    writeFileSync(join(runDir, 'hook-npm', 'cache', 'artifact'), 'cached npm');
     const outcome = await takeUpHeldRun(runDir, parseUiAnswers(answered(checklist, 3, { values: true })), scenarios, deps);
     assert.equal(outcome.state, 'done');
     assert.ok(outcome.state === 'done');
@@ -339,6 +342,7 @@ describe('ui-result', () => {
     assert.equal(liveRuns(stateDir).has(RUN), false);
     assert.equal(existsSync(join(runDir, HELD_RUN_FILE)), false);
     assert.equal(existsSync(join(runDir, 'canary-pending')), false);
+    assert.equal(existsSync(join(runDir, 'hook-npm')), false, 'terminal take-up removes its npm installation and cache');
     const swept = await sweep(sweepTargets(remote), stateDir);
     assert.deepEqual(swept, { removedRefs: [], closedPullRequests: [], deletedProjects: [], archivedDocuments: 0, recovered: [], keptLive: [], errors: [] });
     assert.match(readFileSync(join(runDir, 'harness.log'), 'utf8'), /ui item 3 \(assert-dom\): pass/);

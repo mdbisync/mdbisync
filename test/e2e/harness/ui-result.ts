@@ -299,6 +299,7 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   const outcome = classify(blockedBySetupStop(error, ctx.engine.results, ctx.engine.setupRuns), deps.expectedRed.has(scenario.id));
   finishPersonClone(runDir, outcome.result, ctx.log);
   rmSync(join(runDir, 'engine'), { recursive: true, force: true });
+  rmSync(join(runDir, 'hook-npm'), { recursive: true, force: true });
   ctx.log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   appendFileSync(join(runDir, 'harness.log'), `\n${logLines.join('\n')}`);
   // The held part's runs and the ones after it: observations carry over the hold.
