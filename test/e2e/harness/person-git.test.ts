@@ -169,7 +169,7 @@ describe('the person clone at the end of a run', () => {
     finishPersonClone(empty, 'fail', () => assert.fail('nothing to keep'));
   });
 
-  it('keeps a failed run\'s clone without credentials and without depending on the shared cache', async () => {
+  it('keeps a failed run\'s clone without credentials', async () => {
     const root = mkdtempSync(join(tmpdir(), 'person-end-'));
     roots.push(root);
     const names = runNames('aaaaaa');
@@ -181,13 +181,10 @@ describe('the person clone at the end of a run', () => {
     const remote = join(root, 'sandbox.git');
     await new Git(root, IDENTITY).run(['clone', '--quiet', '--bare', seed.dir, remote]);
     await new Git(remote).run(['branch', names.trackedBranch, 'main']);
-    // As `Sandbox.clone` makes it: borrowing objects from a shared cache.
-    const cache = join(root, 'cache.git');
-    await new Git(root, IDENTITY).run(['clone', '--quiet', '--bare', remote, cache]);
+    // As `Sandbox.clone` makes it: a single-branch clone that stands alone.
     const runDir = join(root, 'run');
-    await new Git(root, IDENTITY).run(['clone', '--quiet', '--reference-if-able', cache, '--single-branch', '--branch', names.trackedBranch, remote, join(runDir, 'person')]);
+    await new Git(root, IDENTITY).run(['clone', '--quiet', '--single-branch', '--branch', names.trackedBranch, remote, join(runDir, 'person')]);
     const person = new Git(join(runDir, 'person'), IDENTITY);
-    assert.ok(existsSync(join(person.dir, '.git', 'objects', 'info', 'alternates')));
     await person.run(['config', 'remote.origin.url', 'https://person:s3cret@mirror.example/sandbox.git?access_token=abc']);
     // Git also records the URL it cloned or fetched from, query and all, in the reflogs and FETCH_HEAD.
     const head = await person.text(['rev-parse', 'HEAD']);
@@ -205,8 +202,7 @@ describe('the person clone at the end of a run', () => {
       assert.ok(!text.includes('access_token=abc'), `${file}: ${text}`);
     }
     assert.match(readFileSync(headLog, 'utf8'), /clone: from https:\/\/mirror\.example\/sandbox\.git\?access_token=\*\*\*/);
-    // The cache may go; the kept clone still reads its whole history.
-    rmSync(cache, { recursive: true, force: true });
+    // The kept clone reads its whole history on its own.
     assert.equal(existsSync(join(person.dir, '.git', 'objects', 'info', 'alternates')), false);
     await person.run(['fsck', '--connectivity-only', '--no-progress']);
     assert.equal(await person.text(['log', '-1', '--format=%s']), 'Starting tree');

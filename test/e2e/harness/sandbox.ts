@@ -184,12 +184,15 @@ export class Sandbox {
     return texts;
   }
 
-  /** A working clone of the run's tracked branch (no LFS content), for the engine or for a person. */
+  /**
+   * A working clone of the run's tracked branch (no LFS content), for the engine or for a person.
+   * Never a reference to the cache: the cache is a blob:none partial clone, so
+   * offering its main as present lets the server send run blobs as deltas
+   * against main's blobs the cache never downloaded ("pack has unresolved deltas").
+   */
   async clone(names: RunNames, dir: string): Promise<Git> {
     mkdirSync(dirname(dir), { recursive: true });
-    await this.git(dirname(dir)).run([
-      'clone', '--quiet', '--reference-if-able', this.cache.dir, '--single-branch', '--branch', names.trackedBranch, this.url, dir,
-    ]);
+    await this.git(dirname(dir)).run(['clone', '--quiet', '--single-branch', '--branch', names.trackedBranch, this.url, dir]);
     return this.git(dir, PERSON);
   }
 
@@ -209,7 +212,7 @@ export class Sandbox {
   /** The committer time of a commit on the sandbox, fetching it into the cache when needed. */
   async commitTime(oid: string): Promise<number | null> {
     try {
-      // Never shallow: a shallow cache cannot serve as a clone reference.
+      // Never shallow: a shallow fetch would make the shared cache a shallow repository for every later run.
       await this.cache.run(['fetch', '--quiet', '--filter=blob:none', this.url, oid]);
       return Number((await this.cache.text(['show', '-s', '--format=%ct', oid])).trim()) * 1000;
     } catch {
