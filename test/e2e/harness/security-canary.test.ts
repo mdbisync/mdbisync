@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { CANARY_BASELINE, CANARY_ENABLED, CANARY_EVIDENCE, CANARY_FILE, CANARY_HOOK_ENTRY, canaryFacts, canaryScript } from './security-canary.ts';
+import { CANARY_BASELINE, CANARY_ENABLED, CANARY_EVIDENCE, CANARY_FILE, CANARY_HOOK_ENTRY, canaryFacts, canaryIsolated, canaryScript, type CanaryFacts } from './security-canary.ts';
 import { loadScenarios } from './spec.ts';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -67,4 +67,23 @@ test('the canary fails on its own secrets or a wrong key and records only facts'
 test('canary evidence rejects values and unrelated fields', () => {
   assert.deepEqual(canaryFacts('Security canary: {"secret":"value"}'), []);
   assert.deepEqual(canaryFacts('Security canary: null'), []);
+});
+
+// The hooks step's environment names as a hosted runner gave them to the canary in a live L2-41 run
+// (November 2026). A snapshot: a name the runner adds later shows up only in the next live L2-41 run.
+const hostedRunnerNames = ['ACTIONS_ORCHESTRATION_ID', 'CANARY_HOOK_KEY', 'CI', 'GITHUB_ACTION', 'GITHUB_ACTIONS', 'GITHUB_ACTION_REF', 'GITHUB_ACTION_REPOSITORY', 'GITHUB_ACTOR', 'GITHUB_ACTOR_ID', 'GITHUB_API_URL', 'GITHUB_ARTIFACTS', 'GITHUB_ARTIFACTS_LIST', 'GITHUB_BASE_REF', 'GITHUB_EVENT_NAME', 'GITHUB_EVENT_PATH', 'GITHUB_GRAPHQL_URL', 'GITHUB_HEAD_REF', 'GITHUB_JOB', 'GITHUB_REF', 'GITHUB_REF_NAME', 'GITHUB_REF_PROTECTED', 'GITHUB_REF_TYPE', 'GITHUB_REPOSITORY', 'GITHUB_REPOSITORY_ID', 'GITHUB_REPOSITORY_OWNER', 'GITHUB_REPOSITORY_OWNER_ID', 'GITHUB_RETENTION_DAYS', 'GITHUB_RUN_ATTEMPT', 'GITHUB_RUN_ID', 'GITHUB_RUN_NUMBER', 'GITHUB_SERVER_URL', 'GITHUB_SHA', 'GITHUB_TRIGGERING_ACTOR', 'GITHUB_WORKFLOW', 'GITHUB_WORKFLOW_REF', 'GITHUB_WORKFLOW_SHA', 'GITHUB_WORKSPACE', 'GIT_TERMINAL_PROMPT', 'HOME', 'HOSTNAME', 'LC_CTYPE', 'MDBISYNC_HOOKS', 'MDBISYNC_NODE', 'MDBISYNC_SECURITY_CANARY', 'PATH', 'PRE_COMMIT', 'PRE_COMMIT_COLOR', 'PWD', 'RUNNER_ARCH', 'RUNNER_ENVIRONMENT', 'RUNNER_NAME', 'RUNNER_OS', 'RUNNER_TEMP', 'RUNNER_TOOL_CACHE', 'RUNNER_TRACKING_ID', 'RUNNER_WORKSPACE', 'SHLVL', '_'];
+const clean = (environmentNames: string[]): CanaryFacts => ({ environmentNames, hookKeyMatches: true, linearSecretMatches: false, linearTokenMatches: false, appTokenMatches: false });
+
+test('isolation accepts the runner orchestration id and nothing else named ACTIONS_*', () => {
+  assert.equal(canaryIsolated(clean(hostedRunnerNames)), true);
+  const leaking = [
+    'ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RUNTIME_URL', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_URL', 'ACTIONS_CACHE_URL', 'ACTIONS_RESULTS_URL',
+    // An ACTIONS_* name nobody has checked yet fails.
+    'ACTIONS_SOMETHING_NEW', 'ACTIONS_', 'ACTIONS_ORCHESTRATION_ID_TOKEN', 'ACTIONS_ORCHESTRATION',
+    'INPUT_LINEAR-CLIENT-SECRET', 'INPUT_APP-TOKEN', 'INPUT_ACTIONS_ORCHESTRATION_ID',
+    'CANARY_LINEAR_SECRET', 'CANARY_APP_TOKEN',
+  ];
+  for (const name of leaking) assert.equal(canaryIsolated(clean([...hostedRunnerNames, name])), false, name);
+  for (const flag of ['linearSecretMatches', 'linearTokenMatches', 'appTokenMatches'] as const) assert.equal(canaryIsolated({ ...clean(hostedRunnerNames), [flag]: true }), false, flag);
+  assert.equal(canaryIsolated({ ...clean(hostedRunnerNames), hookKeyMatches: false }), false);
 });

@@ -124,8 +124,26 @@ export function canaryFacts(log: string): CanaryFacts[] {
   });
 }
 
+/**
+ * Runner variables named `ACTIONS_*` that carry no credential and may reach
+ * the hooks step. The runner sets `ACTIONS_ORCHESTRATION_ID` on every step:
+ * a correlation id that `actions/checkout` puts into git's user agent. The
+ * list is exact on purpose: other `ACTIONS_*` names carry tokens or the
+ * service URLs those tokens open (`ACTIONS_RUNTIME_TOKEN`,
+ * `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_URL`,
+ * `ACTIONS_CACHE_URL`, `ACTIONS_RESULTS_URL`), and a name the runner adds
+ * later fails isolation until someone has checked it and named it here.
+ */
+const ALLOWED_ACTIONS_NAMES: ReadonlySet<string> = new Set(['ACTIONS_ORCHESTRATION_ID']);
+
+/** Whether an environment name in the hooks step breaks isolation: the stage's secrets, action inputs, unlisted runner variables. */
+export function canaryNameLeaks(name: string): boolean {
+  if ((CANARY_SECRET_INPUTS as readonly string[]).includes(name) || name.startsWith('INPUT_')) return true;
+  return name.startsWith('ACTIONS_') && !ALLOWED_ACTIONS_NAMES.has(name);
+}
+
 /** The same pass condition for live evidence and the offline workflow smoke. */
 export function canaryIsolated(fact: CanaryFacts): boolean {
   return fact.hookKeyMatches && !fact.linearSecretMatches && !fact.linearTokenMatches && !fact.appTokenMatches
-    && !fact.environmentNames.some(name => /^(INPUT_|ACTIONS_|CANARY_LINEAR_SECRET$|CANARY_APP_TOKEN$)/.test(name));
+    && !fact.environmentNames.some(canaryNameLeaks);
 }
