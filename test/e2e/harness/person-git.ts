@@ -116,9 +116,8 @@ export async function writePersonDiagnostics(git: Git, ctx: Pick<RunContext, 'na
 /**
  * Removes the person's clone at the end of a run, except after a failed one: then it stays in the run folder for
  * diagnosis, made safe to keep first. Its remote URL, reflogs and FETCH_HEAD lose any credentials they carried (the
- * harness passes its token through the environment, but a configured mirror URL may hold one), and it copies in the objects it borrowed from
- * the shared cache, whose unreachable objects a later cleanup of the cache may drop. A clone that cannot be made safe
- * is removed.
+ * harness passes its token through the environment, but a configured mirror URL may hold one). A clone that cannot be
+ * made safe is removed.
  */
 export function finishPersonClone(runDir: string, result: Result, log: (line: string) => void): void {
   const dir = join(runDir, 'person');
@@ -129,10 +128,7 @@ export function finishPersonClone(runDir: string, result: Result, log: (line: st
   const git = (args: string[]) => spawnSync('git', args, { cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } });
   const url = git(['config', '--get', 'remote.origin.url']).stdout.trim();
   const clean = withoutCredentials(url);
-  const steps = [
-    ...(clean !== url ? [git(['config', 'remote.origin.url', clean])] : []),
-    ...(existsSync(join(dir, '.git', 'objects', 'info', 'alternates')) ? [git(['repack', '-a', '-d', '-q'])] : []),
-  ];
+  const steps = clean !== url ? [git(['config', 'remote.origin.url', clean])] : [];
   let scrubbed = true;
   try {
     // Git records the URL it cloned or fetched from in the reflogs and FETCH_HEAD, query and all.
@@ -149,7 +145,6 @@ export function finishPersonClone(runDir: string, result: Result, log: (line: st
     rmSync(dir, { recursive: true, force: true });
     return;
   }
-  rmSync(join(dir, '.git', 'objects', 'info', 'alternates'), { force: true });
   log(`kept the person clone for diagnosis: ${dir}`);
 }
 
