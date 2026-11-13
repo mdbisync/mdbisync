@@ -86,6 +86,15 @@ export function pinnedActionSha(template: string): string {
   return match[1] as string;
 }
 
+/**
+ * Whether the run's sync workflow runs only when requested (a dispatch, a
+ * scheduler tick): renderForRun drops its push and schedule triggers, so a
+ * push to the run's branch only registers it and skips its job.
+ */
+export function syncDispatchOnly(options: Pick<RunWorkflowOptions, 'securityCanary' | 'scheduledOnly'>): boolean {
+  return options.securityCanary === true || options.scheduledOnly === true;
+}
+
 /** A template rendered for one run. */
 export function renderForRun(template: string, options: RunWorkflowOptions): string {
   let text = template;
@@ -111,7 +120,7 @@ export function renderForRun(template: string, options: RunWorkflowOptions): str
   // gets a group of its own, so it never replaces a pending dispatch of the
   // run's group. The default branch and the repository's settings stay as
   // they are.
-  if ((options.securityCanary || options.scheduledOnly) && isMap(on) && isMap(doc.getIn(['jobs', 'sync']))) {
+  if (syncDispatchOnly(options) && isMap(on) && isMap(doc.getIn(['jobs', 'sync']))) {
     // These drivers observe requested runs only; pushes register the workflow with no job.
     on.delete('push');
     on.delete('schedule');

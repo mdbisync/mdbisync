@@ -58,7 +58,7 @@ import type { SandboxRest, WorkflowJob, WorkflowRun } from './github.ts';
 import { blockerEvidence, environmentBlocker, firstFailedStep, hadReplaceableRun, jobsEvidence, jobSpans, maxOverlap, runLogs, runResult, stopScheduledRun, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun, workflowEvidence } from './workflows.ts';
 import { outputCount, outputFile, outputText } from '../../../src/run/output.ts';
 import { CANARY_FIXTURE, canaryFacts } from './security-canary.ts';
-import { pinnedActionSha, prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
+import { pinnedActionSha, prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, syncDispatchOnly, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 
 export { documentId, documentPaths, resolveDestination, sibling, targetPath };
 
@@ -412,8 +412,7 @@ async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'):
     syncBranch: ctx.names.syncBranch,
     refPrefix: ctx.names.refPrefix,
     group: runGroup(ctx.names.runId),
-    securityCanary: ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE),
-    scheduledOnly: ctx.scenario.steps.some((step) => step.kind === 'run' && step.action === 'soak'),
+    ...dispatchOnlyDrivers(ctx),
     actionSha,
   }, wanted);
   if (files.size === 0) return;
@@ -424,7 +423,14 @@ async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'):
   await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
   ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
   ctx.observations.set('workflows.installed', [...installed, ...files.keys()]);
-  if (ctx.scenario.steps.some((step) => step.kind === 'run' && step.action === 'soak')) ctx.observations.set('workflows.scheduledOnly', true);
+}
+
+/** The scenario's drivers that observe requested sync runs only: they render the sync dispatch-only (workflow-files.ts). */
+function dispatchOnlyDrivers(ctx: RunContext): { securityCanary: boolean; scheduledOnly: boolean } {
+  return {
+    securityCanary: ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE),
+    scheduledOnly: ctx.scenario.steps.some((step) => step.kind === 'run' && step.action === 'soak'),
+  };
 }
 
 async function requireWorkflows(ctx: RunContext, command: CommandName = 'sync'): Promise<void> {
@@ -535,13 +541,16 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
  * order, so any recorded run counts, not only the latest. A failed follow-up
  * run fails the scenario, since it is the deployment's run. The follow-up
  * runs count for the request budgets and the canary scan, but they are not
- * the runs that `runs.<n|last>` name. Returns how many runs it recorded.
+ * the runs that `runs.<n|last>` name. A sync rendered dispatch-only (a timed
+ * soak, the security canary) has no follow-up runs: its push runs only
+ * register it and skip its job. Returns how many runs it recorded.
  */
 export async function settleFollowUpRuns(ctx: RunContext, limit = 5): Promise<number> {
-  if (ctx.observations.get('workflows.scheduledOnly') === true) return 0;
   const sync = workflowFor('sync');
   const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
   if (ctx.scenario.mode !== 'actions' || ctx.live === null || !installed.includes(sync)) return 0;
+  // A dispatch-only sync has no deployment push run: its push runs only register it and skip its job.
+  if (syncDispatchOnly(dispatchOnlyDrivers(ctx))) return 0;
   // Before any sync took in a commit there is no sync state to follow (a hook-only scenario on an empty setup):
   // its push runs end with `initial-sync-required`, as a deployer is told to expect.
   if (takenTips(ctx).size === 0) return 0;

@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { parse } from 'yaml';
-import { ACTION_REPOSITORY, DISPATCH_GUARD, pinnedActionSha, prerequisiteErrors, readTemplate, renderForRun, runWorkflows, SANDBOX_RUNNER, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
+import { ACTION_REPOSITORY, DISPATCH_GUARD, pinnedActionSha, prerequisiteErrors, readTemplate, renderForRun, runWorkflows, SANDBOX_RUNNER, syncDispatchOnly, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 import { REPORT_ARTIFACT } from './workflows.ts';
 
 const RUN = {
@@ -27,6 +27,15 @@ describe('workflow templates rendered for a run', () => {
     // Formatting checks still run on pushes; only the sync job is schedule-only.
     const checks = parse(renderForRun(readTemplate(WORKFLOW_FILES['pre-commit']), { ...RUN, scheduledOnly: true })) as { on: Record<string, unknown> };
     assert.ok('push' in checks.on || 'pull_request' in checks.on);
+  });
+  it('renders the sync dispatch-only exactly when its drivers observe requested runs only, so a push runs no job', () => {
+    const sync = readTemplate(WORKFLOW_FILES.sync);
+    for (const drivers of [{}, { securityCanary: true }, { scheduledOnly: true }]) {
+      const parsed = parse(renderForRun(sync, { ...RUN, ...drivers })) as { on: Record<string, unknown>; jobs: Record<string, { if?: string }> };
+      const guarded = Object.values(parsed.jobs).every((job) => job.if === DISPATCH_GUARD || job.if?.startsWith(`${DISPATCH_GUARD} && (`) === true);
+      assert.equal(guarded, syncDispatchOnly(drivers), JSON.stringify(drivers));
+      assert.equal('schedule' in parsed.on, !syncDispatchOnly(drivers) && 'schedule' in (parse(sync) as { on: Record<string, unknown> }).on);
+    }
   });
   it('the initial sync: the run\'s group, runner, names, branches and refs, and a report artifact', () => {
     const template = readTemplate(WORKFLOW_FILES['initial-sync']);
