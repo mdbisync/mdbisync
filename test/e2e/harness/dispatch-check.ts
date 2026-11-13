@@ -193,14 +193,22 @@ export async function dispatchCheck(deps: DispatchCheckDeps): Promise<DispatchCh
     return token;
   };
   try {
-    const denied = await mint(DENIED);
-    const allowed = await mint(ALLOWED);
-    const reader = new SandboxRest(config, denied.token, fetchImpl);
-    const state = await reader.workflowState(WORKFLOW_FILES.sync);
-    if (state !== 'active') throw new EnvBlockedError(`the sandbox's ${WORKFLOW_FILES.sync} is ${state === undefined ? 'not registered' : state}; nothing was dispatched`);
-    // The registry also lists a workflow that only a run branch carries; the script dispatches main's.
-    if (!await reader.workflowExists(WORKFLOW_FILES.sync, 'main')) throw new EnvBlockedError(`the sandbox's main has no .github/workflows/${WORKFLOW_FILES.sync}; nothing was dispatched`);
-    const before = new Set((await reader.workflowFileRuns(WORKFLOW_FILES.sync, 'workflow_dispatch')).map((run) => run.id));
+    // Before the first dispatch, any failure (the App not installed, a bad key, an API error) means the check could not run.
+    const setup = async () => {
+      const denied = await mint(DENIED);
+      const allowed = await mint(ALLOWED);
+      const reader = new SandboxRest(config, denied.token, fetchImpl);
+      const state = await reader.workflowState(WORKFLOW_FILES.sync);
+      if (state !== 'active') throw new EnvBlockedError(`the sandbox's ${WORKFLOW_FILES.sync} is ${state === undefined ? 'not registered' : state}; nothing was dispatched`);
+      // The registry also lists a workflow that only a run branch carries; the script dispatches main's.
+      if (!await reader.workflowExists(WORKFLOW_FILES.sync, 'main')) throw new EnvBlockedError(`the sandbox's main has no .github/workflows/${WORKFLOW_FILES.sync}; nothing was dispatched`);
+      const before = new Set((await reader.workflowFileRuns(WORKFLOW_FILES.sync, 'workflow_dispatch')).map((run) => run.id));
+      return { denied, allowed, reader, before };
+    };
+    const { denied, allowed, reader, before } = await setup().catch((error: unknown) => {
+      if (error instanceof EnvBlockedError) throw error;
+      throw new EnvBlockedError(`before any dispatch: ${error instanceof Error ? error.message : String(error)}; nothing was dispatched`);
+    });
 
     const errors: string[] = [];
     const record = (what: string, error: unknown) => {
@@ -217,34 +225,35 @@ export async function dispatchCheck(deps: DispatchCheckDeps): Promise<DispatchCh
     // may have been taken without the script hearing it.
     const certain = [deniedRun, allowedRun].filter((run) => run.exitCode === 0).length;
     const uncertain = [deniedRun, allowedRun].some((run) => run.exitCode !== 0 && mayHaveStarted(run));
-    const seen = new Map<number, { run: WorkflowRun; appearedAfterMs: number }>();
+    const writer = new SandboxRest(config, allowed.token, fetchImpl);
+    // Each run is cancelled as soon as it is seen, while the check goes on looking for others.
+    const settle = async (run: WorkflowRun): Promise<string> => {
+      if (deps.keepRun === true) return 'kept';
+      try {
+        await writer.request('POST', `/actions/runs/${run.id}/cancel`);
+        return 'cancelled';
+      } catch (error) {
+        // GitHub answers 409 for a run that already finished.
+        if (error instanceof GitHubError && error.status === 409) return 'already finished';
+        record(`cancelling run ${run.id}`, error);
+        return `not cancelled: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    };
+    const runs: FoundRun[] = [];
     if (certain > 0 || uncertain) {
       for (;;) {
         try {
           for (const run of await newRuns(reader, before, allowed.appLogin)) {
-            if (!seen.has(run.id)) seen.set(run.id, { run, appearedAfterMs: Date.now() - dispatchedAt });
+            if (runs.some((found) => found.id === run.id)) continue;
+            const appearedAfterMs = Date.now() - dispatchedAt;
+            runs.push({ id: run.id, url: run.html_url ?? null, createdAt: run.created_at, appearedAfterMs, after: await settle(run) });
           }
         } catch (error) { record('listing runs', error); }
-        if ((!uncertain && seen.size >= certain) || Date.now() - dispatchedAt >= lookForMs) break;
+        if ((!uncertain && runs.length >= certain) || Date.now() - dispatchedAt >= lookForMs) break;
         await sleep(pollMs);
       }
     }
-    const writer = new SandboxRest(config, allowed.token, fetchImpl);
-    const runs: FoundRun[] = [];
-    for (const { run, appearedAfterMs } of [...seen.values()].sort((a, b) => a.run.id - b.run.id)) {
-      let after = 'kept';
-      if (deps.keepRun !== true) {
-        try {
-          await writer.request('POST', `/actions/runs/${run.id}/cancel`);
-          after = 'cancelled';
-        } catch (error) {
-          // GitHub answers 409 for a run that already finished.
-          if (error instanceof GitHubError && error.status === 409) after = 'already finished';
-          else { after = `not cancelled: ${error instanceof Error ? error.message : String(error)}`; record(`cancelling run ${run.id}`, error); }
-        }
-      }
-      runs.push({ id: run.id, url: run.html_url ?? null, createdAt: run.created_at, appearedAfterMs, after });
-    }
+    runs.sort((a, b) => a.id - b.id);
 
     const deniedOk = deniedRun.exitCode === 1 && deniedRun.httpStatus === '403' && deniedRun.stdout === ''
       && deniedRun.stderr === 'mdbisync dispatch failed: HTTP 403\n';

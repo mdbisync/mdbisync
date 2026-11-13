@@ -61,6 +61,13 @@ class MockGitHub {
   failListings = 0;
   /** Runs someone else starts with each accepted dispatch. */
   alsoStarts = 0;
+  /** Drop the connection of a dispatch by a token without Actions write, so the script hears no answer. */
+  dropDenied = false;
+  /** Whether the App is installed on the repository. */
+  installed = true;
+  /** When the last accepted dispatch and each cancel arrived. */
+  dispatchedAt = 0;
+  readonly cancelledAt: number[] = [];
   /** The answer to a cancel, 202 when it works. */
   cancelStatus = 202;
   /** Runs dispatched so far, and listings since the last dispatch. */
@@ -95,7 +102,7 @@ class MockGitHub {
       response.end(value === undefined ? undefined : JSON.stringify(value));
     };
     const route = `${request.method} ${path}`;
-    if (route === `GET ${REPO_PATH}/installation`) return send(200, { id: 7, app_slug: 'sync-app' });
+    if (route === `GET ${REPO_PATH}/installation`) return this.installed ? send(200, { id: 7, app_slug: 'sync-app' }) : send(404, { message: 'Not Found' });
     if (route === 'POST /app/installations/7/access_tokens') {
       const asked = JSON.parse(body) as { permissions: Record<string, string> };
       const token = `ghs_${randomBytes(18).toString('hex')}`;
@@ -118,7 +125,9 @@ class MockGitHub {
       return send(200, { workflow_runs: [...this.runs].reverse() });
     }
     if (route === `POST ${REPO_PATH}/actions/workflows/mdbisync.yml/dispatches`) {
+      if (token.permissions.actions !== 'write' && this.dropDenied) { request.socket.destroy(); return; }
       if (token.permissions.actions !== 'write' && !this.acceptsAny) return send(403, { message: 'Resource not accessible by integration' });
+      this.dispatchedAt = Date.now();
       if (this.startsRuns) {
         this.#dispatched += 1;
         this.#listings = 0;
@@ -135,6 +144,7 @@ class MockGitHub {
     if (cancel !== null && token.permissions.actions === 'write') {
       if (this.cancelStatus !== 202) return send(this.cancelStatus, { message: 'refused' });
       this.cancelled.push(Number(cancel[1]));
+      this.cancelledAt.push(Date.now());
       return send(202, {});
     }
     send(404, { message: 'Not Found' });
@@ -268,6 +278,26 @@ describe('dispatch-check against a mock endpoint', { skip: realCurl === '' ? 'cu
     assert.match(second.report.runs[0]?.after ?? '', /^not cancelled: POST .*HTTP 403$/);
     assert.equal(second.report.ok, false);
     assert.ok(mock.minted.every((entry) => entry.revoked));
+  }));
+
+  it('cancels a run as soon as it is seen while it still looks for one a lost answer may have started', () => withMock(async (mock) => {
+    mock.dropDenied = true;
+    const started = Date.now();
+    const { report } = await check(mock, { lookForMs: 1_500 });
+    const finished = Date.now();
+    assert.equal(report.denied.httpStatus, '000');
+    assert.equal(report.denied.ok, false);
+    assert.deepEqual(report.runs.map((run) => [run.id, run.after]), [[101, 'cancelled']]);
+    // It kept looking for the whole window, but cancelled the run long before the window ended.
+    assert.ok(finished - started >= 1_500);
+    assert.ok((mock.cancelledAt[0] as number) - mock.dispatchedAt < 1_000);
+  }));
+
+  it('is env-blocked, not failed, when a call before the first dispatch fails', () => withMock(async (mock) => {
+    mock.installed = false;
+    await assert.rejects(check(mock), (error) => error instanceof EnvBlockedError && /^before any dispatch: GET .*HTTP 404; nothing was dispatched$/.test(error.message));
+    assert.equal(mock.minted.length, 0);
+    assert.equal(mock.seen.filter((entry) => entry.path.endsWith('/dispatches')).length, 0);
   }));
 
   it('runs one check at a time on a host', () => withMock(async (mock) => {
