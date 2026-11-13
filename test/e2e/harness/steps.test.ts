@@ -4441,7 +4441,9 @@ describe('document text right after a run', () => {
     await assert.rejects(resolveSubject(ctx, 'runs.last.documents.content'), /engine run 2 has no snapshot/);
     await assert.rejects(resolveSubject(ctx, 'runs.5.documents.content'), ProductError);
     // Other run subjects still come from the report.
-    assert.equal(subjectSource('runs.0.documents.brokenImageUrls'), 'engine');
+    assert.equal(subjectSource('runs.0.sync.failed'), 'engine');
+    // A document's image links are computed on the world right after the run, as its text is.
+    assert.equal(subjectSource('runs.0.documents.brokenImageUrls'), 'harness');
   });
 
   it('compares with the golden form of the files at the same moment, so a later git edit fails no correct run', async () => {
