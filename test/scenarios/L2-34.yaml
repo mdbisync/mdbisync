@@ -68,7 +68,7 @@
         "expected": 0
       },
       {
-        "subject": "runs.last.pullRequests.created",
+        "subject": "runs.last.writes.pullRequests.opened",
         "operator": "equal",
         "expected": 0
       }
