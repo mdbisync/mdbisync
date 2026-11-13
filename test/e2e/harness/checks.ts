@@ -1020,27 +1020,32 @@ export async function collectCanaryEvidence(ctx: RunContext, options: { summarie
     // Linear comments on the run's documents: project documents, and team-zone documents that carry the
     // run's prefix or that the run's ownership record holds, as `readSides` selects them. Annotation READMEs
     // keep their plain title, so only the record shows they are the run's; another run's README is not in it.
+    // Every read takes trashed and archived documents with their archived comments: a comment stays on a
+    // document the engine trashed, and Linear archives it with the document. Each document is read once.
+    const scanned = new Set<string>();
     for (const project of world.projects.values()) {
       for (const document of await commentsOf(world.app, { project: { id: { eq: project.id } } })) {
+        scanned.add(document.id);
         texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
       }
     }
-    const scanned = new Set<string>();
     for (const team of world.tree.teamZones.keys()) {
       const teamId = world.teams.get(team)?.id;
       if (teamId === undefined) continue;
       for (const document of await commentsOf(world.app, { team: { id: { eq: teamId } }, title: { startsWith: ctx.names.teamZonePrefix } })) {
+        // The prefix is the run's own, so a prefixed document in a project the run no longer lists is its too.
+        if (scanned.has(document.id)) continue;
         scanned.add(document.id);
-        if (!document.inProject) texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
+        texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
       }
     }
-    // Owned documents neither query returned: read by id, trashed and archived ones included, since a comment
-    // stays on a document the engine trashed. The ids are the run's own, so no team filter is needed.
-    const unscanned = [...ownedDocuments(ctx.owned).keys()].filter((id) => !scanned.has(id) && !texts.has(`comments on ${id}`));
+    // Owned documents neither query returned, read by id. The ids are the run's own, so no team or project
+    // filter is needed: a document the run created and then moved out of its places is still scanned.
+    const unscanned = [...ownedDocuments(ctx.owned).keys()].filter((id) => !scanned.has(id));
     for (let start = 0; start < unscanned.length; start += OWNED_IDS_PER_COMMENT_QUERY) {
       const ids = unscanned.slice(start, start + OWNED_IDS_PER_COMMENT_QUERY);
-      for (const document of await commentsOf(world.app, { id: { in: ids } }, { includeArchived: true })) {
-        if (!document.inProject) texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
+      for (const document of await commentsOf(world.app, { id: { in: ids } })) {
+        texts.set(`comments on ${document.id}`, document.bodies.join('\n'));
       }
     }
   }
@@ -1070,11 +1075,15 @@ export const COMMENT_DOCUMENTS_PER_PAGE = 25;
 const OWNED_IDS_PER_COMMENT_QUERY = 50;
 export const COMMENTS_PER_DOCUMENT = 50;
 
-/** The comment bodies of every document that matches `filter`, page by page. */
+/**
+ * The comment bodies of every document that matches `filter`, page by page:
+ * trashed and archived documents included, and archived comments too, since
+ * Linear archives a document's comments with it and hides archived nodes
+ * from a connection unless it is asked for them.
+ */
 export async function commentsOf(
   client: Pick<LinearClient, 'request'>,
   filter: Record<string, unknown>,
-  options: { includeArchived?: boolean } = {},
 ): Promise<Array<{ id: string; inProject: boolean; bodies: string[] }>> {
   const result: Array<{ id: string; inProject: boolean; bodies: string[] }> = [];
   let after: string | null = null;
@@ -1087,13 +1096,13 @@ export async function commentsOf(
     } = await client.request(
       'RunComments',
       'query',
-      `query RunComments($filter: DocumentFilter, $after: String, $includeArchived: Boolean) {
-        documents(first: ${COMMENT_DOCUMENTS_PER_PAGE}, after: $after, filter: $filter, includeArchived: $includeArchived) {
-          nodes { id project { id } comments(first: ${COMMENTS_PER_DOCUMENT}) { nodes { body } pageInfo { hasNextPage endCursor } } }
+      `query RunComments($filter: DocumentFilter, $after: String) {
+        documents(first: ${COMMENT_DOCUMENTS_PER_PAGE}, after: $after, filter: $filter, includeArchived: true) {
+          nodes { id project { id } comments(first: ${COMMENTS_PER_DOCUMENT}, includeArchived: true) { nodes { body } pageInfo { hasNextPage endCursor } } }
           pageInfo { hasNextPage endCursor }
         }
       }`,
-      { filter, after, includeArchived: options.includeArchived ?? false },
+      { filter, after },
     );
     for (const document of data.documents.nodes) {
       const bodies = document.comments.nodes.map((comment) => comment.body);
@@ -1103,7 +1112,7 @@ export async function commentsOf(
         const more = await client.request<{
           document: { comments: { nodes: Array<{ body: string }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } };
         }>('RunCommentPage', 'query', `query RunCommentPage($id: String!, $after: String!) {
-          document(id: $id) { comments(first: ${COMMENTS_PER_DOCUMENT}, after: $after) {
+          document(id: $id) { comments(first: ${COMMENTS_PER_DOCUMENT}, after: $after, includeArchived: true) {
             nodes { body } pageInfo { hasNextPage endCursor }
           } }
         }`, { id: document.id, after: page.endCursor });
