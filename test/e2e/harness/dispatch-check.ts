@@ -6,14 +6,13 @@
 //
 // The tokens are installation tokens of the harness's own GitHub App, minted
 // for this check with only `actions: write`, or with only `actions: read` and
-// `contents: read`, and revoked at its end. The script gets its token the way
-// the page says, from a
-// `dispatch-token` file in $CREDENTIALS_DIRECTORY; the token is never on a
-// command line, printed or logged, and its private folder is removed.
+// `contents: read`, and revoked at its end. The script reads its token where
+// the page says, `dispatch-token` in $CREDENTIALS_DIRECTORY, through a pipe:
+// the token is never written to disk, on a command line, printed or logged.
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -69,13 +68,17 @@ export interface ScriptRun {
   signal: string | null;
 }
 
+/** The descriptor the script inherits the token on; its `dispatch-token` file is a link to it. */
+const TOKEN_FD = 3;
+
 /**
- * Runs `script` as a scheduler would, in a private folder removed afterwards:
- * the token in `credentials/dispatch-token` (mode 600, ending in a newline
- * as a pasted token does) and $CREDENTIALS_DIRECTORY naming that folder, as
- * systemd's LoadCredential= gives it. HOME is the private folder, so neither
- * the operator's curl settings nor their own token file is read. Output is
- * masked for the token.
+ * Runs `script` as a scheduler would, in a private folder removed afterwards,
+ * with $CREDENTIALS_DIRECTORY naming a folder that holds `dispatch-token`, as
+ * systemd's LoadCredential= gives it. That file is a link to a pipe the script
+ * inherits, so the script reads the token (ending in a newline, as a pasted
+ * token does) from the path the page names while the token never touches the
+ * disk. HOME is the private folder, so neither the operator's curl settings
+ * nor their own token file is read. Output is masked for the token.
  */
 export async function runScript(script: string, token: string, env: NodeJS.ProcessEnv = process.env): Promise<ScriptRun> {
   githubRequestToken(token);
@@ -84,13 +87,20 @@ export async function runScript(script: string, token: string, env: NodeJS.Proce
     chmodSync(dir, 0o700);
     const credentials = join(dir, 'credentials');
     mkdirSync(credentials, { mode: 0o700 });
-    writeFileSync(join(credentials, 'dispatch-token'), `${token}\n`, { mode: 0o600 });
+    symlinkSync(`/dev/fd/${TOKEN_FD}`, join(credentials, 'dispatch-token'));
     const path = join(dir, 'mdbisync-dispatch');
     writeFileSync(path, script, { mode: 0o700 });
     // What curl may need to reach GitHub from this host: proxies and the CA bundle.
     const passed = Object.fromEntries(PASSED_ENV.flatMap((name) => (env[name] === undefined ? [] : [[name, env[name] as string]])));
-    // Through the script's own interpreter, so a temporary folder mounted noexec does not stop it.
-    const child = spawn('/bin/sh', [path], { cwd: dir, env: { ...passed, HOME: dir, CREDENTIALS_DIRECTORY: credentials }, stdio: ['ignore', 'pipe', 'pipe'], timeout: SCRIPT_TIMEOUT_MS });
+    // The script runs through its own interpreter, so a temporary folder mounted noexec does not stop it.
+    // Node's pipes to a child are sockets, which /dev/fd cannot open again, so `cat` copies the
+    // token from this process into a pipe that the script's shell holds as its token descriptor.
+    const child = spawn('/bin/sh', ['-c', `cat | exec /bin/sh "$1" ${TOKEN_FD}<&0 </dev/null`, 'sh', path], {
+      cwd: dir, env: { ...passed, HOME: dir, CREDENTIALS_DIRECTORY: credentials }, stdio: ['pipe', 'pipe', 'pipe'], timeout: SCRIPT_TIMEOUT_MS,
+    });
+    // A script that stops before it reads the token closes the pipe; that is its result to report, not an error here.
+    child.stdin.on('error', () => {});
+    child.stdin.end(`${token}\n`);
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk; });

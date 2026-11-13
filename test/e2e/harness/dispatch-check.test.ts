@@ -323,17 +323,29 @@ describe('dispatch-check against a mock endpoint', { skip: realCurl === '' ? 'cu
     assert.ok(mock.minted.every((entry) => entry.revoked));
   }));
 
-  it('runs the script with only the token file, removed afterwards, and masks the token in its output', () => withMock(async (mock) => {
+  it('gives the script the token at the documented path through a pipe, never on disk, and masks it in its output', () => withMock(async (mock) => {
     const token = `ghs_${randomBytes(18).toString('hex')}`;
-    // A script that tries the places a token could leak: it can only see its own folder.
-    const probe = '#!/bin/sh\nprintf "%s|%s|%s\\n" "$HOME" "$CREDENTIALS_DIRECTORY" "$(cat "$CREDENTIALS_DIRECTORY/dispatch-token")"\nls -ld "$CREDENTIALS_DIRECTORY/dispatch-token" | cut -c1-10 >&2\nexit 3\n';
+    // A script that looks where a token could be: the documented path holds it, no file in its folder does.
+    const probe = [
+      '#!/bin/sh',
+      'token=$(tr -d \'[:space:]\' < "$CREDENTIALS_DIRECTORY/dispatch-token")',
+      'printf "%s|%s|%s\\n" "$HOME" "$CREDENTIALS_DIRECTORY" "$token"',
+      'grep -rlF "$token" "$HOME" >&2 || echo "not on disk" >&2',
+      'exit 3',
+      '',
+    ].join('\n');
     const result = await runScript(probe, token, { PATH: pathTo(mock) });
     assert.equal(result.exitCode, 3);
     assert.equal(result.httpStatus, null);
     const [home, credentials, shown] = result.stdout.trim().split('|') as [string, string, string];
     assert.equal(shown, '[masked]');
     assert.ok(credentials.startsWith(`${home}/`));
-    assert.equal(result.stderr.trim(), '-rw-------');
+    assert.equal(result.stderr, 'not on disk\n');
     assert.equal(spawnSync('test', ['-e', home]).status, 1);
   }));
+
+  it('reports a script that stops before reading its token', async () => {
+    const result = await runScript('#!/bin/sh\nexit 4\n', `ghs_${randomBytes(18).toString('hex')}`, { PATH: process.env.PATH ?? '/usr/bin:/bin' });
+    assert.equal(result.exitCode, 4);
+  });
 });
