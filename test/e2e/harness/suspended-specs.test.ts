@@ -7,11 +7,13 @@ import { it } from 'node:test';
 import { runCli } from '../../../src/cli.ts';
 import { LinearClient, type LogEntry } from '../../../src/linear/index.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeCheck } from '../../../src/setup/test-helpers.ts';
+import { resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
 import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { CheckpointControl } from './checkpoints.ts';
+import { colorLabel, CONFLICT_MARK } from './conflicts.ts';
 import { runChecks, snapshotRefs, budgetHolds } from './checks.ts';
-import { rerunCheckAsPerson } from './check-fault.ts';
+import { faultChecks, rerunCheckAsPerson, type WorkflowRun } from './check-fault.ts';
 import type { RunContext } from './context.ts';
 import { engineInputs, type EngineResult } from './engine.ts';
 import { SandboxRest } from './github.ts';
@@ -29,6 +31,10 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
       const names = runNames('aaaaaa');
       const count = scenario.id === 'L5-35' ? 65 : 3;
       const documents = Object.fromEntries(Array.from({ length: count }, (_, i) => [`eng/notes/item-${String(i).padStart(2, '0')}.md`, `# Notes ${i}\n\nFirst paragraph.\n\nSecond paragraph.\n`]));
+      // As in the live corpus, one of L5-35's held documents holds a conflict
+      // from git, which the initial sync writes to Linear without the conflict
+      // mark; the sync marks it once it reconciles the edited document.
+      if (scenario.id === 'L5-35') documents['eng/notes/item-03.md'] = '**Sync conflict: git version**\n\n```sh\nnpm ci\n```\n\n**Sync conflict: Linear version**\n\n```sh\nnpm install\n```\n\n**Sync conflict: end**\n\nFirst paragraph.\n';
       const tree = { 'eng/notes/README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n', ...documents, '.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/example/hooks\n    rev: 0123456789abcdef0123456789abcdef01234567\n    hooks:\n      - id: linear-format\n', [CHECK_WORKFLOW_PATH]: CHECK_WORKFLOW };
       await fixture.seed(tree, { branch: names.trackedBranch });
       const world = fakeWorld();
@@ -44,6 +50,25 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         const result = await fixture.remote.run(['show', `${sha}:${path}`], { okCodes: [0, 128] });
         return result.code === 0 ? result.stdout.toString('utf8') : null;
       };
+      // The sandbox has one runner. As on GitHub, the marker workflow runs for
+      // the tip of the tracked branch and of every open pull request's head
+      // branch; a new tip or a close cancels the earlier head's job (its
+      // concurrency group). A `pending` job sleeps and holds the runner.
+      const markerRuns = new Map<string, WorkflowRun & { branch: string; cancelledBy?: 'person' | 'concurrency' }>();
+      const holder = () => [...markerRuns.values()].find((run) => run.status !== 'completed');
+      const runner = async () => {
+        const tips = new Map<string, string>();
+        for (const branch of [names.trackedBranch, ...world.github.pullRequests.filter((pr) => pr.state === 'open').map((pr) => pr.head)]) {
+          const tip = await fixture.remote.run(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { okCodes: [0, 1] });
+          if (tip.code === 0) tips.set(tip.stdout.toString('utf8').trim(), branch);
+        }
+        for (const run of markerRuns.values()) if (run.status !== 'completed' && !tips.has(run.head_sha)) Object.assign(run, { status: 'completed', conclusion: 'cancelled', cancelledBy: 'concurrency' });
+        for (const [sha, branch] of tips) {
+          if (markerRuns.has(sha) || (await show(sha, CHECK_MARKER))?.trim() !== 'pending' || await show(sha, '.harness-check-fixed') !== null) continue;
+          markerRuns.set(sha, { id: 100 + markerRuns.size, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null, branch });
+        }
+        return holder();
+      };
       const serve = async (input: Parameters<typeof fetch>[0], init: RequestInit | undefined, byHarness: boolean): Promise<Response> => {
         const url = String(input);
         const sha = /\/commits\/([0-9a-f]+)\/check-runs/.exec(url)?.[1];
@@ -52,9 +77,13 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           const target = (await show(sha, '.harness-check-target'))?.trim();
           const passed = marker === undefined || await show(sha, '.harness-check-fixed') !== null || (marker === 'flaky' && (attempts.get(sha) ?? 1) > 1) || (marker === 'document' && target !== undefined && (await show(sha, target))?.includes('Approved for review.'));
           const check = checks.get(sha) ?? { name: 'format', status: 'completed' };
+          const sleeping = marker === 'pending' && !passed;
+          const busy = await runner();
+          const own = markerRuns.get(sha);
+          const blocked = busy !== undefined && busy.head_sha !== sha;
           const fresh = ctx.ownCommits.includes(sha) && !polled.has(sha);
           if (byHarness) polled.add(sha);
-          Object.assign(check, { status: fresh || (marker === 'pending' && !passed) ? 'queued' : 'completed', conclusion: passed ? 'success' : 'failure', annotations: (target === undefined ? [] : [target]).map((path) => ({ path, start_line: 1, title: 'Review required', message: 'Check the review status.' })) });
+          Object.assign(check, { status: fresh || (sleeping && own?.status !== 'completed') || blocked ? 'queued' : 'completed', conclusion: own?.conclusion === 'cancelled' ? 'cancelled' : passed ? 'success' : 'failure', annotations: (target === undefined ? [] : [target]).map((path) => ({ path, start_line: 1, title: 'Review required', message: 'Check the review status.' })) });
           checks.set(sha, check);
           world.github.checks!.set(sha, [check]);
           const response = await transport(String(input).replace('https://api.github.com', GITHUB_API), init);
@@ -65,7 +94,17 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         if (url.includes('/actions/workflows/harness-check.yml/runs')) {
           assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
           const sha = new URL(url).searchParams.get('head_sha')!;
-          return Response.json({ workflow_runs: [{ id: 1, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'completed', conclusion: 'failure' }] });
+          const held = markerRuns.get(sha);
+          return Response.json({ workflow_runs: held !== undefined ? [held] : [{ id: 1, head_sha: sha, path: CHECK_WORKFLOW_PATH, status: 'completed', conclusion: 'failure' }] });
+        }
+        const cancel = /\/actions\/runs\/(\d+)\/cancel$/.exec(url);
+        if (cancel !== null) {
+          assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
+          const run = [...markerRuns.values()].find((candidate) => candidate.id === Number(cancel[1]));
+          if (run === undefined) return new Response(null, { status: 404 });
+          if (run.status === 'completed') return new Response(null, { status: 409 });
+          Object.assign(run, { status: 'completed', conclusion: 'cancelled', cancelledBy: 'person' });
+          return new Response(null, { status: 202 });
         }
         if (url.endsWith('/actions/runs/1/rerun-failed-jobs')) {
           assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
@@ -149,16 +188,20 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           assert.equal(result.exitCode, 0, result.stderr);
           ctx.engine.results.push({ command, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, remote: { runId: ctx.engine.results.length, runAttempt: 1, linearEngine: true, requests }, report: JSON.parse(await readFile(reportFile, 'utf8')), summary: await readFile(summaryFile, 'utf8'), signal: null, durationMs: 0, timedOut: false, notImplemented: false } as EngineResult);
           if (scenario.id === 'L5-35') {
-            const writes = world.linear.documents.filter((d) => {
-              const before = beforeDocuments.get(d.id);
-              return before === undefined || ['content', 'title', 'projectId', 'teamId', 'trashed'].some((key) => d[key as keyof typeof d] !== before[key as keyof typeof before]);
-            }).length;
             // Count changed suspended documents from the service, including clears
             // that capture finishes after the lane's own holdMarks report.
             const changed = new Set([...world.linear.comments].flatMap(([id, c]) => {
               const before = beforeComments.get(id);
               return c.body.includes('Check `') && (before === undefined || before.body !== c.body || before.resolved !== c.resolved) ? [c.documentContentId] : [];
             }));
+            // Changed documents, not write requests. An icon or color change
+            // counts as a write (the live I9 counts icon-only updates too),
+            // except a held document's, which the hold changes already cover.
+            const writes = world.linear.documents.filter((d) => {
+              const before = beforeDocuments.get(d.id);
+              const keys = ['content', 'title', 'projectId', 'teamId', 'trashed', ...(changed.has(`content-${d.id}`) ? [] : ['icon', 'color'])];
+              return before === undefined || keys.some((key) => d[key as keyof typeof d] !== before[key as keyof typeof before]);
+            }).length;
             const count = requests.filter((r) => r.kind !== 'oauth').length;
             assert.ok(budgetHolds(count, writes, 1, changed.size), `I9 per run: ${count} requests, ${writes} document writes, ${changed.size} hold changes`);
           }
@@ -182,9 +225,23 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
           } else await sync('sync', step.args);
         } else if (step.action === 'rerun-suspended-check') {
           await rerunCheckAsPerson(ctx, new SandboxRest({ owner: 'owner', repo: 'repo' }, 'person-token', fetchImpl));
+        } else if (step.kind === 'fault' && step.action === 'checks') {
+          await faultChecks(ctx, step.args, () => new SandboxRest({ owner: 'owner', repo: 'repo' }, 'person-token', fetchImpl));
         } else await runStep(ctx, step);
         history.push(await snapshotRefs(ctx));
         refreshView(ctx);
+      }
+      // L5-27: the suspended head carries the batch's `pending` marker, so its
+      // job held the runner until a person cancelled it before the tracked-lane fault.
+      if (scenario.id === 'L5-27') {
+        assert.equal(ctx.observations.get('checks.cancelledPending'), 1);
+        assert.deepEqual([...markerRuns.values()].filter((run) => run.cancelledBy === 'person').map((run) => run.branch), [suspendedBranch(resolveStateConfig(names))]);
+      }
+      assert.equal(await runner(), undefined, 'a pending marker job still holds the runner');
+      // L5-35: the held document with a conflict from git ends with the conflict mark.
+      if (scenario.id === 'L5-35') {
+        const conflicted = world.linear.documents.find((d) => d.title.endsWith('item-03'));
+        assert.deepEqual([conflicted?.icon, colorLabel(conflicted?.color)], [CONFLICT_MARK.icon, CONFLICT_MARK.color]);
       }
       // I6 uses the same in-process engine transport as the scenario's own runs.
       const original = STEP_ACTIONS['run.sync'];

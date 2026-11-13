@@ -4,8 +4,9 @@ How to set up and run mdbisync in a repository: how folders map to Linear,
 the checks every run makes, the workflows, both directions of the initial sync (each has its own
 page: [git to Linear](initial-sync-git-to-linear.md) and
 [Linear to git](initial-sync-linear-to-git.md)), the sync pull request, and how to pin a release. The setup steps (the
-Linear OAuth app, the GitHub App, the secrets and the workflows) are on
-[mdbisync.com](https://mdbisync.com/#setup). How Markdown is kept in
+Linear OAuth app, the GitHub App, the secrets and the workflows) are in the
+[quickstart](quickstart.md), and every input with its default in the
+[configuration reference](configuration.md). How Markdown is kept in
 Linear's form is in [linear-format.md](linear-format.md), and conflicts, when
 both sides change one document, in [conflicts.md](conflicts.md). How a change
 travels each way after the initial sync, what people see, how long it takes
@@ -231,7 +232,11 @@ remain after release; its presence alone does not mean a batch is on hold.
 - Later Linear changes join the open pull request's branch by fast-forward or
   merge commit; the branch is never force-pushed. The branch moves only when
   Linear brings something new, so the checks on its head are not restarted by
-  every run.
+  every run. When an existing head's registered checks have passed, a run
+  tries to merge it before adding fresh captures, so ongoing edits cannot
+  continually replace a checked head. Those captures remain saved for the
+  next batch. A head needing reconciliation, recovering from a merge refusal,
+  or waiting for the suspended lane can still take in new captures.
 - After opening the pull request or moving its branch, a run waits up to
   `merge-grace-seconds` (default `60`, range `0`–`120`) for the head's check
   runs and commit statuses. When every check has finished and passed, it
@@ -340,14 +345,14 @@ release SHA and keep its version comment:
 
 ```yaml
 # In a GitHub Actions workflow:
-- uses: mdbisync/mdbisync@<release-sha> # v0.1.0-rc.1
+- uses: mdbisync/mdbisync@<release-sha> # v0.1.0-rc.9
 ```
 
 ```yaml
 # In .pre-commit-config.yaml:
 repos:
   - repo: https://github.com/mdbisync/mdbisync
-    rev: <release-sha> # v0.1.0-rc.1
+    rev: <release-sha> # v0.1.0-rc.9
     hooks:
       - id: linear-format
 ```
@@ -373,7 +378,7 @@ To update to a specific release, resolve its annotated tag and use the
 first column as both pins:
 
 ```sh
-git ls-remote https://github.com/mdbisync/mdbisync 'refs/tags/v0.1.0-rc.2^{}'
+git ls-remote https://github.com/mdbisync/mdbisync 'refs/tags/v0.1.0-rc.9^{}'
 ```
 
 `pre-commit autoupdate` follows source history and cannot discover these

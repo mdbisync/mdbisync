@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -59,6 +59,36 @@ describe('engine checkpoints (MDBISYNC_TEST_HOOKS)', () => {
     control.resume('before-write');
     assert.equal(await exited, 0);
     for (const name of CHECKPOINTS) assert.equal(control.reached(name), 1, name);
+  });
+
+  it('never show the harness a visit half written', async () => {
+    const control = new CheckpointControl(fresh('hooks-whole-'));
+    const visits = 2_000;
+    const repeat = `
+      const { checkpoint } = await import(${JSON.stringify(new URL('../../../src/test-hooks.ts', import.meta.url).href)});
+      for (let i = 0; i < ${visits}; i += 1) await checkpoint('before-write');
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', repeat], { env: { ...process.env, [HOOKS_ENV]: '1', [HOOKS_DIR_ENV]: control.dir }, stdio: ['ignore', 'ignore', 'inherit'] });
+    let done = false;
+    const exited = new Promise<number | null>((resolve, reject) => {
+      child.once('exit', (code) => { done = true; resolve(code); });
+      child.once('error', (error) => { done = true; reject(error); });
+    });
+    // The harness reads the count while the engine rewrites it: every read is a whole visit.
+    let last = 0;
+    try {
+      while (!done) {
+        const count = control.reached('before-write');
+        assert.ok(count >= last, `the count went back from ${last} to ${count}`);
+        last = count;
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    } finally {
+      if (!done) child.kill('SIGKILL');
+    }
+    assert.equal(await exited, 0);
+    assert.equal(control.reached('before-write'), visits);
+    assert.deepEqual(readdirSync(join(control.dir, 'reached')), ['before-write']);
   });
 
   it('forget an earlier engine\'s visit when a pause is armed', async () => {
@@ -465,7 +495,7 @@ const README = (fields: string) => `---\n${fields}\n---\n# Area\n`;
 const CORPUS: Record<string, string> = {
   'README.md': '# Corpus\n',
   'eng/README.md': README('linear-team: ENG'),
-  'eng/guides/start.md': '# Start\n\nkx-00000001\n',
+  'eng/guides/start.md': '# Start — über\n\nkx-00000001\n\nSee [the plan](../alpha/plan.md).\n',
   'eng/alpha/README.md': README('linear-project: PROJECT_ENG_1'),
   'eng/alpha/plan.md': '# Plan\n\nkx-00000002\n',
   'docs/README.md': README('linear-team: DOCS'),
@@ -547,7 +577,13 @@ describe('run tree from a slice', () => {
     const { commit } = await sandbox.createTrackedBranch('mini', names);
     const files = (await new Git(remote).text(['ls-tree', '-r', '--name-only', names.trackedBranch])).split('\n');
     assert.ok(files.includes('eng/4f1a9c/guides/start.md'));
+    // A moved zone file's link into an unmoved project folder still reaches its file.
+    assert.equal(await new Git(remote).text(['show', `${names.trackedBranch}:eng/4f1a9c/guides/start.md`]), '# Start — über\n\nkx-00000001\n\nSee [the plan](../../alpha/plan.md).');
     assert.ok(!files.some((file) => file.startsWith('corpus')));
+    // Bytes that are not UTF-8 are never decoded into a text the run tree could rewrite.
+    const notUtf8 = (await sandbox.cache.text(['hash-object', '-w', '--stdin'], { input: Buffer.from([0x23, 0xff, 0xfe, 0x0a]) })).trim();
+    const plain = (await sandbox.cache.text(['hash-object', '-w', '--stdin'], { input: 'ü\n' })).trim();
+    assert.deepEqual(await sandbox.blobTexts([notUtf8, plain]), [undefined, 'ü\n']);
     assert.ok(!files.some((file) => file.startsWith('.github/')));
     const enabled = runNames('abcdef');
     await sandbox.createTrackedBranch('mini', enabled, { checks: true });

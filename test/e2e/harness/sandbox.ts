@@ -13,8 +13,11 @@ import { validateSha } from '../../../src/release/package.ts';
 import { CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { LOCAL_REPOS, PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
 import { Git, GitError } from '../../../src/state/index.ts';
+import type { RunOptions, RunResult } from '../../../src/state/git.ts';
 import { CORPUS_DIR, SLICES_DIR, buildRunTree, selectTeams, parseManifest, parseSlice, type Manifest, type RunTree, type SliceList } from './corpus.ts';
 import { gitAuthEnv } from './github.ts';
+import { relinkRunTree } from './run-links.ts';
+import { soakRunTree } from './soak-corpus.ts';
 import { runOfRef, type RunNames } from './isolation.ts';
 import { acquireLock } from './locks.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
@@ -39,13 +42,28 @@ export class CorpusMissingError extends Error {
 export interface SandboxOptions {
   url: string;
   token: string;
+  getToken?: () => Promise<string>;
   stateDir: string;
   runId: string;
+}
+
+/** Refresh before every Git operation; isolated hook environments never inherit credentials. */
+export class CredentialGit extends Git {
+  readonly #load: () => Promise<string>;
+  constructor(dir: string, env: Record<string, string>, load: () => Promise<string>) {
+    super(dir, env);
+    this.#load = load;
+  }
+  override async run(args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
+    if (options.onlyEnv !== undefined) return super.run(args, options);
+    return super.run(args, { ...options, env: { ...gitAuthEnv(await this.#load()), ...options.env } });
+  }
 }
 
 export class Sandbox {
   readonly url: string;
   readonly #token: string;
+  readonly #getToken: (() => Promise<string>) | undefined;
   readonly #stateDir: string;
   readonly #runId: string;
   readonly cache: Git;
@@ -53,14 +71,21 @@ export class Sandbox {
   constructor(options: SandboxOptions) {
     this.url = options.url;
     this.#token = options.token;
+    this.#getToken = options.getToken;
     this.#stateDir = options.stateDir;
     this.#runId = options.runId;
-    this.cache = new Git(join(options.stateDir, 'cache', 'sandbox.git'), this.env(HARNESS));
+    this.cache = this.git(join(options.stateDir, 'cache', 'sandbox.git'), HARNESS);
   }
 
   env(who: { name: string; email: string } = HARNESS): Record<string, string> {
     // A stalled transfer (under 1 KB/s for a minute) fails instead of hanging the run.
     return { ...gitAuthEnv(this.#token), ...identityEnv(who), GIT_LFS_SKIP_SMUDGE: '1', GIT_HTTP_LOW_SPEED_LIMIT: '1000', GIT_HTTP_LOW_SPEED_TIME: '60' };
+  }
+
+  private git(dir: string, who = HARNESS): Git {
+    const load = this.#getToken;
+    const base = this.env(who);
+    return load === undefined ? new Git(dir, base) : new CredentialGit(dir, base, load);
   }
 
   /** Brings the shared cache up to date with the sandbox's main branch. */
@@ -69,7 +94,7 @@ export class Sandbox {
     try {
       if (!existsSync(join(this.cache.dir, 'HEAD'))) {
         mkdirSync(dirname(this.cache.dir), { recursive: true });
-        await new Git(dirname(this.cache.dir), this.env()).run(['clone', '--quiet', '--bare', '--filter=blob:none', '--single-branch', '--branch', 'main', this.url, this.cache.dir]);
+        await this.git(dirname(this.cache.dir)).run(['clone', '--quiet', '--bare', '--filter=blob:none', '--single-branch', '--branch', 'main', this.url, this.cache.dir]);
       } else {
         await this.cache.run(['fetch', '--quiet', '--filter=blob:none', this.url, '+refs/heads/main:refs/heads/main']);
       }
@@ -94,7 +119,7 @@ export class Sandbox {
   }
 
   /** Builds the run's tree from a slice and pushes it as the run's tracked branch (a new root commit). */
-  async createTrackedBranch(slice: string, names: RunNames, options: { checks?: boolean; teams?: readonly string[]; validate?: (selected: SliceList) => Promise<void> } = {}): Promise<{ tree: RunTree; commit: string }> {
+  async createTrackedBranch(slice: string, names: RunNames, options: { checks?: boolean; soak?: Manifest; teams?: readonly string[]; validate?: (selected: SliceList) => Promise<void> } = {}): Promise<{ tree: RunTree; commit: string }> {
     const sliceText = await this.readMain(`${SLICES_DIR}/${slice}.json`);
     if (sliceText === null) throw new CorpusMissingError(`the sandbox's main has no ${SLICES_DIR}/${slice}.json (the corpus is not there yet)`);
     const list = parseSlice(sliceText, slice);
@@ -104,15 +129,23 @@ export class Sandbox {
       const match = /^(\d+) blob ([0-9a-f]+)\t(.+)$/s.exec(record);
       if (match !== null) entries.set(match[3] as string, { mode: match[1] as string, oid: match[2] as string });
     }
-    const readmes = new Map<string, string>();
     for (const path of list.paths) {
       if (!entries.has(path)) throw new CorpusMissingError(`slice ${slice} names ${path}, which is not in ${CORPUS_DIR}/`);
-      if (/(^|\/)README\.md$/.test(path)) readmes.set(path, (await this.readMain(`${CORPUS_DIR}/${path}`)) ?? '');
     }
+    // Markdown texts, for the annotations and for the links the run tree relinks.
+    const markdown = list.paths.filter((path) => path.endsWith('.md'));
+    const read = await this.blobTexts(markdown.map((path) => (entries.get(path) as { oid: string }).oid));
+    const texts = new Map<string, string>();
+    markdown.forEach((path, index) => {
+      const text = read[index];
+      if (text !== undefined) texts.set(path, text);
+    });
+    const readmes = new Map(markdown.filter((path) => /(^|\/)README\.md$/.test(path)).map((path) => [path, texts.get(path) ?? '']));
     const selected = options.teams === undefined ? list : selectTeams(list, readmes, options.teams);
     await options.validate?.(selected);
     const selectedReadmes = new Map([...readmes].filter(([path]) => selected.paths.includes(path)));
-    const tree = buildRunTree(selected, selectedReadmes, names);
+    const relinked = relinkRunTree(buildRunTree(selected, selectedReadmes, names), texts);
+    const tree = options.soak === undefined ? relinked : soakRunTree(relinked, options.soak, texts);
     // Only check-fault scenarios opt into runner jobs. Other scenarios keep
     // their workflow-free starting tree.
     if (options.checks !== true) tree.paths.delete(CHECK_WORKFLOW_PATH);
@@ -133,13 +166,32 @@ export class Sandbox {
     return { tree, commit };
   }
 
+  /** The text of each blob, in order, read from the cache in one call; undefined for bytes that are not valid UTF-8. */
+  async blobTexts(oids: readonly string[]): Promise<Array<string | undefined>> {
+    if (oids.length === 0) return [];
+    const { stdout } = await this.cache.run(['cat-file', '--batch'], { input: `${oids.join('\n')}\n` });
+    const texts: Array<string | undefined> = [];
+    let at = 0;
+    for (const oid of oids) {
+      const end = stdout.indexOf(0x0a, at);
+      const header = /^([0-9a-f]+) blob (\d+)$/.exec(stdout.subarray(at, end).toString('utf8'));
+      if (header === null || header[1] !== oid) throw new Error(`the sandbox cache has no blob ${oid}`);
+      const size = Number(header[2]);
+      const bytes = stdout.subarray(end + 1, end + 1 + size);
+      const text = bytes.toString('utf8');
+      texts.push(Buffer.from(text, 'utf8').equals(bytes) ? text : undefined);
+      at = end + 1 + size + 1;
+    }
+    return texts;
+  }
+
   /** A working clone of the run's tracked branch (no LFS content), for the engine or for a person. */
   async clone(names: RunNames, dir: string): Promise<Git> {
     mkdirSync(dirname(dir), { recursive: true });
-    await new Git(dirname(dir), this.env()).run([
+    await this.git(dirname(dir)).run([
       'clone', '--quiet', '--reference-if-able', this.cache.dir, '--single-branch', '--branch', names.trackedBranch, this.url, dir,
     ]);
-    return new Git(dir, this.env(PERSON));
+    return this.git(dir, PERSON);
   }
 
   /** All run branches and state refs on the sandbox, with their run ids. */

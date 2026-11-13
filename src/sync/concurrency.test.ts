@@ -21,7 +21,7 @@ import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
 import { Git } from '../state/index.ts';
-import { type Fixture, IDENTITY, createFixture } from '../state/test-helpers.ts';
+import { type Fixture, IDENTITY, createFixture, mergeOnGitHub } from '../state/test-helpers.ts';
 import { type Checkpoint, HOOKS_DIR_ENV, HOOKS_ENV } from '../test-hooks.ts';
 import { MERGE_RECORD_MESSAGE, PARTIAL_RECORD_MESSAGE } from './write.ts';
 
@@ -204,18 +204,7 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
   }
 
   /** GitHub's merge with a merge commit, done on the bare remote: parents (base, head), refused when the head moved. */
-  async function mergeOnRemote(pr: { head: string; base: string; number: number }, sha: string): Promise<{ sha: string } | { status: number }> {
-    if ((await rev(`refs/heads/${pr.head}`)) !== sha) return { status: 409 };
-    const base = await rev(`refs/heads/${pr.base}`);
-    const merged = await fixture.remote.run(['merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
-    if (merged.code !== 0) return { status: 405 };
-    const tree = merged.stdout.toString('utf8').split('\n')[0] as string;
-    const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number} from owner/${pr.head}`], {
-      env: { GIT_AUTHOR_NAME: 'sync-app[bot]', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@example.com' },
-    });
-    await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
-    return { sha: commit };
-  }
+  const mergeOnRemote = (pr: { head: string; base: string; number: number }, sha: string) => mergeOnGitHub(fixture, pr, sha);
 
   const rev = (spec: string) => fixture.remote.text(['rev-parse', spec]);
   const show = async (spec: string) => (await fixture.remote.run(['show', spec])).stdout.toString('utf8');
@@ -414,6 +403,51 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     await assertSettled(['Findings, edited in Linear.', 'Second paragraph, edited in git.']);
   });
 
+  it('L4-01: a run whose new pull request loses to one the other run opened meanwhile uses that one', async () => {
+    await editInLinear(REVIEW, 'Findings of the review.', 'Findings, edited in Linear.');
+    await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
+    // The first run pushes the sync branch and finds no pull request; that answer reaches it only once the second run,
+    // started meanwhile from that branch, has opened one. Its own request to open one then comes second.
+    // With no sync branch yet, the first run's only look for the pull request is the one right before it opens it.
+    assert.equal(await remoteRef('refs/heads/mdbisync/linear'), null);
+    const { promise: found, resolve: listed } = Promise.withResolvers<void>();
+    let held = false;
+    let secondEnded = false;
+    /** Whether the held answer went out once the second run had opened the pull request. */
+    let releasedAfterOpen = false;
+    let refused = 0;
+    server.hold = async (method, path, text) => {
+      if (method === 'POST' && path === '/github/repos/owner/repo/pulls' && text.includes('A pull request already exists')) refused += 1;
+      if (held || method !== 'GET' || !path.startsWith('/github/repos/owner/repo/pulls?') || !path.includes('head=owner%3Amdbisync%2Flinear&') || text !== '[]') return;
+      held = true;
+      listed();
+      const until = Date.now() + RUN_TIMEOUT_MS / 4;
+      while (world.github.pullRequests.length === 0 && !secondEnded && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 20));
+      releasedAfterOpen = world.github.pullRequests.length > 0;
+    };
+    const first = await startRun();
+    await Promise.race([found, first.ended]);
+    if (!held) assert.fail(`the first run did not look for the pull request: ${(await first.ended).stderr}`);
+    const second = await sync().finally(() => (secondEnded = true));
+    const late = await first.ended;
+    delete server.hold;
+    assert.ok(releasedAfterOpen, `the second run did not open the pull request while the first waited: ${second.stderr}`);
+    assert.equal(second.report?.pullRequest?.pullRequest?.opened, true, second.stderr);
+    assert.equal(refused, 1, 'the first run did not try to open a second pull request');
+    assert.equal(world.github.pullRequests.length, 1);
+
+    // GitHub refused the late run's pull request as a duplicate: it takes the open one instead of failing.
+    assert.equal(late.report?.pullRequest?.code, undefined, late.stderr);
+    assert.deepEqual(late.report?.pullRequest?.pullRequest, { number: 1, url: 'https://github.test/owner/repo/pull/1', opened: false });
+    // Their write steps still meet each other's records, as in two runs started together.
+    for (const run of [second, late]) {
+      assert.ok(run.code === 0 || run.code === INCOMPLETE_EXIT_CODE, run.stderr);
+      assert.equal(run.report?.partialRefUpdates, 0, run.stderr);
+      if (run.code === INCOMPLETE_EXIT_CODE) assert.equal(run.report?.atomicPushRefused, true, run.stderr);
+    }
+    await assertSettled(['Findings, edited in Linear.', 'Second paragraph, edited in git.']);
+  });
+
   it('L4-02: a document edited in Linear while the run waits to write is skipped; the record is an ordinary commit and the next run merges the edit', async () => {
     await editInGit(NOTES, 'Second paragraph.', 'Second paragraph, edited in git.');
     // Another document the run does write, so it records what it did.
@@ -537,6 +571,52 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.equal(world.github.pullRequests.length, 1);
   });
 
+  it('a document an interrupted run created and a person then edited is not overwritten by a run that adopts it; the next run takes the edit in', async () => {
+    const path = 'eng/notes/draft.md';
+    await person.run(['pull', '--quiet', '--ff-only']);
+    await writeFile(join(personDir, path), `# Draft\n\nA new page from git. ${CANARY}\n`);
+    await person.run(['add', path]);
+    await person.run(['commit', '--quiet', '-m', 'Add a page']);
+    await person.run(['push', '--quiet', 'origin', 'HEAD:main']);
+    personCommits.push(await person.text(['rev-parse', 'HEAD']));
+    // The recovering run has captured Linear before the interrupted run creates the document, so its capture never saw it.
+    const recovering = await startRun('after-capture-push-before-pr');
+    await reached(recovering, 'after-capture-push-before-pr');
+    const interrupted = await startRun('document-created-before-ids-push');
+    await reached(interrupted, 'document-created-before-ids-push');
+    interrupted.kill();
+    assert.equal((await interrupted.ended).signal, 'SIGKILL');
+    const created = world.linear.documents.filter((document) => document.title === 'draft' && document.trashed !== true);
+    assert.equal(created.length, 1, 'the interrupted run created the document');
+    const orphan = created[0] as FakeDocument;
+    assert.equal((await ids())[path], undefined, 'its id is not recorded');
+    // A person edits the new document in Linear before the recovering run reads it again.
+    orphan.content = (orphan.content ?? '').replace('A new page from git.', 'A new page, typed in Linear.');
+    touch(orphan);
+    const writesBefore = world.writes.length;
+    recovering.hooks.resume('after-capture-push-before-pr');
+    const run = await recovering.ended;
+
+    assert.equal(run.code, 0, run.stderr);
+    assert.deepEqual(run.report?.sync?.adopted, []);
+    assert.deepEqual(run.report?.sync?.created, []);
+    assert.deepEqual(run.report?.sync?.skipped, [{ path, reason: 'edited-in-linear' }]);
+    assert.equal(run.report?.skippedConcurrentDocument, true);
+    assert.deepEqual(world.writes.slice(writesBefore).filter((write) => /Document/.test(write)), [], 'the run wrote a document');
+    assert.match(orphan.content ?? '', /typed in Linear/);
+
+    await assertSettled([]);
+    // Created once, and both versions reach the tracked branch and Linear: none is lost and the conflict is shown.
+    assert.deepEqual(world.linear.documents.filter((document) => document.title === 'draft' && document.trashed !== true).map((document) => document.id), [orphan.id]);
+    assert.equal((await ids())[path]?.id, orphan.id);
+    const tracked = await show(`refs/heads/main:${path}`);
+    for (const text of [tracked, orphan.content ?? '']) {
+      assert.match(text, /A new page, typed in Linear\./);
+      assert.match(text, /A new page from git\./);
+    }
+    assert.equal(orphan.content, body(tracked));
+  });
+
   it('L4-06: a push to the tracked branch during a run: the record merges the commit the run took in, and the next run takes the new one', async () => {
     const first = await editInGit(NOTES, 'First paragraph.', 'First paragraph, edited in git.');
     const linearBefore = await rev('refs/mdbisync/linear');
@@ -564,6 +644,8 @@ interface Served {
   url: string;
   /** Answers a request before the fake world does, for a fault; undefined lets the world answer. */
   fault?: (body: string) => Response | undefined;
+  /** Holds an answer before it is sent, to order two runs' requests; undefined sends it at once. */
+  hold?: (method: string, path: string, text: string) => Promise<void>;
   close: () => Promise<void>;
 }
 
@@ -583,10 +665,11 @@ async function serve(world: FakeWorld): Promise<Served> {
         const body = Buffer.concat(chunks).toString('utf8');
         const reply = served.fault?.(body) ?? (await answer(target, { method, headers, ...(method === 'GET' || method === 'HEAD' ? {} : { body }) }));
         const bytes = Buffer.from(await reply.arrayBuffer());
+        await served.hold?.(method, path, bytes.toString('utf8'));
         response.writeHead(reply.status, { ...Object.fromEntries(reply.headers), 'content-type': reply.headers.get('content-type') ?? 'application/json', 'content-length': String(bytes.length) });
         response.end(bytes);
       } catch (error) {
-        console.error(error);
+        console.error(JSON.stringify(error instanceof Error ? error.stack ?? error.message : String(error)));
         response.writeHead(500, { 'content-type': 'text/plain' });
         response.end('Request failed');
       }
@@ -598,3 +681,21 @@ async function serve(world: FakeWorld): Promise<Served> {
   served.close = () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
   return served;
 }
+
+it('the fake server logs request failures as a single escaped line', async (t) => {
+  const server = await serve(fakeWorld());
+  const logged = t.mock.method(console, 'error', () => {});
+  server.fault = () => { throw new Error('failed\r\nforged log entry'); };
+  try {
+    const response = await fetch(`${server.url}/github/test`);
+    assert.equal(response.status, 500);
+    assert.equal(await response.text(), 'Request failed');
+    assert.equal(logged.mock.callCount(), 1);
+    const [line] = logged.mock.calls[0]!.arguments as unknown as [string];
+    assert.doesNotMatch(line, /[\r\n]/);
+    assert.match(JSON.parse(line) as string, /failed\r\nforged log entry/);
+  } finally {
+    logged.mock.restore();
+    await server.close();
+  }
+});

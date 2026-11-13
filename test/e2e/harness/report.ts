@@ -2,9 +2,9 @@
 // the latest result of every scenario, and an evidence summary. Reports hold
 // ids, results, reasons, counts and timings; never document content.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { RESULTS, type Result, type ScenarioResult } from './results.ts';
+import { RESULTS, unexpectedPasses, type Result, type ScenarioResult } from './results.ts';
 import { LEVELS, levelOf, type Level } from './spec.ts';
 
 export const LEVEL_TITLES: Record<Level, string> = {
@@ -55,8 +55,24 @@ export function renderRunMarkdown(report: HarnessReport): string {
   for (const result of report.results) {
     lines.push(`| ${result.id} | ${result.runId} | ${result.result}${result.unexpectedPass ? ' (expected red)' : ''} | ${cell(result.reason ?? '')} | ${result.engineRequests} | ${result.harnessAppRequests} | ${Math.round(result.durationMs / 1000)} | ${result.cleanup.ok ? 'ok' : cell(result.cleanup.detail ?? 'failed')} |`);
   }
-  const passing = report.results.filter((result) => result.unexpectedPass);
-  if (passing.length > 0) lines.push('', `Passing while on the expected-red list (remove them from the list): ${passing.map((result) => result.id).join(', ')}.`);
+  const passing = unexpectedPasses(report.results);
+  if (passing.length > 0) lines.push('', `Passing while on the expected-red list, which fails the run (remove them from the list): ${passing.join(', ')}.`);
+  const answers = report.results.flatMap((result) => Object.entries(result.answerSizes ?? {}).map(([operation, size]) => ({ id: result.id, operation, size })));
+  if (answers.length > 0) {
+    // The largest answers: content pages near the transport's timeout show here.
+    const largest = answers.sort((a, b) => b.size.maxBytes - a.size.maxBytes).slice(0, 10);
+    lines.push('', '## Largest engine answers', '', '| Scenario | Operation | Answers | Largest bytes | Its seconds | Slowest seconds |', '| --- | --- | --- | --- | --- | --- |');
+    for (const { id, operation, size } of largest) lines.push(`| ${id} | ${cell(operation)} | ${size.count} | ${size.maxBytes} | ${(size.maxBytesDurationMs / 1000).toFixed(1)} | ${(size.maxDurationMs / 1000).toFixed(1)} |`);
+  }
+  const marks = report.results.filter((result) => result.conflictMarks !== undefined);
+  if (marks.length > 0) {
+    lines.push('', '## Conflict marks after the checks', '', '| Scenario | Mapped | Path | Mark | Saved own icon | Comments |', '| --- | --- | --- | --- | --- | --- |');
+    for (const result of marks) {
+      const { mapped, marked } = result.conflictMarks as NonNullable<typeof result.conflictMarks>;
+      if (marked.length === 0) lines.push(`| ${result.id} | ${mapped} | none |  |  |  |`);
+      for (const mark of marked) lines.push(`| ${result.id} | ${mapped} | ${cell(mark.path)} | ${mark.icon}/${mark.color} | ${mark.saved === null ? 'none' : `${mark.saved.icon ?? 'none'}/${mark.saved.color ?? 'none'}`} | ${mark.comments} |`);
+    }
+  }
   return `${lines.join('\n')}\n`;
 }
 
@@ -145,7 +161,12 @@ export function renderStatusPage(catalog: readonly string[], latest: readonly La
  * environment) are kept.
  */
 export function updateStatusPage(file: string, catalog: readonly string[], report: HarnessReport): void {
-  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  let text = '';
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
   const frontMatter = /^---\n[\s\S]*?\n---\n/.exec(text)?.[0] ?? '---\nstatus: generated\n---\n';
   const body = text.slice(frontMatter.length).split(DATA_START)[0] ?? '';
   const sections = body.split(/^(?=## )/m).filter((section) => section.startsWith('## ') && !section.startsWith('## Scenarios'));
@@ -163,6 +184,7 @@ export function evidenceSummary(report: HarnessReport): string {
   const appReads = report.results.reduce((sum, result) => sum + result.harnessAppRequests, 0);
   const waited = report.results.reduce((sum, result) => sum + result.budgetWaitMs, 0);
   const cleanupFailures = report.results.filter((result) => !result.cleanup.ok).map((result) => result.id);
+  const passing = unexpectedPasses(report.results);
   const lines = [
     `# Evidence: scenario run ${report.harnessRunId}`,
     '',
@@ -171,6 +193,7 @@ export function evidenceSummary(report: HarnessReport): string {
     `- Scenarios: ${report.results.length}; ${RESULTS.map((result) => `${result}: ${counts[result]}`).join(', ')}.`,
     `- Linear requests: engine ${engine}, harness editors ${harness}, harness app reads ${appReads}; budget waits ${Math.round(waited / 1000)} s.`,
     `- Cleanup failures: ${cleanupFailures.length === 0 ? 'none' : cleanupFailures.join(', ')}.`,
+    `- Unexpected passes (fail the run; remove them from the expected-red list): ${passing.length === 0 ? 'none' : passing.join(', ')}.`,
     '',
     '| Scenario | Result | Harness app reads | Reason |',
     '| --- | --- | --- | --- |',

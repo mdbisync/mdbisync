@@ -15,8 +15,9 @@ import { assertWritesMatchWorld, markWorld } from '../run/test-helpers.ts';
 import { detectConflicts, MARKERS, RETITLED_COMMENT } from '../merge/index.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
-import { type Fixture, createFixture } from '../state/test-helpers.ts';
+import { type Fixture, createFixture, mergeOnGitHub } from '../state/test-helpers.ts';
 import { CONFLICT_COMMENT, MARKS } from './marks.ts';
+import { stableId } from './stable-id.ts';
 
 const CANARY = 'kx-5e1f0a93';
 const NOTES = 'eng/notes';
@@ -134,18 +135,7 @@ describe('sync: conflicts through the cycle (L3)', () => {
     assert.fail('the sync did not settle');
   }
 
-  async function mergeOnRemote(pr: { head: string; base: string; number: number }, sha: string): Promise<{ sha: string } | { status: number }> {
-    if ((await rev(`refs/heads/${pr.head}`)) !== sha) return { status: 409 };
-    const base = await rev(`refs/heads/${pr.base}`);
-    const merged = await fixture.remote.run(['merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
-    if (merged.code !== 0) return { status: 405 };
-    const tree = merged.stdout.toString('utf8').split('\n')[0] as string;
-    const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number} from owner/${pr.head}`], {
-      env: { GIT_AUTHOR_NAME: 'sync-app[bot]', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@example.com' },
-    });
-    await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
-    return { sha: commit };
-  }
+  const mergeOnRemote = (pr: { head: string; base: string; number: number }, sha: string) => mergeOnGitHub(fixture, pr, sha);
 
   /** I3: every commit the tracked branch gained is the scenario's own or a merge of a sync branch head. */
   async function assertTrackedHistory() {
@@ -575,6 +565,58 @@ describe('sync: conflicts through the cycle (L3)', () => {
     await assertBothSides(DOC, PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.'));
   });
 
+  it('a gone document an interrupted run recreated and a person then edited is not overwritten; the next run takes the edit in', async () => {
+    const document = await documentOf(DOC);
+    document.trashed = true;
+    document.archivedAt = new Date().toISOString();
+    touch(document);
+    const gitText = PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.');
+    // After this run's capture: Linear removes the document for good, and an interrupted run has already created it
+    // again under the id derived from the old one, which a person then edits.
+    const recreated: FakeDocument = {
+      id: stableId('recreated', document.id), title: document.title, projectId: document.projectId as string, createdAt: new Date().toISOString(),
+      content: body(gitText).replace('Alpha paragraph.', 'Alpha paragraph, Linear.'),
+    };
+    afterCapture(() => {
+      world.linear.documents.splice(world.linear.documents.indexOf(document), 1);
+      world.linear.documents.push(recreated);
+      touch(recreated);
+    });
+    await commitGit({ [DOC]: gitText });
+    const first = await sync();
+    assert.deepEqual(first.report.sync?.created, []);
+    assert.deepEqual(first.report.sync?.skipped, [{ path: DOC, reason: 'edited-in-linear' }]);
+    assert.match(recreated.content ?? '', /Alpha paragraph, Linear\./);
+    await settle();
+    assert.deepEqual(world.linear.documents.filter((d) => !d.trashed && d.title === document.title).map((d) => d.id), [recreated.id]);
+    await assertBothSides(DOC, PLAN.replace('Alpha paragraph.', 'Alpha paragraph, Linear.').replace('Gamma paragraph.', 'Gamma paragraph, git.'));
+  });
+
+  it('a gone document an interrupted run recreated and a person then trashed is restored with git\'s text, not skipped on every run', async () => {
+    const document = await documentOf(DOC);
+    document.trashed = true;
+    document.archivedAt = new Date().toISOString();
+    touch(document);
+    const gitText = PLAN.replace('Gamma paragraph.', 'Gamma paragraph, git.');
+    const recreated: FakeDocument = {
+      id: stableId('recreated', document.id), title: document.title, projectId: document.projectId as string, createdAt: new Date().toISOString(),
+      content: body(gitText), trashed: true, archivedAt: new Date().toISOString(),
+    };
+    afterCapture(() => {
+      world.linear.documents.splice(world.linear.documents.indexOf(document), 1);
+      world.linear.documents.push(recreated);
+      touch(recreated);
+    });
+    await commitGit({ [DOC]: gitText });
+    const first = await sync();
+    assert.deepEqual(first.report.sync?.skipped, []);
+    assert.deepEqual(first.report.sync?.restored, [DOC]);
+    assert.ok(!recreated.trashed);
+    await settle();
+    assert.equal((await documentOf(DOC)).id, recreated.id);
+    await assertBothSides(DOC, gitText);
+  });
+
   it('L3-17: renamed in Linear and edited in git, both apply', async () => {
     const document = await documentOf(DOC);
     document.title = 'Roadmap';
@@ -617,9 +659,9 @@ describe('sync: conflicts through the cycle (L3)', () => {
   it('L3-20: different images added at the same spot become a conflict whose versions keep both images working', async () => {
     const path = `${NOTES}/gallery.md`;
     const text = TREE[path] as string;
-    // Bytes above 0x7F, as in a real PNG signature, so an encoding slip shows.
-    const gitBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0x01, 0x80]);
-    const linearBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xfe, 0x02, 0x81]);
+    // Distinct real PNGs retain binary bytes, so an encoding slip shows.
+    const gitBytes = await readFile(new URL('../../test/fixtures/assets/banner.png', import.meta.url));
+    const linearBytes = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
     // alice pastes a picture in Linear: Linear stores it and links its upload URL.
     const url = `${UPLOADS_HOST}/pasted/photo.png`;
     world.linear.uploads.push({ filename: 'photo.png', contentType: 'image/png', size: linearBytes.length, assetUrl: url, bytes: linearBytes });

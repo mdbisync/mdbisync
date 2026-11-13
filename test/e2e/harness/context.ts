@@ -32,6 +32,7 @@ export interface LiveWorld {
   sandbox: Sandbox;
   rest: SandboxRest;
   githubToken: string;
+  getGithubToken?: () => Promise<string>;
   githubTokenSource: 'app' | 'host';
   /** The bot login of the App the harness and the workflows authenticate as (`<slug>[bot]`); App tokens only. */
   githubAppLogin?: string;
@@ -65,6 +66,8 @@ export interface RunContext {
   live: LiveWorld | null;
   /** The sandbox, known before the live world is complete, so cleanup can remove an early branch. */
   sandbox?: Sandbox;
+  /** Set before the first remote write, including a push whose answer may be lost. Absent means unknown. */
+  remoteWritesStarted?: boolean;
   proxy: FaultProxy | null;
   /** What the run created in Linear, on disk as it is created, for cleanup and for a recovery after a failed one. */
   owned: OwnershipLedger;

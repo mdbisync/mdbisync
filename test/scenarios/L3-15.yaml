@@ -63,7 +63,7 @@
       {
         "subject": "tracked.body",
         "operator": "same-as",
-        "expected": "edited.linearBody"
+        "expected": "edited.linearStoredBody"
       },
       {
         "subject": "pullRequests.restoredPath",
@@ -71,7 +71,7 @@
         "expected": true
       },
       {
-        "subject": "summary.code",
+        "subject": "decided.code",
         "operator": "equal",
         "expected": "edit-wins-delete"
       }

@@ -21,7 +21,7 @@
 // adopted by its title.
 
 import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { documentPath } from './paths.ts';
 import { sameMarkdown, splitFile } from '../format/index.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
@@ -58,6 +58,7 @@ import { type Checkpoint, checkpoint as testCheckpoint, testStopAfterDocuments }
 import { nameFixingHooks } from './fix-hooks.ts';
 import { type CreateChange, type Decided, type DocumentChange, type KeepChange, type SideFile, type TrashChange, alreadyMerged, changePath, mergedInitialRecord, filesOf, knownIdLookup, lastSynchronized, leftOutFiles, mergeLocally } from './merge.ts';
 import { reconcileDocumentMark, releasedHold } from './marks.ts';
+import { stableId } from './stable-id.ts';
 import { suspendedPaths } from './suspended.ts';
 import { recordedTrailers } from './recorded.ts';
 import { message } from '../messages.ts';
@@ -425,8 +426,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const blobs = await readBlobs(git, rest.map(([, oid]) => oid));
     for (const [path, oid] of rest) linked(path, (blobs.get(oid) as Buffer).toString('utf8'));
   }
+  /** Superseded ids that a document this run left unmapped in Linear links (an edited one it did not take over). */
+  const keptSuperseded = new Set<string>();
   /** The superseded ids to keep: a document that links the path was neither written with the new id nor trashed. */
-  const nextSuperseded = () => new Map([...superseded].filter(([, path]) => [...relinks].some(([document, paths]) => paths.has(path) && !stored.has(document) && !result.trashed.includes(document))));
+  const nextSuperseded = () => new Map([...superseded].filter(([id, path]) => keptSuperseded.has(id) || [...relinks].some(([document, paths]) => paths.has(path) && !stored.has(document) && !result.trashed.includes(document))));
 
   let written = 0;
   /** When the current batch's re-read answered. */
@@ -695,18 +698,24 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
   function withCurrentIds(document: LinearDocument): LinearDocument {
     if (superseded.size === 0 || document.content == null) return document;
     const held = document.content;
-    // Only link destinations: a URL quoted in code or prose is text, and stays as it is.
     let content = '';
     let at = 0;
-    for (const { from, to, url } of linkDestinations(held)) {
-      const id = /^https:\/\/linear\.app\/[^/]+\/document\/([^/#?]+)/.exec(url)?.[1];
-      const path = id === undefined ? undefined : superseded.get(id);
-      if (id === undefined || path === undefined) continue;
+    for (const { from, to, id, path } of supersededLinks(held)) {
       content += held.slice(at, from) + held.slice(from, to).replace(id, documentIds.get(path) as string);
       at = to;
     }
     content += held.slice(at);
     return content === held ? document : { ...document, content };
+  }
+
+  /** The links in a text by a superseded id, with the path each id names. */
+  function supersededLinks(text: string): Array<{ from: number; to: number; id: string; path: string }> {
+    // Only link destinations: a URL quoted in code or prose is text, and stays as it is.
+    return linkDestinations(text).flatMap(({ from, to, url }) => {
+      const id = /^https:\/\/linear\.app\/[^/]+\/document\/([^/#?]+)/.exec(url)?.[1];
+      const path = id === undefined ? undefined : superseded.get(id);
+      return id === undefined || path === undefined ? [] : [{ from, to, id, path }];
+    });
   }
 
   /**
@@ -814,16 +823,28 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const file = merge.result.get(change.path) as SideFile;
     const body = await transformBody(transforms, change.path, splitFile(textOf(file)).body);
     const id = documentIds.get(change.path) as string;
-    if (change.restore !== undefined && change.restore.recreate === undefined) return restore(change, file, body, current);
-    // Created again under its derived id by a run that stopped before recording it.
+    if (change.restore !== undefined && change.restore.recreate === undefined) return restore(change, file, body, current.get(change.restore.id));
+    // Created again under its derived id by a run that stopped before recording it. Removed from Linear since, it is
+    // restored as any document Linear removed while git changed its file.
     const recreated = change.restore?.recreate === undefined ? undefined : current.get(change.restore.recreate);
-    const adopted = adoptable.get(change.path) ?? recreated;
+    if (recreated !== undefined && (recreated.trashed || recreated.archivedAt !== null)) return restore(change, file, body, recreated);
+    // A document listed for adoption may have gone from Linear since: the next run does not adopt it.
+    const listed = adoptable.get(change.path);
+    const adopted = recreated ?? (listed === undefined ? undefined : current.get(listed.id));
+    if (listed !== undefined && (adopted === undefined || adopted.trashed || adopted.archivedAt !== null)) return skip(change.path, 'missing-in-linear');
     let document: LinearDocument;
     if (adopted !== undefined) {
-      const live = current.get(adopted.id);
-      const write = () => linear.updateDocument(adopted.id, { content: body });
-      // Only a document the re-read returned has a window.
-      document = live === undefined ? await write() : live.content != null && sameMarkdown(live.content, body) ? live : await timed(write);
+      // Only a document that already holds this run's text is taken over. The capture did not see it, so any other
+      // text may be a person's edit made since an interrupted run created it: it is left for the next capture, which
+      // takes it in as a new document at this path for the merge with git's file.
+      const held = withCurrentIds(adopted);
+      if (!sameMarkdown(held.content ?? '', body)) {
+        // The next capture reads its links by superseded ids as links to their paths only while those ids are kept.
+        for (const { id } of supersededLinks(adopted.content ?? '')) keptSuperseded.add(id);
+        return skip(change.path, 'edited-in-linear');
+      }
+      // Equal only with its links by superseded ids read as current ones: the links are written with the current ids.
+      document = held === adopted ? adopted : await timed(() => linear.updateDocument(adopted.id, { content: body }));
       if (recreated === undefined) result.adopted.push(change.path);
     } else {
       document = await linear.createDocument(placeId(targets, file.place), { id, title: file.title.normalize('NFC'), content: body });
@@ -842,8 +863,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
    * why. A document a person changed since the capture read it (restored,
    * moved or edited) is left: the next capture takes that in.
    */
-  async function restore(change: CreateChange, file: SideFile, body: string, current: ReadonlyMap<string, LinearDocument>): Promise<boolean> {
-    const removed = current.get((change.restore as NonNullable<CreateChange['restore']>).id);
+  async function restore(change: CreateChange, file: SideFile, body: string, removed: LinearDocument | undefined): Promise<boolean> {
     if (removed === undefined) return skip(change.path, 'missing-in-linear');
     const seen = options.captured?.get(removed.id);
     const changed = seen === undefined
@@ -1090,13 +1110,6 @@ async function wentOnFromPartial(git: RunContext['git'], tips: ReadonlyArray<Oid
 function pathsOf(change: DocumentChange): string[] {
   if (change.kind === 'keep') return change.from === change.to ? [change.to] : [change.from, change.to];
   return [change.path];
-}
-
-/** A UUID that follows from its parts: a Linear id a repeated run must find again instead of making anew. */
-function stableId(...parts: string[]): string {
-  const hex = createHash('sha256').update(parts.join('\0')).digest('hex');
-  const variant = ((parseInt(hex[16] as string, 16) & 0x3) | 0x8).toString(16);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 function compare(a: string, b: string): number {

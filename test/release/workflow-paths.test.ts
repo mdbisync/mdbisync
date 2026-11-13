@@ -117,10 +117,12 @@ function simulate(ref: string, version: string, outcomes: Partial<Record<string,
 }
 
 const main = 'refs/heads/main';
-const passing = { gate: 'success', build: 'success', attest: 'success', tag: 'success' } as const;
+const passing = { gate: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success' } as const;
 
-test('release.yml has the gate, build, attest, tag and final check jobs in that order', () => {
-  assert.deepEqual(Object.keys(jobs), ['gate', 'build', 'attest', 'tag', 'tagged']);
+test('release.yml has the gate, test, build, attest, tag and final check jobs in that order', () => {
+  assert.deepEqual(Object.keys(jobs), ['gate', 'test', 'build', 'attest', 'tag', 'tagged']);
+  assert.deepEqual(needsOf('test'), ['gate']);
+  assert.deepEqual(needsOf('build'), ['gate', 'test']);
   assert.deepEqual(needsOf('attest'), ['gate', 'build']);
   assert.deepEqual(needsOf('tag'), ['gate', 'build', 'attest']);
   assert.deepEqual(needsOf('tagged'), ['tag']);
@@ -140,26 +142,72 @@ test('the tag job itself requires a passed gate and attestations for a final ver
 
 test('a pre-release skips the gate and the attestations, then builds and tags', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', passing);
-  assert.deepEqual(results, { gate: 'skipped', build: 'success', attest: 'skipped', tag: 'success', tagged: 'success' });
+  assert.deepEqual(results, { gate: 'skipped', test: 'success', build: 'success', attest: 'skipped', tag: 'success', tagged: 'success' });
   assert.equal(conclusion, 'success');
 });
 
-test('a final release that passed the gate builds, attests and tags', () => {
+test('a final release that passed the gate tests, builds, attests and tags', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', passing);
-  assert.deepEqual(results, { gate: 'success', build: 'success', attest: 'success', tag: 'success', tagged: 'success' });
+  assert.deepEqual(results, { gate: 'success', test: 'success', build: 'success', attest: 'success', tag: 'success', tagged: 'success' });
   assert.equal(conclusion, 'success');
 });
 
-test('a final release that failed the gate builds, attests and tags nothing and fails', () => {
+test('a final release that failed the gate tests, builds, attests and tags nothing and fails', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, gate: 'failure' });
-  assert.deepEqual(results, { gate: 'failure', build: 'skipped', attest: 'skipped', tag: 'skipped', tagged: 'failure' });
+  assert.deepEqual(results, { gate: 'failure', test: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', tagged: 'failure' });
   assert.equal(conclusion, 'failure');
 });
 
 test('a final release whose attestation failed tags nothing and fails', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0', { ...passing, attest: 'failure' });
-  assert.deepEqual(results, { gate: 'success', build: 'success', attest: 'failure', tag: 'skipped', tagged: 'failure' });
+  assert.deepEqual(results, { gate: 'success', test: 'success', build: 'success', attest: 'failure', tag: 'skipped', tagged: 'failure' });
   assert.equal(conclusion, 'failure');
+});
+
+test('a failed test shard builds, attests and tags nothing, for a pre-release and a final release', () => {
+  for (const version of ['v0.1.0-rc.9', 'v0.1.0']) {
+    const { results, conclusion } = simulate(main, version, { ...passing, test: 'failure' });
+    assert.equal(results.build, 'skipped', version);
+    assert.equal(results.attest, 'skipped', version);
+    assert.equal(results.tag, 'skipped', version);
+    assert.equal(results.tagged, 'failure', version);
+    assert.equal(conclusion, 'failure', version);
+  }
+});
+
+test('a cancelled test shard builds and tags nothing and the run ends cancelled', () => {
+  const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', { ...passing, test: 'cancelled' });
+  assert.deepEqual(results, { gate: 'skipped', test: 'cancelled', build: 'skipped', attest: 'skipped', tag: 'skipped', tagged: 'skipped' });
+  assert.equal(conclusion, 'cancelled');
+});
+
+// The release runs the same files as `npm test`, split into shards that together cover the whole suite.
+test('the test job runs every file of the full suite across its shards, before anything is built', () => {
+  const job = jobs.test as Job & { strategy: { 'fail-fast': boolean; matrix: { shard: number[] } }; 'continue-on-error'?: unknown };
+  // A shard that fails must fail the job: needs.test.result then reads 'failure' and nothing is built.
+  assert.equal(job.strategy['fail-fast'], false, 'every shard runs to the end, as in CI');
+  assert.equal(job['continue-on-error'], undefined);
+  assert.ok(job.steps.every((step) => !('continue-on-error' in step)));
+  const shards = job.strategy.matrix.shard;
+  assert.deepEqual(shards, Array.from({ length: shards.length }, (_, index) => index + 1));
+  const run = job.steps.find((step) => step.name === 'Test')!.run!;
+  const prefix = `node --test --test-shard=\${{ matrix.shard }}/${shards.length} `;
+  assert.ok(run.startsWith(prefix), run);
+  const scripts = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).scripts;
+  const globs = (command: string) => command.match(/"[^"]+"/g);
+  assert.deepEqual(globs(run.slice(prefix.length)), globs(scripts.test));
+  assert.ok(!jobs.build!.steps.some((step) => /\bnpm test\b|node --test\b/.test(step.run ?? '')), 'the build does not run the suite a second time');
+});
+
+// The shards and the build each set up their own runner; the setup must not drift apart.
+test('the test and build jobs check out, install, admit dependencies and install pre-commit the same way', () => {
+  const setup = (job: string) => jobs[job]!.steps.slice(0, 7);
+  assert.deepEqual(setup('test').map((step) => step.name ?? step.uses), [
+    jobs.test!.steps[0]!.uses, 'Validate and check out source', jobs.test!.steps[2]!.uses, 'Install compatible npm',
+    'Install locked build dependencies without scripts', 'Verify dependency admission', 'Install pre-commit',
+  ]);
+  assert.deepEqual(setup('build'), setup('test'));
+  assert.deepEqual(jobs.build!.env, jobs.test!.env);
 });
 
 test('a failed build tags nothing, for a pre-release and a final release', () => {
@@ -180,14 +228,14 @@ test('a failed tag fails the run', () => {
 
 test('a cancelled build tags nothing and the run ends cancelled, without a failed check', () => {
   const { results, conclusion } = simulate(main, 'v0.1.0-rc.9', { ...passing, build: 'cancelled' });
-  assert.deepEqual(results, { gate: 'skipped', build: 'cancelled', attest: 'skipped', tag: 'skipped', tagged: 'skipped' });
+  assert.deepEqual(results, { gate: 'skipped', test: 'success', build: 'cancelled', attest: 'skipped', tag: 'skipped', tagged: 'skipped' });
   assert.equal(conclusion, 'cancelled');
 });
 
 test('a run outside main skips every release job and does not end as success', () => {
   for (const version of ['v0.1.0-rc.9', 'v0.1.0']) {
     const { results, conclusion } = simulate('refs/heads/other', version, passing);
-    assert.deepEqual(results, { gate: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', tagged: 'failure' }, version);
+    assert.deepEqual(results, { gate: 'skipped', test: 'skipped', build: 'skipped', attest: 'skipped', tag: 'skipped', tagged: 'failure' }, version);
     assert.equal(conclusion, 'failure', version);
   }
 });

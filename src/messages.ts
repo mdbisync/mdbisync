@@ -18,6 +18,9 @@ export const MESSAGES = {
   'action.unknown-security-step': 'unknown security-step: {step} (expected one of: {steps}, or empty)',
   'action.cleanup-before-stage': 'cleanup-tokens belongs before the stage step, not apply',
   'action.cleanup-revocation-failed': 'token cleanup revocation failed',
+  'output.invalid-text': 'cannot write report text: expected printable Unicode text of at most {limit} characters',
+  'output.invalid-count': 'cannot write report metadata: expected a non-negative safe integer',
+  'output.outside-directory': 'report destination must stay inside the configured output directory',
 
   // `init`.
   'init.security-twice': 'choose security hooks once',
@@ -36,6 +39,7 @@ export const MESSAGES = {
   'init.format-hook-differs': 'existing linear-format hook uses a different repository or release',
   'init.security-hook-differs': 'existing {hook} hook differs from the security example; reconcile it first',
   'init.release-sha': '--release-sha must be a full 40-character commit SHA',
+  'init.release-too-old': 'release {version} is older than {minimum}, the release these workflows are written for and checked against. Use {minimum} or later',
   'init.release-version': '--release-version must be a version such as v1.2.3',
   'init.needs-folder': 'provide --folder with --team and/or --project',
   'init.not-at-root': 'run init at the repository root',
@@ -204,9 +208,7 @@ export const MESSAGES = {
   'sync.write-before-record': 'the sync writes to Linear only after initial sync has recorded `linear`',
   'sync.merge-conflict-output': 'Invalid merge-file conflict output',
   'assets.not-allowed': 'asset destination is not allowed',
-  'assets.redirect-not-allowed': 'asset redirect destination is not allowed',
   'assets.download-failed': 'asset could not be downloaded',
-  'assets.too-large': 'asset exceeds the download limit',
   'assets.destination-exists': 'asset destination already exists',
 } as const;
 

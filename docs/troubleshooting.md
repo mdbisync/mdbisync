@@ -224,8 +224,8 @@ Its step reports:
 
 | Code | Meaning | What to do |
 | --- | --- | --- |
-| `merge-refused` | GitHub did not merge the sync pull request this time: `GitHub did not merge the sync pull request (<reason>); a later run tries again.` | Nothing; a later run tries again. |
-| `merge-blocked` | GitHub refused to merge again, on the same head and for the same reason (exit code 3). | When GitHub names a required check that is expected, make that check run on the sync pull request: check workflow filters and the required check's name. Otherwise let the sync's GitHub App merge into the tracked branch, for example by adjusting the branch's rules. A later run merges. |
+| `merge-refused` | GitHub did not merge the sync pull request this time: `GitHub did not merge the sync pull request (<reason>); a later run tries again.` When GitHub refused because of merge conflicts (`Pull Request has merge conflicts`), the next run first merges the tracked branch into the sync branch, unless the head already holds the tracked branch's latest commit. | Nothing; a later run tries again. |
+| `merge-blocked` | GitHub refused to merge again, on the same head and for the same reason (exit code 3). A refusal for merge conflicts repeats only on a head that already holds the tracked branch's latest commit. | When GitHub names a required check that is expected, make that check run on the sync pull request: check workflow filters and the required check's name. Otherwise let the sync's GitHub App merge into the tracked branch, for example by adjusting the branch's rules. A later run merges. |
 | `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. For documents the sync merges with conflict markers: this run into Linear's state, a later run into the sync branch. | Resolve the markers on either side ([conflicts.md](conflicts.md#resolving-a-conflict)). A conflicting file that is not a document waits: merge both the tracked branch and the `linear` state ref (`refs/mdbisync/linear` by default) into the sync branch and resolve it there; the sync keeps those commits. |
 | `initial-pull-request-pending` | The sync branch holds an initial sync from Linear that no one has merged yet (exit code 4). | Review and merge it with a merge commit. |
 | `state-moved` | The sync branch moved while the run worked. | Nothing; the next run updates the pull request. |
@@ -294,11 +294,13 @@ the reason is fixed. The summaries list each with its rules:
 | `stored-in-lfs` | The Markdown file itself is stored in Git LFS. | Store Markdown files in git directly. |
 | `upload-too-large` | The document links a file over Linear's 10 MB upload limit. | Make the file smaller, or link it from somewhere else. |
 | `upload-unreadable` | The document links a file the run cannot read, such as an LFS object stored with LFS extensions or one the LFS server does not have. | Store the file in git or plain LFS, or push its LFS object. |
-| `download-failed` | From Linear: a file the document embeds could not be downloaded (gone, over 10 MB, or redirected elsewhere). The file keeps the tracked branch's text. | Fix the embedded file in Linear, then run again. |
+| `image-blocked` | From Linear: an image or file the document embeds is not an upload of the workspace (an external URL, a `data:` URI, a path), or its upload is gone, over 10 MB, redirected or not a supported type. The file keeps the tracked branch's text. | Upload the files in Linear instead of linking them. The first sync after the initial sync (once its pull request, if any, is merged) marks the document and comments which images to fix. |
+| `download-failed` | From Linear: a file the document embeds could not be downloaded this time (a network error, Linear's rate limit or a server error) or placed next to it. The file keeps the tracked branch's text. | Nothing; the next sync reads the document again. If it repeats, check the run's log for the asset error. |
 | `security-hook` | From Linear: a hook marked `alias: security` flagged the document's text or a file it embeds. The file keeps the tracked branch's text. | Remove what the hook flagged from the document in Linear. |
 | `security-unchecked` | From Linear: the security hooks did not see this text, because their step did not run or the tracked branch moved after it. | Nothing; the next run checks it. If it repeats, check that the hooks step runs. |
 | `title-not-a-path` | From Linear: the file the document's title names would map to a different document, for example because it lands in a folder another annotation owns. | Rename the document in Linear. |
 | `front-matter-boundary` | From Linear: the document's text starts with something that reads as front matter, so it would not stay the file's body. | Change the start of the document in Linear. |
+| `download-retry` | An upload download timed out, lost its connection, or returned 429 or a server error. The document stays out of this capture without a mark. | The next run retries automatically. |
 | `capture-translation` | The run could not turn the document's text from Linear into the file's text. | Check the document in Linear for unusual content, or report it as a bug. |
 
 The `linear-format` hook's rules leave a file out too until it is fixed:
@@ -395,6 +397,7 @@ the message. Most come from the workflow's configuration:
 | `provide --folder with --team and/or --project` | Name at least one folder, each with a team or project. |
 | `unknown option: <flag>`, `<flag> needs a value`, `<flag> must follow --folder`, `<flag> was given twice for a folder`, `<flag> was given twice`, `choose security hooks once` | Fix the flags; `mdbisync init --help` lists them. |
 | `--release-sha must be a full 40-character commit SHA`, `--release-version must be a version such as v1.2.3` | Give the release commit SHA and version (see [usage.md](usage.md#release-builds-and-pins)). |
+| `release <version> is older than <minimum>, the release these workflows are written for and checked against. Use <minimum> or later` | Pick `<minimum>` or a later release (see [`init`](configuration.md#init)): the workflows pass action inputs that the older release lacks. |
 | `paths must stay inside the repository`, `setup destinations must not contain symlinks`, `a setup folder path names a regular file` | Give folder paths inside the repository, without symbolic links. |
 | `conflicting folder options: <path>` | Give each folder its options once. |
 | `invalid YAML configuration`, `.pre-commit-config.yaml needs a repos list`, `invalid pre-commit repository entry` | Fix `.pre-commit-config.yaml` or the `README.md` front matter. |
@@ -429,7 +432,7 @@ document named.
 | `token cleanup revocation failed` | Token cleanup could not revoke an old token. Run again; check the app in Linear if it repeats. |
 | `FileUpload: Linear returned no upload target`, `FileUploads: Linear returned no upload target`, `<operation>: storage request failed`, `<operation>: storage answered HTTP <status>` | Uploading a linked file failed. |
 | `upload destination is not allowed` | Linear gave an upload address outside its own storage; the run refused to send the file there. |
-| `asset destination is not allowed`, `asset redirect destination is not allowed`, `asset could not be downloaded`, `asset exceeds the download limit`, `asset destination already exists` | Downloading a file a document embeds failed or was refused (only Linear's own storage, up to 10 MB). The document is left out with `download-failed`. |
+| `asset destination is not allowed`, `asset redirect destination is not allowed`, `asset could not be downloaded`, `asset exceeds the download limit`, `asset destination already exists` | Downloading a file a document embeds failed or was refused (only Linear's own storage, up to 10 MB). An initial sync from Linear leaves the document out with `image-blocked` or `download-failed`. |
 | `GitHub answered HTTP <status> while <what>`, `GitHub did not answer while <what>` | A GitHub request failed. `<what>` is one of: listing open pull requests, reading a pull request, opening a pull request, updating a pull request, closing a pull request, sending a request to the pull request API, reading the check runs of the sync pull request, reading the commit statuses of the sync pull request, reading the annotations of a failed check run, merging the sync pull request. A failed read of a check run's annotations does not stop the run: the suspended documents' comments name that check without them, and the run summary says so. |
 | `git <arguments> failed with exit code <n>: <output>` | A git command failed; its own output follows. Often a network problem or missing rights to push. |
 | `refusing to move <ref> to a commit that does not descend from its current value` | A state ref or the sync branch was changed by hand. Undo that change, or recover with an initial sync. |
@@ -514,3 +517,11 @@ To recover with an initial sync:
 To abandon an initial sync from Linear whose pull request is still open,
 close the pull request, delete the sync branch (`mdbisync/linear` by
 default) and start again from step 2.
+
+## Report output errors
+
+| Message | Meaning and what to do |
+| --- | --- |
+| `cannot write report text: expected printable Unicode text of at most <limit> characters` | A report exceeds its output limit or an output field has an unexpected type. Normal Unicode Markdown is preserved, and control characters in display text are shown as Unicode escapes. Reduce the report size; if the message repeats for a small report, report the error with its operation and code. |
+| `cannot write report metadata: expected a non-negative safe integer` | A workflow identifier or count has an invalid type or value. Check the upstream response before retrying; an invalid workflow identifier is never used as an evidence directory. |
+| `report destination must stay inside the configured output directory` | A derived output path would leave its selected directory. Check the output configuration and file name. |

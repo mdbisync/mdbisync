@@ -21,6 +21,19 @@ const freshStateDir = () => {
 after(() => stateDirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 describe('scenario selection', () => {
+  it('plans the 24-hour Actions soak on mid with all 288 scheduled syncs', () => {
+    const soak = byId('L4-13');
+    assert.equal(soak.slice, 'mid');
+    assert.equal(soak.mode, 'actions');
+    // Initial sync, 288 ticks, up to three drain runs for each of the 24 hourly checks, up to four settle runs, I6.
+    assert.equal(engineRuns(soak), 1 + 288 + 24 * 3 + 4 + 1);
+    // Each hourly check reads every document once, and again after each drain run.
+    const documents = 212;
+    const undrained = { ...soak, steps: soak.steps.map((step) => (step.action === 'soak' ? { ...step, args: { ...step.args, drainSyncs: 0 } } : step)) };
+    assert.equal(engineRuns(undrained), 294);
+    assert.ok(estimate(undrained, documents).requests > 90000);
+    assert.equal(estimate(soak, documents).requests - estimate(undrained, documents).requests, Math.ceil(24 * 3 * documents + 24 * 3 * (1.5 * documents + 5)));
+  });
   it('loads every spec of the catalog, validated', () => {
     assert.ok(scenarios.length >= 137);
     assert.equal(new Set(scenarios.map((scenario) => scenario.id)).size, scenarios.length);
@@ -181,6 +194,8 @@ describe('budget governor', () => {
   it('estimates from the slice, the engine runs and I9', () => {
     const l104 = byId('L1-04');
     assert.equal(engineRuns(l104), 2); // initial sync and the I6 re-run
+    // A conflicted start: initial sync, the conflict's run and a settle of four; L3-10's own settle and the I6 re-run.
+    assert.equal(engineRuns(byId('L3-10')), 6 + 4 + 1);
     assert.equal(estimate(byId('L0-01')).requests, 0);
     const mini = estimate(byId('L2-01'));
     const bank = estimate(l104);

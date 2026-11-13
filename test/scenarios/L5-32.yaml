@@ -146,7 +146,7 @@
         "expected": 0
       },
       {
-        "subject": "suspended.commentsResolved",
+        "subject": "suspended.commentsRefused",
         "operator": "equal",
         "expected": true
       },

@@ -4,6 +4,7 @@
 import type { Drift } from './record.ts';
 import type { FixtureResult, LimitFact, ProbeRun } from './probe.ts';
 import { describeSummary, type YjsNode } from './yjs-summary.ts';
+import { reportText } from '../../src/run/output.ts';
 
 export interface ReportOptions {
   /** Front-matter title, when the report lives in a knowledge base. */
@@ -93,7 +94,7 @@ export function renderReport(run: ProbeRun, options: ReportOptions): string {
     }
     out.push('');
   }
-  return `${out.join('\n').trimEnd()}\n`;
+  return reportText(`${out.join('\n').trimEnd()}\n`);
 }
 
 function renderFacts(run: ProbeRun): string[] {

@@ -24,6 +24,7 @@ import { runChecks } from './checks.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { startFaultProxy } from './fault-proxy.ts';
 import { OwnershipLedger } from './ownership.ts';
+import { finishPersonClone } from './person-git.ts';
 import { BudgetBlockedError, estimate } from './governor.ts';
 import { githubToken } from './github.ts';
 import { forgetHeldRun, heldRunOf, loadHeldRun, saveHeldRun, type HeldRun } from './held-run.ts';
@@ -43,6 +44,7 @@ import {
   runTeamZones,
   takeTeamLocks,
   type RunnerDeps,
+  writeRunRefs,
 } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import type { Scenario, Step } from './spec.ts';
@@ -294,10 +296,13 @@ async function takeUp(runDir: string, answers: UiAnswers, scenarios: readonly Sc
   else registration.hold(0);
   release(false);
   forgetHeldRun(runDir);
-  cleanClones(runDir);
   const outcome = classify(blockedBySetupStop(error, ctx.engine.results, ctx.engine.setupRuns), deps.expectedRed.has(scenario.id));
+  finishPersonClone(runDir, outcome.result, ctx.log);
+  rmSync(join(runDir, 'engine'), { recursive: true, force: true });
   ctx.log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   appendFileSync(join(runDir, 'harness.log'), `\n${logLines.join('\n')}`);
+  // The held part's runs and the ones after it: observations carry over the hold.
+  writeRunRefs(ctx, runDir);
   rmSync(join(runDir, 'canary-pending'), { force: true });
   const base = resultOf(ctx, outcome, { startedAt: Date.parse(held.startedAt), budgetWaitMs, checks, cleanup });
   const result: ScenarioResult = {

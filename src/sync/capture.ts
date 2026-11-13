@@ -16,13 +16,13 @@ import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type IdEntry, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
-import { MARKS, reconcileDocumentMark, releasedHold } from './marks.ts';
+import { MARKS, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, type CapturedAssets } from './assets.ts';
+import { createAssetCapture, ImageBlockedError, DownloadRetryError, type CapturedAssets } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
@@ -52,7 +52,7 @@ export interface CaptureResult {
   state: StateSnapshot;
   /** Metadata for every observed document; selected changes also have content. Never serialize these. */
   documents: Map<string, LinearDocument>;
-  blocked: Array<{ id: string; path: string; findings: SecurityFinding[] }>;
+  blocked: Array<{ id: string; path: string; findings: BlockedFinding[] }>;
   changed: string[];
   removed: string[];
   /**
@@ -321,6 +321,13 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(id);
       if (old !== undefined && previous.has(old.path)) targets.set(old.path, id);
     };
+    const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[]) => {
+      const old = byId.get(doc.id);
+      const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
+      ids.set(old?.path ?? path, {...old?.entry, id: doc.id, saved});
+      result.blocked.push({id: doc.id, path: old?.path ?? path, findings});
+      resetTarget(doc.id);
+    };
     for (const doc of [...work.values()].sort((a,b) => a.id.localeCompare(b.id))) {
       const old = byId.get(doc.id);
       if (!live(doc)) {
@@ -348,8 +355,19 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (old !== undefined) documentIds.delete(old.path);
         documentIds.set(path, doc.id);
       } catch (error) {
-        if (error instanceof LinearStoppedError) throw error;
-        result.leftOut.push({id: doc.id, rule: 'capture-translation'});
+        if (error instanceof LinearError) throw error;
+        if (error instanceof ImageBlockedError) {
+          const security = await gate.check(new Map([[path, head + (doc.content ?? '')]]));
+          if (security === null) {
+            result.leftOut.push({id: doc.id, rule: 'security-unchecked'});
+            resetTarget(doc.id);
+          } else {
+            recordBlocked(doc, path, [...error.findings, ...security]);
+          }
+          continue;
+        }
+        if (error instanceof DownloadRetryError) result.leftOut.push({id: doc.id, rule: 'download-retry'});
+        else result.leftOut.push({id: doc.id, rule: 'capture-translation'});
       }
     }
     // A rejected target may change other documents' relative links. Recheck
@@ -404,11 +422,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
           break;
         }
         if (findings.length > 0) {
-          const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
-          ids.set(old?.path ?? path, {...old?.entry, id, saved});
-          result.blocked.push({id, path: old?.path ?? path, findings});
+          recordBlocked(doc, path, findings);
           candidates.delete(id);
-          resetTarget(id);
           again = true;
           break;
         }
@@ -463,7 +478,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         assets = await captureAtBaseline(candidate.path, candidate.doc.content ?? '', uploads, body);
       } catch (error) {
         // An image that version did not have: the document changed.
-        if (error instanceof NotDownloaded) return false;
+        if (error instanceof DownloadRetryError && error.cause instanceof NotDownloaded) return false;
         throw error;
       }
       // Linear's spelling of that version reads back as its text.
@@ -526,7 +541,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       }
       const lostLease = new Error(message('sync.lost-lease'));
       const marked = [
-        ...[...candidates.values()].filter(({doc}) => !unmarked.has(doc.id)).map(({doc, path}) => ({doc, path, blocked: [] as SecurityFinding[]})),
+        ...[...candidates.values()].filter(({doc}) => !unmarked.has(doc.id)).map(({doc, path}) => ({doc, path, blocked: [] as BlockedFinding[]})),
         ...result.blocked.map(({id, path, findings}) => ({doc: documents.get(id)!, path, blocked: findings})),
       ];
       try {
@@ -642,6 +657,7 @@ function placeKeyOf(place: {projectId?: string | null; teamId?: string | null}):
 
 function renderCapture(result: CaptureResult, configured: boolean): string {
   let summary = `Captured ${result.changed.length} files; removed ${result.removed.length}; blocked ${result.blocked.length}; left out ${result.leftOut.length}.`;
+  for (const item of result.leftOut) if (item.rule === 'download-retry') summary += `\ndownload-retry: ${JSON.stringify(item.id)}. An upload could not be downloaded; the next run will retry.`;
   if (result.heldRemovals.length > 0) {
     summary += `\nRemoval held for ${result.heldRemovals.length} files: Linear did not return their documents while their place listed no document, as a blank answer would read. The files stay; the next run removes them if Linear still does not have them: ${result.heldRemovals.map((path) => JSON.stringify(path)).join(', ')}.`;
   }

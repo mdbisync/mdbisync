@@ -15,7 +15,7 @@ import { SCHEDULE_TICK_ENV, scheduleTick } from './steps.ts';
 import {
   ACTION_REPOSITORY, pinnedActionSha, readTemplate, renderScheduler, requestScript, runGroup, SANDBOX_RUNNER, scheduledJobName, SCHEDULER_FILE, SCHEDULER_GROUP, WORKFLOW_FILES,
 } from './workflow-files.ts';
-import { jobSpans, maxOverlap, REPORT_ARTIFACT, waitForRequestTaken, waitForScheduledRun } from './workflows.ts';
+import { jobSpans, maxOverlap, REPORT_ARTIFACT, stopScheduledRun, waitForRequestTaken, waitForScheduledRun } from './workflows.ts';
 
 const SHA = 'a'.repeat(40);
 const OUT = (name: string) => `\${{ needs.request.outputs.${name} }}`;
@@ -131,6 +131,40 @@ describe('the request script', () => {
 });
 
 describe('waiting for a scheduled run', () => {
+  it('bounds polling sleeps by the absolute soak deadline', { timeout: 2000 }, async () => {
+    await assert.rejects(waitForRequestTaken({ branchExists: async () => true } as never, 't/a1b2c3/schedule', { deadlineAt: Date.now() + 20, pollMs: 60000 }), /deadline/);
+    await assert.rejects(waitForScheduledRun({ workflowFileRuns: async () => [] } as never, { workflow: SCHEDULER_FILE, runId: 'a1b2c3', after: Date.now(), deadlineAt: Date.now() + 20, pollMs: 60000 }), /deadline/);
+  });
+
+  it('fences a request that no scheduler took without cancelling any workflow', async () => {
+    await stopScheduledRun({ deleteBranch: async () => true, workflowFileRuns: async () => assert.fail('no workflow can own an untaken request') } as never, { workflow: SCHEDULER_FILE, runId: 'a1b2c3', requestBranch: 't/a1b2c3/schedule', after: Date.now() });
+  });
+
+  it('cancels only the current owned scheduled job and waits for its completion', async () => {
+    const cancelled: number[] = [];
+    let polls = 0;
+    const rest = {
+      deleteBranch: async () => false,
+      workflowFileRuns: async (_file: string, event: string) => {
+        if (event !== 'schedule') return [];
+        polls++;
+        return [
+          { id: 1, status: 'completed', created_at: new Date().toISOString() },
+          { id: 2, status: 'in_progress', created_at: new Date().toISOString() },
+          { id: 3, status: polls > 1 ? 'completed' : 'in_progress', created_at: new Date().toISOString() },
+        ];
+      },
+      runJobs: async (id: number) => [{ name: id === 2 ? 'sync ffffff' : 'sync a1b2c3' }],
+      request: async (method: string, path: string) => { assert.equal(method, 'POST'); assert.equal(path, '/actions/runs/3/cancel'); cancelled.push(3); },
+    };
+    await stopScheduledRun(rest as never, { workflow: SCHEDULER_FILE, runId: 'a1b2c3', requestBranch: 't/a1b2c3/schedule', after: Date.now() - 1000, exclude: new Set([1]), pollMs: 1 });
+    assert.deepEqual(cancelled, [3]);
+    assert.equal(polls, 2);
+  });
+
+  it('keeps an unconfirmed scheduled writer blocked for verified recovery', async () => {
+    await assert.rejects(stopScheduledRun({ deleteBranch: async () => false, workflowFileRuns: async () => [] } as never, { workflow: SCHEDULER_FILE, runId: 'a1b2c3', requestBranch: 't/a1b2c3/schedule', after: Date.now(), timeoutMs: 0 }), /reservation must remain held/);
+  });
   it('waits until the request is taken, and blocks when no tick takes it', async () => {
     let polls = 0;
     await waitForRequestTaken({ branchExists: async () => (polls += 1) < 3 } as never, 't/a1b2c3/schedule', { pollMs: 1 });

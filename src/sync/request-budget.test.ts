@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { runCli } from '../cli.ts';
 import { type RunReport } from '../run/finish.ts';
 import { type FakeDocument, type FakeWorld, GITHUB_API, LINEAR_API, UPLOADS_HOST, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
-import { type Fixture, createFixture } from '../state/test-helpers.ts';
+import { type Fixture, createFixture, mergeOnGitHub } from '../state/test-helpers.ts';
 
 const PRE_COMMIT = `repos:
   - repo: https://github.com/example/mdbisync
@@ -80,19 +80,7 @@ describe('sync: the Linear request budget (I9)', () => {
     return (await fixture.remote.text(['rev-parse', ref])).trim();
   }
 
-  async function mergeOnRemote(pr: { head: string; base: string; number: number }, sha: string): Promise<{ sha: string } | { status: number }> {
-    if ((await rev(`refs/heads/${pr.head}`)) !== sha) return { status: 409 };
-    const base = await rev(`refs/heads/${pr.base}`);
-    const merged = await fixture.remote.run(['merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
-    if (merged.code !== 0) return { status: 405 };
-    const tree = merged.stdout.toString('utf8').split('\n')[0] as string;
-    // GitHub's merge commit, with its own identity: the test needs none configured.
-    const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number}`], {
-      env: { GIT_AUTHOR_NAME: 'sync-app[bot]', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@example.com' },
-    });
-    await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit.trim(), base]);
-    return { sha: commit.trim() };
-  }
+  const mergeOnRemote = (pr: { head: string; base: string; number: number }, sha: string) => mergeOnGitHub(fixture, pr, sha, `Merge pull request #${pr.number}`);
 
   /** Counts what reaches Linear's API; uploads and downloads go to other hosts. */
   const counting = (inner: typeof fetch): typeof fetch => async (input, init) => {
@@ -238,7 +226,7 @@ describe('sync: the Linear request budget (I9)', () => {
 
   it('an image pasted in Linear (L2-28)', async () => {
     const url = `${UPLOADS_HOST}/workspace/diagram.png`;
-    world.linear.uploads.push({ assetUrl: url, filename: 'diagram.png', contentType: 'image/png', size: 11, bytes: Buffer.from('image-bytes') });
+    world.linear.uploads.push({ assetUrl: url, filename: 'diagram.png', contentType: 'image/png', size: 11, bytes: await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url)) });
     const document = byTitle('plan');
     document.content = `${document.content ?? ''}\n![Diagram](${url})\n`;
     touch(document);

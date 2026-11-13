@@ -11,6 +11,20 @@
 //   node test/e2e/harness/cli.ts scheduler [--install]
 //        prints the sandbox's scheduled sync workflow for the release under test; --install commits it
 //        to the sandbox's default branch (workflow-files.ts, renderScheduler)
+//   node test/e2e/harness/cli.ts walkthrough prepare|push|dispatch|wait|list|cancel
+//        --run <six hex> [--dir <clone>] [--ref t/<run>/main]
+//        [--workflow mdbisync-initial-sync.yml] [--input direction=git-to-linear]
+//        [--input confirm=false] [--run-number <id>]
+//        prepare adapts local copied workflows; review and commit before push.
+//        dispatch waits up to 30 minutes and prints the conclusion and summary.
+//        Live commands need an admitted manual run's isolation/cleanup window.
+//   node test/e2e/harness/cli.ts walkthrough project|trash|linear-edit|linear-read|cleanup
+//        --run <six hex> [--team ENG] [--path docs/notes.md] [--text <line>]
+//        project creates "Field notes <run>" in the team; trash reads zone trash
+//        counts (the first reading is the baseline); linear-edit appends one
+//        neutral line to a synced document; linear-read prints it; cleanup
+//        archives the run's projects and documents (never trashes them),
+//        closes its pull requests and deletes its refs, with trash counts.
 //
 // The test configuration comes from the environment and the test
 // configuration folder (see config.ts).
@@ -26,26 +40,29 @@ import { countAppRequest } from './app-reads.ts';
 import { loadTestConfig } from './config.ts';
 import { REPO_ROOT } from './engine.ts';
 import { Governor, budgetFromStatus, estimate, type App } from './governor.ts';
+import { tokenLease } from './token-lease.ts';
 import { SandboxRest, githubToken } from './github.ts';
 import { newRunId, runNames, RUN_ID_PATTERN } from './isolation.ts';
 import { LinearWorld, editorClient } from './linear-world.ts';
 import { acquireLock, defaultStateDir, forgetRun, registerRun, requireStoppedLocalRun } from './locks.ts';
 import { updateStatusPage, writeEvidence, writeRunReport, type HarnessReport } from './report.ts';
-import { loadExpectedRed } from './results.ts';
+import { gateExitCode, loadExpectedRed } from './results.ts';
 import { requireLiveConfig, runScenarios, skippedResult } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { loadScenarios, selectScenarios } from './spec.ts';
-import { actionShaUnderTest, scheduleTick } from './steps.ts';
+import { actionShaUnderTest, requiredActionSha, scheduleTick } from './steps.ts';
 import { sweep } from './sweeper.ts';
 import { parseUiAnswers, renderUiChecklist } from './ui-checklist.ts';
 import { OwnershipLedger, ownedRuns } from './ownership.ts';
 import { loadHeldRun } from './held-run.ts';
 import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-result.ts';
 import { readTemplate, renderScheduler, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
+import { walkthrough } from './walkthrough.ts';
 
 const list = (value: string | undefined) => (value === undefined ? undefined : value.split(',').map((item) => item.trim()).filter(Boolean));
 
 async function main(argv: string[]): Promise<number> {
+  if (argv[0] === 'walkthrough') return walkthrough(argv.slice(1));
   const { positionals, values } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -95,7 +112,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === 'scheduler') {
-    const text = renderScheduler(readTemplate(WORKFLOW_FILES.sync), actionShaUnderTest());
+    const text = renderScheduler(readTemplate(WORKFLOW_FILES.sync), requiredActionSha());
     if (values.install !== true) {
       process.stdout.write(text);
       return 0;
@@ -112,14 +129,14 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  // Live commands mint one token per OAuth app for the harness's own reads and revoke it at the end.
+  // Long runs renew harness app tokens before expiry and revoke every minted token.
   let shared: SharedAdmission | undefined;
   const sharedAdmission = async () => {
     if (shared === undefined) {
       shared = new SharedAdmission(new GitStateStore({ stateDir, url: config.gitUrl, env: refreshingGitEnv(async () => {
         const token = await githubToken(config, 'local');
         return new Sandbox({ url: config.gitUrl, token: token.token, stateDir, runId: 'control' }).env();
-      }) }));
+      }), log }));
     }
     return shared;
   };
@@ -135,7 +152,17 @@ async function main(argv: string[]): Promise<number> {
       const hooks = hooksFor(app.name);
       const token = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
       tokens.push({ token, hooks });
-      appClients.set(app.name, new LinearClient({ token: token.accessToken, auth: token.context, hooks }));
+      let previous = token;
+      const current = tokenLease(token, (value) => value.expiresIn * 1000, async () => {
+        const next = await mintAppToken({ clientId: app.clientId, clientSecret: app.clientSecret }, { hooks });
+        tokens.push({ token: next, hooks });
+        // Keep the previous token tracked until its revocation is confirmed.
+        await revokeToken(previous.accessToken, { hooks, auth: previous.context });
+        tokens.splice(tokens.findIndex((entry) => entry.token === previous), 1);
+        previous = next;
+        return next;
+      });
+      appClients.set(app.name, new LinearClient({ token: async () => (await current()).accessToken, auth: token.context, hooks }));
     }
 
     if (command === 'sweep' || command === 'recover') {
@@ -239,7 +266,7 @@ async function main(argv: string[]): Promise<number> {
       log(`report: ${files.markdown}`);
       if (values['status-page'] !== undefined) updateStatusPage(values['status-page'], all.map((scenario) => scenario.id), report);
       if (values['evidence-dir'] !== undefined) log(`evidence: ${writeEvidence(report, values['evidence-dir'])}`);
-      return results.some((result) => result.result === 'fail' || !result.cleanup.ok) ? 1 : 0;
+      return gateExitCode(results, log);
     }
 
     if (command === 'ui-result') {
@@ -271,10 +298,10 @@ async function main(argv: string[]): Promise<number> {
       });
       if (statusPage === 'kept-newer') log(`status page: kept a newer result of ${result.id} from another run`);
       process.stdout.write(`${result.id} ${result.runId}: ${result.result}${result.reason === undefined ? '' : ` (${result.reason})`}; cleanup ${result.cleanup.ok ? 'ok' : `failed: ${result.cleanup.detail ?? ''}`}; report ${files.markdown}\n`);
-      return result.result === 'fail' || !result.cleanup.ok ? 1 : 0;
+      return gateExitCode([result], log);
     }
 
-    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|scheduler [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
+    process.stdout.write('Usage: cli.ts run|plan|sweep|recover|checklist|ui-result|scheduler|walkthrough [--ids ...] [--levels ...] [--slices ...] [--modes ...]\n');
     return command === 'help' ? 0 : 2;
   } finally {
     try { await shared?.store.close?.(); }

@@ -12,8 +12,9 @@
 //   caused it), with the reason.
 // - skipped: not run (stopped before its turn, or not selected for this host).
 //
-// A scenario on the expected-red list that passes is reported, so the list
-// shrinks.
+// A scenario on the expected-red list that passes is reported and fails the
+// run (`runGate`): the list must shrink, or a later regression in that
+// scenario would count as expected-red and stay hidden.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -96,6 +97,10 @@ export interface ScenarioResult {
   metrics?: Record<string, unknown>;
   /** Trashed documents per team zone the run used, before it and after its cleanup; a run should leave them unchanged. */
   teamZoneTrash?: Record<string, { before: number; after?: number }>;
+  /** Per operation, the largest and slowest answer the engine got through the local proxy; sizes only. */
+  answerSizes?: Record<string, import('./request-accounting.ts').AnswerSize>;
+  /** The mapped documents Linear shows with the conflict mark after the checks; absent when the run did not reach them or the read failed. */
+  conflictMarks?: { mapped: number; marked: import('./subjects.ts').ConflictMarkRecord[] };
 }
 
 export const EXPECTED_RED_FILE = fileURLToPath(new URL('../expected-red.json', import.meta.url));
@@ -104,6 +109,34 @@ export const EXPECTED_RED_FILE = fileURLToPath(new URL('../expected-red.json', i
 export function loadExpectedRed(file: string = EXPECTED_RED_FILE): Set<string> {
   const value = JSON.parse(readFileSync(file, 'utf8')) as { scenarios: string[] };
   return new Set(value.scenarios);
+}
+
+/** The ids of the scenarios that passed while on the expected-red list. */
+export function unexpectedPasses(results: readonly ScenarioResult[]): string[] {
+  return results.filter((result) => result.unexpectedPass === true).map((result) => result.id);
+}
+
+/**
+ * Whether a run of these results passes: no scenario failed, every cleanup
+ * held, and no scenario on the expected-red list passed. The messages say what
+ * failed the run, with the ids that passed while listed and what to do with them.
+ */
+export function runGate(results: readonly ScenarioResult[]): { ok: boolean; messages: string[] } {
+  const messages: string[] = [];
+  const failed = results.filter((result) => result.result === 'fail').map((result) => result.id);
+  const cleanup = results.filter((result) => !result.cleanup.ok).map((result) => result.id);
+  const passing = unexpectedPasses(results);
+  if (failed.length > 0) messages.push(`failed: ${failed.join(', ')}`);
+  if (cleanup.length > 0) messages.push(`cleanup failed: ${cleanup.join(', ')}`);
+  if (passing.length > 0) messages.push(`unexpected pass: ${passing.join(', ')} passed while on the expected-red list; remove ${passing.length === 1 ? 'it' : 'them'} from test/e2e/expected-red.json`);
+  return { ok: messages.length === 0, messages };
+}
+
+/** The exit code of a command that ran these results: 1 when the gate fails, after logging why, and 0 otherwise. */
+export function gateExitCode(results: readonly ScenarioResult[], log: (line: string) => void): 0 | 1 {
+  const gate = runGate(results);
+  for (const message of gate.messages) log(`run fails: ${message}`);
+  return gate.ok ? 0 : 1;
 }
 
 /** Turns what happened into a result. `error` is the first error, or undefined when every step and check passed. */

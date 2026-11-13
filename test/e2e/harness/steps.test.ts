@@ -4,24 +4,27 @@ import { spawnSync } from 'node:child_process';
 import { deflateRawSync } from 'node:zlib';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { LinearGraphQLError, LinearHttpError, LinearNetworkError, LinearStoppedError, LinearTokenError, type LinearDocument } from '../../../src/linear/index.ts';
 import { Git, GitError, lfsReader, parseLfsPointer } from '../../../src/state/index.ts';
 import { fakeLfsServer } from '../../../src/state/test-helpers.ts';
 import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, resolveKeeping, scanMarkers } from './conflicts.ts';
+import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, noteSentence, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import type { RunTree } from './corpus.ts';
 import { FIXTURE_PREPARATION } from './runner.ts';
-import { DOCUMENT_FIXTURES, fixtureEdit, paragraphEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
+import { DOCUMENT_FIXTURES, fixtureEdit, LINK_PAIR, paragraphEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
 import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
 import { burst, burstDocuments, burstEditCounts, editCapacity, soak, soakEditCounts, type Actor, type SoakDriver } from './load.ts';
 import { CONTENT_LIMIT } from '../../../src/format/rules.ts';
-import { blockedBySetupStop, EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
-import { bodyOf, compare, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
+import { fixText } from '../../../src/format/fix.ts';
+import { blockedBySetupStop, classify, EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
+import { finishPersonClone } from './person-git.ts';
+import type { SoakFailureReport } from './soak-evidence.ts';
+import { bodyOf, compare, editsFound, holdsToken, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, probedFixtures, readFixture } from '../../probe/bank.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
@@ -31,17 +34,18 @@ import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, install
 import { engineEntry, REPO_ROOT, type EngineResult } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
 import { readHookConfig } from '../../../src/setup/hooks.ts';
-import { CHECK_MARKER, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
-import { waitForCheck, waitForCheckCompleted } from './check-fault.ts';
+import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { cancelPendingRuns, faultChecks, waitForCheck, waitForCheckCompleted } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios } from './spec.ts';
-import { editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
-import { commitAsPerson, folderTeam, readRunIds, setTarget } from './step-helpers.ts';
+import { ACTION_SHA_ENV, afterUiStep, editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, requiredActionSha, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
+import { commitAsPerson, folderTeam, projectFolders, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
-import { environmentBlocker, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
+import { engineNotImplemented, environmentBlocker, hadReplaceableRun, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
-import { prerequisiteErrors } from './workflow-files.ts';
+import { engineSteps, pinnedActionSha, prerequisiteErrors, readTemplate, WORKFLOW_FILES } from './workflow-files.ts';
 import { parse as parseYaml } from 'yaml';
+import { buildCorpus } from '../../corpus/generate.ts';
 
 const roots: string[] = [];
 const fresh = (prefix: string) => {
@@ -246,6 +250,18 @@ describe('edit fixtures', () => {
 });
 
 describe('workflows', () => {
+  // Actions mode runs the release under test; these fakes name one.
+  const RELEASE_SHA = 'c'.repeat(40);
+  let savedActionSha: string | undefined;
+  before(() => {
+    savedActionSha = process.env[ACTION_SHA_ENV];
+    process.env[ACTION_SHA_ENV] = RELEASE_SHA;
+  });
+  after(() => {
+    if (savedActionSha === undefined) delete process.env[ACTION_SHA_ENV];
+    else process.env[ACTION_SHA_ENV] = savedActionSha;
+  });
+
   /** A zip with stored and deflated entries, built the way zip tools write them. */
   function zip(files: Record<string, { data: Buffer; deflate: boolean }>): Buffer {
     const locals: Buffer[] = [];
@@ -342,6 +358,46 @@ describe('workflows', () => {
     assert.equal(environmentBlocker(failedRun(7), [earlier], logs), undefined);
   });
 
+  it('block actions mode with a clear reason when the release under test is not named, never falling back to the templates\' pin', () => {
+    const pin = pinnedActionSha(readTemplate(WORKFLOW_FILES.sync));
+    assert.throws(() => requiredActionSha({}), (error: Error) => error instanceof EnvBlockedError && error.message.includes(`${ACTION_SHA_ENV} is unset`) && error.message.includes(pin.slice(0, 7)));
+    assert.throws(() => requiredActionSha({ [ACTION_SHA_ENV]: '  ' }), EnvBlockedError);
+    assert.throws(() => requiredActionSha({ [ACTION_SHA_ENV]: 'v0.1.0' }), (error: Error) => error instanceof EnvBlockedError && /full commit SHA/.test(error.message));
+    assert.equal(requiredActionSha({ [ACTION_SHA_ENV]: RELEASE_SHA }), RELEASE_SHA);
+  });
+
+  it('read "not implemented" only from the engine\'s own line in a step that runs the engine', () => {
+    assert.deepEqual([...engineSteps()].sort(), ['Initial sync', 'Stage Linear\'s changes', 'Stage Linear\'s documents', 'Sync']);
+    const at = '2026-11-11T19:20:00.1234567Z ';
+    // The engine's own answer, as the action reports it from the sync or initial sync step.
+    assert.equal(engineNotImplemented(new Map([['sync/9_Sync.txt', `${at}##[group]Run mdbisync/mdbisync@x\n${at}##[error]sync: not implemented\n`]]), 'sync'), true);
+    assert.equal(engineNotImplemented(new Map([['sync 5a9cba/7_Stage Linear\'s changes.txt', `${at}##[error]sync: not implemented\r\n`]]), 'sync'), true);
+    assert.equal(engineNotImplemented(new Map([['initial-sync/9_Initial sync.txt', `${at}##[error]initial-sync: not implemented\n`]]), 'initial-sync'), true);
+    // An older release's post step on any failed run, or the same words outside the engine's steps.
+    assert.equal(engineNotImplemented(new Map([['sync/15_Post Sync.txt', `${at}post: not implemented, nothing to clean up\n`]]), 'sync'), false);
+    assert.equal(engineNotImplemented(new Map([['sync/6_Run the security hooks.txt', `${at}##[error]sync: not implemented\n`]]), 'sync'), false);
+    // The job's whole log beside the step logs, another command's answer, and the words inside another line.
+    assert.equal(engineNotImplemented(new Map([['0_sync.txt', `${at}##[error]sync: not implemented\n`]]), 'sync'), false);
+    assert.equal(engineNotImplemented(new Map([['sync/9_Sync.txt', `${at}##[error]initial-sync: not implemented\n`]]), 'sync'), false);
+    assert.equal(engineNotImplemented(new Map([['sync/9_Sync.txt', `${at}##[error]sync: not implemented yet for this path\n`]]), 'sync'), false);
+  });
+
+  it('block an actions step before it installs anything when the release under test is not named', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+    fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml' });
+    const tip = (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
+    delete process.env[ACTION_SHA_ENV];
+    try {
+      await assert.rejects(STEP_ACTIONS['git.edit']!(ctx, { workflows: true }), (error: Error) => error instanceof EnvBlockedError && error.message.includes(`${ACTION_SHA_ENV} is unset`));
+      await assert.rejects(STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' }), (error: Error) => error instanceof EnvBlockedError && error.message.includes(`${ACTION_SHA_ENV} is unset`));
+    } finally {
+      process.env[ACTION_SHA_ENV] = RELEASE_SHA;
+    }
+    assert.equal((await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim(), tip, 'nothing was pushed');
+    assert.equal(ctx.observations.has('workflows.installed'), false);
+  });
+
   it('wait for a workflow to be registered, and fail as the harness when it never is', async () => {
     let calls = 0;
     const rest = { workflowId: async () => (++calls > 2 ? 42 : undefined) };
@@ -417,6 +473,24 @@ describe('workflows', () => {
     assert.equal(existsSync(join(ctx.runDir, 'workflows')), false);
   });
 
+  it('keep a failed run whose old post step says "not implemented" as a failure, not expected-red', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    const at = '2026-11-11T19:20:00.1234567Z ';
+    const logs = {
+      'sync/9_Sync.txt': `${at}fatal: could not read Username for 'https://github.com': No such device or address\n${at}##[error]The process '/usr/bin/git' failed with exit code 128\n`,
+      'sync/15_Post Sync.txt': `${at}post: not implemented, nothing to clean up\n`,
+    };
+    fakeActions(ctx, remoteGit, { conclusion: 'failure', jobs: [jobWith('Sync', 9)], logs });
+    await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+    await STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' });
+    assert.equal(ctx.engine.results.length, 1);
+    assert.equal(ctx.engine.results[0]?.notImplemented, false);
+    assert.equal(ctx.observations.get('runs.0.exitCode'), 1);
+    const installed = await remoteGit.text(['show', `${ctx.names.trackedBranch}:.github/workflows/mdbisync.yml`]);
+    assert.ok(installed.includes(`mdbisync/mdbisync@${RELEASE_SHA}`), 'the release under test, not the templates\' pin');
+    assert.ok(!installed.includes(pinnedActionSha(readTemplate(WORKFLOW_FILES.sync))));
+  });
+
   it('settles an Actions scenario with dispatches instead of local sync processes', async () => {
     const { ctx, remoteGit } = await fakeRun();
     ctx.scenario = { ...ctx.scenario, mode: 'actions', setup: { ...ctx.scenario.setup, fixtures: ['actions-security-canary'] } };
@@ -424,6 +498,155 @@ describe('workflows', () => {
     await STEP_ACTIONS['run.settle']!(ctx, {});
     assert.deepEqual(dispatched, [99, 99, 99, 99], 'without a changed=false report, settle keeps dispatching to its limit');
     assert.equal(ctx.engine.results.length, 4);
+  });
+
+  /**
+   * A sync branch head (optionally with the `pending` marker, and a person's
+   * fix of it), its open pull request 261, and checks on that head that stay
+   * pending for `pendingReads` reads: the marker check, another workflow's
+   * check and a commit status (L4-09).
+   */
+  async function pendingPullRequest(ctx: RunContext, options: { marker?: boolean; fixed?: boolean; pendingReads: number; others?: boolean }) {
+    const git = await ctx.person();
+    await git.run(['fetch', '--quiet', 'origin', ctx.names.trackedBranch]);
+    await git.run(['checkout', '--quiet', '-B', 'sync-head', 'FETCH_HEAD']);
+    writeFileSync(join(git.dir, 'eng/platform/notes.md'), '# Notes\n\nKept short.\n\nA paragraph from Linear.\n');
+    if (options.marker === true) writeFileSync(join(git.dir, CHECK_MARKER), 'pending\n');
+    if (options.fixed === true) writeFileSync(join(git.dir, '.harness-check-fixed'), 'approved\n');
+    await git.run(['add', '--all']);
+    await git.run(['commit', '--quiet', '--no-verify', '-m', 'Update documents']);
+    await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.syncBranch}`]);
+    const head = (await git.text(['rev-parse', 'HEAD'])).trim();
+    const reads: string[] = [];
+    const rest = ctx.live!.rest as unknown as Record<string, unknown>;
+    const request = (rest.request as (method: string, path: string) => Promise<unknown>).bind(rest);
+    rest.pullRequest = async (number: number) => ({ number, state: 'open', head: { ref: ctx.names.syncBranch, sha: head }, base: { ref: ctx.names.trackedBranch } });
+    rest.request = async (method: string, path: string) => {
+      const runs = /^\/commits\/([0-9a-f]+)\/check-runs/.exec(path)?.[1];
+      const status = /^\/commits\/([0-9a-f]+)\/status/.exec(path)?.[1];
+      if (runs === undefined && status === undefined) return request(method, path);
+      if (runs !== undefined) reads.push(runs);
+      const done = reads.length > options.pendingReads;
+      if (status !== undefined) return { statuses: options.others === true ? [{ context: 'deploy/preview', state: done ? 'success' : 'pending' }] : [] };
+      const names = [CHECK_NAME, ...(options.others === true ? ['pre-commit'] : [])];
+      return { check_runs: names.map((name, id) => ({ id, name, status: done ? 'completed' : 'in_progress', conclusion: done ? 'success' : null, app: { slug: 'github-actions' } })) };
+    };
+    return { head, reads };
+  }
+
+  const pending = { hasChecks: true, state: 'pending', failed: [], pending: [CHECK_NAME] };
+  const passed = { hasChecks: true, state: 'passed', failed: [], pending: [] };
+  /** Reports in turn; the last one repeats. */
+  const reportsOf = (...reports: Array<{ changed: boolean; checks: Record<string, unknown> }>) => {
+    let next = 0;
+    return () => {
+      const { changed, checks } = reports[Math.min(next++, reports.length - 1)]!;
+      return { changed, pullRequest: { needed: true, pullRequest: { number: 261, opened: false }, checks, merged: null } };
+    };
+  };
+  const settleScenario = async (report: () => Record<string, unknown>, options: Parameters<typeof pendingPullRequest>[1]) => {
+    const { ctx, remoteGit } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, mode: 'actions', setup: { ...ctx.scenario.setup, fixtures: ['actions-security-canary'] } };
+    ctx.checkPollMs = 1;
+    const { dispatched } = fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report });
+    const { head, reads } = await pendingPullRequest(ctx, options);
+    await STEP_ACTIONS['run.settle']!(ctx, {});
+    return { ctx, dispatched, head, reads };
+  };
+
+  it('settle waits for the check still pending on the sync pull request\'s new head, then runs again (L4-09)', async () => {
+    const { ctx, dispatched, head, reads } = await settleScenario(reportsOf({ changed: false, checks: pending }, { changed: false, checks: passed }), { pendingReads: 2 });
+    assert.deepEqual(dispatched, [99, 99], 'a run that changed nothing while the check was pending is not the settled run');
+    assert.deepEqual(reads, [head, head, head], 'settle polled the checks on the pull request\'s head until they completed');
+    assert.equal(ctx.observations.get('settle.checkWaits'), 1);
+  });
+
+  it('settle runs again after a wait on its last run', async () => {
+    const changed = { changed: true, checks: passed };
+    const { dispatched } = await settleScenario(reportsOf(changed, changed, changed, { changed: false, checks: pending }, { changed: false, checks: passed }), { pendingReads: 1 });
+    assert.equal(dispatched.length, 5, 'the run after the wait comes on top of the four runs');
+  });
+
+  it('settle waits for every pending check and status on the head, not only the marker check', async () => {
+    const { reads, dispatched } = await settleScenario(reportsOf({ changed: false, checks: { ...pending, pending: ['deploy/preview', 'pre-commit'] } }, { changed: false, checks: passed }), { pendingReads: 1, others: true });
+    assert.equal(reads.length, 2);
+    assert.equal(dispatched.length, 2);
+  });
+
+  it('settle does not wait for a head that carries the scenario\'s own pending marker', async () => {
+    const { dispatched, reads } = await settleScenario(reportsOf({ changed: false, checks: pending }), { marker: true, pendingReads: Infinity });
+    assert.deepEqual(dispatched, [99], 'the marker job sleeps by design: the run that changed nothing settles');
+    assert.deepEqual(reads, []);
+  });
+
+  it('settle waits for a marker head that a person fixed', async () => {
+    const { dispatched, reads } = await settleScenario(reportsOf({ changed: false, checks: pending }, { changed: false, checks: passed }), { marker: true, fixed: true, pendingReads: 1 });
+    assert.equal(reads.length, 2);
+    assert.equal(dispatched.length, 2);
+  });
+
+  it('count the runs the concurrency group cancelled when a newer run replaced them (L4-10)', async () => {
+    const l410 = scenarios.find((item) => item.id === 'L4-10')!;
+    const assertion = l410.checks.assertions.find((item) => item.subject === 'workflows.replacedPending')!;
+    // Three runs arrive: a push and two dispatches. `replaced`: a newer dispatch replaced the pending push run,
+    // which started no job. `stopped`: the push run was cancelled while its job ran, and the first dispatch was
+    // waiting when the second arrived. `apart`: nothing was cancelled and no job ran when a run arrived.
+    const parallel = async (mode: 'replaced' | 'stopped' | 'apart') => {
+      const { ctx, remoteGit } = await fakeRun();
+      ctx.scenario = { ...ctx.scenario, mode: 'actions' };
+      fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report: (run) => ({ operation: 'sync', capturedTrackedTip: run.head_sha ?? null }) });
+      mkdirSync(ctx.live!.sandbox.cache.dir, { recursive: true });
+      await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+      const rest = ctx.live!.rest as unknown as { dispatchWorkflow: (workflow: string | number) => Promise<void>; workflowRuns: () => Promise<WorkflowRun[]>; runJobs: (id: number) => Promise<WorkflowJob[]> };
+      const cancelled = new Set<number>();
+      const dispatch = rest.dispatchWorkflow;
+      rest.dispatchWorkflow = async (workflow) => {
+        await dispatch(workflow);
+        for (const run of await rest.workflowRuns()) {
+          if (mode === 'apart' || run.event !== 'push' || run.path !== '.github/workflows/mdbisync.yml') continue;
+          run.conclusion = 'cancelled';
+          cancelled.add(run.id);
+        }
+      };
+      // The cancelled run's job ran from before the runs started until after the last one arrived.
+      const job = { ...jobWith('Sync', 4), started_at: new Date(Date.now() - 60_000).toISOString(), completed_at: new Date(Date.now() + 60_000).toISOString() };
+      rest.runJobs = async (id) => (mode === 'stopped' && cancelled.has(id) ? [job] : []);
+      const step = STEP_ACTIONS['run.workflow-parallel']!(ctx, { events: ['push', 'workflow_dispatch'], replacePending: true });
+      if (mode === 'apart') {
+        await assert.rejects(step, (error: Error) => !(error instanceof ProductError) && /the runs did not overlap enough/.test(error.message));
+        return ctx;
+      }
+      await step;
+      assert.equal(ctx.engine.results.length, 2, 'only the runs that were not cancelled are settled');
+      return ctx;
+    };
+    // A pending run the group replaced started no job: it counts, and L4-10's assertion holds.
+    const replaced = await parallel('replaced');
+    assert.deepEqual(await resolveSubject(replaced, 'workflows.replacedPending'), { known: true, value: 1 });
+    assert.equal((await evaluateAssertion(replaced, assertion)).holds, true);
+    // A run cancelled while its job ran (a timeout, a lost runner) was not a pending run replaced by the group.
+    const stopped = await parallel('stopped');
+    assert.deepEqual(await resolveSubject(stopped, 'workflows.replacedPending'), { known: true, value: 0 });
+    assert.equal((await evaluateAssertion(stopped, assertion)).holds, false);
+    // Runs that never overlapped leave no run to replace: the harness says so instead of failing the group.
+    const apart = await parallel('apart');
+    assert.equal(apart.observations.has('workflows.replacedPending'), false);
+  });
+
+  it('tell a race that could replace a pending run from runs that only queued one after another', () => {
+    const at = (second: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, second)).toISOString();
+    const ms = (second: number) => Date.parse(at(second));
+    const run = (id: number, created: number) => ({ id, created_at: at(created) });
+    // The scheduled job runs 0 to 10; the dispatch arrives at 5 and runs 10 to 20; the push arrives at 15.
+    // Each later run waited alone, so a working group cancels nothing: not a race that proves the group.
+    const queued = [run(1, 0), run(2, 5), run(3, 15)];
+    const queuedSpans = [{ runId: 1, started: ms(0), completed: ms(10) }, { runId: 2, started: ms(10), completed: ms(20) }, { runId: 3, started: ms(20), completed: ms(30) }];
+    assert.equal(hadReplaceableRun(queued, queuedSpans), false);
+    // The push arrives at 7, while the scheduled job runs and the dispatch waits: the group can replace the dispatch.
+    const raced = [run(1, 0), run(2, 5), run(3, 7)];
+    assert.equal(hadReplaceableRun(raced, [{ runId: 1, started: ms(0), completed: ms(10) }, { runId: 3, started: ms(10), completed: ms(20) }]), true);
+    // Two runs alone never make a replacement possible.
+    assert.equal(hadReplaceableRun(raced.slice(0, 2), [{ runId: 1, started: ms(0), completed: ms(10) }]), false);
   });
 
   it('wait for the push run that the sync pull request\'s merge starts before the checks, as a deployment runs it', async () => {
@@ -611,6 +834,129 @@ describe('load', () => {
     assert.equal(ctx.engine.results.length, 0);
   });
 
+  it('leaves a file the run left out on purpose out of the load-test targets, and still fails on a document missing otherwise', async () => {
+    // A live run moved a folder under its run id while the linked image stayed at the corpus path: the initial sync
+    // left the file out (image-file-missing), so it has no document. Here: that file's document is gone and the
+    // initial sync's report names it as left out.
+    const leftOut = 'eng/platform/notes.md';
+    const initialSync = (paths: string[]) => engineRun('initial-sync', {
+      operation: 'initial-sync', initialSync: { created: [] }, summary: { leftOutFiles: paths.map((path) => ({ path, rules: ['image-file-missing'], lines: [3] })) },
+    });
+    for (const action of ['burst', 'soak']) {
+      const { ctx, linear, ids } = await fakeRun();
+      const lines: string[] = [];
+      ctx.log = (line) => void lines.push(line);
+      linear.documents.delete(ids[leftOut]!.id);
+      // Without the report, the missing document is a product failure, as before.
+      await assert.rejects(runStep(ctx, { kind: 'run', action, args: { durationSeconds: 0 } }), ProductError, action);
+      ctx.engine.results.push(initialSync([leftOut]));
+      await runStep(ctx, { kind: 'run', action, args: { durationSeconds: 0 } });
+      assert.ok(lines.some((line) => line.startsWith(`${action}: 1 file(s)`) && line.includes(`${leftOut} (lint: image-file-missing)`)), `${action} names the skipped file: ${lines.join(' | ')}`);
+    }
+    // A short real burst edits the other documents and never the left-out file.
+    const { ctx, linear, ids } = await fakeRun();
+    linear.documents.delete(ids[leftOut]!.id);
+    ctx.engine.results.push(initialSync([leftOut]));
+    await runStep(ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 2, linearEditsPerMinute: 60, gitPushesPerMinute: 30 } });
+    const edited = new Set((ctx.observations.get('burst.edits') as Array<{ path: string }>).map((edit) => edit.path));
+    assert.ok(edited.size > 0 && !edited.has(leftOut), [...edited].join(', '));
+    // When every document was left out on purpose, the load test names that instead of a capacity problem.
+    const empty = await fakeRun();
+    for (const path of Object.keys(empty.ids)) empty.linear.documents.delete(empty.ids[path]!.id);
+    empty.ctx.engine.results.push(initialSync(['eng/platform/plan.md', 'eng/platform/notes.md', 'docs/handbook/start.md']));
+    await assert.rejects(runStep(empty.ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 0 } }), /has no target: every synchronized document was left out on purpose/);
+  });
+
+  it('reports the burst\'s edits made and found on each side, which L4-12 requires to be equal', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const path = 'docs/handbook/start.md';
+    const document = linear.documents.get(ids[path]!.id)!;
+    // An edit before the burst is not the burst's: only the recorded burst edits are counted.
+    ctx.edits.push({ side: 'git', path, token: 'aaaaaa-before' });
+    const burstEdits = [
+      { side: 'linear' as const, path, token: 'aaaaaa-0001' },
+      { side: 'linear' as const, path, token: 'aaaaaa-0002' },
+      { side: 'git' as const, path, token: 'aaaaaa-0003' },
+    ];
+    ctx.edits.push(...burstEdits);
+    ctx.observations.set('burst.edits', burstEdits);
+    const git = await ctx.person();
+    const publish = async (text: string) => {
+      writeFileSync(join(git.dir, path), text);
+      await git.run(['add', '--', path]);
+      await git.run(['commit', '--quiet', '-m', 'Update the review date']);
+      await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+    };
+    // Git has the first and the third edit; Linear has the first two.
+    await publish('# Start\n\nNote aaaaaa-0001.\n\nNote aaaaaa-0003.\n');
+    document.content = 'Note aaaaaa-0001.\n\nNote aaaaaa-0002.\n';
+    refreshView(ctx);
+    const l412 = scenarios.find((item) => item.id === 'L4-12')!;
+    const counted = l412.checks.assertions.filter((item) => item.subject.startsWith('report.burstEdits'));
+    assert.deepEqual(counted.map((item) => item.subject), ['report.burstEditsMade', 'report.burstEditsFoundInGit', 'report.burstEditsFoundInLinear']);
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsMade'), { known: true, value: 3 });
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsFoundInGit'), { known: true, value: 2 });
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsFoundInLinear'), { known: true, value: 2 });
+    assert.deepEqual((ctx.observations.get('metrics') as Record<string, unknown>).burstEdits, { made: 3, foundInGit: 2, foundInLinear: 2 }, 'the report keeps the counts');
+    for (const assertion of counted.slice(1)) assert.equal((await evaluateAssertion(ctx, assertion)).holds, false, assertion.subject);
+    // Once both sides hold every burst edit, the counts are equal.
+    await publish('# Start\n\nNote aaaaaa-0001.\n\nNote aaaaaa-0002.\n\nNote aaaaaa-0003.\n');
+    document.content = 'Note aaaaaa-0001.\n\nNote aaaaaa-0002.\n\nNote aaaaaa-0003.\n';
+    refreshView(ctx);
+    for (const assertion of counted.slice(1)) assert.equal((await evaluateAssertion(ctx, assertion)).holds, true, assertion.subject);
+    // A trashed document's text is not found in Linear.
+    document.trashed = true;
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, 'report.burstEditsFoundInLinear'), { known: true, value: 0 });
+  });
+
+  it('records the burst\'s own edits for its report, also when the burst stops early', async () => {
+    const { ctx } = await fakeRun();
+    ctx.edits.push({ side: 'git', path: 'a.md', token: 'aaaaaa-before' });
+    await runStep(ctx, { kind: 'run', action: 'burst', args: { durationSeconds: 0 } });
+    assert.deepEqual(ctx.observations.get('burst.edits'), [], 'a burst of no time made no edits, and the earlier edit is not its own');
+    // A short real burst: every edit it reports is recorded once, each on the side that made it.
+    // (The fake sandbox's sync does not carry edits across; the counting test above covers the found counts.)
+    const full = (await fakeRun()).ctx;
+    await runStep(full, { kind: 'run', action: 'burst', args: { durationSeconds: 2, linearEditsPerMinute: 60, gitPushesPerMinute: 30 } });
+    const made = full.observations.get('burst.edits') as Array<{ side: string; token: string }>;
+    assert.deepEqual(made.map((edit) => edit.side).sort(), ['git', 'linear', 'linear']);
+    assert.equal(new Set(made.map((edit) => edit.token)).size, 3);
+    assert.equal(made.length, Number(full.observations.get('report.generatedLinearEdits')) + Number(full.observations.get('report.generatedGitPushes')));
+    assert.deepEqual(await resolveSubject(full, 'report.burstEditsMade'), { known: true, value: 3 });
+    // The second Linear edit fails: the burst throws, and the edit that landed before is still recorded as its own.
+    const failing = (await fakeRun()).ctx;
+    failing.edits.push({ side: 'git', path: 'a.md', token: 'aaaaaa-before' });
+    for (const editor of Object.values(failing.live!.editors)) {
+      const client = editor as unknown as { updateDocument: (...args: unknown[]) => Promise<unknown> };
+      const update = client.updateDocument.bind(client);
+      client.updateDocument = async (...args) => {
+        if (failing.edits.length > 1) throw new Error('the editor lost its connection');
+        return update(...args);
+      };
+    }
+    await assert.rejects(runStep(failing, { kind: 'run', action: 'burst', args: { durationSeconds: 2, linearEditsPerMinute: 60, gitPushesPerMinute: 0 } }), /lost its connection/);
+    const recorded = failing.observations.get('burst.edits') as Array<{ side: string; token: string }>;
+    assert.deepEqual(recorded.map((edit) => edit.side), ['linear'], 'the burst recorded the edit that landed, although it threw');
+    // A failed step skips the checks, so the report's metrics already say where the sides stand.
+    const metrics = (failing.observations.get('metrics') as Record<string, unknown>).burstEdits as Record<string, unknown>;
+    assert.equal(metrics.made, 1);
+    assert.equal(metrics.afterQuiet, false);
+    assert.equal(metrics.foundInLinear, 1, 'the edit that landed is in Linear');
+    assert.equal(typeof metrics.foundInGit, 'number');
+  });
+
+  it('match an edit token only as a whole token, so a lost edit is not found inside a longer token', () => {
+    assert.equal(holdsToken('Note aaaaaa-1000.', 'aaaaaa-100'), false);
+    assert.equal(holdsToken('Note aaaaaa-1000. Note aaaaaa-100.', 'aaaaaa-100'), true);
+    assert.equal(holdsToken('Note aaaaaa-100', 'aaaaaa-100'), true, 'at the end of the text');
+    const sides = { files: new Map([['a.md', 'Note aaaaaa-1000.\n']]), documents: new Map([['d', { content: 'Note aaaaaa-1000.\n', trashed: false } as LinearDocument]]) };
+    const lost = { side: 'git' as const, path: 'a.md', token: 'aaaaaa-100' };
+    assert.deepEqual(editsFound([lost], sides), { git: 0, linear: 0 });
+    const ctx = { edits: [lost], observations: new Map() } as unknown as RunContext;
+    assert.deepEqual(lostEdits(ctx, sides), [lost]);
+  });
+
   it('runs a soak with hourly checks and a repeatable schedule', async () => {
     const run = async () => {
       const clock = fakeClock();
@@ -626,6 +972,64 @@ describe('load', () => {
     assert.ok(first.result.edits.git > 100 && first.result.edits['editor-a'] > 100);
     assert.deepEqual(first.result.edits, soakEditCounts(SOAK));
     assert.deepEqual((await run()).edited, first.edited);
+  });
+
+  it('records runner queue delay and saves the failing hourly check before stopping further edits', async () => {
+    const clock = fakeClock();
+    const saved: unknown[] = [];
+    let syncs = 0;
+    const driver: SoakDriver = {
+      ...clock, linearEdit: async () => {}, gitEdit: async () => {},
+      sync: async () => { syncs++; const started = clock.now() + 50; await clock.sleep(100); return started; },
+      checkInvariants: async () => ({ lostEdits: 1 }),
+      progress: async (result) => { saved.push(structuredClone(result)); },
+    };
+    await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), /edits lost/);
+    assert.equal(syncs, 1);
+    assert.deepEqual(saved.at(-1), { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 1, lostEdits: 1, drainSyncs: 0, scheduleDelays: [50], serverErrors: { tolerated: 0, recovered: 0 } });
+  });
+
+  it('stops an overrun instead of stretching a timed soak into a longer passing run', async () => {
+    const clock = fakeClock();
+    let saved = 0;
+    const driver: SoakDriver = { ...clock, linearEdit: async () => {}, gitEdit: async () => {}, sync: async () => { await clock.sleep(10000); }, checkInvariants: async () => ({ lostEdits: 0 }), progress: async () => { saved++; } };
+    await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), EnvBlockedError);
+    assert.equal(saved, 2, 'initial state and completed invocation survive the deadline stop');
+  });
+
+  it('saves failed invocation evidence and preserves its original error classification', async () => {
+    const clock = fakeClock();
+    const failure = new EnvBlockedError('runner logs unavailable');
+    let failed = false;
+    const saved: boolean[] = [];
+    const driver: SoakDriver = { ...clock, linearEdit: async () => {}, gitEdit: async () => {}, sync: async () => { failed = true; throw failure; }, checkInvariants: async () => ({ lostEdits: 0 }), progress: async () => { saved.push(failed); } };
+    await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), (error) => error === failure);
+    assert.deepEqual(saved, [false, true]);
+  });
+
+  it('retains a completed failing invocation in the count and delay distribution', async () => {
+    const clock = fakeClock();
+    const failure = new EnvBlockedError('workflow diagnostics missing');
+    let saved: unknown;
+    const driver: SoakDriver = {
+      ...clock, linearEdit: async () => {}, gitEdit: async () => {},
+      sync: async (deadlineAt) => {
+        assert.equal(deadlineAt, 4000);
+        return { completed: true, startedAt: 1025, error: failure };
+      },
+      checkInvariants: async () => ({ lostEdits: 0 }), progress: async (result) => { saved = structuredClone(result); },
+    };
+    await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), (error) => error === failure);
+    assert.deepEqual(saved, { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 0, lostEdits: 0, drainSyncs: 0, scheduleDelays: [25], serverErrors: { tolerated: 0, recovered: 0 } });
+  });
+
+  it('persists the soak step report even when no timed events are requested', async () => {
+    const { ctx } = await fakeRun();
+    await runStep(ctx, { kind: 'run', action: 'soak', args: { durationSeconds: 0 } });
+    const saved = JSON.parse(readFileSync(join(ctx.runDir, 'soak-progress.json'), 'utf8')) as { metrics: Record<string, unknown> };
+    assert.equal(saved.metrics.activeLinearTokens, 0);
+    assert.deepEqual(saved.metrics.scheduleDelayDistribution, { samples: [], count: 0, p50: null, p95: null, p99: null, max: null });
+    assert.equal(ctx.observations.get('report.hourlyInvariantChecks'), 0);
   });
 
   it('keeps the seeded soak off near-limit documents and within each document\'s room, without dropping an edit', async () => {
@@ -700,6 +1104,113 @@ describe('load', () => {
     await assert.rejects(runStep(ctx, { kind: 'run', action: 'soak', args: { durationSeconds: 0 } }), /soak target is missing/);
     assert.equal(ctx.edits.length, 0);
     assert.equal(ctx.engine.results.length, 0);
+  });
+
+  it('keeps a self-contained report of a failed hourly check before cleanup, as a failure and as expected red', async () => {
+    // Seed s23 makes one editor-a edit and one git edit before the first check, and no sync run: each edit is on one side only.
+    // No drain: the first look is the hour's verdict.
+    const args = { durationSeconds: 2, scheduleSeconds: 5, invariantIntervalSeconds: 2, actors: ['editor-a', 'git'], randomSeed: 's23', drainSyncs: 0 };
+    assert.deepEqual(soakEditCounts({ durationMs: 2000, scheduleMs: 5000, invariantIntervalMs: 2000, actors: ['editor-a', 'git'], seed: 's23' }), { 'editor-a': 1, 'editor-b': 0, git: 1 });
+    for (const expectedRed of [false, true]) {
+      const { ctx, linear, ids, remoteGit, docs } = await fakeRun();
+      // A sync branch whose files hold both tokens, as a waiting sync pull request would, with its pull request and check.
+      const lane = fresh('soak-lane-');
+      spawnSync('git', ['clone', '--quiet', '--branch', ctx.names.trackedBranch, remoteGit.dir, lane]);
+      for (const path of docs) writeFileSync(join(lane, path), `${readFileSync(join(lane, path), 'utf8')}\nWaiting: aaaaaa-001, aaaaaa-002.\n`);
+      spawnSync('git', ['commit', '--quiet', '--all', '-m', 'Waiting'], { cwd: lane, env: { ...process.env, ...IDENTITY } });
+      spawnSync('git', ['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.syncBranch}`], { cwd: lane });
+      const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: lane, encoding: 'utf8' }).stdout.trim();
+      const run = { id: 7, event: 'pull_request', status: 'completed', conclusion: 'failure', created_at: '2026-01-01T00:00:00Z', head_branch: ctx.names.syncBranch, head_sha: head, path: '.github/workflows/checks.yml' };
+      (ctx.live as { rest: unknown }).rest = {
+        pullRequests: async () => [{ number: 3, state: 'open', title: 'Sync', body: 'Files it changes: 3.', head: { ref: ctx.names.syncBranch, sha: head }, base: { ref: ctx.names.trackedBranch }, merged_at: null, created_at: '2026-01-01T00:00:00Z' }],
+        // A second run of the same head whose jobs cannot be read: it is named, and the other run's jobs stay.
+        workflowRuns: async (branch: string) => (branch === ctx.names.syncBranch ? [run, { ...run, id: 8 }] : []),
+        runJobs: async (id: number) => {
+          if (id === 8) throw new Error('jobs read failed');
+          return [{ id: 1, name: 'pre-commit', conclusion: 'failure', started_at: '2026-01-01T00:00:01Z', completed_at: '2026-01-01T00:00:09Z' }];
+        },
+      };
+      // An earlier step's edit that never reached either side: I2 counts it, and the report keeps its path's versions.
+      const early = { side: 'linear' as const, path: 'docs/handbook/start.md', token: 'aaaaaa-early' };
+      ctx.edits.push(early);
+      const error = await runStep(ctx, { kind: 'run', action: 'soak', args }).then(() => undefined, (thrown: unknown) => thrown);
+      assert.ok(error instanceof ProductError, String(error));
+      assert.equal(error.message, 'soak stopped at hour 1: I1=false, 3 edits lost (2 retained pending, 0 absent everywhere, 1 outside the soak ledger) after 0 of 0 drain syncs');
+      assert.deepEqual(ctx.observations.get('soak.checks'), [{ I1: false, lost: 3, drainSyncs: 0, looks: [], retainedPending: 2, absentEverywhere: 0, unknown: 0, unledgered: 1 }]);
+
+      // The ledger: each edit with its measured write window, the git edit with its commit.
+      const ledger = readFileSync(join(ctx.runDir, 'soak-edits.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+      assert.deepEqual(ledger.map((entry) => entry.actor).sort(), ['editor-a', 'git']);
+      for (const entry of ledger) {
+        assert.ok(Date.parse(entry.startedAt as string) <= Date.parse(entry.completedAt as string));
+        assert.equal(entry.syncsBefore, 0);
+      }
+      assert.equal(ledger.find((entry) => entry.actor === 'git')?.commit, ctx.ownCommits.at(-1));
+
+      // The run ends as the runner ends it: the classification decides whether the person's clone stays.
+      const outcome = classify(error, expectedRed);
+      assert.equal(outcome.result, expectedRed ? 'expected-red' : 'fail');
+      finishPersonClone(ctx.runDir, outcome.result, () => {});
+      assert.equal(existsSync(join(ctx.runDir, 'person')), !expectedRed);
+      linear.documents.clear();
+
+      // The report holds every missing-side edit with its payloads, from the files alone.
+      const report = JSON.parse(readFileSync(join(ctx.runDir, 'soak-failure-hour-1.json'), 'utf8')) as SoakFailureReport;
+      assert.deepEqual(report.verdict.I1, false);
+      assert.equal(report.verdict.lostEdits, 3);
+      assert.deepEqual(report.boundary, { drainSyncs: 0, drainLimit: 0 });
+      assert.deepEqual(report.presence, { retainedPending: report.tokens.map((token) => token.token), absentEverywhere: [], unknown: [], unledgered: [early.token] });
+      assert.deepEqual(report.evidenceErrors, ['jobs of run 8: jobs read failed', 'lost edits not in the soak ledger: linear aaaaaa-early docs/handbook/start.md']);
+      assert.equal(report.missing.length, 2);
+      const earlyVersions = report.payloads.find((payload) => payload.path === early.path);
+      assert.ok(earlyVersions !== undefined && earlyVersions.trackedFile !== null && earlyVersions.document !== null);
+      for (const token of report.tokens) {
+        const git = token.actor === 'git';
+        assert.equal(token.lost, true);
+        assert.deepEqual([token.inGit, token.inLinear], git ? [true, false] : [false, true]);
+        assert.deepEqual(git ? token.gitPaths : token.linearDocuments, [token.path]);
+        assert.equal(token.inSyncBranch, true);
+        assert.equal(token.inSuspendedBranch, null);
+        assert.equal(token.syncBefore, null);
+        const versions = report.payloads.find((payload) => payload.path === token.path);
+        assert.ok(versions !== undefined);
+        assert.equal(versions.documentId, ids[token.path]?.id);
+        assert.equal(holdsToken(versions.trackedFile ?? '', token.token), git);
+        assert.equal(holdsToken(versions.document ?? '', token.token), !git);
+        assert.ok(holdsToken(versions.syncBranchFile ?? '', token.token));
+        assert.equal(versions.suspendedBranchFile, null);
+      }
+      assert.equal(report.refs[`refs/heads/${ctx.names.syncBranch}`], head);
+      assert.ok(report.refs[`refs/heads/${ctx.names.trackedBranch}`] !== undefined && report.refs[`${ctx.names.refPrefix}/ids`] !== undefined);
+      assert.deepEqual(report.pullRequests.map((pr) => (pr as { number: number }).number), [3]);
+      const checks = report.checks as Array<{ id: number; jobs: Array<{ name: string; conclusion: string }> | null }>;
+      assert.deepEqual(checks.map((check) => [check.id, check.jobs?.map((job) => [job.name, job.conclusion]) ?? null]), [[7, [['pre-commit', 'failure']]], [8, null]]);
+    }
+  });
+
+  it('drains an unsettled hour through the step\'s own sync and keeps the report only after the last drain run', async () => {
+    // The same seed: each edit is on one side only at the first look. The fake run's sync moves nothing, so the
+    // drain cannot settle the hour: it ends in a failure after its one run, never in a pass or a blocked environment.
+    const args = { durationSeconds: 2, scheduleSeconds: 5, invariantIntervalSeconds: 2, actors: ['editor-a', 'git'], randomSeed: 's23', drainSyncs: 1 };
+    const { ctx } = await fakeRun();
+    const error = await runStep(ctx, { kind: 'run', action: 'soak', args }).then(() => undefined, (thrown: unknown) => thrown);
+    assert.ok(error instanceof ProductError, String(error));
+    assert.equal(error.message, 'soak stopped at hour 1: I1=false, 2 edits lost (2 retained pending, 0 absent everywhere) after 1 of 1 drain syncs');
+    // The drain run went through the step's sync, into its ledger, marked as a drain run.
+    const syncs = readFileSync(join(ctx.runDir, 'soak-syncs.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.deepEqual(syncs.map((entry) => [entry.index, entry.phase, entry.completed]), [[1, 'drain', true]]);
+    assert.equal(ctx.engine.results.length, 1, 'the drain run is an engine run of the step');
+    // One look before the drain, then the verdict, with the report of the final look.
+    assert.deepEqual(ctx.observations.get('soak.checks'), [{ I1: false, lost: 2, drainSyncs: 1, looks: [{ drainSyncs: 0, I1: false, lost: 2 }], retainedPending: 2, absentEverywhere: 0, unknown: 0, unledgered: 0 }]);
+    const report = JSON.parse(readFileSync(join(ctx.runDir, 'soak-failure-hour-1.json'), 'utf8')) as SoakFailureReport;
+    assert.deepEqual(report.boundary, { drainSyncs: 1, drainLimit: 1 });
+    assert.equal(report.presence.retainedPending.length, 2);
+    assert.deepEqual(report.syncs.map((entry) => entry.phase), ['drain']);
+    // The look before the drain kept its I1 differences under its own name; the verdict's are the run's.
+    assert.ok(existsSync(join(ctx.runDir, 'soak-hour-1-look-1-i1-differences.txt')));
+    assert.ok(existsSync(join(ctx.runDir, 'i1-differences.txt')));
+    const saved = JSON.parse(readFileSync(join(ctx.runDir, 'soak-progress.json'), 'utf8')) as { metrics: { soak: { syncRuns: number; drainSyncs: number; invariantChecks: number; lostEdits: number } } };
+    assert.deepEqual([saved.metrics.soak.syncRuns, saved.metrics.soak.drainSyncs, saved.metrics.soak.invariantChecks, saved.metrics.soak.lostEdits], [1, 1, 1, 2]);
   });
 });
 
@@ -1052,6 +1563,9 @@ async function localHookConfig(root: string): Promise<string> {
 }
 
 /** A finished engine run with the given report, as the harness records it. */
+/** The report of a sync that refuses with exit 4, as a pending initial pull request makes it (L1R-07). */
+const REFUSED = { operation: 'sync', ok: false, complete: false, changed: false, code: 'initial-pull-request-pending', writes: { linear: {}, git: {}, pullRequests: {} } };
+
 function engineRun(command: EngineResult['command'], report: Record<string, unknown>): EngineResult {
   return { command, exitCode: 0, signal: null, notImplemented: false, timedOut: false, durationMs: 1, stdout: '', stderr: '', summary: '', report };
 }
@@ -1071,7 +1585,18 @@ async function writeUploads(ctx: RunContext, entries: Record<string, string>): P
   refreshView(ctx);
 }
 
-async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: boolean } = {}) {
+/** The ids state ref as the engine pushes it: a new commit on the current one. */
+async function writeIds(ctx: RunContext, entries: Record<string, { id: string }>): Promise<void> {
+  const git = await ctx.person();
+  const ref = `${ctx.names.refPrefix}/ids`;
+  const blob = (await git.text(['hash-object', '-w', '--stdin'], { input: JSON.stringify(entries) })).trim();
+  const tree = (await git.text(['mktree'], { input: `100644 blob ${blob}\tids.json\n` })).trim();
+  await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]);
+  const commit = (await git.text(['commit-tree', tree, '-p', ref, '-m', 'ids'])).trim();
+  await git.run(['push', '--quiet', 'origin', `${commit}:${ref}`]);
+}
+
+async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: boolean; files?: Record<string, string> } = {}) {
   const root = fresh('steps-');
   const remote = join(root, 'sandbox.git');
   const names = runNames('aaaaaa');
@@ -1090,6 +1615,7 @@ async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: b
     ...(options.review === undefined ? {} : { 'eng/platform/guides/weekly-plan.md': options.review }),
     // A team-zone folder: its README's document sits in team ENG's zone with the plain title README.
     ...(options.teamZone === true ? { 'zone/README.md': '---\nlinear-team: ENG\n---\n\n# Zone\n\nTeam notes.\n' } : {}),
+    ...options.files,
   };
   for (const [path, text] of Object.entries(files)) {
     spawnSync('mkdir', ['-p', join(seed.dir, path, '..')]);
@@ -1179,7 +1705,7 @@ async function fakeRun(options: { review?: string; hooks?: boolean; teamZone?: b
   const remoteGit = new Git(remote, IDENTITY);
   const remoteFile = async (path: string, ref = names.trackedBranch) => remoteGit.text(['show', `${ref}:${path}`]);
   // The file's exact bytes, final newline included.
-  const rawFile = async (path: string) => (await remoteGit.run(['show', `${names.trackedBranch}:${path}`])).stdout.toString('utf8');
+  const rawFile = async (path: string, ref = names.trackedBranch) => (await remoteGit.run(['show', `${ref}:${path}`])).stdout.toString('utf8');
   return { ctx, linear, ids, remoteGit, remoteFile, rawFile, faults, created, docs };
 }
 
@@ -1251,9 +1777,11 @@ describe('marker-driven checks', () => {
     await git.run(['fetch', '--quiet', 'origin', `refs/heads/${ctx.names.syncBranch}`]);
     await git.run(['checkout', '--quiet', '--detach', 'FETCH_HEAD']);
     const editCommit = await personCommit(git, ctx.names, new Map([[path, edit]]), 'Update the plan', { verify: false, branch: ctx.names.syncBranch });
-    await runStep(ctx, { kind: 'fault', action: 'checks', args: { name: 'format', status: 'failed' } });
+    // On the same branch the new head cancels the pending job itself: no person's Actions credential is needed.
+    const noPerson = () => { throw new Error('a same-branch fault must not cancel through a person'); };
+    await faultChecks(ctx, { name: 'format', status: 'failed' }, noPerson);
     assert.equal((await remoteFile(CHECK_MARKER, ctx.names.syncBranch)).trim(), 'failed');
-    await runStep(ctx, { kind: 'fault', action: 'checks', args: { status: 'passed' } });
+    await faultChecks(ctx, { status: 'passed' }, noPerson);
     const passed = checked.at(-1)!;
     assert.equal((await remoteGit.run(['cat-file', '-e', `${passed}:${CHECK_MARKER}`], { okCodes: [0, 128] })).code, 128);
     assert.equal(await remoteFile(path, ctx.names.syncBranch), edit.trimEnd());
@@ -1351,6 +1879,50 @@ describe('marker-driven checks', () => {
     } finally {
       for (const action of ['git.test-idle', 'git.test-pending', 'git.test-no-workflow']) delete STEP_ACTIONS[action];
     }
+  });
+
+  it('cancels the pending marker runs on a head and waits until they complete', async () => {
+    const runs = [
+      { id: 7, head_sha: 'abc', path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null as string | null },
+      { id: 8, head_sha: 'abc', path: CHECK_WORKFLOW_PATH, status: 'queued', conclusion: null as string | null },
+      { id: 9, head_sha: 'abc', path: '.github/workflows/other.yml', status: 'in_progress', conclusion: null as string | null },
+    ];
+    const calls: string[] = [];
+    let reads = 0;
+    const person = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'person-token', (async (input, init) => {
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer person-token');
+      const path = new URL(String(input)).pathname;
+      calls.push(`${init?.method} ${path}`);
+      if (init?.method === 'GET') {
+        reads += 1;
+        // GitHub finishes a cancel asynchronously: the runs complete one read later.
+        if (reads === 3) for (const run of runs) if (run.id !== 9 && run.conclusion === 'cancelled') run.status = 'completed';
+        return Response.json({ workflow_runs: runs });
+      }
+      const run = runs.find((candidate) => path.endsWith(`/actions/runs/${candidate.id}/cancel`))!;
+      // Run 8 finished on its own between the read and the cancel.
+      if (run.id === 8) { run.status = 'completed'; run.conclusion = 'failure'; return new Response(null, { status: 409 }); }
+      run.conclusion = 'cancelled';
+      return new Response(null, { status: 202 });
+    }) as typeof fetch);
+    const ctx = { signal: new AbortController().signal } as unknown as RunContext;
+    assert.equal(await cancelPendingRuns(ctx, person, ['abc'], { pollMs: 0, timeoutMs: 1000 }), 1);
+    assert.deepEqual(calls.filter((call) => call.startsWith('POST')), ['POST /repos/example/sandbox/actions/runs/7/cancel', 'POST /repos/example/sandbox/actions/runs/8/cancel']);
+    assert.equal(calls.filter((call) => call.startsWith('GET')).length, 3);
+  });
+
+  it('reports a pending marker run that will not finish as env-blocked', async () => {
+    let posts = 0;
+    const person = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'person-token', (async (_input, init) => {
+      if (init?.method === 'POST') { posts += 1; return new Response(null, { status: 202 }); }
+      return Response.json({ workflow_runs: [{ id: 7, head_sha: 'abc', path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null }] });
+    }) as typeof fetch);
+    const ctx = { signal: new AbortController().signal } as unknown as RunContext;
+    await assert.rejects(cancelPendingRuns(ctx, person, ['abc'], { pollMs: 0, timeoutMs: 20 }), (error) => error instanceof EnvBlockedError && /within 0 s after its cancel/.test(error.message));
+    assert.equal(posts, 1, 'one cancel per run, not one per poll');
+    const forbidden = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'person-token', (async (_input, init) => init?.method === 'POST' ? new Response(null, { status: 403 })
+      : Response.json({ workflow_runs: [{ id: 7, head_sha: 'abc', path: CHECK_WORKFLOW_PATH, status: 'in_progress', conclusion: null }] })) as typeof fetch);
+    await assert.rejects(cancelPendingRuns(ctx, forbidden, ['abc'], { pollMs: 0 }), { name: 'GitHubError', status: 403 });
   });
 
   it("takes a run's writes from its report, so L1R-03's expected-zero total fails on the first sync's writes", async () => {
@@ -1682,6 +2254,59 @@ describe('git executors', () => {
     assert.equal(ctx.observations.get('resolved.body'), '# Plan\n\nOurs.\n');
   });
 
+  it('edit a paragraph on the sync branch and resolve markers there, never on the tracked branch', async () => {
+    const plan = 'eng/platform/guides/weekly-plan.md';
+    const conflicted = `# Plan\n\nFirst.\n\n${MARKERS.git}\n\nOurs.\n\n${MARKERS.linear}\n\nTheirs.\n\n${MARKERS.end}\n`;
+    const { ctx, remoteGit, remoteFile } = await fakeRun({ review: conflicted });
+    ctx.observations.set('fixture.document', plan);
+    await remoteGit.run(['update-ref', `refs/heads/${ctx.names.syncBranch}`, ctx.names.trackedBranch]);
+    await runStep(ctx, { kind: 'git', action: 'edit-sync-branch', args: { target: 'first-paragraph' } });
+    const pending = ctx.observations.get('syncBranch.personEdit') as { path: string; token: string };
+    assert.equal(pending.path, plan);
+    // The sentence joins the first paragraph, not a new paragraph at the end.
+    const base = await remoteFile(plan);
+    assert.equal(await remoteFile(plan, ctx.names.syncBranch), editParagraph(base, 0, pending.token));
+    await runStep(ctx, { kind: 'git', action: 'resolve-sync-branch', args: {} });
+    const resolved = `# Plan\n\nFirst. The review moved to the next morning, note ${pending.token}.\n\nOurs.\n`;
+    // The fake's file reader drops the final newline, as in the tracked-branch resolve test.
+    assert.equal(await remoteFile(plan, ctx.names.syncBranch), resolved.replace(/\n$/, ''));
+    assert.equal(ctx.observations.get('resolved.body'), resolved);
+    assert.ok(ctx.observations.has('syncBranch.resolutionCommit'));
+    assert.equal(await remoteFile(plan), base);
+    await assert.rejects(runStep(ctx, { kind: 'git', action: 'resolve-sync-branch', args: {} }), /no conflict markers to resolve/);
+  });
+
+  it('edit a file in Linear\'s form on the sync branch without adding a final newline, so I1 holds after the merge (L4-08)', async () => {
+    const { ctx, linear, ids, remoteGit, rawFile, docs } = await fakeRun();
+    // The tracked files and their documents as a sync leaves them: in Linear's form, without a final newline.
+    const kept = new Map(await Promise.all(docs.map(async (path) => [path, (await rawFile(path)).replace(/\n+$/, '')] as [string, string])));
+    await commitAsPerson(ctx, kept, 'Store the files as the documents keep them', true);
+    for (const [path, text] of kept) await linear.updateDocument(ids[path]?.id as string, { content: text });
+    await remoteGit.run(['update-ref', `refs/heads/${ctx.names.syncBranch}`, ctx.names.trackedBranch]);
+
+    await runStep(ctx, { kind: 'git', action: 'edit-sync-branch', args: {} });
+    const { path, token } = ctx.observations.get('syncBranch.personEdit') as { path: string; token: string };
+    const edited = await rawFile(path, ctx.names.syncBranch);
+
+    // The sync pull request merges and the sync writes the person's note to the document, which Linear keeps
+    // without a final newline.
+    await remoteGit.run(['update-ref', `refs/heads/${ctx.names.trackedBranch}`, ctx.names.syncBranch]);
+    await linear.updateDocument(ids[path]?.id as string, { content: edited.replace(/\n+$/, '') });
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const sides = await readSides(ctx);
+    assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
+    assert.equal(edited, `${kept.get(path)}\n\n${noteSentence(token)}`);
+  });
+
+  it('append a paragraph keeping the text\'s own final line ending', () => {
+    const token = 'abcdef-001';
+    assert.equal(paragraphEdit('# Notes\n\nKept short.', undefined, token), `# Notes\n\nKept short.\n\n${noteSentence(token)}`);
+    assert.equal(paragraphEdit('# Notes\n\nKept short.\n', undefined, token), `# Notes\n\nKept short.\n\n${noteSentence(token)}\n`);
+    assert.equal(paragraphEdit('# Notes\n\nKept short.\n\n\n', undefined, token), `# Notes\n\nKept short.\n\n${noteSentence(token)}\n`);
+    // A paragraph target past the last paragraph appends the same way.
+    assert.equal(paragraphEdit('# Notes', 'second-paragraph', token), `# Notes\n\n${noteSentence(token)}`);
+  });
+
   it('commit to the sync branch as CI and as a person, recording which interleaving it was', async () => {
     const { ctx, remoteGit, remoteFile } = await fakeRun();
     await assert.rejects(runStep(ctx, { kind: 'git', action: 'ci-fix', args: {} }), ProductError);
@@ -1856,6 +2481,85 @@ describe('git executors', () => {
     assert.match(await remoteFile(path), /\[\^1\]/);
     await runStep(ctx, { kind: 'git', action: 'remove-footnote', args: {} });
     assert.doesNotMatch(await remoteFile(path), /\[\^/);
+  });
+
+  it('prepare two documents linked by id for the browser check (L6-12)', async () => {
+    const { ctx, remoteFile } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, steps: [{ kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } }] };
+    await prepareFixtures(ctx, ctx.live as LiveWorld, 'beforeSync', { runStep });
+    const { folder, project } = projectFolders(ctx)[0] as { folder: string; project: string };
+    const source = `${folder}/${LINK_PAIR.source}.md`;
+    const target = `${folder}/${LINK_PAIR.target}.md`;
+    assert.deepEqual(ctx.observations.get('fixture.linkPair'), { source, target, anchor: LINK_PAIR.anchor, project });
+    // The index links the notes by a relative path, once whole and once to a heading the notes have.
+    const index = await remoteFile(source);
+    assert.deepEqual([...index.matchAll(/\]\(<([^>]+)>\)/g)].map((match) => match[1]), ['route-notes.md', `route-notes.md#${LINK_PAIR.anchor}`]);
+    assert.match(await remoteFile(target), /^## Depot hours$/m);
+    // UI steps run in the browser session, never here.
+    await assert.rejects(runStep(ctx, { kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } }), EnvBlockedError);
+    // Once the session answered, whether the anchored link scrolled goes to the report, which no check reads.
+    ctx.observations.set('ui.anchorScrolls', false);
+    await afterUiStep(ctx, { kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } });
+    assert.deepEqual(ctx.observations.get('metrics'), { anchorScrolls: false });
+    ctx.observations.delete('ui.anchorScrolls');
+    await afterUiStep(ctx, { kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } });
+    assert.deepEqual(ctx.observations.get('metrics'), { anchorScrolls: null });
+  });
+
+  it('prepare the L6-12 pair in Linear\'s form, so I1 finds both files equal to their documents', async () => {
+    const { ctx, linear, ids, rawFile } = await fakeRun();
+    ctx.scenario = { ...ctx.scenario, steps: [{ kind: 'ui', action: 'follow-document-links', args: { actor: 'editor-a' } }] };
+    await prepareFixtures(ctx, ctx.live as LiveWorld, 'beforeSync', { runStep });
+    const { source, target, project } = ctx.observations.get('fixture.linkPair') as { source: string; target: string; project: string };
+    const { folder } = projectFolders(ctx)[0] as { folder: string };
+    const projectId = [...(ctx.live as LiveWorld).projects.values()].find((item) => item.name === project)?.id as string;
+    const files = { [source]: await rawFile(source), [target]: await rawFile(target) };
+
+    // The documents as a sync leaves them: links by id, and the text as Linear keeps it, without a final newline.
+    for (const path of [target, source]) ids[path] = { id: linear.add({ projectId }, path.slice(folder.length + 1).replace(/\.md$/, ''), '').id };
+    await writeIds(ctx, ids);
+    const base = (ctx.live as LiveWorld).documentUrlBase;
+    // The index's links to the notes, `<route-notes.md>` and `<route-notes.md#…>`, become links to the notes' document.
+    const kept = (text: string) => text.replaceAll(`](<${basename(target)}`, `](<${base}/${ids[target]?.id}`).replace(/\n+$/, '');
+    for (const path of [target, source]) await linear.updateDocument(ids[path]?.id as string, { content: kept(files[path] as string) });
+    assert.ok((linear.documents.get(ids[source]?.id as string)?.content ?? '').includes(`(<${base}/${ids[target]?.id}#${LINK_PAIR.anchor}>)`));
+    const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
+    const sides = await readSides(ctx);
+    assert.deepEqual([source, target].map((path) => sides.files.has(path)), [true, true]);
+    assert.deepEqual(await INVARIANT_CHECKS.I1(ctx, async () => sides), { name: 'I1', ok: true });
+
+    // Both files are already in Linear's form, as the corpus is: the fix command changes nothing, final newline included.
+    for (const text of Object.values(files)) assert.equal(fixText(text), text);
+    // The notes run past one browser window: about forty lines of text above the anchored heading, and more below it.
+    const notes = files[target] as string;
+    const heading = notes.indexOf('\n## Depot hours\n');
+    assert.ok(heading >= 2500, `${heading} characters above the heading`);
+    assert.ok(notes.length - heading >= 600, `${notes.length - heading} characters from the heading on`);
+  });
+
+  it('check that Linear holds the index linking the notes by id, whole and with the anchor (L6-12)', async () => {
+    const { ctx, linear, ids } = await fakeRun();
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    const notes = ids['eng/platform/notes.md']?.id as string;
+    ctx.observations.set('fixture.linkPair', { source: 'eng/platform/plan.md', target: 'eng/platform/notes.md', anchor: 'dates', project: 'unused' });
+    const holds = async (content: string) => {
+      (linear.documents.get(plan) as LinearDocument).content = content;
+      refreshView(ctx);
+      return (await resolveSubject(ctx, 'documents.linkPairById')).value;
+    };
+    const url = `https://linear.app/test/document/${notes}`;
+    assert.equal(await holds(`# Plan\n\nSee [notes](${url}) and [the dates](<${url}#dates>).\n`), true);
+    // A relative link Linear kept, a lost anchor, or a third link to the notes is not the pair the browser check needs.
+    assert.equal(await holds(`# Plan\n\nSee [notes](notes.md) and [the dates](${url}#dates).\n`), false);
+    assert.equal(await holds(`# Plan\n\nSee [notes](${url}) and [the dates](${url}).\n`), false);
+    assert.equal(await holds(`# Plan\n\nSee [notes](${url}), [again](${url}) and [the dates](${url}#dates).\n`), false);
+    // A document the sync did not write is named, not reported as a link mismatch.
+    ctx.observations.set('fixture.linkPair', { source: 'eng/platform/plan.md', target: 'eng/platform/missing.md', anchor: 'dates', project: 'unused' });
+    refreshView(ctx);
+    await assert.rejects(resolveSubject(ctx, 'documents.linkPairById'), /wrote no document for eng\/platform\/missing\.md/);
+    ctx.observations.delete('fixture.linkPair');
+    refreshView(ctx);
+    await assert.rejects(resolveSubject(ctx, 'documents.linkPairById'), /recorded no fixture\.linkPair/);
   });
 });
 
@@ -2435,9 +3139,61 @@ describe('subjects', () => {
     Object.assign(linear.documents.get(id) as LinearDocument, { icon: 'Alert', color: '#F2994A' });
     refreshView(ctx);
     assert.deepEqual(await resolveSubject(ctx, 'conflicts.markCount'), { known: true, value: 1 });
+    const failed = await evaluateAssertion(ctx, { subject: 'conflicts.markCount', operator: 'equal', expected: 0 });
+    assert.equal(failed.holds, false);
+    if (!failed.holds) {
+      assert.ok(failed.reason.includes('docs/handbook/start.md'));
+      assert.ok(!failed.reason.includes('missing marks'));
+    }
     assert.deepEqual(await resolveSubject(ctx, 'conflicts.color'), { known: true, value: 'orange' });
     assert.equal(colorLabel('#eb5757'), 'red');
     assert.equal(colorLabel('#123456'), '#123456');
+  });
+
+  it('L3-24 counts only its twenty conflicted documents on the mid slice and names missing marks', async () => {
+    const scenario = scenarios.find((candidate) => candidate.id === 'L3-24')!;
+    assert.equal(scenario.slice, 'mid');
+    const corpus = buildCorpus('0'.repeat(40));
+    const mid = new Set(corpus.slices.mid);
+    const marker = 'docs/reference/conflict-markers/sync-markers-code.md';
+    assert.ok(mid.has(marker));
+    const files = Object.fromEntries(corpus.files.filter((file) => mid.has(file.path) && file.path.endsWith('.md')).map((file) => [file.path, file.content.toString('utf8')]));
+    const { ctx, linear, ids } = await fakeRun({ files });
+    ctx.scenario = scenario;
+    // Initial sync already decorated the corpus's marker example before the scenario edits.
+    const mark = (path: string) => Object.assign(linear.documents.get(ids[path]!.id)!, { icon: 'Alert', color: '#F2994A' });
+    mark(marker);
+    ctx.observations.set(BEFORE_VIEW, await takeStartView(ctx));
+    await runStep(ctx, scenario.steps[0]!);
+    await runStep(ctx, scenario.steps[1]!);
+    const paths = ctx.observations.get('conflict.paths') as string[];
+    assert.equal(paths.length, 20);
+    assert.ok(!paths.includes(marker));
+    for (const path of paths) mark(path);
+    refreshView(ctx);
+    const assertion = scenario.checks.assertions.find((item) => item.subject === 'conflicts.markCount')!;
+    assert.equal(assertion.expected, 20);
+    assert.deepEqual(await resolveSubject(ctx, assertion.subject), { known: true, value: 20 });
+    assert.deepEqual(await evaluateAssertion(ctx, assertion), { holds: true });
+
+    // The corpus mark must never replace a missing scenario mark, mapping or document.
+    const path = paths[0]!;
+    const id = ids[path]!.id;
+    const document = linear.documents.get(id)!;
+    Object.assign(document, { icon: null, color: null });
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, assertion.subject), { known: true, value: 19 });
+    const failed = await evaluateAssertion(ctx, assertion);
+    assert.equal(failed.holds, false);
+    if (!failed.holds) {
+      assert.ok(failed.reason.includes(path));
+      assert.match(failed.reason, /expected 20, actual 19/);
+      assert.ok(!failed.reason.includes(marker));
+    }
+    mark(path);
+    linear.documents.delete(id);
+    refreshView(ctx);
+    assert.deepEqual(await resolveSubject(ctx, assertion.subject), { known: true, value: 19 });
   });
 
   it('retire the edits a resolution discards on purpose, so I2 does not count them as lost', async () => {
@@ -2495,7 +3251,7 @@ describe('subjects', () => {
     const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
     const sides = await readSides(ctx);
     assert.deepEqual([...sides.omitted], [['eng/platform/large.md', 'write: upload-too-large']]);
-    assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => sides)).detail, '1 files differ from their documents: eng/platform/lost.md (no document)');
+    assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => sides)).detail, '1 files differ from their documents (each in i1-differences.txt): eng/platform/lost.md (no document)');
     assert.equal((await INVARIANT_CHECKS.I7(ctx, async () => sides)).detail, '1 problems: eng/platform/lost.md has no id');
     // Once the run also leaves the second file out with its rule, both checks hold.
     initialSync.leftOutAtWrite.push({ path: 'eng/platform/lost.md', rule: 'content-too-long' });
@@ -2536,7 +3292,7 @@ describe('subjects', () => {
       return [(await INVARIANT_CHECKS.I1(ctx, async () => sides)).detail, (await INVARIANT_CHECKS.I7(ctx, async () => sides)).detail];
     };
     const bothMissing = [
-      '2 files differ from their documents: docs/handbook/README.md (no document), eng/platform/README.md (no document)',
+      '2 files differ from their documents (each in i1-differences.txt): docs/handbook/README.md (no document), eng/platform/README.md (no document)',
       '2 problems: docs/handbook/README.md has no id; eng/platform/README.md has no id',
     ];
 
@@ -2561,24 +3317,24 @@ describe('subjects', () => {
 
     // Only one named: the other README is genuinely without a document.
     await recordIds(documents, final(['eng/platform/README.md']));
-    assert.deepEqual(await check(), ['1 files differ from their documents: docs/handbook/README.md (no document)', '1 problems: docs/handbook/README.md has no id']);
+    assert.deepEqual(await check(), ['1 files differ from their documents (each in i1-differences.txt): docs/handbook/README.md (no document)', '1 problems: docs/handbook/README.md has no id']);
 
     // A trailer never excuses a synchronized file that is not an annotation README, nor a mapped document Linear lacks.
     const { 'eng/platform/notes.md': _notes, ...withoutNotes } = documents;
     await recordIds({ ...withoutNotes, 'docs/handbook/start.md': { id: 'gone' } }, final([...both, 'eng/platform/notes.md', 'docs/handbook/start.md']));
     assert.deepEqual(await check(), [
-      '2 files differ from their documents: docs/handbook/start.md (no document), eng/platform/notes.md (no document)',
+      '2 files differ from their documents (each in i1-differences.txt): docs/handbook/start.md (no document), eng/platform/notes.md (no document)',
       '2 problems: docs/handbook/start.md: its document is not in Linear; eng/platform/notes.md has no id',
     ]);
 
     // A kept README that later gained an id is checked like any mapped file: its document must exist.
     await recordIds({ ...documents, 'eng/platform/README.md': { id: 'gone' } }, final(both));
-    assert.deepEqual(await check(), ['1 files differ from their documents: eng/platform/README.md (no document)', '1 problems: eng/platform/README.md: its document is not in Linear']);
+    assert.deepEqual(await check(), ['1 files differ from their documents (each in i1-differences.txt): eng/platform/README.md (no document)', '1 problems: eng/platform/README.md: its document is not in Linear']);
 
     // A body edited on the tracked branch after the record is a new document: without one it fails, named or not.
     await recordIds(documents, final(both));
     await commitReadmes({ 'eng/platform/README.md': ENG.replace('owns', 'runs') }, 'Edit the platform README');
-    assert.deepEqual(await check(), ['1 files differ from their documents: eng/platform/README.md (no document)', '1 problems: eng/platform/README.md has no id']);
+    assert.deepEqual(await check(), ['1 files differ from their documents (each in i1-differences.txt): eng/platform/README.md (no document)', '1 problems: eng/platform/README.md has no id']);
 
     // An annotation-only README the record holds needs no trailer: the engine keeps it, as capture does after its document leaves.
     await commitReadmes({ 'eng/platform/README.md': `---\nlinear-project: ${PROJECT.name}\n---\n` }, 'Only the annotation');
@@ -2595,7 +3351,13 @@ describe('subjects', () => {
     await git.run(['commit', '--quiet', '-am', 'Add a footnote']);
     await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
     const { INVARIANT_CHECKS, readSides } = await import('./checks.ts');
-    assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => readSides(ctx))).detail, '1 files differ from their documents: docs/handbook/start.md');
+    assert.equal((await INVARIANT_CHECKS.I1(ctx, async () => readSides(ctx))).detail, '1 files differ from their documents (each in i1-differences.txt): docs/handbook/start.md');
+    // The run folder keeps where each file differs: the documents are archived at cleanup.
+    assert.equal(readFileSync(join(ctx.runDir, 'i1-differences.txt'), 'utf8'), 'docs/handbook/start.md: line 3: file "Welcome.[^1]", document "Welcome."\n');
+    // A differences file that cannot be written leaves a failed check, not a crash.
+    const unwritable = await INVARIANT_CHECKS.I1({ ...ctx, runDir: join(ctx.runDir, 'missing') } as RunContext, async () => readSides(ctx));
+    assert.equal(unwritable.ok, false);
+    assert.match(unwritable.detail ?? '', /^1 files differ from their documents \(i1-differences\.txt not written: .*\): docs\/handbook\/start\.md$/);
     const sync = (leftOut: unknown[]) => engineRun('sync', { initialSync: null, sync: { updated: [], created: [], adopted: [], restored: [], leftOut, leftOutAtWrite: [] } });
     ctx.engine.results.push(sync([{ path: 'docs/handbook/start.md', rules: ['footnote'] }]));
     const sides = await readSides(ctx);
@@ -3373,11 +4135,12 @@ describe('quiet runs through the harness', () => {
     }
   });
 
-  async function watchedRun(options: { moves: Array<'state' | 'tracked-tree' | 'tracked-commit' | 'sync'>; report?: Record<string, unknown>; pullRequests?: [unknown[], unknown[]]; writes?: number; watch?: boolean }) {
+  async function watchedRun(options: { moves: Array<'state' | 'tracked-tree' | 'tracked-commit' | 'sync' | 'sync-delete'>; report?: Record<string, unknown>; pullRequests?: [unknown[], unknown[]]; writes?: number; mutations?: number; unparsed?: number; syncBefore?: boolean; exitCode?: number; subject?: string; watch?: boolean }) {
     const { ctx, remoteGit } = await fakeRun();
+    if (options.syncBefore === true) await remoteGit.run(['update-ref', `refs/heads/${ctx.names.syncBranch}`, (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim()]);
     mkdirSync(await ctx.engineClone(), { recursive: true });
     mkdirSync(ctx.sandbox!.cache.dir, { recursive: true });
-    if (options.watch !== false) ctx.scenario = { ...ctx.scenario, checks: { ...ctx.scenario.checks, assertions: [{ subject: 'quiet.last', operator: 'equal', expected: [] }] } };
+    if (options.watch !== false) ctx.scenario = { ...ctx.scenario, checks: { ...ctx.scenario.checks, assertions: [{ subject: options.subject ?? 'quiet.last', operator: 'equal', expected: [] }] } };
     const lists = options.pullRequests ?? [[MERGED], [MERGED]];
     let listed = 0;
     Object.assign(ctx.live!, { rest: { pullRequests: async () => lists[Math.min(listed++, 1)] } });
@@ -3397,10 +4160,18 @@ describe('quiet runs through the harness', () => {
         if (move === 'tracked-tree') git('update-ref', ${JSON.stringify(`refs/heads/${names.trackedBranch}`)}, git('commit-tree', empty, '-p', tip, '-m', 'Change content'));
         if (move === 'tracked-commit') git('update-ref', ${JSON.stringify(`refs/heads/${names.trackedBranch}`)}, git('commit-tree', tip + '^{tree}', '-p', tip, '-m', 'Same content'));
         if (move === 'sync') git('update-ref', ${JSON.stringify(`refs/heads/${names.syncBranch}`)}, git('commit-tree', empty, '-m', 'Sync branch'));
+        if (move === 'sync-delete') git('update-ref', '-d', ${JSON.stringify(`refs/heads/${names.syncBranch}`)});
       }
       const writes = Array.from({ length: ${options.writes ?? 0} }, (_, n) => ({ n, at: 0, operation: 'documentUpdate', kind: 'mutation', status: 200, injected: false }));
-      writeFileSync(${JSON.stringify(records)}, JSON.stringify(writes));
+      // Mutations that are not document writes, one refused by Linear: a comment.
+      const others = Array.from({ length: ${options.mutations ?? 0} }, (_, n) => ({ n, at: 0, operation: 'commentCreate', kind: 'mutation', status: n === 0 ? 400 : 200, injected: false }));
+      // GraphQL bodies the proxy could not classify.
+      const unparsed = Array.from({ length: ${options.unparsed ?? 0} }, (_, n) => ({ n, at: 0, operation: 'unparsed', kind: 'other', status: 200, injected: false }));
+      // Every run mints and revokes its token: neither writes to the workspace.
+      const oauth = ['/oauth/token', '/oauth/revoke'].map((path, n) => ({ n, at: 0, operation: 'http ' + path, kind: 'other', status: 200, injected: false }));
+      writeFileSync(${JSON.stringify(records)}, JSON.stringify([...oauth, ...writes, ...others, ...unparsed]));
       writeFileSync(process.env.MDBISYNC_REPORT_FILE, JSON.stringify(${JSON.stringify({ ...QUIET_REPORT, ...options.report })}));
+      process.exitCode = ${options.exitCode ?? 0};
     `);
     const previous = process.env['MDBISYNC_ENGINE'];
     process.env['MDBISYNC_ENGINE'] = driver;
@@ -3461,6 +4232,143 @@ describe('quiet runs through the harness', () => {
     const ctx = await watchedRun({ moves: ['state'], watch: false });
     await assert.rejects(resolveSubject(ctx, 'quiet.last'), /was not watched/);
     await assert.rejects(resolveSubject(ctx, 'quiet.3'), ProductError);
+  });
+
+  describe('untouched: a run that must change nothing at all', () => {
+    const refused = (options: Parameters<typeof watchedRun>[0]) => watchedRun({ subject: 'untouched.last', exitCode: 4, report: REFUSED, ...options });
+    const CLOSED = { ...MERGED, merged_at: null };
+
+    it('is a harness subject', () => {
+      assert.equal(subjectSource('untouched.last'), 'harness');
+      assert.equal(subjectSource('untouched.1'), 'harness');
+      assert.equal(subjectSource('before.untouched.last'), null);
+    });
+
+    it('accepts a refused run that left every ref, pull request and Linear alone', async () => {
+      const ctx = await refused({ moves: [], pullRequests: [[CLOSED], [CLOSED]] });
+      assert.deepEqual(await resolveSubject(ctx, 'untouched.last'), { known: true, value: [] });
+      assert.deepEqual(await resolveSubject(ctx, 'runs.0.exitCode'), { known: true, value: 4 });
+      assert.deepEqual(await resolveSubject(ctx, 'runs.0.code'), { known: true, value: 'initial-pull-request-pending' });
+      assert.deepEqual(await resolveSubject(ctx, 'runs.0.writes.total'), { known: true, value: 0 });
+    });
+
+    it('rejects even the state ref write a quiet run may make', async () => {
+      // This world has only the ids state ref, so the merge record creates the linear one.
+      const ctx = await refused({ moves: ['state'] });
+      assert.deepEqual(await resolveSubject(ctx, 'untouched.last'), { known: true, value: [`ref ${ctx.names.refPrefix}/linear was created`] });
+    });
+
+    it('rejects a moved tracked branch and a sync branch created or deleted', async () => {
+      const moved = await refused({ moves: ['tracked-commit'] });
+      assert.deepEqual(await resolveSubject(moved, 'untouched.last'), { known: true, value: [`ref refs/heads/${moved.names.trackedBranch} moved`] });
+      const created = await refused({ moves: ['sync'] });
+      assert.deepEqual(await resolveSubject(created, 'untouched.last'), { known: true, value: [`ref refs/heads/${created.names.syncBranch} was created`] });
+      const deleted = await refused({ moves: ['sync-delete'], syncBefore: true });
+      assert.deepEqual(await resolveSubject(deleted, 'untouched.last'), { known: true, value: [`ref refs/heads/${deleted.names.syncBranch} was deleted`] });
+      // A branch made and removed within the run leaves the world as it was.
+      const gone = await refused({ moves: ['sync', 'sync-delete'] });
+      assert.deepEqual(await resolveSubject(gone, 'untouched.last'), { known: true, value: [] });
+    });
+
+    it('rejects a merged or reopened pull request, as a sync that merged the abandoned snapshot would leave', async () => {
+      const merged = await refused({ moves: ['tracked-tree'], pullRequests: [[CLOSED], [{ ...CLOSED, number: 31, merged_at: '2026-01-02T00:00:00Z' }, CLOSED]] });
+      assert.deepEqual(await resolveSubject(merged, 'untouched.last'), { known: true, value: [`ref refs/heads/${merged.names.trackedBranch} moved`, 'pull request #31 was opened'] });
+      const reopened = await refused({ moves: [], pullRequests: [[CLOSED], [{ ...CLOSED, state: 'open' }]] });
+      assert.deepEqual(await resolveSubject(reopened, 'untouched.last'), { known: true, value: ['pull request #30 was updated'] });
+    });
+
+    it('rejects every Linear mutation the proxy passed on, refused and unclassified ones included, but not the token calls', async () => {
+      const ctx = await refused({ moves: [], writes: 1, mutations: 2, unparsed: 1 });
+      assert.deepEqual(await resolveSubject(ctx, 'untouched.last'), { known: true, value: ['4 Linear mutations were sent'] });
+    });
+
+    it('gives no verdict for a run it did not watch', async () => {
+      const ctx = await refused({ moves: [], watch: false });
+      await assert.rejects(resolveSubject(ctx, 'untouched.last'), /was not watched/);
+      await assert.rejects(resolveSubject(ctx, 'untouched.2'), ProductError);
+    });
+  });
+});
+
+describe('abandoning an initial pull request from Linear (L1R-07)', () => {
+  const l1r07 = scenarios.find((item) => item.id === 'L1R-07')!;
+  const OPEN_INITIAL = { number: 40, state: 'open', title: 'Changes from Linear', body: 'The initial import.', head: { ref: '', sha: 'b'.repeat(40) }, base: { ref: 't/aaaaaa/main' }, merged_at: null, created_at: '2026-01-01T00:00:00Z' };
+  const report = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, 'run-reports', `${name}.json`), 'utf8')) as Record<string, unknown>;
+  /** Removes a file from the tracked branch, as a merge that accepted its removal would. */
+  async function removeFile(ctx: RunContext, path: string): Promise<void> {
+    const git = await ctx.person();
+    await git.run(['pull', '--quiet', 'origin', ctx.names.trackedBranch]);
+    await git.run(['rm', '--quiet', path]);
+    await git.run(['commit', '--quiet', '-m', 'Remove the notes']);
+    await git.run(['push', '--quiet', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
+  }
+
+  it('closes the pull request and deletes its branch before the sync whose refusal it checks', () => {
+    const steps = l1r07.steps.map((step) => `${step.kind}.${step.action}`);
+    assert.deepEqual(steps, ['git.add', 'run.initial-sync', 'git.close-pr', 'git.delete-sync-branch', 'run.sync', 'run.initial-sync', 'merge.pull-request', 'run.sync']);
+    // The refusing sync is the second run: runs.1.
+    const expected = new Map(l1r07.checks.assertions.map((assertion) => [assertion.subject, assertion.expected]));
+    assert.equal(expected.get('runs.1.exitCode'), 4);
+    assert.equal(expected.get('runs.1.code'), 'initial-pull-request-pending');
+    assert.deepEqual(expected.get('untouched.1'), []);
+    assert.equal(expected.get('runs.1.tracked.addedFileExists'), true);
+    assert.deepEqual(expected.get('quiet.last'), []);
+  });
+
+  it('sees the git-only file right after the refusing sync, though a later merge removes it', async () => {
+    const run = await fakeRun();
+    run.ctx.scenario = { ...run.ctx.scenario, checks: l1r07.checks };
+    mkdirSync(run.ctx.sandbox!.cache.dir, { recursive: true });
+    await runStep(run.ctx, { kind: 'git', action: 'add', args: {} });
+    const added = run.ctx.observations.get('git.added') as string;
+    assert.ok((await run.remoteFile(added)).includes('# Notes'));
+    await watchRun(run.ctx, { throughProxy: true }, async () => void run.ctx.engine.results.push(engineRun('initial-sync', report('reverse-initial-sync'))));
+    await watchRun(run.ctx, { throughProxy: true }, async () => void run.ctx.engine.results.push({ ...engineRun('sync', REFUSED), exitCode: 4 }));
+    assert.deepEqual(await resolveSubject(run.ctx, 'untouched.1'), { known: true, value: [] });
+    // The person's merge of the replacement snapshot removes the file.
+    await removeFile(run.ctx, added);
+    refreshView(run.ctx);
+    assert.deepEqual(await resolveSubject(run.ctx, 'runs.1.tracked.addedFileExists'), { known: true, value: true });
+    assert.deepEqual(await resolveSubject(run.ctx, 'tracked.addedFileExists'), { known: true, value: false });
+    // A later git.add names another file; the run's own view still speaks of the file added before it.
+    await runStep(run.ctx, { kind: 'git', action: 'add', args: {} });
+    refreshView(run.ctx);
+    assert.notEqual(run.ctx.observations.get('git.added'), added);
+    assert.deepEqual(await resolveSubject(run.ctx, 'runs.1.tracked.addedFileExists'), { known: true, value: true });
+  });
+
+  it("retires the git-only file's edit when a person merges the initial pull request that removes it, and no other edit", async () => {
+    const run = await fakeRun();
+    await runStep(run.ctx, { kind: 'git', action: 'add', args: {} });
+    await runStep(run.ctx, { kind: 'git', action: 'edit', args: {} });
+    const [added, edited] = run.ctx.edits;
+    // The initial pull request's branch: the tracked tree without the git-only file, merged by a person.
+    const tip = (await run.remoteGit.text(['rev-parse', run.ctx.names.trackedBranch])).trim();
+    const env = { ...process.env, GIT_INDEX_FILE: join(run.ctx.runDir, 'merge-index') };
+    spawnSync('git', ['--git-dir', run.remoteGit.dir, 'read-tree', tip], { env });
+    spawnSync('git', ['--git-dir', run.remoteGit.dir, 'rm', '--cached', '--quiet', added!.path], { env });
+    const tree = spawnSync('git', ['--git-dir', run.remoteGit.dir, 'write-tree'], { env, encoding: 'utf8' }).stdout.trim();
+    const merge = (await run.remoteGit.text(['commit-tree', tree, '-p', tip, '-m', 'Merge the changes from Linear'])).trim();
+    Object.assign(run.ctx.live!, { rest: { pullRequests: async () => [{ ...OPEN_INITIAL, head: { ...OPEN_INITIAL.head, ref: run.ctx.names.syncBranch } }], mergePullRequest: async () => ({ sha: merge }) } });
+    await runStep(run.ctx, { kind: 'merge', action: 'pull-request', args: { actor: 'editor-a' } });
+    assert.equal(added!.retired, true);
+    assert.notEqual(edited!.retired, true);
+  });
+
+  it('fails the check when the refusing sync took the git-only file away', async () => {
+    const run = await fakeRun();
+    run.ctx.scenario = { ...run.ctx.scenario, checks: l1r07.checks };
+    mkdirSync(run.ctx.sandbox!.cache.dir, { recursive: true });
+    await runStep(run.ctx, { kind: 'git', action: 'add', args: {} });
+    const added = run.ctx.observations.get('git.added') as string;
+    await watchRun(run.ctx, { throughProxy: true }, async () => void run.ctx.engine.results.push(engineRun('initial-sync', report('reverse-initial-sync'))));
+    await watchRun(run.ctx, { throughProxy: true }, async () => {
+      // A sync that merged the abandoned snapshot: the file is gone from the tracked branch.
+      await removeFile(run.ctx, added);
+      run.ctx.engine.results.push(engineRun('sync', report('quiet-sync')));
+    });
+    assert.deepEqual(await resolveSubject(run.ctx, 'runs.1.tracked.addedFileExists'), { known: true, value: false });
+    assert.deepEqual(await resolveSubject(run.ctx, 'untouched.1'), { known: true, value: [`ref refs/heads/${run.ctx.names.trackedBranch} moved`] });
   });
 });
 

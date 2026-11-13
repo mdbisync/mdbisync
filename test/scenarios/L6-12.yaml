@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "id": "L6-12",
+  "slice": "mini",
+  "mode": "ui",
+  "setup": {
+    "state": "converged",
+    "fixtures": [
+      "document-links"
+    ],
+    "teamZoneLock": true
+  },
+  "steps": [
+    {
+      "kind": "ui",
+      "action": "verify-editor",
+      "args": {
+        "actor": "editor-a",
+        "requireIdleSeconds": 120
+      }
+    },
+    {
+      "kind": "ui",
+      "action": "follow-document-links",
+      "args": {
+        "actor": "editor-a"
+      }
+    }
+  ],
+  "checks": {
+    "invariants": {
+      "I1": {
+        "required": true
+      },
+      "I2": {
+        "required": true
+      },
+      "I3": {
+        "required": true
+      },
+      "I4": {
+        "required": true
+      },
+      "I5": {
+        "required": true
+      },
+      "I6": {
+        "required": true
+      },
+      "I7": {
+        "required": true
+      },
+      "I8": {
+        "required": true
+      },
+      "I9": {
+        "required": true
+      }
+    },
+    "assertions": [
+      {
+        "subject": "documents.linkPairById",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "ui.plainLinkOpensTarget",
+        "operator": "equal",
+        "expected": true
+      },
+      {
+        "subject": "ui.anchorLinkOpensTarget",
+        "operator": "equal",
+        "expected": true
+      }
+    ]
+  }
+}

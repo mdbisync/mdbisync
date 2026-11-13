@@ -39,7 +39,10 @@ the execution environment, never embedded credentials or account names.
 - `converged`: complete initial sync, with matching tracked files and documents.
 - `linear-seeded`: existing documents for initial sync matching or import, no state refs.
 - `conflicted`: a converged fixture followed by an unresolved conflict, with the
-  original icon, color and body saved as `beforeConflict` observations.
+  original icon, color and body saved as `beforeConflict` observations. The
+  setup lets the runs settle after the conflict's run, so the sync pull request
+  carries the markers to the tracked branch: the scenario starts with them on
+  both sides.
 
 `fixtures` names required semantic fixture groups for the slice. Supplemental
 fixtures can extend a slice when a scenario needs more documents or constructs. The harness
@@ -61,8 +64,15 @@ Steps execute in order. `kind`, `action` and `args` form the adapter call:
 | `run` | Invoke the named command or orchestration operation and collect observations. |
 | `fault` | Configure a proxy response, engine checkpoint, setup failure or check result. `clear` removes injected faults; `resume` releases a paused engine. |
 | `kill` | Terminate the engine at the named checkpoint; wait for actual termination. |
-| `merge` | Merge the initial pull request as the specified person. |
+| `merge` | Merge the initial pull request as the specified person. Git edits whose files the merge removes were accepted as removed and are no longer expected by I2. |
 | `ui` | Verify the signed-in editor, perform the stated browser action, and collect DOM evidence. |
+
+A step's `target` names the document it acts on: a path or path suffix,
+`<ordinal>-document` or `other-document` by position, or `project-document`
+for the first document inside a project folder, which exists under every team
+selection of `mini`. Without one, a step acts on the scenario's fixture
+document, else the first document, which can sit at team level when only some
+teams are selected.
 
 `run.args.wait: false` starts an engine asynchronously; a checkpoint is reached
 before the following step executes. The harness joins that invocation after
@@ -72,6 +82,13 @@ per-invocation evidence. `parallel` bypasses workflow serialization on purpose;
 `workflow-parallel` tests the actual concurrency group. A timeout is a failure,
 not convergence. `probe`, `lint`, `fix`, `pre-commit`, `scan-canaries`, `cleanup`,
 `burst`, `soak` and `token-lifecycle` invoke their respective test adapters.
+`soak` appends each edit (token, actor, path, measured write window, commit)
+to `soak-edits.jsonl` and each sync invocation (workflow run, exit, summary)
+to `soak-syncs.jsonl` in the run folder as they end. A failed hourly check
+writes `soak-failure-hour-<n>.json` before cleanup, whether the run ends as
+a failure or expected red: each token's presence on both sides and on the
+sync and suspended branches, the versions of every path with a lost edit, the
+run's refs, its sync pull requests and the checks of their heads.
 `check` runs the engine's setup check with the run's credentials; it counts as
 a run, and a failed check is recorded as that run's result rather than stopping
 the scenario. Its report has no sync fields and is never quiet, so a subject
@@ -157,6 +174,19 @@ and reports `changed: true` while staying quiet. That internal catch-up is the
 only write a quiet run may make: `changed: true` with no state ref moved is not
 quiet. The harness snapshots the world before and after every run of a scenario
 that asserts `quiet`; an unwatched run gives no verdict.
+
+`untouched.<n|last>` lists what that run changed in the world, and a scenario
+asserts it equal to `[]` for a run that must refuse and write nothing at all:
+no Linear request seen by the proxy that may write, whatever its answer (every
+request but a recognized GraphQL query, the OAuth calls for the run's token
+aside); no ref of the run
+created, moved or deleted (the tracked branch, the sync branch and every state
+ref, so not even the catch-up a quiet run may make); and no pull request
+opened, updated or gone. It uses the same snapshots as `quiet`, taken around
+every run of a scenario that asserts either subject.
+
+`runs.<n|last>.tracked.addedFileExists` tells whether the file a `git.add` step
+added was on the tracked branch right after that run.
 
 `runs.<n|last>.setupFailure.item` and `runs.<n|last>.setupFailure.fixLink` are
 computed by the harness, not read from the report, although they start with
@@ -250,3 +280,31 @@ L5-34 remains selectable for planning, but its offline execution is explicitly
 skipped until the engine exposes `before-suspension-push`. Its spec names the
 required crash window; substituting an earlier checkpoint would exercise a
 different failure.
+
+## Sync-branch reconciliation
+
+L4-14 to L4-18 leave a person's commit pending on the sync branch and then
+edit the same paragraph again: in Linear (L4-14, L4-16, L4-18) or on the
+tracked branch (L4-15, L4-17), with the sync pull request open or, in L4-16
+and L4-17, closed by a person first. `git.edit-sync-branch` with a paragraph
+target edits that paragraph on the sync branch; the next sync must report the
+document in `pullRequest.marked` and merge both versions between conflict
+markers, which reach the tracked branch and Linear with the conflict mark.
+In L4-18 a person resolves the markers on the sync branch
+(`git.resolve-sync-branch`, keeping the git version) before the pull request
+merges; the resolution reaches Linear without markers. The scenarios need no
+check workflow. Run their steps and assertions against local Git and fake
+services:
+
+```sh
+node --test test/e2e/harness/reconcile-specs.test.ts
+```
+
+L3-17 (renamed in Linear, edited in git) and L3-18 (moved in git, edited in
+Linear) run the same way. Their fake GitHub merges as GitHub does, without
+pairing a rename on one side with an edit on the other, so the sync pull
+request merges only after the sync branch has taken in the tracked branch:
+
+```sh
+node --test test/e2e/harness/rename-edit-specs.test.ts
+```

@@ -14,19 +14,25 @@ const root = resolve(import.meta.dirname, '../..');
 
 test('CI and release install the same pinned pre-commit before tests', async () => {
   const versions: string[] = [];
-  for (const [file, job] of [['ci.yml', 'test'], ['ci.yml', 'validate'], ['release.yml', 'build']] as const) {
+  for (const [file, job] of [['ci.yml', 'test'], ['ci.yml', 'validate'], ['release.yml', 'test'], ['release.yml', 'build']] as const) {
     const workflow = parse(await readFile(join(root, '.github/workflows', file), 'utf8'));
     assert.ok(workflow.jobs?.[job], `${file} must contain the ${job} job`);
     const steps = workflow.jobs[job].steps as { run?: string }[];
     const installs = steps.flatMap((step, index) => {
-      const match = step.run?.trim().match(/^pipx install pre-commit==(\d+\.\d+\.\d+)$/);
-      return match ? [{ version: match[1]!, index }] : [];
+      const match = step.run?.match(/-m pip install --require-hashes --only-binary :all: -r (\S+)/);
+      return match ? [{ requirements: match[1]!, index }] : [];
     });
     assert.equal(installs.length, 1, `${file} must install exactly one pinned pre-commit`);
-    const tests = steps.flatMap((step, index) => /\b(?:npm (?:test|run test:hooks)|node --test)\b/.test(step.run ?? '') ? [index] : []);
+    // The release build runs no suite, but its staged flow runs the security hooks through pre-commit.
+    const tests = steps.flatMap((step, index) => /\b(?:npm (?:test|run test:hooks)|node --test|node test\/release\/staged-flow\.ts)\b/.test(step.run ?? '') ? [index] : []);
     assert.ok(tests.length > 0, `${file} must run tests`);
     assert.ok(tests.every(index => installs[0]!.index < index), `${file} must install pre-commit before tests`);
-    versions.push(installs[0]!.version);
+    const requirementsPath = installs[0]!.requirements === '"$RUNNER_TEMP/pre-commit-requirements.txt"'
+      ? '.github/requirements/pre-commit.txt' : installs[0]!.requirements;
+    const requirements = await readFile(join(root, requirementsPath), 'utf8');
+    const version = /^pre-commit==(\d+\.\d+\.\d+)(?: --hash=sha256:[0-9a-f]{64})+$/m.exec(requirements);
+    assert.ok(version, `${file} must pin pre-commit with a hash`);
+    versions.push(version[1]!);
   }
   assert.equal(new Set(versions).size, 1, 'CI and release pre-commit versions must match');
 });

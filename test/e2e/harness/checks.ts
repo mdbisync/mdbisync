@@ -4,7 +4,7 @@
 
 import { engineRequestCount, remoteRequests, isDocumentWrite } from './request-accounting.ts';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import type { Definition, Image, Link, Nodes } from 'mdast';
@@ -16,10 +16,12 @@ import type { RunContext } from './context.ts';
 import { annotatedFolders, annotationPath, owningFolder, type Folder } from './corpus.ts';
 import type { EngineResult } from './engine.ts';
 import { ownedDocuments } from './ownership.ts';
+import { pullTracked } from './person-git.ts';
 import { HarnessGapError, NotImplementedError, ProductError, type CheckOutcome } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
+import { RUN_ID_PATTERN } from './isolation.ts';
 import { INVARIANTS, type Assertion, type InvariantId } from './spec.ts';
-import { encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
+import { conflictMarks, encodeTitlePath, expectedPlace, placeOf, refreshView, resolveSubject, shortSegment } from './subjects.ts';
 
 // --- pure helpers ----------------------------------------------------------
 
@@ -183,12 +185,12 @@ export function linkDestinations(body: string): Destination[] {
 }
 
 /** What a fragment cannot hold as it is in a link destination, percent-encoded. */
-function encodeFragment(fragment: string): string {
+export function encodeFragment(fragment: string): string {
   return fragment.replace(/[^A-Za-z0-9\-._~!$'*+,;=:@/?%]/g, (char) => encodeURIComponent(char));
 }
 
 /** Replaces destinations by offset; `replace` returns the new raw destination, or undefined to keep it. */
-function rewriteDestinations(body: string, replace: (destination: Destination) => string | undefined): string {
+export function rewriteDestinations(body: string, replace: (destination: Destination) => string | undefined): string {
   let result = '';
   let at = 0;
   for (const destination of linkDestinations(body)) {
@@ -252,7 +254,32 @@ export function gitLinks(content: string, documentPath: string, targets: Require
 
 /** Whether a document holds exactly its file's text in Linear's terms (I1 for one file). */
 export function sameAsFile(text: string, content: string, path: string, sides: LinkTargets): boolean {
-  return linearLinks(bodyOf(text), path, sides) === content;
+  return expectedDocumentText(text, path, sides) === content;
+}
+
+/** The text a file's document must hold: the file's body, its links in Linear's form. */
+export function expectedDocumentText(text: string, path: string, sides: LinkTargets): string {
+  return linearLinks(bodyOf(text), path, sides);
+}
+
+/** The file in the run folder where a failing I1 lists how each file differs from its document. */
+export const I1_DIFFERENCES_FILE = 'i1-differences.txt';
+
+/**
+ * Where a file's expected document text and the document's text first differ, as one line: a final newline only,
+ * or the first differing line on each side (shortened).
+ */
+export function firstDifference(expected: string, actual: string): string {
+  const ending = (text: string) => /[\r\n]*$/.exec(text)![0];
+  if (expected.slice(0, expected.length - ending(expected).length) === actual.slice(0, actual.length - ending(actual).length)) {
+    return `only the line breaks at the end differ (file ends ${JSON.stringify(ending(expected))}, document ends ${JSON.stringify(ending(actual))})`;
+  }
+  const a = expected.split('\n');
+  const b = actual.split('\n');
+  let line = 0;
+  while (line < a.length && line < b.length && a[line] === b[line]) line += 1;
+  const show = (text: string | undefined) => (text === undefined ? '(end)' : JSON.stringify(text.length > 120 ? `${text.slice(0, 120)}…` : text));
+  return `line ${line + 1}: file ${show(a[line])}, document ${show(b[line])}`;
 }
 
 /**
@@ -315,10 +342,43 @@ export async function evaluateAssertion(ctx: RunContext, assertion: Assertion): 
     expected = other.value;
   }
   if (compare(assertion.operator, actual.value, expected)) return { holds: true };
+  if (assertion.subject === 'conflicts.markCount') {
+    const marks = (await resolveSubject(ctx, 'conflicts.marks')).value as Map<string, boolean>;
+    const marked = [...marks].filter(([, marked]) => marked).map(([path]) => path);
+    const missing = ctx.observations.has('conflict.paths') ? [...marks].filter(([, marked]) => !marked).map(([path]) => path) : [];
+    const describe = (paths: string[]) => `${JSON.stringify(paths.slice(0, 5))}${paths.length > 5 ? ` and ${paths.length - 5} more` : ''}`;
+    return { holds: false, reason: `${assertion.operator} did not hold: expected ${JSON.stringify(expected)}, actual ${actual.value}; marked paths ${describe(marked)}${missing.length === 0 ? '' : `; missing marks ${describe(missing)}`}` };
+  }
   const paths = assertion.subject === 'summary.collisionPaths' && ['same-as', 'equal'].includes(assertion.operator)
     ? differingCollisionPaths(actual.value, expected)
-    : differingPaths(actual.value, expected);
+    : differingPaths(actual.value, expected) ?? differingValue(actual.value, expected, CODE_SUBJECT.test(assertion.subject));
   return { holds: false, reason: `${assertion.operator} did not hold${paths === undefined ? '' : `: ${paths}`}` };
+}
+
+/** Subjects whose value is a rule or summary code (`summary.code`, `runs.0.summary.code`, `decided.code`), never document text. */
+export const CODE_SUBJECT = /(?:^|\.)code$/;
+
+/**
+ * How two single values differ, never by document content (I5): nothing, a
+ * flag or a count by itself; a string only when the subject is a code
+ * (`isCode`), since any other string may be a document's text; two other
+ * texts by where they first differ. Undefined for other values.
+ */
+export function differingValue(actual: unknown, expected: unknown, isCode: boolean): string | undefined {
+  if (actual === null || typeof actual === 'boolean' || typeof actual === 'number') return `actual ${JSON.stringify(actual)}`;
+  if (typeof actual === 'string' && isCode && /^[a-z0-9][a-z0-9-]{0,63}$/.test(actual)) return `actual ${JSON.stringify(actual)}`;
+  if (typeof actual !== 'string' || typeof expected !== 'string') return undefined;
+  const ending = (text: string) => /[\r\n]*$/.exec(text)![0];
+  if (actual.slice(0, actual.length - ending(actual).length) === expected.slice(0, expected.length - ending(expected).length)) {
+    return `only the line breaks at the end differ (actual ends ${JSON.stringify(ending(actual))}, expected ${JSON.stringify(ending(expected))})`;
+  }
+  // Lines as a text has them: a final line break ends the last line and opens no new one.
+  const lines = (text: string) => text.replace(/\n$/, '').split('\n');
+  const a = lines(actual);
+  const b = lines(expected);
+  let line = 0;
+  while (line < a.length && line < b.length && a[line] === b[line]) line += 1;
+  return `the texts first differ at line ${line + 1} (actual has ${a.length} lines, expected ${b.length})`;
 }
 
 /** Collision lists preserve raw Git path spelling, including Unicode form. */
@@ -476,7 +536,8 @@ export function lfsSize(bytes: Buffer): number | null {
 
 export async function fetchRef(git: Git, ref: string): Promise<string | null> {
   try {
-    await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+    // Not into FETCH_HEAD: a pull or another reader in the same clone may be using it at the same time.
+    await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]);
     return (await git.text(['rev-parse', ref])).trim();
   } catch {
     return null;
@@ -546,7 +607,7 @@ export async function readSides(ctx: RunContext, options: { allowNoIds?: boolean
   const world = ctx.live;
   if (world === null) throw new Error('offline scenarios have no sides');
   const git = await ctx.person();
-  await git.run(['pull', '--quiet', '--no-rebase', '--no-edit', 'origin', ctx.names.trackedBranch]);
+  await pullTracked(git, ctx);
   const config = resolveStateConfig({ trackedBranch: ctx.names.trackedBranch, syncBranch: ctx.names.syncBranch, refPrefix: ctx.names.refPrefix });
   const idsCommit = await fetchRef(git, stateRef(config, 'ids'));
   const uploadsCommit = await fetchRef(git, stateRef(config, 'uploads'));
@@ -626,22 +687,71 @@ export function expectsDocument(s: Pick<Sides, 'omitted' | 'kept'>, path: string
 const ok = (name: string): CheckOutcome => ({ name, ok: true });
 const bad = (name: string, detail: string): CheckOutcome => ({ name, ok: false, detail });
 
+/** The observation that holds I4's non-forward moves, which the run's evidence writes to `ref-moves.json`. */
+export const REF_MOVES = 'harness.refMoves';
+/** The most bytes of one move's patch the evidence keeps; a longer patch is cut there and says so. */
+export const REF_MOVE_PATCH_LIMIT = 256 * 1024;
+
+/** A ref that moved to a commit that does not descend from its old one, and what differs between the two. */
+export interface RefMove {
+  /** The ref without the run's prefix, or `sync branch`. */
+  ref: string;
+  /**
+   * The ref snapshot it moved before: snapshot 0 is taken when setup ends and one
+   * more after each step and each follow-up run, so with no follow-up runs it is the step's number plus one.
+   */
+  snapshot: number;
+  old: string;
+  next: string;
+  /** `git diff --name-status` between the two trees; empty when git could not compare them. */
+  paths: string[];
+  /** The text patch between the two trees: Markdown and LFS pointers in full, other binary files named only. */
+  patch: string;
+  /** Why the trees or the patch could not be compared (a commit or blob git could not read). */
+  error?: string;
+}
+
+/** What differs between two commits' trees, renames not paired, so each path is compared by its own content. */
+export async function refMoveDiff(git: Git, old: string, next: string): Promise<Pick<RefMove, 'paths' | 'patch' | 'error'>> {
+  const names = await git.run(['diff', '--no-renames', '--name-status', old, next], { okCodes: [0, 128] });
+  if (names.code !== 0) return { paths: [], patch: '', error: 'the two commits could not be compared' };
+  const paths = names.stdout.toString('utf8').split('\n').filter(Boolean);
+  // The trees can be present without every blob (a clone that borrows a partial cache): the paths stay, the patch says why it is missing.
+  const patch = await git.run(['diff', '--no-renames', '--no-ext-diff', '--no-textconv', old, next], { okCodes: [0, 128] });
+  if (patch.code !== 0) return { paths, patch: '', error: 'the patch could not be read' };
+  const bytes = patch.stdout;
+  return {
+    paths,
+    patch: bytes.length > REF_MOVE_PATCH_LIMIT ? `${bytes.subarray(0, REF_MOVE_PATCH_LIMIT).toString('utf8')}\n[cut at ${REF_MOVE_PATCH_LIMIT} bytes]\n` : bytes.toString('utf8'),
+  };
+}
+
 export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
-  async I1(_ctx, sides) {
+  async I1(ctx, sides) {
     const s = await sides();
-    const differing: string[] = [];
+    const differing: Array<{ name: string; detail: string }> = [];
     for (const [path, text] of s.files) {
       // A file left out on purpose, or a kept annotation README, has no document to match.
       if (!expectsDocument(s, path)) continue;
       const entry = s.ids.get(path);
       const document = entry === undefined ? undefined : s.documents.get(entry.id);
       if (document === undefined || document.trashed) {
-        differing.push(`${path} (no document)`);
+        differing.push({ name: `${path} (no document)`, detail: `${path}: no document` });
         continue;
       }
-      if (!sameAsFile(text, document.content ?? '', path, s)) differing.push(path);
+      const expected = expectedDocumentText(text, path, s);
+      if (expected !== (document.content ?? '')) differing.push({ name: path, detail: `${path}: ${firstDifference(expected, document.content ?? '')}` });
     }
-    return differing.length === 0 ? ok('I1') : bad('I1', `${differing.length} files differ from their documents: ${differing.slice(0, 10).join(', ')}`);
+    if (differing.length === 0) return ok('I1');
+    // Every difference, kept in the run folder: the documents are archived at cleanup. A file that cannot be
+    // written must not turn the failed check into a crash that skips the other checks.
+    let where = `each in ${I1_DIFFERENCES_FILE}`;
+    try {
+      writeFileSync(join(ctx.runDir, I1_DIFFERENCES_FILE), `${differing.map((item) => item.detail).join('\n')}\n`);
+    } catch (error) {
+      where = `${I1_DIFFERENCES_FILE} not written: ${(error as Error).message}`;
+    }
+    return bad('I1', `${differing.length} files differ from their documents (${where}): ${differing.slice(0, 10).map((item) => item.name).join(', ')}`);
   },
 
   async I2(ctx, sides) {
@@ -667,17 +777,25 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     const history = (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined) ?? [];
     const git = await ctx.person();
     const backwards: string[] = [];
+    const moves: RefMove[] = [];
     for (let index = 1; index < history.length; index += 1) {
       const before = history[index - 1] as Record<string, string>;
       const after = history[index] as Record<string, string>;
       for (const [ref, old] of Object.entries(before)) {
         const next = after[ref];
         if (next === undefined || next === old) continue;
-        await git.run(['fetch', '--quiet', 'origin', old, next], { okCodes: [0, 1, 128] });
+        // The snapshots keep each commit they saw; the remote is asked only for one still missing.
+        const present = await git.run(['cat-file', '-e', `${old}^{commit}`], { okCodes: [0, 1, 128] }).then((r) => r.code === 0) && await git.run(['cat-file', '-e', `${next}^{commit}`], { okCodes: [0, 1, 128] }).then((r) => r.code === 0);
+        if (!present) await git.run(['fetch', '--quiet', 'origin', old, next], { okCodes: [0, 1, 128] });
         const result = await git.run(['merge-base', '--is-ancestor', old, next], { okCodes: [0, 1, 128] });
-        if (result.code !== 0) backwards.push(ref.replace(`${ctx.names.refPrefix}/`, '').replace(`refs/heads/${ctx.names.syncBranch}`, 'sync branch'));
+        if (result.code === 0) continue;
+        const name = ref.replace(`${ctx.names.refPrefix}/`, '').replace(`refs/heads/${ctx.names.syncBranch}`, 'sync branch');
+        backwards.push(name);
+        moves.push({ ref: name, snapshot: index, old, next, ...(await refMoveDiff(git, old, next)) });
       }
     }
+    // The evidence keeps what differs between the two commits, since the remote may drop the old one.
+    if (moves.length > 0) ctx.observations.set(REF_MOVES, moves);
     return backwards.length === 0 ? ok('I4') : bad('I4', `refs moved other than forward: ${[...new Set(backwards)].join(', ')}`);
   },
 
@@ -774,18 +892,46 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   },
 };
 
+/** All tracked files' text, and all documents' text that are not trashed: where an edit's token is looked for. */
+function sideTexts(sides: Pick<Sides, 'files' | 'documents'>): { gitText: string; linearText: string } {
+  return {
+    gitText: [...sides.files.values()].join('\n'),
+    linearText: [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n'),
+  };
+}
+
+/**
+ * Whether the text holds this edit token as a whole token. A token's sequence
+ * number grows past its padding (`<run>-999`, then `<run>-1000`), so `<run>-100`
+ * is a prefix of `<run>-1000`: a digit right after a match is another token.
+ */
+export function holdsToken(text: string, token: string): boolean {
+  for (let at = text.indexOf(token); at !== -1; at = text.indexOf(token, at + 1)) {
+    if (!/[0-9]/.test(text.charAt(at + token.length))) return true;
+  }
+  return false;
+}
+
+/** How many of these edits each side shows, counted on its own: the burst's report of edits found (L4-12). */
+export function editsFound(edits: RunContext['edits'], sides: Pick<Sides, 'files' | 'documents'>): { git: number; linear: number } {
+  const { gitText, linearText } = sideTexts(sides);
+  return {
+    git: edits.filter((edit) => holdsToken(gitText, edit.token)).length,
+    linear: edits.filter((edit) => holdsToken(linearText, edit.token)).length,
+  };
+}
+
 /** Edits that are not on both sides (or, for a removal, still on a side). */
 export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documents'>): RunContext['edits'] {
-  const gitText = [...sides.files.values()].join('\n');
-  const linearText = [...sides.documents.values()].filter((document) => !document.trashed).map((document) => document.content ?? '').join('\n');
+  const { gitText, linearText } = sideTexts(sides);
   return ctx.edits.filter((edit) => {
     if (edit.retired === true) return false;
     // An explicit user deletion supersedes earlier edits only after both sides
     // show that deletion. A restore removes this intent and checks the edits again.
     const deletedId = (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined)?.get(edit.path);
     if (deletedId !== undefined && (ctx.observations.get('linear.editsBeforeTrash') as Map<string, Set<string>> | undefined)?.get(edit.path)?.has(edit.token) === true && !sides.files.has(edit.path) && sides.documents.get(deletedId)?.trashed === true) return false;
-    const inGit = gitText.includes(edit.token);
-    const inLinear = linearText.includes(edit.token);
+    const inGit = holdsToken(gitText, edit.token);
+    const inLinear = holdsToken(linearText, edit.token);
     return edit.removal === true ? inGit || inLinear : !(inGit && inLinear);
   });
 }
@@ -918,27 +1064,63 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
   const world = ctx.live;
   if (world === null) return {};
   const refs = await world.sandbox.runRefs();
-  return Object.fromEntries(refs.filter((ref) => ref.runId === ctx.names.runId && ref.ref !== `refs/heads/${ctx.names.trackedBranch}`).map((ref) => [ref.ref, ref.oid]));
+  const snapshot = Object.fromEntries(refs.filter((ref) => ref.runId === ctx.names.runId && ref.ref !== `refs/heads/${ctx.names.trackedBranch}`).map((ref) => [ref.ref, ref.oid]));
+  // Evidence only: a commit not kept leaves I4 to fetch it as before, so a failure here never fails the run.
+  await keepSeenCommits(world.sandbox, snapshot).catch((error: unknown) => ctx.log(`ref snapshot: commits not kept in the sandbox cache: ${(error as Error).message}`));
+  return snapshot;
 }
 
-/** Stable solo/parallel evidence. Only known resource identities are normalized;
- * document text is hashed after its own links are resolved to corpus paths. */
+/**
+ * Fetches each commit a snapshot lists into the sandbox cache while the remote
+ * still holds it. A later step can leave a commit without any ref on the
+ * remote (an initial sync replacing its record after the sync branch was
+ * deleted), and I4 then still compares it with its successor: the person's
+ * clone borrows the cache's objects. The objects need no ref; the cache keeps
+ * them until it prunes objects weeks old. Each commit is fetched on its own,
+ * so one that has gone since the listing does not keep the others out.
+ */
+async function keepSeenCommits(sandbox: { cache: Git; url: string }, snapshot: Readonly<Record<string, string>>): Promise<void> {
+  const oids = [...new Set(Object.values(snapshot))];
+  if (oids.length === 0) return;
+  const known = await sandbox.cache.run(['cat-file', '--batch-check'], { input: `${oids.join('\n')}\n` });
+  const missing = oids.filter((oid) => !known.stdout.toString('utf8').includes(`${oid} commit `));
+  for (const oid of missing) await sandbox.cache.run(['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', sandbox.url, oid], { okCodes: [0, 1, 128] });
+}
+
+/** The placeholder that stands for the run's own id in isolation evidence. */
+export const RUN_ID_PLACEHOLDER = '<run>';
+
+/** A function that replaces every standalone occurrence of the run's own id with the placeholder.
+ * An id inside a longer word (a commit hash, an upload key, `key_<id>`) is left alone, and so is any other run's id. */
+export function withoutRunId(runId: string): (text: string) => string {
+  if (!RUN_ID_PATTERN.test(runId)) throw new Error(`run id must be six hex characters: ${runId}`);
+  const own = new RegExp(`(?<![0-9A-Za-z_])${runId}(?![0-9A-Za-z_])`, 'g');
+  return (text) => text.replace(own, RUN_ID_PLACEHOLDER);
+}
+
+/** Stable solo/parallel evidence. Only known resource identities are normalized:
+ * document text is hashed after its own links are resolved to corpus paths, and
+ * the run's own id becomes a placeholder in paths, titles and text, so two runs
+ * that differ only by run id give the same snapshot. */
 export function isolationSnapshot(ctx: RunContext, sides: Sides): unknown {
   const world = ctx.live;
   if (world === null) throw new Error('isolation evidence needs a live world');
+  const own = withoutRunId(ctx.names.runId);
   const source = (path: string) => world.tree.paths.get(path) ?? path;
   const ids = new Map([...sides.ids].map(([path, entry]) => [source(path), entry]));
   const uploads = new Map([...sides.uploads].map(([url, path]) => [url, source(path)]));
   const projects = new Map([...world.projects].map(([placeholder, project]) => [project.id, placeholder]));
   const teams = new Map([...world.teams].map(([key, team]) => [team.id, key]));
-  return [...sides.files.keys()].sort().map((path) => {
+  // Ordered by the normalized path, which is what two runs compare.
+  return [...sides.files.keys()].map((path) => {
     const id = sides.ids.get(path)?.id;
     const doc = id === undefined ? undefined : sides.documents.get(id);
-    if (doc === undefined) return { path: source(path), document: null };
+    if (doc === undefined) return { path: own(source(path)), document: null };
     const content = gitLinks(doc.content ?? '', source(path), { ids, uploads, documentUrlBase: sides.documentUrlBase });
-    return { path: source(path), title: doc.projectId === null && doc.title.startsWith(ctx.names.teamZonePrefix) ? doc.title.slice(ctx.names.teamZonePrefix.length) : doc.title,
+    const title = doc.projectId === null && doc.title.startsWith(ctx.names.teamZonePrefix) ? doc.title.slice(ctx.names.teamZonePrefix.length) : doc.title;
+    return { path: own(source(path)), title: own(title),
       place: doc.projectId === null ? teams.get(doc.teamId ?? '') : projects.get(doc.projectId), state: documentState(doc),
-      contentHash: createHash('sha256').update(content).digest('hex') };
+      contentHash: createHash('sha256').update(own(content)).digest('hex') };
   }).sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -979,5 +1161,10 @@ export async function runChecks(ctx: RunContext): Promise<CheckOutcome[]> {
     }
   }
   if (zoneConcurrent(ctx.scenario)) ctx.observations.set('isolation.snapshot', isolationSnapshot(ctx, await readSides(ctx)));
+  // The conflict marks of the world after I6, for the report only: a failed read never decides the result.
+  if (ctx.live !== null) {
+    try { ctx.observations.set('conflictMarks', await conflictMarks(ctx, await readSides(ctx))); }
+    catch (error) { ctx.log(`conflict marks not recorded: ${(error as Error).message}`); }
+  }
   return outcomes;
 }

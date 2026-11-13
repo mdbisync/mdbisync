@@ -385,7 +385,7 @@ describe('initial sync from Linear to the tracked branch', () => {
   it('L1R-04: downloads the files documents embed next to them, stored as .gitattributes decides, linked relatively and cached', async () => {
     await fixture.seed({ '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n' });
     const world = fakeWorld();
-    const shot = Buffer.from('png bytes of a screenshot');
+    const shot = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
     const spec = Buffer.from('%PDF-1.4 a specification');
     // The same bytes as a file the tracked branch already holds (committed before the LFS pattern).
     const diagram = Buffer.from(TREE['eng/notes/diagram.png'] as string);
@@ -436,6 +436,41 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(world.linear.documents.find((d) => d.id === 'doc-runbook')?.content, contents['doc-runbook']);
   });
 
+  it('keeps the tracked spelling of links to embedded files on a first run, so a replacement after abandoning it reuses the same record', async () => {
+    // The tracked plan links its pictures as people write them: with `./`, and in angle brackets around a space.
+    const wide = Buffer.from('a wide picture');
+    const plan = `---\nowner: platform\n---\n\n# Plan\n\n![Diagram](./diagram.png)\n\n![Wide](<./my shots/wide shot.png>)\n`;
+    await fixture.seed({ 'eng/notes/plan.md': plan, 'eng/notes/my shots/wide shot.png': wide.toString() });
+    const world = fakeWorld();
+    // Linear holds each picture as an upload of the same bytes; the upload cache is empty, as before any first run.
+    const upload = (name: string, bytes: Buffer) => {
+      const assetUrl = `${UPLOADS_HOST}/${world.linear.uploads.length}/${name}`;
+      world.linear.uploads.push({ filename: name, contentType: 'image/png', size: bytes.length, assetUrl, bytes });
+      return assetUrl;
+    };
+    const diagramUrl = upload('diagram.png', Buffer.from(TREE['eng/notes/diagram.png'] as string));
+    const wideUrl = upload('wide.png', wide);
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Diagram](${diagramUrl})\n\n![Wide](${wideUrl})\n` } : d));
+
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    // The tracked path, in Linear's brackets: Linear returned none, so the space is encoded, as for a link the cache knows.
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), plan.trimEnd().replace('<./my shots/wide shot.png>', './my%20shots/wide%20shot.png'));
+    assert.deepEqual((await files('refs/mdbisync/linear')).filter((path) => path.endsWith('.png')), ['eng/notes/diagram.png', 'eng/notes/my shots/wide shot.png']);
+    const record = (await refs())['refs/mdbisync/linear'];
+
+    // A person closes the pull request and deletes its branch; a new initial sync from Linear replaces the record.
+    const initial = world.github.pullRequests[0];
+    assert.ok(initial);
+    initial.state = 'closed';
+    await fixture.remote.run(['update-ref', '-d', 'refs/heads/mdbisync/linear']);
+    const replaced = await run(world);
+    assert.equal(replaced.result.exitCode, 0, replaced.result.stderr);
+    // The same documents give the same record: the state ref stays where it was instead of moving to a sibling.
+    assert.equal((await refs())['refs/mdbisync/linear'], record);
+    assert.equal((await refs())['refs/heads/mdbisync/linear'], record);
+  });
+
   it('maps links to synchronized documents back to relative links, keeping the tracked spelling', async () => {
     // The tracked plan already links the README in its own spelling; Linear holds the document URL.
     await fixture.seed({ 'eng/notes/plan.md': `---\nowner: platform\n---\n\n# Plan\n\nSee [the notes](./README.md#top). ${CANARY}` });
@@ -455,26 +490,33 @@ describe('initial sync from Linear to the tracked branch', () => {
     );
   });
 
-  it('keeps a link to a new document left out as its Linear URL, and stores a file whose bytes equal a removed page', async () => {
+  it('keeps a link to a new document left out as its Linear URL', async () => {
     const world = fakeWorld();
     const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
-    // The bytes of the git-only page the pull request removes: the attachment must not point at it.
-    const bytes = Buffer.from(TREE['eng/backend/notes.md'] as string);
-    const attachment = `${UPLOADS_HOST}/0/notes.txt`;
-    world.linear.uploads.push({ filename: 'notes.txt', contentType: 'text/plain', size: bytes.length, assetUrl: attachment, bytes });
     const contents: Record<string, string> = {
-      // Reads as front matter: left out, so it has no file to link to.
       'doc-faq': `---\nlinear-team: DOCS\n---\nLooks like metadata. ${CANARY}`,
-      'doc-runbook': `# Runbook\n\nSee [the FAQ](${url('doc-faq')}) and [the notes](${attachment}).\n`,
+      'doc-runbook': `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).\n`,
     };
     world.linear.documents = linearDocuments().map((d) => (contents[d.id] === undefined ? d : { ...d, content: contents[d.id] as string }));
     const { result, report } = await run(world);
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/faq.md', rule: 'front-matter-boundary' }]);
-    const hash = createHash('sha256').update(bytes).digest('hex');
-    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}) and [the notes](${hash}.txt).`);
-    assert.deepEqual((await fixture.remote.run(['show', `refs/mdbisync/linear:eng/ops/${hash}.txt`])).stdout, bytes);
-    assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/backend/notes.md'));
+    assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
+  });
+
+  it('refuses unsupported attachment bytes equal to a removed Markdown page instead of linking that page', async () => {
+    const world = fakeWorld();
+    const bytes = Buffer.from(TREE['eng/backend/notes.md'] as string);
+    const attachment = `${UPLOADS_HOST}/0/notes.txt`;
+    world.linear.uploads.push({ filename: 'notes.txt', contentType: 'text/plain', size: bytes.length, assetUrl: attachment, bytes });
+    world.linear.documents = linearDocuments().map((d) => d.id === 'doc-runbook' ? {...d, content:`# Runbook\n\n[Notes](${attachment}).\n`} : d);
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{path:'eng/ops/runbook.md', rule:'image-blocked'}]);
+    const tree = await files('refs/mdbisync/linear');
+    assert.ok(!tree.includes('eng/ops/runbook.md'));
+    assert.ok(!tree.includes('eng/backend/notes.md'));
+    assert.ok(!tree.some((path) => path.endsWith('.txt')));
   });
 
   it('a link to a new page the mapping leaves out (stored in LFS) stays its Linear URL in the record', async () => {
@@ -491,7 +533,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
   });
 
-  it('a file that cannot be downloaded keeps the tracked file, which stays its document', async () => {
+  it('a dead upload keeps the tracked file, which stays its document', async () => {
     const world = fakeWorld();
     const gone = `![Gone](${UPLOADS_HOST}/9/gone.png)\n`;
     world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' || d.id === 'doc-faq' ? { ...d, content: `# Page\n\n${gone}` } : d));
@@ -499,8 +541,8 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(result.exitCode, 0, result.stderr);
     // A new file is left out with its id; an existing one keeps the tracked text and its id.
     assert.deepEqual(report.linearToGit?.leftOutAtRecord.sort((a, b) => a.path.localeCompare(b.path)), [
-      { path: 'eng/notes/faq.md', rule: 'download-failed' },
-      { path: 'eng/notes/plan.md', rule: 'download-failed' },
+      { path: 'eng/notes/faq.md', rule: 'image-blocked' },
+      { path: 'eng/notes/plan.md', rule: 'image-blocked' },
     ]);
     assert.equal((await readIds())['eng/notes/faq.md'], undefined);
     assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/notes/faq.md'));
@@ -511,6 +553,69 @@ describe('initial sync from Linear to the tracked branch', () => {
     const latest = world.linear.documents.map((d) => d.updatedAt ?? d.createdAt).sort().at(-1);
     assert.notEqual(planTime, latest);
     assert.match(await fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/ids']), new RegExp(`^Capture-through: ${planTime}$`, 'm'));
+  });
+
+  it('an image that is not an upload stays out of the record, and the first sync after the merge blocks its document', async () => {
+    const world = fakeWorld();
+    const contents: Record<string, string> = {
+      // An external URL a person typed in the editor, on a document whose file exists.
+      'doc-plan': `# Plan\n\n![Chart](https://images.example.test/chart.png) ${CANARY}\n`,
+      // A relative path, on a document that would be a new file.
+      'doc-faq': `# FAQ\n\nText ${CANARY}.\n\n![Diagram](./diagram.png)\n`,
+    };
+    world.linear.documents = linearDocuments().map((d) => (contents[d.id] === undefined ? d : { ...d, content: contents[d.id] as string }));
+    const { result, report } = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.linearToGit?.leftOutAtRecord.sort((a, b) => a.path.localeCompare(b.path)), [
+      { path: 'eng/notes/faq.md', rule: 'image-blocked' },
+      { path: 'eng/notes/plan.md', rule: 'image-blocked' },
+    ]);
+    // Nothing is fetched but Linear's own hosts, and the initial sync writes nothing to Linear.
+    assert.ok(!world.requests.some((request) => request.includes('images.example.test')), 'the external image was fetched');
+    assert.deepEqual(linearMutations(world), []);
+    assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/notes/faq.md'));
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), (TREE['eng/notes/plan.md'] as string).replace(/\n$/, ''));
+    assert.equal((await readIds())['eng/notes/plan.md'], 'doc-plan');
+    assert.equal((await readIds())['eng/notes/faq.md'], undefined);
+    // The first sync after the merge reads both again: the plan by the cursor, which stays at its document,
+    // and the FAQ as a document without an id.
+    const plan = world.linear.documents.find((d) => d.id === 'doc-plan') as FakeDocument;
+    assert.match(await fixture.remote.text(['log', '-1', '--format=%B', 'refs/mdbisync/ids']), new RegExp(`^Capture-through: ${plan.updatedAt ?? plan.createdAt}$`, 'm'));
+
+    await merge(world);
+    const tracked = await files('refs/heads/main');
+    const after = await run(world, {}, 'sync');
+    assert.equal(after.result.exitCode, 0, after.result.stderr);
+    assert.ok(!world.requests.some((request) => request.includes('images.example.test')), 'the external image was fetched');
+    // The capture blocks both documents with the mark and the comment, as for any later edit.
+    const notice = (line: number) => `Some images in this document cannot be synchronized. Fix the listed images and sync again.\n\n- Image 1 of 1 (line ${line}): not uploaded to this workspace. Upload the file instead of linking to it.`;
+    for (const [id, line] of [['doc-plan', 3], ['doc-faq', 5]] as const) {
+      assert.equal(world.linear.documents.find((d) => d.id === id)?.icon, 'Cross', id);
+      const comments = [...world.linear.comments.values()].filter((comment) => comment.body === notice(line));
+      assert.equal(comments.length, 1, `${id}: ${JSON.stringify([...world.linear.comments.values()].map((comment) => comment.body))}`);
+    }
+    // Neither text reaches git: the tracked branch keeps the plan's tracked text and gets no FAQ file.
+    assert.deepEqual(await files('refs/heads/main'), tracked);
+    assert.equal(await show('refs/heads/main:eng/notes/plan.md'), (TREE['eng/notes/plan.md'] as string).replace(/\n$/, ''));
+    for (const ref of ['refs/mdbisync/linear', 'refs/heads/mdbisync/linear']) {
+      const tree = await files(ref).catch(() => [] as string[]);
+      assert.ok(!tree.includes('eng/notes/faq.md'), ref);
+      if (tree.includes('eng/notes/plan.md')) assert.ok(!(await show(`${ref}:eng/notes/plan.md`)).includes('images.example.test'), ref);
+    }
+  });
+
+  it('stops when Linear refuses the run access to an upload, instead of leaving the document out', async () => {
+    const world = fakeWorld();
+    const refused = `${UPLOADS_HOST}/0/refused.png`;
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Chart](${refused}) ${CANARY}\n` } : d));
+    const base = fakeFetch(world);
+    const fetch: typeof globalThis.fetch = async (input, init) => (String(input) === refused ? new Response(null, { status: 403 }) : base(input, init));
+    const before = await refs();
+    await assert.rejects(runCli(['initial-sync'], { env: env({}), cwd, fetch }), (error: unknown) =>
+      error instanceof Error && error.name === 'LinearHttpError' && (error as { httpStatus?: number }).httpStatus === 403 && !error.message.includes(CANARY));
+    // Nothing is recorded: no record, no pull request.
+    assert.equal((await refs())['refs/mdbisync/linear'], before['refs/mdbisync/linear']);
+    assert.equal(world.github.pullRequests.length, 0);
   });
 
   it('a folder README an initial sync to Linear left out is created once its file can be uploaded, its body unchanged', async () => {
@@ -546,7 +651,7 @@ describe('initial sync from Linear to the tracked branch', () => {
     plan.content = `# Page\n\n![Gone](${UPLOADS_HOST}/9/gone.png)\n`;
     const again = await run(world);
     assert.equal(again.result.exitCode, 0, again.result.stderr);
-    assert.deepEqual(again.report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/plan.md', rule: 'download-failed' }]);
+    assert.deepEqual(again.report.linearToGit?.leftOutAtRecord, [{ path: 'eng/notes/plan.md', rule: 'image-blocked' }]);
     assert.deepEqual(await readIds(), ids);
     assert.equal(await cursor(), plan.createdAt);
   });
@@ -1052,9 +1157,9 @@ describe('the security gate of an initial sync from Linear', () => {
       const mapping = await loadMapping(git, fetched.tracked);
       const world = fakeWorld();
       const SECRET = ['blocked', 'value', '731'].join('-');
-      const leak = `${UPLOADS_HOST}/0/env.txt`;
-      const bytes = Buffer.from(`token: ${SECRET}\n`);
-      world.linear.uploads.push({ filename: 'env.txt', contentType: 'text/plain', size: bytes.length, assetUrl: leak, bytes });
+      const leak = `${UPLOADS_HOST}/0/env.pdf`;
+      const bytes = Buffer.from(`%PDF-1.4 token: ${SECRET}\n`);
+      world.linear.uploads.push({ filename: 'env.pdf', contentType: 'application/pdf', size: bytes.length, assetUrl: leak, bytes });
       world.linear.documents = linearDocuments().map((d) =>
         d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n[env](${leak})\n` } : d.id === 'doc-faq' ? { ...d, content: `# FAQ\n\n${SECRET}\n` } : d,
       );
@@ -1079,9 +1184,9 @@ describe('the security gate of an initial sync from Linear', () => {
         { path: 'eng/notes/plan.md', rule: 'security-hook' },
       ]);
       // The hooks saw the downloaded file with its document.
-      assert.ok(checked.some((paths) => paths.includes('eng/notes/plan.md') && paths.some((path) => path.endsWith('.txt'))));
+      assert.ok(checked.some((paths) => paths.includes('eng/notes/plan.md') && paths.some((path) => path.endsWith('.pdf'))));
       const tree = (await fixture.remote.text(['ls-tree', '-r', '--name-only', 'refs/mdbisync/linear'])).split('\n');
-      assert.ok(!tree.includes('eng/notes/faq.md') && !tree.some((path) => path.endsWith('.txt')));
+      assert.ok(!tree.includes('eng/notes/faq.md') && !tree.some((path) => path.endsWith('.pdf')));
       // The existing file keeps the tracked text and stays its document's.
       const ids = JSON.parse(await fixture.remote.text(['show', 'refs/mdbisync/ids:ids.json'])) as Record<string, { id: string }>;
       assert.equal(ids['eng/notes/plan.md']?.id, 'doc-plan');

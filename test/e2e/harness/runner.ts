@@ -5,11 +5,14 @@
 import { collectCanaryEvidence } from './checks.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts';
-import { Git, readIds } from '../../../src/state/index.ts';
+import { parse, visit } from '../../../src/format/markdown.ts';
+import { contentTypeOf, destinations, resolveTarget } from '../../../src/initial-sync/uploads.ts';
+import { isRegularFile, MARKDOWN_EXTENSION } from '../../../src/mapping/index.ts';
+import { Git, lfsReader, listTree, parseLfsPointer, readBlobs, readIds, type LfsRead } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
+import { REF_MOVES, runChecks, snapshotRefs, bodyOf, titleOf } from './checks.ts';
 import type { LinearApp, TestConfig } from './config.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { annotatedFolders, CORPUS_DIR, inheritedTeam, owningFolder, readAnnotation, type Manifest, type RunTree } from './corpus.ts';
@@ -18,19 +21,21 @@ import { runScheduled } from './schedule.ts';
 import { BudgetBlockedError, budgetFromStatus, estimate, MAX_ADMISSION, type Governor } from './governor.ts';
 import { SandboxRest, githubToken, type GitHubToken } from './github.ts';
 import { newRunId, runNames, runOfTeamTitle, type RunNames } from './isolation.ts';
-import { engineRequestCount, requestBuckets, remoteRequests, isGraphql } from './request-accounting.ts';
+import { answerSizes, engineRequestCount, requestBuckets, remoteRequests, isGraphql } from './request-accounting.ts';
 import { withAppRequests } from './app-reads.ts';
 import { LinearWorld, editorClient, type Project, type Team } from './linear-world.ts';
 import { acquireLock, LockTimeoutError, registerRun, type Lock } from './locks.ts';
-import { OwnershipLedger, ownedDocuments, type WriteObserver } from './ownership.ts';
+import { OwnershipLedger, readOwnership, type WriteObserver } from './ownership.ts';
+import { retryGitHubCleanup } from './cleanup-retry.ts';
 import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
+import { finishPersonClone } from './person-git.ts';
 import { assertCurrentCorpus } from './corpus-drift.ts';
 import { CorpusMissingError, hookEnv, installHooks, Sandbox } from './sandbox.ts';
 import { provisionHookNpm } from './hook-npm.ts';
 import { PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
 import { levelOf, type Scenario } from './spec.ts';
-import { runStep, settleFollowUpRuns } from './steps.ts';
-import { prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES } from './fixtures.ts';
+import { requiredActionSha, RUN_REFS, runStep, settleFollowUpRuns } from './steps.ts';
+import { openSetupConflict, prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES, type FixtureTools } from './fixtures.ts';
 import { projectFolders } from './step-helpers.ts';
 import { BEFORE_VIEW, takeStartView, encodeTitlePath } from './subjects.ts';
 import { renderUiChecklist } from './ui-checklist.ts';
@@ -216,7 +221,8 @@ export async function liveWorld(
     ?? `https://linear.app/${(await appClient.request<{ organization: { urlKey: string } }>('Organization', 'query', 'query Organization { organization { urlKey } }')).organization.urlKey}/document`;
   return {
     sandbox: parts.sandbox,
-    rest: new SandboxRest(config, parts.token.token),
+    rest: new SandboxRest(config, parts.token.getToken ?? parts.token.token),
+    ...(parts.token.getToken === undefined ? {} : { getGithubToken: parts.token.getToken }),
     githubToken: parts.token.token,
     githubTokenSource: parts.token.source,
     ...(parts.token.appLogin === undefined ? {} : { githubAppLogin: parts.token.appLogin }),
@@ -295,7 +301,7 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
   } catch (error) {
     throw new EnvBlockedError(`GitHub token: ${(error as Error).message}`);
   }
-  const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, stateDir: deps.stateDir, runId: ctx.names.runId });
+  const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, ...(token.getToken === undefined ? {} : { getToken: token.getToken }), stateDir: deps.stateDir, runId: ctx.names.runId });
   ctx.sandbox = sandbox;
   ctx.phase('sandbox cache');
   await sandbox.refreshCache();
@@ -305,9 +311,11 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     ctx.phase('corpus manifest');
     manifest = await sandbox.manifest();
     ctx.phase('tracked branch');
+    ctx.remoteWritesStarted = true;
     created = await sandbox.createTrackedBranch(ctx.scenario.slice, ctx.names, {
       validate: (selected) => assertCurrentCorpus(manifest, selected, (path) => sandbox.readMain(`corpus/${path}`), deps.teams),
       checks: publishesCheckWorkflow(ctx.scenario),
+      ...(ctx.scenario.steps.some((step) => step.kind === 'run' && step.action === 'soak') ? { soak: manifest } : {}),
       ...(deps.teams === undefined ? {} : { teams: deps.teams }),
     });
   } catch (error) {
@@ -365,24 +373,32 @@ async function setupLive(ctx: RunContext, deps: RunnerDeps, appName: string, loc
     live.projects.set(placeholder, project);
   }
 
-  const state = ctx.scenario.setup.state;
   ctx.phase('setup state');
-  const tools = { runStep };
+  await setupState(ctx, live, { runStep });
+}
+
+/**
+ * The setup's state on a world whose tracked branch and projects exist: the
+ * fixtures, the initial sync and the setup conflict, as the scenario's
+ * `setup.state` asks. `tools.runStep` runs each step; the offline specs pass
+ * one that runs the engine in process.
+ */
+export async function setupState(ctx: RunContext, live: LiveWorld, tools: FixtureTools): Promise<void> {
+  const state = ctx.scenario.setup.state;
   await prepareFixtures(ctx, live, 'beforeSync', tools);
   if (state === 'linear-seeded') await seedLinear(ctx, live);
   if (state === 'converged' || state === 'conflicted') {
-    await runStep(ctx, { kind: 'run', action: 'initial-sync', args: { direction: 'git-to-linear', confirm: true } });
+    await tools.runStep(ctx, { kind: 'run', action: 'initial-sync', args: { direction: 'git-to-linear', confirm: true } });
     await prepareFixtures(ctx, live, 'afterSync', tools);
   }
-  if (state === 'conflicted') {
-    // Both sides edit the same paragraph of the same document: an open conflict.
-    await runStep(ctx, { kind: 'git', action: 'edit', args: { fixture: 'same-paragraph' } });
-    await runStep(ctx, { kind: 'linear', action: 'edit', args: { actor: 'editor-a', fixture: 'same-paragraph' } });
-    await runStep(ctx, { kind: 'run', action: 'sync', args: {} });
-  }
-  // The scenario's own edits and runs start here: setup's edits are not the scenario's.
+  if (state === 'conflicted') await openSetupConflict(ctx, tools);
+  await endSetup(ctx, live);
+}
+
+/** The scenario's own edits and runs start here: setup's edits and runs are not the scenario's. */
+async function endSetup(ctx: RunContext, live: LiveWorld): Promise<void> {
   ctx.engine.setupRuns = ctx.engine.results.length;
-  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.|harness\.runView\.)/.test(key)) ctx.observations.delete(key);
+  for (const key of [...ctx.observations.keys()]) if (/^(target\.|edited\.|runs\.|harness\.runs\.|harness\.quiet\.|harness\.untouched\.|harness\.refs\.|harness\.runView\.)/.test(key)) ctx.observations.delete(key);
   await recordStart(ctx, live);
 }
 
@@ -409,6 +425,7 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
   const folders = annotatedFolders(readmes);
   const synced = new Set(live.manifest.files.filter((file) => file.synced && file.class !== 'lint-error').map((file) => file.path));
   const seededPaths = new Map<string, string>();
+  const images = trackedImageUploads(ctx, live);
   for (const [target, source] of live.tree.paths) {
     if (!synced.has(source) || !target.endsWith('.md')) continue;
     const folder = owningFolder(target, folders);
@@ -419,13 +436,83 @@ async function seedLinear(ctx: RunContext, live: LiveWorld): Promise<void> {
     const team = folder.team === null ? undefined : live.teams.get(folder.team);
     const place = project !== undefined ? { projectId: project.id } : team !== undefined ? { teamId: team.id } : null;
     if (place === null) continue;
-    const document = await live.editors['editor-a'].createDocument(place, { id: randomUUID(), title: titleOf(target, folder.folder), content: bodyOf(texts.get(target) ?? '') });
+    const content = await uploadImages(target, bodyOf(texts.get(target) ?? ''), images);
+    const document = await live.editors['editor-a'].createDocument(place, { id: randomUUID(), title: titleOf(target, folder.folder), content });
     live.seededDocuments.push(document.id);
     seededPaths.set(target, document.id);
   }
   ctx.observations.set('setup.seededPaths', seededPaths);
   for (const fixture of ctx.scenario.setup.fixtures) await FIXTURE_PREPARATION[fixture]?.(ctx, live);
   ctx.observations.set('setup.seeded', [...live.seededDocuments]);
+}
+
+/** Uploads a tracked file once, by its path, and gives its upload URL; null for a path that is not a tracked file. */
+type ImageUploads = (path: string) => Promise<string | null>;
+
+/**
+ * A synchronized document in Linear holds its images as uploads of the
+ * workspace, as a pasted image or the sync's own write makes them; a relative
+ * path there is an image Linear cannot show, and the capture blocks the
+ * document. The seeded documents therefore embed each tracked image as an
+ * upload of the tracked file's own bytes, so the initial sync from Linear
+ * maps it back to that file. The tracked tree is read on the first image.
+ */
+function trackedImageUploads(ctx: RunContext, live: LiveWorld): ImageUploads {
+  let tracked: Promise<{ git: Git; files: Map<string, string> }> | undefined;
+  const read = async () => {
+    const git = await ctx.person();
+    const tip = (await git.text(['rev-parse', 'HEAD'])).trim();
+    // Files as the initial sync sees them: regular files that are not documents.
+    const files = new Map((await listTree(git, tip)).filter((entry) => isRegularFile(entry) && !entry.path.endsWith(MARKDOWN_EXTENSION)).map((entry) => [entry.path, entry.oid]));
+    return { git, files };
+  };
+  const urls = new Map<string, Promise<string>>();
+  let readLfs: LfsRead | undefined;
+  const upload = async (git: Git, path: string, oid: string): Promise<string> => {
+    const blob = (await readBlobs(git, [oid])).get(oid) as Buffer;
+    const pointer = parseLfsPointer(blob);
+    let bytes = blob;
+    if (pointer !== null) {
+      readLfs ??= await lfsReader(git, 'origin');
+      const lfs = await readLfs(pointer, path);
+      if (!lfs.ok) throw new EnvBlockedError(`the seeded image ${path} cannot be read from LFS: ${lfs.reason}`);
+      bytes = lfs.content;
+    }
+    const uploaded = await live.editors['editor-a'].uploadFile({ filename: posix.basename(path), contentType: contentTypeOf(path), bytes: new Uint8Array(bytes) });
+    return uploaded.assetUrl;
+  };
+  return async (path) => {
+    tracked ??= read();
+    const { git, files } = await tracked;
+    const oid = files.get(path);
+    if (oid === undefined) return null;
+    if (!urls.has(path)) urls.set(path, upload(git, path, oid));
+    return urls.get(path) as Promise<string>;
+  };
+}
+
+/**
+ * `body` with each image that names a tracked file pointing at that file's
+ * upload instead: inline images, and the definitions reference-style images
+ * use. Links stay as they are; only images must be uploads.
+ */
+async function uploadImages(documentPath: string, body: string, images: ImageUploads): Promise<string> {
+  const referenced = new Set<string>();
+  visit(parse(body), (node) => {
+    if (node.type === 'imageReference') referenced.add(node.identifier);
+  });
+  let result = '';
+  let at = 0;
+  for (const { node, range } of destinations(body)) {
+    if (node.type !== 'image' && !(node.type === 'definition' && referenced.has(node.identifier))) continue;
+    const target = resolveTarget(documentPath, node.url);
+    const url = target === null ? null : await images(target);
+    if (url === null) continue;
+    const cut = node.url.search(/[?#]/);
+    result += `${body.slice(at, range.from)}${url}${cut === -1 ? '' : node.url.slice(cut)}`;
+    at = range.to;
+  }
+  return result + body.slice(at);
 }
 
 /** A 1×1 PNG, for an image that exists only in Linear. */
@@ -490,9 +577,9 @@ async function recordedIds(ctx: RunContext): Promise<string[]> {
   const sandbox = ctx.sandbox;
   if (sandbox === undefined) return [];
   const ref = `${ctx.names.refPrefix}/ids`;
-  if (!(await sandbox.runRefs()).some((entry) => entry.ref === ref)) return [];
+  if (!(await retryGitHubCleanup(() => sandbox.runRefs())).some((entry) => entry.ref === ref)) return [];
   const git = await ctx.person();
-  await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+  await retryGitHubCleanup(() => git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]));
   const ids = await readIds(git, (await git.text(['rev-parse', ref])).trim());
   return [...ids.values()].map((entry) => entry.id);
 }
@@ -533,7 +620,7 @@ export async function removeRunRefsAndPullRequests(
   }
   if (sandbox !== undefined) {
     try {
-      const ofRun = async () => (await sandbox.runRefs()).filter((ref) => ref.runId === runId).map((ref) => ref.ref);
+      const ofRun = async () => (await retryGitHubCleanup(() => sandbox.runRefs())).filter((ref) => ref.runId === runId).map((ref) => ref.ref);
       await sandbox.deleteRunRefs(runId, await ofRun());
       const left = await ofRun();
       if (left.length > 0) problems.push(`refs: still on the sandbox: ${left.join(', ')}`);
@@ -545,6 +632,7 @@ export async function removeRunRefsAndPullRequests(
 }
 
 async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string }> {
+  if (ctx.observations.get('workflows.unstopped') === true) return { ok: false, detail: 'scheduled writer stop is unconfirmed; retain resources and shared reservation for verified recovery' };
   const problems: string[] = [];
   const attempt = async (what: string, action: () => Promise<unknown>) => {
     try {
@@ -573,7 +661,12 @@ async function cleanup(ctx: RunContext): Promise<{ ok: boolean; detail?: string 
   // Every document the run made, by id: what the harness seeded, what the run's ownership record holds (every
   // create, a team zone's README and a create whose answer was lost included) and what the engine recorded.
   // Read the ids before the refs go.
-  const created = new Set([...(ctx.live?.seededDocuments ?? []), ...ownedDocuments(ctx.owned).keys()]);
+  const owned = readOwnership(ctx.owned.stateDir, ctx.names.runId);
+  if (ctx.live === null && ctx.remoteWritesStarted === false && owned !== null
+    && owned.teamIds.size === 0 && owned.projects.size === 0 && owned.documents.size === 0) {
+    return problems.length === 0 ? { ok: true } : { ok: false, detail: problems.join('; ') };
+  }
+  const created = new Set([...(ctx.live?.seededDocuments ?? []), ...(owned?.documents.keys() ?? [])]);
   if (ctx.live !== null) {
     await attempt('ids', async () => {
       for (const id of await recordedIds(ctx)) created.add(id);
@@ -625,7 +718,7 @@ async function corpusReader(deps: Pick<RunnerDeps, 'config' | 'stateDir'>, runId
   } catch (error) {
     throw new EnvBlockedError(`GitHub token: ${(error as Error).message}`);
   }
-  const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, stateDir: deps.stateDir, runId });
+  const sandbox = new Sandbox({ url: config.gitUrl, token: token.token, ...(token.getToken === undefined ? {} : { getToken: token.getToken }), stateDir: deps.stateDir, runId });
   try {
     await sandbox.refreshCache();
   } catch (error) {
@@ -665,6 +758,7 @@ export function createRunContext(
     names,
     runDir,
     live: null,
+    remoteWritesStarted: false,
     proxy: null,
     owned: new OwnershipLedger(deps.stateDir, runId),
     checkpoints: new CheckpointControl(join(runDir, 'hooks')),
@@ -813,6 +907,8 @@ export function resultOf(
     ...(ctx.observations.has('metrics') ? { metrics: ctx.observations.get('metrics') as Record<string, unknown> } : {}),
     ...(ctx.observations.has('corpus.teams') ? { corpusTeams: ctx.observations.get('corpus.teams') as string[] } : {}),
     ...(ctx.observations.has('zone.trash') ? { teamZoneTrash: ctx.observations.get('zone.trash') as Record<string, { before: number; after?: number }> } : {}),
+    ...(ctx.proxy === null ? {} : { answerSizes: answerSizes(ctx.proxy.requests) }),
+    ...(ctx.observations.has('conflictMarks') ? { conflictMarks: ctx.observations.get('conflictMarks') as NonNullable<ScenarioResult['conflictMarks']> } : {}),
   };
 }
 
@@ -847,6 +943,8 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
   try {
     if (scenario.setup.state !== 'offline') {
       requireLiveConfig(deps.config);
+      // Before admission and setup: an actions scenario without the release under test must create nothing.
+      if (scenario.mode === 'actions') requiredActionSha();
       if (deps.governor === null) throw new EnvBlockedError('no Linear app is configured');
       try {
         // Rendered workflows use the primary app's repository secrets. A
@@ -916,29 +1014,48 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     if (!heldForUi) cleanupOutcome = await cleanupAndCount(ctx);
     await ctx.proxy?.close();
     await ctx.engine.lfsProxy?.close();
-    locks.splice(0).reverse().forEach((lock) => lock.release());
+    const writerUnstopped = ctx.observations.get('workflows.unstopped') === true;
+    if (writerUnstopped) {
+      // Only verified recovery may release an unknown writer's team zones.
+      registration.hold(Number.MAX_SAFE_INTEGER);
+      locks.splice(0).reverse().forEach((lock) => lock.hold(Number.MAX_SAFE_INTEGER));
+    } else locks.splice(0).reverse().forEach((lock) => lock.release());
     if (grant !== undefined) for (const { entry } of remoteRequests(ctx)) {
       if (isGraphql(entry) && deps.config.linearApps[0] !== undefined) {
         deps.governor?.observeRateLimits(deps.config.linearApps[0].name, entry.rateLimitHeaders, Date.parse(entry.finishedAt));
       }
     }
-    if (grant !== undefined && (grant.owner === undefined || (cleanupOutcome.ok && !heldForUi && !setupStuck))) {
+    if (grant !== undefined && !writerUnstopped && (grant.owner === undefined || (cleanupOutcome.ok && !heldForUi && !setupStuck))) {
       try { await grant.release(); released = true; }
       catch { cleanupOutcome = { ok: false, detail: 'shared reservation could not be released; retry cleanup before reuse' }; }
     }
     clearInterval(heartbeat);
     if (setupStuck) cleanupOutcome = { ok: false, detail: `setup did not stop; ${cleanupOutcome.detail ?? 'cleaned up'}; shared admission keeps its resources reserved for verified recovery` };
     if (cleanupOutcome.ok && !heldForUi && !setupStuck) registration.done();
-    rmSync(join(runDir, 'person'), { recursive: true, force: true });
     rmSync(join(runDir, 'engine'), { recursive: true, force: true });
     if (!setupStuck) rmSync(join(runDir, 'hook-npm'), { recursive: true, force: true });
   }
   const outcome = classify(error, deps.expectedRed.has(scenario.id));
+  finishPersonClone(runDir, outcome.result, log);
   log(`${outcome.result}${outcome.reason === undefined ? '' : `: ${outcome.reason}`}`);
   writeFileSync(join(runDir, 'harness.log'), logLines.join('\n'));
+  writeRunRefs(ctx, runDir);
   rmSync(join(runDir, 'canary-pending'), { force: true });
   const result = resultOf(ctx, outcome, { startedAt: started, budgetWaitMs: grant?.waitedMs ?? 0, checks, cleanup: cleanupOutcome });
   return grant?.owner !== undefined && !released ? { ...result, sharedReservationKept: true } : result;
+}
+
+/**
+ * The run's refs before and after each watched run, by the scenario's run
+ * index: the raw maps that `untouched.<n>` and `quiet.<n>` compare, so the
+ * run's evidence keeps what was compared and not only the outcome.
+ */
+export function writeRunRefs(ctx: RunContext, runDir: string): void {
+  const runs = Object.fromEntries([...ctx.observations].filter(([key]) => key.startsWith(RUN_REFS)).map(([key, value]) => [key.slice(RUN_REFS.length), value]));
+  if (Object.keys(runs).length > 0) writeFileSync(join(runDir, 'run-refs.json'), `${JSON.stringify(runs, null, 2)}\n`);
+  // I4's non-forward moves, with what differs between the two commits.
+  const moves = ctx.observations.get(REF_MOVES);
+  if (moves !== undefined) writeFileSync(join(runDir, 'ref-moves.json'), `${JSON.stringify(moves, null, 2)}\n`);
 }
 
 /** A check that does not hold fails the scenario as a product error; the outcomes stay in the result either way. */

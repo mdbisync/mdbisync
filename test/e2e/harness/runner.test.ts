@@ -8,19 +8,19 @@ import type { EngineResult } from './engine.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
 import { Git } from '../../../src/state/index.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
-import { budgetHolds, reportedHoldChanges, compare, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
+import { budgetHolds, reportedHoldChanges, compare, firstDifference, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
 import { loadTestConfig, parseEnvFile, parseRepoUrl } from './config.ts';
 import { Governor } from './governor.ts';
 import { appInstallationToken, appJwt, SandboxRest } from './github.ts';
 import { registerRun } from './locks.ts';
 import { evidenceSummary, mergeLatest, readLatest, renderRunMarkdown, renderStatusPage, updateStatusPage, type HarnessReport } from './report.ts';
-import { blockedBySetupStop, EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, classify, loadExpectedRed, type ScenarioResult } from './results.ts';
+import { blockedBySetupStop, EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, classify, gateExitCode, loadExpectedRed, runGate, type ScenarioResult } from './results.ts';
 import { removeRunRefsAndPullRequests, runScenario, runScenarios } from './runner.ts';
 import { Sandbox } from './sandbox.ts';
 import { SharedAdmission, type StateStore } from './shared-state.ts';
 import { loadScenarios } from './spec.ts';
-import { HARNESS_GAPS } from './steps.ts';
+import { ACTION_SHA_ENV, HARNESS_GAPS } from './steps.ts';
 import { shouldSweep, sweep, SWEEP_AGE_MS } from './sweeper.ts';
 import { generateKeyPairSync, createVerify } from 'node:crypto';
 
@@ -45,6 +45,27 @@ describe('results', () => {
     assert.equal(classify(new Error('boom'), true).result, 'fail');
     assert.deepEqual(classify(undefined, false), { result: 'pass' });
     assert.equal(classify(undefined, true).unexpectedPass, true);
+  });
+
+  it('gates a run on failures, failed cleanups and passes of scenarios on the expected-red list', () => {
+    const result = (id: string, outcome: ScenarioResult['result'], extra: Partial<ScenarioResult> = {}): ScenarioResult => ({
+      id, level: id.split('-')[0] as string, slice: 'mini', mode: 'local', runId: '4f1a9c', result: outcome, startedAt: '2026-11-08T23:00:00.000Z',
+      durationMs: 1000, engineRequests: 0, harnessRequests: 0, harnessAppRequests: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true }, ...extra,
+    });
+    assert.deepEqual(runGate([result('L1-04', 'expected-red'), result('L1-05', 'pass'), result('L6-01', 'env-blocked'), result('L2-02', 'skipped')]), { ok: true, messages: [] });
+    assert.deepEqual(runGate([
+      result('L1-04', 'fail'),
+      result('L1-05', 'pass', { cleanup: { ok: false, detail: 'left a branch' } }),
+      result('L3-07', 'pass', { unexpectedPass: true }),
+      result('L4-14', 'pass', { unexpectedPass: true }),
+    ]), {
+      ok: false,
+      messages: [
+        'failed: L1-04',
+        'cleanup failed: L1-05',
+        'unexpected pass: L3-07, L4-14 passed while on the expected-red list; remove them from test/e2e/expected-red.json',
+      ],
+    });
   });
 
   describe('an engine stopped at its setup check on its credentials', () => {
@@ -107,6 +128,19 @@ describe('results', () => {
 
   it('has an executor for every step action', () => {
     assert.equal(HARNESS_GAPS.size, 0);
+  });
+});
+
+describe('I1 differences', () => {
+  it('names where a file and its document first differ, and a final newline on its own', () => {
+    // As in the live L4-12 burst: a conflict block at the end, the file with a final newline, Linear without.
+    const marked = '**Sync conflict: git version**\n\nOurs.\n\n**Sync conflict: Linear version**\n\nTheirs.\n\n**Sync conflict: end**';
+    assert.equal(firstDifference(`${marked}\n`, marked), 'only the line breaks at the end differ (file ends "\\n", document ends "")');
+    assert.equal(firstDifference('x\n\n', 'x\n'), 'only the line breaks at the end differ (file ends "\\n\\n", document ends "\\n")');
+    assert.equal(firstDifference('a\r\n', 'a'), 'only the line breaks at the end differ (file ends "\\r\\n", document ends "")');
+    assert.equal(firstDifference('One.\n\nTwo.', 'One.\n\nTwo, edited.'), 'line 3: file "Two.", document "Two, edited."');
+    assert.equal(firstDifference('One.\n\nTwo.', 'One.'), 'line 2: file "", document (end)');
+    assert.match(firstDifference(`a\n${'x'.repeat(300)}`, 'a\ny'), /^line 2: file "x{120}…", document "y"$/);
   });
 });
 
@@ -304,6 +338,7 @@ describe('reports', () => {
     const summary = evidenceSummary(report);
     assert.match(summary, /Scenarios: 3; pass: 1, fail: 0, expected-red: 1, env-blocked: 1, skipped: 0/);
     assert.match(summary, /engine 9, harness editors 6, harness app reads 12;/);
+    assert.match(summary, /Unexpected passes \(fail the run; remove them from the expected-red list\): L2-01\./);
     assert.match(summary, /\| L1-04 \| expected-red \| 4 \| not implemented: initial-sync \|/);
     assert.match(renderRunMarkdown(report), /\| L2-01 \| 4f1a9c \| pass \(expected red\) \|  \| 3 \| 4 \| 1 \| ok \|/);
   });
@@ -361,6 +396,32 @@ process.exitCode = codes[command];
 `;
 
 describe('runner', () => {
+  it('fails the run when a scenario on the expected-red list passes, naming it and the list to remove it from', async () => {
+    const [result] = await withStubEngine('process.exitCode = 0;\n', () => runScenarios([byId('L0-04')], deps(), 1));
+    assert.equal(result?.result, 'pass');
+    assert.equal(result?.unexpectedPass, true);
+    const logged: string[] = [];
+    assert.equal(gateExitCode([result!], (line) => logged.push(line)), 1);
+    assert.deepEqual(logged, ['run fails: unexpected pass: L0-04 passed while on the expected-red list; remove it from test/e2e/expected-red.json']);
+  });
+
+  it('keeps the run green when a scenario on the expected-red list fails for a product reason', async () => {
+    // "Not implemented" from the engine, and a check that does not hold (a `fix` that is not idempotent).
+    const growing = [
+      "const { readdirSync, readFileSync, writeFileSync, statSync } = await import('node:fs');",
+      "const walk = (dir) => readdirSync(dir).flatMap((name) => statSync(`${dir}/${name}`).isDirectory() ? walk(`${dir}/${name}`) : [`${dir}/${name}`]);",
+      "for (const file of walk('.').filter((path) => path.endsWith('.md'))) writeFileSync(file, readFileSync(file, 'utf8') + 'x');",
+      '',
+    ].join('\n');
+    for (const engine of [NOT_IMPLEMENTED, growing]) {
+      const [result] = await withStubEngine(engine, () => runScenarios([byId('L0-01')], deps(), 1));
+      assert.equal(result?.result, 'expected-red');
+      const logged: string[] = [];
+      assert.equal(gateExitCode([result!], (line) => logged.push(line)), 0);
+      assert.deepEqual(logged, []);
+    }
+  });
+
   it('runs an offline scenario to expected-red when the engine answers "not implemented"', async () => {
     const result = await withStubEngine(NOT_IMPLEMENTED, () => runScenario(byId('L0-01'), deps()));
     assert.equal(result.result, 'expected-red');
@@ -424,6 +485,34 @@ describe('runner', () => {
       assert.equal(result?.result, 'env-blocked', sandboxUrl);
       assert.match(result?.reason ?? '', /test configuration is missing: MDBISYNC_TEST_SANDBOX_URL/, sandboxUrl);
       assert.equal(result?.cleanup.ok, true, sandboxUrl);
+    }
+    assert.deepEqual(touched, [], 'neither the shared admission nor the app budget was read');
+  });
+
+  it('blocks an actions scenario without the release under test before it touches the shared admission or the sandbox', async () => {
+    const touched: string[] = [];
+    const store: StateStore = {
+      async read() { touched.push('read'); throw new Error('not read'); },
+      async update() { touched.push('update'); throw new Error('not updated'); },
+    };
+    const governor = new Governor({
+      apps: [{ name: 'app1', key: 'k', readBudget: async () => { touched.push('budget'); throw new Error('not read'); } }],
+      stateDir: fresh('runner-governor-'), shared: new SharedAdmission(store),
+    });
+    const config = loadTestConfig({ MDBISYNC_TEST_CONFIG_DIR: fresh('runner-config-'), MDBISYNC_TEST_SANDBOX_URL: 'https://github.com/example/sandbox',
+      LINEAR_TEST_APP_CLIENT_ID: 'id', LINEAR_TEST_APP_CLIENT_SECRET: 'secret', LINEAR_TEST_ALICE_API_KEY: 'a', LINEAR_TEST_BOB_API_KEY: 'b' });
+    const app = config.linearApps[0]!;
+    const saved = process.env[ACTION_SHA_ENV];
+    delete process.env[ACTION_SHA_ENV];
+    try {
+      assert.equal(byId('L4-10').mode, 'actions');
+      const [result] = await runScenarios([byId('L4-10')], { ...deps(config), governor, appClients: new Map([[app.name, {} as LinearClient]]) }, 4);
+      assert.equal(result?.result, 'env-blocked');
+      assert.match(result?.reason ?? '', new RegExp(`${ACTION_SHA_ENV} is unset`));
+      assert.equal(result?.cleanup.ok, true);
+    } finally {
+      if (saved === undefined) delete process.env[ACTION_SHA_ENV];
+      else process.env[ACTION_SHA_ENV] = saved;
     }
     assert.deepEqual(touched, [], 'neither the shared admission nor the app budget was read');
   });

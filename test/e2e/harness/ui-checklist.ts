@@ -11,6 +11,7 @@
 import type { RunContext } from './context.ts';
 import type { RunNames } from './isolation.ts';
 import type { Scenario, Step } from './spec.ts';
+import { LINK_PAIR, type LinkPairFixture } from './fixtures.ts';
 
 const INSTRUCTIONS: Record<string, (args: Record<string, unknown>) => string> = {
   'verify-editor': (a) => `Check that the signed-in user is ${String(a.actor)}; wait until the screen has been idle at least ${String(a.requireIdleSeconds)} seconds before any input.`,
@@ -22,6 +23,7 @@ const INSTRUCTIONS: Record<string, (args: Record<string, unknown>) => string> = 
   'type-two-editors': (a) => `Have ${Array.isArray(a.actors) ? a.actors.join(' and ') : 'both editors'} type in the same document during a run; record both texts.`,
   'paste-image': () => 'Paste a small image into the document and wait until it shows.',
   'rename-trash-restore': (a) => `Rename the document to "${String(a.title ?? 'renamed')}", then move it to the trash and restore it.`,
+  'follow-document-links': () => `Open the document "${LINK_PAIR.source}" in the project named above. It links the document "${LINK_PAIR.target}" twice: "the route notes" to the whole document, and "depot hours" to its heading "Depot hours" (\`#${LINK_PAIR.anchor}\`). In the document view, click each link, going back to "${LINK_PAIR.source}" between the clicks. Record in the values below whether each click opened "${LINK_PAIR.target}" (in place or in a new tab, with no "not found" page) and whether the second one scrolled to the heading. Answer pass once both links are clicked and recorded, whatever they did.`,
   'assert-dom': () => 'Check the page for the expected state below and describe what it shows.',
 };
 
@@ -29,6 +31,8 @@ const INSTRUCTIONS: Record<string, (args: Record<string, unknown>) => string> = 
 const RECORDS: Record<string, string[]> = {
   // tracked.bothEditorChangesPresent looks for each editor's text on the tracked branch.
   'type-two-editors': ['ui.typedTexts'],
+  // Whether the link with a heading anchor scrolled to the heading: recorded, not required (the link opening is).
+  'follow-document-links': ['ui.anchorScrolls'],
 };
 
 export function describeUiStep(step: Step): string {
@@ -45,12 +49,14 @@ export function uiValueSubjects(scenario: Scenario): string[] {
   return [...new Set(subjects)];
 }
 
-export function renderUiChecklist(scenario: Scenario, names: RunNames, ctx: Pick<RunContext, 'live' | 'runDir'>): string {
+export function renderUiChecklist(scenario: Scenario, names: RunNames, ctx: Pick<RunContext, 'live' | 'runDir'> & Partial<Pick<RunContext, 'observations'>>): string {
   const projects = ctx.live === null ? [] : [...ctx.live.projects.values()].map((project) => project.name);
+  const pair = ctx.observations?.get('fixture.linkPair') as LinkPairFixture | undefined;
   const lines = [
     `# UI checklist: ${scenario.id} (run ${names.runId})`,
     '',
     `- Projects: ${projects.length === 0 ? 'none' : projects.join(', ')}`,
+    ...(pair === undefined ? [] : [`- "${LINK_PAIR.source}" and "${LINK_PAIR.target}" are in project ${pair.project}`]),
     `- Team-zone documents start with: \`${names.teamZonePrefix}\``,
     `- The run's resources stay until this checklist is answered or for two hours, whichever comes first.`,
     '- Answer in this file: `pass` or `fail` after `result:`, what you saw after `observed:` (never document content), and a JSON value after each `value:`.',

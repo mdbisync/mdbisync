@@ -33,6 +33,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { HOLD_FAILED, HOLD_TIMED_OUT } from '../../../src/sync/hold.ts';
 import { MARKS } from '../../../src/sync/marks.ts';
+import { detectConflicts } from '../../../src/merge/index.ts';
 import type { PullRequest } from './github.ts';
 import type { LinearDocument } from '../../../src/linear/index.ts';
 import { relativeLinkUrls } from '../../../src/format/index.ts';
@@ -42,7 +43,7 @@ import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { INVALID_DIAGRAM_NOTE } from '../../corpus/documents.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, readSides, sameAsFile, expectsDocument, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
+import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, editsFound, readSides, sameAsFile, expectsDocument, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { annotationPath, owningFolder, type Folder } from './corpus.ts';
@@ -50,11 +51,11 @@ import { REPO_ROOT, engineEntry } from './engine.ts';
 import { canaryIsolated, type CanaryFacts } from './security-canary.ts';
 import { isAppBot } from './workflows.ts';
 import type { PushActivity } from './github.ts';
-import { isDocumentWrite, QUIET_SUBJECT } from './quiet.ts';
+import { isDocumentWrite, QUIET_SUBJECT, UNTOUCHED_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
-import { documentPaths, MOVE_SOURCE_FOLDER, projectFolders } from './step-helpers.ts';
-import { UNSAFE_TITLES } from './fixtures.ts';
+import { documentPaths, MOVE_SOURCE_FOLDER, projectFolderOf, projectFolders } from './step-helpers.ts';
+import { UNSAFE_TITLES, type LinkPairFixture } from './fixtures.ts';
 
 // --- views of the world ---------------------------------------------------------------
 
@@ -183,22 +184,28 @@ function firstDocument(ctx: RunContext): string {
   return path;
 }
 
-/** The document the scenario acted on: its path and id in this view. */
-async function target(env: Env): Promise<{ path: string; id: string | undefined; document: LinearDocument | undefined }> {
+/** The path and id of the document the scenario acted on in this view, without reading Linear. */
+function targetIn(env: Env, view: View): { path: string; id: string | undefined } {
   const { ctx } = env;
-  const view = await env.view();
   const origin = (ctx.observations.get('target.path') as string | undefined) ?? firstDocument(ctx);
   const moved = ctx.observations.get('git.moved') as { from: string; to: string } | undefined;
   if (env.which === 'before') {
     const path = moved?.from ?? origin;
-    const id = view.ids.get(path)?.id;
-    return { path, id, document: id === undefined ? undefined : view.documents.get(id) };
+    return { path, id: view.ids.get(path)?.id };
   }
   const before = ctx.observations.get(BEFORE_VIEW) as View | undefined;
   const knownId = (ctx.observations.get('target.id') as string | undefined) ?? before?.ids.get(moved?.from ?? origin)?.id;
   const byId = knownId === undefined ? undefined : [...view.ids].find(([, entry]) => entry.id === knownId)?.[0];
   const path = byId ?? moved?.to ?? origin;
-  const id = view.ids.get(path)?.id ?? knownId;
+  return { path, id: view.ids.get(path)?.id ?? knownId };
+}
+
+/** The document the scenario acted on: its path and id in this view. */
+async function target(env: Env): Promise<{ path: string; id: string | undefined; document: LinearDocument | undefined }> {
+  const { ctx } = env;
+  const view = await env.view();
+  const { path, id } = targetIn(env, view);
+  if (env.which === 'before') return { path, id, document: id === undefined ? undefined : view.documents.get(id) };
   let document = id === undefined ? undefined : view.documents.get(id);
   // Only the world now may be read again; a snapshot answers from what it holds.
   if (document === undefined && id !== undefined && env.which === 'now' && ctx.live !== null) {
@@ -334,17 +341,17 @@ export function symbolicPath(ctx: RunContext, path: string): string {
 }
 
 /**
- * Where a document a step moved across projects is, in the form its moved
- * path and its recorded destination share: only the project it left reads
- * as `project/`; a path in any other project keeps its real folder, so a
- * document that stayed, or went to the wrong project, does not read the same
- * as its destination. Without a cross-project move, the symbolic path.
+ * Where a moved document is, as specs write it: only the project folder the
+ * document started in reads as `project/` (for a cross-project move, the
+ * project it left, which its recorded destination shares). A path in any
+ * other project, or at team level, keeps its real folder, so a document that
+ * went to the wrong project, or started outside a project, never reads as
+ * `project/…`.
  */
-function movedPath(ctx: RunContext, path: string): string {
-  const source = ctx.observations.get(MOVE_SOURCE_FOLDER) as string | undefined;
-  if (source === undefined) return symbolicPath(ctx, path);
-  const folder = projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`));
-  return folder?.folder === source ? symbolicPath(ctx, path) : path;
+export function movedPath(ctx: RunContext, path: string): string {
+  const origin = (ctx.observations.get('target.path') as string | undefined) ?? firstDocument(ctx);
+  const source = (ctx.observations.get(MOVE_SOURCE_FOLDER) as string | undefined) ?? projectFolderOf(ctx, origin);
+  return source !== undefined && projectFolderOf(ctx, path) === source ? symbolicPath(ctx, path) : path;
 }
 
 /** Brings commits into the person's clone; returns the ones it has afterwards. */
@@ -685,6 +692,52 @@ function markRetained(document: LinearDocument | undefined): boolean {
   return document?.icon === CONFLICT_MARK.icon && colorLabel(document.color) === CONFLICT_MARK.color;
 }
 
+/** Marks on the documents the scenario conflicted, excluding unrelated corpus fixtures. */
+async function scenarioConflictMarks(env: Env): Promise<Map<string, boolean>> {
+  const view = await env.view();
+  const paths = env.ctx.observations.get('conflict.paths') as string[] | undefined;
+  if (paths === undefined) {
+    const byId = new Map([...view.ids].map(([path, entry]) => [entry.id, path]));
+    return new Map([...view.documents].map(([id, document]) => [byId.get(id) ?? id, markRetained(document)]));
+  }
+  return new Map(paths.map((path) => {
+    const id = view.ids.get(path)?.id;
+    return [path, markRetained(id === undefined ? undefined : view.documents.get(id))];
+  }));
+}
+
+/** A synchronized document the run's final view shows with the conflict mark. */
+export interface ConflictMarkRecord {
+  path: string;
+  icon: string;
+  color: string;
+  /** The own icon and color the ids ref saved before the mark replaced them; null when it saved none. */
+  saved: { icon: string | null; color: string | null } | null;
+  comments: number;
+}
+
+/**
+ * The documents of the run's ids ref that carry the conflict mark, with
+ * their saved own decoration and comment count: what a report shows of the
+ * marks without their content. A document not listed has no mark. One
+ * comment read per marked document.
+ */
+export async function conflictMarks(ctx: RunContext, sides: Sides): Promise<{ mapped: number; marked: ConflictMarkRecord[] }> {
+  const marked: ConflictMarkRecord[] = [];
+  for (const [path, entry] of sides.ids) {
+    const document = sides.documents.get(entry.id);
+    if (document === undefined || !markRetained(document)) continue;
+    marked.push({
+      path,
+      icon: document.icon as string,
+      color: colorLabel(document.color) as string,
+      saved: entry.saved === undefined ? null : { icon: entry.saved.icon, color: entry.saved.color },
+      comments: (await documentComments(ctx, entry.id)).length,
+    });
+  }
+  return { mapped: sides.ids.size, marked };
+}
+
 async function metrics(env: Env): Promise<Record<string, unknown>> {
   const { ctx } = env;
   const values = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
@@ -705,6 +758,25 @@ async function metrics(env: Env): Promise<Record<string, unknown>> {
   }
   ctx.observations.set('metrics', values);
   return values;
+}
+
+const BURST_COUNTS = new WeakMap<object, { made: number; foundInGit: number; foundInLinear: number }>();
+
+/** The burst's edits made and found on each side after quiet (L4-12), also kept in the report's metrics. */
+async function burstEdits(env: Env): Promise<{ made: number; foundInGit: number; foundInLinear: number }> {
+  const edits = observed(env.ctx, 'burst.edits') as RunContext['edits'];
+  const view = await env.view();
+  // Three subjects read these counts from one view: scan its text once.
+  let counts = BURST_COUNTS.get(view);
+  if (counts === undefined) {
+    const found = editsFound(edits, view);
+    counts = { made: edits.length, foundInGit: found.git, foundInLinear: found.linear };
+    BURST_COUNTS.set(view, counts);
+  }
+  const values = (env.ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+  values.burstEdits = counts;
+  env.ctx.observations.set('metrics', values);
+  return counts;
 }
 
 const linearBody: Compute = (env) => perTarget(env, (path, document, view) => documentBody(view, path, document));
@@ -859,6 +931,17 @@ export const SUBJECTS: Record<string, Compute> = {
     if (anchored === 0) throw new Error('the slice has no link with a fragment to another synchronized document');
     return true;
   },
+  // L6-12: the index Linear holds links the notes by document id exactly twice, once whole and once with the heading anchor.
+  'documents.linkPairById': async (env) => {
+    const pair = observed(env.ctx, 'fixture.linkPair') as LinkPairFixture;
+    const view = await env.view();
+    const source = view.ids.get(pair.source)?.id;
+    const target = view.ids.get(pair.target)?.id;
+    // A pair the sync did not write is not a link mismatch: name what is missing.
+    if (source === undefined || target === undefined) throw new ProductError(`the initial sync wrote no document for ${source === undefined ? pair.source : pair.target}`);
+    const links = documentLinks(view.documents.get(source)?.content ?? '', view.documentUrlBase);
+    return JSON.stringify(sorted(links)) === JSON.stringify(sorted([target, `${target}#${pair.anchor}`]));
+  },
   'documents.oversizeAssetReferences': async (env) => {
     const view = await env.view();
     const bytes = await trackedBytes(env.ctx, (path) => !path.endsWith('.md'));
@@ -1007,6 +1090,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const sync = run.report?.['sync'] as { leftOut?: Array<{ hooks?: string[] }> } | null | undefined;
     return sync?.leftOut?.some((file) => file.hooks?.includes('aligned-table')) === true && run.summary.includes('aligned-table');
   }),
+  'decided.code': async (env) => decidedCode(env.ctx),
 
   // --- the tracked branch ----------------------------------------------------------------
   'tracked.body': (env) => perTarget(env, (path, _document, view) => fileBody(view, path)),
@@ -1070,6 +1154,12 @@ export const SUBJECTS: Record<string, Compute> = {
   'oracle.gitMerge': async (env) => observed(env.ctx, 'oracle.gitMerge'),
   'resolved.body': async (env) => observed(env.ctx, 'resolved.body'),
   'edited.linearBody': async (env) => observed(env.ctx, 'edited.linearBody'),
+  // The editor's text as Linear stored it (the update's answer), in the file's form as I1 reads a document:
+  // Linear keeps its own spelling of what an editor sends, such as no final newline.
+  'edited.linearStoredBody': normalizedObservation('edited.linearStoredBody', async (stored, env) => {
+    const view = await env.view();
+    return documentBody(view, targetIn(env, view).path, { content: stored } as LinearDocument);
+  }),
   'edited.gitBody': async (env) => observed(env.ctx, 'edited.gitBody'),
   'edited.frontMatter': async (env) => observed(env.ctx, 'edited.frontMatter'),
 
@@ -1253,12 +1343,45 @@ export const SUBJECTS: Record<string, Compute> = {
       return comments.length > 0 && comments.every((c) => typeof c.resolvedAt === 'string');
     });
   },
+  // Linear refuses to resolve the comment of a document in its trash. Each held
+  // document is in the trash and named once in a run's `holdMarks.unresolved`,
+  // with Linear's GraphQL refusal; its comment stays open, and every later run
+  // of the scenario finishes without hold work.
+  'suspended.commentsRefused': async (env) => {
+    const view = await env.view();
+    const before = env.ctx.observations.get(BEFORE_VIEW) as View;
+    const held = env.ctx.observations.get('suspended.documents') as Set<string> | undefined;
+    if (held === undefined || held.size === 0) return false;
+    const pathOf = new Map([...before.ids].map(([path, entry]) => [entry.id, path]));
+    const paths = [...held].map((id) => pathOf.get(id));
+    if (paths.some((path) => path === undefined)) return false;
+    const results = ownResults(env.ctx);
+    const marks = results.map((result) => (result.report?.['pullRequest'] as Record<string, unknown> | null | undefined)?.['holdMarks'] as { unresolved?: Array<{ path: string; error: string }> } | null | undefined);
+    const refusing = marks.flatMap((mark, index) => mark?.unresolved === undefined ? [] : [index]);
+    if (refusing.length !== 1) return false;
+    const unresolved = marks[refusing[0]!]!.unresolved!;
+    // A later run counts only when it finished with a report of its sync pull request and no hold work.
+    const later = results.slice(refusing[0]! + 1);
+    const quiet = later.length > 0 && later.every((result, i) => result.exitCode === 0 && result.report?.['pullRequest'] != null && marks[refusing[0]! + 1 + i] == null);
+    const trashedWithOpenComment = [...held].every((id) => {
+      const comments = (view.holdComments?.get(id) ?? []).filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT));
+      return view.documents.get(id)?.trashed === true && comments.length > 0 && comments.every((c) => c.resolvedAt === null);
+    });
+    return JSON.stringify(unresolved.map((item) => item.path).sort()) === JSON.stringify([...paths].sort())
+      && unresolved.every((item) => /^LinearGraphQLError INPUT_ERROR\b/.test(item.error))
+      && quiet && trashedWithOpenComment;
+  },
   'suspended.marksRestored': async (env) => {
     const view = await env.view();
     const before = env.ctx.observations.get(BEFORE_VIEW) as View;
     const held = env.ctx.observations.get('suspended.documents') as Set<string> | undefined;
     return held !== undefined && held.size > 0 && [...held].every((id) => {
       const document = view.documents.get(id);
+      // A released document whose text holds a conflict keeps or gets the
+      // conflict mark; every other one gets its own icon and color back.
+      // Which marker lines make a conflict (not a lookalike in a quote, code
+      // or HTML) is the sync's own reading, which other scenarios check.
+      if (detectConflicts(document?.content ?? '').length > 0) return markRetained(document);
       const own = before.documents.get(id);
       return document?.icon === own?.icon && document?.color === own?.color;
     });
@@ -1460,7 +1583,8 @@ export const SUBJECTS: Record<string, Compute> = {
     const [first] = await conflictTexts(env);
     return agreed(scanMarkers(first?.git ?? '').nested, scanMarkers(first?.linear ?? '').nested);
   },
-  'conflicts.markCount': async (env) => [...(await env.view()).documents.values()].filter(markRetained).length,
+  'conflicts.marks': scenarioConflictMarks,
+  'conflicts.markCount': async (env) => [...(await scenarioConflictMarks(env)).values()].filter(Boolean).length,
   'conflicts.markRetained': async (env) => markRetained((await target(env)).document),
   'conflicts.icon': async (env) => (await target(env)).document?.icon ?? null,
   'conflicts.color': async (env) => colorLabel((await target(env)).document?.color),
@@ -1519,6 +1643,31 @@ export const SUBJECTS: Record<string, Compute> = {
 
   // --- the sync branch, CI and workflows ------------------------------------------------------
   'syncBranch.personCommitRetained': async (env) => retained(env, [observed(env.ctx, 'syncBranch.personCommit') as string]),
+  // Strictly on the tracked branch: the pull request merged the person's commit, not only kept it on the sync branch.
+  'syncBranch.personCommitMerged': async (env) => onTracked(env, observed(env.ctx, 'syncBranch.personCommit') as string),
+  'syncBranch.resolutionMerged': async (env) => onTracked(env, observed(env.ctx, 'syncBranch.resolutionCommit') as string),
+  'syncBranch.editedPaths': async (env) => [(observed(env.ctx, 'syncBranch.personEdit') as { path: string }).path],
+  // The sync-branch edit and the later edit of the same paragraph each appear
+  // once in the document, in different versions of its one marker set, on
+  // the tracked branch and in Linear alike.
+  'conflicts.pendingEditsBetweenMarkers': async (env) => {
+    const pending = observed(env.ctx, 'syncBranch.personEdit') as { path: string; token: string };
+    const at = env.ctx.edits.findIndex((edit) => edit.token === pending.token);
+    const later = env.ctx.edits.slice(at + 1).filter((edit) => edit.path === pending.path).at(-1)?.token;
+    if (later === undefined) throw new Error('the scenario made no later edit of the document edited on the sync branch');
+    const view = await env.view();
+    const id = view.ids.get(pending.path)?.id;
+    const texts = [fileBody(view, pending.path), id === undefined ? null : view.documents.get(id)?.content ?? null];
+    return texts.every((text) => {
+      if (text === null || text === undefined) return false;
+      const { sets } = scanMarkers(text);
+      const [set] = sets;
+      if (set === undefined || sets.length !== 1 || !['git', 'linear', 'end'].every((kind) => set.kinds.includes(kind as never))) return false;
+      const once = (token: string) => text.split(token).length === 2;
+      const version = (token: string) => (set.git.includes(token) ? 'git' : set.linear.includes(token) ? 'linear' : null);
+      return once(pending.token) && once(later) && version(pending.token) !== null && version(later) !== null && version(pending.token) !== version(later);
+    });
+  },
   'syncBranch.ciFixRetained': async (env) => retained(env, observed(env.ctx, 'ciFix.commits') as string[]),
   'syncBranch.ciFixCommitCount': async (env) => {
     const commits = observed(env.ctx, 'ciFix.commits') as string[];
@@ -1662,6 +1811,9 @@ export const SUBJECTS: Record<string, Compute> = {
   'report.budgetWindows': async (env) => (await metrics(env)).budgetWindows,
   'report.generatedLinearEdits': async (env) => observed(env.ctx, 'report.generatedLinearEdits'),
   'report.generatedGitPushes': async (env) => observed(env.ctx, 'report.generatedGitPushes'),
+  'report.burstEditsMade': async (env) => (await burstEdits(env)).made,
+  'report.burstEditsFoundInGit': async (env) => (await burstEdits(env)).foundInGit,
+  'report.burstEditsFoundInLinear': async (env) => (await burstEdits(env)).foundInLinear,
   // The most edits lost at any moment the harness looked: the end, or an hourly soak check.
   'report.lostEditCount': async (env) => Math.max(lostEdits(env.ctx, await env.view()).length, Number(env.ctx.observations.get('soak.maxLostEdits') ?? 0)),
   'report.hourlyInvariantChecks': async (env) => observed(env.ctx, 'report.hourlyInvariantChecks'),
@@ -1705,7 +1857,7 @@ export const SUBJECTS: Record<string, Compute> = {
     // run.probe (L0-05)
     'probe.firstReadback', 'probe.secondReadback', 'probe.drift',
     // run.workflow-parallel (L4-10)
-    'workflows.maxActiveInGroup',
+    'workflows.maxActiveInGroup', 'workflows.replacedPending',
     'tokens.activeBeforeCleanup', 'tokens.activeAfterCleanup',
   ].map((name): [string, Compute] => [name, async (env) => observed(env.ctx, name)])),
 
@@ -1718,6 +1870,8 @@ export const SUBJECTS: Record<string, Compute> = {
     return images.length > 0 && images.every((image) => bytes.has(image));
   },
   'tracked.restoredFileExists': async (env) => (await env.view()).files.has((await target(env)).path),
+  // The file `git.add` added, on the tracked branch: kept by a run that must change nothing.
+  'tracked.addedFileExists': async (env) => (await env.view()).files.has(observed(env.ctx, 'git.added') as string),
   'tracked.bothEditorChangesPresent': async (env) => {
     // The UI session records the text each editor typed.
     const typed = observed(env.ctx, 'ui.typedTexts') as string[];
@@ -1728,9 +1882,11 @@ export const SUBJECTS: Record<string, Compute> = {
 
 /**
  * What every run checks before writing, in order, by the names the
- * engine's report uses in `setupChecks`.
+ * engine's report uses in `setupChecks`. Written out rather than imported,
+ * so a check the engine adds, drops or moves fails `setup-checks.test.ts`
+ * until this list is updated on purpose.
  */
-export const REQUIRED_SETUP_CHECKS = ['linear-credentials', 'github-access', 'merge-commits', 'linear-format-hook', 'annotations', 'annotation-targets', 'left-out-files', 'security-hooks'] as const;
+export const REQUIRED_SETUP_CHECKS = ['linear-credentials', 'github-access', 'github-app', 'merge-commits', 'linear-format-hook', 'annotations', 'annotation-targets', 'left-out-files', 'security-hooks'] as const;
 
 interface SetupCheck {
   name: string;
@@ -1756,6 +1912,10 @@ async function editsOnSide(env: Env, from: 'git' | 'linear', side: 'git' | 'line
   const view = await env.view();
   const text = side === 'git' ? [...view.files.values()].join('\n') : [...view.documents.values()].map((document) => document.content ?? '').join('\n');
   return env.ctx.edits.filter((edit) => edit.side === from && text.includes(edit.token)).length;
+}
+
+async function onTracked(env: Env, commit: string): Promise<boolean> {
+  return isAncestor(await person(env.ctx), commit, (await env.view()).tip);
 }
 
 async function retained(env: Env, commits: readonly string[]): Promise<boolean> {
@@ -2045,7 +2205,7 @@ function setupFailureValue(ctx: RunContext, subject: string): string {
  * Subjects that also name one run, `runs.<n|last>.<subject>`: computed on the
  * world the harness snapshotted right after that run (`harness.runView.<n>`).
  */
-export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|suspended\.(?:count|contentsCurrent|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|marksRestored|comments)|normal\.(?:open|merged|closedEmpty))$/;
+export const RUN_VIEW_SUBJECT = /^runs\.(\d+|last)\.(documents\.content|documents\.body|linear\.body|golden\.linearForm|suspended\.(?:count|contentsCurrent|markedCount|trackedUnchanged|commentCount|commentsDetailed|commentsTimedOut|commentsResolved|commentsRefused|marksRestored|comments)|normal\.(?:open|merged|closedEmpty)|tracked\.addedFileExists)$/;
 
 /** The runs whose world the scenario asserts on (`runs.<n|last>.` document subjects): their indices, and whether the last. */
 function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {
@@ -2066,7 +2226,7 @@ function viewedRuns(ctx: RunContext): { indices: Set<number>; last: boolean } {
  * (`target`, `perTarget`). A run's snapshot keeps them as they were at the
  * run's end, so a later step that picks a target changes no earlier run.
  */
-const TARGET_SELECTION = ['target.path', 'target.id', 'git.moved', 'fixture.document'] as const;
+const TARGET_SELECTION = ['target.path', 'target.id', 'git.moved', 'git.added', 'fixture.document'] as const;
 
 /** The world right after a run, with the target selection of that moment. */
 interface RunView {
@@ -2103,7 +2263,7 @@ export type SubjectSource = 'observed' | 'harness' | 'engine' | 'ui';
 /** Where a subject's value comes from, or null when nothing provides it (a harness gap). */
 export function subjectSource(subject: string): SubjectSource | null {
   const name = subject.startsWith('before.') ? subject.slice('before.'.length) : subject;
-  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || RUN_VIEW_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name)))) return 'harness';
+  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || UNTOUCHED_SUBJECT.test(name) || RUN_VIEW_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name)))) return 'harness';
   if (ENGINE_FAMILIES.some((pattern) => pattern.test(name))) return 'engine';
   if (name.startsWith('ui.')) return 'ui';
   return null;
@@ -2190,6 +2350,32 @@ function engineValue(ctx: RunContext, subject: string): unknown {
   return found.value;
 }
 
+/**
+ * The summary code of the conflict rule that decided the target's path, from
+ * the run that decided it: its report's `sync.decided[]`. That run is the
+ * one that met the conflict, not always the last; a later run that carries
+ * the decision out (a pull request that restores the file) decides nothing.
+ * A rename's decision is reported under the new path, so a target the
+ * scenario moved in git matches by either path. No deciding run, or runs
+ * that disagree, fail as a product error.
+ */
+function decidedCode(ctx: RunContext): string {
+  const path = (ctx.observations.get('target.path') as string | undefined) ?? firstDocument(ctx);
+  const moved = ctx.observations.get('git.moved') as { from: string; to: string } | undefined;
+  const paths = new Set([path, ...(moved === undefined ? [] : [moved.from, moved.to])]);
+  const codes = new Set<unknown>();
+  for (const result of ownResults(ctx)) {
+    const decided = (result.report?.['sync'] as { decided?: unknown } | null | undefined)?.decided;
+    if (!Array.isArray(decided)) continue;
+    for (const entry of decided as Array<{ path?: unknown; summary?: { code?: unknown } }>) if (paths.has(entry?.path as string)) codes.add(entry.summary?.code);
+  }
+  if (codes.size === 0) throw new ProductError(`no engine run of the scenario decided ${path} by a conflict rule`);
+  if (codes.size > 1) throw new ProductError(`the engine's runs decided ${path} by different rules: ${[...codes].map((code) => JSON.stringify(code)).join(', ')}`);
+  const [code] = codes;
+  if (typeof code !== 'string') throw new ProductError(`the engine's decision on ${path} gives no rule code`);
+  return code;
+}
+
 /** The index among the scenario's own runs that `<n|last>` names in `subject`. */
 function ownRunIndex(ctx: RunContext, which: string, subject: string): number {
   const count = ownResults(ctx).length;
@@ -2208,6 +2394,18 @@ function quietValue(ctx: RunContext, subject: string): string[] {
   const failures = ctx.observations.get(`harness.quiet.${index}`) as string[] | undefined;
   if (failures === undefined) throw new Error(`engine run ${index} was not watched for ${subject}`);
   return failures;
+}
+
+/**
+ * What run <n|last> of the scenario changed in the world (quiet.ts,
+ * `untouchedFailures`), empty when it changed nothing. As for quiet, the
+ * run must have been watched.
+ */
+function untouchedValue(ctx: RunContext, subject: string): string[] {
+  const index = ownRunIndex(ctx, (UNTOUCHED_SUBJECT.exec(subject) as RegExpExecArray)[1] as string, subject);
+  const changes = ctx.observations.get(`harness.untouched.${index}`) as string[] | undefined;
+  if (changes === undefined) throw new Error(`engine run ${index} was not watched for ${subject}`);
+  return changes;
 }
 
 /**
@@ -2231,6 +2429,7 @@ async function runViewValue(ctx: RunContext, subject: string): Promise<unknown> 
 export async function resolveSubject(ctx: RunContext, subject: string): Promise<{ known: boolean; value?: unknown }> {
   if (ctx.observations.has(subject) && !NORMALIZED_OBSERVATIONS.has(subject)) return { known: true, value: ctx.observations.get(subject) };
   if (QUIET_SUBJECT.test(subject)) return { known: true, value: quietValue(ctx, subject) };
+  if (UNTOUCHED_SUBJECT.test(subject)) return { known: true, value: untouchedValue(ctx, subject) };
   if (RUN_VIEW_SUBJECT.test(subject)) return { known: true, value: await runViewValue(ctx, subject) };
   if (SETUP_FAILURE_SUBJECT.test(subject)) return { known: true, value: setupFailureValue(ctx, subject) };
   const before = subject.startsWith('before.');

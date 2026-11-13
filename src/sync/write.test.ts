@@ -115,7 +115,7 @@ describe('sync: the tracked branch to Linear', () => {
   const sync = (extra: Record<string, string> = {}) => cli('sync', extra);
 
   /** Commits as a person: files to write (null removes) and moves, then pushes to the tracked branch. */
-  async function commit(changes: Record<string, string | null>, moves: Array<[string, string]> = []) {
+  async function commit(changes: Record<string, string | Buffer | null>, moves: Array<[string, string]> = []) {
     await person.run(['pull', '--quiet', '--ff-only']);
     for (const [from, to] of moves) {
       await mkdir(dirname(join(personDir, to)), { recursive: true });
@@ -919,7 +919,7 @@ describe('sync: the tracked branch to Linear', () => {
     // keeps the old bytes.
     afterCapture(() => { review.content = `# Review\n\nTyped in Linear meanwhile. ${CANARY}`; touch(review); });
     await commit({
-      'eng/media/diagram.png': Buffer.from('second diagram bytes').toString('latin1'),
+      'eng/media/diagram.png': await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url)),
       'eng/notes/review.md': `# Review\n\nEdited too. ${CANARY}\n`,
     });
     const first = await sync();

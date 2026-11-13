@@ -103,8 +103,10 @@ node test/e2e/harness/cli.ts sweep                            # remove leftovers
 `Ctrl-C` lets the running scenarios finish with their cleanup and skips the
 rest; a second `Ctrl-C` stops at once and keeps shared reservations for
 verified recovery.
-`run` exits with 1 when a scenario or its cleanup fails and 0 otherwise, even when
-scenarios are env-blocked or expected-red. Any command also exits with 1
+`run` exits with 1 when a scenario or its cleanup fails, or when a scenario
+on the expected-red list passes, and 0 otherwise, even when scenarios are
+env-blocked or expected-red. When one of these fails the run, it first prints
+a `run fails:` line for each reason, with the ids. Any command also exits with 1
 when the harness itself stops with an error, 2 for an unknown command and
 130 after a second `Ctrl-C`.
 
@@ -245,6 +247,13 @@ A run writes `report.md` and `report.json` in its report folder, and one
 folder per scenario under `runs/<scenario>-<run id>/` with the harness log,
 the engine's inputs and outputs, and the evidence the checks read.
 
+When a pull in the person's clone fails, that folder gets a
+`person-git-*.txt` file with the clone's state at that moment (HEAD, the
+remote branch, merge bases, reflog, a connectivity check). A scenario that
+ends in `fail` also keeps the clone itself as `person/`, without
+credentials in its remote URL and with its own copy of the objects it
+borrowed from the shared cache. Other results remove it.
+
 ```text
 | pass | fail | expected-red | env-blocked | skipped |
 | --- | --- | --- | --- | --- |
@@ -274,8 +283,14 @@ proxy; `Harness app reads` counts the harness's own reads through the OAuth
 app; `Cleanup` says whether the run left nothing behind.
 
 A scenario on the expected-red list that passes is marked as an unexpected
-pass. The change that made it pass removes its id from
-`e2e/expected-red.json`.
+pass, and it fails the run: `run` (and `ui-result` for a held run) exits with
+1 and prints `run fails: unexpected pass: <ids> passed while on the
+expected-red list; remove them from test/e2e/expected-red.json` (`it` for a
+single id). The run report and the evidence summary list the same ids.
+Otherwise a listed scenario could keep passing unnoticed, and a later regression in it would
+count as expected-red and stay hidden. The change that made it pass removes
+its id from `e2e/expected-red.json`; a listed scenario that still fails for a
+product reason stays expected-red and does not fail the run.
 
 ## Credentials for live runs
 
@@ -297,7 +312,7 @@ environment wins. Values are never written to a report or a log.
 | `MDBISYNC_TEST_SANDBOX_URL` | every live scenario | `https://github.com/<owner>/<repo>` of the test repository, which holds the corpus on `main` |
 | `MDBISYNC_TEST_SANDBOX_GIT_URL` | optional | where Git reads and pushes instead, for example a local mirror |
 | `SYNC_APP_CLIENT_ID` and the App's private key (`SYNC_APP_PRIVATE_KEY`, `SYNC_APP_PRIVATE_KEY_FILE`, or `sync-app.pem` in the configuration folder) | `actions` mode; optional for `local` | a GitHub App installed on the test repository; without it, local runs use your Git credential for the repository |
-| `MDBISYNC_TEST_ACTION_SHA` | optional, `actions` mode; environment only, not read from `secrets.env` | a full release commit SHA the workflows run instead of the version their templates pin |
+| `MDBISYNC_TEST_ACTION_SHA` | `actions` mode and `scheduler`; environment only, not read from `secrets.env` | the full commit SHA of the release under test, which every workflow runs instead of the version the templates pin; unset, an `actions` scenario is env-blocked before it installs anything and `scheduler` stops, since the pin can be an older release than the templates' inputs |
 | `MDBISYNC_TEST_SCHEDULE_TICK` | optional, `actions` mode; environment only | `dispatch` starts the scheduled sync workflow by hand instead of waiting for GitHub's schedule (see below) |
 
 The test workspace needs two teams with the keys `ENG` and `DOCS`; the

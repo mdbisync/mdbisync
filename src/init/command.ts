@@ -12,12 +12,18 @@ import { PROJECT_URL } from '../version.ts';
 import { LINEAR_FORMAT_HOOK, PRE_COMMIT_CONFIG, SECURITY_ALIAS } from '../setup/hooks.ts';
 import { findFrontMatter } from '../mapping/front-matter.ts';
 import { message } from '../messages.ts';
+import { MINIMUM_RELEASE, OLDER_RELEASES, RELEASE_PIN } from './releases.ts';
 
 export const INIT_USAGE = `Usage: mdbisync init --release-sha <40-character SHA> [--release-version vX.Y.Z]
   --folder <path> --team <name> [--project <name>]   Repeat for each folder
   --security-hooks | --no-security-hooks           Optional examples (requires Docker)
+The release must be ${MINIMUM_RELEASE.version} or later: the workflows use its action inputs.
 Existing files and annotations are preserved; conflicting values must be resolved first.
 `;
+
+/** The flags `init` accepts: the ones that take a value, then the security choice. */
+export const INIT_VALUE_FLAGS = ['--release-sha', '--release-version', '--folder', '--team', '--project'] as const;
+export const INIT_SECURITY_FLAGS = ['--security-hooks', '--no-security-hooks'] as const;
 
 interface Folder { path: string; team?: string; project?: string }
 interface Settings { sha?: string; version?: string; security?: boolean; folders: Folder[] }
@@ -28,12 +34,12 @@ function parseArgs(args: readonly string[]): Settings {
   const settings: Settings = { folders: [] };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
-    if (flag === '--security-hooks' || flag === '--no-security-hooks') {
+    if ((INIT_SECURITY_FLAGS as readonly string[]).includes(flag ?? '')) {
       if (settings.security !== undefined) throw new InitError(message('init.security-twice'));
       settings.security = flag === '--security-hooks';
       continue;
     }
-    if (!['--release-sha', '--release-version', '--folder', '--team', '--project'].includes(flag ?? '')) throw new InitError(message('init.unknown-option', { option: String(flag) }));
+    if (!(INIT_VALUE_FLAGS as readonly string[]).includes(flag ?? '')) throw new InitError(message('init.unknown-option', { option: String(flag) }));
     const value = args[++i];
     if (value === undefined || value.startsWith('--') || !value.trim()) throw new InitError(message('init.needs-value', { option: String(flag) }));
     if (flag === '--folder') settings.folders.push({ path: value });
@@ -139,6 +145,14 @@ function hookConfig(text: string | undefined, settings: Settings): string {
   return changed ? doc.toString({ lineWidth: 0 }) : text!;
 }
 
+/** The release flags: a well-formed SHA and version, not of a release older than the templates'. */
+function checkRelease(settings: Settings): void {
+  if (!/^[a-f0-9]{40}$/.test(settings.sha ?? '')) throw new InitError(message('init.release-sha'));
+  if (settings.version !== undefined && !/^v\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(settings.version)) throw new InitError(message('init.release-version'));
+  const older = Object.hasOwn(OLDER_RELEASES, settings.sha!) ? OLDER_RELEASES[settings.sha!] : Object.values(OLDER_RELEASES).find((version) => version === settings.version);
+  if (older !== undefined) throw new InitError(message('init.release-too-old', { version: older, minimum: MINIMUM_RELEASE.version }));
+}
+
 export async function runInit(args: readonly string[], options: InitOptions = {}): Promise<CliResult> {
   if (args.includes('--help') || args.includes('-h')) return { exitCode: 0, stdout: INIT_USAGE, stderr: '' };
   try {
@@ -147,6 +161,7 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
     const needsGuidance = !settings.sha || !settings.folders.length || settings.folders.some((folder) => !folder.team && !folder.project);
     if (ask && needsGuidance) {
       settings.sha ??= (await ask('Release commit SHA: ')).trim();
+      checkRelease(settings);
       if (!settings.folders.length) settings.folders.push({ path: (await ask('Folder to synchronize: ')).trim() });
       for (const folder of settings.folders) {
         if (folder.team === undefined) {
@@ -160,8 +175,7 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
       }
       settings.security ??= /^(y|yes)$/i.test((await ask('Include security hook examples (requires Docker)? [y/N] ')).trim());
     }
-    if (!/^[a-f0-9]{40}$/.test(settings.sha ?? '')) throw new InitError(message('init.release-sha'));
-    if (settings.version !== undefined && !/^v\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(settings.version)) throw new InitError(message('init.release-version'));
+    checkRelease(settings);
     if (!settings.folders.length || settings.folders.some((folder) => !folder.path.trim() || (!folder.team && !folder.project))) throw new InitError(message('init.needs-folder'));
     const root = await realpath(options.cwd ?? process.cwd());
     if (!await lstat(join(root, '.git')).catch(() => undefined)) throw new InitError(message('init.not-at-root'));
@@ -174,7 +188,7 @@ export async function runInit(args: readonly string[], options: InitOptions = {}
       if (before !== after) changes.set(target, after);
     };
     for (const [name, template] of Object.entries(templates)) {
-      const content = template.replace(/mdbisync\/mdbisync@[a-f0-9]{40} # v[^\s]+/g, `mdbisync/mdbisync@${settings.sha}${settings.version ? ` # ${settings.version}` : ''}`);
+      const content = template.replace(new RegExp(RELEASE_PIN, 'g'), `mdbisync/mdbisync@${settings.sha}${settings.version ? ` # ${settings.version}` : ''}`);
       await queue(`.github/workflows/${name}`, (before) => {
         if (before !== undefined && before !== content) throw new InitError(message('init.workflow-differs', { name }));
         return content;

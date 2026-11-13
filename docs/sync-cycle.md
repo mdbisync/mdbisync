@@ -19,7 +19,8 @@ warning is in [troubleshooting.md](troubleshooting.md).
 
 The sync workflow runs on every push to the tracked branch, every five
 minutes, and by hand ([workflows](usage.md#workflows)). Runs of one
-repository never overlap. Each run makes these steps, in this order:
+repository share a concurrency group in the supplied workflows
+([overlapping runs](#overlapping-runs)). Each run makes these steps, in this order:
 
 0. **Setup check.** The run checks its tokens, the repository settings and
    the folder annotations, and stops before any write when one fails
@@ -102,6 +103,80 @@ When both sides changed the same document between two runs, git merges the
 two edits. Edits of different paragraphs both arrive on both sides; edits
 of the same lines become a conflict, written into the document on both
 sides ([conflicts.md](conflicts.md)).
+
+## Editing while sync runs
+
+Keep editing in Linear and pushing or merging into the tracked branch while
+ongoing sync runs. You do not need to wait for a run to finish:
+
+- Changes on both sides use the three-way merge described above. Different
+  paragraphs merge; competing changes to the same paragraph keep both
+  versions with [conflict markers](conflicts.md).
+- If an already tracked document changes in Linear between capture and its
+  final re-read, the run skips that document. The next run captures the newer text and
+  tries again; other documents keep syncing.
+- A run that stops after creating a document but before recording its id
+  leaves the document in Linear. If you edit that document, nothing
+  overwrites your edit: a later run takes the document over only if it
+  still holds the text the run would write. Otherwise the next run captures
+  it as a new document at the file's path. The two texts have no earlier
+  version in common, so every part where the document and the file in git
+  differ becomes a [conflict](conflicts.md) that keeps both versions.
+- A push that arrives after the run read the tracked branch is picked up by
+  a later run. Commits on the sync branch are kept too, including changes
+  from a person or CI. Closing its pull request causes a later run to open
+  a replacement from the same branch.
+
+There is a remaining race: Linear's document writes accept no version
+condition. An edit made after the final re-read but before the write lands
+can be lost. The run's `rereadWindowMs` measurement in the JSON report
+([`report-file`](configuration.md#action-inputs)) is the largest interval from
+receipt of a batch re-read's answer to receipt of a successful write's answer. It
+includes earlier writes in that batch and retries. It excludes the time
+between Linear reading the document and the client receiving that response,
+so it does not bound the entire race or establish a fixed safe interval.
+
+In a live race test, the run was deliberately paused after the re-read
+while 100 edit markers were written. The test harness measured a held interval
+of **82,077 ms** (82.077 seconds), and all 100 markers were lost. An earlier live test held
+the interval for 88,471 ms and also lost 100 markers. These artificial
+pauses demonstrate the risk; they are not normal write latency. Tests with
+a local fake service and no pause measured 4.4–12.9 ms across six runs;
+those timings do not measure live Linear latency.
+
+Separate live checks kept three edits to different paragraphs from two
+Linear editors and git. A burst targeting 15 minutes generated 750 Linear
+edits and 15 git pushes: after editing stopped and sync settled, all 765
+edit markers were present in both git and Linear, with no lost marker and
+no content difference. These results show convergence for those runs;
+they do not remove the re-read-to-write race or establish a sustained-load
+limit. For a critical edit where that residual risk is unacceptable, stop
+ongoing sync, wait for the active run to finish, edit, then enable it again.
+
+## Overlapping runs
+
+The supplied sync and initial-sync workflows use the same repository-scoped
+group, `concurrency: { group: mdbisync, cancel-in-progress: false }`.
+Keep that shared group when adapting the workflows. GitHub allows one
+running and one pending run in the group: a new arrival replaces an older
+pending run, and does not cancel the running one. This is not a FIFO queue
+that executes every trigger. A later ongoing-sync run reads the current
+state, so replacing a pending trigger does not discard the edits it would
+have read. A live check using pushes and manual dispatches standing in for
+scheduled runs observed at most one active run, at least one replaced pending run, and all edits
+preserved.
+
+The group serializes these workflows in one repository. It does not lock
+Linear editors, another repository, or a CLI run outside Actions. State-ref
+pushes also use atomic updates with leases: if another writer moved a ref,
+the push is refused rather than partly overwriting state. The next run
+can read the newer state and retry; this does not close the Linear write
+race above. Avoid running an independent writer against the same documents.
+
+Before initial sync or recovery, disable the ongoing-sync workflow and
+wait for its active run to finish. Otherwise a newly queued ongoing-sync
+run can replace the pending initial-sync run. Follow the initial-sync
+direction's instructions before confirming its writes.
 
 ## What people see
 
@@ -232,7 +307,9 @@ that document in Linear. Edit the document in Linear to fix an annotated
 problem, or fix CI on the tracked branch. Either change updates the
 suspended lane and its new head gets checks. Once the suspended head
 contains the current tracked tip and its checks pass, the sync merges it,
-resolves the comments and clears the suspended marks. Any remaining
+resolves the comments and clears the suspended marks. Linear refuses to
+resolve a comment on a document in its trash: such a comment stays open,
+and the run summary names the document once. Any remaining
 blocked or conflict mark still applies. The normal three-way merge
 resumes using the recorded base, so changes waiting on either side meet
 without dropping an edit; overlapping edits can still create a conflict.
@@ -301,12 +378,13 @@ moved out of the synchronized projects, and the old paths of documents
 renamed or moved in Linear (a rename counts once as captured and once as
 removed); *blocked* documents got the
 [blocked mark](#the-blocked-mark); *left out* documents were not taken this
-run (`capture-translation` or `security-unchecked`,
+run (`capture-translation`, `download-retry` or `security-unchecked`,
 [files left out](troubleshooting.md#files-left-out)). Lines that follow
 only when they apply:
 
 | Line | Where it is explained |
 | --- | --- |
+| `download-retry: "<document id>"` | [Files left out](troubleshooting.md#files-left-out); an upload download failed temporarily and the next run retries it without marking the document. |
 | Removal held for N files | [`removal-held`](troubleshooting.md#partial-sync-runs) |
 | The document id map was lost | [Recovery with initial sync](troubleshooting.md#recovery-with-initial-sync) |
 | Capture partial, will continue | [`stopped` and `linear-failed`](troubleshooting.md#partial-sync-runs) |
@@ -324,7 +402,11 @@ What step 2 did with the sync pull request. An ordinary run says one of:
 | The tracked branch already holds every change from Linear | No pull request is needed. |
 | Opened the sync pull request | Opened this run. It names the checks still running at the end of the grace period; a later run merges it. |
 | Added new Linear changes to the sync pull request | New captures joined the open pull request. |
-| The sync pull request waits for its checks | Nothing new; its checks are still running, and a later run merges it. |
+| The sync pull request waits for its checks | Its checks are still running, and a later run merges it. |
+
+An existing head with passing registered checks gets a merge attempt before
+fresh captures join the branch. Captures remain on Linear's state ref for
+the next batch; a successful merge can therefore leave newer changes pending.
 
 The suspended lane and its marks add these lines when applicable:
 
@@ -344,7 +426,7 @@ The suspended lane and its marks add these lines when applicable:
 | more suspended documents get their mark or comment in a later run | Counts deferred documents, at most 50 changed per run. |
 | Suspended documents in Linear's trash or archived, without a mark: | Lists documents that cannot receive a mark. |
 | GitHub did not give the annotations of | Comments name those checks without annotations; a later run can retry. |
-| The suspended marks did not finish | Gives the stopping code and, when available, operation; a later run goes on. |
+| The suspended marks did not finish | Gives the stopping code and, for a failed write, its operation, the document's path, the error's class, Linear's code and HTTP status, and Linear's message on one line; the report's `pullRequest.holdMarks.failure` also keeps Linear's request id. A message that repeats the comment the request sent is withheld. A later run goes on. |
 
 A red tracked branch has a held-pull-request line naming and linking to
 its failing checks. A line saying a check “failed on the sync pull request”

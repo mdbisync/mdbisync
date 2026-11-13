@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { detectConflicts } from '../merge/index.ts';
 import type { LinearClient, LinearDocument } from '../linear/index.ts';
 import type { HoldNotice, IdEntry } from '../state/index.ts';
+import type { ImageFinding, FileFinding } from './assets.ts';
 import { message } from '../messages.ts';
 
 export const MARKS = {
@@ -35,6 +36,8 @@ export interface SecurityFinding {
   line: number;
 }
 
+export type BlockedFinding = SecurityFinding | ImageFinding | FileFinding;
+
 export type MarkClient = Pick<LinearClient, 'updateDocument' | 'ensureDocumentComment' | 'resolveComment' | 'commentExists'>;
 export type MarkState = 'conflict' | 'blocked' | 'clear';
 
@@ -43,10 +46,16 @@ export interface MarkOptions {
   document: LinearDocument;
   entry: IdEntry;
   linear: MarkClient;
-  /** Current security-hook findings. Blocked takes precedence over conflict. */
-  blocked?: readonly SecurityFinding[];
+  /** Current image and security-hook findings. Blocked takes precedence over conflict. */
+  blocked?: readonly BlockedFinding[];
   /** Must durably record the entry in ids before resolving. Never just queue it. */
   persistEntry: (entry: IdEntry) => Promise<void>;
+  /**
+   * The id of a new notice's comment; random by default. A caller that may run
+   * again without the entry it saved (a rebuilt state) passes an id derived from
+   * the episode, so the comment posted before is found instead of added again.
+   */
+  noticeId?: (state: Exclude<MarkState, 'clear'>) => string;
 }
 
 export interface MarkResult {
@@ -56,15 +65,30 @@ export interface MarkResult {
   commented: boolean;
 }
 
-function blockedComment(findings: readonly SecurityFinding[]): string {
-  const locations = [...new Set(findings.map(({ hook, line }) => {
+export const IMAGE_BLOCKED_COMMENT = 'Some images in this document cannot be synchronized. Fix the listed images and sync again.';
+
+function blockedComment(findings: readonly BlockedFinding[]): string {
+  const images = findings.filter((finding): finding is ImageFinding => 'image' in finding);
+  const files = findings.filter((finding): finding is FileFinding => 'file' in finding);
+  const hooks = findings.filter((finding): finding is SecurityFinding => 'hook' in finding);
+  const locations = [...new Set(hooks.map(({ hook, line }) => {
     // Hook configuration is untrusted input. Never copy matched text or a
     // malformed hook name into a public comment.
     const name = /^[a-zA-Z0-9_.-]{1,128}$/.test(hook) ? hook : 'security-check';
     const location = Number.isSafeInteger(line) && line > 0 ? `, line ${line}` : '';
     return `- Hook \`${name}\`${location}.`;
   }))].sort();
-  return `${BLOCKED_COMMENT}\n\n${locations.join('\n')}`;
+  const sections: string[] = [];
+  const imageReasons: Record<ImageFinding['reason'], string> = {
+    'not-uploaded': 'not uploaded to this workspace. Upload the file instead of linking to it.',
+    'unreadable': 'the uploaded file cannot be read. Remove it or upload it again.',
+    'too-large': 'the uploaded file is larger than 10 MB.',
+    'unsupported-type': 'the uploaded file is not a supported image or document. Remove it or upload the original file.',
+  };
+  if (images.length > 0) sections.push(`${IMAGE_BLOCKED_COMMENT}\n\n${images.map(({image, total, line, reason}) => `- Image ${image} of ${total} (line ${line}): ${imageReasons[reason]}`).join('\n')}`);
+  if (files.length > 0) sections.push(`Some files in this document cannot be synchronized. Fix the listed files and sync again.\n\n${files.map(({file, total, line, reason}) => `- File ${file} of ${total} (line ${line}): ${imageReasons[reason]}`).join('\n')}`);
+  if (locations.length > 0) sections.push(`${BLOCKED_COMMENT}\n\n${locations.join('\n')}`);
+  return sections.join('\n\n');
 }
 
 /**
@@ -96,6 +120,12 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
     result.entry = entry;
   }
 
+  if (entry.saved?.notice !== undefined && entry.saved.notice.kind !== state) {
+    // A person can delete the notice before fixing the document. Check for
+    // its absence; failed reads or resolutions retain the notice for retry.
+    if (await linear.commentExists(entry.saved.notice.id)) await linear.resolveComment(entry.saved.notice.id);
+  }
+
   if (state === 'clear') {
     if (entry.saved === undefined) return result;
     if (document.icon !== entry.saved.icon || document.color !== entry.saved.color) {
@@ -115,7 +145,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   const previous = saved.notice;
   const notice = previous?.kind === state
     ? { ...previous, bodyHash, posted: previous.posted && previous.bodyHash === bodyHash }
-    : { id: randomUUID(), kind: state, bodyHash, posted: false };
+    : { id: options.noticeId?.(state) ?? randomUUID(), kind: state, bodyHash, posted: false };
   if (entry.saved === undefined || previous?.kind !== state || previous.bodyHash !== bodyHash) {
     entry = { ...entry, saved: { ...saved, notice } };
     await persistEntry(entry);

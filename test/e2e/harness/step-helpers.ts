@@ -11,6 +11,7 @@ import type { HelperPurpose } from './isolation.ts';
 import type { Project } from './linear-world.ts';
 import { nextToken, type Editor, type RunContext } from './context.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
+import { pullTracked } from './person-git.ts';
 import { personCommit } from './sandbox.ts';
 
 export function live(ctx: RunContext) {
@@ -27,11 +28,18 @@ export function documentPaths(ctx: RunContext): string[] {
 
 /**
  * The scenario's target document: a named path or path suffix; `<ordinal>-document`
- * and `other-document` pick by position; a paragraph target or none picks the
- * scenario's fixture document when setup made one, else the first document.
+ * and `other-document` pick by position; `project-document` picks by position
+ * among the documents inside a project folder, whichever teams the run
+ * selected; a paragraph target or none picks the scenario's fixture document
+ * when setup made one, else the first document.
  */
 export function targetPath(ctx: RunContext, target?: unknown, offset = 0): string {
   const paths = documentPaths(ctx);
+  if (target === 'project-document') {
+    const inProjects = paths.filter((path) => projectFolderOf(ctx, path) !== undefined);
+    if (inProjects.length === 0) throw new EnvBlockedError('the slice has no synchronized document in a project');
+    return pick(inProjects, offset);
+  }
   if (typeof target === 'string') {
     if (target === 'other-document') return pick(paths, offset + 1);
     if (target.endsWith('-document') && ordinalOf(target) !== null) return pick(paths, (ordinalOf(target) as number) + offset);
@@ -73,10 +81,17 @@ export function projectFolders(ctx: RunContext): Array<{ folder: string; project
   const world = live(ctx);
   const result: Array<{ folder: string; project: string }> = [];
   for (const [readme, text] of world.tree.rewritten) {
+    // Relinked Markdown files are rewritten too; only a README annotates a folder.
+    if (!/(^|\/)README\.md$/.test(readme)) continue;
     const name = [...world.tree.projects.values()].find((project) => text.includes(project));
     if (name !== undefined) result.push({ folder: readme.replace(/\/?README\.md$/, ''), project: name });
   }
   return result.sort((a, b) => b.folder.length - a.folder.length || a.folder.localeCompare(b.folder));
+}
+
+/** The project folder of the run's tree that holds `path` (the innermost), if any. */
+export function projectFolderOf(ctx: RunContext, path: string): string | undefined {
+  return projectFolders(ctx).find((candidate) => path.startsWith(`${candidate.folder}/`))?.folder;
 }
 
 /**
@@ -133,7 +148,7 @@ export async function readWorking(git: Git, path: string): Promise<string> {
 }
 
 export async function pull(git: Git, ctx: RunContext): Promise<void> {
-  await git.run(['pull', '--quiet', '--no-rebase', '--no-edit', 'origin', ctx.names.trackedBranch]);
+  await pullTracked(git, ctx);
 }
 
 export async function commitAsPerson(ctx: RunContext, changes: Map<string, string | Buffer | null>, message: string, bypassHook = false): Promise<string> {
@@ -152,7 +167,8 @@ export async function readRunIds(ctx: RunContext): Promise<IdMap | null> {
   const config = resolveStateConfig({ trackedBranch: ctx.names.trackedBranch, syncBranch: ctx.names.syncBranch, refPrefix: ctx.names.refPrefix });
   const ref = stateRef(config, 'ids');
   try {
-    await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+    // Not into FETCH_HEAD: a load test's git edit pulls in the same clone while its Linear edits read the ids.
+    await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]);
   } catch {
     return null;
   }
@@ -178,7 +194,8 @@ export async function editorEdit(ctx: RunContext, editor: Editor, path: string, 
   if (document === undefined) throw new ProductError('a recorded document does not exist in Linear');
   const token = nextToken(ctx);
   const content = await change(document.content ?? '', token);
-  await client.updateDocument(id, { content });
+  const stored = await client.updateDocument(id, { content });
+  ctx.observations.set('edited.linearStoredBody', stored.content ?? '');
   // Only an edit that wrote its token counts for I2 (a resolution or a removal writes none).
   if (removal || content.includes(token)) ctx.edits.push({ side: 'linear', path, token, ...(removal ? { removal } : {}) });
   ctx.observations.set('edited.linearBody', content);

@@ -5,6 +5,9 @@
 import { createSign } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import type { TestConfig } from './config.ts';
+import { githubRequestBody, githubRequestPath, githubRequestToken } from './github-request.ts';
+
+import { tokenLease } from './token-lease.ts';
 
 const API = 'https://api.github.com';
 
@@ -23,6 +26,8 @@ export function appJwt(clientId: string, privateKey: string, nowSeconds = Math.f
 export interface GitHubToken {
   token: string;
   source: 'app' | 'host';
+  /** Renews installation credentials for long-running harness operations. */
+  getToken?: () => Promise<string>;
   /** The App's bot login (`<slug>[bot]`), which GitHub names as the actor of what this token writes; App tokens only. */
   appLogin?: string;
 }
@@ -42,16 +47,16 @@ function encodePath(path: string): string {
 }
 
 async function call<T>(token: string, method: string, path: string, body?: unknown, fetchImpl: typeof fetch = fetch): Promise<T> {
-  const response = await fetchImpl(`${API}${path}`, {
+  const response = await fetchImpl(`${API}${githubRequestPath(path)}`, {
     method,
     headers: {
       accept: 'application/vnd.github+json',
-      authorization: `Bearer ${token}`,
+      authorization: `Bearer ${githubRequestToken(token)}`,
       'x-github-api-version': '2022-11-28',
       'user-agent': 'scenario-harness',
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { body: JSON.stringify(githubRequestBody(body)) }),
     signal: AbortSignal.timeout(60_000),
   });
   if (!response.ok) throw new GitHubError(`${method} ${path.split('?')[0]}: HTTP ${response.status}`, response.status);
@@ -82,7 +87,11 @@ export function hostToken(config: Pick<TestConfig, 'owner' | 'repo'>): string | 
 
 /** Local runs: the App when its key is present, else the host's token. Actions mode always uses the App. */
 export async function githubToken(config: TestConfig, mode: 'local' | 'actions'): Promise<GitHubToken> {
-  if (config.githubApp !== null) return { ...(await appInstallationToken(config)), source: 'app' };
+  if (config.githubApp !== null) {
+    const initial = await appInstallationToken(config);
+    const current = tokenLease(initial, () => 60 * 60_000, () => appInstallationToken(config));
+    return { ...initial, source: 'app', getToken: async () => (await current()).token };
+  }
   if (mode === 'actions') throw new Error(`actions mode needs the GitHub App: ${config.githubAppMissing.join(' and ')} not in the test secrets`);
   const token = hostToken(config);
   if (token === null) throw new Error('no GitHub token: neither the App key nor a host credential for the sandbox');
@@ -116,13 +125,13 @@ export interface PullRequest {
 export interface WorkflowRun {
   id: number;
   run_attempt?: number;
-  status: string;
+  status: string | null;
   conclusion: string | null;
   event: string;
   created_at: string;
   run_started_at?: string;
   updated_at?: string;
-  head_branch?: string;
+  head_branch?: string | null;
   head_sha?: string;
   path?: string;
   actor?: { login: string } | null;
@@ -156,24 +165,33 @@ export interface WorkflowJob {
 }
 
 export class SandboxRest {
-  readonly #token: string;
+  readonly #token: string | (() => Promise<string>);
   readonly #repoPath: string;
   readonly #fetch: typeof fetch;
+  readonly #config: Pick<TestConfig, 'owner' | 'repo'>;
 
-  constructor(config: Pick<TestConfig, 'owner' | 'repo'>, token: string, fetchImpl: typeof fetch = fetch) {
+  constructor(config: Pick<TestConfig, 'owner' | 'repo'>, token: string | (() => Promise<string>), fetchImpl: typeof fetch = fetch) {
     this.#token = token;
     this.#repoPath = `/repos/${config.owner}/${config.repo}`;
     this.#fetch = fetchImpl;
+    this.#config = { owner: config.owner, repo: config.repo };
   }
 
-  request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    return call<T>(this.#token, method, `${this.#repoPath}${path}`, body, this.#fetch);
+  /** A scoped client whose HTTP operations also stop when this signal expires. */
+  withSignal(signal: AbortSignal): SandboxRest {
+    return new SandboxRest(this.#config, this.#token, (input, init) => this.#fetch(input, {
+      ...init, signal: AbortSignal.any([signal, ...(init?.signal == null ? [] : [init.signal])]),
+    }));
+  }
+
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return call<T>(typeof this.#token === 'string' ? this.#token : await this.#token(), method, `${this.#repoPath}${path}`, body, this.#fetch);
   }
 
   /** Bytes of a repository API path that answers with a redirect to a file (artifacts, logs). */
   async download(path: string): Promise<Buffer> {
-    const response = await this.#fetch(`${API}${this.#repoPath}${path}`, {
-      headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${this.#token}`, 'x-github-api-version': '2022-11-28', 'user-agent': 'scenario-harness' },
+    const response = await this.#fetch(`${API}${githubRequestPath(`${this.#repoPath}${path}`)}`, {
+      headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${githubRequestToken(typeof this.#token === 'string' ? this.#token : await this.#token())}`, 'x-github-api-version': '2022-11-28', 'user-agent': 'scenario-harness' },
     });
     if (!response.ok) throw new GitHubError(`GET ${path.split('?')[0]}: HTTP ${response.status}`, response.status);
     return Buffer.from(await response.arrayBuffer());

@@ -12,14 +12,15 @@
 import { CANARY_FILE, CANARY_TOKEN_OBSERVER_FILE, CANARY_TOKEN_OBSERVER, CANARY_FIXTURE, CANARY_KEY_ENV, canaryScript } from './security-canary.ts';
 import { parse, stringify } from 'yaml';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
-import { editBlock, editParagraph, noteSentence, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
+import { appendParagraph, editBlock, editParagraph, noteSentence, scanMarkers, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
+import { pullTracked } from './person-git.ts';
 import { CHECK_MARKER } from '../../corpus/check-workflow.ts';
-import { EnvBlockedError } from './results.ts';
+import { EnvBlockedError, ProductError } from './results.ts';
 import { commitAsPerson, documentId, documentPaths, projectFolders, targetPath } from './step-helpers.ts';
 import type { Step } from './spec.ts';
 
@@ -134,6 +135,28 @@ async function addReviewDocument(ctx: RunContext): Promise<void> {
   ctx.observations.set('fixture.document', path);
 }
 
+/**
+ * The setup conflict of a `conflicted` start: both sides edit the same
+ * paragraph of the same document, and a sync marks the conflict. That run
+ * writes the markers to Linear only; the runs after it push them to the sync
+ * branch, open the sync pull request and merge it, as the cycle does for any
+ * change from Linear. The scenario starts with the markers on both sides, so
+ * its git steps find them on the tracked branch.
+ */
+export async function openSetupConflict(ctx: RunContext, tools: FixtureTools): Promise<void> {
+  await tools.runStep(ctx, { kind: 'git', action: 'edit', args: { fixture: 'same-paragraph' } });
+  await tools.runStep(ctx, { kind: 'linear', action: 'edit', args: { actor: 'editor-a', fixture: 'same-paragraph' } });
+  await tools.runStep(ctx, { kind: 'run', action: 'sync', args: {} });
+  await tools.runStep(ctx, { kind: 'run', action: 'settle', args: {} });
+  const git = await ctx.person();
+  await pullTracked(git, ctx);
+  const path = targetPath(ctx);
+  const file = join(git.dir, path);
+  // A whole set of markers outside code fences: lookalikes in a fence are not the conflict.
+  const reached = existsSync(file) && scanMarkers(readFileSync(file, 'utf8')).sets.some((set) => set.kinds.length === 3);
+  if (!reached) throw new ProductError(`the setup conflict did not reach the tracked branch: ${path} holds no complete set of conflict markers after the runs settled`);
+}
+
 /** A document's own icon and color, which a conflict's mark must give back. */
 export const OWN_MARK = { icon: 'Bug', color: '#5e6ad2' } as const;
 
@@ -212,11 +235,78 @@ export const SLICE_FIXTURES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Two documents for the link check in the browser (L6-12): the index links
+ * the notes twice, once to the whole document and once to one of its
+ * headings. No corpus document links one target both ways, so the step adds
+ * its own pair. Paths are relative to the run's first project folder; the
+ * titles in Linear are those paths without `.md`.
+ */
+export const LINK_PAIR = { source: 'guides/route-index', target: 'guides/route-notes', anchor: 'depot-hours' } as const;
+
+/**
+ * The pair's texts, keyed like `LINK_PAIR`, in Linear's form, as the
+ * corpus files are written: links in angle brackets and no final newline,
+ * which Linear drops, so I1 finds each file equal to its document. The
+ * notes run longer than one browser window, with text after their "Depot
+ * hours" heading too, so a link to that heading has somewhere to scroll.
+ */
+export function linkPairTexts(link: string): { source: string; target: string } {
+  const target = [
+    '# Route notes',
+    'Planners build the routes the evening before and check them again at seven. A route that changes after seven goes to the shift lead, who tells the drivers at the morning briefing.',
+    'Each route lists its stops in the order the van reaches them, with the time window the customer agreed to. Stops without a window go last, unless the planner moves them up to fill a gap.',
+    'When a customer cancels before seven, the planner removes the stop and closes the gap. After seven the stop stays on the list, and the driver marks it as cancelled on arrival.',
+    'Routes for the far villages start first, because their last stop is two hours from the depot. The planner keeps those vans to fewer stops, so a late ferry does not push the whole route into the evening.',
+    'A new driver rides along with an experienced one for the first week. On the second week the new driver takes a short route alone, and the planner checks the times with them at the end of each day.',
+    '## Loading order',
+    'Vans load in the reverse order of their stops, so the first delivery sits nearest the doors. The loading team works from the printed route sheet, not from memory.',
+    'Heavy boxes go on the floor along the walls, and fragile ones on the shelves above them. Cold boxes load last and travel in the insulated bags by the doors.',
+    'A van leaves only when its lead loader has signed the sheet. If a box is missing, the loader notes it on the sheet and the planner calls the customer before the van reaches the stop.',
+    'Returns ride in the crates at the back. The driver stacks them so they do not block the doors, and the evening team empties the crates before the next loading.',
+    'Large orders for one customer load on a pallet of their own, wrapped and labelled with the stop number. The driver unloads the pallet with the lift at the back and takes the wrap back to the depot.',
+    '## Checks before leaving',
+    'Before a van leaves the yard, the driver walks around it once: tyres, lights, mirrors and the side doors. Anything that looks wrong goes on the defect card in the cab.',
+    'A van with a defect card that names the brakes, the tyres or the lights stays in the yard until the workshop has seen it. The planner moves its stops to the spare van.',
+    'Fuel is topped up on the way back, never on the way out, so the first stop is not late. Each van keeps its fuel card in the glove box with the route sheet.',
+    'The driver checks that the scanner is charged and that the day\'s route has loaded on it. A scanner that shows the wrong day goes back to the desk before the van leaves.',
+    '## Depot hours',
+    'The depot opens at six and closes at eight. Late vans call the night desk.',
+    'On Saturdays the depot opens at seven and closes at four, and only the weekend routes run. Sunday is closed, apart from the cold store, which the night desk checks twice a day.',
+    'On public holidays the depot keeps Saturday hours. The planner posts the holiday routes a week ahead, on the board by the loading doors.',
+    '## Night desk',
+    'The night desk takes calls from late vans, from drivers who cannot finish a route and from customers who missed a delivery. It writes each call in the desk log for the morning team.',
+    'A van that returns after eight parks in the outer yard. The driver hands the keys and the route sheet to the night desk and leaves the returns in the crate by the gate.',
+  ].join('\n\n');
+  const source = [
+    '# Route index',
+    `Start with [the route notes](<${link}>).`,
+    `The [depot hours](<${link}#${LINK_PAIR.anchor}>) changed this week.`,
+  ].join('\n\n');
+  return { source, target };
+}
+
+/** What `ui.follow-document-links` records about the pair it added: tracked paths, the anchor, and the project that holds them. */
+export type LinkPairFixture = { [K in keyof typeof LINK_PAIR]: string } & { project: string };
+
+/**
  * Starting state some steps need that the slice does not have: a left-out
- * document to fix (L2-12) and a folder of N documents to rename (L2-14).
- * Both are made before the initial sync, so the converged start holds them.
+ * document to fix (L2-12), a folder of N documents to rename (L2-14) and two
+ * documents linked by id (L6-12). Each is made before the initial sync, so
+ * the converged start holds it.
  */
 export const STEP_PREPARATION: Record<string, SetupFixture> = {
+  'ui.follow-document-links': {
+    async beforeSync(ctx) {
+      const home = projectFolders(ctx)[0];
+      if (home === undefined) throw new EnvBlockedError('the slice has no project folder');
+      const { folder, project } = home;
+      const source = `${folder}/${LINK_PAIR.source}.md`;
+      const target = `${folder}/${LINK_PAIR.target}.md`;
+      const texts = linkPairTexts(relative(source, target));
+      await commitAsPerson(ctx, new Map([[target, texts.target], [source, texts.source]]), 'Add the route notes and their index', true);
+      ctx.observations.set('fixture.linkPair', { source, target, anchor: LINK_PAIR.anchor, project } satisfies LinkPairFixture);
+    },
+  },
   'git.remove-footnote': {
     async beforeSync(ctx) {
       const folder = projectFolders(ctx)[0]?.folder;
@@ -233,7 +323,7 @@ export const STEP_PREPARATION: Record<string, SetupFixture> = {
       const folder = projectFolders(ctx)[0]?.folder;
       if (folder === undefined) throw new EnvBlockedError('the slice has no project folder');
       const git = await ctx.person();
-      await git.run(['pull', '--quiet', '--no-rebase', '--no-edit', 'origin', ctx.names.trackedBranch]);
+      await pullTracked(git, ctx);
       // Documents without relative links, so moving them breaks no link.
       const movable = documentPaths(ctx).filter((path) => !/\]\(\s*(?![a-z][a-z0-9+.-]*:|#)[^)\s]+/i.test(readFileSync(join(git.dir, path), 'utf8')));
       if (movable.length < count) throw new EnvBlockedError(`the slice has ${movable.length} documents without relative links, fewer than the ${count} to move`);
@@ -295,7 +385,7 @@ function frontMatterOf(text: string): string | null {
 function insertAfterFirstParagraph(text: string, line: string): string {
   const { blocks, separators } = splitBlocks(text);
   const index = paragraphIndexes(text)[0];
-  if (index === undefined) return `${text.replace(/\n*$/, '\n')}\n${line}\n`;
+  if (index === undefined) return appendParagraph(text, line);
   blocks.splice(index + 1, 0, line);
   separators.splice(index, 0, '\n\n');
   return joinBlocks(blocks, separators);
@@ -364,8 +454,8 @@ export async function fixtureEdit(ctx: RunContext, fixture: unknown, side: 'git'
   }
 }
 
-/** The default paragraph edit for an ordinal target (`first-paragraph` …), else a new paragraph at the end. */
+/** The default paragraph edit for an ordinal target (`first-paragraph` …), else a new paragraph at the end; the text keeps its final line ending. */
 export function paragraphEdit(text: string, target: unknown, token: string): string {
   if (typeof target === 'string' && target.endsWith('paragraph')) return editParagraph(text, ordinalOf(target) ?? 0, token);
-  return `${text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n`;
+  return appendParagraph(text, noteSentence(token));
 }

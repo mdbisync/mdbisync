@@ -11,9 +11,12 @@
 import { randomUUID } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
+import { delayDistribution, observedTokens } from './soak-report.ts';
+import { pathVersions, missingEdits, presenceOf, tokenVerdicts, writeSoakFailure, SoakLedger, type SoakFailureReport, type SoakPresence } from './soak-evidence.ts';
 import { cleanupKilledTokens } from './token-cleanup.ts';
 import { recordRunView, tokenActive, watchesRunViews } from './subjects.ts';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { COMMANDS, type CommandName } from '../../../src/commands.ts';
@@ -23,9 +26,10 @@ import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
-import { INVARIANT_CHECKS, lostEdits, readSides, snapshotRefs, bodyOf } from './checks.ts';
+import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, editsFound, expectsDocument, holdsToken, lostEdits, readSides, snapshotRefs, bodyOf, type Sides } from './checks.ts';
 import { isCheckpoint } from './checkpoints.ts';
-import { faultChecks, rerunSuspendedCheck, ageCheck, waitForCheckCompleted, CHECK_WAIT_MS } from './check-fault.ts';
+import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
+import type { CheckState } from '../../../src/pull-request/merge.ts';
 import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
@@ -33,9 +37,11 @@ import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineC
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
-import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver } from './load.ts';
+import { soakDrainSyncs } from './soak-drain.ts';
+import { failedWorkflow, pullRequestStepClean, soakServerErrorPolicy } from './soak-recovery.ts';
+import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver, type SoakBoundary, type SoakDriver, type SoakResult } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
-import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, runFailure } from './results.ts';
+import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, runFailure, type CheckOutcome } from './results.ts';
 import { commitStaged, HARNESS, repositoryHookEnv, installHooks, personCommit } from './sandbox.ts';
 import { LINEAR_FORMAT_HOOK, LOCAL_REPOS, PRE_COMMIT_CONFIG, readHookConfig } from '../../../src/setup/hooks.ts';
 import { validateSha } from '../../../src/release/package.ts';
@@ -44,14 +50,15 @@ import { HOOK_REPOSITORY } from '../../corpus/tree.ts';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
 import { lfsEndpoint, lfsUrlEnv, startLfsFaultProxy } from './lfs-fault-proxy.ts';
-import { quietFailures, snapshotWorld, watchesQuiet, writesBetween } from './quiet.ts';
+import { mutationsBetween, quietFailures, snapshotWorld, untouchedFailures, watchesRunWorld, writesBetween } from './quiet.ts';
 import {
   commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
-import type { WorkflowRun } from './github.ts';
-import { environmentBlocker, jobSpans, maxOverlap, runLogs, runResult, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun } from './workflows.ts';
+import type { SandboxRest, WorkflowRun } from './github.ts';
+import { blockerEvidence, environmentBlocker, hadReplaceableRun, jobSpans, maxOverlap, runLogs, runResult, stopScheduledRun, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun, workflowEvidence } from './workflows.ts';
+import { outputCount, outputFile } from '../../../src/run/output.ts';
 import { CANARY_FIXTURE, canaryFacts } from './security-canary.ts';
-import { prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
+import { pinnedActionSha, prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 
 export { documentId, documentPaths, resolveDestination, sibling, targetPath };
 
@@ -93,11 +100,29 @@ export function scheduleTick(env: NodeJS.ProcessEnv = process.env): 'schedule' |
   throw new Error(`${SCHEDULE_TICK_ENV} must be empty or "dispatch", not "${value}"`);
 }
 
-/** The release commit named by `MDBISYNC_TEST_ACTION_SHA`, or undefined for the templates' own pin. */
+/** The release commit named by `MDBISYNC_TEST_ACTION_SHA`, or undefined when it is unset. */
 export function actionShaUnderTest(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const actionSha = env[ACTION_SHA_ENV]?.trim() ?? '';
   if (actionSha !== '' && !/^[0-9a-f]{40}$/.test(actionSha)) throw new EnvBlockedError(`${ACTION_SHA_ENV} must be a full commit SHA`);
   return actionSha === '' ? undefined : actionSha;
+}
+
+/**
+ * The release commit every workflow of actions mode runs. Actions mode tests
+ * the release under test, never the templates' pin: that pin is the release
+ * the templates were last moved to, which can be older than the templates'
+ * own inputs, so a run on it fails for a reason the harness cannot tell from
+ * the product's. Unset blocks the scenario before it installs anything.
+ */
+export function requiredActionSha(env: NodeJS.ProcessEnv = process.env): string {
+  const actionSha = actionShaUnderTest(env);
+  if (actionSha !== undefined) return actionSha;
+  // The pin only illustrates the reason; a template without one still blocks for the unset variable.
+  let pin = '';
+  try {
+    pin = ` ${pinnedActionSha(readTemplate(SYNC_WORKFLOW)).slice(0, 7)}`;
+  } catch {}
+  throw new EnvBlockedError(`${ACTION_SHA_ENV} is unset: actions mode runs the release under test, never the templates' pin${pin}; set it to the release commit's full SHA`);
 }
 
 type Executor = (ctx: RunContext, args: Record<string, unknown>) => Promise<void>;
@@ -131,7 +156,7 @@ async function engineCall(ctx: RunContext, command: CommandName, args: Record<st
     linearUrl: ctx.proxy?.url ?? 'https://api.linear.app',
     credentials: {
       ...linear,
-      githubToken: ctx.engine.badCredential === 'github' ? 'not-a-valid-token' : world.githubToken,
+      githubToken: ctx.engine.badCredential === 'github' ? 'not-a-valid-token' : await world.getGithubToken?.() ?? world.githubToken,
       ...(world.githubAppLogin === undefined ? {} : { appSlug: world.githubAppLogin.replace(/\[bot\]$/, '') }),
     },
     timeoutMs: ENGINE_TIMEOUT_MS,
@@ -248,19 +273,23 @@ async function runCommand(ctx: RunContext, command: CommandName, args: Record<st
   await watchRun(ctx, { throughProxy: true }, async () => settleResult(ctx, await runEngine(call)));
 }
 
+/** The observation prefix of a watched run's refs before and after it: run → ref → SHA. */
+export const RUN_REFS = 'harness.refs.';
+
 /**
  * Runs one engine invocation and snapshots the world around it as the
  * scenario's assertions need: in a scenario that asserts quiet, before and
  * after it, recording why the run was not quiet (`harness.quiet.<n>`, empty
- * when it was) for the `quiet.<n|last>` subject; in one that asserts on the
+ * when it was) for the `quiet.<n|last>` subject and what it changed
+ * (`harness.untouched.<n>`) for `untouched.<n|last>`; in one that asserts on the
  * world right after a run, the view after it (`harness.runView.<n>`) for the
  * `runs.<n|last>.` document subjects.
  */
 export async function watchRun(ctx: RunContext, options: { throughProxy: boolean }, run: () => Promise<void>): Promise<void> {
-  const quiet = watchesQuiet(ctx);
+  const worlds = watchesRunWorld(ctx);
   const views = watchesRunViews(ctx);
-  if (!quiet && !views) return run();
-  const before = quiet ? await snapshotWorld(ctx, options) : undefined;
+  if (!worlds && !views) return run();
+  const before = worlds ? await snapshotWorld(ctx, options) : undefined;
   const count = ctx.engine.results.length;
   await run();
   const result = ctx.engine.results.at(-1);
@@ -270,18 +299,53 @@ export async function watchRun(ctx: RunContext, options: { throughProxy: boolean
   if (before !== undefined) {
     const after = await snapshotWorld(ctx, options);
     ctx.observations.set(`harness.quiet.${n}`, quietFailures({ exitCode: result.exitCode, report: result.report, before, after, documentWrites: writesBetween(ctx, before, after) }));
+    ctx.observations.set(`harness.untouched.${n}`, untouchedFailures({ before, after, linearMutations: mutationsBetween(ctx, before, after) }));
+    // The raw maps behind that comparison, kept for the run's evidence (`run-refs.json`).
+    ctx.observations.set(`${RUN_REFS}${n}`, { before: before.refs, after: after.refs });
   }
   if (views) await recordRunView(ctx, n);
 }
 
-/** Runs the sync until a run changes nothing more (at most `limit` runs). */
+/**
+ * Runs the sync until a run changes nothing more (at most `limit` runs). A
+ * run that changed nothing while its open sync pull request still waits for
+ * a check has not settled: the next run, once the check completes, may merge
+ * the pull request. Settle waits for the head's checks (bounded, as
+ * `fault.checks` waits) and runs again; those runs come on top of `limit`,
+ * and settle waits at most `limit` times.
+ */
 async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit = 4): Promise<void> {
-  for (let attempt = 0; attempt < limit; attempt += 1) {
+  let waits = 0;
+  for (let attempt = 0; attempt < limit + waits; attempt += 1) {
     if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) await workflowRun(ctx, { event: 'workflow_dispatch' });
     else await runCommand(ctx, 'sync', args);
-    const last = ctx.engine.results.at(-1);
-    if (last?.report?.['changed'] === false) return;
+    const report = ctx.engine.results.at(-1)?.report;
+    if (report?.['changed'] !== false) continue;
+    if (waits >= limit || !(await waitForSyncPullRequestChecks(ctx, report))) return;
+    waits += 1;
   }
+}
+
+/**
+ * Waits until the open sync pull request that the run reports with pending
+ * checks has none pending on its head, and returns whether it waited. A head
+ * that carries the scenario's own `pending` marker sleeps by design, so
+ * nothing is waited for there.
+ */
+async function waitForSyncPullRequestChecks(ctx: RunContext, report: Record<string, unknown>): Promise<boolean> {
+  const reported = report['pullRequest'] as { pullRequest?: { number?: number } | null; checks?: Pick<CheckState, 'state'> | null } | null | undefined;
+  const number = reported?.pullRequest?.number;
+  if (ctx.live === null || typeof number !== 'number' || reported?.checks?.state !== 'pending') return false;
+  const world = live(ctx);
+  const pr = await world.rest.pullRequest(number);
+  if (pr.state !== 'open' || pr.head.ref !== ctx.names.syncBranch) return false;
+  const git = await ctx.person();
+  await git.run(['fetch', '--quiet', 'origin', `refs/heads/${ctx.names.syncBranch}`]);
+  if (await sleepsByDesign(git, pr.head.sha)) return false;
+  ctx.log(`waiting up to ${CHECK_WAIT_MS / 60_000} minutes for the checks on the head of sync pull request ${number}`);
+  await waitForHeadChecks(world.rest, pr.head.sha, { signal: ctx.signal, pollMs: ctx.checkPollMs, timeoutMs: CHECK_WAIT_MS });
+  ctx.observations.set('settle.checkWaits', Number(ctx.observations.get('settle.checkWaits') ?? 0) + 1);
+  return true;
 }
 
 /**
@@ -289,7 +353,7 @@ async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit
  * deployer copies them and rendered for this run (its branches, refs,
  * concurrency group and the sandbox's runner and secret names), committed
  * as a person would. `MDBISYNC_TEST_ACTION_SHA` names the release commit
- * under test; without it the templates' own pin runs. Only the command's
+ * under test; without it the scenario is env-blocked (requiredActionSha). Only the command's
  * workflow and the pull request check go in: a sync workflow in an initial
  * sync scenario would start on the scenario's own pushes, as a deployer is
  * told to avoid. The rendered initial sync starts on those pushes too, but
@@ -301,16 +365,17 @@ async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'):
   const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
   const wanted = [workflowFor(command), WORKFLOW_FILES['pre-commit']].filter((file) => !installed.includes(file));
   if (wanted.length === 0) return;
+  const actionSha = requiredActionSha();
   const git = await ctx.person();
   await pull(git, ctx);
-  const actionSha = actionShaUnderTest();
   const files = runWorkflows({
     trackedBranch: ctx.names.trackedBranch,
     syncBranch: ctx.names.syncBranch,
     refPrefix: ctx.names.refPrefix,
     group: runGroup(ctx.names.runId),
     securityCanary: ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE),
-    ...(actionSha === undefined ? {} : { actionSha }),
+    scheduledOnly: ctx.scenario.steps.some((step) => step.kind === 'run' && step.action === 'soak'),
+    actionSha,
   }, wanted);
   if (files.size === 0) return;
   mkdirSync(join(git.dir, '.github', 'workflows'), { recursive: true });
@@ -320,6 +385,7 @@ async function installWorkflows(ctx: RunContext, command: CommandName = 'sync'):
   await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.trackedBranch}`]);
   ctx.ownCommits.push((await git.text(['rev-parse', 'HEAD'])).trim());
   ctx.observations.set('workflows.installed', [...installed, ...files.keys()]);
+  if (ctx.scenario.steps.some((step) => step.kind === 'run' && step.action === 'soak')) ctx.observations.set('workflows.scheduledOnly', true);
 }
 
 async function requireWorkflows(ctx: RunContext, command: CommandName = 'sync'): Promise<void> {
@@ -388,12 +454,27 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
     if (pr === undefined) throw new Error('run.workflow on pull_request needs git.open-pr first');
     run = await waitForRun(world.rest, { branch: ctx.names.syncBranch, event, after: pr.openedAt, exclude: seenRuns(ctx) });
   } else if (event === 'schedule') {
-    const after = await requestScheduledRun(ctx);
-    run = await waitForScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after, exclude: seenRuns(ctx) });
+    const deadlineAt = typeof args.deadlineAt === 'number' ? args.deadlineAt : undefined;
+    const rest = deadlineAt === undefined ? world.rest : world.rest.withSignal(AbortSignal.timeout(Math.max(0, deadlineAt - Date.now())));
+    const after = Date.now();
+    ctx.observations.set('soak.requestAttempted', false);
+    try {
+      const requestedAt = await requestScheduledRun(ctx, rest, deadlineAt);
+      run = await waitForScheduledRun(rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, after: requestedAt, exclude: seenRuns(ctx), ...(deadlineAt === undefined ? {} : { deadlineAt }) });
+    } catch (error) {
+      if (deadlineAt === undefined || Date.now() < deadlineAt) throw error;
+      if (ctx.observations.get('soak.requestAttempted') === true) {
+        ctx.observations.set('workflows.unstopped', true);
+        await stopScheduledRun(world.rest, { workflow: SCHEDULER_FILE, runId: ctx.names.runId, requestBranch: ctx.names.scheduleRequest, after, exclude: seenRuns(ctx) });
+        ctx.observations.set('workflows.unstopped', false);
+      }
+      throw new EnvBlockedError('soak workflow deadline expired; outstanding request or writer stopped');
+    }
   } else {
     throw new Error(`run.workflow cannot start a ${event} run`);
   }
   recordWorkflowRun(ctx, run);
+  ctx.observations.set('workflows.last', run);
   await settleWorkflowRun(ctx, run, command);
 }
 
@@ -418,6 +499,7 @@ async function startWorkflowRun(ctx: RunContext, event: string, command: Command
  * the runs that `runs.<n|last>` name. Returns how many runs it recorded.
  */
 export async function settleFollowUpRuns(ctx: RunContext, limit = 5): Promise<number> {
+  if (ctx.observations.get('workflows.scheduledOnly') === true) return 0;
   const sync = workflowFor('sync');
   const installed = (ctx.observations.get('workflows.installed') as string[] | undefined) ?? [];
   if (ctx.scenario.mode !== 'actions' || ctx.live === null || !installed.includes(sync)) return 0;
@@ -473,24 +555,26 @@ function findPushRun(ctx: RunContext, command: CommandName, headSha: string): Pr
  * rendering for the release under test: a run never installs it, since the
  * default branch is every run's (workflow-files.ts).
  */
-async function requestScheduledRun(ctx: RunContext): Promise<number> {
+async function requestScheduledRun(ctx: RunContext, rest: SandboxRest = live(ctx).rest, deadlineAt?: number): Promise<number> {
   const world = live(ctx);
   // Checked before anything is created: a wrong setting must not leave a request behind.
   const byHand = scheduleTick() === 'workflow_dispatch';
-  const wanted = renderScheduler(readTemplate(SYNC_WORKFLOW), actionShaUnderTest());
-  const installed = await world.rest.fileText(`.github/workflows/${SCHEDULER_FILE}`);
+  const wanted = renderScheduler(readTemplate(SYNC_WORKFLOW), requiredActionSha());
+  const installed = await rest.fileText(`.github/workflows/${SCHEDULER_FILE}`);
   if (installed !== wanted) {
     throw new EnvBlockedError(`the sandbox's default branch holds ${installed === undefined ? 'no' : 'another'} ${SCHEDULER_FILE} than the sync template's for the release under test; install it with \`node test/e2e/harness/cli.ts scheduler --install\``);
   }
-  const state = await world.rest.workflowState(SCHEDULER_FILE);
+  const state = await rest.workflowState(SCHEDULER_FILE);
   if (state !== 'active') throw new EnvBlockedError(`the sandbox's scheduled workflow ${SCHEDULER_FILE} is ${state ?? 'not registered'}, not active`);
   const tip = await trackedTipOnServer(ctx);
   const after = Date.now();
-  await world.rest.createBranch(ctx.names.scheduleRequest, tip);
+  ctx.observations.set('soak.requestAttempted', true);
+  await rest.createBranch(ctx.names.scheduleRequest, tip);
   try {
-    const defaultBranch = byHand ? (await world.rest.request<{ default_branch: string }>('GET', '')).default_branch : '';
-    await waitForRequestTaken(world.rest, ctx.names.scheduleRequest, byHand ? { tick: () => world.rest.dispatchWorkflow(SCHEDULER_FILE, defaultBranch, {}) } : {});
+    const defaultBranch = byHand ? (await rest.request<{ default_branch: string }>('GET', '')).default_branch : '';
+    await waitForRequestTaken(rest, ctx.names.scheduleRequest, { ...(byHand ? { tick: () => rest.dispatchWorkflow(SCHEDULER_FILE, defaultBranch, {}) } : {}), ...(deadlineAt === undefined ? {} : { deadlineAt }) });
   } catch (error) {
+    if (deadlineAt !== undefined && Date.now() >= deadlineAt) throw error;
     // A request no tick took must not start a sync after the step. When a tick took it just now, the deletion
     // finds nothing: the step goes on to that tick's run rather than leave it writing behind the cleanup.
     if (await world.rest.deleteBranch(ctx.names.scheduleRequest)) throw error;
@@ -514,7 +598,7 @@ async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: Com
     if (/Security hooks: staged sets checked [1-9][0-9]*,/.test(result.stdout) && facts.length === 0) ctx.observations.set('securityCanary.missing', true);
     const previous = (ctx.observations.get('securityCanary.facts') as unknown[] | undefined) ?? [];
     ctx.observations.set('securityCanary.facts', [...previous, ...facts]);
-    const dir = join(ctx.runDir, 'workflows', String(run.id));
+    const dir = outputFile(join(ctx.runDir, 'workflows'), String(outputCount(run.id)));
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'security-canary.json'), `${JSON.stringify(facts, null, 2)}\n`);
   }
@@ -524,11 +608,10 @@ async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: Com
     return;
   }
   recordResult(ctx, result);
-  const dir = join(ctx.runDir, 'workflows', String(run.id));
+  const dir = outputFile(join(ctx.runDir, 'workflows'), String(outputCount(run.id)));
   mkdirSync(dir, { recursive: true });
-  const { id, event, status, conclusion, head_branch, head_sha, html_url, created_at, updated_at } = run;
-  writeFileSync(join(dir, 'run.json'), `${JSON.stringify({ id, event, status, conclusion, head_branch, head_sha, html_url, created_at, updated_at }, null, 2)}\n`);
-  writeFileSync(join(dir, 'blocker.json'), `${JSON.stringify(blocker, null, 2)}\n`);
+  writeFileSync(join(dir, 'run.json'), `${JSON.stringify(workflowEvidence(run), null, 2)}\n`);
+  writeFileSync(join(dir, 'blocker.json'), `${JSON.stringify(blockerEvidence(blocker), null, 2)}\n`);
   writeFileSync(join(dir, 'failed-step.txt'), logs.get(blocker.logFile) ?? '');
   ctx.observations.set('workflows.blocker', blocker);
   ctx.log(`first environment blocker: ${blocker.reason}; evidence in ${dir}`);
@@ -537,9 +620,10 @@ async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: Com
 
 // --- the executors -------------------------------------------------------
 
-function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
+function loadDriver(ctx: RunContext, sync: LoadDriver['sync']): LoadDriver {
   return {
     ...realClock,
+    sleep: (ms) => delay(Math.max(0, ms), undefined, { signal: ctx.signal }),
     linearEdit: async (actor, path) => {
       await editorEdit(ctx, actor, path, (text, token) => paragraphEdit(text, undefined, token));
     },
@@ -561,8 +645,10 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
           return;
         } catch (error) {
           // The sync may push to the tracked branch between the pull and the push: try again on top of it.
+          ctx.log(`git edit, try ${attempt + 1}: ${(error as Error).message.split('\n')[0]}`);
           if (attempt >= 3) throw error;
-          await git.run(['reset', '--quiet', '--hard', `origin/${ctx.names.trackedBranch}`], { okCodes: [0, 128] });
+          const reset = await git.run(['reset', '--quiet', '--hard', `origin/${ctx.names.trackedBranch}`], { okCodes: [0, 128] });
+          if (reset.code !== 0) ctx.log(`git edit: could not reset the person clone to origin/${ctx.names.trackedBranch}: ${reset.stderr.trim()}`);
         }
       }
     },
@@ -570,17 +656,28 @@ function loadDriver(ctx: RunContext, sync: () => Promise<void>): LoadDriver {
   };
 }
 
-/** Each tracked document's file and Linear content, the versions a load test's edit budget is measured on. */
+/**
+ * Each tracked document's file and Linear content, the versions a load test's edit budget is measured on. A file
+ * that I1 expects no document for (one a run left out on purpose, such as a moved file whose image is missing) is
+ * not a target; any other file without a document stops the test as a product failure.
+ */
 async function loadCandidates(ctx: RunContext, test: 'burst' | 'soak'): Promise<Map<string, string[]>> {
   const sides = await readSides(ctx);
   const candidates = new Map<string, string[]>();
+  const skipped: string[] = [];
   for (const path of documentPaths(ctx)) {
+    if (!expectsDocument(sides, path)) {
+      skipped.push(`${path} (${sides.omitted.get(path) ?? 'kept without a document'})`);
+      continue;
+    }
     const file = sides.files.get(path);
     const id = sides.ids.get(path)?.id;
     const document = id === undefined ? undefined : sides.documents.get(id);
     if (file === undefined || document === undefined) throw new ProductError(`a ${test} target is missing from the tracked files or recorded Linear documents`);
     candidates.set(path, [file, document.content ?? '']);
   }
+  if (skipped.length > 0) ctx.log(`${test}: ${skipped.length} file(s) without a document on purpose are not targets: ${skipped.join(', ')}`);
+  if (candidates.size === 0) throw new Error(`the ${test} has no target: every synchronized document was left out on purpose`);
   return candidates;
 }
 
@@ -751,7 +848,18 @@ const RUN: Record<string, Executor> = {
       runs.push(run);
       recordWorkflowRun(ctx, run);
     }
-    ctx.observations.set('workflows.maxActiveInGroup', maxOverlap(await jobSpans(world.rest, runs)));
+    const spans = await jobSpans(world.rest, runs);
+    ctx.observations.set('workflows.maxActiveInGroup', maxOverlap(spans));
+    // With one runner, jobs never overlap even without the group. Only the group cancels a pending run that a newer
+    // one replaced: such a run started no job, unlike a run cancelled while it ran (a timeout or a lost runner).
+    const started = new Set(spans.map((span) => span.runId));
+    const replaced = runs.filter((run) => run.conclusion === 'cancelled' && !started.has(run.id)).length;
+    // A replacement needs, when some run arrived, a job running and another run already waiting. Without that
+    // the scenario did not set up its race, and a count of zero says nothing about the group.
+    if (replaced === 0 && !hadReplaceableRun(runs, spans)) {
+      throw new Error('the runs did not overlap enough: no run arrived while one job ran and another run waited, so the group had nothing to replace');
+    }
+    ctx.observations.set('workflows.replacedPending', replaced);
     for (const run of runs) {
       if (run.conclusion === 'cancelled') continue; // replaced by a newer run of the group
       await settleWorkflowRun(ctx, run, 'sync');
@@ -795,26 +903,195 @@ const RUN: Record<string, Executor> = {
     };
     const counts = burstEditCounts(options);
     const documents = burstDocuments(await loadCandidates(ctx, 'burst'), options, lastLoadToken(ctx, counts.linear, counts.git));
-    const result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), { ...options, documents });
+    const from = ctx.edits.length;
+    let result;
+    try {
+      result = await burst(loadDriver(ctx, () => runCommand(ctx, 'sync', {})), { ...options, documents });
+    } catch (error) {
+      // A failed step skips the checks, so the report keeps what the burst left: the edits that landed and,
+      // as far as the sides can still be read, where each side stands (not after quiet).
+      const made = ctx.edits.slice(from);
+      ctx.observations.set('burst.edits', made);
+      const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+      metrics.burstEdits = { made: made.length, afterQuiet: false };
+      try {
+        const found = editsFound(made, await readSides(ctx));
+        metrics.burstEdits = { made: made.length, foundInGit: found.git, foundInLinear: found.linear, afterQuiet: false };
+      } catch (readError) {
+        ctx.log(`burst: the sides could not be read after the burst stopped: ${(readError as Error).message}`);
+      }
+      ctx.observations.set('metrics', metrics);
+      throw error;
+    }
+    // The edits the burst made, each recorded once it landed: the report counts them on both sides after quiet.
+    ctx.observations.set('burst.edits', ctx.edits.slice(from));
     ctx.observations.set('report.generatedLinearEdits', result.linearEdits);
     ctx.observations.set('report.generatedGitPushes', result.gitPushes);
   },
   'run.soak': async (ctx, args) => {
-    // The sync runs every `scheduleSeconds`. In actions mode the harness starts
-    // each run by dispatch, as an external trigger would (a schedule never runs
-    // on a run's branch); the report says so.
+    // Scheduled runs use the sandbox scheduler's request mechanism, scoped to this run.
     const actions = ctx.scenario.mode === 'actions';
+    if (actions && scheduleTick() !== 'workflow_dispatch') throw new EnvBlockedError('the timed soak needs dispatched scheduler ticks; set MDBISYNC_TEST_SCHEDULE_TICK=dispatch');
     if (actions) await installWorkflows(ctx);
-    const sync = actions ? () => workflowRun(ctx, { event: 'workflow_dispatch' }) : () => runCommand(ctx, 'sync', {});
-    const driver = {
-      ...loadDriver(ctx, sync),
-      checkInvariants: async () => {
+    const firstRun = ctx.engine.results.length;
+    let runnerMs = 0;
+    const triggers = new Set<string>();
+    const accounted = new Set<number>();
+    const collectUsage = async () => {
+      const world = live(ctx);
+      const runs = await world.rest.workflowRuns(ctx.names.trackedBranch);
+      const scheduled = ctx.observations.get('soak.workflow') as WorkflowRun | undefined;
+      if (scheduled !== undefined) runs.push(scheduled);
+      for (const run of runs) {
+        if (run.status !== 'completed' || accounted.has(run.id)) continue;
+        const jobs = await world.rest.runJobs(run.id);
+        if (jobs.some((job) => job.started_at !== null && job.completed_at === null)) continue;
+        for (const job of jobs) if (job.started_at !== null && job.completed_at !== null) runnerMs += Date.parse(job.completed_at) - Date.parse(job.started_at);
+        accounted.add(run.id);
+      }
+    };
+    const ledger = new SoakLedger(ctx.runDir);
+    const syncOnce: LoadDriver['sync'] = async (deadlineAt) => {
+      if (actions) {
+        const before = ctx.engine.results.length;
+        let failure: unknown;
+        try { await workflowRun(ctx, { event: 'schedule', deadlineAt }); }
+        catch (error) { failure = error; }
+        const result = ctx.engine.results.at(-1)!;
+        let started: number | undefined;
+        if (ctx.engine.results.length > before) {
+          const run = ctx.observations.get('workflows.last') as WorkflowRun;
+          triggers.add(run.event);
+          ctx.observations.set('soak.workflow', run);
+          try {
+            await collectUsage();
+            const spans = await jobSpans(live(ctx).rest, [run]);
+            if (spans.length === 0) throw new EnvBlockedError('scheduled soak workflow has no runner timing evidence');
+            started = Math.min(...spans.map((span) => span.started));
+          } catch (error) { failure ??= error; }
+        }
+        const completed = ctx.engine.results.length > before;
+        let recoverable: string | undefined;
+        let recovers = true;
+        if (failure === undefined && completed) {
+          if (result.exitCode !== 0) {
+            // Only a GitHub server error in the sync pull request step, with the run's tokens confirmed revoked.
+            const failed = failedWorkflow(result);
+            failure = failed.error;
+            recoverable = failed.recoverable;
+            ctx.log(`soak: workflow ${result.remote?.runId ?? 'unknown'} failed; ${failed.note}`);
+          } else {
+            recovers = pullRequestStepClean(result);
+            const tokens = observedTokens(ctx.engine.results.slice(firstRun));
+            if (tokens.outstanding === null) failure = new EnvBlockedError('soak stopped: workflow token lifecycle diagnostics are missing');
+            else if (tokens.outstanding !== 0) failure = new ProductError('soak stopped: workflow token revocation is unconfirmed');
+          }
+        }
+        return { completed, startedAt: started, error: failure, ...(recoverable === undefined ? {} : { recoverable }), ...(recovers ? {} : { recovers }) };
+      } else await runCommand(ctx, 'sync', {});
+    };
+    // Each invocation goes into the ledger as it ends, with the workflow run and the summary that says what waits.
+    // A drain run of an hourly check is the same scheduled run, marked as one.
+    const sync: SoakDriver['sync'] = async (deadlineAt, phase) => {
+      const invokedAt = new Date().toISOString();
+      const before = ctx.engine.results.length;
+      let recoverable: string | undefined;
+      const record = (error: unknown) => {
+        const result = ctx.engine.results.length > before ? ctx.engine.results.at(-1) : undefined;
+        ledger.sync({
+          ...(phase === undefined ? {} : { phase }),
+          invokedAt,
+          endedAt: new Date().toISOString(),
+          completed: result !== undefined,
+          ...(result?.remote === undefined ? {} : { workflowRunId: result.remote.runId }),
+          ...(result === undefined ? {} : { exitCode: result.exitCode, summary: result.summary }),
+          ...(error === undefined ? {} : { error: error instanceof Error ? error.message : String(error) }),
+          ...(recoverable === undefined ? {} : { recoverable }),
+        });
+      };
+      let outcome: Awaited<ReturnType<LoadDriver['sync']>>;
+      try {
+        outcome = await syncOnce(deadlineAt);
+      } catch (error) {
+        record(error);
+        throw error;
+      }
+      if (typeof outcome === 'object') recoverable = outcome.recoverable;
+      record(typeof outcome === 'object' ? outcome.error : undefined);
+      return outcome;
+    };
+    const progress = async (result: SoakResult) => {
+      ctx.observations.set('report.hourlyInvariantChecks', result.invariantChecks);
+      ctx.observations.set('soak.maxLostEdits', result.lostEdits);
+      const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+      const own = ctx.engine.results.slice(firstRun);
+      const tokens = actions ? observedTokens(own) : null;
+      metrics.scheduleDelay = Math.max(0, ...result.scheduleDelays);
+      metrics.scheduleDelayDistribution = delayDistribution(result.scheduleDelays);
+      metrics.scheduleDelayScope = 'planned slot to runner job start, including dispatch and queue delay';
+      metrics.runnerMinutes = Math.round((actions ? runnerMs : own.reduce((sum, run) => sum + run.durationMs, 0)) / 600) / 100;
+      metrics.runnerUsageScope = 'completed run-branch workflows and requested scheduler jobs, including request jobs; excludes unrelated idle scheduler ticks';
+      metrics.workflowsAccounted = accounted.size;
+      metrics.tokenLifecycle = tokens;
+      const active = actions ? tokens!.outstanding : ctx.proxy?.unrevokedTokens().length ?? null;
+      metrics.activeLinearTokens = active;
+      metrics.triggers = [...triggers];
+      metrics.trigger = actions ? (triggers.size === 1 ? [...triggers][0] : triggers.size === 0 ? null : 'mixed') : 'local';
+      metrics.hourlyLostEditsMax = result.lostEdits;
+      metrics.hourlyChecks = ctx.observations.get('soak.checks') ?? [];
+      metrics.soak = result;
+      ctx.observations.set('metrics', metrics);
+      writeFileSync(join(ctx.runDir, 'soak-progress.json'), `${JSON.stringify({ at: new Date().toISOString(), metrics }, null, 2)}\n`);
+    };
+    const base = loadDriver(ctx, sync);
+    const drainLimit = soakDrainSyncs(args);
+    const serverErrors = soakServerErrorPolicy(args);
+    // The looks of the current hour that found the sides apart, each before a drain run.
+    let looks: Array<{ drainSyncs: number; I1: boolean; lost: number }> = [];
+    // Each edit that landed goes into the ledger with its measured write window, before the soak goes on.
+    const recorded = async (actor: Actor, write: () => Promise<void>) => {
+      const from = ctx.edits.length;
+      const commits = ctx.ownCommits.length;
+      const syncsBefore = ledger.syncs;
+      const startedAt = new Date().toISOString();
+      await write();
+      const completedAt = new Date().toISOString();
+      const commit = ctx.ownCommits.length > commits ? ctx.ownCommits.at(-1) : undefined;
+      for (const edit of ctx.edits.slice(from)) {
+        ledger.edit({ token: edit.token, actor, side: edit.side, path: edit.path, startedAt, completedAt, ...(commit === undefined ? {} : { commit }), syncsBefore });
+      }
+    };
+    const driver: SoakDriver = {
+      ...base,
+      linearEdit: (actor: 'editor-a' | 'editor-b', path: string) => recorded(actor, () => base.linearEdit(actor, path)),
+      gitEdit: (paths: readonly string[]) => recorded('git', () => base.gitEdit(paths)),
+      progress,
+      checkInvariants: async (boundary: SoakBoundary) => {
         const sides = await readSides(ctx);
-        const lost = lostEdits(ctx, sides).length;
+        const lost = lostEdits(ctx, sides);
         const converged = await INVARIANT_CHECKS.I1(ctx, async () => sides);
-        const checks = (ctx.observations.get('soak.checks') as Array<{ I1: boolean; lost: number }> | undefined) ?? [];
-        ctx.observations.set('soak.checks', [...checks, { I1: converged.ok, lost }]);
-        return { lostEdits: lost };
+        const settled = converged.ok && lost.length === 0;
+        if (!settled && !boundary.final) {
+          // Not yet a verdict: the edits wait while the sync drains what is pending. The look's I1 differences
+          // keep their own name, so a run whose drain settles the hour leaves no I1 failure behind.
+          const differences = join(ctx.runDir, I1_DIFFERENCES_FILE);
+          if (existsSync(differences)) renameSync(differences, join(ctx.runDir, `soak-hour-${boundary.hour}-look-${looks.length + 1}-${I1_DIFFERENCES_FILE}`));
+          looks.push({ drainSyncs: boundary.drainSyncs, I1: converged.ok, lost: lost.length });
+          ctx.log(`soak: hour ${boundary.hour} not settled after ${boundary.drainSyncs} drain syncs (I1=${String(converged.ok)}, ${lost.length} edits not on both sides); the sync drains before the verdict`);
+          return { lostEdits: lost.length, converged: converged.ok };
+        }
+        // Before the soak stops and cleanup removes the clones, refs and documents.
+        const presence = settled ? undefined : await keepSoakFailure(ctx, ledger, sides, { hour: boundary.hour, I1: converged, lost, drainSyncs: boundary.drainSyncs, drainLimit });
+        const checks = (ctx.observations.get('soak.checks') as unknown[] | undefined) ?? [];
+        ctx.observations.set('soak.checks', [...checks, {
+          I1: converged.ok, lost: lost.length, drainSyncs: boundary.drainSyncs, looks,
+          ...(presence === undefined ? {} : { retainedPending: presence.retainedPending.length, absentEverywhere: presence.absentEverywhere.length, unknown: presence.unknown.length, unledgered: presence.unledgered.length }),
+        }]);
+        looks = [];
+        return {
+          lostEdits: lost.length, converged: converged.ok,
+          ...(presence === undefined ? {} : { retained: presence.retainedPending.length, absent: presence.absentEverywhere.length, unknown: presence.unknown.length, unledgered: presence.unledgered.length }),
+        };
       },
     };
     const options = {
@@ -823,27 +1100,109 @@ const RUN: Record<string, Executor> = {
       invariantIntervalMs: Number(args.invariantIntervalSeconds ?? 3600) * 1000,
       actors: Array.isArray(args.actors) ? (args.actors as Actor[]) : (['editor-a', 'editor-b', 'git'] as Actor[]),
       seed: String(args.randomSeed ?? ctx.names.runId),
+      drainSyncs: drainLimit,
+      serverErrors,
     };
     const documents = await loadCandidates(ctx, 'soak');
     const lastToken = (edits: Record<Actor, number>) => lastLoadToken(ctx, edits['editor-a'] + edits['editor-b'], edits.git);
-    const result = await soak(driver, { ...options, documents, lastToken });
-    ctx.observations.set('report.hourlyInvariantChecks', result.invariantChecks);
-    const own = ctx.engine.results.slice(ctx.engine.setupRuns);
-    const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
-    metrics.scheduleDelay = Math.max(0, ...result.scheduleDelays);
-    metrics.runnerMinutes = Math.round(own.reduce((sum, run) => sum + run.durationMs, 0) / 600) / 100;
-    // Tokens are visible to the harness only through its proxy (local runs).
-    metrics.activeLinearTokens = actions ? null : ctx.proxy?.tokens().length ?? 0;
-    metrics.trigger = actions ? 'dispatch' : 'local';
-    metrics.hourlyLostEditsMax = result.lostEdits;
-    ctx.observations.set('metrics', metrics);
-    ctx.observations.set('soak.maxLostEdits', result.lostEdits);
-    // An hourly check that failed fails the soak, even when later runs repaired the state.
-    const failed = ((ctx.observations.get('soak.checks') as Array<{ I1: boolean; lost: number }> | undefined) ?? [])
-      .flatMap((check, hour) => (check.I1 && check.lost === 0 ? [] : [`hour ${hour + 1}: ${check.I1 ? '' : 'I1 failed, '}${check.lost} edits lost`]));
-    if (failed.length > 0) throw new ProductError(`hourly checks failed: ${failed.join('; ')}`);
+    await soak(driver, { ...options, documents, lastToken });
   },
 };
+
+/**
+ * Keeps what a failed hourly soak check needs to be explained offline: each edit's token on each side and on the
+ * sync and suspended branches, the versions of every path that holds a lost edit, the run's refs, its sync pull
+ * requests and the checks of their heads, and the ledger of sync invocations. A read that fails is named in the
+ * report and the rest is still kept; the report never replaces the check's verdict. Returns where each lost
+ * edit's token still is (retained on a side or sync lane, absent everywhere, or outside the ledger), or
+ * undefined when the report could not be kept.
+ */
+async function keepSoakFailure(ctx: RunContext, ledger: SoakLedger, sides: Sides, verdict: { hour: number; I1: CheckOutcome; lost: RunContext['edits']; drainSyncs: number; drainLimit: number }): Promise<SoakPresence | undefined> {
+  const errors: string[] = [];
+  const attempt = async <T>(what: string, read: () => Promise<T>, fallback: T): Promise<T> => {
+    try {
+      return await read();
+    } catch (error) {
+      errors.push(`${what}: ${(error as Error).message.split('\n')[0]}`);
+      return fallback;
+    }
+  };
+  try {
+    const world = live(ctx);
+    const syncBranch = ctx.names.syncBranch;
+    const suspended = suspendedBranch(resolveStateConfig(ctx.names));
+    const lanes = [...new Set([syncBranch, suspended])];
+    const edits = ledger.edits();
+    // Every path the soak edited, and every path with a lost edit, the soak's or an earlier step's.
+    const paths = [...new Set([...edits.map((edit) => edit.path), ...verdict.lost.map((edit) => edit.path)])];
+    const person = await attempt('person clone', () => ctx.person(), null);
+    // The run's own branches and state refs only, as `Sandbox.runRefs` lists them, through the person's remote.
+    const refs = person === null ? {} : await attempt('refs', async () => {
+      const text = await person.text(['ls-remote', '--refs', 'origin', `refs/heads/t/${ctx.names.runId}/*`, `${ctx.names.refPrefix}/*`]);
+      return Object.fromEntries(text.split('\n').map((line) => line.split('\t')).filter((parts): parts is [string, string] => parts.length === 2).map(([oid, ref]) => [ref, oid]));
+    }, {} as Record<string, string>);
+    // Each path on a branch, through a ref of the harness's own, so the person's other refs stay as they were.
+    const branchTexts = async (branch: string, lane: 'sync' | 'suspended') => {
+      if (person === null || refs[`refs/heads/${branch}`] === undefined) return null;
+      return attempt(`${lane} branch`, async () => {
+        const local = `refs/soak-evidence/${lane}`;
+        await person.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+refs/heads/${branch}:${local}`]);
+        const texts = new Map<string, string>();
+        for (const path of paths) {
+          const shown = await person.run(['show', `${local}:${path}`], { okCodes: [0, 128] });
+          if (shown.code === 0) texts.set(path, shown.stdout.toString('utf8'));
+        }
+        return texts;
+      }, null);
+    };
+    const syncTexts = await branchTexts(syncBranch, 'sync');
+    const suspendedTexts = await branchTexts(suspended, 'suspended');
+    const pullRequests = await attempt('pull requests', async () => (await world.rest.pullRequests(`t/${ctx.names.runId}/`))
+      .filter((pr) => lanes.includes(pr.head.ref))
+      .map((pr) => ({ number: pr.number, state: pr.state, title: pr.title, body: pr.body, head: pr.head, base: pr.base.ref, createdAt: pr.created_at, mergedAt: pr.merged_at, mergeCommit: pr.merge_commit_sha ?? null })), [] as unknown[]);
+    const heads = new Set(lanes.map((branch) => refs[`refs/heads/${branch}`]).filter((sha): sha is string => sha !== undefined));
+    // Each read on its own: one that fails is named, and the runs and jobs read before and after it stay.
+    const checks: unknown[] = [];
+    for (const branch of lanes) for (const run of await attempt(`workflow runs of ${branch}`, () => world.rest.workflowRuns(branch), [])) {
+      // The jobs of the current heads' runs: which check failed or still waits.
+      const jobs = run.head_sha !== undefined && heads.has(run.head_sha)
+        ? await attempt(`jobs of run ${run.id}`, async () => (await world.rest.runJobs(run.id)).map((job) => ({ name: job.name, conclusion: job.conclusion, startedAt: job.started_at, completedAt: job.completed_at })), null)
+        : undefined;
+      checks.push({ branch, id: run.id, workflow: run.path ?? null, event: run.event, status: run.status, conclusion: run.conclusion, headSha: run.head_sha ?? null, createdAt: run.created_at, url: run.html_url ?? null, ...(jobs === undefined ? {} : { jobs }) });
+    }
+    const input = { files: sides.files, documents: sides.documents, ids: sides.ids, syncBranch: syncTexts, suspendedBranch: suspendedTexts };
+    const tokens = tokenVerdicts(edits, ledger.syncEntries(), { ...input, lostTokens: new Set(verdict.lost.map((edit) => edit.token)), holdsToken });
+    // An I2 loss outside the ledger (an edit made before the soak) is named; its path's versions are in the payloads.
+    const unledgered = verdict.lost.filter((edit) => !edits.some((entry) => entry.token === edit.token));
+    if (unledgered.length > 0) errors.push(`lost edits not in the soak ledger: ${unledgered.map((edit) => `${edit.side} ${edit.token} ${edit.path}`).join(', ')}`);
+    // A lane that exists but could not be read, or refs that could not be listed, leave a token's lanes unknown.
+    const refsRead = person !== null && !errors.some((error) => error.startsWith('refs:'));
+    const laneRead = (branch: string, texts: ReadonlyMap<string, string> | null) => refs[`refs/heads/${branch}`] === undefined || texts !== null;
+    const lanesRead = refsRead && laneRead(syncBranch, syncTexts) && laneRead(suspended, suspendedTexts);
+    const presence = presenceOf(tokens, unledgered.map((edit) => edit.token), lanesRead);
+    const report: SoakFailureReport = {
+      hour: verdict.hour,
+      at: new Date().toISOString(),
+      verdict: { I1: verdict.I1.ok, ...(verdict.I1.detail === undefined ? {} : { I1Detail: verdict.I1.detail }), lostEdits: verdict.lost.length },
+      boundary: { drainSyncs: verdict.drainSyncs, drainLimit: verdict.drainLimit },
+      presence,
+      trackedTip: sides.tip,
+      refs,
+      pullRequests,
+      checks,
+      syncs: ledger.syncEntries(),
+      tokens,
+      missing: missingEdits(tokens),
+      payloads: pathVersions(verdict.lost.map((edit) => edit.path), input),
+      evidenceErrors: errors,
+    };
+    ctx.log(`soak: hour ${verdict.hour} failed; kept ${writeSoakFailure(ctx.runDir, report)}`);
+    return presence;
+  } catch (error) {
+    ctx.log(`soak: the failed hour ${verdict.hour} could not be kept: ${(error as Error).message}${errors.length > 0 ? `; earlier: ${errors.join('; ')}` : ''}`);
+    return undefined;
+  }
+}
 
 /** The sync branch checked out in a worktree of the person's clone; null when it does not exist. */
 async function syncBranchWorktree(ctx: RunContext): Promise<Git | null> {
@@ -1138,14 +1497,38 @@ const GIT: Record<string, Executor> = {
     const pr = await world.rest.openPullRequest(ctx.names.syncBranch, ctx.names.trackedBranch, 'Add the format check page', 'A small page for the weekly review.');
     ctx.observations.set('ci.pullRequest', { number: pr.number, head: commit, openedAt });
   },
-  'git.edit-sync-branch': async (ctx) => {
-    const path = targetPath(ctx);
+  'git.edit-sync-branch': async (ctx, args) => {
+    // A person's commit on the pending sync branch: a new paragraph, or with a
+    // paragraph target an edit of that paragraph, which a later edit of the
+    // same paragraph on another side conflicts with.
+    const path = targetPath(ctx, args.target);
+    setTarget(ctx, path);
     const token = nextToken(ctx);
     const commit = await commitToSyncBranch(ctx, async (git) => {
-      writeFileSync(join(git.dir, path), paragraphEdit(readFileSync(join(git.dir, path), 'utf8'), undefined, token));
+      writeFileSync(join(git.dir, path), paragraphEdit(readFileSync(join(git.dir, path), 'utf8'), args.target, token));
     }, 'Add a note to the pending changes');
     ctx.edits.push({ side: 'git', path, token });
     ctx.observations.set('syncBranch.personCommit', commit);
+    ctx.observations.set('syncBranch.personEdit', { path, token });
+  },
+  'git.resolve-sync-branch': async (ctx) => {
+    // A person resolves the conflict markers a run merged into the pending sync
+    // branch, keeping the git version, before the pull request merges: the
+    // document edited on the sync branch, else the scenario's target.
+    const path = (ctx.observations.get('syncBranch.personEdit') as { path: string } | undefined)?.path ?? targetPath(ctx);
+    setTarget(ctx, path);
+    let conflicted = '';
+    let committed = '';
+    const commit = await commitToSyncBranch(ctx, async (git) => {
+      conflicted = readFileSync(join(git.dir, path), 'utf8');
+      const resolved = resolveKeeping(conflicted, 'git');
+      if (resolved === conflicted) throw new ProductError('the sync branch holds no conflict markers to resolve');
+      writeFileSync(join(git.dir, path), resolved);
+      committed = resolved;
+    }, 'Resolve the conflict');
+    retireDiscarded(ctx, conflicted, committed);
+    ctx.observations.set('resolved.body', bodyOf(committed));
+    ctx.observations.set('syncBranch.resolutionCommit', commit);
   },
   'git.ci-fix': async (ctx, args) => {
     // Fix commits a CI job makes on the sync pull request's branch.
@@ -1647,7 +2030,7 @@ const FAULT: Record<string, Executor> = {
       checkpoint: 'after-write-before-record',
       action: async () => {
         const git = await ctx.person();
-        await git.run(['fetch', '--quiet', 'origin', `+${ref}:${ref}`]);
+        await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', `+${ref}:${ref}`]);
         const tip = (await git.text(['rev-parse', ref])).trim();
         const tree = (await git.text(['rev-parse', `${tip}^{tree}`])).trim();
         const moved = (await git.text(['commit-tree', tree, '-p', tip, '-m', 'Unrelated update'])).trim();
@@ -1756,11 +2139,12 @@ const OTHER: Record<string, Executor> = {
     if (pr === undefined) throw new ProductError('no sync pull request is open to merge');
     const merged = await world.rest.mergePullRequest(pr.number);
     ctx.observations.set('merge.commit', merged.sha);
+    await retireMergedRemovals(ctx, merged.sha);
   },
 };
 
 const UI_ACTIONS = [
-  'ui.assert-dom', 'ui.inspect-blocked', 'ui.inspect-conflict', 'ui.inspect-rendering', 'ui.paste-image',
+  'ui.assert-dom', 'ui.follow-document-links', 'ui.inspect-blocked', 'ui.inspect-conflict', 'ui.inspect-rendering', 'ui.paste-image',
   'ui.rename-trash-restore', 'ui.resolve-markers', 'ui.type-during-write', 'ui.type-two-editors', 'ui.verify-editor',
 ];
 
@@ -1775,6 +2159,22 @@ export const STEP_ACTIONS: Record<string, Executor> = {
     throw new EnvBlockedError('UI steps run in the UI session from its checklist');
   }])),
 };
+
+/**
+ * Marks the git edits whose files a person's merge of the initial pull
+ * request removed: the initial sync from Linear removes files Linear does
+ * not hold, and the person who merged it accepted that. I2 then no longer
+ * expects them; every other edit stays checked.
+ */
+export async function retireMergedRemovals(ctx: RunContext, mergeCommit: string): Promise<void> {
+  const git = await ctx.person();
+  await git.run(['fetch', '--quiet', '--no-write-fetch-head', 'origin', mergeCommit]);
+  for (const edit of ctx.edits) {
+    if (edit.side !== 'git' || edit.removal === true) continue;
+    const kept = await git.run(['cat-file', '-e', `${mergeCommit}:${edit.path}`], { okCodes: [0, 1, 128] });
+    if (kept.code !== 0) edit.retired = true;
+  }
+}
 
 /**
  * Marks the edits of a document that the version kept no longer holds, when
@@ -1795,6 +2195,12 @@ const UI_AFTERMATH: Record<string, Executor> = {
   'ui.resolve-markers': async (ctx, args) => {
     const path = targetPath(ctx, args.target);
     retireMissingFrom(ctx, path, (await linearContent(ctx, path)).content);
+  },
+  // No check reads whether the anchored link scrolled: keep the session's answer in the report (null when not given).
+  'ui.follow-document-links': async (ctx) => {
+    const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
+    metrics.anchorScrolls = ctx.observations.get('ui.anchorScrolls') ?? null;
+    ctx.observations.set('metrics', metrics);
   },
 };
 

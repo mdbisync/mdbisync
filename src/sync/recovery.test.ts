@@ -18,7 +18,7 @@ import { INCOMPLETE_EXIT_CODE, NO_STATE_EXIT_CODE } from '../commands.ts';
 import { type RunReport } from '../run/finish.ts';
 import { Git, UPLOADS_REBUILDING, UPLOADS_REBUILT } from '../state/index.ts';
 import { type FakeWorld, GITHUB_API, LINEAR_API, fakeFetch, fakeWorld, touch } from '../setup/test-helpers.ts';
-import { type Fixture, IDENTITY, createFixture, remoteRef } from '../state/test-helpers.ts';
+import { type Fixture, IDENTITY, createFixture, remoteRef, mergeOnGitHub } from '../state/test-helpers.ts';
 import { MERGE_RECORD_MESSAGE } from './write.ts';
 
 const CANARY = 'kx-0e5b7a31';
@@ -28,7 +28,7 @@ const PRE_COMMIT = `repos:
     hooks:
       - id: linear-format
 `;
-const DIAGRAM = Buffer.from(`diagram bytes ${'x'.repeat(300)}`);
+const DIAGRAM = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
 const TREE: Record<string, string | Buffer> = {
   'README.md': `# Repository\n\n${CANARY}\n`,
@@ -122,18 +122,7 @@ describe('sync: lost state and deleted branches', () => {
   const sync = () => cli('sync');
 
   /** GitHub's merge with a merge commit, done on the bare remote: parents (base, head), refused when the head moved. */
-  async function mergeOnRemote(pr: { head: string; base: string; number: number }, sha: string): Promise<{ sha: string } | { status: number }> {
-    if ((await rev(`refs/heads/${pr.head}`)) !== sha) return { status: 409 };
-    const base = await rev(`refs/heads/${pr.base}`);
-    const merged = await fixture.remote.run(['merge-tree', '--write-tree', base, sha], { okCodes: [0, 1] });
-    if (merged.code !== 0) return { status: 405 };
-    const tree = merged.stdout.toString('utf8').split('\n')[0] as string;
-    const commit = await fixture.remote.text(['commit-tree', tree, '-p', base, '-p', sha, '-m', `Merge pull request #${pr.number} from owner/${pr.head}`], {
-      env: { GIT_AUTHOR_NAME: 'sync-app[bot]', GIT_AUTHOR_EMAIL: 'bot@example.com', GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@example.com' },
-    });
-    await fixture.remote.run(['update-ref', `refs/heads/${pr.base}`, commit, base]);
-    return { sha: commit };
-  }
+  const mergeOnRemote = (pr: { head: string; base: string; number: number }, sha: string) => mergeOnGitHub(fixture, pr, sha);
 
   /** Passes every check on every commit, so the sync merges its pull request on the run after it opens or moves it. */
   function passAllChecks() {

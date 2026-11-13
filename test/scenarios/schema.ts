@@ -43,7 +43,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "git.rerun-suspended-check": [],
   "git.edit": ["cleanEdits", "conflictingDocuments", "fixture", "target", "workflows"],
   "git.edit-many": ["documents"],
-  "git.edit-sync-branch": [],
+  "git.edit-sync-branch": ["target"],
   "git.front-matter": ["target"],
   "git.image-add": ["documents", "storage"],
   "git.image-change": ["samePath"],
@@ -54,6 +54,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "git.remove-footnote": ["target"],
   "git.remove-security-hooks": [],
   "git.resolve": [],
+  "git.resolve-sync-branch": [],
   "git.scratch-hook": ["fixture", "source"],
   "kill.engine": ["checkpoint"],
   "linear.conflict-again": ["actor"],
@@ -68,7 +69,7 @@ export const operationArguments: Record<string, readonly string[]> = {
   "linear.out-of-scope": ["actor", "variants"],
   "linear.remove-one-marker": ["actor"],
   "linear.remove-secret": ["actor"],
-  "linear.rename": ["actor", "title"],
+  "linear.rename": ["actor", "target", "title"],
   "linear.repeated-edit": ["actor", "count"],
   "linear.resolve": ["actor"],
   "linear.restore": ["actor", "fixture"],
@@ -88,12 +89,13 @@ export const operationArguments: Record<string, readonly string[]> = {
   "run.resume-until-complete": ["command", "confirm", "direction"],
   "run.scan-canaries": ["scope", "sources"],
   "run.settle": ["mergeGraceSeconds"],
-  "run.soak": ["actors", "durationSeconds", "invariantIntervalSeconds", "randomSeed", "scheduleSeconds"],
+  "run.soak": ["actors", "drainSyncs", "durationSeconds", "invariantIntervalSeconds", "randomSeed", "scheduleSeconds", "serverErrorTicks", "serverErrorTotal"],
   "run.sync": ["mergeGraceSeconds", "wait", "checkDeadlineMinutes"],
   "run.token-lifecycle": ["outcomes"],
   "run.workflow": ["command", "confirm", "direction", "event"],
   "run.workflow-parallel": ["events", "replacePending"],
   "ui.assert-dom": ["actor"],
+  "ui.follow-document-links": ["actor"],
   "ui.inspect-blocked": ["actor"],
   "ui.inspect-conflict": ["actor"],
   "ui.inspect-rendering": ["actor", "coverAllConstructs", "group", "sampleCount"],
@@ -128,7 +130,7 @@ function list(value: unknown): asserts value is unknown[] {
 
 const stringArguments = new Set('actor checkpoint command construct destination direction event fixture group input missing name lane operation path project ref scope service source storage target title'.split(' '));
 const booleanArguments = new Set('reset flaky document allFiles bypassHook compareGolden concurrencyGroup confirm coverAllConstructs includeEndpointLimits linearFormat mergeCommits replacePending samePath scheduled valid wait workflows'.split(' '));
-const numericArguments = new Set('minutes checkDeadlineMinutes characters cleanEdits conflictingDocuments count documents durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds stopAfterDocuments teams times'.split(' '));
+const numericArguments = new Set('minutes checkDeadlineMinutes characters cleanEdits conflictingDocuments count documents drainSyncs durationSeconds gitPushesPerMinute invariantIntervalSeconds linearEditsPerMinute mergeGraceSeconds passes randomSeed remaining requestNumber requireIdleSeconds retryAfterSeconds rewriteFraction sampleCount scheduleSeconds serverErrorTicks serverErrorTotal stopAfterDocuments teams times'.split(' '));
 const arrayArguments = new Set('actors constructs events fixes measure names orderings outcomes sources variants'.split(' '));
 const requiredArguments: Record<string, string[]> = {
     'fault.check-age': ['minutes'],

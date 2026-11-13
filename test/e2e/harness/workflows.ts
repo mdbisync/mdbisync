@@ -19,15 +19,16 @@
 // scenario then stops at that run. Any other failure stays the run's result
 // for the scenario's checks.
 
-import { REQUEST_JOB, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
+import { engineSteps, REQUEST_JOB, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
 import { diagnosticRequests } from './request-accounting.ts';
 import { CANARY_EVIDENCE } from './security-canary.ts';
 import { inflateRawSync } from 'node:zlib';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { CommandName } from '../../../src/commands.ts';
+import { notImplementedMessage, type CommandName } from '../../../src/commands.ts';
 import type { EngineResult } from './engine.ts';
 import { GitHubError, type SandboxRest, type WorkflowJob, type WorkflowRun } from './github.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
+import { outputCount, outputText } from '../../../src/run/output.ts';
 
 export const REPORT_ARTIFACT = 'mdbisync-report';
 export const RUN_WAIT_MS = 30 * 60_000;
@@ -113,11 +114,13 @@ export async function waitForRun(rest: SandboxRest, options: WaitOptions): Promi
  * while the request waits. A request no tick took within `timeoutMs` blocks
  * the run.
  */
-export async function waitForRequestTaken(rest: SandboxRest, branch: string, options: { tick?: () => Promise<void>; retickMs?: number; timeoutMs?: number; pollMs?: number } = {}): Promise<void> {
+export async function waitForRequestTaken(rest: SandboxRest, branch: string, options: { tick?: () => Promise<void>; retickMs?: number; timeoutMs?: number; pollMs?: number; deadlineAt?: number } = {}): Promise<void> {
   const started = Date.now();
   const timeoutMs = options.timeoutMs ?? SCHEDULE_TAKE_MS;
   let ticked = -Infinity;
+  const deadline = Math.min(started + timeoutMs, options.deadlineAt ?? Infinity);
   for (;;) {
+    if (Date.now() >= deadline) throw new EnvBlockedError(`scheduled request wait reached its deadline (${options.tick === undefined ? 'no scheduled tick took it' : 'no tick started by hand took it'})`);
     if (options.tick !== undefined && Date.now() - ticked >= (options.retickMs ?? RETICK_MS)) {
       ticked = Date.now();
       await options.tick();
@@ -127,7 +130,7 @@ export async function waitForRequestTaken(rest: SandboxRest, branch: string, opt
       const cause = options.tick === undefined ? 'GitHub started no tick of the schedule, or the runner was busy' : 'no tick started by hand took it: the runner was busy, or other requests went first';
       throw new EnvBlockedError(`no scheduled run took the run's request within ${Math.round(timeoutMs / 60_000)} minutes (${cause})`);
     }
-    await sleep(options.pollMs ?? POLL_MS);
+    await sleep(Math.max(0, Math.min(options.pollMs ?? POLL_MS, deadline - Date.now())));
   }
 }
 
@@ -139,11 +142,13 @@ export async function waitForRequestTaken(rest: SandboxRest, branch: string, opt
  * created before the request (it waited for the runner or for the tick
  * before it), so only runs that finished before `after` are left out.
  */
-export async function waitForScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; after: number; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number }): Promise<WorkflowRun> {
+export async function waitForScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; after: number; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number; deadlineAt?: number }): Promise<WorkflowRun> {
   const started = Date.now();
   // Runs that served another run, or none: they never become this run's.
   const others = new Set<number>(options.exclude ?? []);
+  const deadline = Math.min(started + (options.timeoutMs ?? RUN_WAIT_MS), options.deadlineAt ?? Infinity);
   for (;;) {
+    if (Date.now() >= deadline) throw new EnvBlockedError('scheduled workflow wait reached its deadline');
     // GitHub's tick or one by hand, whichever took the request; the run keeps its true event.
     const runs = [...(await rest.workflowFileRuns(options.workflow, 'schedule')), ...(await rest.workflowFileRuns(options.workflow, 'workflow_dispatch'))];
     const candidates = runs
@@ -160,7 +165,29 @@ export async function waitForScheduledRun(rest: SandboxRest, options: { workflow
     }
     const waited = Date.now() - started;
     if (waited > (options.timeoutMs ?? RUN_WAIT_MS)) throw new EnvBlockedError(`the scheduled run that took the run's request did not finish within ${Math.round((options.timeoutMs ?? RUN_WAIT_MS) / 60_000)} minutes (runner busy?)`);
-    await sleep(options.pollMs ?? POLL_MS);
+    await sleep(Math.max(0, Math.min(options.pollMs ?? POLL_MS, deadline - Date.now())));
+  }
+}
+
+/** Fence an untaken request, or cancel only a workflow proven to contain this run's job. */
+export async function stopScheduledRun(rest: SandboxRest, options: { workflow: string; runId: string; requestBranch: string; after: number; exclude?: ReadonlySet<number>; timeoutMs?: number; pollMs?: number }): Promise<void> {
+  if (await rest.deleteBranch(options.requestBranch)) return;
+  const deadline = Date.now() + (options.timeoutMs ?? 120_000);
+  const cancelled = new Set<number>();
+  for (;;) {
+    const runs = [...await rest.workflowFileRuns(options.workflow, 'schedule'), ...await rest.workflowFileRuns(options.workflow, 'workflow_dispatch')];
+    for (const run of runs) {
+      if (options.exclude?.has(run.id)) continue;
+      if (run.status === 'completed' && Date.parse(run.updated_at ?? run.created_at) < options.after) continue;
+      if (!(await rest.runJobs(run.id)).some((job) => job.name.endsWith(` ${options.runId}`))) continue;
+      if (run.status === 'completed') return;
+      if (!cancelled.has(run.id)) {
+        await rest.request('POST', `/actions/runs/${run.id}/cancel`);
+        cancelled.add(run.id);
+      }
+    }
+    if (Date.now() >= deadline) throw new EnvBlockedError('could not confirm the scheduled writer stopped; reservation must remain held');
+    await sleep(Math.min(options.pollMs ?? 1000, Math.max(0, deadline - Date.now())));
   }
 }
 
@@ -202,6 +229,26 @@ export interface RunBlocker {
   reason: string;
 }
 
+/** Only the bounded workflow metadata needed for diagnosing a blocked run. */
+export function workflowEvidence(run: WorkflowRun): Record<string, unknown> {
+  const optional = (value: unknown, limit: number) => value === undefined || value === null ? value : outputText(value, limit);
+  return {
+    id: outputCount(run.id), event: outputText(run.event, 100), status: run.status === null ? null : outputText(run.status, 100),
+    conclusion: run.conclusion === null ? null : outputText(run.conclusion, 100),
+    head_branch: optional(run.head_branch, 1024), head_sha: optional(run.head_sha, 256),
+    html_url: optional(run.html_url, 4096),
+    created_at: outputText(run.created_at, 100), updated_at: optional(run.updated_at, 100),
+  };
+}
+
+export function blockerEvidence(blocker: RunBlocker): RunBlocker {
+  return {
+    runId: outputCount(blocker.runId), job: outputText(blocker.job, 4096),
+    step: outputText(blocker.step, 4096), cause: outputText(blocker.cause, 4096),
+    logFile: outputText(blocker.logFile, 8192), reason: outputText(blocker.reason, 16384),
+  };
+}
+
 /**
  * A failed run's proven environment blocker, or undefined. Proven means: the
  * run's first failed step is a prerequisite step, and its own log shows a
@@ -231,6 +278,42 @@ export function environmentBlocker(run: WorkflowRun, jobs: readonly WorkflowJob[
     };
   }
   return undefined;
+}
+
+/** A step's log file in a run's logs, `<job>/<number>_<step>.txt`, without the characters GitHub may drop from a file name. */
+function stepOfLogFile(file: string): string | undefined {
+  const step = /\/\d+_([^/]+)\.txt$/.exec(file)?.[1];
+  return step === undefined ? undefined : comparable(step);
+}
+
+let comparableEngineSteps: ReadonlySet<string> | undefined;
+
+function comparable(name: string): string {
+  return name.replace(/[^A-Za-z0-9]+/g, '');
+}
+
+/**
+ * Whether a run's engine answered "not implemented" for `command`: a step
+ * that runs the engine (engineSteps) logged the engine's own line,
+ * `<command>: not implemented`, which the action reports as the step's
+ * failure. Any other text is not that answer: an older release's post step
+ * prints "post: not implemented, nothing to clean up" on every failed run,
+ * and a run on a release that rejects the template's inputs fails before the
+ * engine starts.
+ */
+export function engineNotImplemented(files: ReadonlyMap<string, string>, command: CommandName): boolean {
+  comparableEngineSteps ??= new Set([...engineSteps()].map(comparable));
+  const steps = comparableEngineSteps;
+  const line = notImplementedMessage(command);
+  for (const [file, log] of files) {
+    const step = stepOfLogFile(file);
+    if (step === undefined || !steps.has(step)) continue;
+    // Each log line starts with its timestamp; the action's failure carries GitHub's error marker.
+    for (const entry of log.split(/\r?\n/)) {
+      if (entry.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z /, '').replace(/^##\[error\]/, '').trimEnd() === line) return true;
+    }
+  }
+  return false;
 }
 
 /** What a finished workflow run reported, in the shape of a local engine result. */
@@ -264,8 +347,9 @@ export async function runResult(rest: SandboxRest, run: WorkflowRun, command: Co
       requests: diagnosticRequests(files),
     },
     exitCode: run.conclusion === 'success' ? 0 : 1,
+    conclusion: run.conclusion ?? null,
     signal: null,
-    notImplemented: /not implemented/.test(logs) && run.conclusion !== 'success',
+    notImplemented: run.conclusion !== 'success' && engineNotImplemented(files, command),
     timedOut: false,
     durationMs: Date.parse(run.updated_at ?? run.created_at) - started,
     stdout: logs,
@@ -304,6 +388,22 @@ export function maxOverlap(spans: readonly JobSpan[]): number {
     max = Math.max(max, active);
   }
   return max;
+}
+
+/**
+ * Whether the runs set up a replacement: when some run arrived, another run's
+ * job was running and a third run was already waiting (created, its job not
+ * started). Only then can a concurrency group replace a pending run. Runs
+ * that arrive one after another, each waiting alone, never give it the chance.
+ */
+export function hadReplaceableRun(runs: readonly Pick<WorkflowRun, 'id' | 'created_at'>[], spans: readonly JobSpan[]): boolean {
+  const firstStart = (id: number) => Math.min(...spans.filter((span) => span.runId === id).map((span) => span.started));
+  return runs.some((arriving) => {
+    const at = Date.parse(arriving.created_at);
+    const active = spans.some((span) => span.runId !== arriving.id && span.started <= at && span.completed > at);
+    const waiting = runs.some((other) => other.id !== arriving.id && Date.parse(other.created_at) <= at && firstStart(other.id) > at);
+    return active && waiting;
+  });
 }
 
 /** Whether a GitHub login is a GitHub App's bot account. */
