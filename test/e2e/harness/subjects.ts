@@ -33,6 +33,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { HOLD_FAILED, HOLD_TIMED_OUT } from '../../../src/sync/hold.ts';
 import { MARKS } from '../../../src/sync/marks.ts';
+import type { WriteCall } from '../../../src/pull-request/github.ts';
 import { detectConflicts } from '../../../src/merge/index.ts';
 import type { PullRequest } from './github.ts';
 import type { LinearDocument } from '../../../src/linear/index.ts';
@@ -2351,7 +2352,8 @@ const WRITE_KINDS = ['linear', 'git', 'pullRequests'] as const;
 
 /**
  * What one engine run wrote, from its report's `writes`: the subjects
- * `runs.<n|last>.writes.linear|git|pullRequests|total`. The engine counts
+ * `runs.<n|last>.writes.linear|git|pullRequests|total` (one pull request
+ * kind: `runPullRequestWrites`). The engine counts
  * each write where it succeeds and never a refused, failed or unanswered
  * one, so the same holds for every operation:
  *
@@ -2371,18 +2373,41 @@ const WRITE_KINDS = ['linear', 'git', 'pullRequests'] as const;
  * here). A report without `writes` fails as a product error.
  */
 export function runWrites(report: Record<string, unknown>): RunWrites {
+  const reported = reportedWrites(report);
+  const counted = { linear: 0, git: 0, pullRequests: 0 };
+  for (const kind of WRITE_KINDS) for (const count of Object.values(reported[kind])) counted[kind] += count;
+  return { ...counted, total: counted.linear + counted.git + counted.pullRequests };
+}
+
+/** The report's `writes` by kind and name, each a count; anything else fails as a product error. */
+function reportedWrites(report: Record<string, unknown>): Record<typeof WRITE_KINDS[number], Record<string, number>> {
   const writes = report['writes'];
   if (writes === null || typeof writes !== 'object' || Array.isArray(writes)) throw new ProductError("the engine's report gives no writes");
-  const counted = { linear: 0, git: 0, pullRequests: 0 };
+  const reported = { linear: {}, git: {}, pullRequests: {} } as Record<typeof WRITE_KINDS[number], Record<string, number>>;
   for (const kind of WRITE_KINDS) {
     const byName = (writes as Record<string, unknown>)[kind];
     if (byName === null || typeof byName !== 'object' || Array.isArray(byName)) throw new ProductError(`the engine's report gives no writes.${kind}`);
     for (const [name, count] of Object.entries(byName)) {
       if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) throw new ProductError(`the engine's report gives writes.${kind}.${name} that is not a count`);
-      counted[kind] += count;
+      reported[kind][name] = count;
     }
   }
-  return { ...counted, total: counted.linear + counted.git + counted.pullRequests };
+  return reported;
+}
+
+/** The pull request calls the engine counts by name; the compiler keeps them in step with the engine's calls. */
+const PULL_REQUEST_WRITES = { opened: true, updated: true, merged: true, closed: true } satisfies Record<WriteCall['kind'], true>;
+
+/**
+ * How many pull request calls of one kind a run made: the subject
+ * `runs.<n|last>.writes.pullRequests.opened|updated|merged|closed`. The
+ * engine leaves out a kind it did not write, so an absent kind is 0. A
+ * kind the engine does not count would read as 0 and pass, so it is a
+ * harness error (a wrong scenario), not a zero.
+ */
+export function runPullRequestWrites(report: Record<string, unknown>, kind: string): number {
+  if (!Object.hasOwn(PULL_REQUEST_WRITES, kind)) throw new Error(`writes.pullRequests.${kind}: a run's pull request writes are ${Object.keys(PULL_REQUEST_WRITES).map((name) => `writes.pullRequests.${name}`).join(', ')}`);
+  return reportedWrites(report).pullRequests[kind] ?? 0;
 }
 
 function engineValue(ctx: RunContext, subject: string): unknown {
@@ -2395,6 +2420,7 @@ function engineValue(ctx: RunContext, subject: string): unknown {
   if (result.report === null) throw new ProductError(`engine run ${index} wrote no report, so it gives no ${subject}`);
   // A run's writes are the report's `writes` summed by kind (`runWrites`).
   if (runMatch !== null && path[0] === 'writes') {
+    if (path.length === 3 && path[1] === 'pullRequests') return runPullRequestWrites(result.report, path[2] as string);
     const writes = runWrites(result.report);
     const kind = path.length === 2 ? path[1] : undefined;
     // A scenario that names another kind is wrong, not the product: a harness error.
