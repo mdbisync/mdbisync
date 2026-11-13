@@ -135,9 +135,14 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || /^L5-(2
         if (init?.body && url.endsWith('/graphql')) {
           const body = JSON.parse(String(init.body));
           if (['DocumentComments', 'SuspendedComments'].includes(body.operationName)) {
+            // As in Linear, a document in the trash or archived has its comments archived with it, and a
+            // comment connection lists archived comments only when the query asks for them.
+            const archivedListed = /comments\([^)]*includeArchived:\s*true/.test(body.query);
             const commentsFor = (documentId: string) => {
               const id = `content-${documentId}`;
-              const nodes = [...world.linear.comments].filter(([, c]) => c.documentContentId === id).map(([id, c]) => ({ id, body: c.body, resolvedAt: c.resolved ? new Date().toISOString() : null, createdAt: new Date().toISOString() }));
+              const document = world.linear.documents.find((d) => d.id === documentId);
+              const archived = document?.trashed === true || document?.archivedAt !== undefined;
+              const nodes = archived && !archivedListed ? [] : [...world.linear.comments].filter(([, c]) => c.documentContentId === id).map(([id, c]) => ({ id, body: c.body, resolvedAt: c.resolved ? new Date().toISOString() : null, archivedAt: archived ? new Date().toISOString() : null, createdAt: new Date().toISOString() }));
               return { comments: { nodes } };
             };
             const data = body.operationName === 'DocumentComments' ? { document: commentsFor(body.variables.id) }
