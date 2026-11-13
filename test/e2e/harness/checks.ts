@@ -5,7 +5,7 @@
 import { engineRequestCount, remoteRequests, isDocumentWrite } from './request-accounting.ts';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join, posix } from 'node:path';
+import { join, posix, resolve } from 'node:path';
 import type { LinearClient, LinearDocument } from '../../../src/linear/index.ts';
 import type { Definition, Image, Link, Nodes } from 'mdast';
 import { parse, splitFile, visit } from '../../../src/format/markdown.ts';
@@ -712,12 +712,12 @@ export interface RefMove {
 }
 
 /** What differs between two commits' trees, renames not paired, so each path is compared by its own content. */
-export async function refMoveDiff(git: Git, old: string, next: string): Promise<Pick<RefMove, 'paths' | 'patch' | 'error'>> {
-  const names = await git.run(['diff', '--no-renames', '--name-status', old, next], { okCodes: [0, 128] });
+export async function refMoveDiff(git: Git, old: string, next: string, env: Record<string, string> = {}): Promise<Pick<RefMove, 'paths' | 'patch' | 'error'>> {
+  const names = await git.run(['diff', '--no-renames', '--name-status', old, next], { env, okCodes: [0, 128] });
   if (names.code !== 0) return { paths: [], patch: '', error: 'the two commits could not be compared' };
   const paths = names.stdout.toString('utf8').split('\n').filter(Boolean);
-  // The trees can be present without every blob (a clone that borrows a partial cache): the paths stay, the patch says why it is missing.
-  const patch = await git.run(['diff', '--no-renames', '--no-ext-diff', '--no-textconv', old, next], { okCodes: [0, 128] });
+  // The trees can be present without every blob (read through the partial cache): the paths stay, the patch says why it is missing.
+  const patch = await git.run(['diff', '--no-renames', '--no-ext-diff', '--no-textconv', old, next], { env, okCodes: [0, 128] });
   if (patch.code !== 0) return { paths, patch: '', error: 'the patch could not be read' };
   const bytes = patch.stdout;
   return {
@@ -776,6 +776,11 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   async I4(ctx) {
     const history = (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined) ?? [];
     const git = await ctx.person();
+    // The person's clone reads the commits the snapshots kept in the sandbox cache for these reads only. Its
+    // fetches never borrow from the cache: a fetch that offers the partial cache's commits can get deltas
+    // against blobs the cache never downloaded, and fail.
+    const cache = ctx.live?.sandbox.cache.dir;
+    const kept: Record<string, string> = cache === undefined ? {} : { GIT_ALTERNATE_OBJECT_DIRECTORIES: resolve(cache, 'objects') };
     const backwards: string[] = [];
     const moves: RefMove[] = [];
     for (let index = 1; index < history.length; index += 1) {
@@ -785,13 +790,13 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
         const next = after[ref];
         if (next === undefined || next === old) continue;
         // The snapshots keep each commit they saw; the remote is asked only for one still missing.
-        const present = await git.run(['cat-file', '-e', `${old}^{commit}`], { okCodes: [0, 1, 128] }).then((r) => r.code === 0) && await git.run(['cat-file', '-e', `${next}^{commit}`], { okCodes: [0, 1, 128] }).then((r) => r.code === 0);
+        const present = await git.run(['cat-file', '-e', `${old}^{commit}`], { env: kept, okCodes: [0, 1, 128] }).then((r) => r.code === 0) && await git.run(['cat-file', '-e', `${next}^{commit}`], { env: kept, okCodes: [0, 1, 128] }).then((r) => r.code === 0);
         if (!present) await git.run(['fetch', '--quiet', 'origin', old, next], { okCodes: [0, 1, 128] });
-        const result = await git.run(['merge-base', '--is-ancestor', old, next], { okCodes: [0, 1, 128] });
+        const result = await git.run(['merge-base', '--is-ancestor', old, next], { env: kept, okCodes: [0, 1, 128] });
         if (result.code === 0) continue;
         const name = ref.replace(`${ctx.names.refPrefix}/`, '').replace(`refs/heads/${ctx.names.syncBranch}`, 'sync branch');
         backwards.push(name);
-        moves.push({ ref: name, snapshot: index, old, next, ...(await refMoveDiff(git, old, next)) });
+        moves.push({ ref: name, snapshot: index, old, next, ...(await refMoveDiff(git, old, next, kept)) });
       }
     }
     // The evidence keeps what differs between the two commits, since the remote may drop the old one.
@@ -1074,8 +1079,8 @@ export async function snapshotRefs(ctx: RunContext): Promise<Record<string, stri
  * Fetches each commit a snapshot lists into the sandbox cache while the remote
  * still holds it. A later step can leave a commit without any ref on the
  * remote (an initial sync replacing its record after the sync branch was
- * deleted), and I4 then still compares it with its successor: the person's
- * clone borrows the cache's objects. The objects need no ref; the cache keeps
+ * deleted), and I4 then still compares it with its successor, reading the
+ * person's clone with the cache's objects. The objects need no ref; the cache keeps
  * them until it prunes objects weeks old. Each commit is fetched on its own,
  * so one that has gone since the listing does not keep the others out.
  */

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { beforeEach, afterEach, describe, it } from 'node:test';
 import { type Fixture, createFixture, IDENTITY } from '../state/test-helpers.ts';
 import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs } from '../state/index.ts';
@@ -12,7 +13,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
 import { lintInTree } from '../format/index.ts';
-import { capture } from './capture.ts';
+import { capture, prepareLfs } from './capture.ts';
 import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
@@ -806,4 +807,30 @@ it('makes safe title paths and deterministic collision names', () => {
   assert.notEqual(collision, 'docs/plan.md');
   assert.equal(documentPath('docs', 'plan', 'two', new Set(), collision), collision);
   assert.equal(documentPath('docs', 'plan', 'two', occupied), documentPath('docs', 'plan', 'two', occupied));
+});
+
+it('stores the whole content in LFS whatever file the working copy holds at its path', async () => {
+  const fixture = await createFixture();
+  try {
+    const picture = Buffer.concat([png, Buffer.alloc(4096, 7)]);
+    await fixture.seed({ 'docs/picture.png': picture }, { lfs: ['*.png'] });
+    // A checkout without LFS content: the path holds the picture's small pointer file.
+    const git = await fixture.clone('checkout');
+    await git.run(['reset', '--quiet', '--hard', 'origin/main']);
+    const tracked = await git.text(['rev-parse', 'HEAD']);
+    const onDisk = await readFile(join(git.dir, 'docs/picture.png'));
+    assert.ok(onDisk.length < 1024);
+    const sha = createHash('sha256').update(picture).digest('hex');
+    // A pointer to another object, and an empty file.
+    const other = 'b'.repeat(64);
+    const kept = Buffer.from(`version https://git-lfs.github.com/spec/v1\noid sha256:${other}\nsize 12\n`);
+    const prepared = await prepareLfs(git, tracked, new Map([['docs/picture.png', picture], ['docs/kept.png', kept], ['docs/empty.png', Buffer.alloc(0)]]));
+    assert.equal(String(prepared.changes.get('docs/picture.png')), `version https://git-lfs.github.com/spec/v1\noid sha256:${sha}\nsize ${picture.length}\n`);
+    // Content that already is a pointer, or is empty, is stored as it is; only pointers name objects.
+    assert.deepEqual(prepared.changes.get('docs/kept.png'), kept);
+    assert.deepEqual(prepared.changes.get('docs/empty.png'), Buffer.alloc(0));
+    assert.deepEqual(prepared.oids.sort(), [other, sha].sort());
+  } finally {
+    await fixture.cleanup();
+  }
 });

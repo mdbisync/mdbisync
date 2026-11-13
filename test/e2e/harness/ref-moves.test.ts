@@ -62,11 +62,12 @@ it('ref snapshots keep each commit they see, so I4 compares a replaced record th
   const record = (text: string) => commitTree(fixture.remote, { parents: [tracked], base: tracked, changes: new Map([['eng/notes/plan.md', text]]), message: 'Record', identity: IDENTITY, skipIfUnchanged: false });
   const linear = `${names.refPrefix}/linear`;
   const sync = `refs/heads/${names.syncBranch}`;
-  // The harness's sandbox cache, which the person's clone borrows objects from, as `Sandbox.clone` makes it.
+  // The harness's sandbox cache, where the snapshots keep the commits they see. The person's clone stands alone,
+  // as `Sandbox.clone` makes it: I4 reads the kept commits through the cache, never by fetching from it.
   const cache = new Git(join(fixture.root, 'cache.git'));
   await new Git(fixture.root).run(['init', '--quiet', '--bare', cache.dir]);
   await cache.run(['fetch', '--quiet', fixture.url, `refs/heads/${names.trackedBranch}`]);
-  await new Git(fixture.root).run(['clone', '--quiet', '--reference', cache.dir, fixture.url, join(fixture.root, 'person')]);
+  await new Git(fixture.root).run(['clone', '--quiet', fixture.url, join(fixture.root, 'person')]);
   const person = new Git(join(fixture.root, 'person'));
   // The sandbox lists the run's refs as the live harness reads them.
   const runRefs = async () => (await fixture.remote.text(['for-each-ref', '--format=%(refname) %(objectname)', names.refPrefix, sync])).split('\n').filter(Boolean).map((line) => {

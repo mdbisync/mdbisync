@@ -12,8 +12,14 @@ import { runOnFakeServices } from './fake-services.ts';
 import { writeRunRefs } from './runner.ts';
 import { loadScenarios } from './spec.ts';
 
-/** Two small images, so one document embeds two different files: one inline, one by reference. */
-const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/eL9GtQAAAABJRU5ErkJggg==', 'base64');
+/**
+ * Two images, so one document embeds two different files: one inline, one by
+ * reference. Both are stored in LFS, as the corpus stores its pictures, and the
+ * PNG is larger than an LFS pointer can be: the engine's checkout holds only
+ * its pointer, and the first initial sync must still record the whole picture,
+ * or the replacement records another one and moves `linear` (I4).
+ */
+const PNG = Buffer.concat([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/eL9GtQAAAABJRU5ErkJggg==', 'base64'), Buffer.alloc(4096, 7)]);
 const GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
 
 // The last document seeded is the newest in Linear: the first sync after the
@@ -24,6 +30,7 @@ const GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA
 // record and moves the `linear` ref to a commit that does not descend from the
 // first (I4).
 const DOCUMENTS: Readonly<Record<string, string | Buffer>> = {
+  '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n*.gif filter=lfs diff=lfs merge=lfs -text\n',
   'eng/notes/images/diagram.png': PNG,
   'eng/notes/images/chart.gif': GIF,
   'eng/notes/item-0.md': '# Notes 0\n\nFirst paragraph.\n\nSecond paragraph.\n',

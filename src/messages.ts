@@ -194,6 +194,7 @@ export const MESSAGES = {
   'sync.places-unresolved': 'the previously recorded document places could not be resolved',
   'sync.lost-lease': 'state moved while recording document marks',
   'sync.no-lfs-pointer': 'LFS did not return a pointer',
+  'sync.lfs-pointer-mismatch': 'LFS returned a pointer to other content than it was given',
   'sync.entry-mismatch': 'Document and id entry do not match',
   'sync.needs-content': 'Status reconciliation requires document content',
   'sync.needs-comment-target': 'A marked document requires a comment target',
