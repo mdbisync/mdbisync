@@ -27,7 +27,7 @@ import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } 
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
 import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, editsFound, expectsDocument, holdsToken, lostEdits, readSides, snapshotRefs, bodyOf, type Sides } from './checks.ts';
-import { isCheckpoint } from './checkpoints.ts';
+import { isCheckpoint, KILLED_RUN_CHECKPOINT } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
 import type { CheckState } from '../../../src/pull-request/merge.ts';
 import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
@@ -894,10 +894,11 @@ const RUN: Record<string, Executor> = {
           proxy.clearFaults();
         }
       } else if (outcome === 'killed') {
-        ctx.checkpoints.pause('before-write');
-        const running = await startPaused(ctx, await engineCall(ctx, 'sync', {}), 'before-write');
+        // A checkpoint every sync reaches with its token in hand: on a converged setup there is nothing to write.
+        ctx.checkpoints.pause(KILLED_RUN_CHECKPOINT);
+        const running = await startPaused(ctx, await engineCall(ctx, 'sync', {}), KILLED_RUN_CHECKPOINT);
         running.kill();
-        ctx.checkpoints.resume('before-write');
+        ctx.checkpoints.resume(KILLED_RUN_CHECKPOINT);
         delete ctx.engine.pending;
         ctx.engine.results.push(await running.done);
       }
