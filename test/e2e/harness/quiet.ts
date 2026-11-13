@@ -71,7 +71,7 @@ export function isDocumentWrite(record: ProxyRequestRecord): boolean {
   return !record.injected && record.status === 200 && record.kind === 'mutation' && /document(Create|Update|Delete|Unarchive)|(Create|Update|Trash|Restore)Document/i.test(record.operation);
 }
 
-function field(value: unknown, path: readonly string[]): unknown {
+export function field(value: unknown, path: readonly string[]): unknown {
   let current = value;
   for (const key of path) {
     if (current === null || typeof current !== 'object' || !Object.hasOwn(current, key)) return undefined;
