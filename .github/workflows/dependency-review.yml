@@ -22,4 +22,6 @@ jobs:
           fail-on-scopes: runtime, development, unknown
           # npm bundles the affected glob; no npm release bundles patched glob yet.
           # Remove this exception once npm bundles glob 14.0.2 or newer.
-          allow-ghsas: GHSA-3g3m-2fjr-6pw4
+          # GHSA-g3hv-75wg-m249 affects minimatch bundled in npm.
+          # Remove it once npm bundles minimatch 11.0.1 or newer.
+          allow-ghsas: GHSA-3g3m-2fjr-6pw4, GHSA-g3hv-75wg-m249
