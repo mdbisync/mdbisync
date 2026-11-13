@@ -50,7 +50,7 @@ import { HOOK_REPOSITORY } from '../../corpus/tree.ts';
 import type { Step } from './spec.ts';
 import { writeError } from './fault-proxy.ts';
 import { lfsEndpoint, lfsUrlEnv, startLfsFaultProxy } from './lfs-fault-proxy.ts';
-import { mutationsBetween, quietFailures, snapshotWorld, untouchedFailures, watchesRunWorld, writesBetween } from './quiet.ts';
+import { field, mutationsBetween, quietFailures, snapshotWorld, untouchedFailures, watchesRunWorld, writesBetween } from './quiet.ts';
 import {
   commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
@@ -312,15 +312,25 @@ export async function watchRun(ctx: RunContext, options: { throughProxy: boolean
  * a check has not settled: the next run, once the check completes, may merge
  * the pull request. Settle waits for the head's checks (bounded, as
  * `fault.checks` waits) and runs again; those runs come on top of `limit`,
- * and settle waits at most `limit` times.
+ * and settle waits at most `limit` times. A run that merged the sync pull
+ * request on the last allowed attempt is not the last either: the engine
+ * takes the tracked branch in as it was at the run's start, so the next run
+ * records the merge on `linear`. That run also comes on top of `limit`, at
+ * most `limit` times.
  */
 async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit = 4): Promise<void> {
   let waits = 0;
-  for (let attempt = 0; attempt < limit + waits; attempt += 1) {
+  let merges = 0;
+  for (let attempt = 0; attempt < limit + waits + merges; attempt += 1) {
     if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) await workflowRun(ctx, { event: 'workflow_dispatch' });
     else await runCommand(ctx, 'sync', args);
     const report = ctx.engine.results.at(-1)?.report;
-    if (report?.['changed'] !== false) continue;
+    if (report?.['changed'] !== false) {
+      const last = attempt + 1 === limit + waits + merges;
+      if (last && typeof field(report, ['pullRequest', 'merged']) === 'string' && merges < limit) merges += 1;
+      else if (last) ctx.log(`settle: the last of ${String(attempt + 1)} runs still changed; the scenario did not settle`);
+      continue;
+    }
     if (waits >= limit || !(await waitForSyncPullRequestChecks(ctx, report))) return;
     waits += 1;
   }
