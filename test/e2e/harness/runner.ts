@@ -4,7 +4,7 @@
 
 import { collectCanaryEvidence } from './checks.ts';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { LinearClient, type LinearDocument } from '../../../src/linear/index.ts';
 import { parse, visit } from '../../../src/format/markdown.ts';
@@ -30,7 +30,9 @@ import { retryGitHubCleanup } from './cleanup-retry.ts';
 import { blockedBySetupStop, classify, EnvBlockedError, ProductError, type CheckOutcome, type ScenarioResult } from './results.ts';
 import { finishPersonClone } from './person-git.ts';
 import { assertCurrentCorpus } from './corpus-drift.ts';
-import { CorpusMissingError, installHooks, Sandbox } from './sandbox.ts';
+import { CorpusMissingError, hookEnv, installHooks, Sandbox } from './sandbox.ts';
+import { provisionHookNpm } from './hook-npm.ts';
+import { PRE_COMMIT_CONFIG } from '../../../src/setup/hooks.ts';
 import { levelOf, type Scenario } from './spec.ts';
 import { requiredActionSha, RUN_REFS, runStep, settleFollowUpRuns } from './steps.ts';
 import { openSetupConflict, prepareFixtures, publishesCheckWorkflow, UNSAFE_TITLES, type FixtureTools } from './fixtures.ts';
@@ -776,7 +778,7 @@ export function createRunContext(
       if (ctx.live === null) throw new Error('offline scenarios have no repository');
       if (hooksInstalled) return;
       // No sandbox credentials: npm runs while the public hooks install.
-      await installHooks(await ctx.person(), { signal: ctx.signal });
+      await installHooks(await ctx.person(), { signal: ctx.signal, npmDir: join(runDir, 'hook-npm') });
       hooksInstalled = true;
     },
     async engineClone() {
@@ -784,6 +786,9 @@ export function createRunContext(
       if (engineDir === undefined) {
         await ctx.live.sandbox.clone(names, join(runDir, 'engine'));
         engineDir = join(runDir, 'engine');
+        if (existsSync(join(engineDir, PRE_COMMIT_CONFIG))) {
+          await provisionHookNpm(join(runDir, 'hook-npm'), hookEnv(), { signal: ctx.signal });
+        }
       }
       return engineDir;
     },
@@ -1028,6 +1033,7 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
     if (setupStuck) cleanupOutcome = { ok: false, detail: `setup did not stop; ${cleanupOutcome.detail ?? 'cleaned up'}; shared admission keeps its resources reserved for verified recovery` };
     if (cleanupOutcome.ok && !heldForUi && !setupStuck) registration.done();
     rmSync(join(runDir, 'engine'), { recursive: true, force: true });
+    if (!setupStuck) rmSync(join(runDir, 'hook-npm'), { recursive: true, force: true });
   }
   const outcome = classify(error, deps.expectedRed.has(scenario.id));
   finishPersonClone(runDir, outcome.result, log);

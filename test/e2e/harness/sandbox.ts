@@ -21,6 +21,7 @@ import { soakRunTree } from './soak-corpus.ts';
 import { runOfRef, type RunNames } from './isolation.ts';
 import { acquireLock } from './locks.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
+import { hookNpmEnv, provisionHookNpm, repositoryNpmDir } from './hook-npm.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -246,13 +247,14 @@ export class HookRejectedError extends ProductError {
  * must be pinned to a full commit SHA (the released hook), not a placeholder.
  * A clone without a pre-commit configuration has no hooks to install.
  *
- * The installation sees only `hookEnv(options.from)`: npm and the hooks' own
- * install code run here, and they never get the harness's secrets. An npm
+ * With npmDir, a compatible npm is checked or provisioned in the run first.
+ * The installation sees only `hookEnv(options.from)` plus that npm: the hooks' own
+ * install code runs here, and they never get the harness's secrets. An npm
  * that refuses pre-commit's Git package (older than 11.16.0), a network,
  * registry or host failure, a missing pre-commit or a timeout blocks the run;
  * any other npm failure is the released hook's own defect.
  */
-export async function installHooks(git: Git, options: { from?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<void> {
+export async function installHooks(git: Git, options: { from?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number; npmDir?: string } = {}): Promise<void> {
   const text = existsSync(join(git.dir, PRE_COMMIT_CONFIG)) ? readFileSync(join(git.dir, PRE_COMMIT_CONFIG), 'utf8') : null;
   if (text === null) return;
   let config: unknown;
@@ -271,13 +273,19 @@ export async function installHooks(git: Git, options: { from?: NodeJS.ProcessEnv
       throw new EnvBlockedError(`the repository's pre-commit configuration pins a hook to "${String(entry.rev)}", not a released commit SHA`);
     }
   }
+  const started = Date.now();
+  const timeoutMs = options.timeoutMs ?? 15 * 60_000;
+  const env = options.npmDir === undefined ? hookEnv(options.from) : await provisionHookNpm(options.npmDir, hookEnv(options.from), {
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+  });
   try {
     // Building a Node hook's environment runs npm, which can take minutes; the run's other work goes on meanwhile.
     await execFileAsync('pre-commit', ['install', '--install-hooks'], {
       cwd: git.dir,
-      env: hookEnv(options.from),
+      env,
       maxBuffer: 16 * 1024 * 1024,
-      timeout: options.timeoutMs ?? 15 * 60_000,
+      timeout: Math.max(1, timeoutMs - (Date.now() - started)),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
   } catch (error) {
@@ -311,6 +319,11 @@ export function hookEnv(from: NodeJS.ProcessEnv = process.env): Record<string, s
     if (value !== undefined) allowed[key] = value;
   }
   return allowed;
+}
+
+/** Hook commands in either clone share the scenario run's npm. */
+export function repositoryHookEnv(cwd: string, from: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  return hookNpmEnv(repositoryNpmDir(cwd), hookEnv(from));
 }
 
 /** A clone's commit identity, as git resolves it there; the hooks' commit keeps it. */
@@ -395,7 +408,7 @@ export async function commitStaged(git: Git, paths: readonly string[], message: 
     return;
   }
   // The hooks run inside the commit and may build a hook environment: they see only the allowlist and the identity.
-  const env = { ...hookEnv(), ...(await commitIdentity(git)) };
+  const env = { ...repositoryHookEnv(git.dir), ...(await commitIdentity(git)) };
   let failure: GitError | undefined;
   // The second try commits what the hooks fixed; a hook that fails again then refuses the files.
   for (let attempt = 0; attempt < 2; attempt += 1) {

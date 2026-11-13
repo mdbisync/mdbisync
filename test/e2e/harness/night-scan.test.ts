@@ -48,6 +48,8 @@ it('uses the same canary union for current and persisted output and ignores fixt
   try {
     mkdirSync(join(dir, 'engine'));
     writeFileSync(join(dir, 'engine', 'fixture.log'), 'kx-stored-canary');
+    mkdirSync(join(dir, 'hook-npm', 'cache'), { recursive: true });
+    writeFileSync(join(dir, 'hook-npm', 'cache', 'debug.log'), 'kx-stored-canary');
     writeFileSync(join(dir, 'canary-evidence.json'), JSON.stringify({ canaries: ['kx-stored-canary'], texts: { old: 'kx-current-canary' } }));
     const result = scanNight(dir, { directory: join(dir, 'current'), evidence: { canaries: ['kx-current-canary'], texts: { log: 'kx-stored-canary' } } });
     assert.equal(result.matches.length, 2);

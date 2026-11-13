@@ -10,6 +10,7 @@ import type { RemoteRequests } from './request-accounting.ts';
 import { COMMANDS, type CommandName } from '../../../src/commands.ts';
 import { HOOKS_DIR_ENV, HOOKS_ENV } from '../../../src/test-hooks.ts';
 import type { RunNames } from './isolation.ts';
+import { hookNpmEnv, repositoryNpmDir } from './hook-npm.ts';
 
 export const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -110,7 +111,7 @@ export interface RunningEngine {
 /** A clean environment for the engine: only what it needs, never the harness's own secrets. */
 export function engineEnv(call: EngineCall, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return {
-    PATH: env['PATH'],
+    PATH: hookNpmEnv(repositoryNpmDir(call.cwd), { PATH: env['PATH'] ?? '' }).PATH,
     HOME: env['HOME'],
     LANG: 'C.UTF-8',
     GIT_TERMINAL_PROMPT: '0',
