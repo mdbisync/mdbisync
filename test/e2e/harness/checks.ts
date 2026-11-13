@@ -476,6 +476,11 @@ export interface Sides {
   kept: Set<string>;
 }
 
+/** How `deliberateOmissions` names a file a run left out when it wrote: its rules. */
+export function writeOmission(rules: readonly string[]): string {
+  return `write: ${rules.join(', ')}`;
+}
+
 /** Rules of files left out because of files they link; such an entry names those files. */
 const RULES_WITH_FILES = new Set([UPLOAD_TOO_LARGE, UPLOAD_UNREADABLE]);
 
@@ -526,7 +531,7 @@ export function deliberateOmissions(results: readonly Pick<EngineResult, 'report
       for (const entry of list(side['leftOutAtWrite']).map(record)) {
         const path = entry?.['path'];
         const rules = explained(entry, [entry?.['rule']]);
-        if (typeof path === 'string' && rules.length > 0) write.set(path, `write: ${rules.join(', ')}`);
+        if (typeof path === 'string' && rules.length > 0) write.set(path, writeOmission(rules));
       }
     }
   }
@@ -737,6 +742,35 @@ export async function refMoveDiff(git: Git, old: string, next: string, env: Reco
   };
 }
 
+/**
+ * Whether a sync's report is incomplete only because it still waits for
+ * files it cannot read (`upload-unreadable`, an LFS object the remote does
+ * not give): the engine keeps such a document pending on every run, since
+ * the object can turn readable with no git change, while a new document
+ * whose file is over the upload limit completes the run. Each such entry
+ * must name its files and repeat a write-time omission that the runs before
+ * I6's (setup's included) reported (`before`, from `deliberateOmissions`).
+ * Everything else that keeps a sync incomplete must be absent: a code, a
+ * failed, unattempted or skipped write (a conflict or a held rename is
+ * skipped), a conflict, a stop, a removal held in capture, and a pull request
+ * code or hold marks still to set.
+ */
+export function waitsOnlyForUnreadable(report: Record<string, unknown>, before: ReadonlyMap<string, string>): boolean {
+  const object = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
+  const sync = object(report['sync']);
+  const capture = object(report['capture']);
+  const pullRequest = object(report['pullRequest']);
+  if (report['code'] !== null || sync === null || capture === null) return false;
+  const empty = (side: Record<string, unknown>, key: string) => Array.isArray(side[key]) && (side[key] as unknown[]).length === 0;
+  if (!['failed', 'notAttempted', 'skipped', 'conflicts'].every((key) => empty(sync, key)) || (sync['stopped'] ?? null) !== null) return false;
+  if (!empty(capture, 'heldRemovals') || (pullRequest?.['code'] ?? null) !== null) return false;
+  const marks = object(pullRequest?.['holdMarks']);
+  if (pullRequest?.['holdMarks'] !== undefined && (marks === null || (marks['code'] ?? null) !== null || marks['deferred'] !== 0)) return false;
+  const waiting = Array.isArray(sync['leftOutAtWrite']) ? (sync['leftOutAtWrite'] as unknown[]).map(object) : [];
+  return waiting.length > 0 && waiting.every((entry) => entry?.['rule'] === UPLOAD_UNREADABLE && Array.isArray(entry['files']) && entry['files'].length > 0
+    && typeof entry['path'] === 'string' && before.get(entry['path']) === writeOmission([UPLOAD_UNREADABLE]));
+}
+
 export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
   async I1(ctx, sides) {
     const s = await sides();
@@ -837,7 +871,8 @@ export const INVARIANT_CHECKS: Record<InvariantId, Check> = {
     }
     const report = run.report;
     const capture = report?.['capture'] as Record<string, unknown> | null | undefined;
-    if (report?.['operation'] !== 'sync' || report['ok'] !== true || report['complete'] !== true || capture?.['ok'] !== true) {
+    const complete = report?.['complete'] === true || (report !== null && waitsOnlyForUnreadable(report, deliberateOmissions(ctx.engine.results.slice(0, runsBefore))));
+    if (report?.['operation'] !== 'sync' || report['ok'] !== true || !complete || capture?.['ok'] !== true) {
       return bad('I6', `idempotence was not established: the no-change sync run lacks a successful completed report (operation ${String(report?.['operation'])}, ok ${String(report?.['ok'])}, complete ${String(report?.['complete'])}, capture.ok ${String(capture?.['ok'])}, code ${String(report?.['code'])})`);
     }
     const after = await snapshotRefs(ctx);
@@ -939,11 +974,16 @@ export function editsFound(edits: RunContext['edits'], sides: Pick<Sides, 'files
   };
 }
 
-/** Edits that are not on both sides (or, for a removal, still on a side). */
-export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documents'>): RunContext['edits'] {
+/**
+ * Edits that are not on both sides (or, for a removal, still on a side). A
+ * git edit of a file the runs left out on purpose (`Sides.omitted`, the rule
+ * I1 and I7 honor) has no document to reach: it must still be in git.
+ */
+export function lostEdits(ctx: RunContext, sides: Pick<Sides, 'files' | 'documents'> & Partial<Pick<Sides, 'omitted'>>): RunContext['edits'] {
   const { gitText, linearText } = sideTexts(sides);
   return ctx.edits.filter((edit) => {
     if (edit.retired === true) return false;
+    if (edit.side === 'git' && edit.removal !== true && sides.omitted?.has(edit.path) === true) return !holdsToken(gitText, edit.token);
     // An explicit user deletion supersedes earlier edits only after both sides
     // show that deletion. A restore removes this intent and checks the edits again.
     const deletedId = (ctx.observations.get('linear.trashedDocuments') as Map<string, string> | undefined)?.get(edit.path);
