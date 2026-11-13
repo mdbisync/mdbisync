@@ -44,6 +44,7 @@
   "record": null,
   "atomicPushRefused": false,
   "partialRefUpdates": 0,
+  "refusedPushes": [],
   "skippedConcurrentDocument": false,
   "capturedTrackedTip": null,
   "rereadWindowMs": null,

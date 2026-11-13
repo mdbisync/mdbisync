@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import {
-  type Git,
+  Git,
   GitError,
   type IdMap,
   NotFastForwardError,
@@ -159,8 +159,62 @@ describe('state: stores and atomic lease pushes', () => {
     assert.equal(await remoteRef(fixture, UPLOADS), seen.state.uploads);
     assert.equal(await remoteRef(fixture, IDS), otherIds);
     // The refusal is logged for the run's report, with nothing moved.
-    assert.deepEqual(refusedPushes(writer), [{ refs: [LINEAR, IDS, UPLOADS], moved: [] }]);
+    assert.deepEqual(refusedPushes(writer), [{ refs: [LINEAR, IDS, UPLOADS], moved: [], output: [], remoteAfter: {} }]);
     assert.deepEqual(refusedPushes(other), []);
+  });
+
+  it('keeps the output and the remote refs of a refused push that reports a ref updated', async () => {
+    // Another run's push lands between this push's ref advertisement and the
+    // remote's transaction: the hook moves `ids` there, so the remote refuses
+    // the atomic push ("atomic transaction failed"). git itself reports every
+    // ref of such a push rejected; this remote also answers `ok` for `linear`,
+    // which git prints as an updated ref. A refused push in a live run
+    // reported one such ref.
+    const writer = await fixture.clone('reported-writer');
+    const other = await fixture.clone('reported-other');
+    const seen = await fetchState(writer, config);
+    const otherSeen = await fetchState(other, config);
+    const otherIds = await commitIds(other, otherSeen.state.ids, new Map([['docs/r.md', { id: 'doc-r' }]]), IDENTITY);
+    await other.run(['push', '--quiet', fixture.url, `${otherIds}:refs/heads/reported-ids`]);
+    const next = await buildState(writer, seen.tracked, 'reported');
+
+    const hook = join(fixture.remote.dir, 'hooks', 'pre-receive');
+    await writeFile(hook, `#!/bin/sh\ncat >/dev/null\nunset GIT_QUARANTINE_PATH\ngit update-ref ${IDS} ${otherIds}\n`, { mode: 0o755 });
+    try {
+      const short = (oid: string | null) => (oid as string).slice(0, 7);
+      const reporting = new (class extends Git {
+        override async run(args: readonly string[], options?: Parameters<Git['run']>[1]) {
+          const result = await super.run(args, options);
+          if (args[0] !== 'push') return result;
+          const refused = `!\t${next.linear}:${LINEAR}\t[remote rejected] (atomic transaction failed)`;
+          // git's own line for the refused ref, as git prints it: the rewrite below needs it.
+          assert.ok(result.stdout.toString('utf8').includes(refused), result.stdout.toString('utf8'));
+          const stdout = result.stdout.toString('utf8').replace(refused, ` \t${next.linear}:${LINEAR}\t${short(seen.state.linear)}..${short(next.linear)}`);
+          return { ...result, stdout: Buffer.from(stdout) };
+        }
+      })(writer.dir);
+      const result = await pushAtomic(reporting, config, [
+        { ref: LINEAR, expected: seen.state.linear, next: next.linear, replace: true },
+        { ref: IDS, expected: seen.state.ids, next: next.ids, replace: true },
+        { ref: UPLOADS, expected: seen.state.uploads, next: next.uploads, replace: true },
+      ]);
+      assert.ok(!result.ok && result.reason === 'stale', JSON.stringify(result));
+
+      const [refusal] = refusedPushes(reporting);
+      assert.deepEqual(refusal?.refs, [LINEAR, IDS, UPLOADS]);
+      assert.deepEqual(refusal?.moved, [LINEAR]);
+      // The remote never took the reported value: `linear` holds what this run expected.
+      assert.deepEqual(refusal?.remoteAfter, { [LINEAR]: seen.state.linear });
+      assert.equal(await remoteRef(fixture, LINEAR), seen.state.linear);
+      assert.equal(await remoteRef(fixture, IDS), otherIds);
+      // git's output as it came: the porcelain lines, then its errors.
+      const output = refusal?.output ?? [];
+      assert.ok(output.includes(` \t${next.linear}:${LINEAR}\t${short(seen.state.linear)}..${short(next.linear)}`), output.join('\n'));
+      assert.ok(output.includes(`!\t${next.ids}:${IDS}\t[remote rejected] (atomic transaction failed)`), output.join('\n'));
+      assert.ok(output.some((line) => line.startsWith('error: failed to push some refs')), output.join('\n'));
+    } finally {
+      await rm(hook, { force: true });
+    }
   });
 
   it('keeps the lease of a ref the run did not change', async () => {
