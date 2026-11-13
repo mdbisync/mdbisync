@@ -58,7 +58,7 @@ inputs:
     required: false
     default: "60"
   report-file:
-    description: "Path to write the run's report as JSON (names and states only); the job summary goes beside it as summary.md. Leave empty for none."
+    description: "Path to write the run's report as JSON (names and states only, and git's output for a refused push git reports partly applied); the job summary goes beside it as summary.md. Leave empty for none."
     required: false
     default: ""
   direction:
