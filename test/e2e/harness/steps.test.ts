@@ -41,7 +41,7 @@ import { loadScenarios } from './spec.ts';
 import { ACTION_SHA_ENV, afterUiStep, editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, requiredActionSha, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
 import { commitAsPerson, folderTeam, projectFolders, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
-import { engineNotImplemented, environmentBlocker, hadReplaceableRun, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
+import { engineNotImplemented, environmentBlocker, firstFailedStep, hadReplaceableRun, maxOverlap, REPORT_ARTIFACT, unzip, waitForRegistration, waitForRun } from './workflows.ts';
 import type { WorkflowJob, WorkflowRun } from './github.ts';
 import { engineSteps, pinnedActionSha, prerequisiteErrors, readTemplate, runGroup, runWorkflows, WORKFLOW_FILES } from './workflow-files.ts';
 import { parse as parseYaml } from 'yaml';
@@ -337,6 +337,15 @@ describe('workflows', () => {
     ],
   });
 
+  it('find a failed step\'s log by its job and number when GitHub dropped characters from its name', () => {
+    const job = jobWith('Stage: Linear\'s changes', 7);
+    assert.equal(firstFailedStep([job], new Map([['sync/7_Stage Linears changes.txt', 'log']]))?.logFile, 'sync/7_Stage Linears changes.txt');
+    assert.equal(firstFailedStep([job], new Map([['sync/7_Stage: Linear\'s changes.txt', 'log']]))?.logFile, 'sync/7_Stage: Linear\'s changes.txt');
+    // Another job's or step's file is not it.
+    assert.equal(firstFailedStep([job], new Map([['other/7_Stage Linears changes.txt', 'log'], ['sync/8_Sync.txt', 'log']]))?.logFile, 'sync/7_Stage: Linear\'s changes.txt');
+    assert.equal(firstFailedStep([{ ...job, steps: [] }], new Map()), undefined);
+  });
+
   it('prove an environment blocker only from a failed prerequisite step whose own log shows a missing command', () => {
     const logs = new Map([['sync/4_Install pre-commit.txt', missingCommand('pipx')]]);
     const blocker = environmentBlocker(failedRun(7), [jobWith('Install pre-commit', 4)], logs);
@@ -464,14 +473,38 @@ describe('workflows', () => {
     assert.equal(readFileSync(join(dir, 'failed-step.txt'), 'utf8'), logs['sync/4_Install pre-commit.txt']);
   });
 
-  it('keep an unproven failure as the run\'s result, for the scenario\'s checks', async () => {
+  it('keep an unproven failure as the run\'s result, for the scenario\'s checks, with the step that ended it', async () => {
     const { ctx, remoteGit } = await fakeRun();
-    fakeActions(ctx, remoteGit, { conclusion: 'failure', jobs: [jobWith('Sync', 4)], logs: { 'sync/4_Sync.txt': 'Error: boom\n##[error]Process completed with exit code 1.\n' } });
+    const failedLog = '/runner/_temp/a.sh: line 1: node: command not found\n##[error]Process completed with exit code 127.\n';
+    const job = jobWith('Prepare a comparison', 4);
+    job.steps!.push({ name: 'Run the security hooks', number: 6, status: 'completed', conclusion: 'skipped' });
+    fakeActions(ctx, remoteGit, { conclusion: 'failure', jobs: [job], logs: { 'sync/4_Prepare a comparison.txt': failedLog } });
     await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
     await STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' });
     assert.equal(ctx.observations.get('runs.0.exitCode'), 1);
-    assert.equal(ctx.observations.has('workflows.blocker'), false);
-    assert.equal(existsSync(join(ctx.runDir, 'workflows')), false);
+    assert.equal(ctx.observations.has('workflows.blocker'), false, 'a step outside the prerequisites proves no environment blocker');
+    const run = (ctx.observations.get('workflows.runs') as Array<{ id: number }>)[0]!;
+    const dir = join(ctx.runDir, 'workflows', String(run.id));
+    const evidence = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')) as { conclusion: string; jobs: Array<{ name: string; conclusion: string; steps: Array<{ number: number; name: string; conclusion: string }> }> };
+    assert.equal(evidence.conclusion, 'failure');
+    assert.deepEqual(evidence.jobs.map((entry) => [entry.name, entry.conclusion]), [['sync', 'failure']]);
+    assert.deepEqual(evidence.jobs[0]!.steps.map((step) => [step.number, step.name, step.conclusion]), [[1, 'Set up job', 'success'], [4, 'Prepare a comparison', 'failure'], [5, 'Sync', 'skipped'], [6, 'Run the security hooks', 'skipped']]);
+    assert.equal(readFileSync(join(dir, 'failed-step.txt'), 'utf8'), failedLog);
+    assert.equal(existsSync(join(dir, 'blocker.json')), false);
+  });
+
+  it('keep a successful run\'s job and step conclusions, and no failed step', async () => {
+    const { ctx, remoteGit } = await fakeRun();
+    const job: WorkflowJob = { id: 1, name: 'sync', conclusion: 'success', started_at: null, completed_at: null, steps: [{ name: 'Sync', number: 3, status: 'completed', conclusion: 'success' }] };
+    fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [job], logs: {} });
+    await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+    await STEP_ACTIONS['run.workflow']!(ctx, { event: 'push' });
+    const run = (ctx.observations.get('workflows.runs') as Array<{ id: number }>)[0]!;
+    const dir = join(ctx.runDir, 'workflows', String(run.id));
+    const evidence = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')) as { conclusion: string; jobs: Array<{ steps: Array<{ name: string; conclusion: string }> }> };
+    assert.equal(evidence.conclusion, 'success');
+    assert.deepEqual(evidence.jobs[0]!.steps.map((step) => [step.name, step.conclusion]), [['Sync', 'success']]);
+    assert.equal(existsSync(join(dir, 'failed-step.txt')), false);
   });
 
   it('keep a failed run whose old post step says "not implemented" as a failure, not expected-red', async () => {

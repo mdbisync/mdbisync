@@ -12,14 +12,14 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { CANARY_TOKEN_OBSERVER, CANARY_TOKEN_OBSERVER_FILE, CANARY_EVIDENCE, CANARY_FILE, CANARY_HOOK_STEP, CANARY_PREPARE_STEP, canaryScript, canaryFacts, canaryIsolated } from '../e2e/harness/security-canary.ts';
+import { CANARY_TOKEN_OBSERVER, CANARY_TOKEN_OBSERVER_FILE, CANARY_EVIDENCE, CANARY_FILE, CANARY_HOOK_ENTRY, CANARY_HOOK_STEP, canaryScript, canaryFacts, canaryIsolated } from '../e2e/harness/security-canary.ts';
 import { renderForRun } from '../e2e/harness/workflow-files.ts';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { type Readable } from 'node:stream';
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { type AddressInfo } from 'node:net';
-import { basename, join, resolve } from 'node:path';
+import { basename, delimiter, join, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { loadMapping } from '../../src/mapping/index.ts';
 import { validateAction } from '../../src/release/package.ts';
@@ -44,14 +44,14 @@ interface Step {
 }
 
 /** The template's stage, hooks and apply steps, in the order it runs them. */
-async function templateSteps(template: string, canary = false): Promise<[Step, Step, Step, Step?]> {
+async function templateSteps(template: string, canary = false): Promise<[Step, Step, Step]> {
   let text = await readFile(new URL(template, EXAMPLES), 'utf8');
   if (canary) text = renderForRun(text, { trackedBranch: 'main', syncBranch: 'sync', refPrefix: 'refs/mdbisync', group: 'offline', securityCanary: true });
   const workflow = parse(text) as { jobs: Record<string, { steps: Step[] }> };
   const steps = Object.values(workflow.jobs).flatMap((job) => job.steps)
     .filter((step) => step.uses?.startsWith(ACTION) || step.name === HOOKS_STEP);
   assert.deepEqual(steps.map((step) => step.with?.['security-step'] ?? step.name), ['stage', HOOKS_STEP, 'apply'], template);
-  return [steps[0]!, steps[1]!, steps[2]!, Object.values(workflow.jobs).flatMap(job => job.steps).find(step => step.name === CANARY_PREPARE_STEP)] as [Step, Step, Step, Step?];
+  return [steps[0]!, steps[1]!, steps[2]!];
 }
 
 /** Replaces each `${{ name }}` with its value; an expression the smoke does not know fails it. */
@@ -111,8 +111,6 @@ function collectProcess(child: ChildProcessByStdio<null, Readable, Readable>): P
   });
 }
 
-// Keep distinct launch sites so static analysis can distinguish Node arguments
-// from the preparation shell's -c command. Share only output collection.
 function runNode(args: string[], cwd: string, env: Record<string, string>): Promise<{ status: number; output: string }> {
   return collectProcess(spawn(process.execPath, args, { cwd, env, shell: false, stdio: ['ignore', 'pipe', 'pipe'] }));
 }
@@ -162,7 +160,7 @@ async function prepareJob(synced: boolean, canary = false): Promise<Job> {
       - id: scan
         alias: security
         name: Scan
-        entry: ${canary ? `node ${CANARY_FILE}` : '"true"'}
+        entry: ${canary ? JSON.stringify(CANARY_HOOK_ENTRY) : '"true"'}
         verbose: true
         language: system
         stages: [pre-commit]
@@ -197,7 +195,7 @@ async function prepareJob(synced: boolean, canary = false): Promise<Job> {
  * (empty when its `if:` skipped it).
  */
 async function runTemplate(release: string, template: string, inputs: Record<string, string>, job: Job): Promise<string> {
-  const [stage, hooks, apply, prepare] = await templateSteps(template, job.canary);
+  const [stage, hooks, apply] = await templateSteps(template, job.canary);
   const action: unknown = parse(await readFile(join(release, 'action.yml'), 'utf8'));
   const [main, post] = validateAction(action);
   const defaults = (action as { inputs: Record<string, { default?: string }> }).inputs;
@@ -210,6 +208,10 @@ async function runTemplate(release: string, template: string, inputs: Record<str
   const runnerTemp = join(run, 'temp');
   await mkdir(home);
   await mkdir(runnerTemp);
+  // A runner need not have `node` on its PATH (a self-hosted one often has not): every step finds one that fails as a missing command does.
+  const noNode = join(run, 'bin');
+  await mkdir(noNode);
+  await writeFile(join(noNode, 'node'), '#!/bin/sh\necho "node: command not found" >&2\nexit 127\n', { mode: 0o755 });
   const context: Record<string, string> = {
     'runner.temp': runnerTemp,
     'github.workspace': workspace,
@@ -229,7 +231,7 @@ async function runTemplate(release: string, template: string, inputs: Record<str
       files[`GITHUB_${file}`] = join(run, `${name}.${file.toLowerCase()}`);
       await writeFile(files[`GITHUB_${file}`] as string, '');
     }
-    return { PATH: process.env['PATH'] ?? '', HOME: home, LANG: 'C.UTF-8', GITHUB_WORKSPACE: workspace, RUNNER_TEMP: runnerTemp, GITHUB_RUN_ID: basename(run), ...files };
+    return { PATH: [noNode, process.env['PATH'] ?? ''].join(delimiter), HOME: home, LANG: 'C.UTF-8', GITHUB_WORKSPACE: workspace, RUNNER_TEMP: runnerTemp, GITHUB_RUN_ID: basename(run), ...files };
   };
   const server = await serve(job.world);
   try {
@@ -254,11 +256,6 @@ async function runTemplate(release: string, template: string, inputs: Record<str
       ran.push({ name, step, state: runner.GITHUB_STATE as string });
       return fileCommands(runner.GITHUB_OUTPUT as string);
     };
-    if (prepare) {
-      const env = { ...(await runnerEnv('prepare')), ...Object.fromEntries(Object.entries(prepare.env ?? {}).map(([key, value]) => [key, expand(value, context)])) };
-      const result = await collectProcess(spawn('bash', ['-e', '-c', prepare.run!], { cwd: workspace, env, shell: false, stdio: ['ignore', 'pipe', 'pipe'] }));
-      assert.equal(result.status, 0, result.output);
-    }
     for (const [output, value] of Object.entries(await runAction('stage', stage))) context[`steps.stage.outputs.${output}`] = value;
     let printed = '';
     if (hooks.if === undefined || condition(hooks.if, context)) {

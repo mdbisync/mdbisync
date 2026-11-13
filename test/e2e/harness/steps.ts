@@ -54,9 +54,9 @@ import { field, mutationsBetween, quietFailures, snapshotWorld, untouchedFailure
 import {
   commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
-import type { SandboxRest, WorkflowRun } from './github.ts';
-import { blockerEvidence, environmentBlocker, hadReplaceableRun, jobSpans, maxOverlap, runLogs, runResult, stopScheduledRun, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun, workflowEvidence } from './workflows.ts';
-import { outputCount, outputFile } from '../../../src/run/output.ts';
+import type { SandboxRest, WorkflowJob, WorkflowRun } from './github.ts';
+import { blockerEvidence, environmentBlocker, firstFailedStep, hadReplaceableRun, jobsEvidence, jobSpans, maxOverlap, runLogs, runResult, stopScheduledRun, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun, workflowEvidence } from './workflows.ts';
+import { outputCount, outputFile, outputText } from '../../../src/run/output.ts';
 import { CANARY_FIXTURE, canaryFacts } from './security-canary.ts';
 import { pinnedActionSha, prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
 
@@ -622,36 +622,49 @@ async function requestScheduledRun(ctx: RunContext, rest: SandboxRest = live(ctx
 }
 
 /**
- * Records a finished workflow run as an engine run. A proven environment
- * blocker (workflows.ts) stops the scenario at this run, with the run's
- * result and evidence kept: no later step edits Linear or starts another run,
- * and cleanup runs as after any stop. Any other failure is the run's result
- * for the scenario's checks.
+ * Records a finished workflow run as an engine run, and keeps its evidence in
+ * the run folder: the run's conclusion, its jobs' and steps' conclusions and
+ * the log of its first failed step, so a step that ended a run is visible
+ * whatever the scenario's checks report. A proven environment blocker
+ * (workflows.ts) stops the scenario at this run, with the run's result kept:
+ * no later step edits Linear or starts another run, and cleanup runs as after
+ * any stop. Any other failure is the run's result for the scenario's checks.
  */
 async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: CommandName): Promise<void> {
   const world = live(ctx);
   const logs = await runLogs(world.rest, run);
   const result = await runResult(world.rest, run, command, logs);
+  const dir = outputFile(join(ctx.runDir, 'workflows'), String(outputCount(run.id)));
+  mkdirSync(dir, { recursive: true });
   if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) {
     const facts = canaryFacts(result.securityCanary ?? '');
     if (/Security hooks: staged sets checked [1-9][0-9]*,/.test(result.stdout) && facts.length === 0) ctx.observations.set('securityCanary.missing', true);
     const previous = (ctx.observations.get('securityCanary.facts') as unknown[] | undefined) ?? [];
     ctx.observations.set('securityCanary.facts', [...previous, ...facts]);
-    const dir = outputFile(join(ctx.runDir, 'workflows'), String(outputCount(run.id)));
-    mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'security-canary.json'), `${JSON.stringify(facts, null, 2)}\n`);
   }
-  const blocker = run.conclusion === 'failure' ? environmentBlocker(run, await world.rest.runJobs(run.id), logs, prerequisiteErrors()) : undefined;
+  let jobs: WorkflowJob[] | undefined;
+  let jobsError: string | undefined;
+  try {
+    jobs = await world.rest.runJobs(run.id);
+  } catch (error) {
+    // A failed run needs its jobs to prove a blocker; for another run they are diagnostics only.
+    if (run.conclusion === 'failure') throw error;
+    jobsError = error instanceof Error ? error.message : String(error);
+  }
+  const failed = jobs === undefined ? undefined : firstFailedStep(jobs, logs);
+  writeFileSync(join(dir, 'run.json'), `${JSON.stringify({ ...workflowEvidence(run), jobs: jobs === undefined ? null : jobsEvidence(jobs), ...(jobsError === undefined ? {} : { jobsError: outputText(jobsError, 4096) }) }, null, 2)}\n`);
+  if (failed !== undefined) {
+    writeFileSync(join(dir, 'failed-step.txt'), logs.get(failed.logFile) ?? '');
+    ctx.log(`workflow run ${run.id}: ${run.conclusion ?? run.status ?? 'unknown'}; first failed step "${failed.step.name}" of job "${failed.job.name}"; evidence in ${dir}`);
+  }
+  const blocker = jobs === undefined ? undefined : environmentBlocker(run, jobs, logs, prerequisiteErrors());
   if (blocker === undefined) {
     settleResult(ctx, result);
     return;
   }
   recordResult(ctx, result);
-  const dir = outputFile(join(ctx.runDir, 'workflows'), String(outputCount(run.id)));
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'run.json'), `${JSON.stringify(workflowEvidence(run), null, 2)}\n`);
   writeFileSync(join(dir, 'blocker.json'), `${JSON.stringify(blockerEvidence(blocker), null, 2)}\n`);
-  writeFileSync(join(dir, 'failed-step.txt'), logs.get(blocker.logFile) ?? '');
   ctx.observations.set('workflows.blocker', blocker);
   ctx.log(`first environment blocker: ${blocker.reason}; evidence in ${dir}`);
   throw new EnvBlockedError(blocker.reason);
