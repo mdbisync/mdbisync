@@ -5,8 +5,11 @@ import { commentsOf } from './checks.ts';
 it('includes comments beyond the first page in the canary evidence', async () => {
   const calls: string[] = [];
   const client = {
-    request: async (operation: string) => {
+    request: async (operation: string, _kind: string, query: string) => {
       calls.push(operation);
+      // Archived comments on every page: Linear archives a trashed document's comments with it.
+      assert.match(query, /comments\([^)]*includeArchived: true/, `${operation} asks for archived comments`);
+      if (operation === 'RunComments') assert.match(query, /documents\([^)]*includeArchived: true/, 'RunComments asks for archived documents');
       if (operation === 'RunComments') return { documents: {
         nodes: [{ id: 'doc', project: null, comments: { nodes: [{ body: 'clean' }], pageInfo: { hasNextPage: true, endCursor: 'next' } } }],
         pageInfo: { hasNextPage: false, endCursor: null },
