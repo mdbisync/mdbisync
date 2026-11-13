@@ -105,7 +105,8 @@ export interface RunReport {
   atomicPushRefused: boolean;
   /**
    * Refs of refused pushes that the remote holds at the value pushed (`landedRefs`); 0 expected, since every
-   * push is atomic. A ref git reported updated while the remote kept another value is not counted.
+   * push is atomic. A ref git reported updated while the remote kept another value is not counted, nor is any
+   * ref when the remote holds the push's whole result (another run pushed identical commits).
    */
   partialRefUpdates: number;
   /** Each push refused for its leases; when git reported a ref updated, git's output, the value sent and the remote's refs. */
