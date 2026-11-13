@@ -92,6 +92,7 @@
   },
   "atomicPushRefused": false,
   "partialRefUpdates": 0,
+  "refusedPushes": [],
   "skippedConcurrentDocument": false,
   "capturedTrackedTip": "c0e66191259920baa3abdfa6f88abac44bfb65db",
   "rereadWindowMs": 310,

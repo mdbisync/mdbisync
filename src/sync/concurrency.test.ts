@@ -385,6 +385,8 @@ describe('sync: races inside a run', { timeout: 240_000 }, () => {
     assert.equal(refused.code, INCOMPLETE_EXIT_CODE, refused.stderr);
     assert.equal(refused.report?.atomicPushRefused, true);
     assert.equal(refused.report?.partialRefUpdates, 0);
+    // The report keeps each refused push; one that git reports no ref updated in needs no output.
+    assert.deepEqual(refused.report?.refusedPushes.map((push) => ({ moved: push.moved, output: push.output, remoteAfter: push.remoteAfter })), [{ moved: [], output: [], remoteAfter: {} }]);
     assert.equal(refused.report?.exitStatus, 'warning');
     assert.equal(refused.report?.code, 'state-moved');
     assert.match(refused.summary, /A state ref moved while this run was writing, so it recorded nothing/);

@@ -86,10 +86,22 @@ export type PushResult =
   | { ok: true; updated: string[] }
   | { ok: false; reason: 'stale' | 'rejected'; refs: { ref: string; message: string }[] };
 
-/** A push refused for its leases, and any of its refs git reported as updated anyway (none: the push is atomic). */
+/**
+ * A push refused for its leases, and any of its refs git reported as updated
+ * anyway (none expected: the push is atomic). A ref reported updated keeps
+ * the evidence to tell a real partial update from a misreport: git's output
+ * for the push, and where the remote held each such ref right after.
+ */
 export interface RefusedPush {
   refs: string[];
   moved: string[];
+  /** git's output for the push, its porcelain lines and then its errors; kept only when `moved` is not empty. */
+  output: string[];
+  /**
+   * Each ref in `moved`, as the remote held it after the refusal (null: the
+   * ref is absent); empty when `moved` is; null when the remote could not be read.
+   */
+  remoteAfter: Record<string, Oid | null> | null;
 }
 
 const refusals = new WeakMap<Git, RefusedPush[]>();
@@ -171,7 +183,7 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   const skipped = updates.filter((update) => update.next !== update.expected && before.get(update.ref) === update.next);
   if (skipped.length > 0) {
     // Nothing was sent, so nothing moved.
-    logRefusal(git, changing, []);
+    logRefusal(git, { refs: changing.map((update) => update.ref), moved: [], output: [], remoteAfter: {} });
     return { ok: false, reason: 'stale', refs: skipped.map((update) => ({ ref: update.ref, message: 'already at the new value, not at the expected one' })) };
   }
 
@@ -180,7 +192,8 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   for (const update of updates) args.push(`${update.next}:${update.ref}`);
 
   const result = await git.run(args, { okCodes: [0, 1] });
-  const lines = parsePorcelain(result.stdout.toString('utf8'));
+  const stdout = result.stdout.toString('utf8');
+  const lines = parsePorcelain(stdout);
 
   if (result.code === 0) {
     // The local copies are only a record of the last value seen; if they
@@ -201,12 +214,25 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   // the later one ("atomic transaction failed"). Either way a ref has moved
   // away from its expected value; any other refusal (a hook, missing rights)
   // leaves them where they were.
-  const stale =
-    rejected.some((line) => line.summary.includes('stale info')) ||
-    (await movedAway(git, config.remote, updates));
+  // The remote's refs, read when git's own check passed; the evidence below reuses them.
+  const remote = rejected.some((line) => line.summary.includes('stale info'))
+    ? undefined
+    : await lsRemote(git, config.remote, updates.map((update) => update.ref));
+  const stale = remote === undefined || updates.some((update) => (remote.get(update.ref) ?? null) !== update.expected);
   // What git reports it updated in the refused push. A ref found at this push's value proves nothing: another run
-  // that took in the same changes in the same second makes the same commits.
-  if (stale) logRefusal(git, changing, lines.filter((line) => line.flag !== '!' && line.flag !== '=').map((line) => line.ref));
+  // that took in the same changes in the same second makes the same commits. So the refusal keeps git's output and
+  // where the remote held those refs, for a person to tell a partial update from a misreport.
+  if (stale) {
+    const moved = lines.filter((line) => line.flag !== '!' && line.flag !== '=').map((line) => line.ref);
+    // The evidence must not turn a lost lease into a failed run: a remote that cannot be read leaves it out.
+    const after = moved.length === 0 ? undefined : remote ?? (await lsRemote(git, config.remote, moved).catch(() => null));
+    logRefusal(git, {
+      refs: changing.map((update) => update.ref),
+      moved,
+      output: moved.length === 0 ? [] : outputLines(stdout, result.stderr),
+      remoteAfter: after === undefined ? {} : after === null ? null : Object.fromEntries(moved.map((ref) => [ref, after.get(ref) ?? null])),
+    });
+  }
   return {
     ok: false,
     reason: stale ? 'stale' : 'rejected',
@@ -214,15 +240,15 @@ export async function pushAtomic(git: Git, config: StateConfig, updates: readonl
   };
 }
 
-async function movedAway(git: Git, remote: string, updates: readonly RefUpdate[]): Promise<boolean> {
-  const current = await lsRemote(git, remote, updates.map((update) => update.ref));
-  return updates.some((update) => (current.get(update.ref) ?? null) !== update.expected);
+function logRefusal(git: Git, refusal: RefusedPush): void {
+  const log = refusals.get(git) ?? [];
+  log.push(refusal);
+  refusals.set(git, log);
 }
 
-function logRefusal(git: Git, changing: readonly RefUpdate[], moved: string[]): void {
-  const log = refusals.get(git) ?? [];
-  log.push({ refs: changing.map((update) => update.ref), moved });
-  refusals.set(git, log);
+/** A push's output as lines: standard output (the porcelain report), then standard error. */
+function outputLines(stdout: string, stderr: string): string[] {
+  return [...stdout.split('\n'), ...stderr.split('\n')].map((line) => line.trimEnd()).filter((line) => line !== '');
 }
 
 interface PorcelainLine {
