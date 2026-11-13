@@ -13,6 +13,7 @@ import { NEUTRAL_IDENTITY } from '../../../src/state/index.ts';
 import { CheckpointControl } from './checkpoints.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS, noteSentence, resolveKeeping, scanMarkers } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
+import { CANARY_FIXTURE } from './security-canary.ts';
 import type { RunTree } from './corpus.ts';
 import { FIXTURE_PREPARATION } from './runner.ts';
 import { DOCUMENT_FIXTURES, fixtureEdit, LINK_PAIR, paragraphEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
@@ -37,7 +38,7 @@ import { readHookConfig } from '../../../src/setup/hooks.ts';
 import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
 import { cancelPendingRuns, faultChecks, waitForCheck, waitForCheckCompleted } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
-import { loadScenarios } from './spec.ts';
+import { loadScenarios, type Step } from './spec.ts';
 import { ACTION_SHA_ENV, afterUiStep, editInsideMarkers, HARNESS_GAPS, isProbeEnvironmentError, requiredActionSha, retireDiscarded, runStep, settleFollowUpRuns, STEP_ACTIONS, watchRun } from './steps.ts';
 import { commitAsPerson, folderTeam, projectFolders, readRunIds, setTarget } from './step-helpers.ts';
 import { BEFORE_VIEW, documentLinks, encodeTitlePath, refreshView, relativeLinks, resolveSubject, subjectSource, takeStartView, tokenActive } from './subjects.ts';
@@ -840,6 +841,40 @@ describe('workflows', () => {
     const list = rest.workflowRuns;
     rest.workflowRuns = async (branch) => (await list(branch)).map((run) => (actions.runs.indexOf(run) >= 2 ? Object.assign(run, { conclusion }) : run));
     await assert.rejects(settleFollowUpRuns(ctx), (error: Error) => error instanceof ProductError && /follow-up push run \d+ did not succeed/.test(error.message));
+  });
+
+  it('leave a dispatch-only sync\'s registering push run alone, while a skipped deployment push run still fails', async () => {
+    // A live security-canary scenario's registering push run: its one job skipped by the dispatch guard, with no steps.
+    const registering = { conclusion: 'skipped', jobs: [{ id: 1, name: 'sync', conclusion: 'skipped', started_at: '2026-11-13T20:55:47Z', completed_at: '2026-11-13T20:55:47Z', steps: [] }] };
+    const scenario = async (fixtures: string[], steps: Step[] = []) => {
+      const { ctx, remoteGit } = await fakeRun();
+      ctx.scenario = { ...ctx.scenario, mode: 'actions', setup: { ...ctx.scenario.setup, fixtures }, steps: [...ctx.scenario.steps, ...steps] };
+      let tip = '';
+      const { runs } = fakeActions(ctx, remoteGit, { conclusion: 'success', jobs: [], logs: {}, workflow: 'mdbisync.yml', report: () => ({ operation: 'sync', capturedTrackedTip: tip }) });
+      const rest = ctx.live!.rest as unknown as { workflowRuns: (branch: string) => Promise<WorkflowRun[]>; runJobs: (runId: number) => Promise<WorkflowJob[]> };
+      const list = rest.workflowRuns;
+      const isSyncPush = (run: WorkflowRun) => run.event === 'push' && run.path === '.github/workflows/mdbisync.yml';
+      rest.workflowRuns = async (branch) => (await list(branch)).map((run) => (isSyncPush(run) ? Object.assign(run, { conclusion: registering.conclusion }) : run));
+      rest.runJobs = async (runId) => (runs.some((run) => run.id === runId && isSyncPush(run)) ? registering.jobs : []) as WorkflowJob[];
+      mkdirSync(ctx.live!.sandbox.cache.dir, { recursive: true });
+      await STEP_ACTIONS['git.edit']!(ctx, { workflows: true });
+      tip = (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
+      await STEP_ACTIONS['run.workflow']!(ctx, { event: 'workflow_dispatch' });
+      assert.equal(ctx.engine.results.at(-1)?.report?.['capturedTrackedTip'], tip, 'a dispatched run took in the tip: the settle looks for follow-up runs');
+      assert.ok((await list(ctx.names.trackedBranch)).some((run) => isSyncPush(run) && run.conclusion === 'skipped'), 'the workflows\' push started a skipped sync run');
+      return { ctx, runs };
+    };
+    // The canary and a timed soak render the sync workflow dispatch-only: no push run is ever the deployment's.
+    const soakStep: Step = { kind: 'run', action: 'soak', args: {} };
+    for (const [fixtures, steps] of [[[CANARY_FIXTURE], []], [[], [soakStep]]] as const) {
+      const { ctx } = await scenario([...fixtures], [...steps]);
+      assert.equal(await settleFollowUpRuns(ctx), 0);
+      assert.equal(ctx.engine.results.length, 1, 'the registering run is no engine run');
+      assert.deepEqual((ctx.observations.get('workflows.runs') as Array<{ event: string }>).map((run) => run.event), ['workflow_dispatch']);
+    }
+    // A sync workflow that deploys on push: a skipped push run did not take in the tip, and fails the scenario.
+    const deployed = await scenario([]);
+    await assert.rejects(settleFollowUpRuns(deployed.ctx), (error: Error) => error instanceof ProductError && /follow-up push run \d+ did not succeed/.test(error.message));
   });
 
   it('dispatch the initial sync by its registry id once its push has registered it', async () => {
