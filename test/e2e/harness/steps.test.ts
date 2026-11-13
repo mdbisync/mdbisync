@@ -1617,7 +1617,7 @@ class FakeLinear {
         .map((document) => {
           const live = !document.trashed && document.archivedAt === null;
           const bodies = live || archivedComments ? (this.comments.get(document.id) ?? []) : [];
-          return { id: document.id, project: document.projectId === null ? null : { id: document.projectId }, comments: { nodes: bodies.map((body) => ({ body })) } };
+          return { id: document.id, title: document.title, trashed: document.trashed, archivedAt: document.archivedAt, team: document.teamId === null ? null : { id: document.teamId }, project: document.projectId === null ? null : { id: document.projectId }, comments: { nodes: bodies.map((body) => ({ body })) } };
         });
       this.commentReads.push(...nodes.map((node) => node.id));
       return { documents: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } as T;
@@ -3997,6 +3997,32 @@ describe('crash-created document adoption (L1-17)', () => {
     assert.equal(evidence.texts[`comments on ${other.id}`], undefined);
     ctx.observations.delete('canary.remoteTexts');
     assert.deepEqual(await canaryScan(ctx, { summariesOnly: false }), [{ source: `comments on ${readme}`, canary: 'kx-zone-readme-canary' }]);
+  });
+
+  it('name each scanned document in the canary evidence: place, state and why the scan took it, without comment text', async () => {
+    const { ctx, linear, readme, ids } = await crashed();
+    const plan = ids['eng/platform/plan.md']?.id as string;
+    // A run-prefixed document in the team zone, another run's README there, and the run's README in the trash.
+    const prefixed = linear.add({ teamId: 'team-eng' }, `${ctx.names.teamZonePrefix}Roadmap`, 'Roadmap.\n');
+    const other = linear.add({ teamId: 'team-eng' }, 'README', 'Another run\'s notes.\n');
+    await linear.commentOnDocument(`content-${readme}`, 'kx-private-comment-text');
+    await linear.commentOnDocument(`content-${other.id}`, 'Another run\'s comment.');
+    await linear.trashDocument(readme);
+    const { collectCanaryEvidence } = await import('./checks.ts');
+    const evidence = await collectCanaryEvidence(ctx, { summariesOnly: false });
+    assert.deepEqual(evidence.documents[readme], { title: 'README', teamId: 'team-eng', projectId: null, trashed: true, archived: true, reason: 'ownership record' });
+    assert.deepEqual(evidence.documents[prefixed.id], { title: prefixed.title, teamId: 'team-eng', projectId: null, trashed: false, archived: false, reason: 'run prefix' });
+    assert.deepEqual(evidence.documents[plan], { title: 'plan', teamId: 'team-eng', projectId: PROJECT.id, trashed: false, archived: false, reason: 'project' });
+    assert.equal(evidence.documents[other.id], undefined);
+    // Every `comments on <id>` text has its document, and the record holds no comment text.
+    const commented = Object.keys(evidence.texts).filter((source) => source.startsWith('comments on ')).map((source) => source.slice('comments on '.length));
+    assert.deepEqual(commented.sort(), Object.keys(evidence.documents).sort());
+    assert.ok(!JSON.stringify(evidence.documents).includes('kx-private-comment-text'));
+    // The second collection reuses the first one's remote reads and keeps the same record.
+    const reads = linear.commentQueries.length;
+    assert.deepEqual((await collectCanaryEvidence(ctx, { summariesOnly: false })).documents, evidence.documents);
+    assert.equal(linear.commentQueries.length, reads);
+    assert.deepEqual((await collectCanaryEvidence(ctx, { summariesOnly: true })).documents, {});
   });
 
   it('scan comments on the run\'s own README after the engine trashed it', async () => {
