@@ -59,7 +59,7 @@ import { type CreateEntry, type InitialSyncPlan, type OverwriteEntry, placeId, p
 import { readPlanSources } from './run.ts';
 import { type BodyTransform, LeaveOutError, restoreBody, sameLinkDestinations, transformBody } from './transform.ts';
 import { detectConflicts } from '../merge/index.ts';
-import { MARKS, reconcileDocumentMark } from '../sync/marks.ts';
+import { type ConflictNotices, MARKS, noConflictNotices, reconcileDocumentMark } from '../sync/marks.ts';
 import { withRecorded } from '../sync/recorded.ts';
 import { stableId } from '../sync/stable-id.ts';
 import { message } from '../messages.ts';
@@ -166,6 +166,8 @@ export interface ConfirmedResult {
   progressPushes: number;
   /** Every document this run wrote has its id in the `ids` ref (false only when a ref moved under the run). */
   progressRecorded: boolean;
+  /** Documents whose conflict notice this run's marks set or resolved. */
+  conflictNotices: ConflictNotices;
   record: RecordResult | null;
 }
 
@@ -230,6 +232,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
     notAttempted: [],
     progressPushes: 0,
     progressRecorded: true,
+    conflictNotices: noConflictNotices(),
     record: null,
   };
 
@@ -294,6 +297,7 @@ export async function confirmInitialSync(context: RunContext, options: ConfirmOp
       entry: shown ? { ...entry, saved: { icon: null, color: null } } : entry,
       linear,
       noticeId: (state) => stableId('initial-sync', state, document.id, hash),
+      onConflictNotice: (change) => result.conflictNotices[change].push(path),
       persistEntry: async (next) => {
         ids.set(path, next);
         await pushProgress();

@@ -84,5 +84,9 @@
       "uploads": 1
     },
     "pullRequests": {}
+  },
+  "conflictNotices": {
+    "set": [],
+    "resolved": []
   }
 }
