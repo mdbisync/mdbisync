@@ -13,6 +13,7 @@ import {
   commitTree,
   commitUploads,
   fetchState,
+  landedRefs,
   listTree,
   pushAtomic,
   readBlobs,
@@ -159,38 +160,44 @@ describe('state: stores and atomic lease pushes', () => {
     assert.equal(await remoteRef(fixture, UPLOADS), seen.state.uploads);
     assert.equal(await remoteRef(fixture, IDS), otherIds);
     // The refusal is logged for the run's report, with nothing moved.
-    assert.deepEqual(refusedPushes(writer), [{ refs: [LINEAR, IDS, UPLOADS], moved: [], output: [], remoteAfter: {} }]);
+    assert.deepEqual(refusedPushes(writer), [{ refs: [LINEAR, IDS, UPLOADS], moved: [], output: [], pushed: {}, remoteAfter: {} }]);
     assert.deepEqual(refusedPushes(other), []);
   });
 
-  it('keeps the output and the remote refs of a refused push that reports a ref updated', async () => {
-    // Another run's push lands between this push's ref advertisement and the
-    // remote's transaction: the hook moves `ids` there, so the remote refuses
-    // the atomic push ("atomic transaction failed"). git itself reports every
-    // ref of such a push rejected; this remote also answers `ok` for `linear`,
-    // which git prints as an updated ref. A refused push in a live run
-    // reported one such ref.
-    const writer = await fixture.clone('reported-writer');
-    const other = await fixture.clone('reported-other');
+  /**
+   * A refused atomic push whose output git reports `linear` updated. Another
+   * run's push lands between this push's ref advertisement and the remote's
+   * transaction: the hook moves `ids` there, and `linear` to the winning
+   * run's value or this push's own (`linear`), so the remote refuses the atomic push. git itself reports
+   * every ref of such a push rejected; this remote answers `ok` for `linear`,
+   * which git prints as an updated ref, as GitHub did in live runs.
+   */
+  async function refuseReportingLinear(name: string, linear: 'kept' | 'winner' | 'pushed') {
+    const writer = await fixture.clone(`${name}-writer`);
+    const other = await fixture.clone(`${name}-other`);
     const seen = await fetchState(writer, config);
     const otherSeen = await fetchState(other, config);
-    const otherIds = await commitIds(other, otherSeen.state.ids, new Map([['docs/r.md', { id: 'doc-r' }]]), IDENTITY);
-    await other.run(['push', '--quiet', fixture.url, `${otherIds}:refs/heads/reported-ids`]);
-    const next = await buildState(writer, seen.tracked, 'reported');
+    const otherIds = await commitIds(other, otherSeen.state.ids, new Map([[`docs/${name}.md`, { id: `doc-${name}` }]]), IDENTITY);
+    const winner = linear === 'winner' ? (await buildState(other, otherSeen.tracked, `${name}-winner`)).linear : null;
+    await other.run(['push', '--quiet', fixture.url, `${otherIds}:refs/heads/${name}-ids`, ...(winner === null ? [] : [`${winner}:refs/heads/${name}-linear`])]);
+    const next = await buildState(writer, seen.tracked, name);
+    const linearAfter = linear === 'winner' ? winner : linear === 'pushed' ? next.linear : null;
 
     const hook = join(fixture.remote.dir, 'hooks', 'pre-receive');
-    await writeFile(hook, `#!/bin/sh\ncat >/dev/null\nunset GIT_QUARANTINE_PATH\ngit update-ref ${IDS} ${otherIds}\n`, { mode: 0o755 });
+    const moves = [`git update-ref ${IDS} ${otherIds}`, ...(linearAfter === null ? [] : [`git update-ref ${LINEAR} ${linearAfter}`])];
+    await writeFile(hook, `#!/bin/sh\ncat >/dev/null\nunset GIT_QUARANTINE_PATH\n${moves.join('\n')}\n`, { mode: 0o755 });
+    const short = (oid: string | null) => (oid as string).slice(0, 7);
+    const reported = ` \t${next.linear}:${LINEAR}\t${short(seen.state.linear)}..${short(next.linear)}`;
     try {
-      const short = (oid: string | null) => (oid as string).slice(0, 7);
       const reporting = new (class extends Git {
         override async run(args: readonly string[], options?: Parameters<Git['run']>[1]) {
           const result = await super.run(args, options);
           if (args[0] !== 'push') return result;
-          const refused = `!\t${next.linear}:${LINEAR}\t[remote rejected] (atomic transaction failed)`;
+          const stdout = result.stdout.toString('utf8');
           // git's own line for the refused ref, as git prints it: the rewrite below needs it.
-          assert.ok(result.stdout.toString('utf8').includes(refused), result.stdout.toString('utf8'));
-          const stdout = result.stdout.toString('utf8').replace(refused, ` \t${next.linear}:${LINEAR}\t${short(seen.state.linear)}..${short(next.linear)}`);
-          return { ...result, stdout: Buffer.from(stdout) };
+          const refused = stdout.split('\n').find((line) => line.startsWith(`!\t${next.linear}:${LINEAR}\t`));
+          assert.ok(refused !== undefined, stdout);
+          return { ...result, stdout: Buffer.from(stdout.replace(refused, reported)) };
         }
       })(writer.dir);
       const result = await pushAtomic(reporting, config, [
@@ -199,22 +206,46 @@ describe('state: stores and atomic lease pushes', () => {
         { ref: UPLOADS, expected: seen.state.uploads, next: next.uploads, replace: true },
       ]);
       assert.ok(!result.ok && result.reason === 'stale', JSON.stringify(result));
-
-      const [refusal] = refusedPushes(reporting);
-      assert.deepEqual(refusal?.refs, [LINEAR, IDS, UPLOADS]);
-      assert.deepEqual(refusal?.moved, [LINEAR]);
-      // The remote never took the reported value: `linear` holds what this run expected.
-      assert.deepEqual(refusal?.remoteAfter, { [LINEAR]: seen.state.linear });
-      assert.equal(await remoteRef(fixture, LINEAR), seen.state.linear);
       assert.equal(await remoteRef(fixture, IDS), otherIds);
-      // git's output as it came: the porcelain lines, then its errors.
-      const output = refusal?.output ?? [];
-      assert.ok(output.includes(` \t${next.linear}:${LINEAR}\t${short(seen.state.linear)}..${short(next.linear)}`), output.join('\n'));
-      assert.ok(output.includes(`!\t${next.ids}:${IDS}\t[remote rejected] (atomic transaction failed)`), output.join('\n'));
-      assert.ok(output.some((line) => line.startsWith('error: failed to push some refs')), output.join('\n'));
+      const [refusal] = refusedPushes(reporting);
+      assert.ok(refusal !== undefined);
+      return { refusal, seen, next, winner, otherIds, reported };
     } finally {
       await rm(hook, { force: true });
     }
+  }
+
+  it('keeps the output and the remote refs of a refused push that reports a ref updated', async () => {
+    const { refusal, seen, next, reported } = await refuseReportingLinear('reported', 'kept');
+    assert.deepEqual(refusal.refs, [LINEAR, IDS, UPLOADS]);
+    assert.deepEqual(refusal.moved, [LINEAR]);
+    assert.deepEqual(refusal.pushed, { [LINEAR]: next.linear });
+    // The remote never took the reported value: `linear` holds what this run expected.
+    assert.deepEqual(refusal.remoteAfter, { [LINEAR]: seen.state.linear });
+    assert.equal(await remoteRef(fixture, LINEAR), seen.state.linear);
+    assert.deepEqual(landedRefs(refusal), []);
+    // git's output as it came: the porcelain lines, then its errors.
+    assert.ok(refusal.output.includes(reported), refusal.output.join('\n'));
+    assert.ok(refusal.output.includes(`!\t${next.ids}:${IDS}\t[remote rejected] (atomic transaction failed)`), refusal.output.join('\n'));
+    assert.ok(refusal.output.some((line) => line.startsWith('error: failed to push some refs')), refusal.output.join('\n'));
+  });
+
+  it('does not count a ref git reports updated while the remote holds the winning run\'s value', async () => {
+    // As in a live run: the winning run moved both `ids` and `linear`; git
+    // still printed this push's `linear` as updated.
+    const { refusal, next, winner, reported } = await refuseReportingLinear('misreported', 'winner');
+    assert.deepEqual(refusal.moved, [LINEAR]);
+    assert.deepEqual(refusal.pushed, { [LINEAR]: next.linear });
+    assert.deepEqual(refusal.remoteAfter, { [LINEAR]: winner });
+    assert.equal(await remoteRef(fixture, LINEAR), winner);
+    assert.deepEqual(landedRefs(refusal), []);
+    assert.ok(refusal.output.includes(reported), refusal.output.join('\n'));
+  });
+
+  it('counts a ref of a refused push that the remote holds at the pushed value', async () => {
+    const { refusal, next } = await refuseReportingLinear('landed', 'pushed');
+    assert.deepEqual(refusal.remoteAfter, { [LINEAR]: next.linear });
+    assert.deepEqual(landedRefs(refusal), [LINEAR]);
   });
 
   it('keeps the lease of a ref the run did not change', async () => {
