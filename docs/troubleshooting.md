@@ -464,7 +464,7 @@ content).
 - `run initial sync first`
 - ``the sync writes to Linear only after initial sync has recorded `linear` ``
 - `the previously recorded document places could not be resolved`
-- `LFS did not return a pointer`
+- `LFS did not return a pointer`, `LFS returned a pointer to other content than it was given`
 - `Document and id entry do not match`
 - `Status reconciliation requires document content`
 - `A marked document requires a comment target`

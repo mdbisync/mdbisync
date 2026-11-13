@@ -104,7 +104,8 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
     const sandbox = new Sandbox({ url: fixture.url, token: 'unused', stateDir: join(fixture.root, 'state'), runId: names.runId });
     await mkdir(sandbox.cache.dir, { recursive: true });
     await sandbox.cache.run(['init', '--quiet', '--bare']);
-    const engine = await fixture.clone('engine');
+    // The engine's working clone is made as a live run makes it: checked out, without LFS content.
+    const engine = await sandbox.clone(names, join(fixture.root, 'engine'));
     const person = await sandbox.clone(names, join(fixture.root, 'person'));
     const ctx = {
       scenario, names, runDir: fixture.root, sandbox, live: {

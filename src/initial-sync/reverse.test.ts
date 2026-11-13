@@ -18,7 +18,7 @@ import { LinearClient } from '../linear/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { NEUTRAL_IDENTITY } from '../state/index.ts';
-import { commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
+import { Git, commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
 import { type SecurityGate } from '../sync/security.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
 import { type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit } from './reverse.ts';
@@ -469,6 +469,43 @@ describe('initial sync from Linear to the tracked branch', () => {
     // The same documents give the same record: the state ref stays where it was instead of moving to a sibling.
     assert.equal((await refs())['refs/mdbisync/linear'], record);
     assert.equal((await refs())['refs/heads/mdbisync/linear'], record);
+  });
+
+  it('stores a downloaded file over 1 KiB as the whole LFS object when its pointer is checked out at its path, so a replacement reuses the record', async () => {
+    // A picture larger than an LFS pointer can be, stored in LFS on the tracked branch and linked by the plan.
+    const pixel = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
+    const picture = Buffer.concat([pixel, Buffer.alloc(4096, 7)]);
+    const plan = `---\nowner: platform\n---\n\n# Plan\n\n![Picture](../pictures/picture.png)\n`;
+    await fixture.seed({ 'eng/notes/plan.md': plan, 'eng/pictures/picture.png': picture }, { lfs: ['*.png'] });
+    const trackedPointer = await show('main:eng/pictures/picture.png');
+    // The engine's working copy is checked out without LFS content, as a CI checkout leaves it: the
+    // picture's path holds its pointer file, far smaller than the picture.
+    const work = new Git(cwd);
+    await work.run(['fetch', '--quiet', 'origin']);
+    await work.run(['reset', '--quiet', '--hard', 'origin/main']);
+    assert.equal(await readFile(join(cwd, 'eng/pictures/picture.png'), 'utf8'), `${trackedPointer}\n`);
+    const world = fakeWorld();
+    // Linear holds the picture as an upload of the same bytes; the upload cache is empty, as before any first run.
+    const pictureUrl = `${UPLOADS_HOST}/0/picture.png`;
+    world.linear.uploads.push({ filename: 'picture.png', contentType: 'image/png', size: picture.length, assetUrl: pictureUrl, bytes: picture });
+    world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n![Picture](${pictureUrl})\n` } : d));
+
+    const first = await run(world);
+    assert.equal(first.result.exitCode, 0, first.result.stderr);
+    // The record holds the tracked pointer: the whole picture, not the first kilobyte the checked-out pointer's size suggests.
+    assert.equal(await show('refs/mdbisync/linear:eng/pictures/picture.png'), trackedPointer);
+    assert.equal(await show('refs/mdbisync/linear:eng/notes/plan.md'), plan.trimEnd());
+    const record = (await refs())['refs/mdbisync/linear'];
+
+    // A person closes the pull request and deletes its branch; the replacement finds the picture in the upload cache.
+    const initial = world.github.pullRequests[0];
+    assert.ok(initial);
+    initial.state = 'closed';
+    await fixture.remote.run(['update-ref', '-d', 'refs/heads/mdbisync/linear']);
+    const replaced = await run(world);
+    assert.equal(replaced.result.exitCode, 0, replaced.result.stderr);
+    // The same documents and bytes give the same record: the state ref does not move to a sibling.
+    assert.equal((await refs())['refs/mdbisync/linear'], record);
   });
 
   it('maps links to synchronized documents back to relative links, keeping the tracked spelling', async () => {
