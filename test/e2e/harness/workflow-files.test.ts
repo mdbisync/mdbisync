@@ -141,8 +141,11 @@ describe('workflow templates rendered for a run', () => {
       assert.equal(steps.find(step => step.with?.['security-step'] === 'apply')?.env?.['NODE_OPTIONS'], undefined);
       assert.equal(hook.env?.['CANARY_HOOK_KEY'], '${{ secrets.CANARY_HOOK_KEY }}');
       assert.ok(Object.values(hook.env!).every(value => !/LINEAR|app-token/.test(value)));
-      const prepare = steps.findIndex(step => step.name === 'Prepare own-run canary comparisons');
-      assert.ok(prepare < steps.findIndex(step => step.with?.['security-step'] === 'stage'));
+      // The run's own secrets reach only the stage process, whose observer writes the baseline on the action's Node.
+      assert.equal(stage.env?.['CANARY_LINEAR_SECRET'], '${{ secrets.LINEAR_TEST_APP_CLIENT_SECRET }}');
+      assert.equal(stage.env?.['CANARY_APP_TOKEN'], '${{ steps.app-token.outputs.token }}');
+      // A self-hosted runner need not have `node` on its PATH: no step the canary adds runs it.
+      assert.deepEqual(steps.filter(step => /(^|[\s;&|(`"'])node(?=[\s"'`;)]|$)/m.test(step.run ?? '')).map(step => step.name), []);
       assert.ok(String(steps.find(step => step.uses?.startsWith('actions/upload-artifact@'))?.with?.['path']).includes('mdbisync-report'));
     }
   });

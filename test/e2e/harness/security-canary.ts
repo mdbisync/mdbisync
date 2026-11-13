@@ -2,7 +2,6 @@
 // Only processes carrying this workflow run id are compared with its secrets.
 export const CANARY_ENABLED = 'MDBISYNC_SECURITY_CANARY';
 export const CANARY_HOOK_STEP = 'Run the security hooks';
-export const CANARY_PREPARE_STEP = 'Prepare own-run canary comparisons';
 export const CANARY_FIXTURE = 'actions-security-canary';
 export const CANARY_KEY_ENV = 'MDBISYNC_TEST_HOOK_KEY';
 export const CANARY_KEY = 'CANARY_HOOK_KEY';
@@ -12,21 +11,41 @@ export const CANARY_PREFIX = 'Security canary: ';
 export const CANARY_EVIDENCE = 'security-canary.jsonl';
 export const CANARY_BASELINE = 'security-canary-baseline.json';
 
-/** Runs in a credential-bearing step before stage, never in the hooks step. */
-export const CANARY_PREPARE = `node --input-type=module <<'NODE'
-import { createHash } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-const digest = value => createHash('sha256').update(value).digest('hex');
-const secrets = ['CANARY_LINEAR_SECRET', 'CANARY_APP_TOKEN'];
-if (secrets.some(name => !process.env[name])) throw new Error('Missing canary baseline input');
-writeFileSync(join(process.env.RUNNER_TEMP, '${CANARY_BASELINE}'), JSON.stringify(secrets.map(name => ({ hash: digest(process.env[name]), length: process.env[name].length }))), { mode: 0o600 });
-NODE`;
+/** The stage step's environment names that carry the run's own secrets to the token observer. */
+export const CANARY_SECRET_INPUTS = ['CANARY_LINEAR_SECRET', 'CANARY_APP_TOKEN'] as const;
 
-/** Loaded only in the credential-bearing stage process; retains token digests only. */
+/**
+ * The canary's pre-commit hook. A runner need not have `node` on its PATH,
+ * so in the sync's hooks step it runs on the Node the stage step named for
+ * that step. Elsewhere (the pull request's pre-commit check, a person's
+ * commit) that name is unset and the hook takes `node` from PATH, where it
+ * exits at once without the canary flag.
+ */
+export const CANARY_HOOK_ENTRY = `sh -c 'exec "\${MDBISYNC_NODE:-node}" ${CANARY_FILE}'`;
+
+/**
+ * Loaded through NODE_OPTIONS only in the credential-bearing stage process,
+ * so it runs on the action's own Node. Its first load writes the baseline of
+ * the run's own secrets; then it adds each minted Linear token. It retains
+ * digests only and leaves the secrets out of the environment of any process
+ * the stage starts.
+ */
 export const CANARY_TOKEN_OBSERVER = `import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+const secrets = ${JSON.stringify(CANARY_SECRET_INPUTS)};
+const baselineFile = join(process.env.RUNNER_TEMP, '${CANARY_BASELINE}');
+if (!existsSync(baselineFile)) {
+  if (secrets.some(name => !process.env[name])) throw new Error('Missing canary baseline input');
+  const digest = value => createHash('sha256').update(value).digest('hex');
+  try {
+    writeFileSync(baselineFile, JSON.stringify(secrets.map(name => ({ hash: digest(process.env[name]), length: process.env[name].length }))), { mode: 0o600, flag: 'wx' });
+  } catch (error) {
+    // Another process of the stage step wrote it first.
+    if (error.code !== 'EEXIST') throw error;
+  }
+}
+for (const name of secrets) delete process.env[name];
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (...args) => {
   const response = await originalFetch(...args);
@@ -35,10 +54,9 @@ globalThis.fetch = async (...args) => {
   if (url.pathname.endsWith('/oauth/token') && response.ok) {
     const body = await response.clone().json();
     if (typeof body.access_token === 'string' && body.access_token.length > 0) {
-      const file = join(process.env.RUNNER_TEMP, '${CANARY_BASELINE}');
-      const baseline = JSON.parse(readFileSync(file, 'utf8'));
+      const baseline = JSON.parse(readFileSync(baselineFile, 'utf8'));
       baseline.push({ hash: createHash('sha256').update(body.access_token).digest('hex'), length: body.access_token.length });
-      writeFileSync(file, JSON.stringify(baseline), { mode: 0o600 });
+      writeFileSync(baselineFile, JSON.stringify(baseline), { mode: 0o600 });
     }
   }
   return response;

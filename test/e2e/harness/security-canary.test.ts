@@ -3,9 +3,9 @@ import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { CANARY_BASELINE, CANARY_ENABLED, CANARY_EVIDENCE, canaryFacts, canaryScript } from './security-canary.ts';
+import { CANARY_BASELINE, CANARY_ENABLED, CANARY_EVIDENCE, CANARY_FILE, CANARY_HOOK_ENTRY, canaryFacts, canaryScript } from './security-canary.ts';
 import { loadScenarios } from './spec.ts';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -53,6 +53,10 @@ test('the canary fails on its own secrets or a wrong key and records only facts'
     // The copied PR check and person hooks must run without canary-only inputs.
     const ordinary = spawn(process.execPath, [script], { env: {}, stdio: 'ignore' });
     assert.equal(await new Promise((resolve, reject) => { ordinary.on('error', reject); ordinary.on('close', resolve); }), 0);
+    // The hook entry as pre-commit runs it: outside the sync's hooks step no Node is named, and it takes `node` from PATH.
+    await writeFile(join(directory, CANARY_FILE), canaryScript(digest(key)));
+    const entry = spawn('sh', ['-c', CANARY_HOOK_ENTRY], { cwd: directory, env: { PATH: [dirname(process.execPath), '/usr/bin', '/bin'].join(':') }, stdio: 'ignore' });
+    assert.equal(await new Promise((resolve, reject) => { entry.on('error', reject); entry.on('close', resolve); }), 0);
     await writeFile(script, canaryScript(digest('different-key')));
     const child = spawn(process.execPath, [script], { env: { [CANARY_ENABLED]: '1', RUNNER_TEMP: directory, GITHUB_RUN_ID: randomUUID(), CANARY_HOOK_KEY: key }, stdio: 'ignore' });
     assert.equal(await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', resolve); }), 1);

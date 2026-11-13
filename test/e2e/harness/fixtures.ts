@@ -9,7 +9,7 @@
 //   document with its own icon and color, a trashed document, a blocked one.
 // - Slice fixtures only name content the slice already has; they need no setup.
 
-import { CANARY_FILE, CANARY_TOKEN_OBSERVER_FILE, CANARY_TOKEN_OBSERVER, CANARY_FIXTURE, CANARY_KEY_ENV, canaryScript } from './security-canary.ts';
+import { CANARY_FILE, CANARY_HOOK_ENTRY, CANARY_TOKEN_OBSERVER_FILE, CANARY_TOKEN_OBSERVER, CANARY_FIXTURE, CANARY_KEY_ENV, canaryScript } from './security-canary.ts';
 import { parse, stringify } from 'yaml';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -177,7 +177,7 @@ export const SETUP_FIXTURES: Record<string, SetupFixture> = {
       if (!key) throw new EnvBlockedError(`${CANARY_KEY_ENV} must hold the known workflow hook key`);
       const git = await ctx.person();
       const config = parse(await git.text(['show', 'HEAD:.pre-commit-config.yaml'])) as { repos: unknown[] };
-      config.repos.push({ repo: 'local', hooks: [{ id: 'security-canary', alias: 'security', name: 'Security canary', entry: `node ${CANARY_FILE}`, language: 'system', stages: ['pre-commit'], always_run: true, pass_filenames: false, verbose: true }] });
+      config.repos.push({ repo: 'local', hooks: [{ id: 'security-canary', alias: 'security', name: 'Security canary', entry: CANARY_HOOK_ENTRY, language: 'system', stages: ['pre-commit'], always_run: true, pass_filenames: false, verbose: true }] });
       await commitAsPerson(ctx, new Map([
         [CANARY_FILE, canaryScript(sha256(key))],
         [CANARY_TOKEN_OBSERVER_FILE, CANARY_TOKEN_OBSERVER],

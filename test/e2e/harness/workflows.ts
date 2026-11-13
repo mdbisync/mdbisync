@@ -26,7 +26,7 @@ import { inflateRawSync } from 'node:zlib';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { notImplementedMessage, type CommandName } from '../../../src/commands.ts';
 import type { EngineResult } from './engine.ts';
-import { GitHubError, type SandboxRest, type WorkflowJob, type WorkflowRun } from './github.ts';
+import { GitHubError, type SandboxRest, type WorkflowJob, type WorkflowRun, type WorkflowStep } from './github.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
 import { outputCount, outputText } from '../../../src/run/output.ts';
 
@@ -241,6 +241,37 @@ export function workflowEvidence(run: WorkflowRun): Record<string, unknown> {
   };
 }
 
+/** A run's jobs with their steps' conclusions, in order: which step ended a run, without its logs. */
+export function jobsEvidence(jobs: readonly WorkflowJob[]): Array<Record<string, unknown>> {
+  const optional = (value: string | null, limit: number) => value === null ? null : outputText(value, limit);
+  return jobs.map((job) => ({
+    name: outputText(job.name, 4096), conclusion: optional(job.conclusion, 100),
+    started_at: optional(job.started_at, 100), completed_at: optional(job.completed_at, 100),
+    steps: [...(job.steps ?? [])].sort((a, b) => a.number - b.number).map((step) => ({
+      number: outputCount(step.number), name: outputText(step.name, 4096), status: outputText(step.status, 100), conclusion: optional(step.conclusion, 100),
+    })),
+  }));
+}
+
+/**
+ * The first failed step of the first job with one, and its log file in the
+ * run's logs: `<job>/<number>_<step>.txt`, or the file of that job and step
+ * number whose name GitHub stripped of characters it drops from file names.
+ */
+export function firstFailedStep(jobs: readonly WorkflowJob[], logs: ReadonlyMap<string, string>): { job: WorkflowJob; step: WorkflowStep; logFile: string } | undefined {
+  for (const job of jobs) {
+    const step = [...(job.steps ?? [])].sort((a, b) => a.number - b.number).find((candidate) => candidate.conclusion === 'failure');
+    if (step === undefined) continue;
+    const exact = `${job.name}/${step.number}_${step.name}.txt`;
+    const logFile = logs.has(exact) ? exact : [...logs.keys()].find((file) => {
+      const match = /^(.*)\/(\d+)_[^/]*\.txt$/.exec(file);
+      return match !== null && Number(match[2]) === step.number && comparable(match[1]!) === comparable(job.name);
+    }) ?? exact;
+    return { job, step, logFile };
+  }
+  return undefined;
+}
+
 export function blockerEvidence(blocker: RunBlocker): RunBlocker {
   return {
     runId: outputCount(blocker.runId), job: outputText(blocker.job, 4096),
@@ -258,26 +289,22 @@ export function blockerEvidence(blocker: RunBlocker): RunBlocker {
  */
 export function environmentBlocker(run: WorkflowRun, jobs: readonly WorkflowJob[], logs: ReadonlyMap<string, string>, knownErrors: readonly string[] = []): RunBlocker | undefined {
   if (run.conclusion !== 'failure') return undefined;
-  for (const job of jobs) {
-    const failed = [...(job.steps ?? [])].sort((a, b) => a.number - b.number).find((step) => step.conclusion === 'failure');
-    if (failed === undefined) continue;
-    if (!PREREQUISITE_STEPS.has(failed.name)) return undefined;
-    const logFile = `${job.name}/${failed.number}_${failed.name}.txt`;
-    const log = logs.get(logFile);
-    if (log === undefined) return undefined;
-    const missing = /##\[error\]Process completed with exit code 127\./.test(log) ? /: ([\w.+-]+): command not found\s*$/m.exec(log)?.[1] : undefined;
-    const cause = missing === undefined ? knownErrors.find((error) => log.includes(error))?.replace('##[error]', '') : `${missing}: command not found (exit 127)`;
-    if (cause === undefined) return undefined;
-    return {
-      runId: run.id,
-      job: job.name,
-      step: failed.name,
-      cause,
-      logFile,
-      reason: `the sandbox runner cannot run "${failed.name}": ${cause} (${run.event} run ${run.id})`,
-    };
-  }
-  return undefined;
+  const failed = firstFailedStep(jobs, logs);
+  if (failed === undefined || !PREREQUISITE_STEPS.has(failed.step.name)) return undefined;
+  const { job, step, logFile } = failed;
+  const log = logs.get(logFile);
+  if (log === undefined) return undefined;
+  const missing = /##\[error\]Process completed with exit code 127\./.test(log) ? /: ([\w.+-]+): command not found\s*$/m.exec(log)?.[1] : undefined;
+  const cause = missing === undefined ? knownErrors.find((error) => log.includes(error))?.replace('##[error]', '') : `${missing}: command not found (exit 127)`;
+  if (cause === undefined) return undefined;
+  return {
+    runId: run.id,
+    job: job.name,
+    step: step.name,
+    cause,
+    logFile,
+    reason: `the sandbox runner cannot run "${step.name}": ${cause} (${run.event} run ${run.id})`,
+  };
 }
 
 /** A step's log file in a run's logs, `<job>/<number>_<step>.txt`, without the characters GitHub may drop from a file name. */

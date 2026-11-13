@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMap, isScalar, isSeq, parseDocument, type Document, type YAMLMap } from 'yaml';
-import { CANARY_TOKEN_OBSERVER_FILE, CANARY_ENABLED, CANARY_HOOK_STEP, CANARY_KEY, CANARY_PREPARE, CANARY_PREPARE_STEP } from './security-canary.ts';
+import { CANARY_TOKEN_OBSERVER_FILE, CANARY_ENABLED, CANARY_HOOK_STEP, CANARY_KEY, CANARY_SECRET_INPUTS } from './security-canary.ts';
 import type { CommandName } from '../../../src/commands.ts';
 import { runNames } from './isolation.ts';
 import { PREREQUISITE_STEPS, REPORT_ARTIFACT } from './workflows.ts';
@@ -312,16 +312,12 @@ function patchSteps(doc: Document, job: YAMLMap, options: RunWorkflowOptions): v
     if (hooks === undefined) throw new Error('Security canary needs a separate hooks step');
     hooks.setIn(['env', CANARY_ENABLED], '1');
     hooks.setIn(['env', CANARY_KEY], `\${{ secrets.${CANARY_SECRET} }}`);
-    const stage = steps.items.findIndex(isAction);
-    (steps.items[stage] as YAMLMap).setIn(['env', 'NODE_OPTIONS'], `--import \"\${{ github.workspace }}/${CANARY_TOKEN_OBSERVER_FILE}\"`);
-    steps.items.splice(stage, 0, doc.createNode({
-      name: CANARY_PREPARE_STEP,
-      run: CANARY_PREPARE,
-      env: {
-        CANARY_LINEAR_SECRET: `\${{ ${SANDBOX_NAMES['secrets.MDBISYNC_LINEAR_CLIENT_SECRET']} }}`,
-        CANARY_APP_TOKEN: '${{ steps.app-token.outputs.token }}',
-      },
-    }));
+    // The observer runs in the stage process, on the action's own Node: the runner need not have `node` on its PATH.
+    const stage = steps.items.find(isAction) as YAMLMap;
+    const [linearSecret, appToken] = CANARY_SECRET_INPUTS;
+    stage.setIn(['env', 'NODE_OPTIONS'], `--import \"\${{ github.workspace }}/${CANARY_TOKEN_OBSERVER_FILE}\"`);
+    stage.setIn(['env', linearSecret], `\${{ ${SANDBOX_NAMES['secrets.MDBISYNC_LINEAR_CLIENT_SECRET']} }}`);
+    stage.setIn(['env', appToken], '${{ steps.app-token.outputs.token }}');
   }
   // The stage step runs before the hooks step; the last action step is the one whose report the harness reads.
   const last = steps.items.findLastIndex(isAction);
