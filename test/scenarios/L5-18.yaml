@@ -12,6 +12,19 @@
   },
   "steps": [
     {
+      "kind": "linear",
+      "action": "edit",
+      "args": {
+        "actor": "editor-a",
+        "target": "paragraph"
+      }
+    },
+    {
+      "kind": "run",
+      "action": "sync",
+      "args": {}
+    },
+    {
       "kind": "git",
       "action": "delete-sync-branch",
       "args": {}
@@ -19,6 +32,11 @@
     {
       "kind": "run",
       "action": "sync",
+      "args": {}
+    },
+    {
+      "kind": "run",
+      "action": "settle",
       "args": {}
     }
   ],
