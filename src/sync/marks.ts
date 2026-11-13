@@ -56,6 +56,14 @@ export interface MarkOptions {
    * the episode, so the comment posted before is found instead of added again.
    */
   noticeId?: (state: Exclude<MarkState, 'clear'>) => string;
+  /**
+   * Called as soon as the conflict notice's requests succeed: `set` when the
+   * comment is posted (or the one begun before is found), `resolved` when a
+   * conflict notice is resolved. Each costs up to two requests, which the
+   * run reports even when a later step of this mark fails. A notice already
+   * recorded as posted costs nothing and is not reported.
+   */
+  onConflictNotice?: (change: keyof ConflictNotices) => void;
 }
 
 export interface MarkResult {
@@ -63,6 +71,16 @@ export interface MarkResult {
   entry: IdEntry;
   updated: boolean;
   commented: boolean;
+}
+
+/** The documents whose conflict notice a run set or resolved, by path, once per time it did. */
+export interface ConflictNotices {
+  set: string[];
+  resolved: string[];
+}
+
+export function noConflictNotices(): ConflictNotices {
+  return { set: [], resolved: [] };
 }
 
 export const IMAGE_BLOCKED_COMMENT = 'Some images in this document cannot be synchronized. Fix the listed images and sync again.';
@@ -124,6 +142,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
     // A person can delete the notice before fixing the document. Check for
     // its absence; failed reads or resolutions retain the notice for retry.
     if (await linear.commentExists(entry.saved.notice.id)) await linear.resolveComment(entry.saved.notice.id);
+    if (entry.saved.notice.kind === 'conflict') options.onConflictNotice?.('resolved');
   }
 
   if (state === 'clear') {
@@ -160,6 +179,7 @@ export async function reconcileDocumentMark(options: MarkOptions): Promise<MarkR
   // The pending id is durable before the mutation. Lost responses and failed
   // receipt saves can safely resume; changed blocked locations update this id.
   const comment = await linear.ensureDocumentComment(document.documentContentId, body, notice.id, true);
+  if (state === 'conflict') options.onConflictNotice?.('set');
   const posted = { ...entry, saved: { ...saved, notice: { ...notice, posted: true } } };
   await persistEntry(posted);
   result.entry = posted;
