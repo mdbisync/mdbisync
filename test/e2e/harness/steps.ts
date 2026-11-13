@@ -26,7 +26,7 @@ import { STOP_AFTER_ENV, type Checkpoint } from '../../../src/test-hooks.ts';
 import { BANK_DIR, goldenMarkdownPath, loadBank, probedFixtures, readOptional } from '../../probe/bank.ts';
 import { runProbe } from '../../probe/probe.ts';
 import { findDrift } from '../../probe/record.ts';
-import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, editsFound, expectsDocument, holdsToken, lostEdits, readSides, snapshotRefs, bodyOf, type Sides } from './checks.ts';
+import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, editsFound, expectsDocument, holdsToken, lostEdits, readSides, recordRefs, snapshotRefs, bodyOf, type Sides } from './checks.ts';
 import { isCheckpoint, KILLED_RUN_CHECKPOINT } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
 import type { CheckState } from '../../../src/pull-request/merge.ts';
@@ -567,7 +567,7 @@ export async function settleFollowUpRuns(ctx: RunContext, limit = 5): Promise<nu
     recordWorkflowRun(ctx, run);
     await settleWorkflowRun(ctx, run, 'sync');
     recorded += 1;
-    (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined)?.push(await snapshotRefs(ctx));
+    if (ctx.observations.has('refHistory')) await recordRefs(ctx);
     const result = ctx.engine.results.at(-1);
     if (result?.exitCode !== 0) throw new ProductError(`the deployment's follow-up push run ${run.id} did not succeed (exit ${String(result?.exitCode)})`);
   }

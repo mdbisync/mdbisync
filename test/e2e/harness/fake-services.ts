@@ -12,7 +12,7 @@ import { LinearClient, type LogEntry } from '../../../src/linear/index.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
 import { createFixture, mergeOnGitHub } from '../../../src/state/test-helpers.ts';
 import { CheckpointControl } from './checkpoints.ts';
-import { runChecks, snapshotRefs } from './checks.ts';
+import { recordRefs, runChecks, startRefHistory } from './checks.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { engineInputs, type EngineResult } from './engine.ts';
 import { SandboxRest } from './github.ts';
@@ -163,11 +163,10 @@ export async function runOnFakeServices(t: TestContext, scenario: Scenario, docu
       else await runStep(stepCtx, next);
     };
     await setupState(ctx, ctx.live as LiveWorld, { runStep: step });
-    const history = [await snapshotRefs(ctx)];
-    ctx.observations.set('refHistory', history);
+    await startRefHistory(ctx);
     for (const next of scenario.steps) {
       await step(ctx, next);
-      history.push(await snapshotRefs(ctx));
+      await recordRefs(ctx);
       refreshView(ctx);
     }
     // I6 uses the same in-process engine transport as the scenario's own runs.

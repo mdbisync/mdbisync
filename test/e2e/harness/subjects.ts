@@ -44,14 +44,15 @@ import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { INVALID_DIAGRAM_NOTE } from '../../corpus/documents.ts';
 import { BANK_HOME } from '../../corpus/tree.ts';
 import { BANK_DIR, engineForm, loadBank, readFixture } from '../../probe/bank.ts';
-import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, editsFound, readSides, sameAsFile, expectsDocument, duplicateKey, isLive, snapshotRefs, bodyOf, titleOf, type Sides } from './checks.ts';
+import { canaryScan, fetchRef, fileHash, runScopeGuard, gitLinks, linearLinks, linkDestinations, linkedFile, lfsSize, lostEdits, editsFound, readSides, sameAsFile, expectsDocument, duplicateKey, isLive, snapshotRefs, REF_HISTORY_TIMES, bodyOf, titleOf, type Sides } from './checks.ts';
 import { bothVersionsComplete, colorLabel, conflictScope, CONFLICT_MARK, scanMarkers } from './conflicts.ts';
 import type { RunContext } from './context.ts';
 import { annotationPath, owningFolder, type Folder } from './corpus.ts';
 import { REPO_ROOT, engineEntry } from './engine.ts';
 import { canaryIsolated, type CanaryFacts } from './security-canary.ts';
-import { isAppBot } from './workflows.ts';
-import type { PushActivity } from './github.ts';
+import { isAppBot, runLogs } from './workflows.ts';
+import type { PushActivity, WorkflowRun } from './github.ts';
+import { appTokenClientIds, workflowWriteCredentials } from './run-credentials.ts';
 import { isDocumentWrite, QUIET_SUBJECT, UNTOUCHED_SUBJECT } from './quiet.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
@@ -454,6 +455,120 @@ async function syncCommits(ctx: RunContext): Promise<Map<string, string[]>> {
 
 /** The identity the repository's CI commits its fixes under (the pre-commit example): GitHub Actions' bot account. */
 export const CI_IDENTITY = 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>';
+
+/**
+ * Proves the writer of a state ref outside branches through the workflow runs
+ * that moved it. GitHub records no push to such a ref: its repository activity
+ * lists none, and its other records of a push (events, webhooks) are for
+ * branches and tags. The harness snapshots the run's refs at the start and
+ * after each step and follow-up run, noting when it took each
+ * (`refHistory`, `REF_HISTORY_TIMES`); the last window ends at the ref's tip
+ * now. Every window in which the ref moved, other than to a commit the
+ * harness pushed itself with none of the sync's commits, must overlap at
+ * least one workflow run the harness recorded, by GitHub's times for the run,
+ * and every such run must be one that can only have written as the
+ * harness's App (runWriteProof). A move back to an older commit, or a foreign
+ * force push, needs a writer as much as one that brings the sync's commits.
+ * Throws a product error naming the ref.
+ *
+ * What GitHub cannot show: a push with another credential in the same window
+ * as a proven run. The run's refs are its own (their names carry the run id)
+ * and only the App and the sandbox's owners can write to the sandbox.
+ */
+async function writtenByRuns(ctx: RunContext, ref: string, commits: readonly string[], evidence: RunEvidence): Promise<void> {
+  const history = (ctx.observations.get('refHistory') as Array<Record<string, string>> | undefined) ?? [];
+  const times = (ctx.observations.get(REF_HISTORY_TIMES) as number[] | undefined) ?? [];
+  const startedAt = ctx.observations.get('start.time') as number | undefined;
+  if (history.length === 0 || times.length !== history.length || startedAt === undefined) throw new Error(`${ref}: the harness kept no timed ref history that says which workflow runs moved the run's refs`);
+  const git = await person(ctx);
+  const start = ((ctx.observations.get('start.refs') as Record<string, string> | undefined) ?? {})[ref] ?? null;
+  // syncCommits fetched the ref just now.
+  const tip = (await git.text(['rev-parse', ref])).trim();
+  const points = [{ oid: start, at: startedAt }, ...history.map((snapshot, index) => ({ oid: snapshot[ref] ?? null, at: times[index]! })), { oid: tip, at: Date.now() }];
+  const sync = new Set(commits);
+  const own = new Set(ctx.ownCommits);
+  const not = (await present(git, startTips(ctx))).map((oid) => `^${oid}`);
+  evidence.runs ??= recordedRunTimes(ctx);
+  const runs = await evidence.runs;
+  for (let index = 1; index < points.length; index += 1) {
+    const before = points[index - 1]!;
+    const after = points[index]!;
+    if (after.oid === before.oid) continue;
+    if (after.oid !== null && own.has(after.oid) && (await present(git, [after.oid])).length === 1) {
+      // The harness's own push needs no run, unless the sync's commits came in under it in the same window.
+      const since = before.oid !== null && (await present(git, [before.oid])).length === 1 ? [`^${before.oid}`] : [];
+      const moved = (await git.text(['rev-list', after.oid, ...since, ...not])).split('\n').filter(Boolean);
+      if (!moved.some((commit) => sync.has(commit))) continue;
+    }
+    const window = runs.filter((run) => run.from <= after.at + CLOCK_MARGIN_MS && run.to >= before.at - CLOCK_MARGIN_MS);
+    const to = after.oid === null ? 'deleted' : `moved to ${after.oid.slice(0, 12)}`;
+    if (window.length === 0) throw new ProductError(`${ref}: ${to} while no workflow run ran, so the writer of the sync's commits is unproven`);
+    for (const run of window) {
+      if (!evidence.proofs.has(run.id)) evidence.proofs.set(run.id, runWriteProof(ctx, run.record));
+      const problem = await evidence.proofs.get(run.id)!;
+      if (problem !== null) throw new ProductError(`${ref}: workflow run ${run.id} ran while it was ${to}, and its workflow ${problem}, so the writer of the sync's commits is unproven`);
+    }
+  }
+}
+
+/** What one check read of the recorded workflow runs, shared by the refs it proves: each run's times and its proof. */
+interface RunEvidence {
+  runs?: Promise<Array<{ id: number; from: number; to: number; record: WorkflowRun }>>;
+  proofs: Map<number, Promise<string | null>>;
+}
+
+/** How far the harness's clock and GitHub's may disagree, for comparing a run's times with a ref snapshot's. */
+const CLOCK_MARGIN_MS = 2 * 60_000;
+
+/**
+ * GitHub's record of each workflow run the harness recorded, with the times
+ * GitHub gives for it: from its start (or creation) to its last update. A
+ * run is recorded only after it finished, so its record is final.
+ */
+async function recordedRunTimes(ctx: RunContext): Promise<Array<{ id: number; from: number; to: number; record: WorkflowRun }>> {
+  const recorded = (ctx.observations.get('workflows.runs') as Array<{ id: number }> | undefined) ?? [];
+  const result = [];
+  for (const id of new Set(recorded.map((run) => run.id))) {
+    const record = await ctx.live!.rest.request<WorkflowRun>('GET', `/actions/runs/${id}`);
+    const from = Date.parse(record.run_started_at ?? record.created_at);
+    const to = Date.parse(record.updated_at ?? record.created_at);
+    if (Number.isNaN(from) || Number.isNaN(to)) throw new Error(`GitHub's record of workflow run ${id} gives no times`);
+    result.push({ id, from, to, record });
+  }
+  return result;
+}
+
+/**
+ * Why a workflow run, as GitHub records it, could have written with a
+ * credential other than the harness's App; null when it could not. A run
+ * none of whose jobs started (one its concurrency group cancelled while
+ * queued) ran nothing and wrote nothing. Otherwise GitHub's record of the run
+ * names its workflow file and commit; that file, read from GitHub at that
+ * commit, must give no job's own token contents write and hand the jobs no
+ * secret but the App's key, the Linear app and the canary key
+ * (workflowWriteCredentials); and the runner's log of the run must show every
+ * App token step minting for the harness's App's client id
+ * (appTokenClientIds).
+ */
+async function runWriteProof(ctx: RunContext, run: WorkflowRun): Promise<string | null> {
+  const live = ctx.live!;
+  const clientId = live.githubAppClientId;
+  if (clientId === undefined) throw new EnvBlockedError('the workflow runs\' App is compared with the harness\'s, and the harness holds no App client id');
+  const jobs = await live.rest.runJobs(run.id);
+  if (jobs.every((job) => job.started_at === null)) return null;
+  const path = run.path?.split('@')[0];
+  if (path === undefined || path === '' || run.head_sha === undefined) return 'is not named in GitHub\'s record of the run';
+  const text = await live.rest.fileText(path, run.head_sha);
+  if (text === undefined) return `${path} is not on GitHub at the run's commit ${run.head_sha.slice(0, 12)}`;
+  const problems = workflowWriteCredentials(text);
+  if (problems.length > 0) return problems.join('; ');
+  const logs = await runLogs(live.rest, run);
+  if (logs.size === 0) throw new EnvBlockedError(`GitHub serves no logs for workflow run ${run.id}, so its App token steps cannot be read`);
+  const ids = appTokenClientIds(logs.values());
+  if (ids.length === 0) return 'logged no App token step';
+  if (ids.some((id) => id !== clientId)) return 'minted an App token for another App than the harness\'s';
+  return null;
+}
 
 /** Who a push record names, for a failure: a bot by its login, a person only as a user account. */
 function actorKind(actor: PushActivity['actor']): string {
@@ -1777,11 +1892,13 @@ export const SUBJECTS: Record<string, Compute> = {
     return current === undefined ? null : checksOf(env.ctx, current.head.sha);
   },
   'workflows.events': async (env) => sorted(new Set(((env.ctx.observations.get('workflows.runs') as Array<{ event: string }> | undefined) ?? []).map((run) => run.event))),
-  // Who authenticated the pushes of the sync's commits, from GitHub's own push records, never from a commit's
-  // author: the engine writes that name itself, whatever credential pushes. 'app-bot' means every recorded push
-  // to a run ref the sync wrote was made by the App the harness and the workflows hold (its exact bot login, not
-  // any `[bot]` such as the job's own token; in actions mode the harness's own pushes are the App's too), and
-  // every one of the sync's commits reached GitHub through such a push. Anything else fails and names the ref.
+  // Who authenticated the pushes of the sync's commits, from GitHub's own records, never from a commit's author:
+  // the engine writes that name itself, whatever credential pushes. 'app-bot' means the App the harness and the
+  // workflows hold (its exact bot login, not any `[bot]` such as the job's own token) wrote every one of the sync's
+  // commits. A branch has GitHub's push records (repository activity): every recorded push to it must be the App's
+  // (in actions mode the harness's own pushes are the App's too), and every sync commit must have reached GitHub
+  // through such a push. A state ref outside branches has none, so it is proven through the workflow runs that
+  // moved it (writtenByRuns). Anything else fails and names the ref.
   'writes.githubActor': async (env) => {
     const live = env.ctx.live;
     if (live === null) throw new EnvBlockedError('who pushed is read from GitHub, and the run has no sandbox');
@@ -1789,7 +1906,12 @@ export const SUBJECTS: Record<string, Compute> = {
     if (app === undefined) throw new EnvBlockedError('who pushed is compared with the GitHub App, and the harness holds no App token');
     const git = await person(env.ctx);
     const byRef = await syncCommits(env.ctx);
+    const evidence: RunEvidence = { proofs: new Map() };
     for (const [ref, commits] of byRef) {
+      if (!ref.startsWith('refs/heads/')) {
+        await writtenByRuns(env.ctx, ref, commits, evidence);
+        continue;
+      }
       const pushes = await live.rest.pushActivities(ref);
       const other = pushes.find((push) => push.actor?.login !== app || push.actor.type !== 'Bot');
       if (other !== undefined) throw new ProductError(`${ref}: GitHub records a ${other.activity_type} to ${other.after.slice(0, 12)} by ${actorKind(other.actor)}, not by the App ${app}`);
