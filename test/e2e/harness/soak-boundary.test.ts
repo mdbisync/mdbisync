@@ -220,3 +220,138 @@ describe('soak hourly boundary', () => {
     assert.equal(world.now() >= HOUR + 3 * SCHEDULE, true, 'the three started runs took their slots');
   });
 });
+
+/**
+ * Sync runs that fail as the workflow does on a GitHub server error in the pull request step: `before` the step did
+ * anything (the run only takes its time), or `after` GitHub applied it (the merge happened, the answer was an error).
+ * `fatal` fails without the recoverable classification. Runs are counted from 1, drain runs included.
+ */
+type Interruption = 'before' | 'after' | 'fatal';
+function interrupting(world: ReturnType<typeof pipeline>, plan: (run: number, phase: 'drain' | undefined) => Interruption | undefined) {
+  let runs = 0;
+  const failures: Array<{ run: number; error: ProductError }> = [];
+  const sync: SoakDriver['sync'] = async (deadlineAt, phase) => {
+    runs += 1;
+    const how = plan(runs, phase);
+    if (how === undefined) return world.driver.sync(deadlineAt, phase);
+    const startedAt = world.now();
+    if (how === 'before') await world.driver.sleep(60_000);
+    else await world.driver.sync(deadlineAt, phase);
+    const error = new ProductError(`scheduled soak workflow ${runs} failed (exit 1)`);
+    failures.push({ run: runs, error });
+    return { completed: true, startedAt, error, ...(how === 'fatal' ? {} : { recoverable: `GitHub HTTP 500 in workflow ${runs}` }) };
+  };
+  return { driver: { ...world.driver, sync } satisfies SoakDriver, failures, runs: () => runs };
+}
+
+const TOLERANT: SoakOptions = { ...OPTIONS, serverErrors: { ticks: 2, total: 3 } };
+
+describe('soak recovery from GitHub server errors', () => {
+  it('lets the next scheduled run recover a server error, before or after GitHub applied the step, with no run added', async () => {
+    const world = pipeline({ checkDelayMs: 120_000 });
+    const failing = interrupting(world, (run) => (run === 3 ? 'after' : run === 10 ? 'before' : undefined));
+    const result = await soak(failing.driver, TOLERANT);
+    assert.deepEqual(failing.failures.map((failure) => failure.run), [3, 10]);
+    assert.deepEqual(result.serverErrors, { tolerated: 2, recovered: 2 });
+    assert.equal(result.lostEdits, 0);
+    assert.ok(world.made.every((item) => world.linear.has(item) && world.tracked.has(item)), 'every edit reached both sides');
+    assert.deepEqual(result.edits, soakEditCounts(OPTIONS));
+    // The failed runs kept their slots: every run is a scheduled or a drain run, and all of them count.
+    assert.equal(failing.runs(), 24 + result.drainSyncs);
+    assert.equal(result.syncRuns, failing.runs());
+  });
+
+  it('keeps an hour\'s drain going after a drain run with a server error, and its verdict stays strict', async () => {
+    const world = pipeline({ checkDelayMs: 120_000 });
+    const failing = interrupting(world, (_, phase) => (phase === 'drain' && world.boundaries.length === 1 ? 'before' : undefined));
+    const result = await soak(failing.driver, TOLERANT);
+    assert.deepEqual(result.serverErrors, { tolerated: 1, recovered: 1 });
+    const firstHour = world.boundaries.filter((boundary) => boundary.hour === 1);
+    assert.ok(firstHour.length >= 3, 'the hour looked again after the interrupted drain run');
+    assert.ok(firstHour.at(-1)?.settled, 'the hour settled on a later drain run');
+    assert.equal(result.lostEdits, 0);
+  });
+
+  it('stops on the third server error in a row, with the run\'s own failure', async () => {
+    const world = pipeline({ checkDelayMs: 120_000 });
+    const failing = interrupting(world, (run) => (run >= 5 && run <= 7 ? 'before' : undefined));
+    const saved: Array<{ tolerated: number; recovered: number }> = [];
+    const error = await soak({ ...failing.driver, progress: async (result) => void saved.push({ ...result.serverErrors }) }, TOLERANT).then(() => undefined, (thrown: unknown) => thrown);
+    assert.ok(error instanceof ProductError, String(error));
+    assert.equal(error.message, 'scheduled soak workflow 7 failed (exit 1); not recovered: 3 runs in a row failed on a server error (bound 2)');
+    assert.equal(failing.runs(), 7, 'no run after the stop');
+    assert.deepEqual(saved.at(-1), { tolerated: 2, recovered: 0 });
+  });
+
+  it('does not count a run that succeeded with its pull request step still failing as a recovery', async () => {
+    const world = pipeline({ checkDelayMs: 120_000 });
+    // Runs 5 and 7 fail on a server error; run 6 succeeds as a workflow, but its pull request step still failed.
+    const failing = interrupting(world, (run) => (run === 5 || run === 7 ? 'before' : undefined));
+    let runs = 0;
+    const driver: SoakDriver = {
+      ...failing.driver,
+      sync: async (deadlineAt, phase) => {
+        runs += 1;
+        const outcome = await failing.driver.sync(deadlineAt, phase);
+        return runs === 6 ? { completed: true, startedAt: world.now(), recovers: false } : outcome;
+      },
+    };
+    const error = await soak(driver, { ...TOLERANT, serverErrors: { ticks: 1, total: 3 } }).then(() => undefined, (thrown: unknown) => thrown);
+    assert.ok(error instanceof ProductError, String(error));
+    assert.equal(error.message, 'scheduled soak workflow 7 failed (exit 1); not recovered: 2 runs in a row failed on a server error (bound 1)');
+  });
+
+  it('stops on the fourth server error in the soak, even when each one before it recovered', async () => {
+    const world = pipeline({ checkDelayMs: 120_000 });
+    const failing = interrupting(world, (run) => ([3, 9, 15, 21].includes(run) ? 'after' : undefined));
+    const error = await soak(failing.driver, TOLERANT).then(() => undefined, (thrown: unknown) => thrown);
+    assert.ok(error instanceof ProductError, String(error));
+    assert.equal(error.message, 'scheduled soak workflow 21 failed (exit 1); not recovered: 4 runs failed on a server error in this soak (bound 3)');
+  });
+
+  it('stops when the soak ends before a later run recovers a server error', async () => {
+    const world = pipeline({ checkDelayMs: 0 });
+    const failing = interrupting(world, (run) => (run === 24 ? 'after' : undefined));
+    // Settled sides at every check: only the unrecovered run can stop this soak.
+    const driver: SoakDriver = { ...failing.driver, checkInvariants: async () => ({ lostEdits: 0, converged: true }) };
+    await assert.rejects(soak(driver, { ...TOLERANT, drainSyncs: 0 }), (error: unknown) => {
+      assert.ok(error instanceof ProductError);
+      assert.equal(error.message, 'soak ended before a later run recovered 1 failed run(s): GitHub HTTP 500 in workflow 24');
+      return true;
+    });
+  });
+
+  it('stops on the first failed run in strict mode, the default, and on any failure not classified as recoverable', async () => {
+    for (const [options, how] of [[OPTIONS, 'after'], [{ ...OPTIONS, serverErrors: { ticks: 0, total: 3 } }, 'after'], [TOLERANT, 'fatal']] as const) {
+      const world = pipeline({ checkDelayMs: 120_000 });
+      const failing = interrupting(world, (run) => (run === 3 ? how : undefined));
+      await assert.rejects(soak(failing.driver, options), (error) => error === failing.failures[0]?.error);
+      assert.equal(failing.runs(), 3);
+    }
+  });
+
+  it('names the drain runs that failed on a server error when the hour\'s strict verdict fails', async () => {
+    const world = pipeline({ checkDelayMs: Number.POSITIVE_INFINITY });
+    let drains = 0;
+    const failing = interrupting(world, (_, phase) => (phase === 'drain' && (drains += 1) <= 2 ? 'before' : undefined));
+    await assert.rejects(soak(failing.driver, TOLERANT), (error: unknown) => {
+      assert.ok(error instanceof ProductError);
+      assert.match(error.message, /^soak stopped at hour 1: I1=false, \d+ edits lost \(\d+ retained pending, 0 absent everywhere\) after 3 of 3 drain syncs, 2 of them failed on a server error$/);
+      return true;
+    });
+  });
+
+  it('still stops on a lost edit with server errors tolerated', async () => {
+    const world = pipeline({ checkDelayMs: 120_000, destroys: 'abcdef-002' });
+    const failing = interrupting(world, (run) => (run === 3 ? 'after' : undefined));
+    await assert.rejects(soak(failing.driver, TOLERANT), /^ProductError: soak stopped at hour 1: I1=false, 1 edits lost \(0 retained pending, 1 absent everywhere\) after 3 of 3 drain syncs$/);
+  });
+
+  it('refuses server error bounds that are not nonnegative whole numbers before the first edit', async () => {
+    for (const serverErrors of [{ ticks: -1, total: 3 }, { ticks: 2, total: 1.5 }]) {
+      const world = pipeline({ checkDelayMs: 0 });
+      await assert.rejects(soak(world.driver, { ...OPTIONS, serverErrors }), /server error bounds must be nonnegative whole numbers/);
+      assert.equal(world.made.length, 0);
+    }
+  });
+});

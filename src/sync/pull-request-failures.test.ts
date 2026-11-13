@@ -216,6 +216,57 @@ describe('sync: pull request failures', () => {
     assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Lost answers\./);
   });
 
+  it('a GitHub server error after GitHub opened or merged the sync pull request: the next run converges without a second one', async () => {
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nServer errors. ${CANARY}\n`);
+    h.world.github.serverError = (request, body) => (request === 'POST /pulls' && body.head !== undefined ? 'after' : undefined);
+    const open = await sync();
+    assert.equal(open.result.exitCode, INCOMPLETE_EXIT_CODE, open.result.stderr);
+    assert.equal(open.report.pullRequest?.code, 'github-failed');
+    assert.equal(open.report.pullRequest?.status, 500);
+    assert.equal(open.report.code, 'github-failed');
+    assert.equal(openPullRequests().length, 1, 'GitHub opened it before it answered 500');
+
+    h.world.github.serverError = (request) => (request === 'PUT /pulls/1/merge' ? 'after' : undefined);
+    const merge = await sync();
+    assert.equal(merge.result.exitCode, INCOMPLETE_EXIT_CODE, merge.result.stderr);
+    assert.equal(merge.report.pullRequest?.status, 500);
+    assert.equal(h.world.github.pullRequests[0]?.merged, true, 'GitHub merged it before it answered 500');
+
+    delete h.world.github.serverError;
+    const after = await sync();
+    assert.equal(after.result.exitCode, 0, after.result.stderr);
+    assert.deepEqual(after.writes, []);
+    assert.equal(h.world.github.pullRequests.length, 1, 'no second pull request');
+    assert.equal(after.report.pullRequest?.needed, false);
+    const plan = await show('refs/heads/main:eng/notes/plan.md');
+    assert.equal(plan.split('Server errors.').length, 2, 'the edit is on the tracked branch once');
+    assert.equal(((await documentOf('eng/notes/plan.md')).content ?? '').split('Server errors.').length, 2, 'and once in Linear');
+  });
+
+  it('a GitHub server error on every request of the pull request step ends each run incomplete, and the next run converges', async () => {
+    await editInLinear('eng/notes/plan.md', `# Plan\n\nEvery server error. ${CANARY}\n`);
+    await sync();
+    const steps = ['GET /pulls', 'PATCH /pulls/1', 'GET /commits/', 'PUT /pulls/1/merge'];
+    const ofStep = (request: string, step: string) => request.startsWith(step) && !request.endsWith('per_page=1');
+    for (const step of steps) {
+      if (step === 'PATCH /pulls/1') await editInLinear('combined/page-2.md', `# Page 2\n\nChanged during the outage. ${CANARY}\n`);
+      h.world.github.serverError = (request) => (ofStep(request, step) ? 'before' : undefined);
+      const broken = await sync();
+      assert.equal(broken.result.exitCode, INCOMPLETE_EXIT_CODE, `${step}: ${broken.result.stderr}`);
+      assert.equal(broken.report.pullRequest?.code, 'github-failed', step);
+      assert.equal(broken.report.pullRequest?.status, 500, step);
+      assert.equal(broken.report.exitStatus, 'failure', step);
+    }
+    delete h.world.github.serverError;
+    let run = await sync();
+    if (run.report.pullRequest?.branchMoved === true) run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(h.world.github.pullRequests.length, 1, 'no second pull request');
+    assert.equal(h.world.github.pullRequests[0]?.merged, true);
+    assert.match(await show('refs/heads/main:combined/page-2.md'), /Changed during the outage\./);
+    assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Every server error\./);
+  });
+
   it('a reset connection on every request of the pull request step ends each run defined', async () => {
     await editInLinear('eng/notes/plan.md', `# Plan\n\nEvery request. ${CANARY}\n`);
     await sync();
