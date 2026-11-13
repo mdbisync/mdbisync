@@ -123,9 +123,12 @@ and git's path beats Linear's title
 
 - Linear documents only: issues, comments, icons and colors are not synced.
   YAML front matter stays in git.
-- Linear to git waits for the next scheduled run: GitHub starts schedules
-  every five minutes at best, often later, and turns them off in a public
-  repository after 60 days without activity.
+- Between pushes, Linear to git waits for the next scheduled or
+  dispatched run. GitHub may start scheduled runs hours late or skip them,
+  on any plan, and turns them off in a public repository after 60 days
+  without activity: for timely runs, start the workflow from your own
+  timer
+  ([docs/own-scheduler.md](docs/own-scheduler.md)).
 - A document with Markdown Linear would lose (a footnote, a link title,
   table alignment), an image from the web, a linked file over 10 MB or more
   than 250,000 characters is left out whole: it stays in git only and is
@@ -181,8 +184,14 @@ overwrites documents and moves those without a file to Linear's trash.
 
 Once the initial sync is done (for `linear-to-git`, once its pull request is
 merged), copy [`examples/mdbisync.yml`](examples/mdbisync.yml)
-to `.github/workflows/`. It runs on every push to `main` and every five
-minutes, in both directions.
+to `.github/workflows/`. It runs on every push to `main`, on GitHub's
+schedule and by hand, in both directions.
+
+Do not rely on GitHub's schedule to bring Linear edits to git: it can run
+hours late. Start the workflow every few minutes from a timer of your own
+(cron, a systemd timer or another scheduler) with a token that may only
+start workflows in this repository, and keep the schedule as a fallback:
+[run the sync from your own scheduler](docs/own-scheduler.md).
 
 ## Documentation
 
@@ -193,6 +202,8 @@ minutes, in both directions.
   request and release pins.
 - [How the sync works](docs/sync-cycle.md): each run step by step, timing and
   the run summary.
+- [Your own scheduler](docs/own-scheduler.md): start the sync on time from
+  cron, a systemd timer or another scheduler.
 - Initial sync [from git to Linear](docs/initial-sync-git-to-linear.md) and
   [from Linear to git](docs/initial-sync-linear-to-git.md).
 - [Linear's Markdown form](docs/linear-format.md), [conflicts](docs/conflicts.md)
