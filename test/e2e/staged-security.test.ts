@@ -21,6 +21,7 @@ import { type FakeWorld, FAKE_APP_SLUG, GITHUB_API, LINEAR_API, fakeFetch, fakeW
 import { Git, commitIds, commitTree, commitUploads, fetchState, pushAtomic, resolveStateConfig, stateRef, listTree, readBlobs } from '../../src/state/index.ts';
 import { type Fixture, IDENTITY, createFixture } from '../../src/state/test-helpers.ts';
 import { STAGE_FOLDER } from '../../src/sync/staged.ts';
+import { canaryNameLeaks } from './harness/security-canary.ts';
 
 const MAIN = fileURLToPath(new URL('../../src/action/main.ts', import.meta.url));
 const linux = process.platform === 'linux' && existsSync('/proc/self/environ');
@@ -248,7 +249,7 @@ for (const file of process.argv.slice(2)) {
       assert.equal(seen.hookKey, hookKey);
       assert.ok(seen.read > 2, 'the canary could not read /proc');
       assert.deepEqual(seen.found, [], 'the hook saw a secret of the run');
-      assert.deepEqual(seen.keys.filter((key) => key.startsWith('INPUT_') || key.startsWith('ACTIONS_')), []);
+      assert.deepEqual(seen.keys.filter(canaryNameLeaks), []);
     }
 
     const apply = await action('apply', { operation: 'sync', 'security-step': 'apply' });
