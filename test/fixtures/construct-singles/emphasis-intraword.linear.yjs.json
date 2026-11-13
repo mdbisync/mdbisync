@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"Use un","marks":{"attribution":"user"}},{"text":"believ","marks":{"attribution":"user","strong":{}}},{"text":"able sparingly, and snake_case_names stay plain.","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-5c546736","marks":{"attribution":"user"}}]}
-  ]
-}

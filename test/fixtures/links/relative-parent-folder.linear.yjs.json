@@ -1,9 +1,0 @@
-{
-  "roots": [
-    "prosemirror"
-  ],
-  "content": [
-    {"type":"paragraph","children":[{"text":"See ","marks":{"attribution":"user"}},{"text":"the runbook","marks":{"attribution":"user","link":{"href":"../work-documents/runbook.md","noEmbed":null}}},{"text":" and ","marks":{"attribution":"user"}},{"text":"the FAQ","marks":{"attribution":"user","link":{"href":"../work-documents/faq.md#where-are-invoices","noEmbed":null}}},{"text":".","marks":{"attribution":"user"}}]},
-    {"type":"paragraph","children":[{"text":"Ref kx-ee1d2790","marks":{"attribution":"user"}}]}
-  ]
-}
