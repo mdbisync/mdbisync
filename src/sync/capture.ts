@@ -17,7 +17,7 @@ import { type RunContext } from '../run/preflight.ts';
 import { containersOf } from '../run/capacity.ts';
 import { type CommitIdentity, type IdEntry, type Git, type StateConfig, type StateSnapshot, type Oid, commitTree, commitIds, commitUploads, pushAtomic, stateRef, listTree, parseLfsPointer, readBlobs, readIds, readReservedIds, readSupersededIds, readUploads, UPLOADS_REBUILDING } from '../state/index.ts';
 import { securityGate, type SecurityGate, type SecurityFinding } from './security.ts';
-import { MARKS, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
+import { MARKS, type ConflictNotices, noConflictNotices, reconcileDocumentMark, releasedHold, type BlockedFinding } from './marks.ts';
 import { readRecorded, recordedTime } from './recorded.ts';
 import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
@@ -74,6 +74,8 @@ export interface CaptureResult {
    * a changed annotation, or listed nothing. Never serialize these.
    */
   containers?: Map<string, LinearDocument[]>;
+  /** Documents whose conflict notice this capture's marks set or resolved. */
+  conflictNotices: ConflictNotices;
 }
 
 const CURSOR = /^Capture-through: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)$/m;
@@ -126,7 +128,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
   // link to its path.
   const superseded = await readSupersededIds(git, state.ids);
   const gate = options.security ?? await securityGate(git, fetched.tracked);
-  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], heldRemovals:[], leftOut:[], writeBackWarnings:[], summary:''};
+  const result: CaptureResult = {ok:true, state, documents:new Map(), blocked:[], changed:[], removed:[], heldRemovals:[], leftOut:[], writeBackWarnings:[], summary:'', conflictNotices:noConflictNotices()};
   let published = false;
   try {
     // Capture the old place before a git annotation change moves its documents.
@@ -549,6 +551,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         for (const {doc, path, blocked} of marked) {
           const before = ids.get(path)!;
           const outcome = await reconcileDocumentMark({document: doc, entry: before, linear, blocked,
+            onConflictNotice: (change) => result.conflictNotices[change].push(path),
             persistEntry: async (entry) => {
               ids.set(path, entry);
               const tip = await commitIds(git, result.state.ids, ids, identity, {reserved, superseded, message:'Capture document marks'});

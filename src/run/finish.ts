@@ -13,6 +13,7 @@ import { cell } from './summary.ts';
 import { type OperationOutcome, type RunWrites } from './operation.ts';
 import { type PreflightOutcome } from './preflight.ts';
 import { type RecordLeftOutRule } from '../codes.ts';
+import { type ConflictNotices } from '../sync/marks.ts';
 
 export interface RunReport {
   capacity: ContainerCapacity[];
@@ -119,6 +120,13 @@ export interface RunReport {
    * has three empty objects.
    */
   writes: RunWrites;
+  /**
+   * Documents whose conflict notice comment this run posted (`set`) or
+   * resolved (`resolved`), by path, once each time it did: capture's marks,
+   * then the write step's or a confirmed initial sync's. Each costs up to two
+   * Linear requests, which the request budget allows for.
+   */
+  conflictNotices: ConflictNotices;
 }
 
 export interface ReverseReport {
@@ -237,6 +245,16 @@ export function toRunReport(outcome: OperationOutcome): RunReport {
     linearToGit: reverse === undefined ? null : toReverseReport(reverse),
     ...raceFacts(outcome),
     writes: outcome.writes,
+    conflictNotices: conflictNoticesOf(outcome, confirmed?.conflictNotices),
+  };
+}
+
+/** The run's conflict notice changes: capture's first, then those of the step that wrote. */
+function conflictNoticesOf(outcome: OperationOutcome, written: ConflictNotices | undefined): ConflictNotices {
+  const captured = outcome.captured?.conflictNotices;
+  return {
+    set: [...(captured?.set ?? []), ...(written?.set ?? [])],
+    resolved: [...(captured?.resolved ?? []), ...(written?.resolved ?? [])],
   };
 }
 
@@ -310,6 +328,7 @@ function toSyncRunReport(outcome: OperationOutcome, write: WriteResult): RunRepo
     linearToGit: null,
     ...raceFacts(outcome),
     writes: outcome.writes,
+    conflictNotices: conflictNoticesOf(outcome, write.conflictNotices),
   };
 }
 

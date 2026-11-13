@@ -93,5 +93,9 @@
     "pullRequests": {
       "opened": 1
     }
+  },
+  "conflictNotices": {
+    "set": [],
+    "resolved": []
   }
 }

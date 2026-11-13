@@ -8,7 +8,7 @@ import type { EngineResult } from './engine.ts';
 import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeWorld } from '../../../src/setup/test-helpers.ts';
 import { Git } from '../../../src/state/index.ts';
 import { countAppRequest, withAppRequests } from './app-reads.ts';
-import { budgetHolds, reportedHoldChanges, compare, firstDifference, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
+import { budgetHolds, reportedConflictNotices, reportedHoldChanges, compare, firstDifference, gitLinks, pathFitsTitle, sameAsFile, scanCanaries, bodyOf, titleOf } from './checks.ts';
 import type { TestConfig } from './config.ts';
 import { loadTestConfig, parseEnvFile, parseRepoUrl } from './config.ts';
 import { Governor } from './governor.ts';
@@ -254,6 +254,21 @@ describe('check helpers', () => {
       { pullRequest: { holdMarks: { set: [], updated: [], cleared: ['a.md'], deferred: 0, removed: [] } } },
     ];
     assert.equal(reportedHoldChanges(reports), 4);
+  });
+
+  it('allows I9 2 more requests per conflict notice set or resolved, and nothing for a report without one', () => {
+    assert.ok(budgetHolds(9, 0, 1, 0, 2));
+    assert.ok(!budgetHolds(10, 0, 1, 0, 2));
+    const reports = [
+      { conflictNotices: { set: ['a.md', 'b.md'], resolved: [] } },
+      { conflictNotices: { set: [], resolved: [] }, pullRequest: { holdMarks: { set: ['c.md'], updated: [], cleared: [] } } },
+      null,
+      {},
+      { conflictNotices: { set: ['a.md'], resolved: ['a.md', 'b.md'] } },
+    ];
+    assert.equal(reportedConflictNotices(reports), 5);
+    // A suspended mark change is not a conflict notice change, nor the other way round.
+    assert.equal(reportedHoldChanges(reports), 1);
   });
 
   it('evaluate every assertion operator', () => {

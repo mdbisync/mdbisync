@@ -5,7 +5,9 @@
 // opened and merged on the way), and one more run. Every request that
 // reaches Linear's API counts, the token's mint and revocation included:
 // the whole scenario stays within 1.5 requests per written document plus 5
-// per run (I9), and a run that changes nothing makes at most 5.
+// per run (I9), and a run that changes nothing makes at most 5. A conflict
+// episode on three documents also counts 2 per conflict notice set or
+// resolved, as I9 does.
 
 import assert from 'node:assert/strict';
 import { readFile, rm } from 'node:fs/promises';
@@ -42,10 +44,19 @@ const TREE: Record<string, string> = {
   'docs/handbook/tools.md': '# Tools\n\nThe editor and the terminal.\n',
 };
 
+/** A slice of three documents in one team zone, smaller than any corpus slice. */
+const THREE_DOCUMENTS: Record<string, string> = {
+  '.pre-commit-config.yaml': PRE_COMMIT,
+  '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n',
+  'eng/README.md': '---\nlinear-team: ENG\n---\n\n# Engineering\n',
+  'eng/runbook.md': '# Runbook\n\nRestart the service.\n',
+  'eng/plan.md': '# Plan\n\nSteps one and two.\n',
+};
+
 /** I9's allowance per run: also the most a run that changes nothing may make. */
 const PER_RUN = 5;
 /** I9 as the scenarios check it. */
-const allowance = (written: number, runs: number) => 1.5 * written + PER_RUN * runs;
+const allowance = (written: number, runs: number, conflictNotices = 0) => 1.5 * written + PER_RUN * runs + 2 * conflictNotices;
 
 describe('sync: the Linear request budget (I9)', () => {
   let fixture: Fixture;
@@ -57,9 +68,10 @@ describe('sync: the Linear request budget (I9)', () => {
   let runs: number;
   const reportFile = () => join(fixture.root, 'report.json');
 
-  beforeEach(async () => {
+  /** A converged start: the tree seeded and synchronized to Linear by a confirmed initial sync. */
+  async function start(tree: Record<string, string>, documents: number) {
     fixture = await createFixture();
-    await fixture.seed(TREE, { lfs: ['*.png'] });
+    await fixture.seed(tree, { lfs: ['*.png'] });
     cwd = (await fixture.clone('engine')).dir;
     world = fakeWorld();
     world.linear.teams = [{ id: 'team-eng', key: 'ENG', name: 'Engineering' }, { id: 'team-docs', key: 'DOCS', name: 'Docs' }];
@@ -75,8 +87,10 @@ describe('sync: the Linear request budget (I9)', () => {
     runs = 0;
     const initial = await cli('initial-sync', { MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: 'true' });
     assert.equal(initial.result.exitCode, 0, initial.result.stderr);
-    assert.equal(live().length, 12);
-  });
+    assert.equal(live().length, documents);
+  }
+
+  beforeEach(() => start(TREE, 12));
   afterEach(() => fixture.cleanup());
 
   async function rev(ref: string): Promise<string> {
@@ -134,9 +148,11 @@ describe('sync: the Linear request budget (I9)', () => {
   /** The documents written in the whole scenario, counted as I9 counts them. */
   const written = () => world.writes.filter((operation) => /document(Create|Update)|(Create|Update)Document/i.test(operation)).length;
 
-  function assertBudget(runReports: Array<{ requests: string[]; report: RunReport }>) {
-    process.stdout.write(`# ${requests.length} Linear requests for ${written()} written documents in ${runs} runs (limit ${allowance(written(), runs)})\n`);
-    assert.ok(requests.length <= allowance(written(), runs), `${requests.length} requests for ${written()} written documents in ${runs} runs (limit ${allowance(written(), runs)}): ${requests.join(', ')}`);
+  /** I9 over the whole scenario; `notices` is the conflict notice changes the runs reported, when the scenario counts them. */
+  function assertBudget(runReports: Array<{ requests: string[]; report: RunReport }>, notices = 0) {
+    const limit = allowance(written(), runs, notices);
+    process.stdout.write(`# ${requests.length} Linear requests for ${written()} written documents and ${notices} conflict notice changes in ${runs} runs (limit ${limit})\n`);
+    assert.ok(requests.length <= limit, `${requests.length} requests for ${written()} written documents and ${notices} conflict notice changes in ${runs} runs (limit ${limit}): ${requests.join(', ')}`);
     // A run that changes nothing stays within one run's allowance on its own, so settled runs never eat into the budget.
     for (const run of runReports) {
       if (run.report.changed !== false) continue;
@@ -193,6 +209,7 @@ describe('sync: the Linear request budget (I9)', () => {
     const resolve = await syncAndSettle();
     assert.equal(byTitle('runbook').content, '# Runbook\n\nRestart the service, git.\n');
     assertTakeIns([...conflict, ...resolve], 1);
+    // Without the conflict notice allowance: on twelve documents the episode fits I9 even so, and this keeps it fitting.
     assertBudget([...conflict, ...resolve]);
   });
 
@@ -208,6 +225,31 @@ describe('sync: the Linear request budget (I9)', () => {
     assert.equal(byTitle('runbook').content, text);
     assertTakeIns([...conflict, ...again], 2);
     assertBudget([...conflict, ...again]);
+  });
+
+  it('a conflict episode on a three-document slice stays within I9 with 2 requests per conflict notice set or resolved, and only its notice runs touch comments', async () => {
+    await fixture.cleanup();
+    await start(THREE_DOCUMENTS, 3);
+    const conflict = await conflictOnRunbook();
+    await commitGit({ 'eng/runbook.md': '# Runbook\n\nRestart the service, git.\n' });
+    const resolve = await syncAndSettle();
+    assert.equal(byTitle('runbook').content, '# Runbook\n\nRestart the service, git.\n');
+    const episode = [...conflict, ...resolve];
+    // The run that writes the markers sets the notice, the resolution run resolves it; no other run reports one.
+    assert.deepEqual(episode.map((run) => run.report.conflictNotices).filter(({ set, resolved }) => set.length + resolved.length > 0), [
+      { set: ['eng/runbook.md'], resolved: [] },
+      { set: [], resolved: ['eng/runbook.md'] },
+    ]);
+    // Each notice change costs at most its two requests (the comment's lookup and its write or resolution), and a run
+    // without one makes no comment request: the allowance follows the episode and nothing else.
+    for (const run of episode) {
+      const comments = run.requests.filter((operation) => /Comment/.test(operation));
+      const notices = run.report.conflictNotices.set.length + run.report.conflictNotices.resolved.length;
+      assert.ok(comments.length <= 2 * notices, `${comments.length} comment requests for ${notices} conflict notice changes: ${run.requests.join(', ')}`);
+    }
+    assertTakeIns(episode, 1);
+    const notices = episode.reduce((sum, run) => sum + run.report.conflictNotices.set.length + run.report.conflictNotices.resolved.length, 0);
+    assertBudget(episode, notices);
   });
 
   it('a run that writes lists the containers again before it writes', async () => {
