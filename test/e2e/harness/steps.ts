@@ -38,7 +38,7 @@ import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { soakDrainSyncs } from './soak-drain.ts';
-import { failedWorkflow, pullRequestStepClean, soakServerErrorPolicy } from './soak-recovery.ts';
+import { describeServerError, failedWorkflow, pullRequestStepClean, settleServerError, soakServerErrorPolicy } from './soak-recovery.ts';
 import { burst, burstDocuments, burstEditCounts, realClock, soak, type Actor, type LoadDriver, type SoakBoundary, type SoakDriver, type SoakResult } from './load.ts';
 import { ownedDocuments } from './ownership.ts';
 import { EnvBlockedError, HarnessGapError, NotImplementedError, ProductError, runFailure, type CheckOutcome } from './results.ts';
@@ -306,6 +306,9 @@ export async function watchRun(ctx: RunContext, options: { throughProxy: boolean
   if (views) await recordRunView(ctx, n);
 }
 
+/** How many runs of one settle a GitHub server error in the sync pull request step may fail before it fails the settle. */
+export const SETTLE_SERVER_ERROR_RETRIES = 2;
+
 /**
  * Runs the sync until a run changes nothing more (at most `limit` runs). A
  * run that changed nothing while its open sync pull request still waits for
@@ -317,16 +320,37 @@ export async function watchRun(ctx: RunContext, options: { throughProxy: boolean
  * takes the tracked branch in as it was at the run's start, so the next run
  * records the merge on `linear`. That run also comes on top of `limit`, at
  * most `limit` times.
+ *
+ * A run that failed only on a GitHub server error in the sync pull request
+ * step (`settleServerError`) has not settled either: the engine ends it
+ * incomplete on purpose and the next run repeats the step. Settle runs again,
+ * on top of `limit`, for at most `SETTLE_SERVER_ERROR_RETRIES` such runs;
+ * one more fails the settle with that error. The failed runs stay among the
+ * scenario's results for its checks.
  */
-async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit = 4): Promise<void> {
+export async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit = 4, runOnce: () => Promise<void> = () => settleRun(ctx, args)): Promise<void> {
   let waits = 0;
   let merges = 0;
-  for (let attempt = 0; attempt < limit + waits + merges; attempt += 1) {
-    if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) await workflowRun(ctx, { event: 'workflow_dispatch' });
-    else await runCommand(ctx, 'sync', args);
-    const report = ctx.engine.results.at(-1)?.report;
+  let serverErrors = 0;
+  for (let attempt = 0; attempt < limit + waits + merges + serverErrors; attempt += 1) {
+    const count = ctx.engine.results.length;
+    await runOnce();
+    // Only a run this attempt recorded is judged: an earlier step's failed run is not this settle's.
+    const result = ctx.engine.results.length > count ? ctx.engine.results.at(-1) : undefined;
+    const verdict = result === undefined ? undefined : settleServerError(result);
+    if (verdict !== undefined && 'recoverable' in verdict) {
+      const error = describeServerError(verdict.recoverable);
+      if (serverErrors >= SETTLE_SERVER_ERROR_RETRIES) {
+        throw new ProductError(`run.settle: ${error} failed ${serverErrors + 1} runs, more than the ${SETTLE_SERVER_ERROR_RETRIES} the settle runs again after`);
+      }
+      serverErrors += 1;
+      ctx.observations.set('settle.serverErrorRetries', Number(ctx.observations.get('settle.serverErrorRetries') ?? 0) + 1);
+      ctx.log(`run.settle: ${error}; running again (${serverErrors} of ${SETTLE_SERVER_ERROR_RETRIES})`);
+      continue;
+    }
+    const report = result?.report;
     if (report?.['changed'] !== false) {
-      const last = attempt + 1 === limit + waits + merges;
+      const last = attempt + 1 === limit + waits + merges + serverErrors;
       if (last && typeof field(report, ['pullRequest', 'merged']) === 'string' && merges < limit) merges += 1;
       else if (last) ctx.log(`settle: the last of ${String(attempt + 1)} runs still changed; the scenario did not settle`);
       continue;
@@ -334,6 +358,11 @@ async function settle(ctx: RunContext, args: Record<string, unknown> = {}, limit
     if (waits >= limit || !(await waitForSyncPullRequestChecks(ctx, report))) return;
     waits += 1;
   }
+}
+
+async function settleRun(ctx: RunContext, args: Record<string, unknown>): Promise<void> {
+  if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) await workflowRun(ctx, { event: 'workflow_dispatch' });
+  else await runCommand(ctx, 'sync', args);
 }
 
 /**

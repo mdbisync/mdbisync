@@ -500,6 +500,39 @@ describe('workflows', () => {
     assert.equal(ctx.engine.results.length, 4);
   });
 
+  it('settles an Actions scenario again after a dispatched run failed only on a GitHub server error, and fails when it persists', async () => {
+    const oauth = (operation: string, extra: Record<string, unknown> = {}) => `Sync\t2026-11-13T09:15:11Z ${JSON.stringify({ operation, kind: 'oauth', attempt: 1, status: 200, durationMs: 1, startedAt: '2026-11-13T09:15:10Z', finishedAt: '2026-11-13T09:15:11Z', rateLimitHeaders: {}, ...extra })}`;
+    const engineLog = [oauth('oauth.token'), oauth('oauth.revoke', { revocationConfirmed: true }), 'Sync\t2026-11-13T09:15:12Z ##[error]sync: not finished (github-failed); run it again', ''].join('\n');
+    const failed = {
+      operation: 'sync', code: 'github-failed', exitStatus: 'failure', changed: false, stop: null, notImplemented: false, stoppedEarly: false,
+      failedWriteRecorded: false, writesAfterLimit: 0, progressRecorded: true, capture: { ok: true, blocked: [] },
+      pullRequest: { needed: true, pullRequest: { number: 412, opened: false }, checks: passed, merged: null, code: 'github-failed', status: 502 },
+      sync: { complete: true, failed: [], notAttempted: [], stopped: null },
+    };
+    const settled = { operation: 'sync', code: null, exitStatus: 'success', changed: false, pullRequest: { needed: false, pullRequest: null, checks: null, merged: null } };
+    const settleActions = async (reports: Array<Record<string, unknown>>, logs: Record<string, string>) => {
+      const { ctx, remoteGit } = await fakeRun();
+      ctx.scenario = { ...ctx.scenario, mode: 'actions', setup: { ...ctx.scenario.setup, fixtures: ['actions-security-canary'] } };
+      let next = 0;
+      // Every dispatched run concludes `failure`: the settled report is the engine's, read after the run.
+      const { dispatched } = fakeActions(ctx, remoteGit, { conclusion: 'failure', jobs: [], logs, workflow: 'mdbisync.yml', report: () => reports[Math.min(next++, reports.length - 1)]! });
+      const outcome = await STEP_ACTIONS['run.settle']!(ctx, {}).then(() => undefined, (error: unknown) => error);
+      return { ctx, dispatched, outcome };
+    };
+    const once = await settleActions([failed, settled], { 'sync/5_Sync.txt': engineLog });
+    assert.equal(once.outcome, undefined);
+    assert.deepEqual(once.dispatched, [99, 99], 'the run after the server error is the settled one');
+    assert.equal(once.ctx.observations.get('settle.serverErrorRetries'), 1);
+    const persistent = await settleActions([failed], { 'sync/5_Sync.txt': engineLog });
+    assert.ok(persistent.outcome instanceof ProductError);
+    assert.match(persistent.outcome.message, /^run\.settle: GitHub HTTP 502 in workflow \d+ \(sync pull request #412\) failed 3 runs/);
+    assert.equal(persistent.dispatched.length, 3);
+    // Without the engine's own line, another step may have failed: the run that changed nothing ends the settle, as before.
+    const unproven = await settleActions([failed, settled], { 'sync/5_Sync.txt': '##[error]Process completed with exit code 1.\n' });
+    assert.equal(unproven.outcome, undefined);
+    assert.deepEqual(unproven.dispatched, [99]);
+  });
+
   /**
    * A sync branch head (optionally with the `pending` marker, and a person's
    * fix of it), its open pull request 261, and checks on that head that stay
