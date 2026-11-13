@@ -25,14 +25,15 @@ describe('scenario selection', () => {
     const soak = byId('L4-13');
     assert.equal(soak.slice, 'mid');
     assert.equal(soak.mode, 'actions');
-    // Initial sync, 288 ticks, up to three drain runs for each of the 24 hourly checks, up to four settle runs, I6.
-    assert.equal(engineRuns(soak), 1 + 288 + 24 * 3 + 4 + 1);
-    // Each hourly check reads every document once, and again after each drain run.
+    // Initial sync, 288 ticks (an hourly check's drain runs are scheduled ticks), up to four settle runs, I6.
+    assert.equal(engineRuns(soak), 1 + 288 + 4 + 1);
     const documents = 212;
     const undrained = { ...soak, steps: soak.steps.map((step) => (step.action === 'soak' ? { ...step, args: { ...step.args, drainSyncs: 0 } } : step)) };
     assert.equal(engineRuns(undrained), 294);
     assert.ok(estimate(undrained, documents).requests > 90000);
-    assert.equal(estimate(soak, documents).requests - estimate(undrained, documents).requests, Math.ceil(24 * 3 * documents + 24 * 3 * (1.5 * documents + 5)));
+    // Each hourly check reads every document once, and the 23 that can drain again after each of three drain
+    // runs; the last check, at the end of the 24 hours, has no scheduled run left and is strict at once.
+    assert.equal(estimate(soak, documents).requests - estimate(undrained, documents).requests, 23 * 3 * documents);
   });
   it('loads every spec of the catalog, validated', () => {
     assert.ok(scenarios.length >= 137);

@@ -986,7 +986,7 @@ describe('load', () => {
     };
     await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), /edits lost/);
     assert.equal(syncs, 1);
-    assert.deepEqual(saved.at(-1), { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 1, lostEdits: 1, drainSyncs: 0, scheduleDelays: [50], serverErrors: { tolerated: 0, recovered: 0 } });
+    assert.deepEqual(saved.at(-1), { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 1, lostEdits: 1, drainSyncs: 0, scheduleDelays: [50], serverErrors: { tolerated: 0, recovered: 0 }, clock: { startedAt: 0, editsEndAt: 3000, expectedEndAt: 3000, hardEndAt: 4000 } });
   });
 
   it('stops an overrun instead of stretching a timed soak into a longer passing run', async () => {
@@ -1020,7 +1020,7 @@ describe('load', () => {
       checkInvariants: async () => ({ lostEdits: 0 }), progress: async (result) => { saved = structuredClone(result); },
     };
     await assert.rejects(soak(driver, { ...SOAK, durationMs: 3000, scheduleMs: 1000, invariantIntervalMs: 1000, actors: [], documents: new Map() }), (error) => error === failure);
-    assert.deepEqual(saved, { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 0, lostEdits: 0, drainSyncs: 0, scheduleDelays: [25], serverErrors: { tolerated: 0, recovered: 0 } });
+    assert.deepEqual(saved, { edits: { 'editor-a': 0, 'editor-b': 0, git: 0 }, syncRuns: 1, invariantChecks: 0, lostEdits: 0, drainSyncs: 0, scheduleDelays: [25], serverErrors: { tolerated: 0, recovered: 0 }, clock: { startedAt: 0, editsEndAt: 3000, expectedEndAt: 3000, hardEndAt: 4000 } });
   });
 
   it('persists the soak step report even when no timed events are requested', async () => {
@@ -1189,28 +1189,37 @@ describe('load', () => {
   });
 
   it('drains an unsettled hour through the step\'s own sync and keeps the report only after the last drain run', async () => {
-    // The same seed: each edit is on one side only at the first look. The fake run's sync moves nothing, so the
-    // drain cannot settle the hour: it ends in a failure after its one run, never in a pass or a blocked environment.
-    const args = { durationSeconds: 2, scheduleSeconds: 5, invariantIntervalSeconds: 2, actors: ['editor-a', 'git'], randomSeed: 's23', drainSyncs: 1 };
+    // Each edit is on one side only at the first look. The fake run's sync moves nothing, so the drain cannot
+    // settle the hour: it ends in a failure after its one run, never in a pass or a blocked environment. The drain
+    // run is the next scheduled run, at four seconds, before the second check.
+    const args = { durationSeconds: 6, scheduleSeconds: 1, invariantIntervalSeconds: 3, actors: ['editor-a', 'git'], randomSeed: 's23', drainSyncs: 1 };
     const { ctx } = await fakeRun();
     const error = await runStep(ctx, { kind: 'run', action: 'soak', args }).then(() => undefined, (thrown: unknown) => thrown);
     assert.ok(error instanceof ProductError, String(error));
-    assert.equal(error.message, 'soak stopped at hour 1: I1=false, 2 edits lost (2 retained pending, 0 absent everywhere) after 1 of 1 drain syncs');
-    // The drain run went through the step's sync, into its ledger, marked as a drain run.
+    assert.equal(error.message, 'soak stopped at hour 1: I1=false, 5 edits lost (5 retained pending, 0 absent everywhere) after 1 of 1 drain syncs');
+    // The three scheduled runs of the first three seconds, then the drain run, through the step's sync and into its
+    // ledger, marked as a drain run.
     const syncs = readFileSync(join(ctx.runDir, 'soak-syncs.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
-    assert.deepEqual(syncs.map((entry) => [entry.index, entry.phase, entry.completed]), [[1, 'drain', true]]);
-    assert.equal(ctx.engine.results.length, 1, 'the drain run is an engine run of the step');
+    assert.deepEqual(syncs.map((entry) => [entry.index, entry.phase, entry.completed]), [[1, undefined, true], [2, undefined, true], [3, undefined, true], [4, 'drain', true]]);
+    assert.equal(ctx.engine.results.length, 4, 'the drain run is an engine run of the step');
     // One look before the drain, then the verdict, with the report of the final look.
-    assert.deepEqual(ctx.observations.get('soak.checks'), [{ I1: false, lost: 2, drainSyncs: 1, looks: [{ drainSyncs: 0, I1: false, lost: 2 }], retainedPending: 2, absentEverywhere: 0, unknown: 0, unledgered: 0 }]);
+    assert.deepEqual(ctx.observations.get('soak.checks'), [{ I1: false, lost: 5, drainSyncs: 1, looks: [{ drainSyncs: 0, I1: false, lost: 5 }], retainedPending: 5, absentEverywhere: 0, unknown: 0, unledgered: 0 }]);
     const report = JSON.parse(readFileSync(join(ctx.runDir, 'soak-failure-hour-1.json'), 'utf8')) as SoakFailureReport;
     assert.deepEqual(report.boundary, { drainSyncs: 1, drainLimit: 1 });
-    assert.equal(report.presence.retainedPending.length, 2);
-    assert.deepEqual(report.syncs.map((entry) => entry.phase), ['drain']);
+    assert.equal(report.presence.retainedPending.length, 5);
+    assert.deepEqual(report.syncs.map((entry) => entry.phase), [undefined, undefined, undefined, 'drain']);
     // The look before the drain kept its I1 differences under its own name; the verdict's are the run's.
     assert.ok(existsSync(join(ctx.runDir, 'soak-hour-1-look-1-i1-differences.txt')));
     assert.ok(existsSync(join(ctx.runDir, 'i1-differences.txt')));
-    const saved = JSON.parse(readFileSync(join(ctx.runDir, 'soak-progress.json'), 'utf8')) as { metrics: { soak: { syncRuns: number; drainSyncs: number; invariantChecks: number; lostEdits: number } } };
-    assert.deepEqual([saved.metrics.soak.syncRuns, saved.metrics.soak.drainSyncs, saved.metrics.soak.invariantChecks, saved.metrics.soak.lostEdits], [1, 1, 1, 2]);
+    const saved = JSON.parse(readFileSync(join(ctx.runDir, 'soak-progress.json'), 'utf8')) as { metrics: { soak: { syncRuns: number; drainSyncs: number; invariantChecks: number; lostEdits: number }; soakClock: Record<string, string | number> } };
+    assert.deepEqual([saved.metrics.soak.syncRuns, saved.metrics.soak.drainSyncs, saved.metrics.soak.invariantChecks, saved.metrics.soak.lostEdits], [4, 1, 1, 5]);
+    // The clock a supervisor stops on: six seconds plus one interval from the start, and the soak says it finished.
+    const clock = saved.metrics.soakClock;
+    const started = Date.parse(String(clock.startedAt));
+    assert.deepEqual([clock.editsEndAt, clock.expectedEndAt, clock.hardEndAt].map((at) => Date.parse(String(at)) - started), [5000, 6000, 7000]);
+    assert.ok(typeof clock.finishedAt === 'string' && Date.parse(clock.finishedAt) >= started);
+    assert.equal((saved.metrics.soak as Record<string, unknown>).clock, undefined, 'the bounds have one source');
+    assert.equal(clock.elapsedMs, Date.parse(String(clock.finishedAt)) - started);
   });
 });
 

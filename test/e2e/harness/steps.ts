@@ -1020,7 +1020,10 @@ const RUN: Record<string, Executor> = {
       record(typeof outcome === 'object' ? outcome.error : undefined);
       return outcome;
     };
+    let finishedAt: number | undefined;
+    let last: SoakResult | undefined;
     const progress = async (result: SoakResult) => {
+      last = result;
       ctx.observations.set('report.hourlyInvariantChecks', result.invariantChecks);
       ctx.observations.set('soak.maxLostEdits', result.lostEdits);
       const metrics = (ctx.observations.get('metrics') as Record<string, unknown> | undefined) ?? {};
@@ -1039,7 +1042,17 @@ const RUN: Record<string, Executor> = {
       metrics.trigger = actions ? (triggers.size === 1 ? [...triggers][0] : triggers.size === 0 ? null : 'mixed') : 'local';
       metrics.hourlyLostEditsMax = result.lostEdits;
       metrics.hourlyChecks = ctx.observations.get('soak.checks') ?? [];
-      metrics.soak = result;
+      // The clock goes to soakClock only, so the file has one source for its bounds.
+      const { clock, ...counts } = result;
+      metrics.soak = counts;
+      // The wall-clock contract a supervisor stops on: the timed phase starts at startedAt, and a soak with no
+      // finishedAt past hardEndAt has overrun.
+      const iso = (ms: number) => new Date(ms).toISOString();
+      metrics.soakClock = {
+        startedAt: iso(clock.startedAt), editsEndAt: iso(clock.editsEndAt), expectedEndAt: iso(clock.expectedEndAt), hardEndAt: iso(clock.hardEndAt),
+        elapsedMs: (finishedAt ?? Date.now()) - clock.startedAt,
+        ...(finishedAt === undefined ? {} : { finishedAt: iso(finishedAt) }),
+      };
       ctx.observations.set('metrics', metrics);
       writeFileSync(join(ctx.runDir, 'soak-progress.json'), `${JSON.stringify({ at: new Date().toISOString(), metrics }, null, 2)}\n`);
     };
@@ -1105,7 +1118,22 @@ const RUN: Record<string, Executor> = {
     };
     const documents = await loadCandidates(ctx, 'soak');
     const lastToken = (edits: Record<Actor, number>) => lastLoadToken(ctx, edits['editor-a'] + edits['editor-b'], edits.git);
-    await soak(driver, { ...options, documents, lastToken });
+    let failure: unknown;
+    try {
+      await soak(driver, { ...options, documents, lastToken });
+    } catch (error) {
+      failure = error;
+    }
+    // The timed phase is over, passed or not: the saved progress says so before cleanup starts. A failure to
+    // save it never replaces the soak's own failure, which decides the run's result.
+    finishedAt = Date.now();
+    try {
+      if (last !== undefined) await progress(last);
+    } catch (error) {
+      if (failure === undefined) throw error;
+      ctx.log(`soak: the final progress was not saved: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (failure !== undefined) throw failure;
   },
 };
 
