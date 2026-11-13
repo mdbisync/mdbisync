@@ -65,11 +65,27 @@ export interface View extends Sides {
   /** Comment bodies by document id, for the documents read so far. */
   comments: Map<string, string[]>;
   suspendedFiles?: Map<string, string>;
-  holdComments?: Map<string, Array<{ id: string; body: string; resolvedAt: string | null }>>;
+  holdComments?: Map<string, HoldCommentNode[]>;
   pullRequests?: Array<PullRequest & { empty: boolean }>;
 }
 
 export const BEFORE_VIEW = 'view.before';
+
+type HoldCommentNode = { id: string; body: string; resolvedAt: string | null; archivedAt: string | null };
+
+/**
+ * The comments a held document shows. An archived comment counts only on a document that is itself in the
+ * trash or archived: Linear archived it with its document, and it comes back with a restore.
+ */
+export function documentHoldComments(nodes: readonly HoldCommentNode[], document: { trashed: boolean; archivedAt: string | null } | undefined): HoldCommentNode[] {
+  const withDocument = document !== undefined && (document.trashed || document.archivedAt !== null);
+  return nodes.filter((comment) => comment.archivedAt === null || withDocument);
+}
+
+/** A comment the sync posted on a held document: its hold notice. */
+function isHoldNotice(comment: { body: string }): boolean {
+  return comment.body.startsWith(HOLD_FAILED) || comment.body.startsWith(HOLD_TIMED_OUT);
+}
 
 export async function takeView(ctx: RunContext, withComments: boolean, options: { allowNoIds?: boolean } = {}): Promise<View> {
   const sides = await readSides(ctx, options);
@@ -94,11 +110,22 @@ export async function takeView(ctx: RunContext, withComments: boolean, options: 
       const page = commentList.slice(start, start + 10);
       const variables = Object.fromEntries(page.map((id, i) => [`id${i}`, id]));
       const declarations = page.map((_, i) => `$id${i}: String!`).join(', ');
-      const fields = page.map((_, i) => `d${i}: document(id: $id${i}) { comments(first: 100) { nodes { id body resolvedAt } } }`).join(' ');
-      const data = await ctx.live.app.request<Record<string, { comments: { nodes: Array<{ id: string; body: string; resolvedAt: string | null }> } } | null>>(
+      // Linear archives a document's comments with it when the document goes to the trash, and a
+      // connection hides archived nodes unless asked: a held document in the trash keeps its comment.
+      const fields = page.map((_, i) => `d${i}: document(id: $id${i}) { comments(first: 100, includeArchived: true) { nodes { id body resolvedAt archivedAt } } }`).join(' ');
+      const data = await ctx.live.app.request<Record<string, { comments: { nodes: HoldCommentNode[] } } | null>>(
         'SuspendedComments', 'query', `query SuspendedComments(${declarations}) { ${fields} }`, variables,
       );
-      for (const [i, id] of page.entries()) view.holdComments.set(id, data[`d${i}`]?.comments.nodes ?? []);
+      for (const [i, id] of page.entries()) {
+        const nodes = data[`d${i}`]?.comments.nodes;
+        view.holdComments.set(id, documentHoldComments(nodes ?? [], view.documents.get(id)));
+        // The run's log says what the read saw for each held document, so a live failure of a comment subject can be told apart.
+        if (held.has(id)) {
+          const notices = (nodes ?? []).filter(isHoldNotice);
+          ctx.log(nodes === undefined ? `hold comments of ${id}: document not returned`
+            : `hold comments of ${id}: ${nodes.length} comments, ${notices.length} hold notices (${notices.filter((c) => c.resolvedAt !== null).length} resolved, ${notices.filter((c) => c.archivedAt !== null).length} archived)`);
+        }
+      }
     }
     const git = await person(ctx);
     const branch = suspendedBranch(resolveStateConfig(ctx.names));
@@ -1375,24 +1402,24 @@ export const SUBJECTS: Record<string, Compute> = {
     const view = await env.view();
     return [...view.ids.values()].filter((entry) => entry.suspended !== undefined && view.documents.get(entry.id)?.icon === MARKS.suspended.icon && view.documents.get(entry.id)?.color === MARKS.suspended.color).length;
   },
-  'suspended.commentCount': async (env) => [...(await env.view()).holdComments?.values() ?? []].flat().filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT)).length,
+  'suspended.commentCount': async (env) => [...(await env.view()).holdComments?.values() ?? []].flat().filter(isHoldNotice).length,
   'suspended.commentsDetailed': async (env) => {
     const view = await env.view();
     const held = [...view.ids.values()].filter((entry) => entry.suspended !== undefined);
     return held.length > 0 && held.every((entry) => {
-      const comments = (view.holdComments?.get(entry.id) ?? []).filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT));
+      const comments = (view.holdComments?.get(entry.id) ?? []).filter(isHoldNotice);
       return comments.length === 1 && comments.every((c) => c.body.includes('Check `format`') && /\[run\]\(https:\/\/github\.com\//.test(c.body) && /Line 1/.test(c.body) && c.resolvedAt === null);
     });
   },
   'suspended.commentsTimedOut': async (env) => {
-    const comments = [...(await env.view()).holdComments?.values() ?? []].flat().filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT));
+    const comments = [...(await env.view()).holdComments?.values() ?? []].flat().filter(isHoldNotice);
     return comments.length > 0 && comments.every((c) => c.body.includes('did not finish in time'));
   },
   'suspended.commentsResolved': async (env) => {
     const view = await env.view();
     const held = env.ctx.observations.get('suspended.documents') as Set<string> | undefined;
     return held !== undefined && held.size > 0 && [...held].every((id) => {
-      const comments = (view.holdComments?.get(id) ?? []).filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT));
+      const comments = (view.holdComments?.get(id) ?? []).filter(isHoldNotice);
       return comments.length > 0 && comments.every((c) => typeof c.resolvedAt === 'string');
     });
   },
@@ -1417,7 +1444,7 @@ export const SUBJECTS: Record<string, Compute> = {
     const later = results.slice(refusing[0]! + 1);
     const quiet = later.length > 0 && later.every((result, i) => result.exitCode === 0 && result.report?.['pullRequest'] != null && marks[refusing[0]! + 1 + i] == null);
     const trashedWithOpenComment = [...held].every((id) => {
-      const comments = (view.holdComments?.get(id) ?? []).filter((c) => c.body.startsWith(HOLD_FAILED) || c.body.startsWith(HOLD_TIMED_OUT));
+      const comments = (view.holdComments?.get(id) ?? []).filter(isHoldNotice);
       return view.documents.get(id)?.trashed === true && comments.length > 0 && comments.every((c) => c.resolvedAt === null);
     });
     return JSON.stringify(unresolved.map((item) => item.path).sort()) === JSON.stringify([...paths].sort())
