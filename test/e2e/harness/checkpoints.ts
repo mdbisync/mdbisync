@@ -6,6 +6,14 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { CHECKPOINTS, type Checkpoint } from '../../../src/test-hooks.ts';
 
+/**
+ * Where the token scenario (L5-20) kills its run. Every sync whose capture
+ * succeeds reaches it, also one with nothing to write, and the run's Linear
+ * token is minted and not yet revoked there. `before-write` would not do: a
+ * run with no change to write never reaches it.
+ */
+export const KILLED_RUN_CHECKPOINT: Checkpoint = 'after-capture-push-before-pr';
+
 export function isCheckpoint(value: unknown): value is Checkpoint {
   return typeof value === 'string' && (CHECKPOINTS as readonly string[]).includes(value);
 }
