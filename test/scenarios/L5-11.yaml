@@ -69,17 +69,22 @@
     },
     "assertions": [
       {
+        "subject": "runs.0.target.failed",
+        "operator": "equal",
+        "expected": true
+      },
+      {
         "subject": "runs.0.documents.brokenImageUrls",
         "operator": "equal",
         "expected": 0
       },
       {
-        "subject": "runs.1.uploadCompleted",
+        "subject": "runs.1.documents.imageUploaded",
         "operator": "equal",
         "expected": true
       },
       {
-        "subject": "runs.1.documentWritten",
+        "subject": "runs.1.target.written",
         "operator": "equal",
         "expected": true
       }
