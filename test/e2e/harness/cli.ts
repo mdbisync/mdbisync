@@ -11,7 +11,7 @@
 //   node test/e2e/harness/cli.ts scheduler [--install]
 //        prints the sandbox's scheduled sync workflow for the release under test; --install commits it
 //        to the sandbox's default branch (workflow-files.ts, renderScheduler)
-//   node test/e2e/harness/cli.ts dispatch-check [--keep-run]
+//   node test/e2e/harness/cli.ts dispatch-check [--keep-run] [--with-workflow]
 //        runs docs/own-scheduler.md's dispatch script, as published, against the
 //        sandbox: with an App token without Actions write (expects HTTP 403 and
 //        exit 1), then with one with it (expects a run of mdbisync.yml on main
@@ -19,6 +19,10 @@
 //        record as JSON; exit 0 when both cases behave as the page says, 1 when
 //        not, 3 when the check could not run and dispatched nothing
 //        (dispatch-check.ts). Needs the GitHub App; it dispatches live.
+//        --with-workflow puts a dispatch-only stand-in mdbisync.yml on main for
+//        the check and removes it afterwards, under an exclusive shared
+//        reservation (after a crash: recover <its run id> --writer-stopped, then
+//        the next check with --with-workflow removes the stand-in).
 //   node test/e2e/harness/cli.ts walkthrough prepare|push|dispatch|wait|list|cancel
 //        --run <six hex> [--dir <clone>] [--ref t/<run>/main]
 //        [--workflow mdbisync-initial-sync.yml] [--input direction=git-to-linear]
@@ -66,7 +70,7 @@ import { loadHeldRun } from './held-run.ts';
 import { recordUiResult, reportDirOf, reportEntry, takeUpHeldRun } from './ui-result.ts';
 import { readTemplate, renderScheduler, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
 import { walkthrough } from './walkthrough.ts';
-import { dispatchCheck } from './dispatch-check.ts';
+import { dispatchCheck, LeftOnSandboxError } from './dispatch-check.ts';
 
 const list = (value: string | undefined) => (value === undefined ? undefined : value.split(',').map((item) => item.trim()).filter(Boolean));
 
@@ -89,6 +93,7 @@ async function main(argv: string[]): Promise<number> {
       defer: { type: 'string' },
       install: { type: 'boolean' },
       'keep-run': { type: 'boolean' },
+      'with-workflow': { type: 'boolean' },
     },
   });
   const command = positionals[0] ?? 'help';
@@ -139,19 +144,6 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  if (command === 'dispatch-check') {
-    try {
-      const report = await dispatchCheck({ config, stateDir, keepRun: values['keep-run'] === true, log });
-      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-      return report.ok ? 0 : 1;
-    } catch (error) {
-      // Not run: nothing was dispatched, which says nothing about the page.
-      if (!(error instanceof EnvBlockedError)) throw error;
-      process.stdout.write(`${JSON.stringify({ result: 'env-blocked', reason: error.message }, null, 2)}\n`);
-      return 3;
-    }
-  }
-
   // Long runs renew harness app tokens before expiry and revoke every minted token.
   let shared: SharedAdmission | undefined;
   const sharedAdmission = async () => {
@@ -186,6 +178,30 @@ async function main(argv: string[]): Promise<number> {
         return next;
       });
       appClients.set(app.name, new LinearClient({ token: async () => (await current()).accessToken, auth: token.context, hooks }));
+    }
+
+    if (command === 'dispatch-check') {
+      // The stand-in's reservation goes through its own store, on tokens the check mints, scopes and revokes.
+      let store: GitStateStore | undefined;
+      const admission = (gitToken: () => Promise<string>) => new SharedAdmission(store = new GitStateStore({ stateDir, url: config.gitUrl, env: refreshingGitEnv(async () => (
+        new Sandbox({ url: config.gitUrl, token: await gitToken(), stateDir, runId: 'control' }).env()
+      )), log }));
+      try {
+        const report = await dispatchCheck({ config, stateDir, keepRun: values['keep-run'] === true, log, ...(values['with-workflow'] === true ? { withWorkflow: { admission } } : {}) });
+        process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+        return report.ok ? 0 : 1;
+      } catch (error) {
+        if (error instanceof LeftOnSandboxError) {
+          process.stdout.write(`${JSON.stringify({ result: 'failed', reason: error.message }, null, 2)}\n`);
+          return 1;
+        }
+        // Not run: nothing was dispatched, which says nothing about the page.
+        if (!(error instanceof EnvBlockedError)) throw error;
+        process.stdout.write(`${JSON.stringify({ result: 'env-blocked', reason: error.message }, null, 2)}\n`);
+        return 3;
+      } finally {
+        await store?.close();
+      }
     }
 
     if (command === 'sweep' || command === 'recover') {

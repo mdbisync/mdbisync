@@ -7,10 +7,13 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { dispatchCheck, documentedScript, runScript, SCRIPT_PAGE, scriptFor } from './dispatch-check.ts';
+import { parse } from 'yaml';
+import { dispatchCheck, documentedScript, isStandIn, LeftOnSandboxError, runScript, SCRIPT_PAGE, scriptFor, STAND_IN_PATH, standInWorkflow } from './dispatch-check.ts';
 import { REPO_ROOT } from './engine.ts';
-import { acquireLock } from './locks.ts';
+import { acquireLock, liveRuns } from './locks.ts';
+import { ownedRuns } from './ownership.ts';
 import { EnvBlockedError } from './results.ts';
+import { parseSharedState, SharedAdmission, type SharedState, type StateStore } from './shared-state.ts';
 
 const OWNER = 'octo-org';
 const REPO = 'notes-sandbox';
@@ -48,9 +51,17 @@ class MockGitHub {
   readonly seen: Seen[] = [];
   readonly cancelled: number[] = [];
   runs: Array<Record<string, unknown>> = [{ id: 100, head_branch: 'main', actor: { login: 'sync-app[bot]' }, created_at: '2026-01-01T00:00:00Z' }];
-  state = 'active';
-  /** Whether the default branch carries the workflow file. */
-  onMain = true;
+  /** The workflow's state in the Actions registry; undefined while it is not registered. */
+  state: string | undefined = 'active';
+  /** The workflow file's text on the default branch, undefined when it is not there. */
+  mainFile: string | undefined = 'name: mdbisync\n';
+  /** Registry reads after a commit that adds the file before GitHub shows it registered and active. */
+  registerAfterReads = 0;
+  /** The answer to a commit that removes the file, 200 when it works. */
+  deleteStatus = 200;
+  /** Commits to the default branch, in order. */
+  readonly commits: Array<{ method: string; message: string; content?: string }> = [];
+  #registering: number | undefined;
   /** Whether an accepted dispatch shows up as a run. */
   startsRuns = true;
   /** Answer 204 to every dispatch, whatever the token may do. */
@@ -65,6 +76,8 @@ class MockGitHub {
   dropDenied = false;
   /** Whether the App is installed on the repository. */
   installed = true;
+  /** The workflow file on main at each accepted dispatch. */
+  readonly dispatchedWith: string[] = [];
   /** When the last accepted dispatch and each cancel arrived. */
   dispatchedAt = 0;
   readonly cancelledAt: number[] = [];
@@ -112,9 +125,29 @@ class MockGitHub {
     const token = this.#token(request);
     if (token === undefined) return send(401, { message: 'Bad credentials' });
     if (route === 'DELETE /installation/token') { token.revoked = true; return send(204); }
-    if (route === `GET ${REPO_PATH}/actions/workflows/mdbisync.yml`) return send(200, { state: this.state });
-    if (route === `GET ${REPO_PATH}/contents/.github/workflows/mdbisync.yml?ref=main` && token.permissions.contents === 'read') {
-      return this.onMain ? send(200, { encoding: 'base64', content: Buffer.from('name: mdbisync\n').toString('base64') }) : send(404, { message: 'Not Found' });
+    if (route === `GET ${REPO_PATH}/actions/workflows/mdbisync.yml`) {
+      if (this.#registering !== undefined && --this.#registering < 0) { this.state = 'active'; this.#registering = undefined; }
+      return this.state === undefined ? send(404, { message: 'Not Found' }) : send(200, { state: this.state });
+    }
+    const contents = `${REPO_PATH}/contents/.github/workflows/mdbisync.yml`;
+    if ((route === `GET ${contents}?ref=main` || route === `GET ${contents}`) && token.permissions.contents !== undefined) {
+      return this.mainFile === undefined ? send(404, { message: 'Not Found' })
+        : send(200, { sha: `blob-${this.commits.length}`, encoding: 'base64', content: Buffer.from(this.mainFile).toString('base64') });
+    }
+    if ((route === `PUT ${contents}` || route === `DELETE ${contents}`) && token.permissions.contents === 'write' && token.permissions.workflows === 'write') {
+      const asked = JSON.parse(body) as { message: string; content?: string; sha?: string };
+      // GitHub needs the current blob to replace or remove a file, and none to add one.
+      if ((this.mainFile === undefined) !== (asked.sha === undefined) || (asked.sha !== undefined && asked.sha !== `blob-${this.commits.length}`)) return send(409, { message: 'sha mismatch' });
+      if (request.method === 'DELETE') {
+        if (this.deleteStatus !== 200) return send(this.deleteStatus, { message: 'refused' });
+        this.mainFile = undefined;
+        this.commits.push({ method: 'DELETE', message: asked.message });
+      } else {
+        this.mainFile = Buffer.from(asked.content ?? '', 'base64').toString('utf8');
+        this.commits.push({ method: 'PUT', message: asked.message, content: this.mainFile });
+        if (this.state === undefined) this.#registering = this.registerAfterReads;
+      }
+      return send(200, { commit: { sha: `c0ffee${this.commits.length}` } });
     }
     if (route === `GET ${REPO_PATH}/actions/workflows/mdbisync.yml/runs?event=workflow_dispatch&per_page=50`) {
       if (this.#dispatched > 0) {
@@ -127,6 +160,9 @@ class MockGitHub {
     if (route === `POST ${REPO_PATH}/actions/workflows/mdbisync.yml/dispatches`) {
       if (token.permissions.actions !== 'write' && this.dropDenied) { request.socket.destroy(); return; }
       if (token.permissions.actions !== 'write' && !this.acceptsAny) return send(403, { message: 'Resource not accessible by integration' });
+      // GitHub dispatches the file on the ref.
+      if (this.mainFile === undefined) return send(422, { message: 'No workflow file' });
+      this.dispatchedWith.push(this.mainFile);
       this.dispatchedAt = Date.now();
       if (this.startsRuns) {
         this.#dispatched += 1;
@@ -150,6 +186,33 @@ class MockGitHub {
     send(404, { message: 'Not Found' });
   }
 }
+
+/** Shared admission state in memory, checked as the Git store checks it. */
+class MemoryStore implements StateStore {
+  state: SharedState = { version: 1, runs: [] };
+  async read() { return structuredClone(this.state); }
+  async update<T>(change: (state: SharedState) => T | Promise<T>) {
+    const next = structuredClone(this.state);
+    const result = await change(next);
+    this.state = parseSharedState(JSON.stringify(next));
+    return result;
+  }
+}
+
+describe('the stand-in workflow', () => {
+  it('starts only by hand, has no permissions and skips its one job', () => {
+    const workflow = parse(standInWorkflow()) as { name: string; on: Record<string, unknown>; permissions: unknown; jobs: Record<string, { if: string; 'runs-on': string[] }> };
+    assert.equal(STAND_IN_PATH, '.github/workflows/mdbisync.yml');
+    assert.equal(workflow.name, 'mdbisync');
+    assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
+    assert.deepEqual(workflow.permissions, {});
+    assert.deepEqual(Object.keys(workflow.jobs), ['sync']);
+    assert.equal(workflow.jobs.sync?.if, '${{ false }}');
+    assert.deepEqual(workflow.jobs.sync?.['runs-on'], ['self-hosted', 'mdbisync-sandbox']);
+    assert.equal(isStandIn(standInWorkflow()), true);
+    assert.equal(isStandIn('name: mdbisync\n'), false);
+  });
+});
 
 describe('dispatch-check against a mock endpoint', { skip: realCurl === '' ? 'curl is not installed' : false }, () => {
   let bin: string;
@@ -180,13 +243,18 @@ describe('dispatch-check against a mock endpoint', { skip: realCurl === '' ? 'cu
     return `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`;
   };
 
-  const check = async (mock: MockGitHub, options: { keepRun?: boolean; lookForMs?: number } = {}) => {
+  const check = async (mock: MockGitHub, options: { keepRun?: boolean; lookForMs?: number; shared?: SharedAdmission; registerMs?: number } = {}) => {
     const lines: string[] = [];
     const report = await dispatchCheck({
       config: { owner: OWNER, repo: REPO, sandboxUrl: `https://github.com/${OWNER}/${REPO}`, githubApp: { clientId: 'Iv1.test', privateKey }, githubAppMissing: [] },
       stateDir, fetch: mock.fetch, env: { PATH: pathTo(mock) }, log: (line) => lines.push(line),
       ...(options.keepRun === undefined ? {} : { keepRun: options.keepRun }),
-      timing: { lookForMs: options.lookForMs ?? 5_000, pollMs: 50 },
+      ...(options.shared === undefined ? {} : { withWorkflow: { admission: (gitToken: () => Promise<string>) => {
+        const shared = options.shared as SharedAdmission;
+        // As the Git store does: each change of the admission ref pushes with a token from the check.
+        return new SharedAdmission({ read: () => shared.store.read(), update: async (change) => { await gitToken(); return shared.store.update(change); } });
+      } } }),
+      timing: { lookForMs: options.lookForMs ?? 5_000, pollMs: 50, registerMs: options.registerMs ?? 2_000 },
     });
     return { report, lines };
   };
@@ -317,10 +385,186 @@ describe('dispatch-check against a mock endpoint', { skip: realCurl === '' ? 'cu
   }));
 
   it('dispatches nothing when main lacks the workflow file', () => withMock(async (mock) => {
-    mock.onMain = false;
+    mock.mainFile = undefined;
     await assert.rejects(check(mock), (error) => error instanceof EnvBlockedError && /main has no \.github\/workflows\/mdbisync\.yml/.test(error.message));
     assert.equal(mock.seen.filter((entry) => entry.path.endsWith('/dispatches')).length, 0);
     assert.ok(mock.minted.every((entry) => entry.revoked));
+  }));
+
+  /** The sandbox's main before a check that brings its own workflow: no file, and the workflow not registered. */
+  const bare = (mock: MockGitHub) => { mock.mainFile = undefined; mock.state = undefined; };
+  const writes = (mock: MockGitHub) => mock.seen.filter((entry) => (entry.method === 'PUT' || entry.method === 'DELETE') && entry.path.includes('/contents/'));
+  const dispatches = (mock: MockGitHub) => mock.seen.filter((entry) => entry.path.endsWith('/dispatches'));
+
+  it('with --with-workflow, puts the stand-in on main for the check under an exclusive reservation and removes it', () => withMock(async (mock) => {
+    bare(mock);
+    mock.registerAfterReads = 2;
+    const store = new MemoryStore();
+    const reservations: SharedState[] = [];
+    const watched: StateStore = { read: () => store.read(), update: async (change) => { const result = await store.update(change); reservations.push(await store.read()); return result; } };
+    const { report, lines } = await check(mock, { shared: new SharedAdmission(watched) });
+    assert.equal(report.ok, true, JSON.stringify(report.errors));
+    // The script dispatched the stand-in, which was the only commit in and the only one out.
+    assert.deepEqual(mock.dispatchedWith, [standInWorkflow()]);
+    assert.deepEqual(mock.commits.map((commit) => [commit.method, commit.content]), [['PUT', standInWorkflow()], ['DELETE', undefined]]);
+    assert.equal(mock.mainFile, undefined);
+    assert.deepEqual(report.standIn, { reservation: report.standIn?.reservation, added: 'c0ffee1', removed: 'c0ffee2' });
+    assert.match(report.standIn?.reservation ?? '', /^[0-9a-f]{6}$/);
+    // One exclusive reservation from before the first write to after the last, then none.
+    assert.deepEqual(reservations.map((state) => state.runs.map((run) => [run.runId, run.app, run.full])), [[[report.standIn?.reservation, 'dispatch-check', true]], []]);
+    const reserved = mock.seen.findIndex((entry) => entry.method === 'PUT');
+    assert.ok(reserved > 0);
+    // The writer token may write contents and workflows and nothing else; all three tokens are revoked.
+    // The writer token may write contents and workflows and nothing else, each admission push has a Contents write token; all are revoked.
+    assert.deepEqual(mock.minted.map((entry) => entry.permissions), [{ actions: 'read', contents: 'read' }, { actions: 'write' }, { contents: 'write', workflows: 'write' }, { contents: 'write' }, { contents: 'write' }]);
+    assert.ok(mock.minted.every((entry) => entry.revoked));
+    assert.equal(report.tokensRevoked, true);
+    for (const write of writes(mock)) assert.equal(write.headers.authorization, `Bearer ${mock.minted[2]?.token}`);
+    // Nothing is left on this host for recovery.
+    assert.equal(liveRuns(stateDir).size, 0);
+    assert.deepEqual(ownedRuns(stateDir), []);
+    assert.ok(lines.some((line) => line.startsWith('added the stand-in')) && lines.some((line) => line.startsWith('removed the stand-in')));
+  }));
+
+  it('with --with-workflow, writes and dispatches nothing while another run holds a shared reservation', () => withMock(async (mock) => {
+    bare(mock);
+    const store = new MemoryStore();
+    store.state = { version: 1, runs: [{ runId: 'abcdef', owner: '00000000-0000-4000-8000-000000000000', app: 'app-a', full: false, zones: [], requests: 10, complexity: 10 }] };
+    await assert.rejects(check(mock, { shared: new SharedAdmission(store) }), (error) => error instanceof EnvBlockedError && /exclusive shared admission/.test(error.message));
+    assert.deepEqual(writes(mock), []);
+    assert.deepEqual(dispatches(mock), []);
+    assert.deepEqual(store.state.runs.map((run) => run.runId), ['abcdef']);
+    assert.ok(mock.minted.every((entry) => entry.revoked));
+  }));
+
+  it('with --with-workflow, leaves a mdbisync.yml on main that is not the stand-in as it is', () => withMock(async (mock) => {
+    const store = new MemoryStore();
+    await assert.rejects(check(mock, { shared: new SharedAdmission(store) }), (error) => error instanceof EnvBlockedError && /not the stand-in; it was left as it is/.test(error.message));
+    assert.equal(mock.mainFile, 'name: mdbisync\n');
+    assert.deepEqual(writes(mock), []);
+    assert.deepEqual(dispatches(mock), []);
+    assert.deepEqual(store.state.runs, []);
+    assert.equal(liveRuns(stateDir).size, 0);
+  }));
+
+  it('with --with-workflow, uses and removes a stand-in a stopped check left on main', () => withMock(async (mock) => {
+    mock.mainFile = standInWorkflow();
+    const store = new MemoryStore();
+    const { report } = await check(mock, { shared: new SharedAdmission(store) });
+    assert.equal(report.ok, true, JSON.stringify(report.errors));
+    assert.equal(report.standIn?.added, 'already there');
+    assert.deepEqual(mock.commits.map((commit) => commit.method), ['DELETE']);
+    assert.equal(mock.mainFile, undefined);
+    assert.deepEqual(store.state.runs, []);
+  }));
+
+  it('with --with-workflow, removes the stand-in and dispatches nothing when GitHub does not register it in time', () => withMock(async (mock) => {
+    bare(mock);
+    mock.registerAfterReads = 1_000;
+    const store = new MemoryStore();
+    await assert.rejects(check(mock, { shared: new SharedAdmission(store), registerMs: 300 }), (error) => error instanceof EnvBlockedError && /did not register the stand-in/.test(error.message));
+    assert.deepEqual(mock.commits.map((commit) => commit.method), ['PUT', 'DELETE']);
+    assert.equal(mock.mainFile, undefined);
+    assert.deepEqual(dispatches(mock), []);
+    assert.deepEqual(store.state.runs, []);
+    assert.ok(mock.minted.every((entry) => entry.revoked));
+  }));
+
+  it('with --with-workflow, fails and keeps the reservation for recovery when the stand-in cannot be removed', () => withMock(async (mock) => {
+    bare(mock);
+    mock.deleteStatus = 502;
+    const store = new MemoryStore();
+    const { report, lines } = await check(mock, { shared: new SharedAdmission(store) });
+    assert.equal(report.denied.ok && report.allowed.ok, true);
+    assert.equal(report.ok, false);
+    assert.equal(report.standIn?.removed, null);
+    assert.match(report.errors.join('\n'), /^removing the stand-in \(reservation [0-9a-f]{6} stays held\): DELETE .*HTTP 502$/m);
+    assert.equal(mock.mainFile, standInWorkflow());
+    const reservation = report.standIn?.reservation ?? '';
+    assert.deepEqual(store.state.runs.map((run) => run.runId), [reservation]);
+    // Registered on this host with an empty ownership record: `recover` takes it up once this process is gone.
+    assert.ok(ownedRuns(stateDir).includes(reservation));
+    assert.ok(lines.some((line) => line.includes(`reservation ${reservation} stays held`)));
+    assert.ok(mock.minted.every((entry) => entry.revoked));
+    rmSync(join(stateDir, 'runs', `${reservation}.json`), { force: true });
+    rmSync(join(stateDir, 'owned'), { recursive: true, force: true });
+  }));
+
+  it('with --with-workflow, uses and removes a stand-in an older harness left, known by its first line', () => withMock(async (mock) => {
+    mock.mainFile = `${standInWorkflow().split('\n')[0]}\nname: mdbisync\non: workflow_dispatch\n`;
+    const store = new MemoryStore();
+    const { report } = await check(mock, { shared: new SharedAdmission(store) });
+    assert.equal(report.ok, true, JSON.stringify(report.errors));
+    assert.equal(report.standIn?.added, 'already there');
+    assert.equal(mock.mainFile, undefined);
+  }));
+
+  it('with --with-workflow, fails rather than env-blocked when the stand-in cannot be removed after a setup failure', () => withMock(async (mock) => {
+    bare(mock);
+    mock.registerAfterReads = 1_000;
+    mock.deleteStatus = 502;
+    const store = new MemoryStore();
+    await assert.rejects(check(mock, { shared: new SharedAdmission(store), registerMs: 200 }),
+      (error) => error instanceof LeftOnSandboxError && /did not register the stand-in.*; then the stand-in could not be removed and reservation [0-9a-f]{6} stays held: DELETE .*HTTP 502$/.test(error.message));
+    assert.equal(mock.mainFile, standInWorkflow());
+    assert.equal(store.state.runs.length, 1);
+    assert.deepEqual(dispatches(mock), []);
+    assert.ok(mock.minted.every((entry) => entry.revoked));
+    const reservation = store.state.runs[0]?.runId ?? '';
+    rmSync(join(stateDir, 'runs', `${reservation}.json`), { force: true });
+    rmSync(join(stateDir, 'owned'), { recursive: true, force: true });
+  }));
+
+  it('with --with-workflow, never replaces or removes a file that appears on main after its check', () => withMock(async (mock) => {
+    bare(mock);
+    const store = new MemoryStore();
+    // Someone adds a real workflow between the check's read and its write: the create-only write is refused.
+    let reads = 0;
+    const raced: typeof fetch = async (input, init) => {
+      if (String(input).endsWith('/contents/.github/workflows/mdbisync.yml') && (init?.method ?? 'GET') === 'GET' && ++reads === 1) {
+        const answer = await mock.fetch(input, init);
+        mock.mainFile = 'name: mdbisync\n';
+        mock.commits.push({ method: 'PUT', message: 'someone else' });
+        return answer;
+      }
+      return mock.fetch(input, init);
+    };
+    const shared = new SharedAdmission(store);
+    await assert.rejects(dispatchCheck({
+      config: { owner: OWNER, repo: REPO, sandboxUrl: `https://github.com/${OWNER}/${REPO}`, githubApp: { clientId: 'Iv1.test', privateKey }, githubAppMissing: [] },
+      stateDir, fetch: raced, env: { PATH: pathTo(mock) },
+      withWorkflow: { admission: () => shared }, timing: { lookForMs: 500, pollMs: 50, registerMs: 500 },
+    }), (error) => error instanceof LeftOnSandboxError && /no longer the stand-in/.test(error.message));
+    assert.equal(mock.mainFile, 'name: mdbisync\n');
+    assert.deepEqual(mock.commits.map((commit) => commit.message), ['someone else']);
+    assert.deepEqual(dispatches(mock), []);
+    // Whether its own write landed is unknown to the check, so the reservation stays for recovery.
+    const reservation = store.state.runs[0]?.runId ?? '';
+    assert.match(reservation, /^[0-9a-f]{6}$/);
+    rmSync(join(stateDir, 'runs', `${reservation}.json`), { force: true });
+    rmSync(join(stateDir, 'owned'), { recursive: true, force: true });
+  }));
+
+  it('with --with-workflow, keeps the local records for recovery when taking the reservation fails', () => withMock(async (mock) => {
+    bare(mock);
+    const failing = new SharedAdmission({ read: async () => ({ version: 1, runs: [] }), update: async () => { throw new Error('shared admission push failed: HTTP 500'); } });
+    await assert.rejects(dispatchCheck({
+      config: { owner: OWNER, repo: REPO, sandboxUrl: `https://github.com/${OWNER}/${REPO}`, githubApp: { clientId: 'Iv1.test', privateKey }, githubAppMissing: [] },
+      stateDir, fetch: mock.fetch, env: { PATH: pathTo(mock) }, withWorkflow: { admission: () => failing },
+    }), (error) => error instanceof LeftOnSandboxError && /taking the shared reservation [0-9a-f]{6} failed, and it may be held/.test(error.message));
+    const [reservation] = ownedRuns(stateDir);
+    assert.match(reservation ?? '', /^[0-9a-f]{6}$/);
+    assert.ok(liveRuns(stateDir).has(reservation ?? ''));
+    assert.deepEqual(writes(mock), []);
+    rmSync(join(stateDir, 'runs', `${reservation}.json`), { force: true });
+    rmSync(join(stateDir, 'owned'), { recursive: true, force: true });
+  }));
+
+  it('without --with-workflow, dispatches nothing while main holds a stand-in', () => withMock(async (mock) => {
+    mock.mainFile = standInWorkflow();
+    await assert.rejects(check(mock), (error) => error instanceof EnvBlockedError && /holds a dispatch check's stand-in/.test(error.message));
+    assert.deepEqual(dispatches(mock), []);
+    assert.deepEqual(writes(mock), []);
   }));
 
   it('gives the script the token at the documented path through a pipe, never on disk, and masks it in its output', () => withMock(async (mock) => {

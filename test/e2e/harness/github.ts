@@ -342,6 +342,30 @@ export class SandboxRest {
     return { commit: result.commit.sha };
   }
 
+  /** A file's text and blob sha on the default branch, or undefined when it is not there. */
+  async fileBlob(path: string): Promise<{ text: string; sha: string } | undefined> {
+    try {
+      const file = await this.request<{ content?: string; encoding?: string; sha: string }>('GET', `/contents/${encodePath(path)}`);
+      if (file.encoding !== 'base64' || file.content === undefined) throw new Error(`${path} is not a file GitHub returns whole`);
+      return { text: Buffer.from(file.content, 'base64').toString('utf8'), sha: file.sha };
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return undefined;
+      throw error;
+    }
+  }
+
+  /** Adds a file to the default branch in one commit; GitHub refuses when the file is there by then. */
+  async createFile(path: string, text: string, message: string): Promise<{ commit: string }> {
+    const result = await this.request<{ commit: { sha: string } }>('PUT', `/contents/${encodePath(path)}`, { message, content: Buffer.from(text, 'utf8').toString('base64') });
+    return { commit: result.commit.sha };
+  }
+
+  /** Removes the file at blob `sha` from the default branch in one commit; GitHub refuses when it changed since. */
+  async deleteFile(path: string, message: string, sha: string): Promise<{ commit: string }> {
+    const result = await this.request<{ commit: { sha: string } }>('DELETE', `/contents/${encodePath(path)}`, { message, sha });
+    return { commit: result.commit.sha };
+  }
+
   /** A workflow file's state in the Actions registry (`active`, or one of the disabled states), or undefined while it is not registered. */
   async workflowState(file: string): Promise<string | undefined> {
     try {

@@ -369,6 +369,30 @@ cases behave as the page says and 1 when not. It needs the GitHub App and
 `mdbisync.yml` on the repository's `main`, takes a lock so only one check
 runs on a host, and otherwise dispatches nothing and exits 3.
 
+The test repository's `main` normally has no `mdbisync.yml`. With
+`--with-workflow` the check brings a stand-in for its own duration: a
+`mdbisync.yml` that starts only by hand (`workflow_dispatch`, no
+`schedule` or `push`), has no permissions and whose one job is always
+skipped, so nothing runs on its own and the dispatched run ends at once.
+Before it writes anything the check registers itself on the host, with an
+empty ownership record, and takes an exclusive shared reservation, so no
+scenario run uses the repository meanwhile; it is refused (exit 3) while
+any other run holds one. The reservation's pushes use App tokens with
+only Contents write. A third App token, with only Contents write and
+Workflows write, adds the file to `main` in one commit that GitHub
+refuses if the file appeared meanwhile; the check waits up to a minute
+for GitHub to register it as active, and after the check the same token
+removes it in one commit tied to the blob it read, before the
+reservation is released. All tokens are revoked at the end. The record's
+`standIn` names the reservation and both commits. The check never
+touches a `mdbisync.yml` on `main` that is not the stand-in (exit 3); it
+knows a stand-in by its first line. A check without `--with-workflow`
+refuses (exit 3) while `main` holds a stand-in. If the stand-in or the
+reservation may be left behind, the check fails (exit 1) and says so:
+after `recover <its run id> --writer-stopped` has released the
+reservation, the next `dispatch-check --with-workflow` uses and removes
+a stand-in it finds.
+
 `ui` mode is a checklist for a person or a browser session signed in as
 the two members.
 
