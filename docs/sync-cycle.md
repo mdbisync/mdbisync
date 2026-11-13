@@ -173,10 +173,11 @@ the push is refused rather than partly overwriting state. The next run
 can read the newer state and retry; this does not close the Linear write
 race above. Avoid running an independent writer against the same documents.
 
-Before initial sync or recovery, disable the ongoing-sync workflow and
-wait for its active run to finish. Otherwise a newly queued ongoing-sync
-run can replace the pending initial-sync run. Follow the initial-sync
-direction's instructions before confirming its writes.
+Before initial sync or recovery, disable the ongoing-sync workflow, stop
+your own dispatch timer if you run one, and wait for its active run to
+finish. Otherwise a newly queued ongoing-sync run can replace the pending
+initial-sync run. Follow the initial-sync direction's instructions before
+confirming its writes.
 
 ## What people see
 
@@ -342,12 +343,15 @@ same check also fails on the tracked tip.
 - **Git to Linear:** a push to the tracked branch starts a run at once, so
   the change is in Linear when that run finishes, usually within a minute
   or two. If another run is going, the new one waits for it.
-- **Linear to git:** the next scheduled run captures the edit. GitHub runs
-  schedules every five minutes at best and often starts them later. The
+- **Linear to git:** the next run captures the edit. Between pushes that
+  is a run from your own timer, GitHub's schedule or a run by hand. With
+  a timer that is within its interval plus the run
+  ([own scheduler](own-scheduler.md)); GitHub's schedule alone can take
+  hours, since GitHub may start scheduled runs late or skip them. The
   same run merges the sync pull request when its checks pass within the
   grace period (`merge-grace-seconds`, default 60 seconds); slower checks
-  leave the merge to a later run, one more schedule interval. Run the
-  workflow by hand to take a Linear edit in sooner.
+  leave the merge to a later run, one more interval. Run the workflow by
+  hand to take a Linear edit in sooner.
 - **A conflict** adds no delay: both versions arrive on both sides in the
   same runs that would have carried either edit.
 - **A failing check** moves the batch to **Suspended changes from Linear**

@@ -28,6 +28,9 @@ You need:
   [pre-commit](https://pre-commit.com) (`python3 -m pip install
   pre-commit==4.7.0`, or `pipx install pre-commit`). Docker too, if you
   choose the security hook examples ([security hooks](#security-hooks)).
+- **For timely sync from Linear:** a machine or service that can run a
+  job every few minutes (cron, a systemd timer or another scheduler), for
+  [your own scheduler](own-scheduler.md).
 
 Pick a release and note its **release SHA**, the commit both the action
 and the hook are pinned to. List the releases:
@@ -366,7 +369,14 @@ Turn the sync back on: Actions → **mdbisync** → **Enable workflow**. Then
 start one run by hand: **mdbisync** → Run workflow → Use workflow from:
 `main` → Run workflow. It finishes green, and its summary shows the setup check and
 what it synchronized; right after an initial sync there is nothing to
-write. From now on it runs on every push to `main` and every five minutes.
+write. From now on it runs on every push to `main` and on GitHub's
+schedule.
+
+GitHub may start scheduled runs hours late or skip them, so a Linear edit
+could wait that long. Now set up a timer of your own that starts the
+workflow every few minutes, with a token that may only start workflows in
+this repository: [run the sync from your own scheduler](own-scheduler.md).
+Keep the schedule in the workflow as a fallback.
 
 To see it work, edit a synchronized document in Linear: within a few
 minutes the **Changes from Linear** pull request opens, passes

@@ -4,11 +4,15 @@
 # Keep this workflow disabled until the initial sync has finished: until
 # then each run writes nothing and fails with `initial-sync-required`, and
 # a sync queued in the shared group can replace a pending initial sync.
-# Disable it again before any later initial sync (recovery).
+# Disable it again before any later initial sync (recovery), and stop your
+# own dispatch timer then too.
 #
 # Each run takes Linear's changes to main through the sync pull request,
 # which the sync merges once its checks pass, and writes main's changes to
-# Linear. It runs on every push to main, every five minutes, and by hand.
+# Linear. It runs on every push to main, on GitHub's schedule, and by hand.
+# For Linear's changes to arrive on time, also start it every few minutes
+# from your own scheduler through workflow_dispatch:
+# https://github.com/mdbisync/mdbisync/blob/main/docs/own-scheduler.md
 #
 # Needs: the repository variable MDBISYNC_APP_CLIENT_ID and the secrets
 # MDBISYNC_APP_PRIVATE_KEY (the sync's GitHub App), MDBISYNC_LINEAR_CLIENT_ID
@@ -18,8 +22,10 @@ name: mdbisync
 on:
   push:
     branches: [main]
-  # GitHub runs schedules only on the default branch, may start them late,
-  # and turns them off in a public repository after 60 days without activity.
+  # A fallback, not the trigger to rely on: GitHub may start scheduled runs
+  # hours late or skip them, on any plan, runs them only on the default
+  # branch, and turns them off in a public repository after 60 days without
+  # activity.
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
