@@ -15,7 +15,7 @@ import { bothVersionsComplete, colorLabel, conflictScope, editParagraph, MARKERS
 import type { LiveWorld, RunContext } from './context.ts';
 import { CANARY_FIXTURE } from './security-canary.ts';
 import type { RunTree } from './corpus.ts';
-import { FIXTURE_PREPARATION } from './runner.ts';
+import { captureCanaryEvidence, FIXTURE_PREPARATION } from './runner.ts';
 import { DOCUMENT_FIXTURES, fixtureEdit, LINK_PAIR, paragraphEdit, prepareFixtures, publishesCheckWorkflow, reviewDocument, seededPng, SETUP_FIXTURES, SLICE_FIXTURES, STEP_PREPARATION } from './fixtures.ts';
 import { runNames } from './isolation.ts';
 import { OwnershipLedger } from './ownership.ts';
@@ -25,7 +25,7 @@ import { fixText } from '../../../src/format/fix.ts';
 import { blockedBySetupStop, classify, EnvBlockedError, HarnessGapError, ProductError } from './results.ts';
 import { finishPersonClone } from './person-git.ts';
 import type { SoakFailureReport } from './soak-evidence.ts';
-import { bodyOf, compare, editsFound, holdsToken, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, REF_HISTORY_TIMES, sameAsFile } from './checks.ts';
+import { INVARIANT_CHECKS, bodyOf, compare, editsFound, holdsToken, lostEdits, differingPaths, evaluateAssertion, fileHash, gitLinks, linearLinks, REF_HISTORY_TIMES, sameAsFile } from './checks.ts';
 import { offlineInput, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { BANK_DIR, engineForm, goldenMarkdownPath, loadBank, probedFixtures, readFixture } from '../../probe/bank.ts';
 import { GraphQLTransport } from '../../../src/linear/transport.ts';
@@ -523,8 +523,14 @@ describe('workflows', () => {
       assert.equal(existsSync(join(dir, 'requests.json')), !leaking);
       if (!leaking) assert.deepEqual(JSON.parse(readFileSync(join(dir, 'logs.json'), 'utf8')), logs);
       else {
+        assert.equal(ctx.observations.get('workflows.outputLeak'), true);
         assert.equal(ctx.engine.results.at(-1)!.stdout, '');
         assert.equal(ctx.engine.results.at(-1)!.report, null);
+        assert.equal((await INVARIANT_CHECKS.I5(ctx, async () => { throw new Error('unexpected read'); })).ok, false);
+        await captureCanaryEvidence(ctx);
+        const evidence = JSON.parse(readFileSync(join(ctx.runDir, 'canary-evidence.json'), 'utf8'));
+        assert.equal(typeof evidence.error, 'string');
+        assert.deepEqual(evidence.texts, {});
       }
     }
   });

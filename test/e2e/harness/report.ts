@@ -65,7 +65,7 @@ export function renderRunMarkdown(report: HarnessReport): string {
       const evidence = result.workflowRateLimits!;
       const selected = evidence.governor?.selected;
       const sample = (value: { at: number; remaining: number } | undefined) => value === undefined ? 'none' : `${new Date(value.at).toISOString()} (${value.remaining} remaining)`;
-      lines.push(`| ${result.id} | ${cell(evidence.app)} | ${evidence.samples.length} | ${sample(selected?.requests)} | ${sample(selected?.complexity)} | ${cell(JSON.stringify(evidence.governor?.decision ?? null))} |`);
+      lines.push(`| ${result.id} | ${cell(evidence.app)} | ${evidence.samples.length} | ${sample(selected?.requests)} | ${sample(selected?.complexity)} | ${cell(JSON.stringify(evidence.admission?.decision ?? null))} |`);
     }
   }
   const passing = unexpectedPasses(report.results);

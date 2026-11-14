@@ -55,7 +55,7 @@ import {
   commitAsPerson, createHelperProject, documentId, documentPaths, editorEdit, editorOf, folderTeam, live, MOVE_SOURCE_FOLDER, projectFolders, pull, readRunIds, readWorking, resolveDestination, setTarget, sibling, targetPath,
 } from './step-helpers.ts';
 import type { SandboxRest, WorkflowJob, WorkflowRun } from './github.ts';
-import { blockerEvidence, environmentBlocker, firstFailedStep, hadReplaceableRun, jobsEvidence, jobSpans, maxOverlap, runLogs, runResult, retainWorkflowOutput, stopScheduledRun, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun, workflowEvidence } from './workflows.ts';
+import { blockerEvidence, environmentBlocker, firstFailedStep, hadReplaceableRun, jobsEvidence, jobSpans, maxOverlap, runLogs, runResult, retainWorkflowOutput, safeWorkflowValue, stopScheduledRun, waitForRegistration, waitForRequestTaken, waitForRun, waitForScheduledRun, workflowEvidence } from './workflows.ts';
 import { outputCount, outputFile, outputText } from '../../../src/run/output.ts';
 import { CANARY_FIXTURE, canaryFacts } from './security-canary.ts';
 import { pinnedActionSha, prerequisiteErrors, readTemplate, renderScheduler, runGroup, runWorkflows, SCHEDULER_FILE, syncDispatchOnly, WORKFLOW_FILES, workflowFor } from './workflow-files.ts';
@@ -646,11 +646,13 @@ async function settleWorkflowRun(ctx: RunContext, run: WorkflowRun, command: Com
   const dir = outputFile(join(ctx.runDir, 'workflows', String(outputCount(run.id))), String(outputCount(run.run_attempt ?? 1)));
   mkdirSync(dir, { recursive: true });
   const sources = new Set(world.tree.paths.values());
-  const forbidden = [world.githubToken, world.engineApp.clientSecret,
-    ...contentCanaries(world.manifest.files).filter((file) => sources.has(file.path)).map((file) => file.canary)];
+  const forbidden = [world.githubToken, world.engineApp.clientSecret, ...(world.outputSecrets ?? []),
+    ...contentCanaries(world.manifest.files).filter((file) => sources.has(file.path) && file.canary.length >= 6).map((file) => file.canary)];
   if (!retainWorkflowOutput(dir, logs, result, forbidden)) {
-    // Keep accounting and the failure without allowing later evidence collection to save the leaking output.
-    recordResult(ctx, { ...result, stdout: '', stderr: '', summary: '', report: null, securityCanary: '', remote: { ...result.remote!, requests: [] } });
+    ctx.observations.set('workflows.outputLeak', true);
+    writeFileSync(join(dir, 'run.json'), `${JSON.stringify(safeWorkflowValue(workflowEvidence(run), forbidden), null, 2)}\n`);
+    // Keep the failed run without allowing later evidence collection to save the leaking output.
+    recordResult(ctx, { ...result, stdout: '', stderr: '', summary: '', report: null, securityCanary: '', remote: safeWorkflowValue(result.remote!, forbidden) });
     throw new ProductError('workflow output contains a secret or content canary; clear output was withheld');
   }
   if (ctx.scenario.setup.fixtures.includes(CANARY_FIXTURE)) {

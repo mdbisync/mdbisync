@@ -146,6 +146,7 @@ export interface Grant {
   app: App;
   waitedMs: number;
   budgetBefore: Budget;
+  rateLimitEvidence?: ReturnType<Governor['rateLimitEvidence']>;
   owner?: string;
   /** Waits at most `maxWaitMs` (default: the governor's longest wait) for the accounts' budgets. */
   claimBudgets?(accounts: readonly AccountBudget[], signal?: AbortSignal, maxWaitMs?: number): Promise<void>;
@@ -291,10 +292,13 @@ export class Governor {
     for (;;) {
       let retryAt = Infinity;
       for (const app of apps) {
+        let evidence: ReturnType<Governor['rateLimitEvidence']> | undefined;
         const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: holdsFullSlot(scenario), ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
           readBudget: async () => {
             const at = this.#now();
-            return this.#withObserved(app.name, await app.readBudget(), at);
+            const budget = this.#withObserved(app.name, await app.readBudget(), at);
+            evidence = this.rateLimitEvidence(app.name);
+            return budget;
           },
         });
         if (!admission.admitted) {
@@ -304,7 +308,7 @@ export class Governor {
           continue;
         }
         return {
-          app, owner, waitedMs: this.#now() - started, budgetBefore: admission.budget!,
+          app, owner, ...(evidence === undefined ? {} : { rateLimitEvidence: evidence }), waitedMs: this.#now() - started, budgetBefore: admission.budget!,
           claimBudgets: async (accounts, signal, maxWaitMs) => {
             const until = this.#now() + (maxWaitMs ?? options.maxWaitMs ?? MAX_BUDGET_WAIT_MS);
             for (;;) {
@@ -388,6 +392,7 @@ export class Governor {
       for (;;) {
         const readStartedAt = this.#now();
         const budget = this.#withObserved(slot.app.name, await slot.app.readBudget(), readStartedAt);
+        const evidence = this.rateLimitEvidence(slot.app.name);
         const app = slot.app;
         const admitted = await withLedger(options.stateDir, app.name, runId, (ledger) => {
           const reserved = sumLedger(ledger);
@@ -404,6 +409,7 @@ export class Governor {
             app,
             waitedMs: this.#now() - started,
             budgetBefore: budget,
+            rateLimitEvidence: evidence,
             release: () => {
               if (released) return;
               released = true;

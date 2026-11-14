@@ -8,10 +8,11 @@ import type { SandboxRest, WorkflowRun } from './github.ts';
 import type { RunContext } from './context.ts';
 import { diagnosticRequests, engineRequestCount, requestBuckets, remoteRequests } from './request-accounting.ts';
 import { INVARIANT_CHECKS } from './checks.ts';
+import { renderRunMarkdown } from './report.ts';
 import { resultOf } from './runner.ts';
 import { BudgetBlockedError, Governor } from './governor.ts';
 import { loadScenarios } from './spec.ts';
-import { retainWorkflowOutput, runResult } from './workflows.ts';
+import { retainWorkflowOutput, safeWorkflowValue, runResult } from './workflows.ts';
 
 // Retained dry and confirmed initial-sync diagnostics, stripped to safe request
 // metadata, with neutral request identifiers. Counts and limit headers are real.
@@ -180,6 +181,8 @@ it('admits workflows on their configured app and lets a later fresh read superse
   primary.release();
   now += 2000;
   const recovered = await governor.admit(scenario, 'abcdef4', { requests: 1, complexity: 1 }, 'primary');
+  assert.equal(primary.rateLimitEvidence?.decision?.readStartedAt, now - 2000);
+  assert.equal(recovered.rateLimitEvidence?.decision?.readStartedAt, now);
   recovered.release();
 });
 
@@ -227,4 +230,41 @@ it('withholds logs and diagnostics when a log, summary or request contains a sec
     assert.equal(existsSync(join(dir, 'requests.json')), false);
     assert.equal(readFileSync(join(dir, 'output-scan.json'), 'utf8').includes(secret), false);
   }
+});
+
+it('includes workflow response identities and governor decisions in both reports', async () => {
+  const ctx = await context();
+  const samples = remoteRequests(ctx).filter(({ entry }) => Object.keys(entry.rateLimitHeaders).length > 0);
+  const evidence = { app: 'primary', samples, governor: { selected: { requests: { remaining: 4000, resetAt: 2000, at: 1000 } }, decision: { readStartedAt: 999, fresh: { requestsRemaining: 5000, complexityRemaining: 2000000, resetAt: 2000 }, used: { requestsRemaining: 4000, complexityRemaining: 2000000, resetAt: 2000 }, sources: { requests: 1000 } } } };
+  const withAdmission = { ...evidence, admission: evidence.governor };
+  ctx.observations.set('workflowRateLimits', withAdmission);
+  const result = { ...resultOf(ctx, { result: 'pass' }, { startedAt: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true } }), harnessAppRequests: 0 };
+  assert.deepEqual(result.workflowRateLimits, withAdmission);
+  assert.equal(samples[0]!.runId, 1);
+  assert.equal(samples[0]!.runAttempt, 1);
+  const markdown = renderRunMarkdown({ harnessRunId: 'example', startedAt: '', finishedAt: '', host: '', selection: {}, results: [result] });
+  assert.match(markdown, /Workflow rate-limit evidence/);
+  assert.match(markdown, /primary/);
+  assert.match(markdown, /4000 remaining/);
+  assert.match(markdown, /readStartedAt/);
+});
+
+it('keeps accounting and response headers while redacting contaminated diagnostic text', () => {
+  const requests = { runId: 1, runAttempt: 2, linearEngine: true, requests: [{ ...recorded.dry[1]!, operation: 'kx-hidden-note' }] };
+  const safe = safeWorkflowValue(requests, ['kx-hidden-note']);
+  assert.equal(safe.requests.length, 1);
+  assert.deepEqual(safe.requests[0]!.rateLimitHeaders, requests.requests[0]!.rateLimitHeaders);
+  assert.equal(safe.requests[0]!.operation, '[withheld]');
+  assert.equal(JSON.stringify(safe).includes('kx-hidden-note'), false);
+});
+
+it('withholds a multiline credential interrupted by Actions timestamps', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'workflow-multiline-'));
+  roots.push(dir);
+  const secret = 'first-key-line\nsecond-key-line\n';
+  const files = new Map([['job/3_Stage.txt', secret.trimEnd().split('\n').map((line) => `2026-11-14T10:00:00.123Z ${line}`).join('\r\n')]]);
+  const result = await runResult(rest, run(9), 'initial-sync', files);
+  assert.equal(retainWorkflowOutput(dir, files, result, [secret]), false);
+  assert.equal(existsSync(join(dir, 'logs.json')), false);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'output-scan.json'), 'utf8')).rejectedSources, ['log: job/3_Stage.txt']);
 });
