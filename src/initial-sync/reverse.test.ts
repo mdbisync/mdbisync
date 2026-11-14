@@ -1238,6 +1238,10 @@ describe('the security gate of an initial sync from Linear', () => {
     }
   });
 
+  /** Whether a Markdown text has a link whose destination is on Linear's host, as a privacy hook might refuse. */
+  const linksLinear = (text: string) =>
+    [...text.matchAll(/\]\(([^)\s]+)\)/g)].some(([, destination]) => URL.canParse(destination as string) && new URL(destination as string).hostname === 'linear.app');
+
   /**
    * Runs the import with hooks that refuse `refused` text, in one step or in
    * the two steps (stage every set, run the hooks on them, apply from their
@@ -1313,7 +1317,7 @@ describe('the security gate of an initial sync from Linear', () => {
           d.id === 'doc-faq' ? { ...d, content: `# FAQ\n\n${SECRET}\n` } : d.id === 'doc-runbook' ? { ...d, content: `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).\n` } : d,
         );
         // A privacy hook that refuses the secret and any Linear document URL.
-        const result = await gated(fixture, world, (text) => text.includes(SECRET) || text.includes('https://linear.app/'), steps);
+        const result = await gated(fixture, world, (text) => text.includes(SECRET) || linksLinear(text), steps);
         assert.deepEqual(result.leftOutAtRecord.sort((a, b) => a.path.localeCompare(b.path)), [
           { path: 'eng/notes/faq.md', rule: 'security-hook' },
           { path: 'eng/ops/runbook.md', rule: 'security-hook' },
@@ -1354,7 +1358,7 @@ describe('the security gate of an initial sync from Linear', () => {
         const world = fakeWorld();
         const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
         world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-runbook' ? { ...d, content: `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).\n` } : d));
-        const result = await gated(fixture, world, (text) => text.includes('https://linear.app/'), steps);
+        const result = await gated(fixture, world, linksLinear, steps);
         assert.ok(result.leftOutAtRecord.some((entry) => entry.path === 'eng/notes/faq.md' && entry.rule === 'title-not-a-path'), JSON.stringify(result.leftOutAtRecord));
         assert.ok(result.leftOutAtRecord.some((entry) => entry.path === 'eng/ops/runbook.md' && entry.rule === 'security-hook'), JSON.stringify(result.leftOutAtRecord));
         const objects = await fixture.remote.text(['cat-file', '--batch-all-objects', '--batch']);
