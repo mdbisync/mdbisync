@@ -301,10 +301,11 @@ export function pullRequestHarness() {
     }
   }
 
-  async function editRef(ref: string, path: string, text: string, message = 'Edit'): Promise<string> {
+  /** Commits `text` at `path` on `ref`; with `other`, as a merge whose second parent is `other`, as anyone who may push there could. */
+  async function editRef(ref: string, path: string, text: string, message = 'Edit', other?: string): Promise<string> {
     const base = await rev(ref);
     const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: text });
-    const commit = await commitFile(base, path, blob, undefined, message);
+    const commit = await commitFile(base, path, blob, other, message);
     await fixture.remote.run(['update-ref', ref, commit, base]);
     if (ref === SYNC_BRANCH || ref === SUSPENDED) syncValues.push(commit);
     else if (ref === 'refs/heads/main') start = commit;

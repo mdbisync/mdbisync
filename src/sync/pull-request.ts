@@ -52,15 +52,19 @@ import {
   initialRecordChangesParent,
   type Oid,
   type StateConfig,
+  type PushResult,
+  type RefUpdate,
   type StateSnapshot,
   branchRef,
   pushAtomic,
   readIds,
+  readSyncPushed,
+  stateRef,
   commitTree,
 } from '../state/index.ts';
 import { HOLD_MARK_LIMIT, type HoldMarksResult, type HoldWriteFailure, LINEAR_MESSAGE_LENGTH, linkTarget, plainLine } from './hold.ts';
 import { CHECKS_MISSING_ADVICE, DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, missingText, headSince, pastDeadline, readMainVerdict, readRedMainNote, redMainNote, type RedMainHold } from './deadline.ts';
-import { LaneMoved, LaneConflict, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
+import { LaneMoved, LaneConflict, commitLaneIds, maintainSuspended, suspendBatch, suspendedPaths, type SuspendedResult } from './suspended.ts';
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import { oneLine, unverifiedList, unverifiedNote, unverifiedPaths } from './head-check.ts';
 import { message } from '../messages.ts';
@@ -224,7 +228,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // A sync branch is made by the first sync pull request and stays. Once `linear` holds more than initial sync's
     // record and the tracked branch, a missing branch was deleted by a person: it comes back at `linear`.
     if (sync !== null || (await isAncestor(git, linear, tracked)) || (await isInitialRecord(git, linear))) return result;
-    const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: null, next: frozen.size === 0 ? linear : await commitTree(git, {base: wanted, changes: new Map(), parents: [linear], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? context.identity}) }]);
+    const pushed = await pushSyncBranch(context, options, null, frozen.size === 0 ? linear : await commitTree(git, {base: wanted, changes: new Map(), parents: [linear], message: SYNC_BRANCH_MERGE_MESSAGE, identity: options.identity ?? context.identity}));
     if (pushed.ok) return { ...result, branchMoved: true };
     // A refusal that is not a lease (a rule on branch names, missing rights) leaves the branch to the run that needs it.
     return pushed.reason === 'stale' ? { ...result, code: 'state-moved' } : result;
@@ -246,7 +250,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // A head whose earlier checks the history does not show is never kept: the sync's next push (Linear's changes) is
     // what lets it merge again.
     const checkedExpectation = async () => {
-      const known = await expectedChecks(github, sync as Oid, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, linear });
+      const known = await expectedChecks(github, sync as Oid, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, pushed: await readSyncPushed(git, options.state.ids) });
       return known.complete ? checkExpectation(options, known.checks) : null;
     };
     const keepCheckedHead = open !== null && pending && suspended?.waiting !== true && noted === null
@@ -311,7 +315,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     if (open === null && !result.needed && headTree === trackedTree) return result;
 
     if (head !== sync) {
-      const pushed = await pushAtomic(git, config, [{ ref: branchRef(config.syncBranch), expected: sync, next: head }]);
+      const pushed = await pushSyncBranch(context, options, sync, head);
       if (!pushed.ok) return { ...result, code: 'state-moved' };
       result.branchMoved = true;
       result.marked = [...new Set(resolved.marked)].sort();
@@ -325,7 +329,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const since = headSince(open?.body, head, new Date());
     // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
     // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`).
-    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync] } : { body: open?.body, git, base: tracked, linear });
+    const expected = await expectedChecks(github, head, options.requiredChecks ?? [], result.branchMoved ? { pushedFrom: sync === null ? [] : [sync] } : { body: open?.body, git, base: tracked, pushed: await readSyncPushed(git, options.state.ids) });
     const stillHeld = hold === null ? null : { ...hold, head };
     // Whoever added commits to the sync branch, the sync merges only changes to synchronized documents and their assets.
     const unverified = await unverifiedPaths(git, trackedTree, headTree, context.mapping.zones);
@@ -492,6 +496,22 @@ async function needsTrackedMerge(git: Git, tracked: Oid, head: Oid, noted: Merge
 
 async function isAncestor(git: Git, ancestor: Oid, descendant: Oid): Promise<boolean> {
   return (await git.run(['merge-base', '--is-ancestor', ancestor, descendant], { okCodes: [0, 1] })).code === 0;
+}
+
+/**
+ * Pushes `next` to the sync branch together with the id state that records it as the sync's own head, both or neither:
+ * the checks expected of a later head are read down to it (see `expectedChecks`), and a commit someone else pushed
+ * never takes its place.
+ */
+async function pushSyncBranch(context: RunContext, options: PullRequestOptions, expected: Oid | null, next: Oid): Promise<PushResult> {
+  const { git } = context;
+  const ids = options.state.ids;
+  const updates: RefUpdate[] = [{ ref: branchRef(options.config.syncBranch), expected, next }];
+  const idsTip = ids === null ? null : await commitLaneIds(context, ids, await readIds(git, ids), 'Sync: record the sync branch head', options.identity, next);
+  if (idsTip !== null) updates.push({ ref: stateRef(options.config, 'ids'), expected: ids, next: idsTip });
+  const pushed = await pushAtomic(git, options.config, updates);
+  if (pushed.ok && idsTip !== null) options.state.ids = idsTip;
+  return pushed;
 }
 
 /**

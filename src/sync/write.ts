@@ -37,6 +37,7 @@ import {
   type IdEntry,
   type IdMap,
   type Oid,
+  type PushResult,
   type RefUpdate,
   type StateConfig,
   type StateSnapshot,
@@ -1064,19 +1065,30 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const rebuilt = cacheLost && merged && result.stopped === undefined ? { message: UPLOADS_REBUILT, always: true } : {};
     const uploadsCommit = expected.uploads === null && uploads.size === 0 && !cacheLost ? null : await commitUploads(git, expected.uploads, uploads, identity, rebuilt);
 
-    const updates: RefUpdate[] = [
+    const updates = (ids: Oid): RefUpdate[] => [
       { ref: stateRef(options.config, 'linear'), expected: linearTip, next: commit },
-      { ref: stateRef(options.config, 'ids'), expected: expected.ids, next: idsCommit },
+      { ref: stateRef(options.config, 'ids'), expected: expected.ids, next: ids },
+      ...(uploadsCommit === null ? [] : [{ ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit }]),
     ];
-    if (uploadsCommit !== null) updates.push({ ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit });
-    const branch: RefUpdate | undefined = options.createSyncBranch === true && commit !== linearTip ? { ref: branchRef(options.config.syncBranch), expected: null, next: commit } : undefined;
-    let pushed = await pushAtomic(git, options.config, branch === undefined ? updates : [...updates, branch]);
-    // The branch is optional: a refusal that is not a lease (a rule on branch names, missing rights) moved nothing,
-    // and the record goes on without it.
-    if (!pushed.ok && pushed.reason === 'rejected' && branch !== undefined) pushed = await pushAtomic(git, options.config, updates);
+    const createBranch = options.createSyncBranch === true && commit !== linearTip;
+    let recordedIds = idsCommit;
+    let pushed: PushResult;
+    if (createBranch) {
+      // The ids record the branch's head as the sync's own push, only together with that push.
+      recordedIds = await commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: true, syncPushed: commit });
+      pushed = await pushAtomic(git, options.config, [...updates(recordedIds), { ref: branchRef(options.config.syncBranch), expected: null, next: commit }]);
+      // The branch is optional: a refusal that is not a lease (a rule on branch names, missing rights) moved nothing,
+      // and the record goes on without it.
+      if (!pushed.ok && pushed.reason === 'rejected') {
+        recordedIds = idsCommit;
+        pushed = await pushAtomic(git, options.config, updates(recordedIds));
+      }
+    } else {
+      pushed = await pushAtomic(git, options.config, updates(recordedIds));
+    }
     if (!pushed.ok) return null;
     if (pushed.updated.length > 0) result.changed = true;
-    result.state = { linear: commit, ids: idsCommit, uploads: uploadsCommit };
+    result.state = { linear: commit, ids: recordedIds, uploads: uploadsCommit };
     const recorded: SyncRecord = { commit, kind: merged ? 'merge' : 'ordinary', parents: commit === linearTip ? [] : parents };
     result.record = commit === linearTip ? null : recorded;
     return recorded;

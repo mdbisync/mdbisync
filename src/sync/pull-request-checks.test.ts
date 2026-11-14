@@ -336,6 +336,30 @@ describe('sync: pull request checks', () => {
     assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID},tests@run:${FAKE_ACTIONS_APP_ID} -->`));
   });
 
+  // A merge's parents are whatever its author chose: anyone who may push to the sync branch can make one look like the
+  // sync's own merge of the tracked branch or of Linear's state. Below such a merge, the earlier head's checks still count.
+  for (const parent of ['main', 'linear'] as const) it(`does not merge past a forged merge of ${parent === 'main' ? 'the tracked branch' : "Linear's state"} when the head note is deleted`, async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    // The sync records the head it pushed in its own state, beside the document ids.
+    assert.deepEqual(JSON.parse(await show('refs/mdbisync/ids:sync-pushed.json')), { head: await rev(SYNC_BRANCH) });
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'completed', conclusion: 'failure' }]);
+    // Linear's state below its tip: the tip is the branch's head itself.
+    await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nChanged.\n', 'Merge', await rev(parent === 'main' ? 'refs/heads/main' : 'refs/mdbisync/linear~1'));
+    const fixed = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nChanged and formatted.\n', 'Apply pre-commit fixes');
+    checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'deploy', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 }]);
+    h.editHeadNote('mdbisync/linear', () => '');
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.pullRequest?.merged, null, 'merged a head that never ran `tests`');
+    assert.deepEqual(run.report.pullRequest?.checks?.missing, ['tests']);
+    assert.equal(await rev('refs/heads/main'), h.start);
+    checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const merged = await sync();
+    assert.ok(merged.report.pullRequest?.merged);
+  });
+
   // Anyone who may write commit statuses can name one after a check run; only the check's own publisher proves it ran.
   it('does not let a commit status or another app stand in for an expected check run', async () => {
     const path = 'eng/notes/plan.md';
