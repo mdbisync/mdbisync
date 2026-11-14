@@ -23,7 +23,7 @@ import { detectConflicts } from '../merge/index.ts';
 import { documentPath } from './paths.ts';
 import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
-import { createAssetCapture, ImageBlockedError, DownloadRetryError, type CapturedAssets } from './assets.ts';
+import { createAssetCapture, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
@@ -410,7 +410,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         if (!unchanged || old?.entry.saved !== undefined) {
           // Upload URLs also enter the cache ref. Scan the original text so
           // localization cannot hide a secret embedded in a URL or its query.
-          const original = head + (doc.content ?? '');
+          const original = withNewUploadUrls(head + (doc.content ?? ''), assets.uploads, uploads);
           if (original !== text) findings = await gate.check(new Map<string, Buffer | string>([[path, original], ...assets.files]));
           if (findings?.length === 0) findings = await gate.check(candidate.files);
         }
