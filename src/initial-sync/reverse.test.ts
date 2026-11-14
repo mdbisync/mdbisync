@@ -21,7 +21,7 @@ import { resolveTargets } from '../setup/linear.ts';
 import { NEUTRAL_IDENTITY } from '../state/index.ts';
 import { Git, commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
 import { type SecurityGate } from '../sync/security.ts';
-import { LINK_VARIANT_LINKS } from '../sync/capture.ts';
+import { LINK_VARIANT_LINKS, capture } from '../sync/capture.ts';
 import { candidateKey } from '../sync/staged.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
 import { type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit } from './reverse.ts';
@@ -1444,6 +1444,47 @@ describe('the security gate of an initial sync from Linear', () => {
       assert.deepEqual(result.leftOutAtRecord.filter((entry) => entry.path.includes('dense-')), [{ path: 'eng/notes/dense-00.md', rule: 'security-hook' }]);
       for (let i = 1; i < count; i += 1) {
         assert.ok((await fixture.remote.text(['show', `refs/mdbisync/linear:eng/notes/dense-${String(i).padStart(2, '0')}.md`])).includes(url(ids[0]!)));
+      }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it('leaves densely linked new documents it could not check to the sync, which records them once the refused one is known', async () => {
+    const fixture = await createFixture();
+    try {
+      await fixture.seed(TREE);
+      const world = fakeWorld();
+      const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
+      const SECRET = ['blocked', 'value', '907'].join('-');
+      const count = 16;
+      const ids = Array.from({ length: count }, (_, i) => `doc-dense-${String(i).padStart(2, '0')}`);
+      // The last document is refused: past the targets the first documents stage alone.
+      const dense = ids.map((id, i) => doc(id, `dense-${String(i).padStart(2, '0')}`, { projectId: 'project-api' }, `${i === count - 1 ? `${SECRET}\n\n` : ''}${ids.filter((other) => other !== id).map((other) => `[${other}](${url(other)})`).join('\n')}\n`));
+      world.linear.documents = [...linearDocuments(), ...dense];
+      const refused = (files: ReadonlyMap<string, FileContent>) => [...files.values()].some((content) => contentBytes(content).toString().includes(SECRET));
+      const result = await gated(fixture, world, (text) => text.includes(SECRET), 2);
+      const waiting = result.leftOutAtRecord.filter((entry) => entry.path.includes('dense-') && entry.rule === 'security-unchecked');
+      assert.ok(waiting.length > 0, JSON.stringify(result.leftOutAtRecord));
+      // The sync reads every new document the record left out, whatever its cursor; the refused one gets its mark and is staged first next time.
+      const config = resolveStateConfig({});
+      const git = await fixture.clone('sync');
+      const linear = new LinearClient({ token: 'test', baseUrl: LINEAR_API, fetch: fakeFetch(world) });
+      const syncRun = async () => {
+        const fetched = await fetchState(git, config);
+        const mapping = await loadMapping(git, fetched.tracked);
+        const { targets } = await resolveTargets(linear, mapping.zones.values());
+        assert.ok(targets);
+        const context = { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY };
+        const staged = new Set<string>();
+        await capture(context, { config, state: fetched.state, identity: NEUTRAL_IDENTITY, stageOnly: true, security: { configured: true, check: async (files) => { staged.add(candidateKey(files)); return []; } } });
+        return capture(context, { config, state: fetched.state, identity: NEUTRAL_IDENTITY, security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : refused(files) ? [{ hook: 'privacy-check', line: 1 }] : []) } });
+      };
+      await syncRun();
+      const second = await syncRun();
+      assert.deepEqual(second.leftOut, []);
+      for (let i = 0; i < count - 1; i += 1) {
+        assert.ok((await fixture.remote.text(['show', `refs/mdbisync/linear:eng/notes/dense-${String(i).padStart(2, '0')}.md`])).includes(url(ids[count - 1]!)));
       }
     } finally {
       await fixture.cleanup();

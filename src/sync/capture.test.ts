@@ -1171,7 +1171,7 @@ describe('staged texts with rejected link targets', () => {
     const candidates = new Map(paths.map((path, i) => [documentIds.get(path)!, { index: i, path, files: new Map<string, FileContent>() }]));
     const work = { texts: 0, characters: 0, resets: 0 };
     const textOf = (candidate: { index: number }, targets: ReadonlyMap<string, string>) => {
-      const text = links(candidate.index).map((i) => (targets.has(paths[i]!) ? `[d](./d${i}.md)` : `[d](https://linear.app/team/document/d${i})`)).join('\n') + '\n';
+      const text = links(candidate.index).map((i) => (targets.has(paths[i]!) ? `[d](./d${i}.md)` : `[d](fallback:d${i})`)).join('\n') + '\n';
       work.texts += 1;
       work.characters += text.length;
       return text;
@@ -1190,7 +1190,7 @@ describe('staged texts with rejected link targets', () => {
   const dense = (count: number) => corpus(count, (index) => Array.from({ length: count }, (_, i) => i).filter((i) => i !== index));
   const unlimited = () => ({ sets: Number.MAX_SAFE_INTEGER, work: Number.MAX_SAFE_INTEGER });
   /** The targets a staged text of document `index` has rejected. */
-  const rejectedIn = (set: Map<string, FileContent>) => [...String([...set.values()][0]).matchAll(/document\/d(\d+)/g)].map(([, i]) => Number(i));
+  const rejectedIn = (set: Map<string, FileContent>) => [...String([...set.values()][0]).matchAll(/fallback:d(\d+)/g)].map(([, i]) => Number(i));
 
   it('stages every combination of a few rejected targets, and nothing for a text without links', () => {
     const { variants } = corpus(5, (index) => (index === 0 ? [1, 2, 3] : []));
@@ -1198,14 +1198,14 @@ describe('staged texts with rejected link targets', () => {
     // Each of the 7 non-empty sets of rejected targets gives its own text.
     assert.equal(new Set(texts).size, 7);
     assert.equal(texts.length, 7);
-    assert.ok(texts.every((text) => text.includes('https://linear.app/')));
+    assert.ok(texts.every((text) => text.includes('(fallback:')));
   });
 
   it('stages each link alone and all together for a text with more targets', () => {
     const { variants } = corpus(8, (index) => (index === 0 ? [1, 2, 3, 4, 5, 6] : []));
     const texts = [...variants()].map((set) => String(set.get('docs/d000.md')));
     assert.equal(texts.length, 7);
-    assert.equal(texts.filter((text) => text.split('https://linear.app/').length === 2).length, 6);
+    assert.equal(texts.filter((text) => text.split('(fallback:').length === 2).length, 6);
     assert.ok(texts.some((text) => !text.includes('./d')));
   });
 
