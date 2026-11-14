@@ -23,7 +23,7 @@
 //    files. The sync refuses to run until it is merged.
 
 import { posix } from 'node:path';
-import { splitFile } from '../format/index.ts';
+import { joinFile, splitFile } from '../format/index.ts';
 import { type LinearDocument, LinearError } from '../linear/index.ts';
 import { folderOf, nearestZone } from '../mapping/annotations.ts';
 import { type MappedDocument, type Place, type RepositoryMapping, loadMapping } from '../mapping/index.ts';
@@ -63,7 +63,7 @@ import {
 import { createAssetCapture, ImageBlockedError } from '../sync/assets.ts';
 import { captureCursorTrailer, cursorTime, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
 import { type SecurityGate, securityGate } from '../sync/security.ts';
-import { documentPath, titlePath } from '../sync/paths.ts';
+import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
@@ -132,7 +132,7 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
   const invalid = (place: Place) => (candidate: string) => !landsInPlace(input.mapping, candidate, place);
 
   const folderOfPlace = (place: Place) => folders.get(placeKey(place)) ?? '';
-  const plainPath = (title: string, place: Place) => `${posix.join(folderOfPlace(place), titlePath(title))}.md`;
+  const plainPath = (title: string, place: Place) => titleFile(folderOfPlace(place), title);
   const named = new Map<string, string>();
 
   // An encoded name belongs to the title it encodes: `Q3%3A goals.md` is the file of `Q3: goals`, even when
@@ -449,11 +449,7 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       const body = restored(entry);
       const tracked = input.texts.get(entry.path);
       if (tracked === undefined) return body;
-      const { head } = splitFile(tracked);
-      // A file that ends right after its closing fence needs a line break before the body
-      // (a head that is only a byte order mark has no fence).
-      const fenced = head.replace(/^﻿/, '') !== '';
-      return fenced && body !== '' && !head.endsWith('\n') ? `${head}\n${body}` : head + body;
+      return joinFile(splitFile(tracked).head, body);
     };
     const leaveOut = (paths: Iterable<string>, rule: RecordLeftOutRule) => {
       const out = new Set(paths);

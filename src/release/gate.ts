@@ -12,6 +12,9 @@ export interface GateOptions {
   repository: string;
   sourceSha: string;
   token: string;
+  // The GitHub account id whose token posts the security-gate status. A
+  // status of that context from anyone else refuses the release.
+  statusCreatorId: number;
   // The workflow token cannot read secret scanning alerts; a separate read-only token can.
   secretScanningToken?: string | undefined;
   apiUrl?: string | undefined;
@@ -86,11 +89,18 @@ function client(apiUrl: string, defaultToken: string) {
 
 type Client = ReturnType<typeof client>;
 
-async function gateStatus(api: Client, repo: string, sha: string): Promise<string | undefined> {
+async function gateStatus(api: Client, repo: string, sha: string, creatorId: number): Promise<string | undefined> {
   // Statuses are listed newest first; the first one of the context is its current state.
   const statuses = await api.list(`/repos/${repo}/commits/${sha}/statuses?per_page=100`, 'commit statuses');
   const latest = statuses.find((status) => status.context === GATE_STATUS);
   if (latest === undefined) return `${GATE_STATUS} status is missing on ${sha}`;
+  // Anyone with write access to statuses can post this context; only the configured account is trusted.
+  const creator = fields(latest.creator);
+  if (creator.id !== creatorId) {
+    const login = typeof creator.login === 'string' ? creator.login : 'an unknown account';
+    const who = typeof creator.id === 'number' ? `${login} (id ${creator.id})` : login;
+    return `${GATE_STATUS} status on ${sha} was posted by ${who}, not by the configured account (id ${creatorId})`;
+  }
   if (latest.state === 'success') return undefined;
   const description = typeof latest.description === 'string' && latest.description !== '' ? `: ${latest.description}` : '';
   return `${GATE_STATUS} status is ${String(latest.state)} on ${sha}${description}`;
@@ -149,14 +159,20 @@ async function codeqlCoverage(api: Client, repo: string, sha: string): Promise<s
   return failed.length === 0 ? undefined : `the latest CodeQL analysis on main does not cover ${sha}: ${failed.join('; ')}`;
 }
 
+// The account id from the workflow's setting: digits only, so '0x10', '1e3' or ' 7' never name another account.
+export function parseCreatorId(value: string | undefined): number {
+  return /^[1-9][0-9]*$/.test(value ?? '') ? Number(value) : Number.NaN;
+}
+
 export async function releaseGate(options: GateOptions): Promise<string[]> {
-  const { repository, sourceSha, token, secretScanningToken } = options;
+  const { repository, sourceSha, token, statusCreatorId, secretScanningToken } = options;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('Expected a repository such as owner/name');
   validateSha(sourceSha);
   if (!token) throw new Error('A GitHub token is required');
+  if (!Number.isSafeInteger(statusCreatorId) || statusCreatorId <= 0) throw new Error(`Expected the ${GATE_STATUS} status creator as a positive GitHub account id`);
   const api = client(options.apiUrl ?? 'https://api.github.com', token);
   const checks = [
-    gateStatus(api, repository, sourceSha),
+    gateStatus(api, repository, sourceSha, statusCreatorId),
     codeScanningAlerts(api, repository),
     secretScanningAlerts(api, repository, secretScanningToken),
     dependabotAlerts(api, repository),
@@ -178,10 +194,11 @@ export async function releaseGate(options: GateOptions): Promise<string[]> {
 
 if (import.meta.main) {
   const [repository, sourceSha] = process.argv.slice(2);
-  if (!repository || !sourceSha) throw new Error('Usage: gate.ts OWNER/REPOSITORY SOURCE_SHA (token in GITHUB_TOKEN)');
+  if (!repository || !sourceSha) throw new Error('Usage: gate.ts OWNER/REPOSITORY SOURCE_SHA (token in GITHUB_TOKEN, status creator id in SECURITY_GATE_CREATOR_ID)');
   const reasons = await releaseGate({
     repository, sourceSha,
     token: process.env.GITHUB_TOKEN ?? '',
+    statusCreatorId: parseCreatorId(process.env.SECURITY_GATE_CREATOR_ID),
     secretScanningToken: process.env.SECRET_SCANNING_TOKEN || undefined,
     apiUrl: process.env.GITHUB_API_URL,
   });

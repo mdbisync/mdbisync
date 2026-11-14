@@ -12,7 +12,7 @@ import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
-import { lintInTree } from '../format/index.ts';
+import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { capture, prepareLfs } from './capture.ts';
 import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
@@ -104,6 +104,65 @@ describe('capture from Linear', () => {
     const tip = result.state.linear;
     await refresh();
     assert.equal((await run()).state.linear, tip);
+  });
+
+  it('keeps a Linear body that opens with a front matter block as the body, in a folder README too', async () => {
+    // Linear spells a thematic break `---`: a document that opens with a rule and has another one later
+    // reads, in a file without front matter, as a front matter block.
+    const blockFirst = '---\nlinear-team: Docs\nlinear-project: Handbook\n---\n\nText.\n';
+    world.linear.documents.push(
+      {id:'notes', title:'notes', projectId:'project-api', content:blockFirst, createdAt:'2026-01-02T00:00:00Z'},
+      {id:'sub-readme', title:'sub/README', projectId:'project-api', content:blockFirst, createdAt:'2026-01-03T00:00:00Z'},
+    );
+    const result = await run();
+    assert.equal(result.ok, true);
+    for (const path of ['docs/notes.md', 'docs/sub/README.md']) {
+      const file = await text(path);
+      assert.equal(splitFile(file).head, '', path);
+      assert.ok(sameMarkdown(splitFile(file).body, blockFirst), path);
+    }
+    const mapping = await loadMapping(context.git, result.state.linear!);
+    assert.deepEqual(mapping.problems, []);
+    assert.equal(mapping.zones.has('docs/sub'), false);
+    assert.deepEqual(mapping.documents.find((file) => file.path === 'docs/sub/README.md')?.title, 'sub/README');
+    // Linear still returns its own spelling: the next run has nothing to capture.
+    await refresh();
+    assert.equal((await run()).state.linear, result.state.linear);
+    // An edit in git goes back to Linear as the body, the opening rule included.
+    const edited = (await text('docs/notes.md')).replace('Text.', 'Edited in git.');
+    const tracked = await commitTree(context.git, {parents:[result.state.linear!], base:result.state.linear, changes:new Map([['docs/notes.md', edited]]), message:'Edit document', identity:IDENTITY});
+    await context.git.run(['push', 'origin', `${tracked}:refs/heads/main`]);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const written = await writeTrackedToLinear(context, {config, state:result.state});
+    assert.deepEqual(written.updated, ['docs/notes.md']);
+    assert.ok(sameMarkdown(world.linear.documents.find((doc) => doc.id === 'notes')!.content!, blockFirst.replace('Text.', 'Edited in git.')));
+  });
+
+  it('leaves an excluded file whose body opens with a rule under front matter as last accepted', async () => {
+    // The image is gone from git, so the file is excluded; Linear still holds the same text and its upload.
+    const hash = createHash('sha256').update(png).digest('hex');
+    const url = 'https://uploads.linear.app/workspace/pixel.png';
+    const head = '---\ncategory: work\n---\n\n';
+    const body = '---\nA.\n---\n\n![Image](pixel.png)\n';
+    await fixture.seed({'docs/plan.md': head + body, 'docs/pixel.png': png});
+    const git = await fixture.clone('excluded');
+    const fetched = await fetchState(git, config);
+    const linearTip = await commitTree(git, {parents:[fetched.tracked], base:fetched.tracked, changes:new Map([['docs/pixel.png', null]]), message:'Remove the image', identity:IDENTITY});
+    const ids = await commitIds(git, fetched.state.ids, new Map([['docs/plan.md', {id:'plan'}]]), IDENTITY);
+    const uploads = await commitUploads(git, fetched.state.uploads, new Map([[hash, url]]), IDENTITY);
+    assert.equal((await pushAtomic(git, config, [
+      {ref:stateRef(config, 'linear'), expected:fetched.state.linear, next:linearTip},
+      {ref:stateRef(config, 'ids'), expected:fetched.state.ids, next:ids},
+      {ref:stateRef(config, 'uploads'), expected:fetched.state.uploads, next:uploads},
+    ])).ok, true);
+    world.linear.documents[0]!.content = body.replace('pixel.png', url);
+    const state = await fetchState(git, config);
+    context = {...context, git, fetched:state, mapping:await loadMapping(git, state.tracked)};
+    const result = await capture(context, {config, state:context.fetched.state, identity:IDENTITY, fetch:async () => new Response(png, {headers:{'content-type':'image/png'}})});
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.changed, []);
+    assert.equal(result.state.linear, linearTip);
   });
 
   for (const [name, content, warns] of [
@@ -485,6 +544,19 @@ describe('capture from Linear', () => {
     assert.equal((await fixture.remote.run(['cat-file','-e',`${result.state.linear}:docs/future.md`],{okCodes:[0,128]})).code, 128);
   });
 
+  it('gives the security gate no path that starts with a dash for a title that does', async () => {
+    world.linear.documents.push({id:'dash', title:'--config=x', projectId:'project-api', createdAt:'2026-01-02T00:00:00Z', content:'Dash.\n'});
+    const checked: string[] = [];
+    const result = await capture(context, {config, state:context.fetched.state, identity:IDENTITY,
+      security:{configured:true, check:async (files) => { checked.push(...files.keys()); return []; }},
+    });
+    assert.equal(result.ok, true);
+    assert.ok(checked.includes('docs/--config=x.md'));
+    assert.ok(!checked.some((path) => path.startsWith('-')));
+    assert.equal(await text('docs/--config=x.md'), 'Dash.\n');
+    assert.equal(world.linear.documents.at(-1)!.title, '--config=x');
+  });
+
   it('combines image and security findings without downloading any asset or disclosing image text', async () => {
     world.linear.documents[0]!.content = '![Allowed](https://uploads.linear.app/a.png)\n\n![private alt](https://example.com/private-destination)\n';
     const result = await capture(context, {config, state:context.fetched.state,
@@ -849,6 +921,22 @@ it('makes safe title paths and deterministic collision names', () => {
   // A git-originated file name that names the Git directory is not kept.
   assert.equal(documentPath('docs', 'git~2/notes', 'one', new Set(), 'docs/git~2/notes.md'), 'docs/%67it~2/notes.md');
   assert.equal(documentPath('docs', '100% done', 'one', new Set(), 'docs/100% done.md'), 'docs/100% done.md');
+  // A path at the repository root never starts with `-`, which tools read as an option.
+  assert.equal(documentPath('', '--config=x', 'one', new Set()), '%2D-config=x.md');
+  assert.equal(documentPath('', '-c/-d', 'one', new Set()), '%2Dc/-d.md');
+  assert.equal(documentPath('', 'a-b', 'one', new Set()), 'a-b.md');
+  // Such a file at the root moves to the encoded name, however it was named before.
+  assert.equal(documentPath('', '-x', 'one', new Set(), '-x.md'), '%2Dx.md');
+  const rootCollision = documentPath('', '-x', 'one', new Set(['%2Dx.md']));
+  assert.match(rootCollision, /^%2Dx~[0-9a-f]{12}\.md$/);
+  assert.equal(documentPath('', '-x', 'one', new Set(['%2Dx.md']), rootCollision), rootCollision);
+  assert.equal(documentPath('', '-x', 'one', new Set(['%2Dx.md']), `-${rootCollision.slice(3)}`), rootCollision);
+  // Below a folder a leading dash is no option: names, also those from before, stay as they are.
+  assert.equal(documentPath('docs', '-x', 'one', new Set()), 'docs/-x.md');
+  assert.equal(documentPath('docs', '-Q3: plan', 'one', new Set(), 'docs/-Q3%3A plan.md'), 'docs/-Q3%3A plan.md');
+  const folderCollision = documentPath('docs', '-x', 'one', new Set(['docs/-x.md']));
+  assert.equal(documentPath('docs', '-x', 'one', new Set(['docs/-x.md']), folderCollision), folderCollision);
+  assert.equal(documentPath('-notes', '-x', 'one', new Set()), '-notes/-x.md');
   const occupied = new Set(['docs/plan.md']);
   const collision = documentPath('docs', 'plan', 'two', occupied);
   assert.notEqual(collision, 'docs/plan.md');

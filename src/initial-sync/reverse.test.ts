@@ -1158,8 +1158,8 @@ describe('planning an initial sync from Linear', () => {
   });
 
   it('names files for titles a path cannot hold by the rule the capture uses, and keeps the titles', () => {
-    const titles = ['Q3: plans?', 'a*b', ' lead', 'guides/setup', '/root', 'a/../b', 'end.', '50%', 'CON', 'pipe|and\\slash'];
-    const plan = planLinearToGit(input(titles.map((title, index) => listed(`doc-${index}`, title, `2026-01-01T00:00:0${index}Z`))));
+    const titles = ['Q3: plans?', 'a*b', ' lead', 'guides/setup', '/root', 'a/../b', 'end.', '50%', 'CON', 'pipe|and\\slash', '--config=x', 'a/-b'];
+    const plan = planLinearToGit(input(titles.map((title, index) => listed(`doc-${index}`, title, `2026-01-01T00:00:${String(index).padStart(2, '0')}Z`))));
     const byId = new Map(plan.create.map((entry) => [entry.documentId, entry]));
     assert.deepEqual(
       titles.map((title, index) => [title, byId.get(`doc-${index}`)?.path]),
@@ -1174,6 +1174,8 @@ describe('planning an initial sync from Linear', () => {
         ['50%', 'notes/50%25.md'],
         ['CON', 'notes/%43ON.md'],
         ['pipe|and\\slash', 'notes/pipe%7Cand%5Cslash.md'],
+        ['--config=x', 'notes/--config=x.md'],
+        ['a/-b', 'notes/a/-b.md'],
       ],
     );
     // The title stays the document's; the file's own title is its encoded path.

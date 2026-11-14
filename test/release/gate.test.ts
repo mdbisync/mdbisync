@@ -4,13 +4,15 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { parse } from 'yaml';
-import { releaseGate } from '../../src/release/gate.ts';
+import { parseCreatorId, releaseGate } from '../../src/release/gate.ts';
 import { validateVersion } from '../../src/release/package.ts';
 
 const repo = 'example/project';
 const source = 'a'.repeat(40);
 const later = 'b'.repeat(40);
 const older = 'c'.repeat(40);
+const scanner = { login: 'scanner', id: 4242, type: 'User' };
+const intruder = { login: 'someone-else', id: 777, type: 'User' };
 
 interface Reply { status?: number; body: unknown; link?: string }
 type Routes = Record<string, Reply>;
@@ -20,8 +22,8 @@ function cleanRoutes(): Routes {
   return {
     [`/repos/${repo}/commits/${source}/statuses?per_page=100`]: { body: [
       { context: 'ci', state: 'failure' },
-      { context: 'security-gate', state: 'success', description: 'No open findings' },
-      { context: 'security-gate', state: 'failure', description: 'An older run' },
+      { context: 'security-gate', state: 'success', description: 'No open findings', creator: scanner },
+      { context: 'security-gate', state: 'failure', description: 'An older run', creator: scanner },
     ] },
     [`/repos/${repo}/code-scanning/alerts?state=open&ref=refs/heads/main&per_page=100`]: { body: [
       { number: 7, rule: { severity: 'warning', security_severity_level: 'low' } },
@@ -58,7 +60,7 @@ async function withApi(routes: Routes, run: (apiUrl: string, seen: IncomingMessa
 }
 
 function gate(apiUrl: string, secretScanningToken = 'secret-read') {
-  return releaseGate({ repository: repo, sourceSha: source, token: 'workflow', secretScanningToken, apiUrl });
+  return releaseGate({ repository: repo, sourceSha: source, token: 'workflow', statusCreatorId: scanner.id, secretScanningToken, apiUrl });
 }
 
 test('the gate passes a green status, no blocking alerts and CodeQL analyses that include the source', async () => {
@@ -81,12 +83,57 @@ test('the gate refuses a source commit without the security-gate status and name
 for (const [state, description] of [['failure', 'Open findings: 2'], ['pending', 'Scanning'], ['error', '']] as const) {
   test(`the gate refuses a security-gate status that is ${state}`, async () => {
     const routes = cleanRoutes();
-    routes[`/repos/${repo}/commits/${source}/statuses?per_page=100`] = { body: [{ context: 'security-gate', state, description }] };
+    routes[`/repos/${repo}/commits/${source}/statuses?per_page=100`] = { body: [{ context: 'security-gate', state, description, creator: scanner }] };
     await withApi(routes, async (apiUrl) => {
       assert.deepEqual(await gate(apiUrl), [`security-gate status is ${state} on ${source}${description ? `: ${description}` : ''}`]);
     });
   });
 }
+
+test('the gate refuses a green security-gate status posted by another account, even over an older trusted one', async () => {
+  const routes = cleanRoutes();
+  routes[`/repos/${repo}/commits/${source}/statuses?per_page=100`] = { body: [
+    { context: 'security-gate', state: 'success', description: 'No open findings', creator: intruder },
+    { context: 'security-gate', state: 'success', description: 'No open findings', creator: scanner },
+  ] };
+  await withApi(routes, async (apiUrl) => {
+    assert.deepEqual(await gate(apiUrl), [`security-gate status on ${source} was posted by someone-else (id 777), not by the configured account (id 4242)`]);
+  });
+});
+
+test('the gate passes a newer trusted status over an older one from another account', async () => {
+  const routes = cleanRoutes();
+  routes[`/repos/${repo}/commits/${source}/statuses?per_page=100`] = { body: [
+    { context: 'security-gate', state: 'success', description: 'No open findings', creator: scanner },
+    { context: 'security-gate', state: 'failure', description: 'Not from the scanner', creator: intruder },
+  ] };
+  await withApi(routes, async (apiUrl) => {
+    assert.deepEqual(await gate(apiUrl), []);
+  });
+});
+
+test('the gate names a creator without a numeric id by login only', async () => {
+  const routes = cleanRoutes();
+  routes[`/repos/${repo}/commits/${source}/statuses?per_page=100`] = { body: [{ context: 'security-gate', state: 'success', creator: { login: 'scanner', id: '4242' } }] };
+  await withApi(routes, async (apiUrl) => {
+    assert.deepEqual(await gate(apiUrl), [`security-gate status on ${source} was posted by scanner, not by the configured account (id 4242)`]);
+  });
+});
+
+test('the creator id setting accepts plain digits only', () => {
+  assert.equal(parseCreatorId('16704707'), 16704707);
+  for (const bad of [undefined, '', ' 7', '7 ', '0', '07', '-7', '0x10', '1e3', '1.5', 'scanner']) {
+    assert.ok(Number.isNaN(parseCreatorId(bad)), String(bad));
+  }
+});
+
+test('the gate refuses a security-gate status without a creator', async () => {
+  const routes = cleanRoutes();
+  routes[`/repos/${repo}/commits/${source}/statuses?per_page=100`] = { body: [{ context: 'security-gate', state: 'success', creator: null }] };
+  await withApi(routes, async (apiUrl) => {
+    assert.deepEqual(await gate(apiUrl), [`security-gate status on ${source} was posted by an unknown account, not by the configured account (id 4242)`]);
+  });
+});
 
 test('the gate refuses a green status with one open medium code scanning alert, found on a later page', async () => {
   const routes = cleanRoutes();
@@ -182,9 +229,13 @@ test('the gate never follows a page link to another host with its token', async 
 });
 
 test('the gate rejects a malformed repository or source commit before any request', async () => {
-  await assert.rejects(releaseGate({ repository: 'example/project/../x', sourceSha: source, token: 't' }), /owner\/name/);
-  await assert.rejects(releaseGate({ repository: repo, sourceSha: 'main', token: 't' }), /full lowercase commit SHA/);
-  await assert.rejects(releaseGate({ repository: repo, sourceSha: source, token: '' }), /token is required/);
+  const statusCreatorId = scanner.id;
+  await assert.rejects(releaseGate({ repository: 'example/project/../x', sourceSha: source, token: 't', statusCreatorId }), /owner\/name/);
+  await assert.rejects(releaseGate({ repository: repo, sourceSha: 'main', token: 't', statusCreatorId }), /full lowercase commit SHA/);
+  await assert.rejects(releaseGate({ repository: repo, sourceSha: source, token: '', statusCreatorId }), /token is required/);
+  for (const bad of [Number.NaN, 0, -1, 1.5]) {
+    await assert.rejects(releaseGate({ repository: repo, sourceSha: source, token: 't', statusCreatorId: bad }), /status creator as a positive GitHub account id/);
+  }
 });
 
 test('release.yml gates final versions only and builds a final version only after the gate passed', async () => {
@@ -197,7 +248,8 @@ test('release.yml gates final versions only and builds a final version only afte
   assert.deepEqual(gateJob.permissions, { contents: 'read', statuses: 'read', 'security-events': 'read', 'vulnerability-alerts': 'read' });
   const step = gateJob.steps.at(-1);
   assert.equal(step.run, 'node src/release/gate.ts "$GITHUB_REPOSITORY" "$SOURCE_SHA"');
-  assert.deepEqual(Object.keys(step.env).sort(), ['GITHUB_TOKEN', 'SECRET_SCANNING_TOKEN']);
+  assert.deepEqual(Object.keys(step.env).sort(), ['GITHUB_TOKEN', 'SECRET_SCANNING_TOKEN', 'SECURITY_GATE_CREATOR_ID']);
+  assert.match(step.env.SECURITY_GATE_CREATOR_ID, /^[1-9][0-9]*$/);
   assert.equal(gateJob.steps[0].with['persist-credentials'], false);
   assert.equal(tests.needs, 'gate');
   assert.equal(tests.if, "${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && contains(inputs.version, '-'))) }}");

@@ -92,7 +92,8 @@ export async function securityGate(git: Git, tracked: Oid, options: SecurityGate
         await scratch.run(['clean', '-fdx', '--quiet']);
         for (const [path, content] of files) {
           checkRepoPath(path);
-          if (path === PRE_COMMIT_CONFIG) return [{ hook: SECURITY_ALIAS, line: 1 }];
+          // pre-commit and its hooks would read a path that starts with `-` as an option, such as `--config`.
+          if (path === PRE_COMMIT_CONFIG || path.startsWith('-')) return [{ hook: SECURITY_ALIAS, line: 1 }];
           await mkdir(dirname(join(dir, path)), { recursive: true });
           await writeFile(join(dir, path), content);
         }

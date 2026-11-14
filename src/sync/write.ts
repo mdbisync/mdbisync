@@ -23,7 +23,7 @@
 import { type ContainerCapacity, assessCapacity, capacityBlocked, containerKey, readContainerDocuments } from '../run/capacity.ts';
 import { randomUUID } from 'node:crypto';
 import { documentPath } from './paths.ts';
-import { sameMarkdown, splitFile } from '../format/index.ts';
+import { joinFile, sameMarkdown, splitFile } from '../format/index.ts';
 import { type DocumentPatch, type LinearClient, type LinearDocument, LinearError, LinearStoppedError, describeLinearError } from '../linear/index.ts';
 import { type Place } from '../mapping/index.ts';
 import { type RunContext } from '../run/preflight.ts';
@@ -1003,7 +1003,7 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     // Written documents: the merge result's front matter and what Linear stored.
     for (const [path, { content, sent }] of stored) {
       const file = merge.result.get(path) as SideFile;
-      const text = splitFile(textOf(file)).head + restoreBody(transforms, path, content, sent);
+      const text = joinFile(splitFile(textOf(file)).head, restoreBody(transforms, path, content, sent));
       if (resultFiles.get(path) !== undefined && text === textOf(file)) continue;
       changes.set(path, text);
     }
