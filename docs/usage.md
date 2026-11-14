@@ -259,12 +259,24 @@ remain after release; its presence alone does not mean a batch is on hold.
   `required-checks`. A head that lacks one of them waits for it, as for a
   pending check. A commit pushed with a workflow's own `GITHUB_TOKEN` (a
   formatter's fix, say) starts no other workflow, so without this rule it
-  would carry only that workflow's check and merge past the others. The
-  expected names are kept in a hidden HTML note in the pull request
-  description. A person can edit that note, so it only adds names:
-  whatever it says, the sync also reads the checks registered on the
-  branch's commits below the head, down to the nearest commit the sync
-  made itself, from git and GitHub. When that commit is more than 50
+  would carry only that workflow's check and merge past the others. A
+  check expected from an earlier head counts only from the publisher that
+  registered it there: a check run from the same GitHub App, or a commit
+  status from the same account. A commit status or another App's check run
+  under the same name does not stand in for it. Workflows in the repository
+  all publish as the same GitHub Actions App, so this tells your CI apart
+  from other Apps and accounts, not one of your workflows from another. A
+  CI that posts statuses from a different account on each build (the
+  pusher's token, say) never meets an expectation from the previous
+  account, and a check whose publisher GitHub does not name (a deleted
+  account) is never met either: both end in `checks-missing` until the
+  sync pushes the branch again. A name in `required-checks`
+  that never registered on an earlier head counts from any publisher. The
+  expected checks and their publishers are kept in a hidden HTML note in
+  the pull request description. A person can edit that note, so it only
+  adds checks: whatever it says, the sync also reads the checks registered
+  on the branch's commits below the head, down to the nearest commit the
+  sync made itself, from git and GitHub. When that commit is more than 50
   commits below the head, the head does not merge until the sync pushes
   again. A head the sync pushes itself starts the repository's whole CI,
   so it expects only what the head it was pushed on registered, besides

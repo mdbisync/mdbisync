@@ -265,7 +265,7 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   const fresh = head !== previous || opened;
   const grace = options.mergeGraceSeconds ?? 60;
   if (fresh && grace === 0) return { ...result, waiting: true };
-  const expectation = checkExpectation(options, expected.names);
+  const expectation = checkExpectation(options, expected.checks);
   const checks = fresh ? await waitForChecks(options.github, head, grace, expectation) : await readChecks(options.github, head, expectation);
   result.checks = checks.failed;
   const expired = pastDeadline(since, options.checkDeadlineMinutes ?? DEFAULT_CHECK_DEADLINE_MINUTES, new Date());

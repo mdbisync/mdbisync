@@ -275,8 +275,11 @@ registers is a repository setting, not a fault of the batch's documents.
 The sync expects, besides the checks registered on a head, every check
 registered on the pull request's earlier heads and every name in
 `required-checks`, and it merges no head with no checks at all unless
-`merge-without-checks` is `true`. A head that lacks an expected check, or
-has none, waits; past the deadline the run reports the setup error
+`merge-without-checks` is `true`. A check expected from an earlier head
+counts only from the publisher that registered it there (the same GitHub
+App for a check run, the same account for a commit status), so a
+same-name check from anyone else does not satisfy it. A head that lacks
+an expected check, or has none, waits; past the deadline the run reports the setup error
 `checks-missing`, and nothing is suspended or marked in Linear. A check
 only GitHub's branch rules require lets the sync try the merge: if GitHub
 refuses it, the run reports `merge-refused`; a later run that meets the

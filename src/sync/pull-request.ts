@@ -33,6 +33,7 @@ import {
   type CheckExpectation,
   type CheckFailure,
   type CheckState,
+  type ExpectedCheck,
   type GitHubRepository,
   PullRequestError,
   ensurePullRequest,
@@ -246,7 +247,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     // what lets it merge again.
     const checkedExpectation = async () => {
       const known = await expectedChecks(github, sync as Oid, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, linear });
-      return known.complete ? checkExpectation(options, known.names) : null;
+      return known.complete ? checkExpectation(options, known.checks) : null;
     };
     const keepCheckedHead = open !== null && pending && suspended?.waiting !== true && noted === null
       && await mergedTree(git, tracked, sync as Oid) !== null
@@ -339,7 +340,7 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const fresh = result.branchMoved || opened || suspended?.released !== undefined;
     const grace = options.mergeGraceSeconds ?? DEFAULT_MERGE_GRACE_SECONDS;
     if (fresh && grace === 0) return result;
-    const expectation = checkExpectation(options, expected.names);
+    const expectation = checkExpectation(options, expected.checks);
     result.checks = fresh ? await waitForChecks(github, head, grace, expectation) : await readChecks(github, head, expectation);
     const expired = pastDeadline(since, options.checkDeadlineMinutes ?? DEFAULT_CHECK_DEADLINE_MINUTES, new Date());
     // A check still pending, queued or never started at the deadline counts as failed.
@@ -568,7 +569,7 @@ function commitMerge(git: Git, tree: string, parents: [Oid, Oid], message: strin
 }
 
 /** Names, counts and GitHub's reason for a refused merge, and the notes on its head; never document content. */
-function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null, notes: { head: Oid; since: Date; held: RedMainHold | null; checks: readonly string[]; unverified?: readonly string[] }): string {
+function pullRequestBody(paths: readonly string[], refusal: MergeRefusal | null, notes: { head: Oid; since: Date; held: RedMainHold | null; checks: readonly ExpectedCheck[]; unverified?: readonly string[] }): string {
   const lines = [
     'Changes made in Linear, on their way to this branch.',
     '',

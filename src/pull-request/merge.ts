@@ -31,12 +31,56 @@ export interface CheckState {
   missing?: string[];
 }
 
+/**
+ * Who published a check: the GitHub App behind a check run, or the account
+ * that created a commit status. Anyone who may write commit statuses can name
+ * one as they like, so a name alone does not tell who ran the check.
+ */
+export interface CheckPublisher {
+  kind: 'run' | 'status';
+  /**
+   * The App's or the account's id on GitHub; 0 when GitHub named none (a
+   * deleted App or account, a status not found in the list). A check expected
+   * from publisher 0 is never satisfied: who ran it cannot be told.
+   */
+  id: number;
+}
+
+/** A check a commit must pass: its name and, when known, the publisher it must come from. */
+export interface ExpectedCheck {
+  name: string;
+  /** Absent for a configured name: a check of that name from any publisher counts. */
+  publisher?: CheckPublisher;
+}
+
 /** What a commit must show beyond the checks registered on it before it counts as passed. */
 export interface CheckExpectation {
-  /** Check names that must be registered on the commit and pass there; an absent one keeps it pending. */
-  names?: readonly string[];
+  /**
+   * Checks that must be registered on the commit and pass there; an absent one keeps it pending. A check with a
+   * publisher counts only when that publisher registered it: a same-name check from another one is not it.
+   */
+  checks?: readonly ExpectedCheck[];
   /** Whether a commit with no checks at all can pass; when false, such a commit stays pending. */
   allowNone?: boolean;
+}
+
+/** One check run (the latest of its name) or commit status (the latest of its context) on a commit. */
+export interface CommitCheck {
+  name: string;
+  publisher: CheckPublisher;
+  outcome: 'pending' | 'failed' | 'passed';
+  /** For a failed check: an https link to its run, when GitHub gave one. */
+  url?: string;
+  /** For a failed check run: its id, which its annotations are read by. */
+  checkRunId?: number;
+}
+
+/** Everything GitHub lists on a commit: its checks, whether it counts any, and notes for those it did not list. */
+export interface CommitChecks {
+  checks: CommitCheck[];
+  hasChecks: boolean;
+  /** "3 more check runs" and the like: checks GitHub counts but did not list, which are never read as passed. */
+  unlisted: string[];
 }
 
 /** A failed check run or commit status: its name, its page on GitHub and, for a check run, its id. */
@@ -66,18 +110,19 @@ export interface CheckAnnotation {
  * starts no other workflow, so what is absent there never ran.
  */
 export async function readChecks(target: GitHubRepository, sha: string, expect: CheckExpectation = {}): Promise<CheckState> {
-  const pending = new Set<string>();
-  const succeeded = new Set<string>();
-  const failures = new Map<string, CheckFailure>();
-  const fail = (name: string, url: unknown, checkRunId?: unknown) => {
-    if (failures.has(name)) return;
-    const failure: CheckFailure = { name };
-    const link = httpsLink(url);
-    if (link !== undefined) failure.url = link;
-    if (Number.isSafeInteger(checkRunId) && (checkRunId as number) > 0) failure.checkRunId = checkRunId as number;
-    failures.set(name, failure);
-  };
+  // Who created the statuses costs more requests; only a check expected from a status's account needs it.
+  const creators = (expect.checks ?? []).some(({ publisher }) => publisher?.kind === 'status');
+  return checkState(await readCommitChecks(target, sha, { creators }), expect);
+}
 
+/**
+ * The check runs and commit statuses on a commit, each with its publisher.
+ * A status's creator is read only with `creators`; without it every status's
+ * publisher is unknown.
+ */
+export async function readCommitChecks(target: GitHubRepository, sha: string, options: { creators: boolean }): Promise<CommitChecks> {
+  const checks: CommitCheck[] = [];
+  const unlisted: string[] = [];
   let seen = 0;
   let hasRuns = false;
   for (let page = 1; ; page += 1) {
@@ -87,17 +132,16 @@ export async function readChecks(target: GitHubRepository, sha: string, expect: 
       throw new PullRequestError(message('github.reading-check-runs'), answer.status);
     }
     hasRuns ||= body.total_count > 0;
-    for (const run of body.check_runs as Array<{ id?: unknown; name?: unknown; status?: unknown; conclusion?: unknown; html_url?: unknown }>) {
+    for (const run of body.check_runs as Array<{ id?: unknown; name?: unknown; status?: unknown; conclusion?: unknown; html_url?: unknown; app?: { id?: unknown } | null }>) {
       const name = typeof run.name === 'string' ? run.name : 'unnamed check';
-      if (run.status !== 'completed') pending.add(name);
-      else if (typeof run.conclusion !== 'string' || !PASSING_CONCLUSIONS.has(run.conclusion)) fail(name, run.html_url, run.id);
-      else succeeded.add(name);
+      const outcome = run.status !== 'completed' ? 'pending' : typeof run.conclusion === 'string' && PASSING_CONCLUSIONS.has(run.conclusion) ? 'passed' : 'failed';
+      checks.push(commitCheck(name, outcome, publisher('run', run.app?.id), run.html_url, run.id));
     }
     seen += body.check_runs.length;
     if (seen >= body.total_count) break;
     // Check runs GitHub counts but did not list are never read as passed.
     if (body.check_runs.length === 0 || page === MAX_PAGES) {
-      pending.add(`${body.total_count - seen} more check runs`);
+      unlisted.push(`${body.total_count - seen} more check runs`);
       break;
     }
   }
@@ -108,19 +152,76 @@ export async function readChecks(target: GitHubRepository, sha: string, expect: 
     throw new PullRequestError(message('github.reading-statuses'), answer.status);
   }
   // The combined status lists at most one page of contexts; ones it does not show are never read as passed.
-  if (combined.total_count > combined.statuses.length) pending.add(`${combined.total_count - combined.statuses.length} more commit statuses`);
-  for (const status of combined.statuses as Array<{ context?: unknown; state?: unknown; target_url?: unknown }>) {
+  if (combined.total_count > combined.statuses.length) unlisted.push(`${combined.total_count - combined.statuses.length} more commit statuses`);
+  const statuses = combined.statuses as Array<{ id?: unknown; context?: unknown; state?: unknown; target_url?: unknown }>;
+  const creators = statuses.length === 0 || !options.creators ? new Map<unknown, unknown>() : await statusCreators(target, sha, new Set(statuses.map(({ id }) => id)));
+  for (const status of statuses) {
     const name = typeof status.context === 'string' ? status.context : 'unnamed status';
-    if (status.state === 'pending') pending.add(name);
-    else if (status.state !== 'success') fail(name, status.target_url);
-    else succeeded.add(name);
+    const outcome = status.state === 'pending' ? 'pending' : status.state === 'success' ? 'passed' : 'failed';
+    checks.push(commitCheck(name, outcome, publisher('status', creators.get(status.id)), status.target_url));
+  }
+  return { checks, hasChecks: hasRuns || combined.total_count > 0, unlisted };
+}
+
+/**
+ * The account that created each of the given commit statuses, by status id.
+ * The combined status names no creator, so the commit's statuses are listed,
+ * newest first, until each given one is found; a status not found in
+ * `MAX_PAGES` pages has an unknown publisher.
+ */
+async function statusCreators(target: GitHubRepository, sha: string, ids: ReadonlySet<unknown>): Promise<Map<unknown, unknown>> {
+  const creators = new Map<unknown, unknown>();
+  for (let page = 1; page <= MAX_PAGES && creators.size < ids.size; page += 1) {
+    const answer = await request(target, 'GET', `/commits/${sha}/statuses?per_page=${PAGE_SIZE}&page=${page}`);
+    if (answer.status !== 200 || !Array.isArray(answer.json)) throw new PullRequestError(message('github.reading-statuses'), answer.status);
+    const listed = answer.json as Array<{ id?: unknown; creator?: { id?: unknown } | null }>;
+    for (const status of listed) if (ids.has(status.id) && !creators.has(status.id)) creators.set(status.id, status.creator?.id);
+    if (listed.length < PAGE_SIZE) break;
+  }
+  return creators;
+}
+
+function publisher(kind: CheckPublisher['kind'], id: unknown): CheckPublisher {
+  return { kind, id: Number.isSafeInteger(id) && (id as number) > 0 ? id as number : 0 };
+}
+
+function commitCheck(name: string, outcome: CommitCheck['outcome'], from: CheckPublisher, url: unknown, checkRunId?: unknown): CommitCheck {
+  const check: CommitCheck = { name, outcome, publisher: from };
+  if (outcome === 'failed') {
+    const link = httpsLink(url);
+    if (link !== undefined) check.url = link;
+    if (Number.isSafeInteger(checkRunId) && (checkRunId as number) > 0) check.checkRunId = checkRunId as number;
+  }
+  return check;
+}
+
+/** Whether a check comes from the publisher an expected check names; any does when it names none, none when it is unknown. */
+function publishedBy(check: CommitCheck, expected: ExpectedCheck): boolean {
+  if (expected.publisher === undefined) return true;
+  return expected.publisher.id > 0 && check.publisher.kind === expected.publisher.kind && check.publisher.id === expected.publisher.id;
+}
+
+/** What the checks listed on a commit say about it, given what it must show. */
+export function checkState(commit: CommitChecks, expect: CheckExpectation = {}): CheckState {
+  const pending = new Set<string>(commit.unlisted);
+  const succeeded = new Set<string>();
+  const failures = new Map<string, CheckFailure>();
+  for (const check of commit.checks) {
+    if (check.outcome === 'pending') pending.add(check.name);
+    else if (check.outcome === 'passed') succeeded.add(check.name);
+    else if (!failures.has(check.name)) {
+      const failure: CheckFailure = { name: check.name };
+      if (check.url !== undefined) failure.url = check.url;
+      if (check.checkRunId !== undefined) failure.checkRunId = check.checkRunId;
+      failures.set(check.name, failure);
+    }
   }
 
   const failed = [...failures.keys()].sort();
-  const hasChecks = hasRuns || combined.total_count > 0;
-  const missing = [...new Set(expect.names ?? [])].filter((name) => !pending.has(name) && !succeeded.has(name) && !failures.has(name)).sort();
-  const waiting = pending.size > 0 || missing.length > 0 || (!hasChecks && expect.allowNone === false);
-  const state: CheckState = { hasChecks, state: failed.length > 0 ? 'failed' : waiting ? 'pending' : 'passed', failed, pending: [...pending].sort() };
+  // An expected check is registered only by its own publisher: a same-name check from another one does not count.
+  const missing = [...new Set((expect.checks ?? []).filter((expected) => !commit.checks.some((check) => check.name === expected.name && publishedBy(check, expected))).map(({ name }) => name))].sort();
+  const waiting = pending.size > 0 || missing.length > 0 || (!commit.hasChecks && expect.allowNone === false);
+  const state: CheckState = { hasChecks: commit.hasChecks, state: failed.length > 0 ? 'failed' : waiting ? 'pending' : 'passed', failed, pending: [...pending].sort() };
   if (failed.length > 0) state.failures = failed.map((name) => failures.get(name) as CheckFailure);
   if (succeeded.size > 0) state.succeeded = [...succeeded].sort();
   if (missing.length > 0) state.missing = missing;
