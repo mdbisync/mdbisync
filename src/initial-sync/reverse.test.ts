@@ -1249,4 +1249,97 @@ describe('the security gate of an initial sync from Linear', () => {
       await fixture.cleanup();
     }
   });
+
+  // The file itself is harmless: only its URL carries the value.
+  const CHART = Buffer.from('%PDF-1.4 a chart\n');
+
+  /**
+   * An initial sync whose hook rejects `secret`, with one upload served at
+   * `url`, Linear's documents changed by `edit` and tracked files from `seed`.
+   */
+  async function importUpload(name: string, secret: string, url: string, edit: (d: FakeDocument) => FakeDocument, seed: Record<string, string> = {}) {
+    const fixture = await createFixture();
+    await fixture.seed({ ...TREE, ...seed });
+    const config = resolveStateConfig({});
+    const git = await fixture.clone(name);
+    const fetched = await fetchState(git, config);
+    const mapping = await loadMapping(git, fetched.tracked);
+    const world = fakeWorld();
+    world.linear.uploads.push({ filename: 'chart.pdf', contentType: 'application/pdf', size: CHART.length, assetUrl: url, bytes: CHART });
+    world.linear.documents = linearDocuments().map(edit);
+    const linear = new LinearClient({ token: 'test', baseUrl: LINEAR_API, fetch: fakeFetch(world) });
+    const { targets } = await resolveTargets(linear, mapping.zones.values());
+    assert.ok(targets);
+    const security: SecurityGate = {
+      configured: true,
+      async check(files) {
+        return [...files.values()].some((content) => contentBytes(content).toString().includes(secret)) ? [{ hook: 'secret-check', line: 1 }] : [];
+      },
+    };
+    const { result } = await confirmLinearToGit(
+      { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY },
+      { config, github: { repository: 'owner/repo', token: 'gh-token', apiUrl: GITHUB_API, fetch: fakeFetch(world) }, security, stopAfterDocuments: undefined },
+    );
+    assert.equal(result.complete, true, result.code);
+    const objects = await fixture.remote.text(['cat-file', '--batch-all-objects', '--batch']);
+    const ids = JSON.parse(await fixture.remote.text(['show', 'refs/mdbisync/ids:ids.json'])) as Record<string, { id: string }>;
+    return { fixture, result, objects, ids };
+  }
+
+  it('keeps an upload URL whose query a hook finds out of the record and the upload cache', async () => {
+    const secret = ['blocked', 'query', '904'].join('-');
+    const url = `${UPLOADS_HOST}/0/chart.pdf?signature=${secret}`;
+    const run = await importUpload('gate-url', secret, url, (d) => (d.id === 'doc-faq' ? { ...d, content: `# FAQ\n\n[chart](${url})\n` } : d));
+    try {
+      assert.deepEqual(run.result.leftOutAtRecord, [{ path: 'eng/notes/faq.md', rule: 'security-hook' }]);
+      assert.ok(!run.objects.includes(secret), 'a blocked upload URL reached the remote');
+    } finally {
+      await run.fixture.cleanup();
+    }
+  });
+
+  it('checks an upload URL as the cache stores it, after its escapes are decoded', async () => {
+    const secret = ['blocked', 'query', '388'].join('-');
+    const url = `${UPLOADS_HOST}/0/chart.pdf?signature=${secret}`;
+    // Linear's text spells the value with a character reference: only the decoded URL holds it.
+    const written = url.replace('query', 'q&#x75;ery');
+    const run = await importUpload('gate-escaped', secret, url, (d) => (d.id === 'doc-faq' ? { ...d, content: `# FAQ\n\n[chart](${written})\n` } : d));
+    try {
+      assert.deepEqual(run.result.leftOutAtRecord, [{ path: 'eng/notes/faq.md', rule: 'security-hook' }]);
+      assert.ok(!run.objects.includes(secret), 'a blocked upload URL reached the remote');
+    } finally {
+      await run.fixture.cleanup();
+    }
+  });
+
+  it('checks a new upload URL even when its file is already in the repository and the text does not change', async () => {
+    const secret = ['blocked', 'query', '517'].join('-');
+    const url = `${UPLOADS_HOST}/0/chart.pdf?signature=${secret}`;
+    const plan = `---\nowner: platform\n---\n\n# Plan\n\n[chart](chart.pdf)\n`;
+    const run = await importUpload('gate-known', secret, url, (d) => (d.id === 'doc-plan' ? { ...d, content: `# Plan\n\n[chart](${url})\n` } : d), {
+      'eng/notes/plan.md': plan,
+      'eng/notes/chart.pdf': CHART.toString(),
+    });
+    try {
+      assert.deepEqual(run.result.leftOutAtRecord, [{ path: 'eng/notes/plan.md', rule: 'security-hook' }]);
+      assert.ok(!run.objects.includes(secret), 'a blocked upload URL reached the remote');
+      // The existing file keeps the tracked text and stays its document's.
+      assert.equal(run.ids['eng/notes/plan.md']?.id, 'doc-plan');
+      assert.equal(await run.fixture.remote.text(['show', 'refs/mdbisync/linear:eng/notes/plan.md']), plan.trimEnd());
+    } finally {
+      await run.fixture.cleanup();
+    }
+  });
+
+  it('records a new upload URL that the hooks pass in the upload cache', async () => {
+    const url = `${UPLOADS_HOST}/0/chart.pdf?signature=plain-417`;
+    const run = await importUpload('gate-pass', 'never-written', url, (d) => (d.id === 'doc-faq' ? { ...d, content: `# FAQ\n\n[chart](${url})\n` } : d));
+    try {
+      assert.deepEqual(run.result.leftOutAtRecord, []);
+      const uploads = await run.fixture.remote.text(['show', 'refs/mdbisync/uploads:uploads.json']);
+      assert.ok(uploads.includes(url), 'the passed URL is missing from the cache');
+    } finally {
+      await run.fixture.cleanup();
+    }
+  });
 });

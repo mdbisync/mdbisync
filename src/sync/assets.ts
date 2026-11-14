@@ -24,6 +24,17 @@ function isUpload(url: string): boolean {
   catch { return false; }
 }
 
+/**
+ * Linear's text as the security hooks check it for upload URLs: the text,
+ * then every URL the upload cache gains from it, as the cache stores it.
+ * The parser decodes escapes and character references, so the stored URL
+ * can be spelled differently from the text.
+ */
+export function withNewUploadUrls(text: string, added: ReadonlyMap<string, string>, cache: ReadonlyMap<string, string>): string {
+  const urls = [...new Set([...added].filter(([hash, url]) => cache.get(hash) !== url).map(([, url]) => url))];
+  return urls.length === 0 ? text : `${text}\n${urls.join('\n')}\n`;
+}
+
 /** Only positions are retained: a finding must never disclose a destination or alt text. */
 export interface ImageFinding {
   image: number;

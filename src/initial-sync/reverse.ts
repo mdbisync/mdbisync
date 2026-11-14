@@ -61,9 +61,9 @@ import {
   readUploads,
   stateRef,
 } from '../state/index.ts';
-import { createAssetCapture, AttachmentBudgetError, ImageBlockedError } from '../sync/assets.ts';
+import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
 import { captureCursorTrailer, cursorTime, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
-import { type SecurityGate, securityGate } from '../sync/security.ts';
+import { type SecurityFinding, type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
@@ -523,10 +523,18 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
         const blocked: string[] = [];
         const unchecked: string[] = [];
         for (const entry of entries) {
-          const { files } = bodies.get(entry.path) as { files: Map<string, FileContent> };
+          const { files, uploads: added } = bodies.get(entry.path) as { files: Map<string, FileContent>; uploads: UploadMap };
           const text = textOf(entry);
-          if (files.size === 0 && text === input.texts.get(entry.path)) continue;
-          const findings = await gate.check(new Map<string, FileContent>([[entry.path, text], ...files]));
+          const newUploads = [...added].some(([hash, url]) => uploads.get(hash) !== url);
+          if (files.size === 0 && !newUploads && text === input.texts.get(entry.path)) continue;
+          // Upload URLs also enter the cache ref. Scan Linear's text before
+          // localization too, so it cannot hide a secret in a URL or its query.
+          const tracked = input.texts.get(entry.path);
+          const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
+          const original = withNewUploadUrls(tracked === undefined ? content : joinFile(splitFile(tracked).head, content), added, uploads);
+          let findings: SecurityFinding[] | null = [];
+          if (original !== text) findings = await gate.check(new Map<string, FileContent>([[entry.path, original], ...files]));
+          if (findings?.length === 0) findings = await gate.check(new Map<string, FileContent>([[entry.path, text], ...files]));
           // No answer: the hooks have not seen this text (the hooks step did not run, or the tracked branch moved).
           if (findings === null) unchecked.push(entry.path);
           else if (findings.length > 0) blocked.push(entry.path);
