@@ -35,7 +35,7 @@ import { commitStaged, HOOK_ENV_KEYS, HookRejectedError, installFailure, install
 import { engineEntry, REPO_ROOT, type EngineResult } from './engine.ts';
 import { HOOK_REPOSITORY, preCommitConfig } from '../../corpus/tree.ts';
 import { readHookConfig } from '../../../src/setup/hooks.ts';
-import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { CHECK_NAME, CHECK_WORKFLOW, CHECK_WORKFLOW_PATH, checkStateMessage, readCheckState } from '../../corpus/check-workflow.ts';
 import { cancelPendingRuns, faultChecks, waitForCheck, waitForCheckCompleted } from './check-fault.ts';
 import { SandboxRest, type PullRequest } from './github.ts';
 import { loadScenarios, type Step } from './spec.ts';
@@ -606,10 +606,10 @@ describe('workflows', () => {
     await git.run(['fetch', '--quiet', 'origin', ctx.names.trackedBranch]);
     await git.run(['checkout', '--quiet', '-B', 'sync-head', 'FETCH_HEAD']);
     writeFileSync(join(git.dir, 'eng/platform/notes.md'), '# Notes\n\nKept short.\n\nA paragraph from Linear.\n');
-    if (options.marker === true) writeFileSync(join(git.dir, CHECK_MARKER), 'pending\n');
-    if (options.fixed === true) writeFileSync(join(git.dir, '.harness-check-fixed'), 'approved\n');
     await git.run(['add', '--all']);
     await git.run(['commit', '--quiet', '--no-verify', '-m', 'Update documents']);
+    if (options.marker === true) await git.run(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', checkStateMessage('pending')]);
+    if (options.fixed === true) await git.run(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', checkStateMessage('fixed')]);
     await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${ctx.names.syncBranch}`]);
     const head = (await git.text(['rev-parse', 'HEAD'])).trim();
     const reads: string[] = [];
@@ -1939,15 +1939,14 @@ describe('marker-driven checks', () => {
       assert.ok(sha, path);
       assert.equal(sha, (await remoteGit.text(['rev-parse', ctx.names.syncBranch])).trim());
       checked.push(sha);
-      const marker = await remoteGit.run(['show', `${sha}:${CHECK_MARKER}`], { okCodes: [0, 128] });
-      const state = marker.code === 0 ? marker.stdout.toString().trim() : 'passed';
+      const state = (await readCheckState(remoteGit.dir, sha)).mode;
       return Response.json({ check_runs: [{ id: 1, name: 'format', app: { slug: 'github-actions' }, status: state === 'pending' ? 'in_progress' : 'completed', conclusion: state === 'pending' ? null : state === 'passed' ? 'success' : 'failure' }] });
     }) as typeof fetch;
     ctx.live!.rest = new SandboxRest({ owner: 'example', repo: 'sandbox' }, 'unused', fetchImpl);
     const tracked = (await remoteGit.text(['rev-parse', ctx.names.trackedBranch])).trim();
     await runStep(ctx, { kind: 'fault', action: 'checks', args: { status: 'pending' } });
     const pending = checked.at(-1)!;
-    assert.equal((await remoteFile(CHECK_MARKER, ctx.names.syncBranch)).trim(), 'pending');
+    assert.equal((await readCheckState(remoteGit.dir, ctx.names.syncBranch)).mode, 'pending');
     assert.equal(prs.length, 1);
     // A fake capture appends the editor's Linear changes while the check is pending.
     const path = 'eng/platform/plan.md';
@@ -1961,10 +1960,11 @@ describe('marker-driven checks', () => {
     // On the same branch the new head cancels the pending job itself: no person's Actions credential is needed.
     const noPerson = () => { throw new Error('a same-branch fault must not cancel through a person'); };
     await faultChecks(ctx, { name: 'format', status: 'failed' }, noPerson);
-    assert.equal((await remoteFile(CHECK_MARKER, ctx.names.syncBranch)).trim(), 'failed');
+    assert.equal((await readCheckState(remoteGit.dir, ctx.names.syncBranch)).mode, 'failed');
     await faultChecks(ctx, { status: 'passed' }, noPerson);
     const passed = checked.at(-1)!;
-    assert.equal((await remoteGit.run(['cat-file', '-e', `${passed}:${CHECK_MARKER}`], { okCodes: [0, 128] })).code, 128);
+    assert.equal((await readCheckState(remoteGit.dir, passed)).mode, 'passed');
+    assert.equal(await remoteGit.text(['rev-parse', `${passed}^{tree}`]), await remoteGit.text(['rev-parse', `${editCommit}^{tree}`]), 'a check state commit changes no file');
     assert.equal(await remoteFile(path, ctx.names.syncBranch), edit.trimEnd());
     await remoteGit.run(['merge-base', '--is-ancestor', pending, editCommit]);
     await remoteGit.run(['merge-base', '--is-ancestor', editCommit, passed]);
@@ -2052,7 +2052,12 @@ describe('marker-driven checks', () => {
       STEP_ACTIONS['git.test-idle'] = async () => {};
       await runStep(ctx, { kind: 'git', action: 'test-idle', args: {} });
       assert.deepEqual(reads, [edited, edited], 'a step that leaves the tracked tip in place does not wait');
-      STEP_ACTIONS['git.test-pending'] = commitStep(new Map([[CHECK_MARKER, 'pending\n']]));
+      STEP_ACTIONS['git.test-pending'] = async (step: RunContext) => {
+        const git = await step.person();
+        await git.run(['pull', '--quiet', '--no-rebase', '--no-edit', 'origin', step.names.trackedBranch]);
+        await git.run(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', checkStateMessage('pending')]);
+        await git.run(['push', '--quiet', '--no-verify', 'origin', `HEAD:refs/heads/${step.names.trackedBranch}`]);
+      };
       await assert.rejects(runStep(ctx, { kind: 'git', action: 'test-pending', args: {} }), HarnessGapError);
       STEP_ACTIONS['git.test-no-workflow'] = commitStep(new Map([[CHECK_WORKFLOW_PATH, null]]));
       await runStep(ctx, { kind: 'git', action: 'test-no-workflow', args: {} });

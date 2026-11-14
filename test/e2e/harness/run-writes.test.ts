@@ -45,7 +45,7 @@ const REVERSE_KEYS = {
 } satisfies Record<keyof ReverseReport, true>;
 const PULL_REQUEST_KEYS = {
   suspended: true, holdMarks: true, redMain: true, mainPending: true, waitsForSuspended: true,
-  needed: true, pullRequest: true, branchMoved: true, checks: true, merged: true, paths: true, marked: true, decided: true, code: true, status: true, reason: true,
+  needed: true, pullRequest: true, branchMoved: true, checks: true, merged: true, paths: true, marked: true, decided: true, code: true, status: true, reason: true, unverified: true,
 } satisfies Record<keyof PullRequestResult, true>;
 const CONFIRMED_KEYS = {
   complete: true, created: true, overwritten: true, unchanged: true, skippedCompleted: true, trashed: true,
@@ -57,7 +57,7 @@ const CAPTURE_KEYS = {
 /** The capture's fields it leaves out unless they apply. */
 const CAPTURE_OPTIONAL = ['stopped', 'rebuiltIds'];
 /** The pull request step's fields it may leave out: only its ending's. */
-const PULL_REQUEST_OPTIONAL = ['code', 'status', 'reason', 'suspended', 'holdMarks', 'redMain', 'mainPending', 'waitsForSuspended'];
+const PULL_REQUEST_OPTIONAL = ['code', 'status', 'reason', 'unverified', 'suspended', 'holdMarks', 'redMain', 'mainPending', 'waitsForSuspended'];
 
 const EXPECTED: Record<string, RunWrites> = {
   // The record on the linear, ids and uploads refs and the sync branch; the pull request it opened.

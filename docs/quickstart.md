@@ -164,6 +164,35 @@ sync cannot merge its own pull request: add the App to that rule's bypass
 list: Settings → Rules → Rulesets → the ruleset → Bypass list → Add
 bypass → your App → Save changes.
 
+### Who may push to the sync branches
+
+With the App on that bypass list, what reaches `main` through the sync's
+pull requests is not reviewed. The sync merges such a pull request only
+when it changes nothing but synchronized documents and their assets
+([what the sync merges](sync-cycle.md#in-github)); anything else waits for
+a person. Even so, anyone who can push to `mdbisync/linear` or
+`mdbisync/suspended` can still put a document edit on `main` without a
+review. To keep those branches to the sync, add a second ruleset: Settings
+→ Rules → Rulesets → New ruleset → New branch ruleset. Name it, set
+Enforcement status to Active, add your App to its bypass list, and under
+Targets → Add target → Include by pattern, enter `mdbisync/*`. Under
+Rules, turn on **Restrict creations**, **Restrict updates** and **Restrict
+deletions**, then create it. If you set other names for the sync branches,
+use those.
+
+**Restrict updates** also refuses the fixes the
+[`pre-commit` workflow](linear-format.md#in-ci) pushes to the sync pull
+request with the workflow's own token. If you use that workflow, leave
+**Restrict updates** off and keep the other two. A person who can push
+can then still add a document edit to a sync pull request, but nothing
+else: the sync leaves any other change for a person to review.
+
+The App keeps **Workflows: Read and write**. The sync branches take in
+`main` with merge commits, so a workflow someone changes on `main` shows up
+in commits the App pushes, and GitHub refuses those pushes without that
+permission. It does not let the sync merge a workflow change: a pull
+request that would change `.github` waits for a person.
+
 ## Security hooks
 
 Changes from Linear pass the hooks you mark `alias: security` before
