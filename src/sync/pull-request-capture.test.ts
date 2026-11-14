@@ -32,6 +32,20 @@ describe('sync: pull request capture', () => {
     assert.equal(renamed.title, '.github/guide');
   });
 
+  it('keeps tracked GitHub templates in place while ordinary edits merge', async () => {
+    const template = 'eng/notes/.github/pull_request_template.md';
+    await h.gitEdit(template, 'Template.\n');
+    await h.settle();
+    const document = await h.documentOf(template);
+    assert.equal(document.title, '.github/pull_request_template');
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nOrdinary edit.\n');
+    await h.settle();
+    assert.equal(await show(`refs/heads/main:${template}`), 'Template.\n');
+    assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Ordinary edit/);
+    assert.equal((await h.ids())[template]?.id, document.id);
+    assert.ok(!Object.keys(await h.ids()).some((path) => path.includes('%2Egithub')));
+  });
+
   it('L2-20: a Linear edit reaches the tracked branch through the sync pull request, merged with a merge commit, front matter kept', async () => {
     await editInLinear('eng/notes/plan.md', `# Plan\n\nSteps one, two and three. ${CANARY}\n`);
 

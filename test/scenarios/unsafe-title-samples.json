@@ -38,5 +38,10 @@
     "alias": "collision-b",
     "title": "notes",
     "relativePathTemplate": "notes~{documentIdHash}.md"
+  },
+  {
+    "alias": "github-segment",
+    "title": ".GitHub/notes",
+    "relativePathTemplate": "%2EGitHub/notes.md"
   }
 ]

@@ -203,7 +203,7 @@ by one rule, the same in the initial sync and in the sync:
 - `%`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|` and control characters are
   percent-encoded (`Q3: plans?` becomes `Q3%3A plans%3F.md`), and so are
   dots and spaces at the end of a part (`notes.` becomes `notes%2E.md`);
-- an empty part (a leading `/` or `//`) becomes `%00`; `.`, `..`, `.git` and
+- an empty part (a leading `/` or `//`) becomes `%00`; `.`, `..`, `.git`, `.github` (case-insensitive) and
   names Windows reserves (`CON`, `NUL`, `COM1`, …) get their first character
   encoded (`%2E%2E`, `%43ON`); spaces at the start of a part are kept;
 - in a folder at the repository root, a `-` at the start of the title is
@@ -222,6 +222,10 @@ by one rule, the same in the initial sync and in the sync:
 
 The `ids` state ref ties the file to its document, so the sync does not
 rename the document after its file name.
+
+Existing tracked files inside `.github` keep their paths, so GitHub templates
+stay in place. Changes to those files still require human review. Unsafe paths
+from earlier captures that have not reached the tracked branch use encoded names.
 
 ## The sync pull request
 

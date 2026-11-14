@@ -273,7 +273,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(doc.id);
       const available = new Set(occupied);
       if (old !== undefined && (!allocated.has(old.path) || allocated.get(old.path) === doc.id)) available.delete(old.path);
-      return documentPath(folderFor(doc)!, doc.title, doc.id, available, old?.path, (path) => invalidZone(doc, path));
+      // Keep Git-authored paths: moving a tracked `.github` file could disable a template.
+      // An unsafe spelling only in earlier capture state must use the encoded title instead.
+      const prior = old !== undefined && !mapping.files.has(old.path) && old.path.split('/').some((part) => part.toLowerCase() === '.github') ? undefined : old?.path;
+      return documentPath(folderFor(doc)!, doc.title, doc.id, available, prior, (path) => invalidZone(doc, path));
     };
     // An unchanged source may link a renamed, moved or removed target.
     // Re-read bodies when a path changes so those inbound links are translated too.

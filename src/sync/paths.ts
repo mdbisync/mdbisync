@@ -11,11 +11,6 @@ import { isGitDirectoryName } from '../state/objects.ts';
  */
 export const PATH_RULE = 'percent-encode-unsafe-segments' satisfies PathRule;
 
-/** Directory segments that captured titles must never create or retain. */
-function isReservedDirectoryName(segment: string): boolean {
-  return isGitDirectoryName(segment) || segment.toLowerCase() === '.github';
-}
-
 /** Titles are slash paths. Encode unsafe segments without allowing traversal or platform aliases. */
 export function titlePath(title: string): string {
   return title.normalize('NFC').split('/').map((part) => {
@@ -24,7 +19,7 @@ export function titlePath(title: string): string {
     if (safe === '' || safe === '.' || safe === '..' || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(safe)) safe = escapeFirst(safe);
     safe = safe.replace(/[. ]+$/, (suffix) => [...suffix].map((char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`).join(''));
     // Checked after the trailing dots and spaces are encoded, so `.git.` keeps its earlier name `.git%2E`.
-    if (isReservedDirectoryName(safe)) safe = escapeFirst(safe);
+    if (isGitDirectoryName(safe) || safe.toLowerCase() === '.github') safe = escapeFirst(safe);
     // Keep every segment below common file-system byte limits.
     if (Buffer.byteLength(safe) > 180) safe = `${[...safe].slice(0, 40).join('')}~${createHash('sha256').update(part).digest('hex').slice(0, 16)}`;
     return safe;
@@ -48,9 +43,9 @@ export function documentPath(folder: string, title: string, id: string, occupied
   const conflicts = (path: string) => invalid(path) || keys.some((key) => key === pathKey(path) || key.startsWith(`${pathKey(path)}/`) || pathKey(path).startsWith(`${key}/`));
   let candidate = titleFile(folder, title);
   // An existing git-originated spelling already represents this title,
-  // unless it would be read as an option or names a reserved directory.
+  // unless it would be read as an option or names the Git directory.
   const raw = `${folder === '' ? '' : `${folder}/`}${title}.md`;
-  if (previous === raw && !conflicts(previous) && !(folder === '' && raw.startsWith('-')) && !previous.split('/').some(isReservedDirectoryName)) return previous;
+  if (previous === raw && !conflicts(previous) && !(folder === '' && raw.startsWith('-')) && !previous.split('/').some(isGitDirectoryName)) return previous;
   const suffix = createHash('sha256').update(id).digest('hex').slice(0, 12);
   // A conflicting ancestor may be a file; flatten the title in that case.
   const flattened = titlePath(title).replaceAll('/', '%2F');

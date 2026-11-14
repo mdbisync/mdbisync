@@ -973,7 +973,8 @@ it('makes safe title paths and deterministic collision names', () => {
   for (const folder of ['', 'docs', 'docs/nested']) {
     for (const title of ['.github/x', '.GitHub/workflows/notes', 'nested/.GITHUB/page']) {
       const raw = `${folder === '' ? '' : `${folder}/`}${title}.md`;
-      const path = documentPath(folder, title, 'one', new Set(), raw);
+      const path = documentPath(folder, title, 'one', new Set());
+      assert.equal(documentPath(folder, title, 'one', new Set(), raw), raw, 'an existing Git-authored path is preserved');
       assert.ok(!path.split('/').some((part) => part.toLowerCase() === '.github'), path);
       assert.equal(documentPath(folder, title, 'one', new Set(), path), path);
     }
