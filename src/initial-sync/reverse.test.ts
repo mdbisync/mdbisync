@@ -655,6 +655,26 @@ describe('initial sync from Linear to the tracked branch', () => {
     }
   });
 
+  it('keeps shadowed image definitions out of initial import and the next capture', async () => {
+    await fixture.seed({'private/report.csv': 'account,balance\nexample,1000\n'});
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    const plan = world.linear.documents.find((document) => document.id === 'doc-plan')!;
+    plan.content = `# Plan\n\n![Chart][asset] ${CANARY}\n\n[asset]: https://uploads.linear.app/workspace/pixel.png\n[ASSET]: ../../private/report.csv\n`;
+    const initial = await run(world);
+    assert.equal(initial.result.exitCode, 0, initial.result.stderr);
+    assert.deepEqual(initial.report.linearToGit?.leftOutAtRecord, [{path:'eng/notes/plan.md', rule:'image-blocked'}]);
+    assert.doesNotMatch(await show('refs/mdbisync/linear:eng/notes/plan.md'), /private\/report\.csv/);
+    await merge(world);
+    plan.content = `# Plan\n\nSee [the report](../../private/report.csv). ${CANARY}\n`;
+    plan.updatedAt = '2026-04-01T00:00:00Z';
+    const captured = await run(world, {}, 'sync');
+    assert.equal(captured.result.exitCode, 0, captured.result.stderr);
+    assert.equal(captured.report.capture?.blocked.length, 1);
+    assert.doesNotMatch(await show('refs/mdbisync/linear:eng/notes/plan.md'), /private\/report\.csv/);
+    assert.equal(world.linear.uploads.length, 0);
+  });
+
   it('stops when Linear refuses the run access to an upload, instead of leaving the document out', async () => {
     const world = fakeWorld();
     const refused = `${UPLOADS_HOST}/0/refused.png`;
