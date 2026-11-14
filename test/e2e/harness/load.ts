@@ -1,5 +1,5 @@
 // Load scenarios: a burst of edits while the sync runs (L4-12) and the
-// 24-hour soak (L4-13). The loops are written against a driver, so the
+// soak (L4-13). The loops are written against a driver, so the
 // timing logic is tested with fakes and the live run plugs in real edits
 // and engine runs.
 
