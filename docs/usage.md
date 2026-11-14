@@ -279,11 +279,17 @@ remain after release; its presence alone does not mean a batch is on hold.
   expected checks and their publishers are kept in a hidden HTML note in
   the pull request description. A person can edit that note, so it only
   adds checks: whatever it says, the sync also reads the checks registered
-  on the branch's commits below the head, down to the nearest commit the
-  sync made itself, from git and GitHub. When that commit is more than 50
-  commits below the head, the head does not merge until the sync pushes
-  again. A head the sync pushes itself starts the repository's whole CI,
-  so it expects only what the head it was pushed on registered, besides
+  on the branch's first-parent commits below the head, down to the last
+  head the sync itself pushed there, which its state records, from git and
+  GitHub. A commit someone else pushed never counts as the sync's, whatever
+  its parents: a merge of the tracked branch made by hand does not end the
+  history. When that head is more than 50 commits below, no longer in the
+  branch's history (the branch was rewritten), or not recorded yet (a pull
+  request the sync last pushed before it recorded its heads), the head does
+  not merge: the sync adds a commit of its own with the same files, `Run
+  the checks again on the sync branch`, whose push runs the checks again.
+  A head the sync pushes itself starts the repository's whole CI, so it
+  expects only what the head it was pushed on registered, besides
   `required-checks`: a check that no longer runs (a renamed job) stays
   expected for at most one more push of the sync. A name removed from
   `required-checks` stops counting at once.

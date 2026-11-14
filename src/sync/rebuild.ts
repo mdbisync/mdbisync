@@ -19,6 +19,8 @@
 import { lintInTree } from '../format/index.ts';
 import { type DocumentPlace, type LinearClient, type LinearFacts, lengthRefusal } from '../linear/index.ts';
 import { type MappedDocument, type Place } from '../mapping/index.ts';
+import { folderOf } from '../mapping/annotations.ts';
+import { type PlaceCheck } from './tracked-places.ts';
 import { INITIAL_RECORD_SUBJECTS } from '../initial-sync/index.ts';
 import { placeId } from '../initial-sync/plan.ts';
 import { type ResolvedTargets } from '../setup/index.ts';
@@ -34,6 +36,8 @@ export interface RebuildInput {
   linear: LinearClient;
   facts: LinearFacts;
   targets: ResolvedTargets;
+  /** Whether a folder's files may be read from a place the record gives them. */
+  allowedPlace: PlaceCheck;
   /** The synchronized files of the `linear` record, with their text. */
   documents: ReadonlyArray<MappedDocument & { text: string }>;
   /** The regular files of the `linear` record's tree, which images must name (`RepositoryMapping.files`). */
@@ -42,7 +46,7 @@ export interface RebuildInput {
   unmapped: readonly string[];
 }
 
-export async function rebuildIds({ git, record, linear, facts, targets, documents, files: treeFiles, unmapped }: RebuildInput): Promise<IdMap> {
+export async function rebuildIds({ git, record, linear, facts, targets, allowedPlace, documents, files: treeFiles, unmapped }: RebuildInput): Promise<IdMap> {
   const keyOf = (place: DocumentPlace, title: string) =>
     `${'projectId' in place ? `project:${place.projectId}` : `team:${place.teamId}`}\0${title.normalize('NFC')}`;
   const files = new Map<string, string>();
@@ -67,6 +71,7 @@ export async function rebuildIds({ git, record, linear, facts, targets, document
       leftOut.push(document.path);
       continue;
     }
+    if (!await allowedPlace(folderOf(document.path), document.place)) continue;
     let place: DocumentPlace;
     try {
       place = placeId(targets, document.place);
@@ -79,7 +84,7 @@ export async function rebuildIds({ git, record, linear, facts, targets, document
     initial ??= latestInitialRecord(git, record);
     const oldest = await lifetimeStart(git, record, path, await initial);
     const last = oldest === undefined ? null : await lastSynchronized(git, record, path, facts, sides, oldest);
-    if (last === null) continue;
+    if (last === null || !await allowedPlace(folderOf(path), last.file.place)) continue;
     const place = await lastPlace(linear, targets, last.file.place);
     if (place !== undefined) add(path, last.file.title, place);
   }

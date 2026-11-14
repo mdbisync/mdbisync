@@ -49,19 +49,18 @@ export interface ExpectedChecks {
    */
   observed: ExpectedCheck[];
   /**
-   * False when the branch's history below the head runs past the search bound before it reaches a commit the sync
-   * made: the earlier checks are not known, and the head does not merge.
+   * False when the branch's history below the head does not reach, within the search bound, the head the sync's own
+   * state records it last pushed: the earlier checks are not known, and the head does not merge.
    */
   complete: boolean;
 }
 
 /**
  * Where a head's earlier checks are read: the description's note together with the branch's own history above `base`
- * (the tracked branch) down to the nearest commit the sync made (one `linear`, Linear's state, holds, or a merge of the
- * tracked branch or of Linear's state into the branch, or `pushed`, the head the sync's own state records it pushed on
- * this branch); or the commits the sync pushed it on this run.
+ * (the tracked branch) down to `pushed`, the head the sync's own state records it last pushed on this branch; or the
+ * commits the sync pushed it on this run.
  */
-export type EarlierHeads = { body: string | undefined; git: Git; base: Oid; linear: Oid; pushed?: Oid | undefined } | { pushedFrom: readonly Oid[] };
+export type EarlierHeads = { body: string | undefined; git: Git; base: Oid; pushed: Oid | undefined } | { pushedFrom: readonly Oid[] };
 
 /** How many commits below a head are searched for a commit the sync made. */
 const EARLIER_HEAD_DEPTH = 50;
@@ -76,7 +75,7 @@ const EARLIER_HEAD_DEPTH = 50;
  *   on that head. They add up while others push. The description is text a
  *   person can edit, so it can only add: whatever it says, every check
  *   registered on the branch's own commits below `head`, down to and with
- *   the nearest commit the sync made, counts (see `earlierHeadChecks`).
+ *   the last head the sync recorded pushing, counts (see `earlierHeadChecks`).
  * - For a head the sync pushed this run: every check registered on the
  *   commits it pushed on, one step back only. Its push starts the
  *   repository's whole CI, so a check that no longer runs (a renamed job)
@@ -115,32 +114,26 @@ export async function expectedChecks(github: GitHubRepository, head: Oid, requir
 }
 
 /**
- * The checks registered on the branch's first-parent history below `head`, above `base`, down to and with the nearest
- * commit the sync made. Every push the sync makes starts the repository's whole CI; a push with a workflow's own token
- * (a formatter's fix, one or several in a row) starts none, so the checks of every such commit since count. A head the
- * sync made itself expects, as when it pushed it, only what the commit below it registered. Null when that commit is
- * not found within the bound.
+ * The checks registered on the branch's first-parent history below `head`, above `base`, down to and with `pushed`,
+ * the last head the sync's own state records it pushed. Every push the sync makes starts the repository's whole CI; a
+ * push with a workflow's own token (a formatter's fix, one or several in a row) starts none, so the checks of every
+ * such commit since count. A head the sync pushed itself expects, as when it pushed it, only what the commit below it
+ * registered. Only that recorded head ends the history: a commit's parents are whatever its author chose, so a merge
+ * that looks like one of the sync's own (of the tracked branch or of Linear's state) does not. Null when `pushed` is
+ * not known or not found within the bound.
  */
-async function earlierHeadChecks(git: Git, github: GitHubRepository, head: Oid, { base, linear, pushed }: { base: Oid; linear: Oid; pushed?: Oid | undefined }): Promise<ExpectedCheck[] | null> {
-  // Each line: a commit, then its parents.
-  const lines = (await git.text(['rev-list', '--first-parent', '--parents', '-n', String(EARLIER_HEAD_DEPTH + 2), head, '--not', base])).split('\n').filter(Boolean).map((line) => line.split(' ') as Oid[]);
-  // The sync's own commits: the head its state records it pushed, Linear's state, or a merge of the tracked branch or
-  // Linear's state into the branch. A merge of anything else (a commit made up for the purpose) is not one of them.
-  const known = async (commit: Oid) => await isAncestorOf(git, commit, linear) || await isAncestorOf(git, commit, base);
-  const synced = async ([commit, , ...merged]: Oid[]) => commit === pushed || await isAncestorOf(git, commit as Oid, linear)
-    || (await Promise.all(merged.map(known))).some(Boolean);
+async function earlierHeadChecks(git: Git, github: GitHubRepository, head: Oid, { base, pushed }: { base: Oid; pushed: Oid | undefined }): Promise<ExpectedCheck[] | null> {
+  if (pushed === undefined) return null;
+  const commits = (await git.text(['rev-list', '--first-parent', '-n', String(EARLIER_HEAD_DEPTH + 2), head, '--not', base])).split('\n').filter(Boolean) as Oid[];
+  const own = commits[0] === pushed;
   const checks: ExpectedCheck[] = [];
-  const own = lines[0] !== undefined && await synced(lines[0]);
-  for (const [index, commit] of lines.slice(1).entries()) {
+  for (const [index, commit] of commits.slice(1).entries()) {
     if (index === EARLIER_HEAD_DEPTH) return null;
-    checks.push(...await registeredChecks(github, commit[0] as Oid));
-    if (own || await synced(commit)) break;
+    checks.push(...await registeredChecks(github, commit));
+    if (own || commit === pushed) return checks;
   }
-  return checks;
-}
-
-async function isAncestorOf(git: Git, commit: Oid, of: Oid): Promise<boolean> {
-  return (await git.run(['merge-base', '--is-ancestor', commit, of], { okCodes: [0, 1] })).code === 0;
+  // The head the sync pushed is not below this one (the branch was rewritten): what ran before is not known.
+  return own ? checks : null;
 }
 
 /** Each check once, sorted by name, then by publisher. */

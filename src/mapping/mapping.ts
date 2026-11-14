@@ -182,7 +182,8 @@ function titleOf(path: string, zone: Zone): string {
   return relative.slice(0, -MARKDOWN_EXTENSION.length);
 }
 
-function placeOf(zone: Zone): Place {
+/** The Linear place a zone's files go to. */
+export function placeOf(zone: Zone): Place {
   return zone.project !== undefined ? { kind: 'project', team: zone.team, project: zone.project } : { kind: 'team', team: zone.team };
 }
 

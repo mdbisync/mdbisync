@@ -301,14 +301,22 @@ export function pullRequestHarness() {
     }
   }
 
-  async function editRef(ref: string, path: string, text: string, message = 'Edit'): Promise<string> {
+  /** Commits `text` at `path` on `ref`; with `other`, as a merge whose second parent is `other`, as anyone who may push there could. */
+  async function editRef(ref: string, path: string, text: string, message = 'Edit', other?: string): Promise<string> {
     const base = await rev(ref);
     const blob = await fixture.remote.text(['hash-object', '-w', '--stdin'], { input: text });
-    const commit = await commitFile(base, path, blob, undefined, message);
+    const commit = await commitFile(base, path, blob, other, message);
     await fixture.remote.run(['update-ref', ref, commit, base]);
     if (ref === SYNC_BRANCH || ref === SUSPENDED) syncValues.push(commit);
     else if (ref === 'refs/heads/main') start = commit;
     return commit;
+  }
+
+  /** Moves `ref` to `commit` as a person's force push would, which the sync-never-force-pushes check then starts from. */
+  async function forcePush(ref: string, commit: string): Promise<void> {
+    await fixture.remote.run(['update-ref', ref, commit]);
+    syncValues.push(commit);
+    if (ref === SYNC_BRANCH) normalValues.push(commit);
   }
 
   // Pending sync-branch edits that conflict with a later edit (MDS-011-2C). The plan's paragraph is edited on the
@@ -406,6 +414,7 @@ export function pullRequestHarness() {
     releaseHeld,
     backdate,
     editHeadNote,
+    forcePush,
     assertNoRerun,
     suspendThenTrash,
     onResolve,
