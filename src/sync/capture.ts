@@ -321,11 +321,15 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const downloadAssets = createAssetCapture(git, options.config, base, options.fetch ?? ((input, init) => linear.transport.fetchUpload(String(input), init)), linear.transport.reads, spool);
     type Candidate = { doc: LinearDocument; path: string; head: string; previousBody?: string; assets: CapturedAssets; files: Map<string, FileContent>; checked?: string; compared?: { body: string; same: boolean } };
     const candidates = new Map<string, Candidate>();
-    const resetTarget = (id: string, targets: Map<string, string> = documentIds) => {
-      for (const [path, target] of targets) if (target === id) targets.delete(path);
-      const old = byId.get(id);
-      if (old !== undefined && previous.has(old.path)) targets.set(old.path, id);
+    // A rejected target links to its accepted file, if it has one.
+    const resetTargets = (rejected: ReadonlySet<string>, targets: Map<string, string>) => {
+      for (const [path, target] of targets) if (rejected.has(target)) targets.delete(path);
+      for (const id of rejected) {
+        const old = byId.get(id);
+        if (old !== undefined && previous.has(old.path)) targets.set(old.path, id);
+      }
     };
+    const resetTarget = (id: string, targets: Map<string, string> = documentIds) => resetTargets(new Set([id]), targets);
     const recordBlocked = (doc: LinearDocument, path: string, findings: BlockedFinding[]) => {
       const old = byId.get(doc.id);
       const saved = old?.entry.saved ?? {icon: doc.icon, color: doc.color};
@@ -376,6 +380,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         else result.leftOut.push({id: doc.id, rule: 'capture-translation'});
       }
     }
+    // The file already holds this text, and the document shows no mark: it is recorded without asking the hooks.
+    const recordedAsIs = (candidate: Candidate, text: string) => {
+      const old = byId.get(candidate.doc.id);
+      const {assets} = candidate;
+      return old?.path === candidate.path && old.entry.saved === undefined && previous.get(candidate.path)?.equals(Buffer.from(text)) === true && assets.files.size === 0 && assets.uploads.size === 0;
+    };
     // A rejected target may change other documents' relative links. Recheck
     // only bodies that change as targets fall back to their accepted paths.
     // A candidate's text with its links written against these targets.
@@ -408,9 +418,8 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
         const text = textOf(candidate, documentIds);
         candidate.files.set(path, text);
         if (candidate.checked === text) continue;
-        const unchanged = old?.path === path && previous.get(path)?.equals(Buffer.from(text)) === true && assets.files.size === 0 && assets.uploads.size === 0;
         let findings: SecurityFinding[] | null = [];
-        if (!unchanged || old?.entry.saved !== undefined) {
+        if (!recordedAsIs(candidate, text)) {
           // Upload URLs also enter the cache ref. Scan the original text so
           // localization cannot hide a secret embedded in a URL or its query.
           const original = withNewUploadUrls(head + (doc.content ?? ''), assets.uploads, uploads);
@@ -443,8 +452,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // and the documents that link to them are written with the rejected
       // targets' fallback links: stage those texts too, or they would wait
       // for an answer on every run while the target stays rejected.
-      if (linkBase !== undefined) for (const set of linkVariants(candidates, textOf, resetTarget, documentIds)) await gate.check(set);
+      // The documents the hooks refused before come first: those that link them make progress on every run.
+      const refused = new Set([...candidates.keys()].filter((id) => { const saved = byId.get(id)?.entry.saved; return saved !== undefined && saved.notice?.kind !== 'conflict'; }));
+      const budget = linkVariantBudget();
+      if (linkBase !== undefined) for (const set of linkVariants(candidates, textOf, resetTargets, documentIds, {refused, settled: recordedAsIs, budget})) await gate.check(set);
       result.summary = `Staged ${candidates.size} changed documents for the security hooks.`;
+      if (budget.short === true) result.summary += ` ${message('sync.link-variant-budget')}`;
       return result;
     }
     // The apply step's documents are the stage step's snapshot, and a mark
@@ -607,34 +620,106 @@ function keptForLane(entry: IdEntry): boolean {
 /** Up to this many changed link targets, every combination of them rejected is staged; above it, each alone and all together. */
 const LINK_VARIANT_TARGETS = 4;
 
+/** At most this many of a text's changed link targets are staged alone, refused ones first; the text with all of them rejected is always staged. */
+export const LINK_VARIANT_LINKS = 8;
+
+/**
+ * What staging texts with rejected link targets may spend in one run: the
+ * sets it stages, and the work of writing their texts (each text's
+ * characters, the link targets copied for it and the targets rejected in
+ * it), spent before each text is written. Past it, the rest is not staged:
+ * a document whose text with a refused target has no answer is left out of
+ * the run, and `short` is set.
+ */
+export interface LinkVariantBudget { sets: number; work: number; short?: boolean }
+export const linkVariantBudget = (): LinkVariantBudget => ({sets: 256, work: 32 * 1024 * 1024});
+
+export interface LinkVariantOptions<C> {
+  /** Targets the hooks refused before: the texts with them rejected are staged first, so the documents that link them make progress run after run. */
+  refused?: ReadonlySet<string>;
+  /** A text the operation records without asking the hooks (the file already holds it): not staged. */
+  settled?: (candidate: C, text: string) => boolean;
+  budget?: LinkVariantBudget;
+}
+
 /**
  * The sets of files each candidate would be checked with when some of the
  * other candidates it links to are rejected: its text with those targets'
- * fallback links, and its embedded files.
+ * fallback links, and its embedded files. Made one at a time, within the
+ * budget. `reset` rejects a set of targets in a copy of `documentIds`.
  */
-export function linkVariants<C extends { path: string; files: Map<string, FileContent> }>(
+export function* linkVariants<C extends { path: string; files: Map<string, FileContent> }>(
   candidates: ReadonlyMap<string, C>,
   textOf: (candidate: C, targets: ReadonlyMap<string, string>) => string,
-  reset: (id: string, targets: Map<string, string>) => void,
+  reset: (ids: ReadonlySet<string>, targets: Map<string, string>) => void,
   documentIds: ReadonlyMap<string, string>,
-): Array<Map<string, FileContent>> {
-  const variants: Array<Map<string, FileContent>> = [];
-  const without = (rejected: readonly string[]) => {
-    const targets = new Map(documentIds);
-    for (const id of rejected) reset(id, targets);
-    return targets;
-  };
-  for (const [id, candidate] of candidates) {
-    const accepted = candidate.files.get(candidate.path);
-    const linked = [...candidates.keys()].filter((other) => other !== id && textOf(candidate, without([other])) !== accepted);
-    const combinations = linked.length <= LINK_VARIANT_TARGETS
-      ? Array.from({length: 2 ** linked.length - 1}, (_, mask) => linked.filter((_, bit) => ((mask + 1) >> bit) & 1))
-      : [...linked.map((other) => [other]), linked];
-    const texts = new Set(combinations.map((rejected) => textOf(candidate, without(rejected))));
-    texts.delete(accepted as string);
-    for (const text of texts) variants.push(new Map([...candidate.files, [candidate.path, text]]));
+  options: LinkVariantOptions<C> = {},
+): Generator<Map<string, FileContent>> {
+  const budget = options.budget ?? linkVariantBudget();
+  const refused = [...candidates.keys()].filter((id) => options.refused?.has(id) === true);
+  // Refused targets first, alone; then every target, refused ones still first.
+  const passes = refused.length > 0 ? [refused, [...new Set([...refused, ...candidates.keys()])]] : [[...candidates.keys()]];
+  const staged = new Map<string, Set<string>>();
+  for (const pass of passes) {
+    for (const [id, candidate] of candidates) {
+      if (budget.sets <= 0) { budget.short = true; return; }
+      const accepted = candidate.files.get(candidate.path) as string;
+      // The candidate's text with the `rejected` targets' fallback links; undefined once the budget is spent.
+      const without = (rejected: readonly string[]): string | undefined => {
+        const cost = accepted.length + documentIds.size + rejected.length;
+        if (budget.work < cost) { budget.short = true; return undefined; }
+        const targets = new Map(documentIds);
+        reset(new Set(rejected), targets);
+        const text = textOf(candidate, targets);
+        budget.work -= cost + Math.max(0, text.length - accepted.length);
+        return text;
+      };
+      const others = pass.filter((other) => other !== id);
+      if (others.length === 0) continue;
+      const all = without(others);
+      if (all === undefined || all === accepted) continue;
+      // The targets it links, found by halving the groups whose rejection changes its text: a text that links
+      // a few of many candidates costs a few texts per link, not one per candidate. A group's change is in one
+      // of its halves: when the first leaves the text as it is, the second has the group's text.
+      const alone = new Map<string, string>();
+      const find = (group: readonly string[], text: string): void => {
+        if (alone.size >= LINK_VARIANT_LINKS) return;
+        if (group.length === 1) { alone.set(group[0]!, text); return; }
+        const first = group.slice(0, group.length >> 1);
+        const second = group.slice(group.length >> 1);
+        const firstText = without(first);
+        if (firstText === undefined) return;
+        if (firstText === accepted) { find(second, text); return; }
+        find(first, firstText);
+        if (alone.size >= LINK_VARIANT_LINKS) return;
+        const secondText = without(second);
+        if (secondText !== undefined && secondText !== accepted) find(second, secondText);
+      };
+      find(others, all);
+      const texts = new Set([...alone.values(), all]);
+      // A few targets: also every combination of two or more of them.
+      const linked = [...alone.keys()];
+      if (linked.length <= LINK_VARIANT_TARGETS) {
+        for (let mask = 1; mask < 2 ** linked.length - 1; mask += 1) {
+          const rejected = linked.filter((_, bit) => (mask >> bit) & 1);
+          if (rejected.length < 2) continue;
+          const text = without(rejected);
+          if (text === undefined) break;
+          texts.add(text);
+        }
+      }
+      const done = staged.get(id) ?? new Set<string>();
+      staged.set(id, done);
+      for (const text of texts) {
+        const hash = createHash('sha256').update(text).digest('hex');
+        if (text === accepted || done.has(hash) || options.settled?.(candidate, text) === true) continue;
+        if (budget.sets <= 0) { budget.short = true; return; }
+        budget.sets -= 1;
+        done.add(hash);
+        yield new Map([...candidate.files, [candidate.path, text]]);
+      }
+    }
   }
-  return variants;
 }
 
 /** Folder configuration remains at its original path; other metadata follows the body. */

@@ -349,6 +349,14 @@ The initial sync also lists:
   `content-too-long`. Shorten it in git or in Linear.
 - `Content is pushed unchecked: no security hooks are configured.` See the
   `security-hooks` warning above.
+- `Some documents that link other changed documents were staged only in part: if the hooks refuse a document they link, they wait for a later run.`
+  The stage step stages each changed document's text also as it reads with
+  some of the documents it links refused, within a limit per run (256 sets).
+  Many changed documents that link each other went past it. If the hooks
+  refuse one of them, a document whose text for that case was not staged is
+  left out with `security-unchecked` and the cursor holds; documents the
+  hooks refused are staged first on the next run, so the rest follow. No
+  action is needed unless it repeats; then fix the refused document.
 - `The document id map was lost: rebuilt by matching titles to paths`: see
   [Recovery with initial sync](#recovery-with-initial-sync).
 - The run report's `paths` field names the file-name rule

@@ -219,6 +219,7 @@ export const MESSAGES = {
   'sync.no-runner-temp': 'RUNNER_TEMP is not set; the staged security steps run in a GitHub Actions job',
   'sync.staged-version': 'the staged candidates come from another version of the action',
   'sync.staged-hash': 'the staged manifest names a file that is not a content hash',
+  'sync.link-variant-budget': 'Some documents that link other changed documents were staged only in part: if the hooks refuse a document they link, they wait for a later run.',
   'sync.write-before-record': 'the sync writes to Linear only after initial sync has recorded `linear`',
   'sync.merge-conflict-output': 'Invalid merge-file conflict output',
   'assets.not-allowed': 'asset destination is not allowed',

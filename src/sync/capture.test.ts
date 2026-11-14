@@ -13,7 +13,9 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GITHUB_API } from '../setup/test-helpers.ts';
 import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
-import { capture, prepareLfs } from './capture.ts';
+import { LINK_VARIANT_LINKS, type LinkVariantBudget, capture, linkVariants, linkVariantBudget, prepareLfs } from './capture.ts';
+import { type FileContent } from '../state/content.ts';
+import { candidateKey } from './staged.ts';
 import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
 import { documentPath, titlePath } from './paths.ts';
@@ -887,6 +889,61 @@ describe('capture from Linear', () => {
     assert.equal((await fixture.remote.run(['cat-file','-e',`${stateRef(config,'linear')}:docs/blocked-new.md`],{okCodes:[0,128]})).code,128);
   });
 
+  it('stages a bounded number of texts for densely linked documents and records those that link a refused one', async () => {
+    const count = 16;
+    const ids = Array.from({ length: count }, (_, i) => `dense-${String(i).padStart(2, '0')}`);
+    for (const [i, id] of ids.entries()) {
+      const content = ids.filter((other) => other !== id).map((other) => `[${other}](https://linear.app/example-team/document/${other})`).join('\n') + '\n';
+      world.linear.documents.push({ id, title: id, projectId: 'project-api', content, createdAt: `2026-01-02T00:00:${String(i).padStart(2, '0')}Z` });
+    }
+    const staged = new Set<string>();
+    await capture(context, { config, state: context.fetched.state, identity: IDENTITY, stageOnly: true, security: { configured: true, check: async (files) => { staged.add(candidateKey(files)); return []; } } });
+    // A set for each changed document, and at most a bounded number of texts with refused targets for each.
+    assert.ok(staged.size <= count + 1 + count * (LINK_VARIANT_LINKS + 1), `${staged.size} sets staged`);
+    // The apply step answers only what was staged; the hooks refuse one document that all the others link.
+    const refused = ids[0]!;
+    const result = await capture(context, {
+      config,
+      state: context.fetched.state,
+      identity: IDENTITY,
+      security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : files.has(`docs/${refused}.md`) ? [{ hook: 'secret-check', line: 1 }] : []) },
+    });
+    assert.deepEqual(result.blocked.map(({ id }) => id), [refused]);
+    assert.deepEqual(result.leftOut, []);
+    for (const id of ids.slice(1)) assert.ok((await text(`docs/${id}.md`)).includes(`(https://linear.app/example-team/document/${refused})`), id);
+  });
+
+  it('records the densely linked documents on the next run when the hooks refuse one past those staged alone', async () => {
+    const count = 16;
+    const ids = Array.from({ length: count }, (_, i) => `dense-${String(i).padStart(2, '0')}`);
+    for (const [i, id] of ids.entries()) {
+      const content = ids.filter((other) => other !== id).map((other) => `[${other}](https://linear.app/example-team/document/${other})`).join('\n') + '\n';
+      world.linear.documents.push({ id, title: id, projectId: 'project-api', content, createdAt: `2026-01-02T00:00:${String(i).padStart(2, '0')}Z` });
+    }
+    // The last document: past the targets the first documents stage alone.
+    const refused = ids[count - 1]!;
+    const stagedRun = async () => {
+      const staged = new Set<string>();
+      await capture(context, { config, state: context.fetched.state, identity: IDENTITY, stageOnly: true, security: { configured: true, check: async (files) => { staged.add(candidateKey(files)); return []; } } });
+      const result = await capture(context, {
+        config,
+        state: context.fetched.state,
+        identity: IDENTITY,
+        security: { configured: true, check: async (files) => (!staged.has(candidateKey(files)) ? null : files.has(`docs/${refused}.md`) ? [{ hook: 'secret-check', line: 1 }] : []) },
+      });
+      await refresh();
+      return result;
+    };
+    const first = await stagedRun();
+    assert.deepEqual(first.blocked.map(({ id }) => id), [refused]);
+    // Nothing unchecked is recorded: what had no answer waits.
+    assert.ok(first.leftOut.length > 0 && first.leftOut.every(({ rule }) => rule === 'security-unchecked'), JSON.stringify(first.leftOut));
+    const second = await stagedRun();
+    assert.deepEqual(second.blocked.map(({ id }) => id), [refused]);
+    assert.deepEqual(second.leftOut, []);
+    for (const id of ids.slice(0, -1)) assert.ok((await text(`docs/${id}.md`)).includes(`(https://linear.app/example-team/document/${refused})`), id);
+  });
+
   it('scans original upload URLs before their query can enter the cache ref', async () => {
     const secret = ['query','canary','731'].join('-');
     const url = `https://uploads.linear.app/workspace/image.png?access=${secret}`;
@@ -1002,4 +1059,103 @@ it('stores the whole content in LFS whatever file the working copy holds at its 
   } finally {
     await fixture.cleanup();
   }
+});
+
+describe('staged texts with rejected link targets', () => {
+  /** Documents where `links(i)` lists the documents document `i` links, and a text function that counts its work. */
+  const corpus = (count: number, links: (index: number) => number[]) => {
+    const paths = Array.from({ length: count }, (_, i) => `docs/d${String(i).padStart(3, '0')}.md`);
+    const documentIds = new Map(paths.map((path, i) => [path, `d${String(i).padStart(3, '0')}`]));
+    const candidates = new Map(paths.map((path, i) => [documentIds.get(path)!, { index: i, path, files: new Map<string, FileContent>() }]));
+    const work = { texts: 0, characters: 0, resets: 0 };
+    const textOf = (candidate: { index: number }, targets: ReadonlyMap<string, string>) => {
+      const text = links(candidate.index).map((i) => (targets.has(paths[i]!) ? `[d](./d${i}.md)` : `[d](https://linear.app/team/document/d${i})`)).join('\n') + '\n';
+      work.texts += 1;
+      work.characters += text.length;
+      return text;
+    };
+    for (const candidate of candidates.values()) candidate.files.set(candidate.path, textOf(candidate, documentIds));
+    work.texts = 0;
+    work.characters = 0;
+    // Every entry of the targets and every rejected id it visits counts.
+    const reset = (rejected: ReadonlySet<string>, targets: Map<string, string>) => {
+      work.resets += targets.size + rejected.size;
+      for (const [path, target] of targets) if (rejected.has(target)) targets.delete(path);
+    };
+    type Options = Parameters<typeof linkVariants<{ index: number; path: string; files: Map<string, FileContent> }>>[4];
+    return { variants: (options: Options = {}) => linkVariants(candidates, textOf, reset, documentIds, options), work };
+  };
+  const dense = (count: number) => corpus(count, (index) => Array.from({ length: count }, (_, i) => i).filter((i) => i !== index));
+  const unlimited = () => ({ sets: Number.MAX_SAFE_INTEGER, work: Number.MAX_SAFE_INTEGER });
+  /** The targets a staged text of document `index` has rejected. */
+  const rejectedIn = (set: Map<string, FileContent>) => [...String([...set.values()][0]).matchAll(/document\/d(\d+)/g)].map(([, i]) => Number(i));
+
+  it('stages every combination of a few rejected targets, and nothing for a text without links', () => {
+    const { variants } = corpus(5, (index) => (index === 0 ? [1, 2, 3] : []));
+    const texts = [...variants()].map((set) => String(set.get('docs/d000.md')));
+    // Each of the 7 non-empty sets of rejected targets gives its own text.
+    assert.equal(new Set(texts).size, 7);
+    assert.equal(texts.length, 7);
+    assert.ok(texts.every((text) => text.includes('https://linear.app/')));
+  });
+
+  it('stages each link alone and all together for a text with more targets', () => {
+    const { variants } = corpus(8, (index) => (index === 0 ? [1, 2, 3, 4, 5, 6] : []));
+    const texts = [...variants()].map((set) => String(set.get('docs/d000.md')));
+    assert.equal(texts.length, 7);
+    assert.equal(texts.filter((text) => text.split('https://linear.app/').length === 2).length, 6);
+    assert.ok(texts.some((text) => !text.includes('./d')));
+  });
+
+  it('grows linearly with densely linked documents, makes sets one at a time and stops at its budget', () => {
+    const counts = [40, 80].map((count) => {
+      const { variants, work } = dense(count);
+      const sets = variants({ budget: unlimited() });
+      sets.next();
+      // The first set is written before the texts of the other documents.
+      assert.ok(work.texts <= 4 * LINK_VARIANT_LINKS + 2 * Math.log2(count) + 2, `${work.texts} texts for the first set`);
+      const made = 1 + [...sets].length;
+      assert.ok(made <= count * (LINK_VARIANT_LINKS + 1), `${made} sets for ${count} documents`);
+      return work;
+    });
+    // Each document costs a bounded number of texts: twice the documents, about twice the work, not four times.
+    assert.ok(counts[1]!.texts <= 2.2 * counts[0]!.texts, `texts ${counts.map(({ texts }) => texts).join(' -> ')}`);
+    // The default budget caps the sets of a larger corpus, and says so.
+    const budget = linkVariantBudget();
+    assert.equal([...dense(80).variants({ budget })].length, linkVariantBudget().sets);
+    assert.equal(budget.short, true);
+  });
+
+  it('spends no more than its budget of sets and work, resets included, and goes on with smaller texts', () => {
+    const budget = { sets: 5, work: Number.MAX_SAFE_INTEGER };
+    assert.equal([...dense(30).variants({ budget })].length, 5);
+    assert.equal(budget.sets, 0);
+    const worked = dense(30);
+    const limited: LinkVariantBudget = { sets: Number.MAX_SAFE_INTEGER, work: 20_000 };
+    const made = [...worked.variants({ budget: limited })].length;
+    assert.ok(made > 0 && made < 30 * (LINK_VARIANT_LINKS + 1), `${made} sets`);
+    assert.equal(limited.short, true);
+    // The work is spent before each text: the characters written and the targets reset stay within it.
+    assert.ok(worked.work.characters + worked.work.resets <= 20_000, `${worked.work.characters} characters, ${worked.work.resets} resets`);
+    // A large text the budget cannot pay for is passed over; a smaller one after it is still staged.
+    const sizes = corpus(4, (index) => (index === 0 ? Array(200).fill(1) : index === 2 ? [3] : []));
+    const left = { sets: Number.MAX_SAFE_INTEGER, work: 200 };
+    assert.deepEqual([...sizes.variants({ budget: left })].map((set) => [...set.keys()][0]), ['docs/d002.md']);
+  });
+
+  it('stages the texts with targets refused before first, also past the targets staged alone', () => {
+    const { variants } = dense(30);
+    const sets = [...variants({ refused: new Set(['d029']), budget: { sets: 29, work: Number.MAX_SAFE_INTEGER } })];
+    // The whole budget goes to each document's text with only the refused target rejected.
+    assert.equal(sets.length, 29);
+    assert.ok(sets.every((set) => rejectedIn(set).join() === '29'), JSON.stringify(sets.map(rejectedIn)));
+  });
+
+  it('does not stage a text the file already holds', () => {
+    const { variants } = dense(10);
+    const all = [...variants({ budget: unlimited() })];
+    const settled = new Set(all.slice(0, 5).map((set) => String([...set.values()][0])));
+    const rest = [...dense(10).variants({ budget: unlimited(), settled: (_, text) => settled.has(text) })];
+    assert.equal(rest.length, all.length - 5);
+  });
 });

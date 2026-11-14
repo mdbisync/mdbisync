@@ -21,6 +21,7 @@ import { resolveTargets } from '../setup/linear.ts';
 import { NEUTRAL_IDENTITY } from '../state/index.ts';
 import { Git, commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
 import { type SecurityGate } from '../sync/security.ts';
+import { LINK_VARIANT_LINKS } from '../sync/capture.ts';
 import { candidateKey } from '../sync/staged.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
 import { type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit } from './reverse.ts';
@@ -1280,7 +1281,7 @@ describe('the security gate of an initial sync from Linear', () => {
    * the two steps (stage every set, run the hooks on them, apply from their
    * answers), and checks that the record holds only bytes the hooks passed.
    */
-  const gated = async (fixture: Fixture, world: FakeWorld, refused: (text: string) => boolean, steps: 1 | 2) => {
+  const gated = async (fixture: Fixture, world: FakeWorld, refused: (text: string) => boolean, steps: 1 | 2, stagedCount?: { sets: number }) => {
     const config = resolveStateConfig({});
     const git = await fixture.clone('gate');
     const fetched = await fetchState(git, config);
@@ -1315,6 +1316,7 @@ describe('the security gate of an initial sync from Linear', () => {
         },
       };
       await confirmLinearToGit(context, { config, github, security: staging, stageOnly: true, stopAfterDocuments: undefined });
+      if (stagedCount !== undefined) stagedCount.sets = staged.size;
       const answers = new Map([...staged].map(([key, files]) => [key, hooks(files)]));
       security = {
         configured: true,
@@ -1401,6 +1403,32 @@ describe('the security gate of an initial sync from Linear', () => {
       }
     });
   }
+
+  it('stages a bounded number of texts for densely linked new documents and records those that link a refused one', async () => {
+    const fixture = await createFixture();
+    try {
+      await fixture.seed(TREE);
+      const world = fakeWorld();
+      const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
+      const SECRET = ['blocked', 'value', '906'].join('-');
+      const count = 16;
+      const ids = Array.from({ length: count }, (_, i) => `doc-dense-${String(i).padStart(2, '0')}`);
+      const dense = ids.map((id, i) => doc(id, `dense-${String(i).padStart(2, '0')}`, { projectId: 'project-api' }, `${i === 0 ? `${SECRET}\n\n` : ''}${ids.filter((other) => other !== id).map((other) => `[${other}](${url(other)})`).join('\n')}\n`));
+      world.linear.documents = [...linearDocuments(), ...dense];
+      const staged = { sets: 0 };
+      const result = await gated(fixture, world, (text) => text.includes(SECRET), 2, staged);
+      // A set for each document, and at most a bounded number of texts with refused targets for each new one.
+      const documents = world.linear.documents.length;
+      assert.ok(staged.sets <= 2 * documents + count * (LINK_VARIANT_LINKS + 1), `${staged.sets} sets staged`);
+      // Only the refused document is left out; the others were staged with its Linear URL and are recorded.
+      assert.deepEqual(result.leftOutAtRecord.filter((entry) => entry.path.includes('dense-')), [{ path: 'eng/notes/dense-00.md', rule: 'security-hook' }]);
+      for (let i = 1; i < count; i += 1) {
+        assert.ok((await fixture.remote.text(['show', `refs/mdbisync/linear:eng/notes/dense-${String(i).padStart(2, '0')}.md`])).includes(url(ids[0]!)));
+      }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 
   // The file itself is harmless: only its URL carries the value.
   const CHART = Buffer.from('%PDF-1.4 a chart\n');

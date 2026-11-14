@@ -584,8 +584,8 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
           );
           const linkIds = linkMap(linkBase).ids;
           // Only a new document left out loses its file; an existing one keeps the tracked text and its links.
-          const reset = (path: string, ids: Map<string, string>) => {
-            if (created.has(path)) ids.delete(path);
+          const reset = (paths: ReadonlySet<string>, ids: Map<string, string>) => {
+            for (const path of paths) if (created.has(path)) ids.delete(path);
           };
           for (const set of linkVariants(candidates, (candidate, ids) => textOf(candidate.entry, ids), reset, linkIds)) await gate.check(set);
         }
