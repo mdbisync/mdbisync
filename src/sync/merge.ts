@@ -616,8 +616,9 @@ function compare(a: string, b: string): number {
 
 /** Copy selected paths exactly (including absence and file modes), leaving all other paths alone. */
 export async function takePaths(git: Git, into: Oid, from: Oid, paths: ReadonlySet<string>): Promise<Oid> {
-  for (const path of paths) checkRepoPath(path);
   const entries = new Map((await listTree(git, from)).map((entry) => [entry.path, entry]));
+  // A path absent from `from` is removed, which an older tree's path may be.
+  for (const path of paths) checkRepoPath(path, { removal: !entries.has(path) });
   // buildTree handles blobs; copy modes through a private index so images and symlinks stay exact.
   const dir = await mkdtemp(join(tmpdir(), 'lane-index-'));
   const env = { GIT_INDEX_FILE: join(dir, 'index') };

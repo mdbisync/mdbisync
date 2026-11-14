@@ -93,17 +93,20 @@ export function isGitDirectoryName(part: string): boolean {
 }
 
 /** The code points HFS+ ignores when it compares names, as Git's `core.protectHFS` lists them. */
-const HFS_IGNORED = /[‌-‏‪-‮⁪-⁯﻿]/g;
+const HFS_IGNORED = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
 
 /**
  * Checks a repository path: relative, `/`-separated, no empty, `.` or `..`
  * parts and no part that names the Git directory (`isGitDirectoryName`).
+ * With `removal`, a part that names the Git directory is allowed: a tree
+ * built before this rule may hold such a path (Git accepts `git~2`), and
+ * removing it only takes it out of the tree.
  */
-export function checkRepoPath(path: string): void {
+export function checkRepoPath(path: string, { removal = false }: { removal?: boolean } = {}): void {
   const parts = path.split('/');
   if (path === '' || path.includes('\0') || path.includes('\\')) throw new Error(message('objects.invalid-path', { path: JSON.stringify(path) }));
   for (const part of parts) {
-    if (part === '' || part === '.' || part === '..' || isGitDirectoryName(part)) {
+    if (part === '' || part === '.' || part === '..' || (!removal && isGitDirectoryName(part))) {
       throw new Error(message('objects.invalid-path', { path: JSON.stringify(path) }));
     }
   }
@@ -127,7 +130,7 @@ export interface CommitSpec {
 
 /** Builds a tree from `base` plus `changes` and commits it. Returns the commit id. */
 export async function commitTree(git: Git, spec: CommitSpec): Promise<Oid> {
-  for (const path of spec.changes.keys()) checkRepoPath(path);
+  for (const [path, content] of spec.changes) checkRepoPath(path, { removal: content === null });
   const tree = await buildTree(git, spec.base, spec.changes);
 
   if ((spec.skipIfUnchanged ?? true) && spec.parents.length === 1) {

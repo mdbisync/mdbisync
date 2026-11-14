@@ -17,7 +17,7 @@ import { capture, prepareLfs } from './capture.ts';
 import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
 import { documentPath, titlePath } from './paths.ts';
-import { checkRepoPath, isGitDirectoryName } from '../state/objects.ts';
+import { buildTree, checkRepoPath, isGitDirectoryName } from '../state/objects.ts';
 
 const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
@@ -243,6 +243,29 @@ describe('capture from Linear', () => {
     assert.equal(ids.get('docs/%47IT~1/hooks/post-checkout.md')?.id, 'hook');
     const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
     assert.ok(!paths.some((path) => path.split('/').some(isGitDirectoryName)), paths.join(', '));
+  });
+
+  it('moves a document away from an earlier path that names the Git directory', async () => {
+    // An earlier version kept the title `git~2/notes` (which Git accepts) as it was.
+    const { git } = context;
+    const state = context.fetched.state;
+    const legacy = 'docs/git~2/notes.md';
+    const tree = await buildTree(git, state.linear!, new Map([['docs/plan.md', null], [legacy, '---\ncategory: work\n---\n\nOriginal.\n']]));
+    const env = { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email };
+    const linear = await git.text(['commit-tree', '--no-gpg-sign', tree, '-p', state.linear!, '-m', 'Earlier capture'], { env });
+    const ids = await commitIds(git, state.ids, new Map([[legacy, { id: 'plan' }]]), IDENTITY);
+    const pushed = await pushAtomic(git, config, [
+      { ref: stateRef(config, 'linear'), expected: state.linear, next: linear },
+      { ref: stateRef(config, 'ids'), expected: state.ids, next: ids },
+    ]);
+    assert.equal(pushed.ok, true);
+    await refresh();
+    Object.assign(world.linear.documents[0]!, { title: 'git~2/notes', updatedAt: '2026-01-03T00:00:00Z' });
+    const result = await run();
+    assert.equal(await text('docs/%67it~2/notes.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    const paths = (await listTree(git, result.state.linear!)).map((entry) => entry.path);
+    assert.ok(!paths.includes(legacy), paths.join(', '));
+    assert.equal((await readIds(git, result.state.ids)).get('docs/%67it~2/notes.md')?.id, 'plan');
   });
 
   it('captures a new path, renames by id and moves across projects', async () => {

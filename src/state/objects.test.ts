@@ -10,7 +10,7 @@ import { checkRepoPath, isGitDirectoryName } from './objects.ts';
 // name `GIT~1` (and the later short names a busy folder hands out), in any
 // case, with the trailing dots and spaces Windows drops from a name, with an
 // NTFS stream suffix after a colon, and with code points HFS+ ignores.
-const aliases = ['.git', '.GIT', '.git.', '.git .', 'git~1', 'GIT~1', 'Git~1. ', 'git~2', 'GIT~9', 'git~10', '.git:x', '.git::$INDEX_ALLOCATION', 'git~1:x', 'GIT~1 .:x', 'GIT~1:x y', 'git~1:\n', '.g‌it', '﻿.GIT', '.gi⁪t'];
+const aliases = ['.git', '.GIT', '.git.', '.git .', 'git~1', 'GIT~1', 'Git~1. ', 'git~2', 'GIT~9', 'git~10', '.git:x', '.git::$INDEX_ALLOCATION', 'git~1:x', 'GIT~1 .:x', 'GIT~1:x\u2028y', 'git~1:\n', '.g\u200cit', '\ufeff.GIT', '.gi\u206at'];
 // Near misses that name ordinary files.
 const ordinary = ['git', 'git~', 'git~a', 'git~1x', 'git~1.md', '.git~1', '.gitignore', '.github', 'x.git', 'git1', '.git.md', 'a.git~1'];
 
@@ -29,6 +29,11 @@ describe('Git directory names', () => {
     for (const name of ordinary) checkRepoPath(`docs/${name}/page.md`);
   });
 
+  it('allows removing a path that names the Git directory, but not other invalid paths', () => {
+    for (const name of aliases) checkRepoPath(`docs/${name}/page.md`, { removal: true });
+    for (const path of ['', 'docs/../x', 'docs//x', 'a\\b']) assert.throws(() => checkRepoPath(path, { removal: true }), /invalid repository path/, path);
+  });
+
   it('rejects every path Git itself refuses under core.protectNTFS and core.protectHFS', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'repo-path-'));
     try {
@@ -44,7 +49,7 @@ describe('Git directory names', () => {
         assert.throws(() => checkRepoPath(path), /invalid repository path/, `Git refuses ${path}`);
       }
       // The check above proves something only while Git really applies both protections.
-      for (const name of ['.git', 'GIT~1', '.git:x', '.g‌it']) assert.ok(refused.includes(name), `Git accepted ${JSON.stringify(name)}`);
+      for (const name of ['.git', 'GIT~1', '.git:x', '.g\u200cit']) assert.ok(refused.includes(name), `Git accepted ${JSON.stringify(name)}`);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
