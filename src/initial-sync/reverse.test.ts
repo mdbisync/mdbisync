@@ -137,6 +137,26 @@ describe('initial sync from Linear to the tracked branch', () => {
   };
   const linearMutations = (world: FakeWorld) => world.writes.filter((write) => !write.includes(' '));
 
+  for (const folder of ['', 'eng/notes']) it(`encodes reserved GitHub title segments on import into ${folder || 'the root'}`, async () => {
+    if (folder === '') await fixture.seed({
+      'README.md': '---\nlinear-team: ENG\nlinear-project: Field notes\n---\n\n# Notes\n',
+      'eng/README.md': '# Engineering\n',
+      'eng/notes/README.md': '# Field notes\n',
+      'combined/README.md': '# Handbook\n',
+    });
+    const world = fakeWorld();
+    const titles = ['.github/x', '.GitHub/workflows/notes', 'nested/.GITHUB/page', 'ordinary'];
+    world.linear.documents.push(...titles.map((title, index) => doc(`new-${index}`, title, { projectId: 'project-api' }, 'New page.\n')));
+    const imported = await run(world);
+    assert.equal(imported.result.exitCode, 0, imported.result.stderr);
+    const paths = await files('refs/heads/mdbisync/linear');
+    assert.ok(!paths.some((path) => path.split('/').some((part) => part.toLowerCase() === '.github')), paths.join(', '));
+    for (const path of ['%2Egithub/x', '%2EGitHub/workflows/notes', 'nested/%2EGITHUB/page', 'ordinary']) {
+      assert.ok(paths.includes(`${folder ? `${folder}/` : ''}${path}.md`), paths.join(', '));
+    }
+    assert.deepEqual(world.linear.documents.map((document) => document.title), titles);
+  });
+
   /** A person merges the pull request with a merge commit. */
   const merge = async (world: FakeWorld) => {
     const head = await fixture.remote.text(['rev-parse', 'refs/heads/mdbisync/linear']);

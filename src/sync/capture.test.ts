@@ -349,6 +349,29 @@ describe('capture from Linear', () => {
     assert.equal((await readIds(git, result.state.ids)).get('docs/%67it~2/notes.md')?.id, 'plan');
   });
 
+  it('moves a document away from an earlier path that names a reserved GitHub folder', async () => {
+    // An earlier version kept the title `.GitHub/notes` as it was.
+    const { git } = context;
+    const state = context.fetched.state;
+    const legacy = 'docs/.GitHub/notes.md';
+    const tree = await buildTree(git, state.linear!, new Map([['docs/plan.md', null], [legacy, '---\ncategory: work\n---\n\nOriginal.\n']]));
+    const env = { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email };
+    const linear = await git.text(['commit-tree', '--no-gpg-sign', tree, '-p', state.linear!, '-m', 'Earlier capture'], { env });
+    const ids = await commitIds(git, state.ids, new Map([[legacy, { id: 'plan' }]]), IDENTITY);
+    const pushed = await pushAtomic(git, config, [
+      { ref: stateRef(config, 'linear'), expected: state.linear, next: linear },
+      { ref: stateRef(config, 'ids'), expected: state.ids, next: ids },
+    ]);
+    assert.equal(pushed.ok, true);
+    await refresh();
+    Object.assign(world.linear.documents[0]!, { title: '.GitHub/notes', updatedAt: '2026-01-03T00:00:00Z' });
+    const result = await run();
+    assert.equal(await text('docs/%2EGitHub/notes.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    const paths = (await listTree(git, result.state.linear!)).map((entry) => entry.path);
+    assert.ok(!paths.includes(legacy), paths.join(', '));
+    assert.equal((await readIds(git, result.state.ids)).get('docs/%2EGitHub/notes.md')?.id, 'plan');
+  });
+
   it('captures a new path, renames by id and moves across projects', async () => {
     world.linear.documents.push({ id: 'new', title: 'guides/new-page', content: 'New.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' });
     await run();
@@ -947,6 +970,17 @@ it('makes safe title paths and deterministic collision names', () => {
     assert.ok(!path.split('/').some(isGitDirectoryName), path);
     checkRepoPath(path);
   }
+  for (const folder of ['', 'docs', 'docs/nested']) {
+    for (const title of ['.github/x', '.GitHub/workflows/notes', 'nested/.GITHUB/page']) {
+      const raw = `${folder === '' ? '' : `${folder}/`}${title}.md`;
+      const path = documentPath(folder, title, 'one', new Set(), raw);
+      assert.ok(!path.split('/').some((part) => part.toLowerCase() === '.github'), path);
+      assert.equal(documentPath(folder, title, 'one', new Set(), path), path);
+    }
+  }
+  assert.equal(titlePath('.github'), '%2Egithub');
+  assert.equal(titlePath('.github./x'), '.github%2E/x');
+  assert.equal(titlePath('.github-notes/x'), '.github-notes/x');
   assert.equal(titlePath('GIT~1/hooks'), '%47IT~1/hooks');
   assert.equal(titlePath('git~1x/page'), 'git~1x/page');
   // Names that were already safe keep the file name they had.

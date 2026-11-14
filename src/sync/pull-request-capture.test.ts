@@ -9,6 +9,29 @@ describe('sync: pull request capture', () => {
   const h = pullRequestHarness();
   const { sync, rev, show, editInLinear, checksOn, openPullRequests } = h;
 
+  it('merges titles containing reserved GitHub folders alongside ordinary edits', async () => {
+    const titles = ['.github/x', '.GitHub/workflows/notes', 'nested/.GITHUB/page'];
+    for (const [index, title] of titles.entries()) {
+      h.world.linear.documents.push({ id: `new-${index}`, title, projectId: 'project-api', content: 'New page.\n', createdAt: '2026-01-02T00:00:00Z' });
+    }
+    const renamed = await h.documentOf('combined/guide.md');
+    renamed.title = '.github/guide';
+    await editInLinear('combined/guide.md', '# Guide\n\nRenamed page.\n');
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nOrdinary edit.\n');
+    const first = await sync();
+    assert.equal(first.result.exitCode, 0, JSON.stringify(first.report));
+    const paths = (await h.fixture.remote.text(['ls-tree', '-r', '--name-only', SYNC_BRANCH])).split('\n');
+    assert.ok(!paths.some((path) => path.split('/').some((part) => part.toLowerCase() === '.github')), paths.join(', '));
+    const merged = await sync();
+    assert.equal(merged.result.exitCode, 0, merged.result.stderr);
+    assert.equal(h.world.github.pullRequests[0]?.merged, true);
+    for (const path of ['%2Egithub/x', '%2EGitHub/workflows/notes', 'nested/%2EGITHUB/page']) assert.equal(await show(`refs/heads/main:eng/notes/${path}.md`), 'New page.\n');
+    assert.match(await show('refs/heads/main:eng/notes/plan.md'), /Ordinary edit/);
+    assert.match(await show('refs/heads/main:combined/%2Egithub/guide.md'), /Renamed page/);
+    await h.settle();
+    assert.equal(renamed.title, '.github/guide');
+  });
+
   it('L2-20: a Linear edit reaches the tracked branch through the sync pull request, merged with a merge commit, front matter kept', async () => {
     await editInLinear('eng/notes/plan.md', `# Plan\n\nSteps one, two and three. ${CANARY}\n`);
 
