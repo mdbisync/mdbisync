@@ -7,7 +7,8 @@ import { it } from 'node:test';
 import { LinearReads } from '../linear/index.ts';
 import { createFixture } from '../state/test-helpers.ts';
 import { resolveStateConfig } from '../state/index.ts';
-import { captureAssets, createAssetCapture, imageFindings, ImageBlockedError } from './assets.ts';
+import { captureAssets, createAssetCapture, imageFindings, ImageBlockedError, typedFileLinkFindings } from './assets.ts';
+import { destinations } from '../initial-sync/uploads.ts';
 
 const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
@@ -398,5 +399,41 @@ it('classifies oversized attachments and empty upload responses as permanent fin
         return true;
       });
     }
+  } finally { await fixture.cleanup(); }
+});
+
+it('blocks a link typed in Linear to a repository file the previous text did not link, matching by resolved path only', () => {
+  const findings = (body: string, previous?: string, previousPath?: string) => typedFileLinkFindings('docs/plan.md', body, previous, previousPath).map(({ file, total, line }) => [file, total, line]);
+  assert.deepEqual(findings('See [r](../private/report.csv).'), [[1, 1, 1]]);
+  assert.deepEqual(findings('A\n\n[r]: ../private/%72eport.csv'), [[1, 1, 3]]);
+  // A definition an image uses is left to the image gate; one a link uses is not.
+  assert.deepEqual(findings('![i][a] [l][b]\n\n[a]: a.png\n[b]: b.csv'), [[1, 1, 4]]);
+  // Images have their own gate; Markdown documents and other sites upload nothing.
+  assert.deepEqual(findings('![i](../private/a.png) [d](guide.md) [s](https://example.com/a.csv) [t](#top)'), []);
+  // The previous text linked the same file, also by another spelling or from where the document was.
+  assert.deepEqual(findings('[r](../private/report.csv)', '[r](<../private/./report.csv>)'), []);
+  assert.deepEqual(findings('[r](../private/report.csv)', '[r](private/report.csv)', 'plan.md'), []);
+  // The same spelling naming another file does not count.
+  assert.deepEqual(findings('[r](../config/app.json)', '[r](../config/app.json)', 'plan.md'), [[1, 1, 1]]);
+  assert.deepEqual(findings('[a](a.csv) [b](b.csv)', '[a](a.csv)'), [[2, 2, 1]]);
+});
+
+it('encodes a restored link\'s fragment, so it cannot end the link and add another', async () => {
+  const fixture = await createFixture();
+  try {
+    await fixture.seed({'docs/plan.md': 'Plan.\n', 'docs/existing.png': Buffer.from('image')});
+    const git = await fixture.clone('fragment');
+    const base = await git.text(['rev-parse', 'origin/main']);
+    const url = 'https://uploads.linear.app/workspace/image.png';
+    const hash = createHash('sha256').update('image').digest('hex');
+    // One link in Linear's text; its decoded fragment spells a second one.
+    const content = `[File](${url}#x\\)\\[y\\]\\(../secret.csv)`;
+    assert.deepEqual(destinations(content).length, 1);
+    const captured = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', content, new Map([[hash, url]]), async () => { throw new Error('a cached link must not be downloaded'); });
+    assert.deepEqual(destinations(captured.body).map(({ node }) => node.url), ['existing.png#x%29%5By%5D%28../secret.csv']);
+    // Query separators stay; an `&` that would read as a character reference does not, and an encoded one stays encoded.
+    const query = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `[File](${url}?download=1&page=2&amp;lt;x&q=a%26b#a&b)`, new Map([[hash, url]]), async () => { throw new Error('a cached link must not be downloaded'); });
+    assert.equal(query.body, '[File](existing.png?download=1&page=2%26lt;x&q=a%26b#a&b)');
+    assert.deepEqual(destinations(query.body).map(({ node }) => node.url), ['existing.png?download=1&page=2%26lt;x&q=a%26b#a&b']);
   } finally { await fixture.cleanup(); }
 });
