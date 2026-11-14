@@ -22,6 +22,8 @@ export interface CycleOptions {
   documentCap?: number | undefined;
   mergeGraceSeconds?: number | undefined;
   checkDeadlineMinutes?: number | undefined;
+  requiredChecks?: readonly string[] | undefined;
+  mergeWithoutChecks?: boolean | undefined;
   config: StateConfig;
   /** The repository the sync pull request is in, with the token the run acts as. */
   github: GitHubRepository;
@@ -56,7 +58,7 @@ export async function runSyncCycle(context: RunContext, options: CycleOptions): 
   if (!captured.ok) return {complete:false, changed, trackedTip, capture:captured};
   await checkpoint('after-capture-push-before-pr');
   // Pending checks and suspended batches still allow steps 3 to 5 for other documents.
-  const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds, checkDeadlineMinutes: options.checkDeadlineMinutes });
+  const pullRequest = await syncPullRequest(context, { config: options.config, state: captured.state, github: options.github, mergeGraceSeconds: options.mergeGraceSeconds, checkDeadlineMinutes: options.checkDeadlineMinutes, requiredChecks: options.requiredChecks, mergeWithoutChecks: options.mergeWithoutChecks });
   // Writing Linear from the tracked branch while that pull request waits would leave it to be merged over the new state.
   if (pullRequest.code === 'initial-pull-request-pending') return { complete: false, changed, trackedTip, capture: captured, pullRequest };
   // The suspended marks follow the lane's push: set for new episodes, edited for a new failure, cleared at release.

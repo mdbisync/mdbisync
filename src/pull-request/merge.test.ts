@@ -13,6 +13,19 @@ function target(checks: FakeCheck[]) {
 }
 
 describe('readChecks', () => {
+  it('keeps a commit pending while an expected check is not registered, or while it has no checks and must have some', async () => {
+    const passed: FakeCheck[] = [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }];
+    assert.deepEqual(await readChecks(target(passed).repo, SHA, { names: ['tests', 'pre-commit', 'tests'] }), { state: 'pending', failed: [], pending: [], hasChecks: true, succeeded: ['pre-commit'], missing: ['tests'] });
+    // A registered expected check counts by its own state; a failure still wins.
+    const failing: FakeCheck[] = [...passed, { name: 'tests', status: 'completed', conclusion: 'failure' }];
+    const failed = await readChecks(target(failing).repo, SHA, { names: ['tests', 'lint'] });
+    assert.equal(failed.state, 'failed');
+    assert.deepEqual(failed.missing, ['lint']);
+    assert.equal((await readChecks(target([...passed, { name: 'tests', status: 'completed', conclusion: 'success' }]).repo, SHA, { names: ['tests'] })).state, 'passed');
+    assert.deepEqual(await readChecks(target([]).repo, SHA, { allowNone: false }), { state: 'pending', failed: [], pending: [], hasChecks: false });
+    assert.equal((await readChecks(target([]).repo, SHA, { allowNone: true })).state, 'passed');
+  });
+
   it('passes a commit without checks, and one whose checks succeeded, were neutral or skipped', async () => {
     assert.deepEqual(await readChecks(target([]).repo, SHA), { state: 'passed', failed: [], pending: [], hasChecks: false });
     const checks: FakeCheck[] = [

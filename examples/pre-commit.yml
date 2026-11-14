@@ -20,6 +20,7 @@ jobs:
     permissions:
       contents: write # Fork pull requests retain a read-only token.
       checks: write # Attach the result to the fixing commit too.
+      actions: write # Start the workflows MDBISYNC_CI_WORKFLOWS lists on the fixing commit.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -179,6 +180,34 @@ jobs:
             "https://api.github.com/repos/$REPOSITORY/check-runs" --data "$payload")
           check_id=$(node -e 'const id=JSON.parse(process.argv[1]).id; if (!Number.isSafeInteger(id)) process.exit(1); console.log(id)' "$response")
           echo "id=$check_id" >> "$GITHUB_OUTPUT"
+      - name: Start the other CI on the fixing commit
+        # A GITHUB_TOKEN push starts no other workflow, so the fixing commit lacks
+        # the repository's other checks, and the sync merges no head that lacks a
+        # check its earlier heads ran. List those workflows' files, each with a
+        # `workflow_dispatch:` trigger, in the repository variable
+        # MDBISYNC_CI_WORKFLOWS (for example `tests.yml lint.yml`). It runs once
+        # the fixing commit's check is pending, so a failed start fails that check.
+        if: ${{ steps.fixes.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository && vars.MDBISYNC_CI_WORKFLOWS != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          WORKFLOWS: ${{ vars.MDBISYNC_CI_WORKFLOWS }}
+        shell: bash
+        run: |
+          read -ra workflows <<< "$(printf '%s' "$WORKFLOWS" | tr ',\r\n' '   ')"
+          for workflow in "${workflows[@]}"; do
+            if [[ ! "$workflow" =~ ^[A-Za-z0-9._-]+\.ya?ml$ ]]; then
+              echo '::error::MDBISYNC_CI_WORKFLOWS must list workflow file names, such as tests.yml, separated by spaces or commas.'
+              exit 1
+            fi
+          done
+          payload=$(node -e 'console.log(JSON.stringify({ref: process.env.HEAD_BRANCH}))')
+          for workflow in "${workflows[@]}"; do
+            curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$REPOSITORY/actions/workflows/$workflow/dispatches" --data "$payload"
+          done
       - name: Check the fixed tree in the same job
         id: checks
         # A GITHUB_TOKEN push does not start another workflow run.

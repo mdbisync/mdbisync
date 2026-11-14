@@ -27,6 +27,16 @@ export interface CheckState {
   failures?: CheckFailure[];
   /** Names of the checks that finished and passed, sorted; absent when none did. */
   succeeded?: string[];
+  /** Expected checks that are not registered on the commit, sorted; absent when none is missing. */
+  missing?: string[];
+}
+
+/** What a commit must show beyond the checks registered on it before it counts as passed. */
+export interface CheckExpectation {
+  /** Check names that must be registered on the commit and pass there; an absent one keeps it pending. */
+  names?: readonly string[];
+  /** Whether a commit with no checks at all can pass; when false, such a commit stays pending. */
+  allowNone?: boolean;
 }
 
 /** A failed check run or commit status: its name, its page on GitHub and, for a check run, its id. */
@@ -50,9 +60,12 @@ export interface CheckAnnotation {
  * The checks on a commit: its check runs (GitHub Actions and other apps,
  * the latest run of each) and its commit statuses (the latest of each
  * context). A failure wins over a pending check, so a failed check is
- * reported as soon as it is seen.
+ * reported as soon as it is seen. An expected check that is not registered
+ * keeps the commit pending, as does a commit with no checks when
+ * `expect.allowNone` is false: a commit pushed with a workflow's own token
+ * starts no other workflow, so what is absent there never ran.
  */
-export async function readChecks(target: GitHubRepository, sha: string): Promise<CheckState> {
+export async function readChecks(target: GitHubRepository, sha: string, expect: CheckExpectation = {}): Promise<CheckState> {
   const pending = new Set<string>();
   const succeeded = new Set<string>();
   const failures = new Map<string, CheckFailure>();
@@ -104,9 +117,13 @@ export async function readChecks(target: GitHubRepository, sha: string): Promise
   }
 
   const failed = [...failures.keys()].sort();
-  const state: CheckState = { hasChecks: hasRuns || combined.total_count > 0, state: failed.length > 0 ? 'failed' : pending.size > 0 ? 'pending' : 'passed', failed, pending: [...pending].sort() };
+  const hasChecks = hasRuns || combined.total_count > 0;
+  const missing = [...new Set(expect.names ?? [])].filter((name) => !pending.has(name) && !succeeded.has(name) && !failures.has(name)).sort();
+  const waiting = pending.size > 0 || missing.length > 0 || (!hasChecks && expect.allowNone === false);
+  const state: CheckState = { hasChecks, state: failed.length > 0 ? 'failed' : waiting ? 'pending' : 'passed', failed, pending: [...pending].sort() };
   if (failed.length > 0) state.failures = failed.map((name) => failures.get(name) as CheckFailure);
   if (succeeded.size > 0) state.succeeded = [...succeeded].sort();
+  if (missing.length > 0) state.missing = missing;
   return state;
 }
 
@@ -152,7 +169,7 @@ export async function readAnnotations(target: GitHubRepository, checkRunId: numb
  * leaves the PR open. All of it runs on the target's clock, real time by
  * default.
  */
-export async function waitForChecks(target: GitHubRepository, sha: string, seconds: number): Promise<CheckState> {
+export async function waitForChecks(target: GitHubRepository, sha: string, seconds: number, expect: CheckExpectation = {}): Promise<CheckState> {
   const clock = target.clock ?? REAL_CLOCK;
   const started = clock.now();
   const deadline = started + seconds * 1000;
@@ -163,7 +180,7 @@ export async function waitForChecks(target: GitHubRepository, sha: string, secon
   for (let attempt = 0; attempt < Math.ceil(seconds / 5); attempt += 1) {
     if (clock.now() >= deadline) break;
     try {
-      last = await readChecks({ ...target, signal }, sha);
+      last = await readChecks({ ...target, signal }, sha, expect);
     } catch (error) {
       if (signal.aborted && !target.signal?.aborted && error instanceof PullRequestError) break;
       throw error;

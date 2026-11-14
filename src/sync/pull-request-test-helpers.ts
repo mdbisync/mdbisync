@@ -91,6 +91,8 @@ export function pullRequestHarness() {
     MDBISYNC_LINEAR_CLIENT_SECRET: 'client-secret',
     MDBISYNC_LINEAR_API_URL: LINEAR_API,
     MDBISYNC_MERGE_GRACE_SECONDS: '0', MDBISYNC_GITHUB_TOKEN: 'gh-token',
+    // Most tests give the head no checks; the ones about missing checks clear this.
+    MDBISYNC_MERGE_WITHOUT_CHECKS: 'true',
     MDBISYNC_GITHUB_API_URL: GITHUB_API,
     MDBISYNC_REPOSITORY: 'owner/repo',
     MDBISYNC_REPORT_FILE: reportFile(),
@@ -214,7 +216,7 @@ export function pullRequestHarness() {
   function backdate(branch: string, minutes: number) {
     const pr = openPullRequests().find((item) => item.head === branch);
     assert.ok(pr !== undefined, `no open pull request from ${branch}`);
-    const body = pr.body.replace(/^(<!-- head: sha=[0-9a-f]+ since=)[^ ]+( -->)$/m, `$1${new Date(Date.now() - minutes * 60_000).toISOString()}$2`);
+    const body = pr.body.replace(/^(<!-- head: sha=[0-9a-f]+ since=)[^ ]+((?: checks=\S*)? -->)$/m,`$1${new Date(Date.now() - minutes * 60_000).toISOString()}$2`);
     assert.notEqual(body, pr.body, 'the description notes no push time');
     pr.body = body;
   }

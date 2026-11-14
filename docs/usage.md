@@ -249,8 +249,23 @@ remain after release; its presence alone does not mean a batch is on hold.
   `merge-grace-seconds` (default `60`, range `0`–`120`) for the head's check
   runs and commit statuses. When every check has finished and passed, it
   merges with a merge commit in the same run after at least 15 seconds for
-  CI registration. With no checks, it waits for 15 seconds of continuously
-  absent checks to allow CI to register first.
+  CI registration. A head with no checks at all does not merge: it waits for
+  a check to register. For a repository without CI, set
+  `merge-without-checks: true`; the sync then merges a head with no checks
+  after 15 seconds of continuously absent checks, to allow CI to register
+  first.
+- Besides the checks registered on a head, the sync expects every check
+  that was registered on the pull request's earlier heads, and every name in
+  `required-checks`. A head that lacks one of them waits for it, as for a
+  pending check. A commit pushed with a workflow's own `GITHUB_TOKEN` (a
+  formatter's fix, say) starts no other workflow, so without this rule it
+  would carry only that workflow's check and merge past the others. The
+  expected names are kept in a hidden HTML note in the pull request
+  description. A head the sync pushes itself starts the repository's whole
+  CI, so it expects only what the head it was pushed on registered, besides
+  `required-checks`: a check that no longer runs (a renamed job) stays
+  expected for at most one more push of the sync. A name removed from
+  `required-checks` stops counting at once.
   Checks still running at the end of this grace period leave the merge to a later run.
   Grace periods of 15 seconds or less defer merging because they leave no
   time for a check observation after registration settles.
@@ -266,11 +281,15 @@ remain after release; its presence alone does not mean a batch is on hold.
   Actions permission; its permissions remain those in the
   [quickstart](quickstart.md#github-app). The push time for each head is
   kept in a hidden HTML note in the pull request description; a new head
-  starts a new deadline. An unreported check does not time out: if no
-  checks register, the sync attempts a merge after the registration grace
-  period. GitHub can refuse it for a missing required check, yielding
-  `merge-refused` and then `merge-blocked`, with nothing suspended or
-  marked in Linear; fix the workflow filters or required-check names.
+  starts a new deadline. An expected check that never registers, or a
+  head that has no checks without `merge-without-checks`, does not suspend
+  anything: past the deadline the run reports the setup error
+  `checks-missing`, with nothing marked in Linear. A check that GitHub's
+  branch rules require but that never registered and that the sync does not
+  expect lets the sync try the merge; GitHub can refuse it, yielding
+  `merge-refused` and then `merge-blocked`, with nothing suspended or marked
+  in Linear. Fix the workflow filters or required-check names, or list the
+  check in `required-checks`.
 - A failed check counts at once. Unless that check also fails on the
   tracked branch's tip, the whole batch moves to the suspended lane, and
   the normal pull request closes once GitHub shows its empty set-aside head.

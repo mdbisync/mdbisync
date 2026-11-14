@@ -261,13 +261,17 @@ sync does not read the branch's list of required checks: branch
 protection's list needs an App permission the sync does not ask for
 (only rulesets are readable without it), and a required check that never
 registers is a repository setting, not a fault of the batch's documents.
-With no reported checks, the sync attempts to merge after its
-registration grace period. If GitHub refuses the merge for a missing
-required check, the run reports `merge-refused`; a later run that meets
-the same refusal on the same head, with the tracked branch unmoved,
-reports the setup error `merge-blocked`. Nothing is suspended or marked
-in Linear. Check workflow filters and the required-check names if this
-happens.
+The sync expects, besides the checks registered on a head, every check
+registered on the pull request's earlier heads and every name in
+`required-checks`, and it merges no head with no checks at all unless
+`merge-without-checks` is `true`. A head that lacks an expected check, or
+has none, waits; past the deadline the run reports the setup error
+`checks-missing`, and nothing is suspended or marked in Linear. A check
+only GitHub's branch rules require lets the sync try the merge: if GitHub
+refuses it, the run reports `merge-refused`; a later run that meets the
+same refusal on the same head, with the tracked branch unmoved, reports
+the setup error `merge-blocked`. Nothing is suspended or marked in Linear.
+Check workflow filters and the required-check names if this happens.
 
 The batch joins the one **Suspended changes from Linear** pull request.
 The normal branch records `Set aside suspended changes` and its pull
