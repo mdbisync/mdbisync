@@ -514,16 +514,41 @@ export async function readWrittenHashes(git: Git, commit: Oid | null): Promise<M
 }
 
 /**
- * Commits the id map (and, when there are any, the reserved ids, the
- * superseded ids and the written hashes) on top of `parent`. Returns
- * `parent` when nothing changed, unless `always`.
+ * The last head the sync itself pushed on the sync branch, kept beside
+ * `ids.json`. Only the sync's own push sets it, so a commit someone else
+ * pushed there never takes its place: the checks expected of a later head
+ * are read down to it.
  */
-export function commitIds(
+export const SYNC_PUSHED_FILE = 'sync-pushed.json';
+
+/** The head `SYNC_PUSHED_FILE` records; none when the commit does not have the file. */
+export async function readSyncPushed(git: Git, commit: Oid | null): Promise<Oid | undefined> {
+  if (commit === null) return undefined;
+  const read = await git.run(['cat-file', 'blob', `${commit}:${SYNC_PUSHED_FILE}`], { okCodes: [0, 128] });
+  if (read.code !== 0) return undefined;
+  let head: unknown;
+  try {
+    head = (JSON.parse(read.stdout.toString('utf8')) as { head?: unknown } | null)?.head;
+  } catch {
+    throw new Error(message('state.invalid-json', { file: SYNC_PUSHED_FILE, commit }));
+  }
+  if (typeof head !== 'string' || !/^[0-9a-f]{40,64}$/.test(head)) throw new Error(message('state.invalid-entry', { file: SYNC_PUSHED_FILE }));
+  return head;
+}
+
+/**
+ * Commits the id map (and, when there are any, the reserved ids, the
+ * superseded ids, the written hashes and the sync branch's pushed head) on
+ * top of `parent`. Returns `parent` when nothing changed, unless `always`.
+ * `syncPushed` records the head the sync pushes on the sync branch together
+ * with this commit; left out, the head `parent` records is kept.
+ */
+export async function commitIds(
   git: Git,
   parent: Oid | null,
   ids: IdMap,
   identity: CommitIdentity,
-  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; superseded?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string> } = {},
+  options: CommitStateOptions & { reserved?: ReadonlyMap<string, string>; superseded?: ReadonlyMap<string, string>; written?: ReadonlyMap<string, string>; syncPushed?: Oid } = {},
 ): Promise<Oid> {
   const entries = [...ids.entries()].sort(([a], [b]) => compareStrings(a, b));
   const data = Object.fromEntries(entries.map(([path, entry]) => [path, entry]));
@@ -532,6 +557,8 @@ export function commitIds(
   if (options.reserved !== undefined && options.reserved.size > 0) files.set(RESERVED_IDS_FILE, sorted(options.reserved));
   if (options.superseded !== undefined && options.superseded.size > 0) files.set(SUPERSEDED_IDS_FILE, sorted(options.superseded));
   if (options.written !== undefined && options.written.size > 0) files.set(WRITTEN_FILE, sorted(options.written));
+  const syncPushed = options.syncPushed ?? await readSyncPushed(git, parent);
+  if (syncPushed !== undefined) files.set(SYNC_PUSHED_FILE, { head: syncPushed });
   return commitJsonFiles(git, parent, files, options.message ?? 'Update document ids', identity, options.always === true);
 }
 

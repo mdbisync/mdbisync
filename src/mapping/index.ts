@@ -6,6 +6,7 @@ export {
   PROJECT_KEY,
   TEAM_KEY,
   type Zone,
+  nearestZone,
   readAnnotation,
   resolveZones,
 } from './annotations.ts';
@@ -24,5 +25,6 @@ export {
   isRegularFile,
   loadMapping,
   mapFiles,
+  placeOf,
   titleKey,
 } from './mapping.ts';

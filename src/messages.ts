@@ -205,6 +205,7 @@ export const MESSAGES = {
   // The sync.
   'sync.needs-initial-sync': 'run initial sync first',
   'sync.places-unresolved': 'the previously recorded document places could not be resolved',
+  'sync.recorded-place-unknown': 'the recorded state names a Linear place for {folder} that the tracked branch never named; the state refs were changed outside the sync',
   'sync.lost-lease': 'state moved while recording document marks',
   'sync.no-lfs-pointer': 'LFS did not return a pointer',
   'sync.lfs-pointer-mismatch': 'LFS returned a pointer to other content than it was given',

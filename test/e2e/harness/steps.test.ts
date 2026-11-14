@@ -1598,7 +1598,7 @@ describe('titles that are not paths', () => {
     assert.equal(encodeTitlePath('../notes'), '%2E%2E/notes');
     assert.equal(encodeTitlePath('./notes'), '%2E/notes');
     assert.equal(encodeTitlePath('.GIT/config'), '%2EGIT/config');
-    assert.equal(encodeTitlePath('.github/notes'), '.github/notes');
+    assert.equal(encodeTitlePath('.github/notes'), '%2Egithub/notes');
     assert.equal(encodeTitlePath('con'), '%63on');
     assert.equal(encodeTitlePath('drafts/LPT1.notes'), 'drafts/%4CPT1.notes');
     assert.equal(encodeTitlePath('console'), 'console');

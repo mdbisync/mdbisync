@@ -416,6 +416,27 @@ describe('sync: pull request suspension', () => {
     assert.ok(released.report.pullRequest?.suspended?.released);
   });
 
+  // A merge made up to look like the sync's own (of the tracked branch or Linear's state) does not end the suspended
+  // branch's history: the check its earlier head failed still counts.
+  for (const parent of ['main', 'linear'] as const) it(`does not release past a forged merge of ${parent === 'main' ? 'the tracked branch' : "Linear's state"} when the head note is deleted`, async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne(path);
+    await sync();
+    await h.editRef(SUSPENDED, path, '# Plan\n\nHeld Linear edit.\n\nChanged.\n', 'Merge', await rev(parent === 'main' ? 'refs/heads/main' : 'refs/mdbisync/linear'));
+    const fixed = await h.editRef(SUSPENDED, path, '# Plan\n\nHeld Linear edit.\n\nChanged and formatted.\n', 'Apply pre-commit fixes');
+    checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'deploy', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 }]);
+    h.editHeadNote('mdbisync/suspended', () => '');
+    const start = await rev('refs/heads/main');
+    const waiting = await sync();
+    assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
+    assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, 'released a head that never ran `ci`');
+    assert.equal(await rev(SUSPENDED), fixed);
+    assert.equal(await rev('refs/heads/main'), start);
+    checksOn(fixed, [...PASSED, { name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+  });
+
   it('does not release a suspended batch on a commit status named after the check run its earlier head ran', async () => {
     const path = 'eng/notes/plan.md';
     await suspendOne(path);

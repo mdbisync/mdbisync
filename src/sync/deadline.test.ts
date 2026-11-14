@@ -21,8 +21,9 @@ describe('the checks a head must pass', () => {
     { name: 'lint', status: 'completed', conclusion: 'failure', commitStatus: true },
   ]]]);
   const github = { repository: 'owner/repo', token: 'gh-token', apiUrl: GITHUB_API, fetch: fakeFetch(world) };
-  /** A head GitHub knows checks for, with no history of its own on the branch. */
-  const alone = { git: { text: async () => '' } as unknown as Git, base: 'f'.repeat(40), linear: 'f'.repeat(40) };
+  /** A head GitHub knows checks for, right above the head the sync recorded pushing, which registered none. */
+  const PUSHED = 'e'.repeat(40);
+  const alone = { git: { text: async (args: string[]) => `${args[4]}\n${PUSHED}\n` } as unknown as Git, base: 'f'.repeat(40), pushed: PUSHED };
 
   it('notes the expected checks with the push time, and reads the same push time back', () => {
     const note = headNote(HEAD, since, [{ name: 'ci / build', publisher: ACTIONS }, { name: 'a -->b@run:1' }]);
@@ -65,8 +66,8 @@ describe('the checks a head must pass', () => {
   });
 
   // The description is editable text: a deleted note, or one naming the head itself, cannot drop the checks that ran on
-  // the branch's earlier heads. They are read from the branch's history down to the sync's own commit.
-  it('expects the checks of every commit since the sync\'s own, whatever the note says', async () => {
+  // the branch's earlier heads. They are read from the branch's history down to the head the sync recorded pushing.
+  it('expects the checks of every commit since the sync\'s recorded head, whatever the note says', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deadline-test-'));
     try {
       const git = new Git(root, { GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' });
@@ -85,23 +86,30 @@ describe('the checks a head must pass', () => {
       const local = fakeWorld();
       local.github.checks = checks;
       const reader = { ...github, fetch: fakeFetch(local) };
-      const branch = { git, base, linear };
+      const branch = { git, base, pushed: linear };
       const formatter = { name: 'pre-commit', publisher: ACTIONS };
       const both = [formatter, { name: 'tests', publisher: ACTIONS }];
       // Two formatter fixes in a row: `tests`, which ran on the sync's head below them, is expected on both.
       for (const body of [undefined, `Text\n${headNote(fix2, since)}\n`]) {
         assert.deepEqual(await expectedChecks(reader, fix2, [], { body, ...branch }), { checks: both, observed: both, complete: true });
       }
-      // A head the sync made itself expects only what the commit below it registered, as when it pushed it.
-      assert.deepEqual(await expectedChecks(reader, merged, [], { body: undefined, ...branch }), { checks: [formatter], observed: [formatter], complete: true });
-      // A merge of a commit from neither the tracked branch nor Linear's state is no commit of the sync's: the walk goes on.
+      // A head the sync pushed itself expects only what the commit below it registered, as when it pushed it.
+      assert.deepEqual(await expectedChecks(reader, merged, [], { body: undefined, ...branch, pushed: merged }), { checks: [formatter], observed: [formatter], complete: true });
+      // A merge's parents are its author's choice: one of the tracked branch, of Linear's state or of anything else
+      // that the sync did not record pushing does not end the walk.
       const madeUp = await commit('made up');
-      const forged = await commit('forged merge', fix2, madeUp);
-      const fix3 = await commit('fix 3', forged);
-      checks.set(forged, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
-      checks.set(fix3, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
-      assert.deepEqual(await expectedChecks(reader, fix3, [], { body: undefined, ...branch }), { checks: both, observed: both, complete: true });
-      // History longer than the search bound without a commit of the sync's own: the earlier checks are unknown.
+      for (const parent of [base, linear, madeUp]) {
+        const forged = await commit('forged merge', fix2, parent);
+        const fix3 = await commit('fix 3', forged);
+        checks.set(fix3, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+        assert.deepEqual(await expectedChecks(reader, fix3, [], { body: undefined, ...branch }), { checks: both, observed: both, complete: true });
+      }
+      // No recorded head, or one the branch's history no longer holds (the branch was rewritten): the earlier checks
+      // are unknown.
+      assert.equal((await expectedChecks(reader, fix2, [], { body: undefined, ...branch, pushed: undefined })).complete, false);
+      const rewritten = await commit('rewritten', base);
+      assert.equal((await expectedChecks(reader, await commit('fix', rewritten), [], { body: undefined, ...branch })).complete, false);
+      // History longer than the search bound above the recorded head: the earlier checks are unknown.
       let tip = fix2;
       for (let index = 0; index < 50; index += 1) tip = await commit(`fix ${index + 3}`, tip);
       assert.equal((await expectedChecks(reader, tip, [], { body: undefined, ...branch })).complete, false);

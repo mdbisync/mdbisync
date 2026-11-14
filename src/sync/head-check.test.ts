@@ -27,6 +27,16 @@ it('leaves every other change to a person', () => {
   }
 });
 
+it('keeps actual GitHub folders protected under a root mapping, including removals', () => {
+  const root = new Map<string, Zone>([['', { team: 'ENG', teamFolder: '' }]]);
+  for (const mode of ['100644', '000000']) {
+    for (const path of ['.github/workflows/ci.yml', '.GitHub/copilot-instructions.md', 'nested/.GITHUB/page.md']) {
+      assert.equal(isSyncedChange(path, mode, root), false, `${path} ${mode}`);
+    }
+    assert.equal(isSyncedChange('%2Egithub/page.md', mode, root), true);
+  }
+});
+
 it("leaves a change of a folder's Linear annotation to a person, and merges a README's other edits", () => {
   const readme = (team: string, body = 'Notes.') => `---\nlinear-team: ${team}\n---\n\n# Engineering\n\n${body}\n`;
   assert.equal(keepsAnnotation('eng/README.md', readme('ENG'), readme('ENG', 'Edited in Linear.')), true);

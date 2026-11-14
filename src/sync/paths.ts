@@ -19,7 +19,7 @@ export function titlePath(title: string): string {
     if (safe === '' || safe === '.' || safe === '..' || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(safe)) safe = escapeFirst(safe);
     safe = safe.replace(/[. ]+$/, (suffix) => [...suffix].map((char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`).join(''));
     // Checked after the trailing dots and spaces are encoded, so `.git.` keeps its earlier name `.git%2E`.
-    if (isGitDirectoryName(safe)) safe = escapeFirst(safe);
+    if (isGitDirectoryName(safe) || safe.toLowerCase() === '.github') safe = escapeFirst(safe);
     // Keep every segment below common file-system byte limits.
     if (Buffer.byteLength(safe) > 180) safe = `${[...safe].slice(0, 40).join('')}~${createHash('sha256').update(part).digest('hex').slice(0, 16)}`;
     return safe;

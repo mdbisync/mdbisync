@@ -235,7 +235,7 @@ from the path rule; the harness unit tests check the harness oracle
 `encodeTitlePath` against them. `fixtures.unsafeTitlePaths` is that oracle's
 title-to-path map for the seeded unsafe titles, below the mapped project folder.
 Per segment, after Unicode NFC: percent-encode `%`, `\`, control characters
-and `:*?"<>|`; encode the leading character of `.`, `..`, `.git` and Windows
+and `:*?"<>|`; encode the leading character of `.`, `..`, `.git`, `.github` (case-insensitive) and Windows
 device names; represent an empty path segment as `%00`; encode trailing periods
 and spaces. Leading spaces stay as they are. Append `.md`. For a collision
 (including a case-only match or a file where a folder is needed) the older

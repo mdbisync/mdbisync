@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { beforeEach, afterEach, describe, it } from 'node:test';
-import { type Fixture, createFixture, IDENTITY } from '../state/test-helpers.ts';
+import { type Fixture, createFixture, IDENTITY, remoteRef } from '../state/test-helpers.ts';
 import { fetchState, resolveStateConfig, commitIds, commitUploads, commitTree, movedRefs, pushAtomic, stateRef, readIds, readReservedIds, listTree, readBlobs } from '../state/index.ts';
 import { loadMapping } from '../mapping/index.ts';
 import { LinearClient, LinearStoppedError, LinearHttpError } from '../linear/index.ts';
@@ -18,6 +18,7 @@ import { type FileContent } from '../state/content.ts';
 import { candidateKey } from './staged.ts';
 import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
+import { RECORD_MESSAGE } from '../initial-sync/confirm.ts';
 import { documentPath, titlePath } from './paths.ts';
 import { buildTree, checkRepoPath, isGitDirectoryName } from '../state/objects.ts';
 
@@ -207,6 +208,72 @@ describe('capture from Linear', () => {
     });
   }
 
+  it('never captures a place that only an altered state ref names', async () => {
+    world.linear.projects.push({ id: 'project-payroll', name: 'Payroll', teamIds: ['team-eng'] });
+    world.linear.documents.push({ id: 'payroll', title: 'salaries', content: 'Payroll body.\n', projectId: 'project-payroll', createdAt: '2026-01-01T00:00:00Z' });
+    // A writer of the repository pushes a state commit whose folder annotation names a project the tracked branch never named.
+    const base = context.fetched.state.linear!;
+    const altered = await commitTree(context.git, { parents: [base], base, changes: new Map([['docs/README.md', '---\nlinear-team: ENG\nlinear-project: Payroll\n---\n\n# Notes\n']]), message: 'Altered state', identity: IDENTITY });
+    assert.equal((await pushAtomic(context.git, config, [{ ref: stateRef(config, 'linear'), expected: base, next: altered }])).ok, true);
+    await refresh();
+    const listedPlaces: unknown[] = [];
+    const list = context.linear.listDocumentsInPlaces.bind(context.linear);
+    context.linear.listDocumentsInPlaces = (places, options) => { listedPlaces.push(...places); return list(places, options); };
+    await assert.rejects(run(), /for docs\/ that the tracked branch never named/);
+    assert.ok(!JSON.stringify(listedPlaces).includes('project-payroll'), JSON.stringify(listedPlaces));
+    assert.equal(await remoteRef(fixture, stateRef(config, 'linear')), altered);
+    assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', 'Payroll body'])).stdout.toString('utf8'), '');
+  });
+
+  for (const [where, annotation, lostIds] of [
+    ['a project', 'linear-team: ENG\nlinear-project: Payroll', false],
+    ['a project, with the ids map lost', 'linear-team: ENG\nlinear-project: Payroll', true],
+    ['the team alone', 'linear-team: ENG', false],
+    ['the team alone, with the ids map lost', 'linear-team: ENG', true],
+  ] as const) it(`never reads an excluded file's place that only altered state refs name: ${where}`, async () => {
+    world.linear.projects.push({ id: 'project-payroll', name: 'Payroll', teamIds: ['team-eng'] });
+    const inProject = annotation.includes('Payroll');
+    world.linear.documents.push({ id: 'payroll', title: 'salaries', content: 'Payroll body.\n', ...(inProject ? { projectId: 'project-payroll' } : { teamId: 'team-eng' }), createdAt: '2026-01-01T00:00:00Z' });
+    // Altered refs: a folder of that place with a file synchronized once and excluded now (its image is gone), and its id.
+    const {linear: base, ids: idsBase} = context.fetched.state;
+    const synced = await commitTree(context.git, { parents: [base!], base: base!, changes: new Map<string, string | Buffer>([
+      ['secret/README.md', `---\n${annotation}\n---\n\n# Secret\n`],
+      ['secret/salaries.md', 'Placeholder.\n\n![Image](pixel.png)\n'],
+      ['secret/pixel.png', png],
+    ]), message: RECORD_MESSAGE, identity: IDENTITY });
+    const altered = await commitTree(context.git, { parents: [synced], base: synced, changes: new Map([['secret/pixel.png', null]]), message: 'Altered state', identity: IDENTITY });
+    const ids = await commitIds(context.git, idsBase, new Map([['docs/plan.md', { id: 'plan' }], ['secret/salaries.md', { id: 'payroll' }]]), IDENTITY);
+    assert.equal((await pushAtomic(context.git, config, [
+      { ref: stateRef(config, 'linear'), expected: base, next: altered },
+      { ref: stateRef(config, 'ids'), expected: idsBase, next: ids },
+    ])).ok, true);
+    if (lostIds) await fixture.remote.run(['update-ref', '-d', stateRef(config, 'ids')]);
+    await refresh();
+    const listedPlaces: unknown[] = [];
+    const list = context.linear.listDocumentsInPlaces.bind(context.linear);
+    context.linear.listDocumentsInPlaces = (places, options) => { listedPlaces.push(...places); return list(places, options); };
+    const result = await run();
+    assert.equal(result.ok, true);
+    assert.ok(!JSON.stringify(listedPlaces).includes(inProject ? 'project-payroll' : '"teamId"'), JSON.stringify(listedPlaces));
+    assert.equal((await fixture.remote.run(['log', '--all', '--format=%H', '-S', 'Payroll body'])).stdout.toString('utf8'), '');
+  });
+
+  it('keeps capturing the old place of a folder whose annotation the tracked branch changed', async () => {
+    world.linear.projects.push({ id: 'project-archive', name: 'Archive', teamIds: ['team-eng'] });
+    await fixture.seed({ 'docs/README.md': '---\nlinear-team: ENG\nlinear-project: Archive\n---\n\n# Notes\n' });
+    await context.git.run(['fetch', '--quiet', 'origin']);
+    await refresh();
+    context.mapping = await loadMapping(context.git, context.fetched.tracked);
+    const { targets } = await resolveTargets(context.linear, context.mapping.zones.values());
+    assert.ok(targets);
+    context.targets = targets;
+    world.linear.documents[0]!.content = 'Edited before the move.\n';
+    world.linear.documents[0]!.updatedAt = '2026-02-01T00:00:00Z';
+    const result = await run();
+    assert.equal(result.ok, true);
+    assert.equal(await text('docs/plan.md'), '---\ncategory: work\n---\n\nEdited before the move.\n');
+  });
+
   it('uses the supplied snapshot between steps without changing the run context', async () => {
     const initial = { ...context.fetched.state };
     world.linear.documents[0]!.content = 'First edit.\n';
@@ -349,6 +416,29 @@ describe('capture from Linear', () => {
     const paths = (await listTree(git, result.state.linear!)).map((entry) => entry.path);
     assert.ok(!paths.includes(legacy), paths.join(', '));
     assert.equal((await readIds(git, result.state.ids)).get('docs/%67it~2/notes.md')?.id, 'plan');
+  });
+
+  it('moves a document away from an earlier path that names a reserved GitHub folder', async () => {
+    // An earlier version kept the title `.GitHub/notes` as it was.
+    const { git } = context;
+    const state = context.fetched.state;
+    const legacy = 'docs/.GitHub/notes.md';
+    const tree = await buildTree(git, state.linear!, new Map([['docs/plan.md', null], [legacy, '---\ncategory: work\n---\n\nOriginal.\n']]));
+    const env = { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email };
+    const linear = await git.text(['commit-tree', '--no-gpg-sign', tree, '-p', state.linear!, '-m', 'Earlier capture'], { env });
+    const ids = await commitIds(git, state.ids, new Map([[legacy, { id: 'plan' }]]), IDENTITY);
+    const pushed = await pushAtomic(git, config, [
+      { ref: stateRef(config, 'linear'), expected: state.linear, next: linear },
+      { ref: stateRef(config, 'ids'), expected: state.ids, next: ids },
+    ]);
+    assert.equal(pushed.ok, true);
+    await refresh();
+    Object.assign(world.linear.documents[0]!, { title: '.GitHub/notes', updatedAt: '2026-01-03T00:00:00Z' });
+    const result = await run();
+    assert.equal(await text('docs/%2EGitHub/notes.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    const paths = (await listTree(git, result.state.linear!)).map((entry) => entry.path);
+    assert.ok(!paths.includes(legacy), paths.join(', '));
+    assert.equal((await readIds(git, result.state.ids)).get('docs/%2EGitHub/notes.md')?.id, 'plan');
   });
 
   it('captures a new path, renames by id and moves across projects', async () => {
@@ -1004,6 +1094,18 @@ it('makes safe title paths and deterministic collision names', () => {
     assert.ok(!path.split('/').some(isGitDirectoryName), path);
     checkRepoPath(path);
   }
+  for (const folder of ['', 'docs', 'docs/nested']) {
+    for (const title of ['.github/x', '.GitHub/workflows/notes', 'nested/.GITHUB/page']) {
+      const raw = `${folder === '' ? '' : `${folder}/`}${title}.md`;
+      const path = documentPath(folder, title, 'one', new Set());
+      assert.equal(documentPath(folder, title, 'one', new Set(), raw), raw, 'an existing Git-authored path is preserved');
+      assert.ok(!path.split('/').some((part) => part.toLowerCase() === '.github'), path);
+      assert.equal(documentPath(folder, title, 'one', new Set(), path), path);
+    }
+  }
+  assert.equal(titlePath('.github'), '%2Egithub');
+  assert.equal(titlePath('.github./x'), '.github%2E/x');
+  assert.equal(titlePath('.github-notes/x'), '.github-notes/x');
   assert.equal(titlePath('GIT~1/hooks'), '%47IT~1/hooks');
   assert.equal(titlePath('git~1x/page'), 'git~1x/page');
   // Names that were already safe keep the file name they had.

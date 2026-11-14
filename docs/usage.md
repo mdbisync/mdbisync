@@ -203,7 +203,7 @@ by one rule, the same in the initial sync and in the sync:
 - `%`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|` and control characters are
   percent-encoded (`Q3: plans?` becomes `Q3%3A plans%3F.md`), and so are
   dots and spaces at the end of a part (`notes.` becomes `notes%2E.md`);
-- an empty part (a leading `/` or `//`) becomes `%00`; `.`, `..`, `.git` and
+- an empty part (a leading `/` or `//`) becomes `%00`; `.`, `..`, `.git`, `.github` (case-insensitive) and
   names Windows reserves (`CON`, `NUL`, `COM1`, …) get their first character
   encoded (`%2E%2E`, `%43ON`); spaces at the start of a part are kept;
 - in a folder at the repository root, a `-` at the start of the title is
@@ -222,6 +222,10 @@ by one rule, the same in the initial sync and in the sync:
 
 The `ids` state ref ties the file to its document, so the sync does not
 rename the document after its file name.
+
+Existing tracked files inside `.github` keep their paths, so GitHub templates
+stay in place. Changes to those files still require human review. Unsafe paths
+from earlier captures that have not reached the tracked branch use encoded names.
 
 ## The sync pull request
 
@@ -275,11 +279,17 @@ remain after release; its presence alone does not mean a batch is on hold.
   expected checks and their publishers are kept in a hidden HTML note in
   the pull request description. A person can edit that note, so it only
   adds checks: whatever it says, the sync also reads the checks registered
-  on the branch's commits below the head, down to the nearest commit the
-  sync made itself, from git and GitHub. When that commit is more than 50
-  commits below the head, the head does not merge until the sync pushes
-  again. A head the sync pushes itself starts the repository's whole CI,
-  so it expects only what the head it was pushed on registered, besides
+  on the branch's first-parent commits below the head, down to the last
+  head the sync itself pushed there, which its state records, from git and
+  GitHub. A commit someone else pushed never counts as the sync's, whatever
+  its parents: a merge of the tracked branch made by hand does not end the
+  history. When that head is more than 50 commits below, no longer in the
+  branch's history (the branch was rewritten), or not recorded yet (a pull
+  request the sync last pushed before it recorded its heads), the head does
+  not merge: the sync adds a commit of its own with the same files, `Run
+  the checks again on the sync branch`, whose push runs the checks again.
+  A head the sync pushes itself starts the repository's whole CI, so it
+  expects only what the head it was pushed on registered, besides
   `required-checks`: a check that no longer runs (a renamed job) stays
   expected for at most one more push of the sync. A name removed from
   `required-checks` stops counting at once.

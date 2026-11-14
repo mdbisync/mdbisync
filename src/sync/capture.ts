@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { isMap, parseDocument, stringify } from 'yaml';
-import { loadMapping, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
+import { loadMapping, placeOf, readAnnotation, findFrontMatter, TEAM_KEY, PROJECT_KEY } from '../mapping/index.ts';
 import { resolveTargets } from '../setup/linear.ts';
 import { nearestZone, folderOf } from '../mapping/annotations.ts';
 import { joinFile, lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
@@ -26,6 +26,7 @@ import { type Side, lastSynchronized } from './merge.ts';
 import { lengthRefusal } from '../linear/index.ts';
 import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, DownloadRetryError, type CapturedAssets, withNewUploadUrls } from './assets.ts';
 import { rebuildIds } from './rebuild.ts';
+import { trackedPlaces } from './tracked-places.ts';
 import { message } from '../messages.ts';
 import { type CaptureCode, type CaptureLeftOutRule, type WriteBackWarningCode } from '../codes.ts';
 
@@ -137,9 +138,12 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
     const recorded = await loadMapping(git, base);
     const zones = new Map(mapping.zones);
     let changedPlace = false;
+    // The recorded state comes from refs any writer can move: a place only it names is read when the tracked branch named it.
+    const allowedPlace = trackedPlaces(git, fetched.tracked, mapping.zones);
     for (const [folder, old] of recorded.zones) {
       const current = zones.get(folder);
       if (current !== undefined && (old.team !== current.team || old.project !== current.project)) {
+        if (!await allowedPlace(folder, placeOf(old))) throw new Error(message('sync.recorded-place-unknown', {folder: folder === '' ? 'the repository root' : `${folder}/`}));
         zones.set(folder, old);
         changedPlace = true;
       }
@@ -154,7 +158,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       // The map is lost (initial sync always records it): match the recorded files to their documents by title.
       const texts = await readBlobs(git, recorded.documents.map((document) => document.oid));
       const documents = recorded.documents.map((document) => ({ ...document, text: texts.get(document.oid)!.toString('utf8') }));
-      for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, documents, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) ids.set(path, entry);
+      for (const [path, entry] of await rebuildIds({ git, record: base, linear, facts: linear.facts, targets, allowedPlace, documents, files: recorded.files, unmapped: [...recorded.leftOut, ...recorded.unsynced].map((file) => file.path) })) ids.set(path, entry);
       // Files left out for a title another file has count too: they had a document as much as any other.
       result.rebuiltIds = { matched: ids.size, files: recorded.documents.length + recorded.leftOut.length };
     }
@@ -235,6 +239,7 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       baselines.set(old.path, baseline);
       const doc = listed.get(id);
       if (baseline === null || doc === undefined || doc.title.normalize('NFC') !== baseline.file.title.normalize('NFC')) continue;
+      if (!await allowedPlace(folderOf(old.path), baseline.file.place)) continue;
       let resolved;
       try { resolved = placeId(targets, baseline.file.place); }
       catch {
@@ -273,7 +278,10 @@ export async function capture(context: RunContext, options: CaptureOptions): Pro
       const old = byId.get(doc.id);
       const available = new Set(occupied);
       if (old !== undefined && (!allocated.has(old.path) || allocated.get(old.path) === doc.id)) available.delete(old.path);
-      return documentPath(folderFor(doc)!, doc.title, doc.id, available, old?.path, (path) => invalidZone(doc, path));
+      // Keep Git-authored paths: moving a tracked `.github` file could disable a template.
+      // An unsafe spelling only in earlier capture state must use the encoded title instead.
+      const prior = old !== undefined && !mapping.files.has(old.path) && old.path.split('/').some((part) => part.toLowerCase() === '.github') ? undefined : old?.path;
+      return documentPath(folderFor(doc)!, doc.title, doc.id, available, prior, (path) => invalidZone(doc, path));
     };
     // An unchanged source may link a renamed, moved or removed target.
     // Re-read bodies when a path changes so those inbound links are translated too.
