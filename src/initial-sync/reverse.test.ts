@@ -1,3 +1,4 @@
+import { contentBytes, type FileContent } from '../state/content.ts';
 // The initial sync from Linear to the tracked branch through the command
 // line, against a local git remote and a fake GitHub and Linear: the dry run,
 // the pull request left for a person, the refusal of the sync until it is
@@ -542,6 +543,18 @@ describe('initial sync from Linear to the tracked branch', () => {
     assert.equal(await show('refs/mdbisync/linear:eng/ops/runbook.md'), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
   });
 
+  it('leaves an initial attachment budget overrun out without partial files or Linear writes', async () => {
+    const world = fakeWorld();
+    const body = Array.from({length: 33}, (_, i) => `[File](${UPLOADS_HOST}/file-${i})`).join('\n');
+    world.linear.documents = linearDocuments().map((d) => d.id === 'doc-runbook' ? {...d, content: body} : d);
+    const {result, report} = await run(world);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(report.linearToGit?.leftOutAtRecord, [{path:'eng/ops/runbook.md', rule:'attachment-budget'}]);
+    assert.ok(!(await files('refs/mdbisync/linear')).includes('eng/ops/runbook.md'));
+    assert.equal(world.linear.comments.size, 0);
+    assert.equal(world.linear.uploads.length, 0);
+  });
+
   it('refuses unsupported attachment bytes equal to a removed Markdown page instead of linking that page', async () => {
     const world = fakeWorld();
     const bytes = Buffer.from(TREE['eng/backend/notes.md'] as string);
@@ -640,6 +653,26 @@ describe('initial sync from Linear to the tracked branch', () => {
       assert.ok(!tree.includes('eng/notes/faq.md'), ref);
       if (tree.includes('eng/notes/plan.md')) assert.ok(!(await show(`${ref}:eng/notes/plan.md`)).includes('images.example.test'), ref);
     }
+  });
+
+  it('keeps shadowed image definitions out of initial import and the next capture', async () => {
+    await fixture.seed({'private/report.csv': 'account,balance\nexample,1000\n'});
+    const world = fakeWorld();
+    world.linear.documents = linearDocuments();
+    const plan = world.linear.documents.find((document) => document.id === 'doc-plan')!;
+    plan.content = `# Plan\n\n![Chart][asset] ${CANARY}\n\n[asset]: https://uploads.linear.app/workspace/pixel.png\n[ASSET]: ../../private/report.csv\n`;
+    const initial = await run(world);
+    assert.equal(initial.result.exitCode, 0, initial.result.stderr);
+    assert.deepEqual(initial.report.linearToGit?.leftOutAtRecord, [{path:'eng/notes/plan.md', rule:'image-blocked'}]);
+    assert.doesNotMatch(await show('refs/mdbisync/linear:eng/notes/plan.md'), /private\/report\.csv/);
+    await merge(world);
+    plan.content = `# Plan\n\nSee [the report](../../private/report.csv). ${CANARY}\n`;
+    plan.updatedAt = '2026-04-01T00:00:00Z';
+    const captured = await run(world, {}, 'sync');
+    assert.equal(captured.result.exitCode, 0, captured.result.stderr);
+    assert.equal(captured.report.capture?.blocked.length, 1);
+    assert.doesNotMatch(await show('refs/mdbisync/linear:eng/notes/plan.md'), /private\/report\.csv/);
+    assert.equal(world.linear.uploads.length, 0);
   });
 
   it('stops when Linear refuses the run access to an upload, instead of leaving the document out', async () => {
@@ -1211,7 +1244,7 @@ describe('the security gate of an initial sync from Linear', () => {
         configured: true,
         async check(files) {
           checked.push([...files.keys()]);
-          return [...files.values()].some((content) => content.toString().includes(SECRET)) ? [{ hook: 'secret-check', line: 1 }] : [];
+          return [...files.values()].some((content) => contentBytes(content).toString().includes(SECRET)) ? [{ hook: 'secret-check', line: 1 }] : [];
         },
       };
       const { result } = await confirmLinearToGit(
@@ -1257,10 +1290,10 @@ describe('the security gate of an initial sync from Linear', () => {
     assert.ok(targets);
     const context = { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY };
     const github = { repository: 'owner/repo', token: 'gh-token', apiUrl: GITHUB_API, fetch: fakeFetch(world) };
-    const hooks = (files: ReadonlyMap<string, Buffer | string>) => ([...files.values()].some((content) => refused(content.toString())) ? [{ hook: 'privacy-check', line: 1 }] : []);
+    const hooks = (files: ReadonlyMap<string, FileContent>) => ([...files.values()].some((content) => refused(contentBytes(content).toString())) ? [{ hook: 'privacy-check', line: 1 }] : []);
     const passed = new Map<string, Buffer[]>();
-    const pass = (files: ReadonlyMap<string, Buffer | string>) => {
-      for (const [path, content] of files) passed.set(path, [...(passed.get(path) ?? []), Buffer.from(content)]);
+    const pass = (files: ReadonlyMap<string, FileContent>) => {
+      for (const [path, content] of files) passed.set(path, [...(passed.get(path) ?? []), contentBytes(content)]);
     };
     let security: SecurityGate;
     if (steps === 1) {
@@ -1277,7 +1310,7 @@ describe('the security gate of an initial sync from Linear', () => {
       const staging: SecurityGate = {
         configured: true,
         async check(files) {
-          staged.set(candidateKey(files), files);
+          staged.set(candidateKey(files), new Map([...files].map(([path, content]) => [path, contentBytes(content)])));
           return [];
         },
       };
@@ -1392,7 +1425,7 @@ describe('the security gate of an initial sync from Linear', () => {
     const security: SecurityGate = {
       configured: true,
       async check(files) {
-        return [...files.values()].some((content) => content.toString().includes(secret)) ? [{ hook: 'secret-check', line: 1 }] : [];
+        return [...files.values()].some((content) => contentBytes(content).toString().includes(secret)) ? [{ hook: 'secret-check', line: 1 }] : [];
       },
     };
     const { result } = await confirmLinearToGit(

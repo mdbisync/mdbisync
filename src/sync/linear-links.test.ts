@@ -4,7 +4,9 @@
 // capture blocks the document as it blocks an image that is not an upload.
 
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
+import { fakeFetch } from '../setup/test-helpers.ts';
 import { CANARY, pullRequestHarness } from './pull-request-test-helpers.ts';
 
 const SECRET = 'account,balance\nprivate-row,1000\n';
@@ -16,6 +18,34 @@ describe('sync: relative links typed in Linear', () => {
   const h = pullRequestHarness();
   const { commentsOf, documentOf, editInLinear, gitEdit, settle, show, sync } = h;
   const uploadedBytes = () => h.world.linear.uploads.map((upload) => upload.bytes?.toString('utf8'));
+
+  for (const definition of ['[ASSET]: ../../private/report.csv', '> [ASSET]:\n> ../../private/report.csv']) {
+    it(`blocks a shadowed image definition across captures and a later write: ${definition}`, async () => {
+      await gitEdit('private/report.csv', SECRET);
+      await settle();
+      const before = await show(`refs/heads/main:${PLAN}`);
+      const image = 'https://uploads.linear.app/workspace/pixel.png';
+      const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
+      const network = fakeFetch(h.world);
+      h.fetchOverride = async (input, init) => String(input) === image ? new Response(png) : network(input, init);
+      await editInLinear(PLAN, `# Plan\n\n![Chart][asset] ${CANARY}\n\n[asset]: ${image}\n\n${definition}\n`);
+      const first = await sync();
+      // Try to turn the previously hidden destination into an ordinary link.
+      await editInLinear(PLAN, `# Plan\n\nSee [the report](../../private/report.csv). ${CANARY}\n`);
+      const second = await sync();
+      await gitEdit(PLAN, planText('Steps one, two and three.'));
+      const written = await sync();
+      for (const run of [first, second, written]) assert.equal(run.result.exitCode, 0, run.result.stderr);
+      assert.equal(first.report.capture?.blocked.length, 1, 'the shadowed definition entered captured state');
+      assert.equal(second.report.capture?.blocked.length, 1, 'previous Linear text authorized a repository link');
+      assert.ok(!uploadedBytes().includes(SECRET), 'the file reached Linear');
+      assert.ok(!before.includes('private/report.csv'));
+      for (const ref of ['refs/heads/main', 'refs/mdbisync/linear']) {
+        assert.doesNotMatch(await show(`${ref}:${PLAN}`), /private\/report\.csv/);
+      }
+      assert.ok(commentsOf(await documentOf(PLAN)).every((comment) => !comment.body.includes('private/report.csv')));
+    });
+  }
 
   it('a link to a repository file typed in Linear is blocked at capture and never uploads the file, also after a git edit', async () => {
     // A file outside every synchronized folder, which no document of the repository links.
