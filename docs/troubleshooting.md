@@ -55,6 +55,7 @@ step with the bare message, without `error:`.
 | `<command>: not finished (sync-branch-changed); merge or close the pull request of the sync branch and delete the branch, then run it again` | See [`sync-branch-changed`](#initial-sync). |
 | `<command>: setup error (merge-blocked): GitHub refuses again to merge the sync pull request (<reason>)` | See [`merge-blocked`](#the-sync-pull-request). |
 | `<command>: setup error (checks-missing): the sync pull request waited past the check deadline for checks that never started (<checks>)` | See [`checks-missing`](#the-sync-pull-request). |
+| `<command>: waits for a person (head-unverified): the sync pull request also changes files that are not synchronized documents or their assets (<files>); a person reviews and merges it` | See [`head-unverified`](#the-sync-pull-request). |
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
 | `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
 | `<command>: not implemented` | This build does not have the command. Use a release that has it. |
@@ -232,6 +233,7 @@ Its step reports:
 | `initial-pull-request-pending` | The sync branch holds an initial sync from Linear that no one has merged yet (exit code 4). | Review and merge it with a merge commit. |
 | `state-moved` | The sync branch moved while the run worked. | Nothing; the next run updates the pull request. |
 | `github-failed` | A GitHub request for the sync pull request failed or got no answer. | Nothing, unless it repeats; then check GitHub's status and the App's permissions. |
+| `head-unverified` | The sync pull request, or the suspended one, would also change files that are not synchronized documents or their assets: anything outside an annotated folder, inside a `.github` folder, of another type, or not a regular file, or a `README.md` change that adds, edits or removes a folder's Linear team or project (exit code 3). Someone added those changes to its branch; the sync does not merge them by itself. The description and the run summary list the files. | Review the changes. Merge the pull request yourself with a merge commit, or remove those changes from its branch with an ordinary commit (no force push); a later run merges what remains. To keep others from pushing to the sync branches, see [quickstart.md](quickstart.md#who-may-push-to-the-sync-branches). |
 
 ## Initial sync
 

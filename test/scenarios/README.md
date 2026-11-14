@@ -271,6 +271,13 @@ L5-17 and L5-23 through L5-35 use the sandbox marker workflow. Publish the
 updated corpus workflow before live execution. Its checks run on pull
 requests and the run's tracked branch, annotate the selected document, and
 can fail only on the first workflow attempt or wait without finishing.
+`fault.checks` requests a state with an empty commit whose trailers
+(`Harness-check`, `Harness-check-target`, `Harness-check-sequence`) the
+workflow reads from the head's history: the latest request wins. No file
+of the harness rides a sync branch, since the sync merges only
+synchronized documents and their assets by itself. The sync's set-aside
+head keeps only the tracked branch's history, as it keeps only its tree,
+so a suspended batch's state leaves the normal lane with its documents.
 `git.rerun-suspended-check` uses a separate host credential with Actions write
 permission; the sync App never receives it. `fault.check-age` ages only the
 fixture pull request's persisted head timestamp so the ten-minute shortened

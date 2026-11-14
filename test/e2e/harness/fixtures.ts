@@ -19,10 +19,10 @@ import { findFrontMatter } from '../../../src/mapping/front-matter.ts';
 import { appendParagraph, editBlock, editParagraph, noteSentence, scanMarkers, ordinalOf, splitBlocks, joinBlocks, paragraphIndexes } from './conflicts.ts';
 import type { LiveWorld, RunContext } from './context.ts';
 import { pullTracked } from './person-git.ts';
-import { CHECK_MARKER } from '../../corpus/check-workflow.ts';
+import { checkStateMessage } from '../../corpus/check-workflow.ts';
 import { recordPendingHead } from './check-fault.ts';
 import { EnvBlockedError, ProductError } from './results.ts';
-import { commitAsPerson, documentId, documentPaths, projectFolders, targetPath } from './step-helpers.ts';
+import { commitAsPerson, commitStateAsPerson, documentId, documentPaths, projectFolders, targetPath } from './step-helpers.ts';
 import type { Step } from './spec.ts';
 
 // --- small binary helpers ---------------------------------------------------------
@@ -190,14 +190,14 @@ export const SETUP_FIXTURES: Record<string, SetupFixture> = {
   // workflow unless the scenario has a `fault.checks` step or one of these
   // fixtures (CHECK_WORKFLOW_FIXTURES): `check-workflow` publishes it (the
   // fast-check case), and `pending-check` also holds its check pending with
-  // a marker committed before the initial sync, so the converged start has
+  // a state commit made before the initial sync, so the converged start has
   // it. Both paths lie outside every annotated folder; nothing syncs them.
   'check-workflow': {},
   'pending-check': {
     async beforeSync(ctx) {
-      // The check workflow keeps a head with this marker pending; `fault.checks` with `passed` removes it.
+      // The check workflow keeps a head whose history requests this state pending; `fault.checks` with `passed` removes it.
       // The push to the tracked branch starts a sleeping job too, which that fault cancels first.
-      recordPendingHead(ctx, await commitAsPerson(ctx, new Map([[CHECK_MARKER, 'pending\n']]), 'Hold the pull request check', true));
+      recordPendingHead(ctx, await commitStateAsPerson(ctx, checkStateMessage('pending')));
     },
   },
   'custom-icon-color': {

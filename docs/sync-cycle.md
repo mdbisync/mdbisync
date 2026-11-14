@@ -199,9 +199,20 @@ confirming its writes.
   and quote no content. A commit a CI job adds to the sync branch keeps the
   name that job gives it.
 - The branch `mdbisync/linear` is never force-pushed. Commits a person or a
-  CI job adds to it are kept and go to the tracked branch with the pull
-  request; closing the pull request does not drop them, and the next run
-  opens a replacement from the same branch.
+  CI job adds to it are kept; closing the pull request does not drop them,
+  and the next run opens a replacement from the same branch.
+- The sync merges a pull request (from either branch) only when the merge
+  changes nothing but synchronized documents and their assets on the
+  tracked branch: `.md` files and the image, video and PDF types the sync
+  writes, as regular files, under a folder with a Linear annotation, and
+  none inside a `.github` folder. A `README.md` may change, but not the
+  Linear team or project it names for its folder. It reads what the merge would change,
+  not who made the commits, so a CI fix to a document merges as before.
+  Any other change, by anyone, even one that only restores an older
+  version of a file, leaves the pull request open: its description lists
+  those files, the run ends with `head-unverified` (exit code 3), and a
+  person reviews and merges it or removes those changes from the branch.
+  Linear's changes keep joining the pull request meanwhile.
 - Nothing else: the sync never pushes to the tracked branch directly.
 
 ### In Linear
@@ -424,6 +435,7 @@ The suspended lane and its marks add these lines when applicable:
 | The normal pull request is waiting for GitHub to show its empty head | A later run retries the close; new normal batches and suspended release wait for it. |
 | Released the suspended batch. | Its head passed and merged; the freeze ends. |
 | GitHub refused the suspended merge | A merge refusal on that lane; `merge-refused` and `merge-blocked` apply to either lane. |
+| The suspended pull request also changes files | Its merge would change files other than synchronized documents and their assets; `head-unverified` applies to either lane. |
 | A GitHub request for the suspended lane failed; the normal lane still runs. | A later run retries that lane. |
 | Suspended files waiting for a manual merge | Named non-document files could not be merged; see [troubleshooting](troubleshooting.md#the-sync-pull-request). |
 | Failed checks: | Names the failed checks on the suspended head or joining batch. |
@@ -444,7 +456,7 @@ head says “it merges after the suspended pull request, whose checks still run.
 
 Any other line names a code (`conflict`, `merge-refused`,
 `merge-blocked`, `initial-pull-request-pending`, `state-moved`,
-`github-failed`), explained in
+`github-failed`, `head-unverified`), explained in
 [the sync pull request](troubleshooting.md#the-sync-pull-request). The
 section also counts the files the pull request changes, and names the
 documents where pending edits on the sync branch met later edits

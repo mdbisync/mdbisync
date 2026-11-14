@@ -30,7 +30,7 @@ import { I1_DIFFERENCES_FILE, INVARIANT_CHECKS, editsFound, expectsDocument, hol
 import { isCheckpoint, KILLED_RUN_CHECKPOINT } from './checkpoints.ts';
 import { faultChecks, rerunSuspendedCheck, ageCheck, sleepsByDesign, waitForCheckCompleted, waitForHeadChecks, CHECK_WAIT_MS } from './check-fault.ts';
 import type { CheckState } from '../../../src/pull-request/merge.ts';
-import { CHECK_MARKER, CHECK_NAME, CHECK_WORKFLOW_PATH } from '../../corpus/check-workflow.ts';
+import { CHECK_NAME, CHECK_WORKFLOW_PATH, readCheckState } from '../../corpus/check-workflow.ts';
 import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflicts.ts';
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
@@ -2319,8 +2319,7 @@ async function waitForTrackedTipCheck(ctx: RunContext, before: string): Promise<
   const workflow = await git.run(['cat-file', '-e', `${tip}:${CHECK_WORKFLOW_PATH}`], { okCodes: [0, 128] });
   if (workflow.code !== 0) return;
   // A pending marker's job sleeps past every wait: the scenario cannot settle here.
-  const marker = await git.run(['show', `${tip}:${CHECK_MARKER}`], { okCodes: [0, 128] });
-  if (marker.code === 0 && marker.stdout.toString('utf8').trim() === 'pending') throw new HarnessGapError(`a git step moved the tracked branch while its ${CHECK_NAME} marker is pending`);
+  if ((await readCheckState(git.dir, tip)).mode === 'pending') throw new HarnessGapError(`a git step moved the tracked branch while its ${CHECK_NAME} marker is pending`);
   ctx.log(`waiting up to ${CHECK_WAIT_MS / 60_000} minutes for ${CHECK_NAME} to complete on the tracked branch's new tip`);
   await waitForCheckCompleted(live(ctx).rest, tip, { signal: ctx.signal, pollMs: ctx.checkPollMs, timeoutMs: CHECK_WAIT_MS });
 }
