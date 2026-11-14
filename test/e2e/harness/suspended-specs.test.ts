@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { it } from 'node:test';
 import { runCli } from '../../../src/cli.ts';
 import { LinearClient, type LogEntry } from '../../../src/linear/index.ts';
-import { fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeCheck } from '../../../src/setup/test-helpers.ts';
+import { FAKE_ACTIONS_APP_ID, fakeFetch, fakeWorld, GITHUB_API, LINEAR_API, type FakeCheck } from '../../../src/setup/test-helpers.ts';
 import { resolveStateConfig, suspendedBranch } from '../../../src/state/index.ts';
 import { createFixture, IDENTITY } from '../../../src/state/test-helpers.ts';
 import { CHECK_WORKFLOW, CHECK_WORKFLOW_PATH, readCheckState } from '../../corpus/check-workflow.ts';
@@ -98,7 +98,7 @@ for (const scenario of loadScenarios().filter((s) => s.id === 'L5-17' || s.id ==
           world.github.checks!.set(sha, [check]);
           const response = await transport(String(input).replace('https://api.github.com', GITHUB_API), init);
           const data = await response.json() as { check_runs: Array<Record<string, unknown>> };
-          for (const run of data.check_runs) Object.assign(run, { app: { slug: 'github-actions' }, html_url: `https://github.com/owner/repo/actions/runs/${run.id}` });
+          for (const run of data.check_runs) Object.assign(run, { app: { id: FAKE_ACTIONS_APP_ID, slug: 'github-actions' }, html_url: `https://github.com/owner/repo/actions/runs/${run.id}` });
           return Response.json(data);
         }
         if (url.includes('/actions/workflows/harness-check.yml/runs')) {

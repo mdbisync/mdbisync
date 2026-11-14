@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { MARKS } from './marks.ts';
 import { HOLD_MARK_LIMIT } from './hold.ts';
 import { INCOMPLETE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
-import { type FakeCheck, type FakeDocument, touch } from '../setup/test-helpers.ts';
+import { FAKE_ACTIONS_APP_ID, type FakeCheck, type FakeDocument, touch } from '../setup/test-helpers.ts';
 import { CHECK_NAME } from '../../test/corpus/check-workflow.ts';
 import { describe, it } from 'node:test';
 import { pullRequestHarness, CANARY, MANY, SYNC_BRANCH } from './pull-request-test-helpers.ts';
@@ -390,6 +390,22 @@ describe('sync: pull request suspension', () => {
     assert.match(await show(`refs/heads/main:${path}`), /Formatted/);
   });
 
+  it('does not release a suspended batch on a commit status named after the check run its earlier head ran', async () => {
+    const path = 'eng/notes/plan.md';
+    await suspendOne(path);
+    await sync();
+    const fixed = await h.editRef(SUSPENDED, path, '# Plan\n\nHeld Linear edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    const formatter: FakeCheck = { name: 'pre-commit', status: 'completed', conclusion: 'success' };
+    checksOn(fixed, [formatter, ...PASSED.map((check) => ({ ...check, commitStatus: true, creator: 666 }))]);
+    const waiting = await sync();
+    assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
+    assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, 'a commit status released a head that never ran `ci`');
+    assert.equal(await rev(SUSPENDED), fixed);
+    checksOn(fixed, [formatter, ...PASSED]);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
+  });
+
   it('a batch that joins the suspended lane keeps the checks its heads ran expected', async () => {
     await suspendOne('eng/notes/plan.md');
     // A second batch fails and joins the suspended pull request: the sync pushes a new suspended head.
@@ -399,7 +415,7 @@ describe('sync: pull request suspension', () => {
     const joined = await sync();
     assert.ok(joined.report.pullRequest?.suspended);
     const head = await rev(SUSPENDED);
-    assert.match(openPullRequests().find((pr) => pr.head === 'mdbisync/suspended')?.body ?? '', new RegExp(`<!-- head: sha=${head} since=\\S+ checks=ci -->`));
+    assert.match(openPullRequests().find((pr) => pr.head === 'mdbisync/suspended')?.body ?? '', new RegExp(`<!-- head: sha=${head} since=\\S+ checks=ci@run:${FAKE_ACTIONS_APP_ID} -->`));
     // Only the formatter's check registers on the joined head: `ci`, which both earlier heads ran, is missing.
     checksOn(head, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
     const waiting = await sync();

@@ -10,7 +10,7 @@
 // the checks of the tracked branch's tip are read: a check that also failed
 // there under the same name is not the batch's fault, and the lane is held.
 
-import { type CheckExpectation, type CheckFailure, type CheckState, type GitHubRepository, PullRequestError, readChecks } from '../pull-request/index.ts';
+import { type CheckExpectation, type CheckFailure, type CheckState, type CommitChecks, type ExpectedCheck, type GitHubRepository, PullRequestError, checkState, readCommitChecks } from '../pull-request/index.ts';
 import { type Oid } from '../state/index.ts';
 
 export const DEFAULT_CHECK_DEADLINE_MINUTES = 60;
@@ -20,24 +20,34 @@ export const MAX_CHECK_DEADLINE_MINUTES = 1440;
 const HEAD_NOTE = /^<!-- head: sha=([0-9a-f]{40,64}) since=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z)(?: checks=([^\s]*))? -->\r?$/m;
 const RED_MAIN_NOTE = /^<!-- red main: head=([0-9a-f]{40,64}) main=([0-9a-f]{40,64}) checks=([^\s]*) -->\r?$/m;
 
+/** A noted check: its URI-encoded name and, after `@`, its publisher (`run:<app id>` or `status:<account id>`). */
+const NOTED_CHECK = /^([^@]*)(?:@(run|status):(0|[1-9][0-9]{0,14}))?$/;
+
 /**
  * The hidden note that says since when the head has waited for its checks,
- * and which checks it must pass beyond those registered on it.
+ * and which checks it must pass beyond those registered on it, each with
+ * the publisher it must come from.
  */
-export function headNote(head: Oid, since: Date, checks: readonly string[] = []): string {
-  const expected = checks.length === 0 ? '' : ` checks=${checks.map(encodeURIComponent).join(',')}`;
+export function headNote(head: Oid, since: Date, checks: readonly ExpectedCheck[] = []): string {
+  const expected = checks.length === 0 ? '' : ` checks=${checks.map(notedCheck).join(',')}`;
   return `<!-- head: sha=${head} since=${since.toISOString()}${expected} -->`;
+}
+
+function notedCheck(check: ExpectedCheck): string {
+  const name = encodeURIComponent(check.name);
+  return check.publisher === undefined ? name : `${name}@${check.publisher.kind}:${check.publisher.id}`;
 }
 
 /** The checks a pull request's head must pass beyond those registered on it. */
 export interface ExpectedChecks {
-  /** Every name the head must pass: those observed and the configured ones; sorted, each once. */
-  names: string[];
+  /** Every check the head must pass: those observed and the configured ones; sorted, each once. */
+  checks: ExpectedCheck[];
   /**
-   * The names registered on earlier heads, which the description notes. Never
-   * the configured ones: a name removed from `required-checks` stops counting.
+   * The checks registered on earlier heads, with their publishers, which the
+   * description notes. Never the configured ones: a name removed from
+   * `required-checks` stops counting.
    */
-  observed: string[];
+  observed: ExpectedCheck[];
 }
 
 /** Where a head's earlier checks are read: the description's note, or the commits the sync pushed it on this run. */
@@ -57,33 +67,48 @@ export type EarlierHeads = { body: string | undefined } | { pushedFrom: readonly
  *   stays expected for one more push of the sync at most, never for good.
  */
 export async function expectedChecks(github: GitHubRepository, head: Oid, required: readonly string[], earlier: EarlierHeads): Promise<ExpectedChecks> {
-  const observed = new Set<string>();
+  const observed: ExpectedCheck[] = [];
   if ('pushedFrom' in earlier) {
-    for (const parent of earlier.pushedFrom) for (const name of await registeredNames(github, parent)) observed.add(name);
+    for (const parent of earlier.pushedFrom) observed.push(...await registeredChecks(github, parent));
   } else {
     const note = HEAD_NOTE.exec(earlier.body ?? '');
     if (note !== null) {
-      for (const name of (note[3] ?? '').split(',').filter(Boolean)) {
+      for (const token of (note[3] ?? '').split(',').filter(Boolean)) {
+        const noted = NOTED_CHECK.exec(token);
         try {
-          observed.add(decodeURIComponent(name));
+          // A token a person broke names nothing; the checks registered on the noted head still count below.
+          if (noted === null) continue;
+          const check: ExpectedCheck = { name: decodeURIComponent(noted[1] as string) };
+          if (noted[2] !== undefined) check.publisher = { kind: noted[2] as 'run' | 'status', id: Number(noted[3]) };
+          observed.push(check);
         } catch {
-          // A note a person broke names nothing; the checks registered on the noted head still count below.
+          // A name a person broke names nothing, as above.
         }
       }
       const noted = note[1] as Oid;
-      if (noted !== head) for (const name of await registeredNames(github, noted)) observed.add(name);
+      if (noted !== head) observed.push(...await registeredChecks(github, noted));
     }
   }
   // A note for unlisted checks ("3 more check runs") is no check name: such a head was never read as passed.
-  const listed = [...observed].filter((name) => !/^[0-9]+ more (check runs|commit statuses)$/.test(name)).sort();
-  return { names: [...new Set([...listed, ...required])].sort(), observed: listed };
+  const listed = distinct(observed.filter(({ name }) => !/^[0-9]+ more (check runs|commit statuses)$/.test(name)));
+  return { checks: distinct([...listed, ...required.map((name) => ({ name }))]), observed: listed };
 }
 
-/** The names of the checks registered on a commit, whatever their state; none for a commit GitHub does not know. */
-async function registeredNames(github: GitHubRepository, sha: Oid): Promise<string[]> {
+/** Each check once, sorted by name, then by publisher. */
+function distinct(checks: readonly ExpectedCheck[]): ExpectedCheck[] {
+  const byKey = new Map(checks.map((check) => [notedCheck(check), check]));
+  return [...byKey.keys()].sort((a, b) => a < b ? -1 : a > b ? 1 : 0).map((key) => byKey.get(key) as ExpectedCheck);
+}
+
+/**
+ * The checks registered on a commit, whatever their state, each bound to its
+ * publisher; none for a commit GitHub does not know. A check whose publisher
+ * GitHub did not name stays expected from that unknown publisher, which no
+ * check satisfies: a person makes it run again, or the sync's next push ends it.
+ */
+async function registeredChecks(github: GitHubRepository, sha: Oid): Promise<ExpectedCheck[]> {
   try {
-    const checks = await commitChecks(github, sha);
-    return [...checks.failed, ...checks.pending, ...(checks.succeeded ?? [])];
+    return (await commitChecks(github, sha)).checks.map(({ name, publisher }) => ({ name, publisher }));
   } catch (error) {
     // A noted commit GitHub does not know (a note a person changed) has no checks to carry over.
     if (error instanceof PullRequestError && (error.status === 404 || error.status === 422)) return [];
@@ -104,8 +129,8 @@ export function headSince(body: string | undefined, head: Oid, now: Date): Date 
 }
 
 /** What a head of either lane must show before it merges: the expected checks, and some check unless merging without any is allowed. */
-export function checkExpectation(options: { mergeWithoutChecks?: boolean | undefined }, names: readonly string[]): CheckExpectation {
-  return { names, allowNone: options.mergeWithoutChecks === true };
+export function checkExpectation(options: { mergeWithoutChecks?: boolean | undefined }, checks: readonly ExpectedCheck[]): CheckExpectation {
+  return { checks, allowNone: options.mergeWithoutChecks === true };
 }
 
 /** Whether a pending head waits only for checks that never registered on it. */
@@ -163,19 +188,22 @@ export type MainVerdict =
   | { state: 'clear'; passed: boolean };
 
 /** The tip's checks, read once per GitHub client and commit: both lanes ask about the same tip in one run. */
-const tipChecks = new WeakMap<GitHubRepository, Map<Oid, Promise<CheckState>>>();
+const tipChecks = new WeakMap<GitHubRepository, Map<Oid, Promise<CommitChecks>>>();
 
 export async function readMainVerdict(github: GitHubRepository, main: Oid, names: readonly string[]): Promise<MainVerdict> {
-  return mainVerdict(await commitChecks(github, main), names);
+  return mainVerdict(checkState(await commitChecks(github, main)), names);
 }
 
-/** A commit's checks, read once per GitHub client: the tip and an earlier head are asked about more than once in a run. */
-function commitChecks(github: GitHubRepository, sha: Oid): Promise<CheckState> {
+/**
+ * A commit's checks with their publishers, read once per GitHub client: the
+ * tip and an earlier head are asked about more than once in a run.
+ */
+function commitChecks(github: GitHubRepository, sha: Oid): Promise<CommitChecks> {
   let known = tipChecks.get(github);
   if (known === undefined) tipChecks.set(github, (known = new Map()));
   let checks = known.get(sha);
   if (checks === undefined) {
-    const read = readChecks(github, sha);
+    const read = readCommitChecks(github, sha, { creators: true });
     checks = read;
     known.set(sha, read);
     // A failed read is not kept: the next question asks GitHub again.

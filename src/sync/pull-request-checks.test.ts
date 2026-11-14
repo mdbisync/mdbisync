@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { MARKS } from './marks.ts';
 import { SETUP_FAILED_EXIT_CODE } from '../commands.ts';
-import { type FakeCheck, fakeFetch } from '../setup/test-helpers.ts';
+import { FAKE_ACTIONS_APP_ID, type FakeCheck, fakeFetch } from '../setup/test-helpers.ts';
 import { IDENTITY } from '../state/test-helpers.ts';
 import { DEFAULT_MERGE_GRACE_SECONDS } from './pull-request.ts';
 import { DEFAULT_CHECK_DEADLINE_MINUTES } from './deadline.ts';
@@ -277,7 +277,7 @@ describe('sync: pull request checks', () => {
     assert.deepEqual(run.report.pullRequest?.checks?.missing, ['tests']);
     assert.equal(await rev('refs/heads/main'), h.start);
     // The description carries the expectation, so a later run that reads only the fixed head still asks for `tests`.
-    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit,tests -->`));
+    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID},tests@run:${FAKE_ACTIONS_APP_ID} -->`));
     const again = await sync();
     assert.equal(again.report.pullRequest?.merged, null);
     assert.deepEqual(again.report.pullRequest?.checks?.missing, ['tests']);
@@ -286,6 +286,50 @@ describe('sync: pull request checks', () => {
     const merged = await sync();
     assert.ok(merged.report.pullRequest?.merged);
     assert.match(await show(`refs/heads/main:${path}`), /Formatted/);
+  });
+
+  // Anyone who may write commit statuses can name one after a check run; only the check's own publisher proves it ran.
+  it('does not let a commit status or another app stand in for an expected check run', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const fixed = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    const formatter: FakeCheck = { name: 'pre-commit', status: 'completed', conclusion: 'success' };
+    checksOn(fixed, [formatter, { name: 'tests', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 }]);
+    const status = await sync();
+    assert.equal(status.result.exitCode, 0, status.result.stderr);
+    assert.equal(status.report.pullRequest?.merged, null, 'a commit status stood in for the `tests` check run');
+    assert.deepEqual(status.report.pullRequest?.checks?.missing, ['tests']);
+    checksOn(fixed, [formatter, { name: 'tests', status: 'completed', conclusion: 'success', app: 666 }]);
+    const app = await sync();
+    assert.equal(app.report.pullRequest?.merged, null, 'another app\'s check run stood in for the `tests` check run');
+    assert.deepEqual(app.report.pullRequest?.checks?.missing, ['tests']);
+    assert.equal(await rev('refs/heads/main'), h.start);
+    // The description keeps who must publish each check, so the binding holds in runs that read only the fixed head.
+    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit@run:${FAKE_ACTIONS_APP_ID},tests@run:${FAKE_ACTIONS_APP_ID} -->`));
+    checksOn(fixed, [formatter, { name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const merged = await sync();
+    assert.ok(merged.report.pullRequest?.merged);
+  });
+
+  it('expects a commit status from the account that published it on the earlier head', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'ci/build', status: 'completed', conclusion: 'success', commitStatus: true }]);
+    const fixed = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    const formatter: FakeCheck = { name: 'pre-commit', status: 'completed', conclusion: 'success' };
+    checksOn(fixed, [formatter, { name: 'ci/build', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 }]);
+    const foreign = await sync();
+    assert.equal(foreign.report.pullRequest?.merged, null, 'a status from another account stood in for `ci/build`');
+    assert.deepEqual(foreign.report.pullRequest?.checks?.missing, ['ci/build']);
+    checksOn(fixed, [formatter, { name: 'ci/build', status: 'completed', conclusion: 'success' }]);
+    const run = await sync();
+    assert.equal(run.report.pullRequest?.merged, null, 'a check run stood in for the `ci/build` commit status');
+    checksOn(fixed, [formatter, { name: 'ci/build', status: 'completed', conclusion: 'success', commitStatus: true }]);
+    const merged = await sync();
+    assert.ok(merged.report.pullRequest?.merged);
   });
 
   it('reports checks-missing past the deadline when an expected check never starts, without suspending', async () => {

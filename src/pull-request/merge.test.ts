@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { type FakeCheck, GITHUB_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
+import { FAKE_ACTIONS_APP_ID, FAKE_CI_ACCOUNT_ID, type FakeCheck, GITHUB_API, fakeFetch, fakeWorld } from '../setup/test-helpers.ts';
 import { PullRequestError } from './github.ts';
 import { mergePullRequest, readAnnotations, readChecks, waitForChecks } from './merge.ts';
 
@@ -15,15 +15,73 @@ function target(checks: FakeCheck[]) {
 describe('readChecks', () => {
   it('keeps a commit pending while an expected check is not registered, or while it has no checks and must have some', async () => {
     const passed: FakeCheck[] = [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }];
-    assert.deepEqual(await readChecks(target(passed).repo, SHA, { names: ['tests', 'pre-commit', 'tests'] }), { state: 'pending', failed: [], pending: [], hasChecks: true, succeeded: ['pre-commit'], missing: ['tests'] });
+    assert.deepEqual(await readChecks(target(passed).repo, SHA, { checks: [{ name: 'tests' }, { name: 'pre-commit' }, { name: 'tests' }] }), { state: 'pending', failed: [], pending: [], hasChecks: true, succeeded: ['pre-commit'], missing: ['tests'] });
     // A registered expected check counts by its own state; a failure still wins.
     const failing: FakeCheck[] = [...passed, { name: 'tests', status: 'completed', conclusion: 'failure' }];
-    const failed = await readChecks(target(failing).repo, SHA, { names: ['tests', 'lint'] });
+    const failed = await readChecks(target(failing).repo, SHA, { checks: [{ name: 'tests' }, { name: 'lint' }] });
     assert.equal(failed.state, 'failed');
     assert.deepEqual(failed.missing, ['lint']);
-    assert.equal((await readChecks(target([...passed, { name: 'tests', status: 'completed', conclusion: 'success' }]).repo, SHA, { names: ['tests'] })).state, 'passed');
+    assert.equal((await readChecks(target([...passed, { name: 'tests', status: 'completed', conclusion: 'success' }]).repo, SHA, { checks: [{ name: 'tests' }] })).state, 'passed');
     assert.deepEqual(await readChecks(target([]).repo, SHA, { allowNone: false }), { state: 'pending', failed: [], pending: [], hasChecks: false });
     assert.equal((await readChecks(target([]).repo, SHA, { allowNone: true })).state, 'passed');
+  });
+
+  it('counts an expected check only from its own publisher', async () => {
+    const actions = { kind: 'run', id: FAKE_ACTIONS_APP_ID } as const;
+    const expect = { checks: [{ name: 'tests', publisher: actions }] };
+    // A same-name commit status or another app's check run, passed or not, is not the expected check run.
+    const status: FakeCheck = { name: 'tests', status: 'completed', conclusion: 'success', commitStatus: true, creator: 666 };
+    const otherApp: FakeCheck = { name: 'tests', status: 'completed', conclusion: 'success', app: 666 };
+    for (const stand of [status, otherApp]) {
+      assert.deepEqual(await readChecks(target([stand]).repo, SHA, expect), { state: 'pending', failed: [], pending: [], hasChecks: true, succeeded: ['tests'], missing: ['tests'] });
+    }
+    assert.equal((await readChecks(target([status, { name: 'tests', status: 'completed', conclusion: 'success' }]).repo, SHA, expect)).state, 'passed');
+    // Its own publisher's failure, or a stand-in's, still fails the commit.
+    assert.equal((await readChecks(target([{ ...status, conclusion: 'failure' }, { name: 'tests', status: 'completed', conclusion: 'success' }]).repo, SHA, expect)).state, 'failed');
+    // A commit status binds to the account that created it.
+    const account = { checks: [{ name: 'ci/build', publisher: { kind: 'status', id: FAKE_CI_ACCOUNT_ID } as const }] };
+    const build: FakeCheck = { name: 'ci/build', status: 'completed', conclusion: 'success', commitStatus: true };
+    assert.equal((await readChecks(target([build]).repo, SHA, account)).state, 'passed');
+    assert.deepEqual((await readChecks(target([{ ...build, creator: 666 }]).repo, SHA, account)).missing, ['ci/build']);
+    assert.deepEqual((await readChecks(target([{ ...build, commitStatus: false }]).repo, SHA, account)).missing, ['ci/build']);
+    // The combined status names no creator: a status the list of statuses does not show has no known publisher.
+    const { repo } = target([build]);
+    const unlisted = { ...repo, fetch: async (input: string | URL | Request, init?: RequestInit) => String(input).includes('/statuses?') ? Response.json([]) : repo.fetch(input, init) };
+    assert.deepEqual((await readChecks(unlisted, SHA, account)).missing, ['ci/build']);
+    assert.equal((await readChecks(unlisted, SHA, { checks: [{ name: 'ci/build' }] })).state, 'passed');
+    const refused = { ...repo, fetch: async (input: string | URL | Request, init?: RequestInit) => String(input).includes('/statuses?') ? Response.json({ message: 'Forbidden' }, { status: 403 }) : repo.fetch(input, init) };
+    await assert.rejects(readChecks(refused, SHA, account), (error: unknown) => error instanceof PullRequestError && error.status === 403);
+    // A check expected from an unknown publisher (GitHub named none) is never satisfied.
+    assert.deepEqual((await readChecks(target([build]).repo, SHA, { checks: [{ name: 'ci/build', publisher: { kind: 'status', id: 0 } }] })).missing, ['ci/build']);
+    // The list is read only when a check is expected from a status's account.
+    const lists: string[] = [];
+    const counted = { ...repo, fetch: async (input: string | URL | Request, init?: RequestInit) => (lists.push(String(input)), repo.fetch(input, init)) };
+    await readChecks(counted, SHA, { checks: [{ name: 'ci/build' }, { name: 'tests', publisher: actions }] });
+    assert.equal(lists.some((url) => url.includes('/statuses?')), false);
+    await readChecks(counted, SHA, account);
+    assert.equal(lists.filter((url) => url.includes('/statuses?')).length, 1);
+  });
+
+  it('takes a status\'s creator from that status, not from an earlier one of its context', async () => {
+    const account = { checks: [{ name: 'ci/build', publisher: { kind: 'status', id: FAKE_CI_ACCOUNT_ID } as const }] };
+    const build: FakeCheck = { name: 'ci/build', status: 'completed', conclusion: 'success', commitStatus: true };
+    assert.equal((await readChecks(target([{ ...build, history: [{ state: 'pending', creator: 20 }] }]).repo, SHA, account)).state, 'passed');
+    assert.deepEqual((await readChecks(target([{ ...build, creator: 666, history: [{ state: 'pending', creator: FAKE_CI_ACCOUNT_ID }] }]).repo, SHA, account)).missing, ['ci/build']);
+    // Newer statuses of other contexts fill the first page: the list is paged until the status is found.
+    const { repo } = target([build]);
+    const pages: string[] = [];
+    const flooded = {
+      ...repo,
+      fetch: async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (!url.pathname.endsWith('/statuses')) return repo.fetch(input, init);
+        pages.push(url.searchParams.get('page') ?? '');
+        if (url.searchParams.get('page') === '1') return Response.json(Array.from({ length: 100 }, (_, index) => ({ id: 500_000 + index, context: `other-${index}`, creator: { id: 666 } })));
+        return repo.fetch(String(input).replace('page=2', 'page=1'), init);
+      },
+    };
+    assert.equal((await readChecks(flooded, SHA, account)).state, 'passed');
+    assert.deepEqual(pages, ['1', '2']);
   });
 
   it('passes a commit without checks, and one whose checks succeeded, were neutral or skipped', async () => {

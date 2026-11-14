@@ -11,6 +11,9 @@ export const SYNC_BRANCHES = ['mdbisync/linear', 'mdbisync/suspended'] as const;
 /** The fake App: the run's `app-slug`, and the commit identity GitHub links to it. */
 export const FAKE_APP_SLUG = 'sync-app';
 export const FAKE_APP_ID = 1001;
+/** The publishers of the fake repository's CI: GitHub Actions for check runs, an external CI account for commit statuses. */
+export const FAKE_ACTIONS_APP_ID = 15368;
+export const FAKE_CI_ACCOUNT_ID = 2001;
 export const FAKE_APP_IDENTITY = { name: 'sync-app[bot]', email: '1001+sync-app[bot]@users.noreply.github.com' } as const;
 export const LINEAR_API = 'https://linear.test';
 
@@ -102,6 +105,12 @@ export interface FakeCheck {
   commitStatus?: boolean;
   /** A commit status's link (`target_url`). */
   url?: string;
+  /** The id of the GitHub App that published a check run; GitHub Actions' by default. */
+  app?: number;
+  /** The id of the account that created a commit status; the repository's CI account by default. */
+  creator?: number;
+  /** Earlier states of a commit status's context, oldest first, each by the account that created it. */
+  history?: Array<{ state: 'pending' | 'success' | 'failure' | 'error'; creator: number }>;
   /** A check run's annotations, as `GET /check-runs/<id>/annotations` answers them. */
   annotations?: Array<{ path: string; start_line: number; title?: string; message: string }>;
   /** An HTTP status the annotations endpoint answers for this check run instead of its annotations. */
@@ -135,6 +144,8 @@ export interface FakeWorld {
     checks?: Map<string, FakeCheck[]>;
     /** Check runs in the order the world first listed them: a run's id is its place here, from 1. */
     checkRuns?: FakeCheck[];
+    /** Commit statuses in the order the world first listed them: a status's id is its place here, from 1. */
+    statuses?: FakeCheck[];
     /** How many annotation pages the runs read. */
     annotationReads?: number;
     /**
@@ -392,21 +403,37 @@ async function mergeRequest(world: FakeWorld, method: string, rest: string, init
  * check runs (`per_page=1`) reads the same list.
  */
 function commitChecks(world: FakeWorld, method: string, rest: string): Response | undefined {
-  const match = /^\/commits\/([0-9a-f]+)\/(check-runs|status)(\?.*)?$/.exec(rest);
+  const match = /^\/commits\/([0-9a-f]+)\/(check-runs|statuses|status)(\?.*)?$/.exec(rest);
   if (match === null || method !== 'GET') return undefined;
   if (world.github.rateLimited) return json(403, { message: 'You have exceeded a secondary rate limit.' });
   if (match[2] === 'check-runs' && world.github.missing.has('checks:read')) return json(403, { message: 'Resource not accessible by integration' });
-  if (match[2] === 'status' && world.github.missing.has('statuses:read')) return json(403, { message: 'Resource not accessible by integration' });
+  if (match[2] !== 'check-runs' && world.github.missing.has('statuses:read')) return json(403, { message: 'Resource not accessible by integration' });
   const all = world.github.checks?.get(match[1] as string) ?? [];
-  if (match[2] === 'status') {
-    const statuses = all.filter((check) => check.commitStatus === true).map((check) => ({ context: check.name, state: check.status === 'completed' ? check.conclusion : 'pending', target_url: check.url ?? null }));
-    return json(200, { state: statuses.length === 0 ? 'pending' : 'success', total_count: statuses.length, statuses });
+  // GitHub's combined status names no creator; only the list of a commit's statuses does.
+  const statuses = all.filter((check) => check.commitStatus === true);
+  const latest = statuses.map((check) => ({ id: statusId(world, check), context: check.name, state: check.status === 'completed' ? check.conclusion : 'pending', target_url: check.url ?? null }));
+  if (match[2] === 'status') return json(200, { state: latest.length === 0 ? 'pending' : 'success', total_count: latest.length, statuses: latest });
+  if (match[2] === 'statuses') {
+    // Every status ever created on the commit, newest first: the latest of each context, then their earlier states.
+    const account = (id: number) => ({ id, login: `account-${id}` });
+    const earlier = statuses.flatMap((check, index) => (check.history ?? []).map((state, at) => ({ id: 100_000 + index * 1_000 + at, context: check.name, state: state.state, target_url: null, creator: account(state.creator) })).reverse());
+    const listed = [...latest.map((status, index) => ({ ...status, creator: account(statuses[index]?.creator ?? FAKE_CI_ACCOUNT_ID) })).reverse(), ...earlier];
+    const page = Number(new URLSearchParams(match[3] ?? '').get('page') ?? '1');
+    const size = Number(new URLSearchParams(match[3] ?? '').get('per_page') ?? '30');
+    return json(200, listed.slice((page - 1) * size, page * size));
   }
   const runs = all.filter((check) => check.commitStatus !== true);
   const page = Number(new URLSearchParams(match[3] ?? '').get('page') ?? '1');
   const size = Number(new URLSearchParams(match[3] ?? '').get('per_page') ?? '30');
   const slice = runs.slice((page - 1) * size, page * size);
-  return json(200, { total_count: runs.length, check_runs: slice.map((check) => ({ id: checkRunId(world, check), name: check.name, status: check.status, conclusion: check.conclusion ?? null, html_url: `https://github.test/owner/repo/runs/${checkRunId(world, check)}` })) });
+  return json(200, { total_count: runs.length, check_runs: slice.map((check) => ({ id: checkRunId(world, check), name: check.name, status: check.status, conclusion: check.conclusion ?? null, html_url: `https://github.test/owner/repo/runs/${checkRunId(world, check)}`, app: { id: check.app ?? FAKE_ACTIONS_APP_ID, slug: `app-${check.app ?? FAKE_ACTIONS_APP_ID}` } })) });
+}
+
+/** A commit status's id: the order in which the world first listed it, from 1. */
+function statusId(world: FakeWorld, check: FakeCheck): number {
+  const listed = (world.github.statuses ??= []);
+  if (!listed.includes(check)) listed.push(check);
+  return listed.indexOf(check) + 1;
 }
 
 /** A check run's id: the order in which the world first listed it, from 1. */
