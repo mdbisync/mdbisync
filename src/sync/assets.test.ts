@@ -431,5 +431,9 @@ it('encodes a restored link\'s fragment, so it cannot end the link and add anoth
     assert.deepEqual(destinations(content).length, 1);
     const captured = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', content, new Map([[hash, url]]), async () => { throw new Error('a cached link must not be downloaded'); });
     assert.deepEqual(destinations(captured.body).map(({ node }) => node.url), ['existing.png#x%29%5By%5D%28../secret.csv']);
+    // Query separators stay; an `&` that would read as a character reference does not, and an encoded one stays encoded.
+    const query = await captureAssets(git, resolveStateConfig({}), base, 'docs/plan.md', `[File](${url}?download=1&page=2&amp;lt;x&q=a%26b#a&b)`, new Map([[hash, url]]), async () => { throw new Error('a cached link must not be downloaded'); });
+    assert.equal(query.body, '[File](existing.png?download=1&page=2%26lt;x&q=a%26b#a&b)');
+    assert.deepEqual(destinations(query.body).map(({ node }) => node.url), ['existing.png?download=1&page=2%26lt;x&q=a%26b#a&b']);
   } finally { await fixture.cleanup(); }
 });

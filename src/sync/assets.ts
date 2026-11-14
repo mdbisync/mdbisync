@@ -89,12 +89,15 @@ export function typedFileLinkFindings(path: string, body: string, previousBody?:
 }
 
 /**
- * A link's query and fragment (`?a=1#b`), as the parser decoded them, in a
- * form a bare destination holds: each part percent-encoded on its own, the
- * parentheses too, so the text cannot end the destination and spell another.
+ * A link's query and fragment (`?a=1&b=2#c`), as the parser decoded them, in
+ * a form a bare destination holds: each part percent-encoded on its own, the
+ * parentheses too, so the text cannot end the destination and spell another;
+ * the query's `&` separators stay.
  */
 function encodeSuffix(suffix: string): string {
-  const encode = (part: string) => encodeFragment(part).replace(/[()]/g, (char) => (char === '(' ? '%28' : '%29'));
+  const encodePiece = (piece: string) => encodeFragment(piece).replace(/[()]/g, (char) => (char === '(' ? '%28' : '%29'));
+  // `&` separates query parameters and stays, except where it would start a character reference the parser decodes.
+  const encode = (part: string) => part.split('&').map((piece, index) => (index === 0 ? '' : /^#?[A-Za-z0-9]+;/.test(piece) ? '%26' : '&') + encodePiece(piece)).join('');
   const hashAt = suffix.indexOf('#');
   const query = hashAt === -1 ? suffix : suffix.slice(0, hashAt);
   const fragment = hashAt === -1 ? undefined : suffix.slice(hashAt + 1);
