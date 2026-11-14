@@ -416,6 +416,10 @@ it('blocks a link typed in Linear to a repository file the previous text did not
   assert.deepEqual(findings('![i][a]\n\n[a]: report.csv\n[A]: second.csv'), [[1, 1, 4]]);
   assert.deepEqual(findings('![i][a]\n\n[a]: https://uploads.linear.app/a.png\n[A]: https://example.com/a.csv'), []);
   assert.deepEqual(findings('![i][a]\n\n> [a]:\n> https://uploads.linear.app/a.png\n\n[A]: report.csv'), [[1, 1, 6]]);
+  assert.deepEqual(findings('![i][a]\n\n[a]: https://uploads.linear.app/a.png\n\n> [A]:\n> report.csv'), [[1, 1, 5]]);
+  assert.deepEqual(findings('[l][b]\n\n> [b]:\n> report.csv'), [[1, 1, 3]]);
+  assert.deepEqual(findings('> [l](\n> report.csv)'), [[1, 1, 1]]);
+  assert.deepEqual(findings('[l](report.csv)', '[l][b]\n\n> [b]:\n> report.csv'), []);
   // The formatter drops shadowed definitions. Validate the original text
   // before that rewrite can hide a destination the upload writer would read.
   const shadowed = '![i][a]\n\n[a]: https://uploads.linear.app/a.png\n[A]: report.csv\n';

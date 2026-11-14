@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
+import type { Definition, Link } from 'mdast';
 import { destinations, findFileLinks, resolveTarget } from '../initial-sync/uploads.ts';
 import { MARKDOWN_EXTENSION } from '../mapping/index.ts';
 import { encodeFragment } from '../initial-sync/links.ts';
 import { type LinearReads, uploadReadKey, LinearError, LinearHttpError } from '../linear/index.ts';
 import { type Git, type Oid, type UploadMap, readBlobs, listTree, readFiles, parseLfsPointer, type StateConfig } from '../state/index.ts';
-import { parse, visit, line, start } from '../format/markdown.ts';
+import { parse, visit, line } from '../format/markdown.ts';
 import { message } from '../messages.ts';
 import { uploadExtension } from './upload-type.ts';
 
@@ -68,27 +69,31 @@ export class ImageBlockedError extends Error {
 export function typedFileLinkFindings(path: string, body: string, previousBody?: string, previousPath = path): FileFinding[] {
   const known = new Set<string>();
   if (previousBody !== undefined) {
-    for (const { node } of destinations(previousBody)) {
+    visit(parse(previousBody), (node) => {
+      if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition') return;
       const target = resolveTarget(previousPath, node.url);
       if (target !== null) known.add(target);
-    }
+    });
   }
   // Only the first definition resolves an image reference and is checked by
   // the image gate. Shadowed definitions still reach the file upload writer.
   const imageLabels = new Set<string>();
-  const definitions = new Map<string, number>();
+  const definitions = new Map<string, Definition>();
+  const candidates: Array<Link | Definition> = [];
   visit(parse(body), (node) => {
     if (node.type === 'imageReference') imageLabels.add(node.identifier);
-    if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, start(node));
+    if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node);
+    if (node.type === 'link' || node.type === 'definition') candidates.push(node);
   });
-  const links = destinations(body).filter(({ node }) => {
-    if (node.type === 'image') return false;
-    if (node.type === 'definition' && imageLabels.has(node.identifier) && definitions.get(node.identifier) === start(node)) return false;
+  // Validate parsed URLs even when their source ranges cannot be rewritten:
+  // formatting can turn a multiline destination into an ordinary file link.
+  const links = candidates.filter((node) => {
+    if (node.type === 'definition' && imageLabels.has(node.identifier) && definitions.get(node.identifier) === node) return false;
     const target = resolveTarget(path, node.url);
     return target !== null && !target.endsWith(MARKDOWN_EXTENSION);
   });
   const findings: FileFinding[] = [];
-  links.forEach(({ node }, index) => {
+  links.forEach((node, index) => {
     if (!known.has(resolveTarget(path, node.url) as string)) findings.push({ file: index + 1, total: links.length, line: line(node), reason: 'not-uploaded' });
   });
   return findings;
