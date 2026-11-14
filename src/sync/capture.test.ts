@@ -16,7 +16,8 @@ import { lintInTree, sameMarkdown, splitFile } from '../format/index.ts';
 import { capture, prepareLfs } from './capture.ts';
 import { writeTrackedToLinear } from './write.ts';
 import { MARKERS } from '../merge/index.ts';
-import { documentPath } from './paths.ts';
+import { documentPath, titlePath } from './paths.ts';
+import { buildTree, checkRepoPath, isGitDirectoryName } from '../state/objects.ts';
 
 const png = await readFile(new URL('../../test/fixtures/assets/pixel.png', import.meta.url));
 
@@ -291,6 +292,39 @@ describe('capture from Linear', () => {
     assert.deepEqual(written.updated, [path]);
     assert.equal(world.linear.documents[0]!.content, 'Edited in git.\n');
     assert.equal(world.linear.documents[0]!.title, 'question?');
+  });
+
+  it('captures a title that names the Git directory by its NTFS short name under an escaped path', async () => {
+    world.linear.documents.push({ id: 'hook', title: 'GIT~1/hooks/post-checkout', content: 'Hook.\n', projectId: 'project-api', createdAt: '2026-01-02T00:00:00Z' });
+    const result = await run();
+    assert.equal(await text('docs/%47IT~1/hooks/post-checkout.md'), 'Hook.\n');
+    const ids = await readIds(context.git, result.state.ids);
+    assert.equal(ids.get('docs/%47IT~1/hooks/post-checkout.md')?.id, 'hook');
+    const paths = (await listTree(context.git, result.state.linear!)).map((entry) => entry.path);
+    assert.ok(!paths.some((path) => path.split('/').some(isGitDirectoryName)), paths.join(', '));
+  });
+
+  it('moves a document away from an earlier path that names the Git directory', async () => {
+    // An earlier version kept the title `git~2/notes` (which Git accepts) as it was.
+    const { git } = context;
+    const state = context.fetched.state;
+    const legacy = 'docs/git~2/notes.md';
+    const tree = await buildTree(git, state.linear!, new Map([['docs/plan.md', null], [legacy, '---\ncategory: work\n---\n\nOriginal.\n']]));
+    const env = { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email };
+    const linear = await git.text(['commit-tree', '--no-gpg-sign', tree, '-p', state.linear!, '-m', 'Earlier capture'], { env });
+    const ids = await commitIds(git, state.ids, new Map([[legacy, { id: 'plan' }]]), IDENTITY);
+    const pushed = await pushAtomic(git, config, [
+      { ref: stateRef(config, 'linear'), expected: state.linear, next: linear },
+      { ref: stateRef(config, 'ids'), expected: state.ids, next: ids },
+    ]);
+    assert.equal(pushed.ok, true);
+    await refresh();
+    Object.assign(world.linear.documents[0]!, { title: 'git~2/notes', updatedAt: '2026-01-03T00:00:00Z' });
+    const result = await run();
+    assert.equal(await text('docs/%67it~2/notes.md'), '---\ncategory: work\n---\n\nOriginal.\n');
+    const paths = (await listTree(git, result.state.linear!)).map((entry) => entry.path);
+    assert.ok(!paths.includes(legacy), paths.join(', '));
+    assert.equal((await readIds(git, result.state.ids)).get('docs/%67it~2/notes.md')?.id, 'plan');
   });
 
   it('captures a new path, renames by id and moves across projects', async () => {
@@ -873,6 +907,19 @@ it('makes safe title paths and deterministic collision names', () => {
     assert.ok(!path.split('/').some((segment) => segment === '..' || segment.toLowerCase() === '.git'));
     assert.ok(!/[\\:*?"<>|]/.test(path));
   }
+  // The NTFS short names of `.git` are escaped like `.git` itself.
+  for (const title of ['GIT~1/hooks/post-checkout', 'git~1/config', 'Git~2/hooks/x', 'git~1. /x', '.git. /x', 'git~1:x/y']) {
+    const path = documentPath('docs', title, 'one', new Set());
+    assert.ok(!path.split('/').some(isGitDirectoryName), path);
+    checkRepoPath(path);
+  }
+  assert.equal(titlePath('GIT~1/hooks'), '%47IT~1/hooks');
+  assert.equal(titlePath('git~1x/page'), 'git~1x/page');
+  // Names that were already safe keep the file name they had.
+  assert.equal(titlePath('.git./x'), '.git%2E/x');
+  assert.equal(titlePath('git~1 /x'), 'git~1%20/x');
+  // A git-originated file name that names the Git directory is not kept.
+  assert.equal(documentPath('docs', 'git~2/notes', 'one', new Set(), 'docs/git~2/notes.md'), 'docs/%67it~2/notes.md');
   assert.equal(documentPath('docs', '100% done', 'one', new Set(), 'docs/100% done.md'), 'docs/100% done.md');
   // A path at the repository root never starts with `-`, which tools read as an option.
   assert.equal(documentPath('', '--config=x', 'one', new Set()), '%2D-config=x.md');
