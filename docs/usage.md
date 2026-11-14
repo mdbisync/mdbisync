@@ -206,6 +206,11 @@ by one rule, the same in the initial sync and in the sync:
 - an empty part (a leading `/` or `//`) becomes `%00`; `.`, `..`, `.git` and
   names Windows reserves (`CON`, `NUL`, `COM1`, …) get their first character
   encoded (`%2E%2E`, `%43ON`); spaces at the start of a part are kept;
+- in a folder at the repository root, a `-` at the start of the title is
+  encoded (`-draft` becomes `%2Ddraft.md`), so no file path reads as a
+  command-line option; a file already there under such a name moves to the
+  encoded one. The security check refuses any other path that starts with
+  `-`, such as one in a mapped folder whose own name starts with `-`;
 - a part longer than 180 bytes is cut to 40 characters plus `~` and 16
   characters of its SHA-256 hash;
 - a name that would land on another file (also one differing only in letter

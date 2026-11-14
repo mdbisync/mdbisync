@@ -63,7 +63,7 @@ import {
 import { createAssetCapture, ImageBlockedError } from '../sync/assets.ts';
 import { captureCursorTrailer, cursorTime, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
 import { type SecurityGate, securityGate } from '../sync/security.ts';
-import { documentPath, titlePath } from '../sync/paths.ts';
+import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_BATCH, type WriteStop, keptAnnotationTrailer, readKeptAnnotations } from './confirm.ts';
 import { type LeftOutEntry, type PlanInput, annotatedPlaces, placeKey, planInitialSync } from './plan.ts';
@@ -132,7 +132,7 @@ export function planLinearToGit(input: ReversePlanInput): ReversePlan {
   const invalid = (place: Place) => (candidate: string) => !landsInPlace(input.mapping, candidate, place);
 
   const folderOfPlace = (place: Place) => folders.get(placeKey(place)) ?? '';
-  const plainPath = (title: string, place: Place) => `${posix.join(folderOfPlace(place), titlePath(title))}.md`;
+  const plainPath = (title: string, place: Place) => titleFile(folderOfPlace(place), title);
   const named = new Map<string, string>();
 
   // An encoded name belongs to the title it encodes: `Q3%3A goals.md` is the file of `Q3: goals`, even when
