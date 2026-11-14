@@ -54,9 +54,11 @@ import { isAppBot, runLogs } from './workflows.ts';
 import type { PushActivity, WorkflowRun } from './github.ts';
 import { appTokenClientIds, workflowWriteCredentials } from './run-credentials.ts';
 import { isDocumentWrite, QUIET_SUBJECT, UNTOUCHED_SUBJECT } from './quiet.ts';
+import { commentsWithState, isImageNotice, noticeImageLabels } from './image-gate.ts';
+import { lintInTree } from '../../../src/format/lint.ts';
 import { EnvBlockedError, NotImplementedError, ProductError } from './results.ts';
 import { zoneConcurrent } from './concurrency.ts';
-import { documentPaths, MOVE_SOURCE_FOLDER, projectFolderOf, projectFolders } from './step-helpers.ts';
+import { documentPaths, live, MOVE_SOURCE_FOLDER, projectFolderOf, projectFolders } from './step-helpers.ts';
 import { UNSAFE_TITLES, type LinkPairFixture } from './fixtures.ts';
 
 // --- views of the world ---------------------------------------------------------------
@@ -731,6 +733,13 @@ async function gitWrites(ctx: RunContext): Promise<number> {
   const commits = new Set<string>();
   for (const tip of tips) for (const commit of await newCommits(git, tip, startTips(ctx))) if (!own.has(commit)) commits.add(commit);
   return commits.size;
+}
+
+/** The document the scenario's `linear.image-path` step blocked. */
+function blockedImagePath(ctx: RunContext): string {
+  const blocked = ctx.observations.get('imageGate.blocked') as { path: string } | undefined;
+  if (blocked === undefined) throw new Error('the scenario has no linear.image-path step');
+  return blocked.path;
 }
 
 async function pullRequestsSinceStart(ctx: RunContext) {
@@ -1843,6 +1852,56 @@ export const SUBJECTS: Record<string, Compute> = {
     return count;
   },
 
+  // --- the image gate through the API path (L2-42) ---------------------------------------------
+  // The labels (`Image N of M (line L)`) the sync's image notices gave before the fix.
+  'blocked.imageLines': async (env) => noticeImageLabels(observed(env.ctx, 'blocked.comments') as string[]),
+  // Image notices on the blocked document that are not resolved; the sync resolves its notice once the images are fixed.
+  'blocked.openImageNotices': async (env) => {
+    const id = (await env.view()).ids.get(blockedImagePath(env.ctx))?.id;
+    if (id === undefined) throw new ProductError('the blocked document has no recorded id');
+    return (await commentsWithState(live(env.ctx).app, id)).filter((comment) => isImageNotice(comment.body) && comment.resolvedAt === null).length;
+  },
+  // The blocked document has its icon and color from the start again.
+  'blocked.marksRestored': async (env) => {
+    const path = blockedImagePath(env.ctx);
+    const view = await env.view();
+    const before = observed(env.ctx, BEFORE_VIEW) as View;
+    const now = view.documents.get(view.ids.get(path)?.id ?? '');
+    const then = before.documents.get(before.ids.get(path)?.id ?? '');
+    if (now === undefined || then === undefined) throw new ProductError('the blocked document is missing at the start or now');
+    return now.icon === then.icon && now.color === then.color;
+  },
+  // The image uploaded through the API reached the tracked branch: the document links it by a relative path, and the
+  // file there (its LFS object when stored in LFS) has the uploaded bytes.
+  'tracked.uploadedImage': async (env) => {
+    const image = observed(env.ctx, 'linear.image') as { path: string; sha256: string };
+    const view = await env.view();
+    const links = imageLinks(view.files.get(image.path) ?? '').filter((link) => !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(link));
+    const bytes = await trackedBytes(env.ctx, (path) => links.some((link) => resolveLink(image.path, link) === path));
+    return [...bytes.values()].some((blob) => (parseLfsPointer(blob)?.oid ?? createHash('sha256').update(blob).digest('hex')) === image.sha256);
+  },
+  // Lint findings in the Markdown files the sync's pull requests changed, each read in its pull request's head tree.
+  // Pull must never commit a file that fails lint; with no pull request there is nothing to judge, a product failure.
+  'pullRequests.lintFindings': async (env) => {
+    const prs = await pullRequestsSinceStart(env.ctx);
+    if (prs.length === 0) throw new ProductError('the scenario opened no pull request to lint');
+    const git = await person(env.ctx);
+    const start = env.ctx.observations.get('start.trackedTip') as string | undefined;
+    if (start === undefined) throw new Error('the runner recorded no tracked tip at the start');
+    const findings = new Set<string>();
+    for (const pr of prs) {
+      const head = (await fetchRef(git, `refs/pull/${pr.number}/head`)) ?? pr.head.sha;
+      const changed = (await git.text(['diff', '--name-only', '-z', '--diff-filter=d', `${start}...${head}`])).split('\0').filter((path) => path.endsWith('.md'));
+      // lint's file set holds regular files only, as the sync's own lint sees the tree: no symbolic links.
+      const files = new Set((await listTree(git, head)).filter((entry) => entry.type === 'blob' && entry.mode !== '120000').map((entry) => entry.path));
+      const texts = await treeFiles(git, head, (path) => changed.includes(path));
+      for (const path of changed) {
+        for (const finding of lintInTree(path, texts.get(path)?.toString('utf8') ?? '', files)) findings.add(`${path}: ${finding.rule}`);
+      }
+    }
+    return sorted(findings);
+  },
+
   // --- the sync branch, CI and workflows ------------------------------------------------------
   'syncBranch.personCommitRetained': async (env) => retained(env, [observed(env.ctx, 'syncBranch.personCommit') as string]),
   // Strictly on the tracked branch: the pull request merged the person's commit, not only kept it on the sync branch.
@@ -2067,6 +2126,8 @@ export const SUBJECTS: Record<string, Compute> = {
     // run.workflow-parallel (L4-10)
     'workflows.maxActiveInGroup', 'workflows.replacedPending',
     'tokens.activeBeforeCleanup', 'tokens.activeAfterCleanup',
+    // linear.image-path (L2-42): the image's place and line in the text Linear stored
+    'expected.blockedImageLines',
   ].map((name): [string, Compute] => [name, async (env) => observed(env.ctx, name)])),
 
   // --- after the UI session's steps (L6) -----------------------------------------------------
@@ -2375,6 +2436,22 @@ async function pullRequestAssets(env: Env): Promise<{ hashes: Map<string, string
  */
 const SETUP_FAILURE_SUBJECT = /^runs\.(\d+|last)\.setupFailure\.(item|fixLink)$/;
 
+/**
+ * The setup checks of run <n|last> by name, as its report gives them: `names` every check in the report's
+ * order, `failed` those in state `failed`. A passing setup check (L1-23's `run.check` as `runs.0`) names
+ * every required check and fails none. A run without a report fails as a product error.
+ */
+const SETUP_CHECKS_SUBJECT = /^runs\.(\d+|last)\.setupChecks\.(names|failed)$/;
+
+function setupChecksValue(ctx: RunContext, subject: string): string[] {
+  const [, which, field] = SETUP_CHECKS_SUBJECT.exec(subject) as RegExpExecArray;
+  const index = ownRunIndex(ctx, which as string, subject);
+  const report = ownResults(ctx)[index]?.report;
+  if (report === null || report === undefined) throw new ProductError(`engine run ${index} wrote no report, so it gives no ${subject}`);
+  const checks = setupChecksOf(report);
+  return (field === 'failed' ? checks.filter((check) => check.state === 'failed') : checks).map((check) => check.name);
+}
+
 function setupFailureValue(ctx: RunContext, subject: string): string {
   const [, which, field] = SETUP_FAILURE_SUBJECT.exec(subject) as RegExpExecArray;
   const own = ownResults(ctx);
@@ -2474,7 +2551,7 @@ export type SubjectSource = 'observed' | 'harness' | 'engine' | 'ui';
 /** Where a subject's value comes from, or null when nothing provides it (a harness gap). */
 export function subjectSource(subject: string): SubjectSource | null {
   const name = subject.startsWith('before.') ? subject.slice('before.'.length) : subject;
-  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || UNTOUCHED_SUBJECT.test(name) || RUN_VIEW_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name) || RUN_TARGET_SUBJECT.test(name)))) return 'harness';
+  if (Object.hasOwn(SUBJECTS, name) || (!subject.startsWith('before.') && (QUIET_SUBJECT.test(name) || UNTOUCHED_SUBJECT.test(name) || RUN_VIEW_SUBJECT.test(name) || SETUP_FAILURE_SUBJECT.test(name) || SETUP_CHECKS_SUBJECT.test(name) || RUN_TARGET_SUBJECT.test(name)))) return 'harness';
   if (ENGINE_FAMILIES.some((pattern) => pattern.test(name))) return 'engine';
   if (name.startsWith('ui.')) return 'ui';
   return null;
@@ -2699,6 +2776,7 @@ export async function resolveSubject(ctx: RunContext, subject: string): Promise<
   if (UNTOUCHED_SUBJECT.test(subject)) return { known: true, value: untouchedValue(ctx, subject) };
   if (RUN_VIEW_SUBJECT.test(subject)) return { known: true, value: await runViewValue(ctx, subject) };
   if (SETUP_FAILURE_SUBJECT.test(subject)) return { known: true, value: setupFailureValue(ctx, subject) };
+  if (SETUP_CHECKS_SUBJECT.test(subject)) return { known: true, value: setupChecksValue(ctx, subject) };
   if (RUN_TARGET_SUBJECT.test(subject)) return { known: true, value: runTargetValue(ctx, subject) };
   const before = subject.startsWith('before.');
   const name = before ? subject.slice('before.'.length) : subject;

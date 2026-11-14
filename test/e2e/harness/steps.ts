@@ -35,6 +35,8 @@ import { editParagraph, MARKERS, noteSentence, resolveKeeping } from './conflict
 import { nextToken, type RunContext } from './context.ts';
 import { REPO_ROOT, engineEntry, engineEnv, runEngine, startEngine, type EngineCall, type EngineResult } from './engine.ts';
 import { fixtureEdit, paragraphEdit, seededPng, sha256 } from './fixtures.ts';
+import { commentsWithState, imagePlace, placeLabel, withoutImage } from './image-gate.ts';
+import { initFiles } from './init-files.ts';
 import { newRunId } from './isolation.ts';
 import { fixableSample, hashes, markerLines, offlineInput, parseFindings, readInput, runFormatCommand, writeInput } from './offline.ts';
 import { soakDrainSyncs } from './soak-drain.ts';
@@ -1674,6 +1676,8 @@ const GIT: Record<string, Executor> = {
     await commitAsPerson(ctx, new Map([[path, next]]), 'Rework the open question');
     ctx.edits.push({ side: 'git', path, token });
   },
+  // A person prepares the repository with `mdbisync init` (init-files.ts); it pins the release under test when the run names one.
+  'git.init-files': (ctx) => initFiles(ctx, actionShaUnderTest()),
   'git.remove-security-hooks': async (ctx) => {
     const git = await ctx.person();
     await pull(git, ctx);
@@ -1960,11 +1964,46 @@ const LINEAR: Record<string, Executor> = {
     const path = targetPath(ctx, args.target);
     const editor = world.editors[editorOf(args)];
     await editorEdit(ctx, editorOf(args), path, async (text, token) => {
-      const upload = await editor.uploadFile({ filename: `diagram-${token}.png`, contentType: 'image/png', bytes: new Uint8Array(seededPng(token)) });
+      const bytes = seededPng(token);
+      const upload = await editor.uploadFile({ filename: `diagram-${token}.png`, contentType: 'image/png', bytes: new Uint8Array(bytes) });
       ctx.observations.set('linear.imageUrl', upload.assetUrl);
+      ctx.observations.set('linear.image', { path, sha256: sha256(bytes) });
       return `${text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n\n![diagram](${upload.assetUrl})\n`;
     });
     ctx.observations.set('linear.imageCapturedAtRequest', ctx.proxy?.requests.length ?? 0);
+  },
+  // An integration writes a relative image path into a synced document through the API (L2-42). The image's
+  // place and line in the text Linear stored are the notice line the sync must give; Linear may keep the path
+  // or turn it into an upload of its own, and which it did is recorded.
+  'linear.image-path': async (ctx, args) => {
+    const path = targetPath(ctx, args.target);
+    let written = '';
+    await editorEdit(ctx, editorOf(args), path, (text, token) => {
+      written = token;
+      return `${text.replace(/\n*$/, '\n')}\n${noteSentence(token)}\n\n![plan ${token}](../images/plan-${token}.png)\n`;
+    });
+    const stored = ctx.observations.get('edited.linearStoredBody') as string;
+    const place = imagePlace(stored, written);
+    // Linear dropping the image is no answer about the sync: the scenario cannot check its gate.
+    if (place === null) throw new Error('Linear stored the document without the written image');
+    ctx.observations.set('imageGate.blocked', { path, token: written, storedDestination: place.url });
+    ctx.observations.set('expected.blockedImageLines', [placeLabel(place)]);
+  },
+  // How the blocked document looks before the editor fixes it (L2-42), then the fix: the image is removed.
+  'linear.remove-image': async (ctx, args) => {
+    const world = live(ctx);
+    const blocked = ctx.observations.get('imageGate.blocked') as { path: string; token: string } | undefined;
+    if (blocked === undefined) throw new Error('linear.remove-image needs a linear.image-path step first');
+    const { id, icon, color } = await linearContent(ctx, blocked.path);
+    ctx.observations.set('blocked.icon', icon);
+    ctx.observations.set('blocked.color', color);
+    ctx.observations.set('blocked.comments', (await commentsWithState(world.app, id)).map((comment) => comment.body));
+    await editorEdit(ctx, editorOf(args), blocked.path, (text) => {
+      const fixed = withoutImage(text, blocked.token);
+      // A fix that changes nothing would leave the document blocked for a reason in the harness, not the sync.
+      if (fixed === null) throw new Error('linear.remove-image found no image with the written alt text in the blocked document');
+      return fixed;
+    });
   },
   'linear.rich-edit': async (ctx, args) => {
     const world = live(ctx);
