@@ -80,14 +80,30 @@ export async function writeBlob(git: Git, content: Buffer | string): Promise<Oid
 }
 
 /**
+ * True for a path part that opens the Git directory on some file system:
+ * `.git` or a numbered NTFS short name `git~<n>`, in any case, followed only
+ * by the dots and spaces Windows drops from a name or by an NTFS stream
+ * suffix (`:...`), and with the code points HFS+ ignores in names left out.
+ * This covers what Git itself refuses under `core.protectNTFS` (`.git` and
+ * `git~1`) and `core.protectHFS`, and also `git~2`, `git~3`, ..., which
+ * Windows gives `.git` when an earlier `git~<n>` name is taken.
+ */
+export function isGitDirectoryName(part: string): boolean {
+  return /^(?:\.git|git~[0-9]+)[. ]*(?::|$)/i.test(part.replace(HFS_IGNORED, ''));
+}
+
+/** The code points HFS+ ignores when it compares names, as Git's `core.protectHFS` lists them. */
+const HFS_IGNORED = /[‌-‏‪-‮⁪-⁯﻿]/g;
+
+/**
  * Checks a repository path: relative, `/`-separated, no empty, `.` or `..`
- * parts and no `.git` part.
+ * parts and no part that names the Git directory (`isGitDirectoryName`).
  */
 export function checkRepoPath(path: string): void {
   const parts = path.split('/');
   if (path === '' || path.includes('\0') || path.includes('\\')) throw new Error(message('objects.invalid-path', { path: JSON.stringify(path) }));
   for (const part of parts) {
-    if (part === '' || part === '.' || part === '..' || part.toLowerCase() === '.git') {
+    if (part === '' || part === '.' || part === '..' || isGitDirectoryName(part)) {
       throw new Error(message('objects.invalid-path', { path: JSON.stringify(path) }));
     }
   }
