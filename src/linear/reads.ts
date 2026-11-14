@@ -13,7 +13,7 @@
 
 import { ContentSpool, contentBytes, type SpooledFile } from '../state/content.ts';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type AuthContext, authMetadata } from './diagnostics.ts';
 
@@ -77,12 +77,24 @@ export class LinearReads {
       for (const { key, status, type, body } of index.answers) {
         if (!/^[0-9a-f]{64}$/.test(body)) return null;
         const file = join(folder, BODIES, body);
-        const size = (await stat(file)).size;
-        total += size;
-        if (total > 512 * 1024 * 1024) return null;
-        const bytes = await readFile(file);
-        if (sha256(bytes) !== body) return null;
-        reads.#add(key, { status, type, body: {file, hash: body, size} });
+        const handle = await open(file, 'r');
+        try {
+          // Inspect and read the same opened file, even if its path is replaced.
+          const info = await handle.stat();
+          const size = info.size;
+          total += size;
+          if (!info.isFile() || total > 512 * 1024 * 1024) return null;
+          const bytes = Buffer.alloc(size);
+          let offset = 0;
+          while (offset < size) {
+            const {bytesRead} = await handle.read(bytes, offset, size - offset, offset);
+            if (bytesRead === 0) return null;
+            offset += bytesRead;
+          }
+          const extra = await handle.read(Buffer.alloc(1), 0, 1, size);
+          if (extra.bytesRead !== 0 || sha256(bytes) !== body) return null;
+          reads.#add(key, { status, type, body: {file, hash: body, size} });
+        } finally { await handle.close(); }
       }
       return reads;
     } catch {

@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, open, readFile, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
@@ -168,6 +168,24 @@ describe('Linear reads kept for the next step', () => {
     });
     const kept = JSON.parse(await readFile(index(), 'utf8')) as { answers: Array<{ body: string }> };
     await writeFile(join(dir, 'bodies', kept.answers[0]!.body), 'changed');
+    assert.equal(await LinearReads.replaying(dir), null);
+  });
+
+  it('rejects a body that grows after its opened file is measured', async (t) => {
+    await record(async (client) => {
+      await client.transport.request('Teams', 'query', QUERY);
+    });
+    const kept = JSON.parse(await readFile(index(), 'utf8')) as { answers: Array<{ body: string }> };
+    const file = join(dir, 'bodies', kept.answers[0]!.body);
+    const probe = await open(file, 'r');
+    const prototype = Object.getPrototypeOf(probe) as FileHandle;
+    const originalStat = prototype.stat;
+    await probe.close();
+    t.mock.method(prototype, 'stat', async function (this: FileHandle) {
+      const info = await originalStat.call(this);
+      await appendFile(file, 'extra');
+      return info;
+    });
     assert.equal(await LinearReads.replaying(dir), null);
   });
 });
