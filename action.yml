@@ -57,6 +57,14 @@ inputs:
     description: "Minutes a sync pull request's checks may stay pending, queued or unstarted after the sync pushed its head (10 to 1440). A batch whose checks have not finished by then is suspended, as for a failed check."
     required: false
     default: "60"
+  required-checks:
+    description: "Check names every sync pull request head must pass before the sync merges it, one per line. An absent one keeps the head waiting; past the check deadline the run reports checks-missing. Empty requires only the checks registered on the head and on its earlier heads."
+    required: false
+    default: ""
+  merge-without-checks:
+    description: "`true` lets the sync merge a sync pull request whose head has no checks at all, for a repository without CI. Otherwise such a head waits for a check, and past the check deadline the run reports checks-missing."
+    required: false
+    default: "false"
   report-file:
     description: "Path to write the run's report as JSON (names and states only, and git's output for a refused push git reports partly applied); the job summary goes beside it as summary.md. Leave empty for none."
     required: false

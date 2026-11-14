@@ -54,6 +54,8 @@ export const MESSAGES = {
   'inputs.app-slug': 'the input app-slug must be a GitHub App slug (letters, digits and hyphens)',
   'inputs.merge-grace': 'the input merge-grace-seconds must be an integer from 0 to 120',
   'inputs.check-deadline': 'the input check-deadline-minutes must be an integer from 10 to 1440',
+  'inputs.required-checks': 'the input required-checks must list check names of at most 255 characters, one per line',
+  'inputs.merge-without-checks': 'the input merge-without-checks must be true or false',
   'inputs.direction': 'the input direction {problem} (initial sync never picks a direction itself)',
   'inputs.direction-missing': 'is required',
   'inputs.direction-unknown': 'must be one of {directions}, not "{direction}"',
@@ -71,6 +73,7 @@ export const MESSAGES = {
   'run.revoke-failed': "the run's Linear token could not be revoked: {reason}",
   'run.container-not-read': 'container documents were not read',
   'pull-request.merge-blocked': 'setup error ({code}): GitHub refuses again to merge the sync pull request ({refusal})',
+  'pull-request.checks-missing': 'setup error ({code}): the sync pull request waited past the check deadline for checks that never started ({checks})',
   'pull-request.initial-pending': 'stopped short ({code}): an initial sync from Linear waits for a person to merge it',
   'pull-request.not-finished': 'not finished ({code}); run it again',
 

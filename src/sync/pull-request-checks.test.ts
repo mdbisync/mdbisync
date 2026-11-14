@@ -155,7 +155,12 @@ describe('sync: pull request checks', () => {
     assert.equal(await rev('refs/heads/main'), h.start);
     assert.equal(await rev(SYNC_BRANCH), replacement);
     assert.match(await show('refs/mdbisync/linear:combined/guide.md'), /Fresh capture/);
-    h.fetchOverride = undefined;
+    // The checked head ran `format`, so every later head must too: the repository's CI runs it on each of them.
+    h.fetchOverride = async (input, init) => {
+      const match = String(input).match(/\/commits\/([0-9a-f]+)\/check-runs/);
+      if (match && !h.world.github.checks?.has(match[1]!)) checksOn(match[1]!, [{ name: 'format', status: 'completed', conclusion: 'success' }]);
+      return transport(input, init);
+    };
     h.concurrentSyncMove = false;
     await settle();
     assert.match(await show(`refs/heads/main:${path}`), /Review edit/);
@@ -255,6 +260,146 @@ describe('sync: pull request checks', () => {
       assertNoRerun();
     });
   }
+
+  // A formatter workflow that pushes its fix with the workflow's own token starts no other workflow on the new head,
+  // and publishes only its own check there. The other checks never ran on that head, so it has not passed them.
+  it('does not merge a formatter fix that carries only the formatter check', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    const pushed = await rev(SYNC_BRANCH);
+    checksOn(pushed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'in_progress' }]);
+    const fixed = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const run = await sync();
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.pullRequest?.merged, null, 'merged a head that the other checks never saw');
+    assert.deepEqual(run.report.pullRequest?.checks?.missing, ['tests']);
+    assert.equal(await rev('refs/heads/main'), h.start);
+    // The description carries the expectation, so a later run that reads only the fixed head still asks for `tests`.
+    assert.match(openPullRequests()[0]?.body ?? '', new RegExp(`<!-- head: sha=${fixed} since=\\S+ checks=pre-commit,tests -->`));
+    const again = await sync();
+    assert.equal(again.report.pullRequest?.merged, null);
+    assert.deepEqual(again.report.pullRequest?.checks?.missing, ['tests']);
+    // Once the repository's CI runs `tests` on the fixed head, it merges.
+    checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const merged = await sync();
+    assert.ok(merged.report.pullRequest?.merged);
+    assert.match(await show(`refs/heads/main:${path}`), /Formatted/);
+  });
+
+  it('reports checks-missing past the deadline when an expected check never starts, without suspending', async () => {
+    const deadline = { MDBISYNC_CHECK_DEADLINE_MINUTES: '10' };
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync(deadline);
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const fixed = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const waiting = await sync(deadline);
+    assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
+    assert.match(waiting.summary, /waits for its checks/);
+    backdate('mdbisync/linear', 11);
+    const late = await sync(deadline);
+    assert.equal(late.result.exitCode, SETUP_FAILED_EXIT_CODE, late.result.stderr);
+    assert.equal(late.report.pullRequest?.code, 'checks-missing');
+    assert.equal(late.report.pullRequest?.suspended, undefined);
+    assert.match(late.result.stderr, /checks-missing.*missing `tests`/);
+    assert.match(late.summary, /never started on its head \(missing `tests`\)/);
+    assert.deepEqual(late.writes, []);
+    assert.equal(await rev('refs/heads/main'), h.start);
+    const document = await documentOf(path);
+    assert.notEqual(document.icon, MARKS.suspended.icon);
+    assert.deepEqual(commentsOf(document), []);
+  });
+
+  it('waits for a configured required check that is not registered, and merges once it passes', async () => {
+    const required = { MDBISYNC_REQUIRED_CHECKS: 'tests\nlint' };
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
+    await sync(required);
+    const head = await rev(SYNC_BRANCH);
+    checksOn(head, [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const waiting = await sync(required);
+    assert.equal(waiting.report.pullRequest?.merged, null);
+    assert.deepEqual(waiting.report.pullRequest?.checks?.missing, ['lint']);
+    checksOn(head, [{ name: 'tests', status: 'completed', conclusion: 'success' }, { name: 'lint', status: 'completed', conclusion: 'success' }]);
+    const merged = await sync(required);
+    assert.ok(merged.report.pullRequest?.merged);
+  });
+
+  // The sync's own push starts the repository's whole CI: a check that stopped running (a renamed job) is not
+  // expected for good, only as long as the head the sync pushes on still shows it.
+  it('expects again only what CI registers once the sync itself pushes a new head', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    const first = await rev(SYNC_BRANCH);
+    checksOn(first, [{ name: 'old-name', status: 'in_progress' }]);
+    const fixed = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    checksOn(fixed, [{ name: 'new-name', status: 'completed', conclusion: 'success' }]);
+    const held = await sync();
+    assert.deepEqual(held.report.pullRequest?.checks?.missing, ['old-name']);
+    await editInLinear('combined/guide.md', '# Guide\n\nLater edit.\n');
+    const transport = fakeFetch(h.world);
+    h.fetchOverride = async (input, init) => {
+      const match = String(input).match(/\/commits\/([0-9a-f]+)\/check-runs/);
+      if (match && !h.world.github.checks?.has(match[1]!)) checksOn(match[1]!, [{ name: 'new-name', status: 'completed', conclusion: 'success' }]);
+      return transport(input, init);
+    };
+    const pushed = await sync({ MDBISYNC_MERGE_GRACE_SECONDS: '20' });
+    assert.equal(pushed.report.pullRequest?.branchMoved, true);
+    assert.ok(pushed.report.pullRequest?.merged, 'a head the sync pushed still waited for a check its CI no longer runs');
+  });
+
+  it('expects of a head the sync pushes in a run what the head it pushed on registered', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    // A person pushes; the repository's CI runs `tests` on that head.
+    const person = await editRef(SYNC_BRANCH, path, '# Plan\n\nFirst edit, reviewed.\n', 'Review');
+    checksOn(person, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'in_progress' }]);
+    await editInLinear('combined/guide.md', '# Guide\n\nLater edit.\n');
+    // The head the sync pushes on top never registers `tests`.
+    const transport = fakeFetch(h.world);
+    h.fetchOverride = async (input, init) => {
+      const match = String(input).match(/\/commits\/([0-9a-f]+)\/check-runs/);
+      if (match && !h.world.github.checks?.has(match[1]!)) checksOn(match[1]!, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+      return transport(input, init);
+    };
+    const run = await sync({ MDBISYNC_MERGE_GRACE_SECONDS: '20' });
+    assert.equal(run.report.pullRequest?.branchMoved, true);
+    assert.equal(run.report.pullRequest?.merged, null, 'merged without `tests`, which ran on the head it was pushed on');
+    assert.deepEqual(run.report.pullRequest?.checks?.missing, ['tests']);
+    assert.equal(await rev('refs/heads/main'), h.start);
+  });
+
+  it('stops expecting a configured check once it is removed from the configuration', async () => {
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
+    await sync({ MDBISYNC_REQUIRED_CHECKS: 'tset' });
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const waiting = await sync({ MDBISYNC_REQUIRED_CHECKS: 'tset' });
+    assert.deepEqual(waiting.report.pullRequest?.checks?.missing, ['tset']);
+    const merged = await sync();
+    assert.ok(merged.report.pullRequest?.merged, 'a name removed from required-checks still held the head');
+  });
+
+  it('does not merge a head with no checks unless merging without checks is allowed', async () => {
+    const strict = { MDBISYNC_MERGE_WITHOUT_CHECKS: '', MDBISYNC_CHECK_DEADLINE_MINUTES: '10' };
+    await editInLinear('eng/notes/plan.md', '# Plan\n\nReady.\n');
+    const fresh = await cli('sync', { ...strict, MDBISYNC_MERGE_GRACE_SECONDS: '' });
+    assert.equal(fresh.result.exitCode, 0, fresh.result.stderr);
+    assert.equal(fresh.report.pullRequest?.merged, null, 'merged a head on which no check ran');
+    const waiting = await sync(strict);
+    assert.equal(waiting.report.pullRequest?.merged, null);
+    backdate('mdbisync/linear', 11);
+    const late = await sync(strict);
+    assert.equal(late.result.exitCode, SETUP_FAILED_EXIT_CODE, late.result.stderr);
+    assert.equal(late.report.pullRequest?.code, 'checks-missing');
+    assert.match(late.summary, /no check ran on its head/);
+    assert.equal(await rev('refs/heads/main'), h.start);
+    const allowed = await sync({ MDBISYNC_MERGE_WITHOUT_CHECKS: 'true' });
+    assert.ok(allowed.report.pullRequest?.merged);
+  });
 
   // The time limit turns a wait that never ends into this test's own failure instead of a stalled suite.
   it('cannot merge a branch that moves while waiting using checks from its old head', { timeout: 60_000 }, async () => {

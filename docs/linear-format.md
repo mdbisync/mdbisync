@@ -455,6 +455,13 @@ branch reaches `main` in Linear's form. Details:
   before the push, the push fails without overwriting the newer commits.
 - It publishes the `pre-commit` check on the fixing commit too; require that
   check in the branch rules. A fork pull request without fixes keeps the
-  job's own check. Other required CI must also run on the fixed
-  commit or report its result for it, because a push with the workflow's
-  token starts no other workflows.
+  job's own check.
+- A push with the workflow's token starts no other workflows, so the
+  repository's other CI must be started on the fixing commit: give each of
+  those workflows a `workflow_dispatch:` trigger and list their files in the
+  repository variable `MDBISYNC_CI_WORKFLOWS` (for example
+  `tests.yml lint.yml`, separated by spaces or commas). The job starts them
+  on the pull request's branch after it pushes a fix. Until those checks pass
+  on the fixing commit, the sync does not merge its pull request: it expects
+  every check that ran on the pull request's earlier heads
+  ([the sync pull request](usage.md#the-sync-pull-request)).

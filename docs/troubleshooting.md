@@ -34,7 +34,7 @@ The command line's exit code:
 | 0 | Done. |
 | 1 | An error that stopped the run: the message starts with `error:`. Look it up on this page; see [Errors found during the run](#errors-found-during-the-run) and [Errors that point to a bug](#errors-that-point-to-a-bug). |
 | 2 | The command or its inputs are wrong. Nothing ran. See [Input errors](#input-errors). |
-| 3 | A setup error. Either the setup check failed and nothing was written, or GitHub keeps refusing the merge (`merge-blocked`) on the sync pull request: then the run kept Linear's changes in its state and on the sync branch, but wrote no tracked-branch changes to Linear. |
+| 3 | A setup error. Either the setup check failed and nothing was written, or GitHub keeps refusing the merge (`merge-blocked`), or expected checks never started on the sync pull request's head (`checks-missing`): then the run kept Linear's changes in its state and on the sync branch, but wrote no tracked-branch changes to Linear. |
 | 4 | The sync has no state: run an initial sync, or merge the pull request of the one that ran. Nothing was written. |
 | 5 | The run did not finish. A sync is partial and the next run goes on; run an initial sync again with the same inputs. Except `container-cap`: running again fails the same way until a person makes room (see [`container-cap`](#container-cap)). |
 | 10 to 15 | `<command>: not implemented`: this build does not have the command. |
@@ -54,6 +54,7 @@ step with the bare message, without `error:`.
 | `<command>: not finished (<code>); run it again with the same inputs` | An initial sync stopped part way. Run it again with the same direction and `confirm`; it skips what it already did. See [Initial sync](#initial-sync). |
 | `<command>: not finished (sync-branch-changed); merge or close the pull request of the sync branch and delete the branch, then run it again` | See [`sync-branch-changed`](#initial-sync). |
 | `<command>: setup error (merge-blocked): GitHub refuses again to merge the sync pull request (<reason>)` | See [`merge-blocked`](#the-sync-pull-request). |
+| `<command>: setup error (checks-missing): the sync pull request waited past the check deadline for checks that never started (<checks>)` | See [`checks-missing`](#the-sync-pull-request). |
 | `<command>: stopped short (initial-pull-request-pending): an initial sync from Linear waits for a person to merge it` | See [`initial-pull-request-pending`](#sync-state). |
 | `<command>: not finished (<code>); run it again` | The sync pull request step did not finish (`state-moved` or `github-failed`); the next run tries again. See [The sync pull request](#the-sync-pull-request). |
 | `<command>: not implemented` | This build does not have the command. Use a release that has it. |
@@ -205,7 +206,7 @@ the head's deadline and the red-main hold. See
 comment text and mark limits.
 
 Linear's changes reach the tracked branch through the sync pull request
-(see [usage.md](usage.md#the-sync-pull-request)). Its step reports the codes below. `merge-refused` and `merge-blocked`
+(see [usage.md](usage.md#the-sync-pull-request)). Its step reports the codes below. `merge-refused`, `merge-blocked` and `checks-missing`
 apply to either lane; the summary identifies a suspended merge refusal.
 
 For **Suspended files waiting for a manual merge**, fix the listed
@@ -226,6 +227,7 @@ Its step reports:
 | --- | --- | --- |
 | `merge-refused` | GitHub did not merge the sync pull request this time: `GitHub did not merge the sync pull request (<reason>); a later run tries again.` When GitHub refused because of merge conflicts (`Pull Request has merge conflicts`), the next run first merges the tracked branch into the sync branch, unless the head already holds the tracked branch's latest commit. | Nothing; a later run tries again. |
 | `merge-blocked` | GitHub refused to merge again, on the same head and for the same reason (exit code 3). A refusal for merge conflicts repeats only on a head that already holds the tracked branch's latest commit. | When GitHub names a required check that is expected, make that check run on the sync pull request: check workflow filters and the required check's name. Otherwise let the sync's GitHub App merge into the tracked branch, for example by adjusting the branch's rules. A later run merges. |
+| `checks-missing` | Past the check deadline, the head still lacks a check the sync expects, or has no checks at all (exit code 3). The sync expects the checks registered on the pull request's earlier heads and the names in `required-checks`. Nothing is suspended or marked in Linear. | Make the missing checks run on the pull request's head. A commit a workflow pushed with its own token starts no other workflow: for the pre-commit example, list your CI workflows in `MDBISYNC_CI_WORKFLOWS` ([In CI](linear-format.md#in-ci)). Remove a check that no longer exists from `required-checks`. A check that ran on an earlier head and no longer runs (a renamed job, a workflow that runs only when a pull request opens) stays expected for at most one more push of the sync to the branch, with a Linear change or the tracked branch merged in. For a repository without CI, set `merge-without-checks: true`. A later run merges. |
 | `conflict` | Linear's latest changes and the tracked branch, or the sync pull request's branch, change the same lines. For documents the sync merges with conflict markers: this run into Linear's state, a later run into the sync branch. | Resolve the markers on either side ([conflicts.md](conflicts.md#resolving-a-conflict)). A conflicting file that is not a document waits: merge both the tracked branch and the `linear` state ref (`refs/mdbisync/linear` by default) into the sync branch and resolve it there; the sync keeps those commits. |
 | `initial-pull-request-pending` | The sync branch holds an initial sync from Linear that no one has merged yet (exit code 4). | Review and merge it with a merge commit. |
 | `state-moved` | The sync branch moved while the run worked. | Nothing; the next run updates the pull request. |
@@ -359,6 +361,8 @@ step fails with the same message:
 | `the input document-cap must be a positive safe integer` | Give a whole number above zero. |
 | `the input merge-grace-seconds must be an integer from 0 to 120` | Give a whole number of seconds from 0 to 120. |
 | `the input check-deadline-minutes must be an integer from 10 to 1440` | Give a whole number of minutes from 10 to 1440. |
+| `the input required-checks must list check names of at most 255 characters, one per line` | List check names as GitHub shows them on a pull request, without control characters. |
+| `the input merge-without-checks must be true or false` | Give `true` or `false`. |
 | `the input app-slug is required: give it the App token step's output app-slug` | In the workflow, give the mdbisync steps `app-slug: ${{ steps.app-token.outputs.app-slug }}`, as the example workflows do. |
 | `the input app-slug must be a GitHub App slug (letters, digits and hyphens)` | Give the App's slug, not its name or its bot login (`<slug>[bot]`); the token step's output `app-slug` is it. |
 | `the input direction is required (initial sync never picks a direction itself)`, `the input direction must be one of git-to-linear, linear-to-git, not "<value>" (initial sync never picks a direction itself)` | Choose `git-to-linear` or `linear-to-git`. |

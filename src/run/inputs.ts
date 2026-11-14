@@ -22,6 +22,8 @@ export const INPUT_NAMES = [
   'document-cap',
   'merge-grace-seconds',
   'check-deadline-minutes',
+  'required-checks',
+  'merge-without-checks',
   'direction',
   'confirm',
 ] as const;
@@ -41,6 +43,10 @@ export interface RunInputs {
   mergeGraceSeconds?: number;
   /** Minutes a head's checks may stay pending before its batch is suspended. */
   checkDeadlineMinutes?: number;
+  /** Check names every sync pull request head must pass, besides those registered on it. */
+  requiredChecks?: string[];
+  /** A sync pull request head with no checks at all may merge. */
+  mergeWithoutChecks?: boolean;
 }
 
 export class InputError extends Error {
@@ -120,7 +126,25 @@ export function readInputs(get: (name: InputName) => string, env: NodeJS.Process
     }
     inputs.checkDeadlineMinutes = Number(deadline);
   }
+  const requiredChecks = value('required-checks');
+  if (requiredChecks !== '') inputs.requiredChecks = checkNames(requiredChecks);
+  const unchecked = value('merge-without-checks');
+  if (unchecked !== '') {
+    if (unchecked !== 'true' && unchecked !== 'false') throw new InputError(message('inputs.merge-without-checks'));
+    inputs.mergeWithoutChecks = unchecked === 'true';
+  }
   return inputs;
+}
+
+/** The longest check name GitHub takes for a check run or a status context. */
+const CHECK_NAME_LENGTH = 255;
+
+/** Check names, one per line (a matrix job's name holds commas); each once, in the order given. */
+function checkNames(list: string): string[] {
+  const names = [...new Set(list.split(/\r?\n/).map((name) => name.trim()).filter(Boolean))];
+  // eslint-disable-next-line no-control-regex
+  if (names.some((name) => name.length > CHECK_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(name))) throw new InputError(message('inputs.required-checks'));
+  return names;
 }
 
 function stateConfig(trackedBranch: string, syncBranch: string, refPrefix: string): StateConfig {

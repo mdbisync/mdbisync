@@ -41,6 +41,7 @@ export const ACTION_REPOSITORY = 'mdbisync/mdbisync';
 /** The templates' secret and variable names, and the sandbox's. */
 export const SANDBOX_NAMES: Readonly<Record<string, string>> = {
   'vars.MDBISYNC_APP_CLIENT_ID': 'vars.SYNC_APP_CLIENT_ID',
+  'vars.MDBISYNC_CI_WORKFLOWS': 'vars.SYNC_CI_WORKFLOWS',
   'secrets.MDBISYNC_APP_PRIVATE_KEY': 'secrets.SYNC_APP_PRIVATE_KEY',
   'secrets.MDBISYNC_LINEAR_CLIENT_ID': 'secrets.LINEAR_TEST_APP_CLIENT_ID',
   'secrets.MDBISYNC_LINEAR_CLIENT_SECRET': 'secrets.LINEAR_TEST_APP_CLIENT_SECRET',

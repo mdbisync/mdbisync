@@ -85,7 +85,7 @@ describe('sync: pull request deadlines', () => {
     assert.equal(moved.report.pullRequest?.branchMoved, true);
     const head = await rev(SYNC_BRANCH);
     checksOn(head, [{ name: 'ci', status: 'queued' }]);
-    const since = /^<!-- head: sha=([0-9a-f]+) since=(\S+) -->$/m.exec(openPullRequests()[0]?.body ?? '');
+    const since = /^<!-- head: sha=([0-9a-f]+) since=(\S+)(?: checks=\S*)? -->$/m.exec(openPullRequests()[0]?.body ?? '');
     assert.equal(since?.[1], head);
     assert.ok(Date.now() - Date.parse(since?.[2] ?? '') < 60_000, 'a new head kept the old push time');
     backdate('mdbisync/linear', 59);

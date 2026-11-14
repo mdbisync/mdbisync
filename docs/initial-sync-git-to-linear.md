@@ -70,6 +70,8 @@ action. Every input of the action, and what it means for this run:
 | `document-cap` | `1000` | Documents a Linear team or project may hold, trash included ([capacity](#container-document-capacity)). |
 | `merge-grace-seconds` | `60` | Not used by the initial sync. |
 | `check-deadline-minutes` | `60` | Not used by the initial sync. |
+| `required-checks` | empty | Not used by the initial sync. |
+| `merge-without-checks` | `false` | Not used by the initial sync. |
 | `report-file` | empty | A path for the run's report as JSON ([the report](#the-report-file)). |
 | `security-step` | empty | `stage` or `apply` in the template's two steps. From git there is nothing for the security hooks to check, so the stage step stages nothing. |
 

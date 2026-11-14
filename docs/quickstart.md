@@ -223,6 +223,22 @@ It writes:
 | `.pre-commit-config.yaml` | The `linear-format` hook, and the security hook examples if you asked for them |
 | `<folder>/README.md` | Each folder's annotation, in its front matter |
 
+When the repository has other CI (tests, linters), the pre-commit
+workflow starts it on the commits it pushes, which a push with the
+workflow's own token does not do. Give each of those workflows a
+`workflow_dispatch:` trigger and list their files in a repository variable
+(Settings → Secrets and variables → Actions → Variables); see
+[In CI](linear-format.md#in-ci). The sync merges its pull request only once
+those checks pass on the fixed commit too.
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Variable | `MDBISYNC_CI_WORKFLOWS` | Your CI workflows' file names, for example `tests.yml lint.yml`; leave it unset when there are none |
+
+A repository with no CI at all gives the sync's steps
+`merge-without-checks: true` ([configuration](configuration.md#action-inputs)):
+otherwise the sync waits for a check before it merges.
+
 It keeps what the files already hold, and stops before writing anything
 when a value it would write differs from one already there. It ends by
 printing the steps that remain; the sections below cover them in order.
