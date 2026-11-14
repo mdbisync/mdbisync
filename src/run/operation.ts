@@ -195,6 +195,8 @@ async function runWithSecurity(
       documentCap: inputs.documentCap,
       mergeGraceSeconds: inputs.mergeGraceSeconds,
       checkDeadlineMinutes: inputs.checkDeadlineMinutes,
+      requiredChecks: inputs.requiredChecks,
+      mergeWithoutChecks: inputs.mergeWithoutChecks,
       github: { ...inputs.github, writes: pullRequestWrites, ...(options.fetch ? { fetch: options.fetch } : {}), ...(options.checkClock ? { clock: options.checkClock } : {}) },
       transforms,
       ...(options.fetch ? { fetch: options.fetch } : {}),

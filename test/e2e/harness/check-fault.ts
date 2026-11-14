@@ -299,7 +299,9 @@ export async function ageCheck(ctx: RunContext, args: Record<string, unknown>): 
   const sha = (await git.text(['rev-parse', 'FETCH_HEAD'])).trim();
   const pr = (await world.rest.pullRequests(ctx.names.syncBranch, 'open')).find((pr) => pr.head.ref === ctx.names.syncBranch);
   if (pr === undefined) throw new ProductError('no normal pull request to age');
-  const note = `<!-- head: sha=${sha} since=${new Date(Date.now() - Number(args.minutes) * 60_000).toISOString()} -->`;
+  // The checks the sync expects on the head stay noted; only the push time moves.
+  const expected = /^<!-- head: sha=[0-9a-f]+ since=\S+( checks=\S*)? -->\r?$/m.exec(pr.body ?? '')?.[1] ?? '';
+  const note = `<!-- head: sha=${sha} since=${new Date(Date.now() - Number(args.minutes) * 60_000).toISOString()}${expected} -->`;
   const body = (pr.body ?? '').replace(/^<!-- head:.* -->\r?$/gm, '').trimEnd();
   await world.rest.request('PATCH', `/pulls/${pr.number}`, { body: `${body}\n\n${note}\n` });
 }

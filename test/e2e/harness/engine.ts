@@ -91,6 +91,8 @@ export function engineInputs(call: EngineCall): Record<string, string> {
     'report-file': call.reportFile,
     // Most scenarios exercise deferred merging; a run's `mergeGraceSeconds` sets a positive grace.
     'merge-grace-seconds': String(call.mergeGraceSeconds ?? 0),
+    // The test repository has no CI: its sync pull requests have no checks.
+    'merge-without-checks': 'true',
   };
   if (call.checkDeadlineMinutes !== undefined) inputs['check-deadline-minutes'] = String(call.checkDeadlineMinutes);
   // The sync's commits name the App when the engine knows it, as in the workflows.

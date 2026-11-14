@@ -78,3 +78,14 @@ it('validates the check deadline from 10 to 1440 minutes, and leaves it to the d
   }
   assert.equal(readInputs(given({ ...REQUIRED, repository: 'o/r' }), {}).checkDeadlineMinutes, undefined);
 });
+
+it('reads required checks one per line, commas kept in a name, and merging without checks as true or false', () => {
+  const read = (extra: Record<string, string>) => readInputs(given({ ...REQUIRED, repository: 'o/r', ...extra }), {});
+  assert.deepEqual(read({ 'required-checks': 'tests\r\ntest (ubuntu-latest, 24)\nlint\n\ntests' }).requiredChecks, ['tests', 'test (ubuntu-latest, 24)', 'lint']);
+  assert.equal(read({}).requiredChecks, undefined);
+  for (const bad of ['tests\u0007', 'x'.repeat(256)]) assert.throws(() => read({ 'required-checks': bad }), /required-checks must list check names/);
+  assert.equal(read({ 'merge-without-checks': 'true' }).mergeWithoutChecks, true);
+  assert.equal(read({ 'merge-without-checks': 'false' }).mergeWithoutChecks, false);
+  assert.equal(read({}).mergeWithoutChecks, undefined);
+  for (const bad of ['yes', 'True', '1']) assert.throws(() => read({ 'merge-without-checks': bad }), /merge-without-checks must be true or false/);
+});

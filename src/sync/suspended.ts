@@ -10,7 +10,7 @@ import { branchRef, commitIds, commitTree, isAncestor, listTree, pushAtomic, rea
 import { knownIdLookup, mergeWithMarkers, takePaths, treeCommit } from './merge.ts';
 import type { HoldFailure } from './hold.ts';
 import type { CheckFailure } from '../pull-request/index.ts';
-import { DEFAULT_CHECK_DEADLINE_MINUTES, codeNames, headNote, headSince, pastDeadline, readMainVerdict } from './deadline.ts';
+import { DEFAULT_CHECK_DEADLINE_MINUTES, checkExpectation, checksMissing, codeNames, expectedChecks, headNote, headSince, pastDeadline, readMainVerdict } from './deadline.ts';
 
 export const SUSPENDED_TITLE = 'Suspended changes from Linear';
 export const SET_ASIDE_MESSAGE = 'Set aside suspended changes';
@@ -41,7 +41,9 @@ export interface SuspendedResult {
   normalClosePending?: boolean;
   changed?: boolean;
   conflicts?: string[];
-  code?: 'github-failed' | 'merge-refused' | 'merge-blocked';
+  code?: 'github-failed' | 'merge-refused' | 'merge-blocked' | 'checks-missing';
+  /** For `checks-missing`: the expected checks never registered on the head; empty when it has no checks at all. */
+  missing?: string[];
   status?: number;
   reason?: string;
 }
@@ -53,6 +55,10 @@ export interface LaneOptions {
   github: GitHubRepository;
   mergeGraceSeconds?: number | undefined;
   checkDeadlineMinutes?: number | undefined;
+  /** Check names every head must pass before it merges, besides those registered on it. */
+  requiredChecks?: readonly string[] | undefined;
+  /** A head with no checks at all may merge. */
+  mergeWithoutChecks?: boolean | undefined;
 }
 
 export class LaneMoved extends Error {}
@@ -229,7 +235,10 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   const earlier = old?.[1] === head && old?.[2] === tracked ? old : null;
   // The deadline runs from the push of this head, noted in the description; a new head starts it now.
   const since = headSince(open?.body, head, new Date());
-  const body = `Changes on hold until their checks pass.\n\n${result.paths.map((path) => `- ${path}`).join('\n')}\n${earlier === null ? '' : `\n${earlier[0]}\n`}\n${headNote(head, since)}\n`;
+  // Checks that ran on the pull request's earlier heads must pass on this one too; the description notes them.
+  // A head this run pushed expects what the head it was pushed on registered (see `expectedChecks`).
+  const expected = await expectedChecks(options.github, head, options.requiredChecks ?? [], head !== previous ? { pushedFrom: previous === null ? [] : [previous] } : { body: open?.body });
+  const body = `Changes on hold until their checks pass.\n\n${result.paths.map((path) => `- ${path}`).join('\n')}\n${earlier === null ? '' : `\n${earlier[0]}\n`}\n${headNote(head, since, expected.observed)}\n`;
   const { pullRequest, opened } = await ensurePullRequest(options.github, {
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE, body,
   });
@@ -237,7 +246,8 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
   const fresh = head !== previous || opened;
   const grace = options.mergeGraceSeconds ?? 60;
   if (fresh && grace === 0) return { ...result, waiting: true };
-  const checks = fresh ? await waitForChecks(options.github, head, grace) : await readChecks(options.github, head);
+  const expectation = checkExpectation(options, expected.names);
+  const checks = fresh ? await waitForChecks(options.github, head, grace, expectation) : await readChecks(options.github, head, expectation);
   result.checks = checks.failed;
   const expired = pastDeadline(since, options.checkDeadlineMinutes ?? DEFAULT_CHECK_DEADLINE_MINUTES, new Date());
   // A check still pending at the deadline counts as failed; the lane no longer holds the normal one for it.
@@ -253,6 +263,8 @@ export async function maintainSuspended(context: RunContext, options: LaneOption
     else if (verdict.state === 'clear' || expired) result.failure = { head, checks: failures, ...(timedOut.length > 0 ? { timedOut } : {}) };
   }
   result.waiting = checks.state === 'pending' && timedOut.length === 0;
+  // Only expected checks that never registered are left: nothing ran to blame the documents, a person must make them run.
+  if (checks.state === 'pending' && expired && checksMissing(checks, expectation)) return { ...result, code: 'checks-missing', missing: checks.missing ?? [] };
   if (checks.state !== 'passed') return result;
   if (!(await isAncestor(git, tracked, head))) return result;
   const remoteTip = (await git.text(['ls-remote', '--refs', options.config.remote, branchRef(options.config.trackedBranch)])).split('\t')[0];
@@ -327,9 +339,11 @@ export async function suspendBatch(context: RunContext, options: LaneOptions, fa
   const normal = await commit(context, options, await git.text(['rev-parse', `${tracked}^{tree}`]), [failed, tracked], SET_ASIDE_MESSAGE);
   await push(context, options, ids, head, previous, { expected: failed, next: normal });
   const closed = await closePullRequestAtHead(options.github, normalNumber, normal);
+  // The new head joins the failed batch and the earlier suspended head: it expects what both registered.
+  const { observed } = await expectedChecks(options.github, head, [], { pushedFrom: previous === null ? [failed] : [previous, failed] });
   const { pullRequest } = await ensurePullRequest(options.github, {
     head: suspendedBranch(options.config), base: options.config.trackedBranch, title: SUSPENDED_TITLE,
-    body: `Changes on hold: ${codeNames([...checks, ...timedOut])}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n\n${headNote(head, new Date())}\n`,
+    body: `Changes on hold: ${codeNames([...checks, ...timedOut])}.\n\n${[...paths].sort().map((path) => `- ${path}`).join('\n')}\n\n${headNote(head, new Date(), observed)}\n`,
   });
   const late = timedOut.length > 0 ? { timedOut } : {};
   return { paths: [...paths].sort(), checks, ...late, batchFailure: { head: failed, paths: batchPaths, checks: failures, ...late }, ...(!closed ? { normalClosePending: true } : {}), changed: true, pullRequest: { number: pullRequest.number, url: pullRequest.url } };

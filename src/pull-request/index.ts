@@ -11,4 +11,4 @@ export {
   openPullRequest,
   updatePullRequest,
 } from './github.ts';
-export { type CheckAnnotation, type CheckFailure, type CheckState, type MergeOutcome, mergePullRequest, readAnnotations, readChecks, waitForChecks } from './merge.ts';
+export { type CheckAnnotation, type CheckExpectation, type CheckFailure, type CheckState, type MergeOutcome, mergePullRequest, readAnnotations, readChecks, waitForChecks } from './merge.ts';

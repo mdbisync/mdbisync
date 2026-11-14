@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { MARKS } from './marks.ts';
 import { HOLD_MARK_LIMIT } from './hold.ts';
-import { INCOMPLETE_EXIT_CODE } from '../commands.ts';
+import { INCOMPLETE_EXIT_CODE, SETUP_FAILED_EXIT_CODE } from '../commands.ts';
 import { type FakeCheck, type FakeDocument, touch } from '../setup/test-helpers.ts';
 import { CHECK_NAME } from '../../test/corpus/check-workflow.ts';
 import { describe, it } from 'node:test';
@@ -363,5 +363,49 @@ describe('sync: pull request suspension', () => {
     const note = commentsOf(await documentOf(path))[0]?.body ?? '';
     assert.match(note, /Check `lint`: \[run\]/);
     assert.doesNotMatch(note, /Unseen/);
+  });
+
+  // A formatter's fix pushed with the workflow's own token carries only the formatter's check: the suspended
+  // batch is not released on it, and past the deadline the run says which check never started.
+  it('does not release a suspended batch on a fix that lacks the check its earlier head ran', async () => {
+    const path = 'eng/notes/plan.md';
+    const deadline = { MDBISYNC_CHECK_DEADLINE_MINUTES: '10' };
+    await suspendOne(path);
+    await sync(deadline);
+    const fixed = await h.editRef(SUSPENDED, path, '# Plan\n\nHeld Linear edit.\n\nFormatted.\n', 'Apply pre-commit fixes');
+    checksOn(fixed, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const waiting = await sync(deadline);
+    assert.equal(waiting.result.exitCode, 0, waiting.result.stderr);
+    assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, 'released a head that never ran `ci`');
+    assert.equal(await rev(SUSPENDED), fixed);
+    h.backdate('mdbisync/suspended', 11);
+    const late = await sync(deadline);
+    assert.equal(late.result.exitCode, SETUP_FAILED_EXIT_CODE, late.result.stderr);
+    assert.equal(late.report.pullRequest?.suspended?.code, 'checks-missing');
+    assert.deepEqual(late.report.pullRequest?.suspended?.missing, ['ci']);
+    assert.match(late.summary, /suspended pull request has waited past the check deadline for checks that never started on its head \(missing `ci`\)/);
+    checksOn(fixed, [...PASSED, { name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const released = await sync(deadline);
+    assert.ok(released.report.pullRequest?.suspended?.released);
+    assert.match(await show(`refs/heads/main:${path}`), /Formatted/);
+  });
+
+  it('a batch that joins the suspended lane keeps the checks its heads ran expected', async () => {
+    await suspendOne('eng/notes/plan.md');
+    // A second batch fails and joins the suspended pull request: the sync pushes a new suspended head.
+    await editInLinear('combined/guide.md', '# Guide\n\nAnother held edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), FAILED);
+    const joined = await sync();
+    assert.ok(joined.report.pullRequest?.suspended);
+    const head = await rev(SUSPENDED);
+    assert.match(openPullRequests().find((pr) => pr.head === 'mdbisync/suspended')?.body ?? '', new RegExp(`<!-- head: sha=${head} since=\\S+ checks=ci -->`));
+    // Only the formatter's check registers on the joined head: `ci`, which both earlier heads ran, is missing.
+    checksOn(head, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const waiting = await sync();
+    assert.equal(waiting.report.pullRequest?.suspended?.released, undefined, 'released a joined head that never ran `ci`');
+    checksOn(head, [...PASSED, { name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    const released = await sync();
+    assert.ok(released.report.pullRequest?.suspended?.released);
   });
 });

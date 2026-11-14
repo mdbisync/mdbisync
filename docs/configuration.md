@@ -31,6 +31,8 @@ only" has no command-line form.
 | `document-cap` | no | `1000` | `MDBISYNC_DOCUMENT_CAP` | Maximum documents per Linear project or team, trash included. A run warns at 90% and stops before writing above it. |
 | `merge-grace-seconds` | no | `60` | `MDBISYNC_MERGE_GRACE_SECONDS` | Seconds, 0 to 120, a run waits for checks after it opens or moves the sync pull request; 0 leaves the merge to a later run. |
 | `check-deadline-minutes` | no | `60` | `MDBISYNC_CHECK_DEADLINE_MINUTES` | Minutes, 10 to 1440, the sync pull request's checks may stay pending before its batch is suspended. |
+| `required-checks` | no | none | `MDBISYNC_REQUIRED_CHECKS` | Check names, one per line, that every sync pull request head must pass before it merges ([the sync pull request](usage.md#the-sync-pull-request)). |
+| `merge-without-checks` | no | `false` | `MDBISYNC_MERGE_WITHOUT_CHECKS` | `true` lets the sync merge a head with no checks at all, for a repository without CI. |
 | `report-file` | no | none | `MDBISYNC_REPORT_FILE` | Path for the run's report as JSON (names and states only, and git's output for a refused push git reports partly applied), with the job summary beside it as `summary.md`; empty writes none. |
 | `direction` | no | none | `MDBISYNC_DIRECTION` | Initial sync only, and required there: `git-to-linear` or `linear-to-git`. |
 | `confirm` | no | none | `MDBISYNC_CONFIRM` | Initial sync only: `true` writes; anything else is a dry run that writes nothing. |
@@ -55,6 +57,7 @@ Settings → Secrets and variables → Actions.
 | Secret | `MDBISYNC_LINEAR_CLIENT_SECRET` | The Linear OAuth app's client secret | [Linear OAuth app](quickstart.md#linear-oauth-app) |
 | Variable | `MDBISYNC_APP_CLIENT_ID` | The GitHub App's client ID | [GitHub App](quickstart.md#github-app) |
 | Secret | `MDBISYNC_APP_PRIVATE_KEY` | The GitHub App's private key, the whole `.pem` file | [GitHub App](quickstart.md#github-app) |
+| Variable | `MDBISYNC_CI_WORKFLOWS` | The file names of the repository's other CI workflows, which the pre-commit workflow starts on the commits it pushes; optional | [In CI](linear-format.md#in-ci) |
 
 A security hook that needs a key of its own gets it from a secret you add,
 in the **Run the security hooks** step's `env:`.

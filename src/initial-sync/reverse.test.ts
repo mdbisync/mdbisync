@@ -1,4 +1,4 @@
-import { contentBytes } from '../state/content.ts';
+import { contentBytes, type FileContent } from '../state/content.ts';
 // The initial sync from Linear to the tracked branch through the command
 // line, against a local git remote and a fake GitHub and Linear: the dry run,
 // the pull request left for a person, the refusal of the sync until it is
@@ -21,6 +21,7 @@ import { resolveTargets } from '../setup/linear.ts';
 import { NEUTRAL_IDENTITY } from '../state/index.ts';
 import { Git, commitTree, fetchState, resolveStateConfig } from '../state/index.ts';
 import { type SecurityGate } from '../sync/security.ts';
+import { candidateKey } from '../sync/staged.ts';
 import { FINAL_IDS_MESSAGE, PROGRESS_MESSAGE } from './confirm.ts';
 import { type ReversePlanInput, PULL_REQUEST_TITLE, REVERSE_RECORD_MESSAGE, confirmLinearToGit, planLinearToGit } from './reverse.ts';
 
@@ -1249,6 +1250,137 @@ describe('the security gate of an initial sync from Linear', () => {
       await fixture.cleanup();
     }
   });
+
+  /** Whether a Markdown text has a link whose destination is on Linear's host, as a privacy hook might refuse. */
+  const linksLinear = (text: string) =>
+    [...text.matchAll(/\]\(([^)\s]+)\)/g)].some(([, destination]) => URL.canParse(destination as string) && new URL(destination as string).hostname === 'linear.app');
+
+  /**
+   * Runs the import with hooks that refuse `refused` text, in one step or in
+   * the two steps (stage every set, run the hooks on them, apply from their
+   * answers), and checks that the record holds only bytes the hooks passed.
+   */
+  const gated = async (fixture: Fixture, world: FakeWorld, refused: (text: string) => boolean, steps: 1 | 2) => {
+    const config = resolveStateConfig({});
+    const git = await fixture.clone('gate');
+    const fetched = await fetchState(git, config);
+    const mapping = await loadMapping(git, fetched.tracked);
+    const linear = new LinearClient({ token: 'test', baseUrl: LINEAR_API, fetch: fakeFetch(world) });
+    const { targets } = await resolveTargets(linear, mapping.zones.values());
+    assert.ok(targets);
+    const context = { git, fetched, mapping, targets, linear, identity: NEUTRAL_IDENTITY };
+    const github = { repository: 'owner/repo', token: 'gh-token', apiUrl: GITHUB_API, fetch: fakeFetch(world) };
+    const hooks = (files: ReadonlyMap<string, FileContent>) => ([...files.values()].some((content) => refused(contentBytes(content).toString())) ? [{ hook: 'privacy-check', line: 1 }] : []);
+    const passed = new Map<string, Buffer[]>();
+    const pass = (files: ReadonlyMap<string, FileContent>) => {
+      for (const [path, content] of files) passed.set(path, [...(passed.get(path) ?? []), contentBytes(content)]);
+    };
+    let security: SecurityGate;
+    if (steps === 1) {
+      security = {
+        configured: true,
+        async check(files) {
+          const findings = hooks(files);
+          if (findings.length === 0) pass(files);
+          return findings;
+        },
+      };
+    } else {
+      const staged = new Map<string, ReadonlyMap<string, Buffer | string>>();
+      const staging: SecurityGate = {
+        configured: true,
+        async check(files) {
+          staged.set(candidateKey(files), new Map([...files].map(([path, content]) => [path, contentBytes(content)])));
+          return [];
+        },
+      };
+      await confirmLinearToGit(context, { config, github, security: staging, stageOnly: true, stopAfterDocuments: undefined });
+      const answers = new Map([...staged].map(([key, files]) => [key, hooks(files)]));
+      security = {
+        configured: true,
+        async check(files) {
+          const findings = answers.get(candidateKey(files)) ?? null;
+          if (findings?.length === 0) pass(files);
+          return findings;
+        },
+      };
+    }
+    const { result } = await confirmLinearToGit(context, { config, github, security, stopAfterDocuments: undefined });
+    assert.equal(result.complete, true, result.code);
+    const changed = (await fixture.remote.text(['diff', '--name-only', 'refs/heads/main', 'refs/mdbisync/linear'])).split('\n').filter((path) => path.endsWith('.md'));
+    for (const path of changed) {
+      const read = await fixture.remote.run(['cat-file', 'blob', `refs/mdbisync/linear:${path}`], { okCodes: [0, 128] });
+      if (read.code !== 0) continue;
+      assert.ok((passed.get(path) ?? []).some((seen) => seen.equals(read.stdout)), `${path} was recorded with bytes the hooks never saw`);
+    }
+    return result;
+  };
+
+  for (const steps of [1, 2] as const) {
+    const mode = steps === 1 ? 'in one step' : 'with staged hooks';
+
+    it(`checks a document again when a document it links is left out by a hook, and keeps the refused link out (${mode})`, async () => {
+      const fixture = await createFixture();
+      try {
+        await fixture.seed(TREE);
+        const world = fakeWorld();
+        const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
+        const SECRET = ['blocked', 'value', '904'].join('-');
+        world.linear.documents = linearDocuments().map((d) =>
+          d.id === 'doc-faq' ? { ...d, content: `# FAQ\n\n${SECRET}\n` } : d.id === 'doc-runbook' ? { ...d, content: `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).\n` } : d,
+        );
+        // A privacy hook that refuses the secret and any Linear document URL.
+        const result = await gated(fixture, world, (text) => text.includes(SECRET) || linksLinear(text), steps);
+        assert.deepEqual(result.leftOutAtRecord.sort((a, b) => a.path.localeCompare(b.path)), [
+          { path: 'eng/notes/faq.md', rule: 'security-hook' },
+          { path: 'eng/ops/runbook.md', rule: 'security-hook' },
+        ]);
+        const tree = (await fixture.remote.text(['ls-tree', '-r', '--name-only', 'refs/mdbisync/linear'])).split('\n');
+        assert.ok(!tree.includes('eng/ops/runbook.md') && !tree.includes('eng/notes/faq.md'));
+        const objects = await fixture.remote.text(['cat-file', '--batch-all-objects', '--batch']);
+        assert.ok(!objects.includes(url('doc-faq')), 'a refused link reached the remote');
+      } finally {
+        await fixture.cleanup();
+      }
+    });
+
+    it(`records a document whose link to a refused document passes the hooks (${mode})`, async () => {
+      const fixture = await createFixture();
+      try {
+        await fixture.seed(TREE);
+        const world = fakeWorld();
+        const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
+        const SECRET = ['blocked', 'value', '905'].join('-');
+        world.linear.documents = linearDocuments().map((d) =>
+          d.id === 'doc-faq' ? { ...d, content: `# FAQ\n\n${SECRET}\n` } : d.id === 'doc-runbook' ? { ...d, content: `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).\n` } : d,
+        );
+        const result = await gated(fixture, world, (text) => text.includes(SECRET), steps);
+        // The runbook's text with the FAQ's URL was staged too: it has an answer, and is not left waiting for one.
+        assert.deepEqual(result.leftOutAtRecord, [{ path: 'eng/notes/faq.md', rule: 'security-hook' }]);
+        assert.equal(await fixture.remote.text(['show', 'refs/mdbisync/linear:eng/ops/runbook.md']), `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).`);
+      } finally {
+        await fixture.cleanup();
+      }
+    });
+
+    it(`checks a document again when the mapping leaves out a document it links (${mode})`, async () => {
+      const fixture = await createFixture();
+      try {
+        // `.gitattributes` routes the new FAQ into LFS; the mapping does not synchronize such a file.
+        await fixture.seed({ ...TREE, '.gitattributes': 'eng/notes/faq.md filter=lfs diff=lfs merge=lfs -text\n' });
+        const world = fakeWorld();
+        const url = (id: string) => `https://linear.app/${world.linear.urlKey}/document/${id}`;
+        world.linear.documents = linearDocuments().map((d) => (d.id === 'doc-runbook' ? { ...d, content: `# Runbook\n\nSee [the FAQ](${url('doc-faq')}).\n` } : d));
+        const result = await gated(fixture, world, linksLinear, steps);
+        assert.ok(result.leftOutAtRecord.some((entry) => entry.path === 'eng/notes/faq.md' && entry.rule === 'title-not-a-path'), JSON.stringify(result.leftOutAtRecord));
+        assert.ok(result.leftOutAtRecord.some((entry) => entry.path === 'eng/ops/runbook.md' && entry.rule === 'security-hook'), JSON.stringify(result.leftOutAtRecord));
+        const objects = await fixture.remote.text(['cat-file', '--batch-all-objects', '--batch']);
+        assert.ok(!objects.includes(url('doc-faq')), 'a refused link reached the remote');
+      } finally {
+        await fixture.cleanup();
+      }
+    });
+  }
 
   // The file itself is harmless: only its URL carries the value.
   const CHART = Buffer.from('%PDF-1.4 a chart\n');

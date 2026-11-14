@@ -64,6 +64,7 @@ const CODE_DEFAULTS: Record<string, string> = {
   'merge-grace-seconds': String(DEFAULT_MERGE_GRACE_SECONDS),
   'check-deadline-minutes': String(DEFAULT_CHECK_DEADLINE_MINUTES),
   'cleanup-tokens': 'false',
+  'merge-without-checks': 'false',
 };
 
 /** The secrets and variables the workflows `init` writes read, from lines that are not comments. */

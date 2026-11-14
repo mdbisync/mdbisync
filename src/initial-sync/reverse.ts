@@ -62,7 +62,7 @@ import {
   stateRef,
 } from '../state/index.ts';
 import { createAssetCapture, AttachmentBudgetError, ImageBlockedError, withNewUploadUrls } from '../sync/assets.ts';
-import { captureCursorTrailer, cursorTime, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
+import { captureCursorTrailer, cursorTime, linkVariants, prepareLfs, readCaptureCursor } from '../sync/capture.ts';
 import { type SecurityFinding, type SecurityGate, securityGate } from '../sync/security.ts';
 import { documentPath, titleFile } from '../sync/paths.ts';
 import { testStopAfterDocuments } from '../test-hooks.ts';
@@ -438,18 +438,19 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
       }
       return linkMemo.map;
     };
-    const restored = (entry: ReverseEntry): string => {
+    /** The document's body with its links; `ids` (path to document id) names the files a link may point to, the record's own by default. */
+    const restored = (entry: ReverseEntry, ids?: ReadonlyMap<string, string>): string => {
       const { body } = bodies.get(entry.path) as { body: string };
       if (linkBase === undefined) return body;
-      const map = linkMap(linkBase);
+      const map = ids === undefined ? linkMap(linkBase) : { base: linkBase, ids };
       // The tracked file's own spelling of each link comes back as it was.
       const seen: LinkSpellings = new Map();
       const tracked = input.texts.get(entry.path);
       if (tracked !== undefined) linksToLinear(splitFile(tracked).body, entry.path, map, seen);
       return linksFromLinear(body, entry.path, map, seen);
     };
-    const textOf = (entry: ReverseEntry): string => {
-      const body = restored(entry);
+    const textOf = (entry: ReverseEntry, ids?: ReadonlyMap<string, string>): string => {
+      const body = restored(entry, ids);
       const tracked = input.texts.get(entry.path);
       if (tracked === undefined) return body;
       return joinFile(splitFile(tracked).head, body);
@@ -501,6 +502,8 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     // document's id, so the document stays its document and is not adopted and overwritten later.
     const keptTracked = new Set<string>();
     const keepTracked = (paths: readonly string[], rule: RecordLeftOutRule) => {
+      // Nothing left out keeps `entries` as it is, and with it the link map built for them.
+      if (paths.length === 0) return;
       const kept = new Set(paths.filter((path) => !created.has(path)));
       for (const path of kept) {
         result.leftOutAtRecord.push({ path, rule });
@@ -513,67 +516,106 @@ export async function confirmLinearToGit(context: RunContext, options: ReverseOp
     keepTracked(budget, 'attachment-budget');
     keepTracked(failed, 'download-failed');
     keepTracked(imageBlocked, 'image-blocked');
-    // The document's text must stay the file's body: text that reads as front
-    // matter would become the file's metadata (or a folder's annotation).
-    keepTracked(entries.filter((entry) => splitFile(textOf(entry)).body !== restored(entry)).map((entry) => entry.path), 'front-matter-boundary');
     // The repository's security hooks see Linear's text and every downloaded file before any byte is pushed, as in the capture.
     const gate = options.security ?? (await securityGate(git, fetched.tracked));
-    try {
-      if (gate.configured) {
-        const blocked: string[] = [];
-        const unchecked: string[] = [];
-        for (const entry of entries) {
-          const { files, uploads: added } = bodies.get(entry.path) as { files: Map<string, FileContent>; uploads: UploadMap };
-          const text = textOf(entry);
-          const newUploads = [...added].some(([hash, url]) => uploads.get(hash) !== url);
-          if (files.size === 0 && !newUploads && text === input.texts.get(entry.path)) continue;
-          // Upload URLs also enter the cache ref. Scan Linear's text before
-          // localization too, so it cannot hide a secret in a URL or its query.
-          const tracked = input.texts.get(entry.path);
-          const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
-          const original = withNewUploadUrls(tracked === undefined ? content : joinFile(splitFile(tracked).head, content), added, uploads);
-          let findings: SecurityFinding[] | null = [];
-          if (original !== text) findings = await gate.check(new Map<string, FileContent>([[entry.path, original], ...files]));
-          if (findings?.length === 0) findings = await gate.check(new Map<string, FileContent>([[entry.path, text], ...files]));
-          // No answer: the hooks have not seen this text (the hooks step did not run, or the tracked branch moved).
-          if (findings === null) unchecked.push(entry.path);
-          else if (findings.length > 0) blocked.push(entry.path);
+    // The text each document last passed the hooks with: a document is checked again only when its bytes change.
+    const passed = new Map<string, string>();
+    /**
+     * Leaves out what may not be recorded, until a pass leaves out nothing.
+     * A new document left out changes the links of the documents that point
+     * to it (a relative link turns back into its Linear URL), so the rest are
+     * checked again with their new text: the hooks' verdict is on the bytes
+     * the record holds.
+     */
+    const screen = async () => {
+      for (;;) {
+        const before = entries.length;
+        // The document's text must stay the file's body: text that reads as front
+        // matter would become the file's metadata (or a folder's annotation).
+        keepTracked(entries.filter((entry) => splitFile(textOf(entry)).body !== restored(entry)).map((entry) => entry.path), 'front-matter-boundary');
+        if (gate.configured) {
+          const blocked: string[] = [];
+          const unchecked: string[] = [];
+          for (const entry of entries) {
+            const { files, uploads: added } = bodies.get(entry.path) as { files: Map<string, FileContent>; uploads: UploadMap };
+            const text = textOf(entry);
+            if (passed.get(entry.path) === text) continue;
+            const newUploads = [...added].some(([hash, url]) => uploads.get(hash) !== url);
+            if (files.size === 0 && !newUploads && text === input.texts.get(entry.path)) continue;
+            // Upload URLs also enter the cache ref. Scan Linear's text before
+            // localization too, so it cannot hide a secret in a URL or its query.
+            // That text does not depend on the links: a document checked again passed it already.
+            const tracked = input.texts.get(entry.path);
+            const content = (documents.get(entry.documentId) as LinearDocument).content ?? '';
+            const original = withNewUploadUrls(tracked === undefined ? content : joinFile(splitFile(tracked).head, content), added, uploads);
+            let findings: SecurityFinding[] | null = [];
+            if (original !== text && !passed.has(entry.path)) findings = await gate.check(new Map<string, FileContent>([[entry.path, original], ...files]));
+            if (findings?.length === 0) findings = await gate.check(new Map<string, FileContent>([[entry.path, text], ...files]));
+            // No answer: the hooks have not seen this text (the hooks step did not run, or the tracked branch moved).
+            if (findings === null) unchecked.push(entry.path);
+            else if (findings.length > 0) blocked.push(entry.path);
+            else passed.set(entry.path, text);
+          }
+          keepTracked(blocked, 'security-hook');
+          keepTracked(unchecked, 'security-unchecked');
         }
-        keepTracked(blocked, 'security-hook');
-        keepTracked(unchecked, 'security-unchecked');
+        if (entries.length === before) return;
       }
-    } finally {
-      await gate.close?.();
-    }
-    // The stage step stops here: the reads it kept end, and the rest of the run reads Linear itself.
-    context.linear.transport.reads?.end();
-    if (options.stageOnly === true) return 'staged';
+    };
     let lfsObjects: string[] = [];
     // What `.gitattributes` makes of each changed path, by the content it was given: a later build
     // reuses it only for the same bytes (a link can change when a document is left out).
     const stored = new Map<string, { input: FileContent | null; output: FileContent | null }>();
     const same = (a: FileContent | null, b: FileContent | null) =>
       a === null || b === null ? a === b : contentBytes(a).equals(contentBytes(b));
-    let commit = await build(entries);
-    // The new tree must map every file back to its document's title and place.
-    // Each pass leaves out more: the misplaced new files (and new README files,
-    // which can name a folder's team or project), then every new file. Without
-    // new files the tree maps as the tracked one does, since text that reads as
-    // front matter is already out; a mismatch then is a defect, not data.
-    for (let attempt = 0; ; attempt += 1) {
-      const misplaced = mismatches(await loadMapping(git, commit), entries);
-      if (misplaced.length === 0) break;
-      const newPaths = entries.filter((entry) => created.has(entry.path)).map((entry) => entry.path);
-      if (attempt === 0) {
-        const moved = misplaced.some((path) => !created.has(path));
-        const newReadmes = moved ? newPaths.filter((path) => /(^|\/)README\.md$/.test(path)) : [];
-        leaveOut([...misplaced.filter((path) => created.has(path)), ...newReadmes], 'title-not-a-path');
-      } else if (attempt === 1 && newPaths.length > 0) {
-        leaveOut(newPaths, 'title-not-a-path');
-      } else {
-        throw new Error(message('initial-sync.misplaced', { count: misplaced.length }));
+    let commit: Oid;
+    try {
+      await screen();
+      // The stage step stops here: the reads it kept end, and the rest of the run reads Linear itself.
+      context.linear.transport.reads?.end();
+      if (options.stageOnly === true) {
+        // The staging gate passed every document. The apply step leaves some
+        // new ones out (a hook's finding, the mapping), and the documents that
+        // link to them are written with those targets' Linear URLs: stage
+        // those texts too, or they would wait for an answer on every run.
+        if (gate.configured && linkBase !== undefined) {
+          const candidates = new Map(
+            entries.map((entry) => [entry.path, { entry, path: entry.path, files: new Map<string, FileContent>([...(bodies.get(entry.path) as { files: Map<string, FileContent> }).files, [entry.path, textOf(entry)]]) }]),
+          );
+          const linkIds = linkMap(linkBase).ids;
+          // Only a new document left out loses its file; an existing one keeps the tracked text and its links.
+          const reset = (path: string, ids: Map<string, string>) => {
+            if (created.has(path)) ids.delete(path);
+          };
+          for (const set of linkVariants(candidates, (candidate, ids) => textOf(candidate.entry, ids), reset, linkIds)) await gate.check(set);
+        }
+        return 'staged';
       }
       commit = await build(entries);
+      // The new tree must map every file back to its document's title and place.
+      // Each pass leaves out more: the misplaced new files (and new README files,
+      // which can name a folder's team or project), then every new file. Without
+      // new files the tree maps as the tracked one does, since text that reads as
+      // front matter is already out; a mismatch then is a defect, not data.
+      for (let attempt = 0; ; attempt += 1) {
+        const misplaced = mismatches(await loadMapping(git, commit), entries);
+        if (misplaced.length === 0) break;
+        const newPaths = entries.filter((entry) => created.has(entry.path)).map((entry) => entry.path);
+        if (attempt === 0) {
+          const moved = misplaced.some((path) => !created.has(path));
+          const newReadmes = moved ? newPaths.filter((path) => /(^|\/)README\.md$/.test(path)) : [];
+          leaveOut([...misplaced.filter((path) => created.has(path)), ...newReadmes], 'title-not-a-path');
+        } else if (attempt === 1 && newPaths.length > 0) {
+          leaveOut(newPaths, 'title-not-a-path');
+        } else {
+          throw new Error(message('initial-sync.misplaced', { count: misplaced.length }));
+        }
+        // The documents left out change the links of the rest: they are checked again.
+        await screen();
+        commit = await build(entries);
+      }
+    } finally {
+      await gate.close?.();
     }
 
     async function build(list: readonly ReverseEntry[]): Promise<Oid> {

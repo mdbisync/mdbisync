@@ -56,7 +56,7 @@ describe('container document capacity', () => {
       MDBISYNC_GITHUB_API_URL: GITHUB_API, MDBISYNC_REPOSITORY: 'owner/repo',
       MDBISYNC_REPORT_FILE: reportFile, MDBISYNC_DOCUMENT_CAP: cap,
       // Keep these capacity journeys in deferred-merge mode.
-      MDBISYNC_MERGE_GRACE_SECONDS: '0',
+      MDBISYNC_MERGE_GRACE_SECONDS: '0', MDBISYNC_MERGE_WITHOUT_CHECKS: 'true',
       MDBISYNC_DIRECTION: 'git-to-linear', MDBISYNC_CONFIRM: String(confirm),
     } });
     return { ...result, refsBeforeWrite, report: JSON.parse(await readFile(reportFile, 'utf8')) as RunReport };
