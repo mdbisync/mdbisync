@@ -22,6 +22,8 @@
 import { engineSteps, REQUEST_JOB, SCHEDULER_FILE, WORKFLOW_FILES } from './workflow-files.ts';
 import { diagnosticRequests } from './request-accounting.ts';
 import { CANARY_EVIDENCE } from './security-canary.ts';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { notImplementedMessage, type CommandName } from '../../../src/commands.ts';
@@ -436,4 +438,40 @@ export function hadReplaceableRun(runs: readonly Pick<WorkflowRun, 'id' | 'creat
 /** Whether a GitHub login is a GitHub App's bot account. */
 export function isAppBot(login: string | null | undefined): boolean {
   return typeof login === 'string' && login.endsWith('[bot]');
+}
+
+/** Scan before persisting any workflow output. Archive names remain JSON keys, never filesystem paths. */
+export function retainWorkflowOutput(dir: string, logs: ReadonlyMap<string, string>, result: EngineResult, forbidden: Iterable<string>): boolean {
+  const values = [...forbidden].filter((value) => value.length > 0);
+  const normalize = (text: string) => text.replace(/\r\n/g, '\n').replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z /gm, '');
+  // Actions prefixes every line, including each line of a PEM credential.
+  const forms = values.map((value) => ({ raw: value, escaped: JSON.stringify(value).slice(1, -1), normalized: normalize(value).trimEnd() }));
+  const matches = (text: string) => {
+    const normalized = normalize(text);
+    return forms.some((value) => text.includes(value.raw) || text.includes(value.escaped) ||
+      (value.normalized.length > 0 && normalized.includes(value.normalized)));
+  };
+  const rejectedSources = [...logs].filter(([name, text]) => matches(name) || matches(text)).map(([name]) => `log: ${safeWorkflowValue(name, values)}`);
+  for (const [name, value] of Object.entries({ ...result, stdout: '' })) {
+    if (matches(JSON.stringify(value) ?? '')) rejectedSources.push(name);
+  }
+  const contaminated = rejectedSources.length > 0;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'output-scan.json'), `${JSON.stringify({ clean: !contaminated, logFiles: logs.size, rejectedSources })}\n`);
+  if (contaminated) return false;
+  writeFileSync(join(dir, 'logs.json'), `${JSON.stringify(Object.fromEntries(logs), null, 2)}\n`);
+  writeFileSync(join(dir, 'requests.json'), `${JSON.stringify(result.remote, null, 2)}\n`);
+  return true;
+}
+
+/** Preserve request counts and numeric budgets without retaining forbidden text in diagnostics. */
+export function safeWorkflowValue<T>(remote: T, forbidden: Iterable<string>): T {
+  const values = [...forbidden].filter((value) => value.length > 0);
+  const redact = (value: unknown): unknown => {
+    if (typeof value === 'string') return values.reduce((text, secret) => text.replaceAll(secret, '[withheld]'), value);
+    if (Array.isArray(value)) return value.map(redact);
+    if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [String(redact(key)), redact(item)]));
+    return value;
+  };
+  return redact(remote) as T;
 }

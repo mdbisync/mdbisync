@@ -219,10 +219,17 @@ export async function liveWorld(
   // Links between synchronized documents are written as document URLs of this workspace.
   const documentUrlBase = parts.known?.documentUrlBase
     ?? `https://linear.app/${(await appClient.request<{ organization: { urlKey: string } }>('Organization', 'query', 'query Organization { organization { urlKey } }')).organization.urlKey}/document`;
+  const outputSecrets = new Set([parts.token.token, ...config.linearApps.map((app) => app.clientSecret), ...Object.values(config.editors), config.githubApp?.privateKey ?? '']);
+  const getToken = parts.token.getToken === undefined ? undefined : async () => {
+    const token = await parts.token.getToken!();
+    outputSecrets.add(token);
+    return token;
+  };
   return {
+    outputSecrets,
     sandbox: parts.sandbox,
-    rest: new SandboxRest(config, parts.token.getToken ?? parts.token.token),
-    ...(parts.token.getToken === undefined ? {} : { getGithubToken: parts.token.getToken }),
+    rest: new SandboxRest(config, getToken ?? parts.token.token),
+    ...(getToken === undefined ? {} : { getGithubToken: getToken }),
     githubToken: parts.token.token,
     githubTokenSource: parts.token.source,
     ...(parts.token.appLogin === undefined ? {} : { githubAppLogin: parts.token.appLogin }),
@@ -805,6 +812,7 @@ export function createRunContext(
 /** Saves what the engine and the remote side showed, before cleanup removes pull requests and comments. Collection errors are saved as errors. */
 export async function captureCanaryEvidence(ctx: RunContext): Promise<void> {
   try {
+    if (ctx.observations.get('workflows.outputLeak')) throw new Error('workflow output withheld');
     if (ctx.observations.get('canary.pendingIncomplete')) throw new Error('pending engine output unavailable');
     const evidence = await withDeadline(collectCanaryEvidence(ctx, { summariesOnly: false }), 30_000, () => new Error('canary collection timed out'));
     writeFileSync(join(ctx.runDir, 'canary-evidence.tmp'), JSON.stringify(evidence));
@@ -900,6 +908,7 @@ export function resultOf(
     durationMs: Date.now() - extra.startedAt,
     engineRequests: engineRequestCount(ctx, remote),
     requestBuckets: requestBuckets(ctx, remote),
+    ...(ctx.observations.has('workflowRateLimits') ? { workflowRateLimits: ctx.observations.get('workflowRateLimits') as NonNullable<ScenarioResult['workflowRateLimits']> } : {}),
     harnessRequests: ctx.live === null ? 0 : [...Object.values(ctx.live.editors)].reduce((sum, client) => sum + client.stats.total, 0),
     budgetWaitMs: extra.budgetWaitMs,
     checks: extra.checks,
@@ -1020,10 +1029,14 @@ async function runScenarioCounted(scenario: Scenario, deps: RunnerDeps, runId: s
       registration.hold(Number.MAX_SAFE_INTEGER);
       locks.splice(0).reverse().forEach((lock) => lock.hold(Number.MAX_SAFE_INTEGER));
     } else locks.splice(0).reverse().forEach((lock) => lock.release());
-    if (grant !== undefined) for (const { entry } of remoteRequests(ctx)) {
-      if (isGraphql(entry) && deps.config.linearApps[0] !== undefined) {
-        deps.governor?.observeRateLimits(deps.config.linearApps[0].name, entry.rateLimitHeaders, Date.parse(entry.finishedAt));
-      }
+    const workflowApp = deps.config.linearApps[0]?.name;
+    if (grant !== undefined && workflowApp !== undefined && ctx.engine.results.some((result) => result.remote !== undefined)) {
+      const samples = remoteRequests(ctx).filter(({ entry }) => isGraphql(entry) && Object.keys(entry.rateLimitHeaders).length > 0);
+      for (const { entry } of samples) deps.governor?.observeRateLimits(workflowApp, entry.rateLimitHeaders, Date.parse(entry.finishedAt));
+      ctx.observations.set('workflowRateLimits', {
+        app: workflowApp, samples, admission: grant.rateLimitEvidence ?? null,
+        governor: deps.governor?.rateLimitEvidence(workflowApp) ?? null,
+      });
     }
     if (grant !== undefined && !writerUnstopped && (grant.owner === undefined || (cleanupOutcome.ok && !heldForUi && !setupStuck))) {
       try { await grant.release(); released = true; }

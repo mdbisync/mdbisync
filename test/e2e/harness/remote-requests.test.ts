@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, it } from 'node:test';
@@ -8,10 +8,11 @@ import type { SandboxRest, WorkflowRun } from './github.ts';
 import type { RunContext } from './context.ts';
 import { diagnosticRequests, engineRequestCount, requestBuckets, remoteRequests } from './request-accounting.ts';
 import { INVARIANT_CHECKS } from './checks.ts';
+import { renderRunMarkdown } from './report.ts';
 import { resultOf } from './runner.ts';
 import { BudgetBlockedError, Governor } from './governor.ts';
 import { loadScenarios } from './spec.ts';
-import { runResult } from './workflows.ts';
+import { retainWorkflowOutput, safeWorkflowValue, runResult } from './workflows.ts';
 
 // Retained dry and confirmed initial-sync diagnostics, stripped to safe request
 // metadata, with neutral request identifiers. Counts and limit headers are real.
@@ -169,12 +170,19 @@ it('admits workflows on their configured app and lets a later fresh read superse
   assert.equal(other.app.name, 'other');
   other.release();
   await assert.rejects(governor.admit(scenario, 'abcdef2', { requests: 1, complexity: 1 }, 'primary'), BudgetBlockedError);
+  assert.equal(governor.rateLimitEvidence('primary').decision?.used.requestsRemaining, 0);
+  assert.equal(governor.rateLimitEvidence('primary').decision?.sources.requests, now);
   now += 1;
   const primary = await governor.admit(scenario, 'abcdef3', { requests: 1, complexity: 1 }, 'primary');
   assert.equal(primary.app.name, 'primary');
+  assert.equal(governor.rateLimitEvidence('primary').decision?.used.requestsRemaining, 5000);
+  assert.deepEqual(governor.rateLimitEvidence('primary').decision?.sources, {});
+  assert.equal(governor.rateLimitEvidence('primary').selected.requests?.remaining, 0);
   primary.release();
   now += 2000;
   const recovered = await governor.admit(scenario, 'abcdef4', { requests: 1, complexity: 1 }, 'primary');
+  assert.equal(primary.rateLimitEvidence?.decision?.readStartedAt, now - 2000);
+  assert.equal(recovered.rateLimitEvidence?.decision?.readStartedAt, now);
   recovered.release();
 });
 
@@ -193,4 +201,70 @@ it('allows the hook-only L0-09 workflow while requiring diagnostics from Linear 
       assert.equal((await INVARIANT_CHECKS.I9(ctx, async () => { throw new Error('unexpected world read'); })).ok, false);
     }
   }
+});
+
+it('retains scanned stage/apply logs and the exact deduplicated accounting ledger', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'workflow-output-'));
+  roots.push(dir);
+  const files = logs(recorded.confirmed);
+  files.set('../../escape.txt', 'ordinary work output');
+  const result = await runResult(rest, run(7), 'initial-sync', files);
+  assert.equal(retainWorkflowOutput(dir, files, result, ['kx-hidden-note']), true);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'logs.json'), 'utf8')), Object.fromEntries(files));
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'requests.json'), 'utf8')), result.remote);
+  assert.equal(JSON.parse(readFileSync(join(dir, 'output-scan.json'), 'utf8')).clean, true);
+});
+
+it('withholds logs and diagnostics when a log, summary or request contains a secret', async () => {
+  for (const source of ['log', 'summary', 'request']) {
+    const dir = mkdtempSync(join(tmpdir(), 'workflow-secret-'));
+    roots.push(dir);
+    const files = logs(recorded.dry);
+    const secret = 'kx-hidden-note';
+    if (source === 'log') files.set('job/7_Apply.txt', secret);
+    const result = await runResult(rest, run(8), 'initial-sync', files);
+    if (source === 'summary') result.summary = secret;
+    if (source === 'request') result.remote!.requests[0]!.operation = secret;
+    assert.equal(retainWorkflowOutput(dir, files, result, [secret]), false);
+    assert.equal(existsSync(join(dir, 'logs.json')), false);
+    assert.equal(existsSync(join(dir, 'requests.json')), false);
+    assert.equal(readFileSync(join(dir, 'output-scan.json'), 'utf8').includes(secret), false);
+  }
+});
+
+it('includes workflow response identities and governor decisions in both reports', async () => {
+  const ctx = await context();
+  const samples = remoteRequests(ctx).filter(({ entry }) => Object.keys(entry.rateLimitHeaders).length > 0);
+  const evidence = { app: 'primary', samples, governor: { selected: { requests: { remaining: 4000, resetAt: 2000, at: 1000 } }, decision: { readStartedAt: 999, fresh: { requestsRemaining: 5000, complexityRemaining: 2000000, resetAt: 2000 }, used: { requestsRemaining: 4000, complexityRemaining: 2000000, resetAt: 2000 }, sources: { requests: 1000 } } } };
+  const withAdmission = { ...evidence, admission: evidence.governor };
+  ctx.observations.set('workflowRateLimits', withAdmission);
+  const result = { ...resultOf(ctx, { result: 'pass' }, { startedAt: 0, budgetWaitMs: 0, checks: [], cleanup: { ok: true } }), harnessAppRequests: 0 };
+  assert.deepEqual(result.workflowRateLimits, withAdmission);
+  assert.equal(samples[0]!.runId, 1);
+  assert.equal(samples[0]!.runAttempt, 1);
+  const markdown = renderRunMarkdown({ harnessRunId: 'example', startedAt: '', finishedAt: '', host: '', selection: {}, results: [result] });
+  assert.match(markdown, /Workflow rate-limit evidence/);
+  assert.match(markdown, /primary/);
+  assert.match(markdown, /4000 remaining/);
+  assert.match(markdown, /readStartedAt/);
+});
+
+it('keeps accounting and response headers while redacting contaminated diagnostic text', () => {
+  const requests = { runId: 1, runAttempt: 2, linearEngine: true, requests: [{ ...recorded.dry[1]!, operation: 'kx-hidden-note' }] };
+  const safe = safeWorkflowValue(requests, ['kx-hidden-note']);
+  assert.equal(safe.requests.length, 1);
+  assert.deepEqual(safe.requests[0]!.rateLimitHeaders, requests.requests[0]!.rateLimitHeaders);
+  assert.equal(safe.requests[0]!.operation, '[withheld]');
+  assert.equal(JSON.stringify(safe).includes('kx-hidden-note'), false);
+});
+
+it('withholds a multiline credential interrupted by Actions timestamps', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'workflow-multiline-'));
+  roots.push(dir);
+  const secret = 'first-key-line\nsecond-key-line\n';
+  const files = new Map([['job/3_Stage.txt', secret.trimEnd().split('\n').map((line) => `2026-11-14T10:00:00.123Z ${line}`).join('\r\n')]]);
+  const result = await runResult(rest, run(9), 'initial-sync', files);
+  assert.equal(retainWorkflowOutput(dir, files, result, [secret]), false);
+  assert.equal(existsSync(join(dir, 'logs.json')), false);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'output-scan.json'), 'utf8')).rejectedSources, ['log: job/3_Stage.txt']);
 });

@@ -146,6 +146,7 @@ export interface Grant {
   app: App;
   waitedMs: number;
   budgetBefore: Budget;
+  rateLimitEvidence?: ReturnType<Governor['rateLimitEvidence']>;
   owner?: string;
   /** Waits at most `maxWaitMs` (default: the governor's longest wait) for the accounts' budgets. */
   claimBudgets?(accounts: readonly AccountBudget[], signal?: AbortSignal, maxWaitMs?: number): Promise<void>;
@@ -236,16 +237,26 @@ export class Governor {
     this.#observed.set(app, observed);
   }
 
+  readonly #decisions = new Map<string, { readStartedAt: number; fresh: Budget; used: Budget; sources: Partial<Record<'requests' | 'complexity', number>> }>();
+
+  /** Snapshot of the actual selection, including the fresh read that may supersede response samples. */
+  rateLimitEvidence(app: string) {
+    return structuredClone({ selected: this.#observed.get(app) ?? {}, decision: this.#decisions.get(app) ?? null });
+  }
+
   #withObserved(app: string, fresh: Budget, readStartedAt: number): Budget {
     const observed = this.#observed.get(app);
     const result = { ...fresh };
+    const sources: Partial<Record<'requests' | 'complexity', number>> = {};
     for (const [kind, field] of [['requests', 'requestsRemaining'], ['complexity', 'complexityRemaining']] as const) {
       const limit = observed?.[kind];
       if (limit !== undefined && limit.at >= readStartedAt && limit.resetAt > this.#now() && limit.remaining < result[field]) {
         result[field] = limit.remaining;
+        sources[kind] = limit.at;
         result.resetAt = Math.max(result.resetAt, limit.resetAt);
       }
     }
+    this.#decisions.set(app, { readStartedAt, fresh: { ...fresh }, used: { ...result }, sources });
     return result;
   }
 
@@ -281,10 +292,13 @@ export class Governor {
     for (;;) {
       let retryAt = Infinity;
       for (const app of apps) {
+        let evidence: ReturnType<Governor['rateLimitEvidence']> | undefined;
         const admission = await shared.reserve({ runId, owner, app: app.key ?? app.name, full: holdsFullSlot(scenario), ...(resumeOwner === undefined ? {} : { resume: true }), need, maxWorkers: Math.min(options.maxWorkersPerApp ?? MAX_WORKERS_PER_APP, MAX_WORKERS_PER_APP), reserve: RESERVE,
           readBudget: async () => {
             const at = this.#now();
-            return this.#withObserved(app.name, await app.readBudget(), at);
+            const budget = this.#withObserved(app.name, await app.readBudget(), at);
+            evidence = this.rateLimitEvidence(app.name);
+            return budget;
           },
         });
         if (!admission.admitted) {
@@ -294,7 +308,7 @@ export class Governor {
           continue;
         }
         return {
-          app, owner, waitedMs: this.#now() - started, budgetBefore: admission.budget!,
+          app, owner, ...(evidence === undefined ? {} : { rateLimitEvidence: evidence }), waitedMs: this.#now() - started, budgetBefore: admission.budget!,
           claimBudgets: async (accounts, signal, maxWaitMs) => {
             const until = this.#now() + (maxWaitMs ?? options.maxWaitMs ?? MAX_BUDGET_WAIT_MS);
             for (;;) {
@@ -378,6 +392,7 @@ export class Governor {
       for (;;) {
         const readStartedAt = this.#now();
         const budget = this.#withObserved(slot.app.name, await slot.app.readBudget(), readStartedAt);
+        const evidence = this.rateLimitEvidence(slot.app.name);
         const app = slot.app;
         const admitted = await withLedger(options.stateDir, app.name, runId, (ledger) => {
           const reserved = sumLedger(ledger);
@@ -394,6 +409,7 @@ export class Governor {
             app,
             waitedMs: this.#now() - started,
             budgetBefore: budget,
+            rateLimitEvidence: evidence,
             release: () => {
               if (released) return;
               released = true;

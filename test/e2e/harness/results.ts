@@ -83,6 +83,7 @@ export interface ScenarioResult {
   durationMs: number;
   /** Local proxy requests plus deduplicated remote GraphQL attempts, for I9. */
   engineRequests: number;
+  workflowRateLimits?: { app: string; samples: ReturnType<typeof import('./request-accounting.ts').remoteRequests>; admission?: ReturnType<import('./governor.ts').Governor['rateLimitEvidence']> | null; governor: ReturnType<import('./governor.ts').Governor['rateLimitEvidence']> | null };
   requestBuckets?: ReturnType<typeof import('./request-accounting.ts').requestBuckets>;
   /** Requests of the harness's editors (personal API keys). */
   harnessRequests: number;

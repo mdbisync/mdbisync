@@ -32,6 +32,8 @@ export interface LiveWorld {
   sandbox: Sandbox;
   rest: SandboxRest;
   githubToken: string;
+  /** Known credential values, retained only in memory for output scanning. */
+  outputSecrets?: Set<string>;
   getGithubToken?: () => Promise<string>;
   githubTokenSource: 'app' | 'host';
   /** The bot login of the App the harness and the workflows authenticate as (`<slug>[bot]`); App tokens only. */
