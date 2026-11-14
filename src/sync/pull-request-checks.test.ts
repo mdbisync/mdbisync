@@ -360,6 +360,34 @@ describe('sync: pull request checks', () => {
     assert.ok(merged.report.pullRequest?.merged);
   });
 
+  // A branch rebuilt by hand (or last pushed before the sync recorded its heads) no longer holds the head the sync
+  // recorded pushing: its earlier checks are unknown. The sync puts a commit of its own on top, which runs the checks
+  // again, rather than waiting for a Linear change.
+  it('runs the checks again with a commit of its own when the branch no longer holds the head it pushed', async () => {
+    const path = 'eng/notes/plan.md';
+    await editInLinear(path, '# Plan\n\nFirst edit.\n');
+    await sync();
+    checksOn(await rev(SYNC_BRANCH), [{ name: 'tests', status: 'completed', conclusion: 'failure' }]);
+    const env = { GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' };
+    const rebuilt = await h.fixture.remote.text(['commit-tree', `${await rev(SYNC_BRANCH)}^{tree}`, '-p', h.start, '-m', 'Rebuilt'], { env });
+    await h.forcePush(SYNC_BRANCH, rebuilt);
+    checksOn(rebuilt, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }]);
+    h.editHeadNote('mdbisync/linear', () => '');
+    const transport = fakeFetch(h.world);
+    h.fetchOverride = async (input, init) => {
+      const match = String(input).match(/\/commits\/([0-9a-f]+)\/check-runs/);
+      if (match && !h.world.github.checks?.has(match[1]!)) checksOn(match[1]!, [{ name: 'pre-commit', status: 'completed', conclusion: 'success' }, { name: 'tests', status: 'completed', conclusion: 'success' }]);
+      return transport(input, init);
+    };
+    const run = await sync({ MDBISYNC_MERGE_GRACE_SECONDS: '20' });
+    assert.equal(run.result.exitCode, 0, run.result.stderr);
+    assert.equal(run.report.pullRequest?.branchMoved, true, 'did not run the checks again');
+    const again = run.report.pullRequest?.merged ? (await h.fixture.remote.text(['show', '-s', '--format=%P', await rev('refs/heads/main')])).split(' ')[1]! : await rev(SYNC_BRANCH);
+    assert.equal(await h.fixture.remote.text(['show', '-s', '--format=%P%n%s', again]), `${rebuilt}\nRun the checks again on the sync branch`);
+    assert.deepEqual(JSON.parse(await show('refs/mdbisync/ids:sync-pushed.json')), { head: again });
+    assert.ok(run.report.pullRequest?.merged, 'did not merge once the checks passed on the new head');
+  });
+
   // Anyone who may write commit statuses can name one after a check run; only the check's own publisher proves it ran.
   it('does not let a commit status or another app stand in for an expected check run', async () => {
     const path = 'eng/notes/plan.md';
@@ -385,7 +413,7 @@ describe('sync: pull request checks', () => {
     assert.ok(merged.report.pullRequest?.merged);
   });
 
-  it('holds a head whose history runs past the search bound before a commit of the sync\'s own', async () => {
+  it('runs the checks again on a head whose history runs past the search bound before the sync\'s recorded head', async () => {
     const path = 'eng/notes/plan.md';
     await editInLinear(path, '# Plan\n\nFirst edit.\n');
     await sync();
@@ -396,16 +424,12 @@ describe('sync: pull request checks', () => {
     assert.equal(run.result.exitCode, 0, run.result.stderr);
     assert.equal(run.report.pullRequest?.merged, null, 'merged without knowing the checks of its earlier heads');
     assert.equal(await rev('refs/heads/main'), h.start);
-    // A Linear change is pushed on top: the sync's own merge ends the history, and the new head merges.
-    await editInLinear('combined/guide.md', '# Guide\n\nLater edit.\n');
-    const transport = fakeFetch(h.world);
-    h.fetchOverride = async (input, init) => {
-      const match = String(input).match(/\/commits\/([0-9a-f]+)\/check-runs/);
-      if (match && !h.world.github.checks?.has(match[1]!)) checksOn(match[1]!, [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
-      return transport(input, init);
-    };
-    const recovered = await sync({ MDBISYNC_MERGE_GRACE_SECONDS: '20' });
-    assert.equal(recovered.report.pullRequest?.branchMoved, true, 'kept the held head instead of pushing the Linear change');
+    // The sync's own commit on top ends the history: its push runs the checks again, and once they pass it merges.
+    const again = await rev(SYNC_BRANCH);
+    assert.equal(run.report.pullRequest?.branchMoved, true, 'kept the head whose earlier checks are unknown');
+    assert.equal(await h.fixture.remote.text(['show', '-s', '--format=%P', again]), head);
+    checksOn(again, [{ name: 'tests', status: 'completed', conclusion: 'success' }]);
+    const recovered = await sync();
     assert.ok(recovered.report.pullRequest?.merged);
   });
 

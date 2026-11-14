@@ -312,6 +312,13 @@ export function pullRequestHarness() {
     return commit;
   }
 
+  /** Moves `ref` to `commit` as a person's force push would, which the sync-never-force-pushes check then starts from. */
+  async function forcePush(ref: string, commit: string): Promise<void> {
+    await fixture.remote.run(['update-ref', ref, commit]);
+    syncValues.push(commit);
+    if (ref === SYNC_BRANCH) normalValues.push(commit);
+  }
+
   // Pending sync-branch edits that conflict with a later edit (MDS-011-2C). The plan's paragraph is edited on the
   // sync branch by a person or CI, and later in Linear or on the tracked branch; a Linear edit of another document
   // opens the pull request first.
@@ -407,6 +414,7 @@ export function pullRequestHarness() {
     releaseHeld,
     backdate,
     editHeadNote,
+    forcePush,
     assertNoRerun,
     suspendThenTrash,
     onResolve,

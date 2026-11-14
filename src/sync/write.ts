@@ -37,7 +37,6 @@ import {
   type IdEntry,
   type IdMap,
   type Oid,
-  type PushResult,
   type RefUpdate,
   type StateConfig,
   type StateSnapshot,
@@ -1059,7 +1058,10 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
     const kept = [...keptAnnotations].map((path) => merge.keptMoves.get(path) ?? path).filter((path) => merge.result.has(path) && !nextIds.has(path));
     const trailers = [...recordedTrailers(asWritten), ...(keptMoved ? keptAnnotationsTrailers(kept) : [])];
     const idsMessage = trailers.length === 0 ? IDS_MESSAGE : `${IDS_MESSAGE}\n\n${trailers.join('\n')}`;
-    const idsCommit = await commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved });
+    const createBranch = options.createSyncBranch === true && commit !== linearTip;
+    const idsOf = (syncPushed?: Oid) => commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: asWritten.size > 0 || keptMoved, ...(syncPushed === undefined ? {} : { syncPushed }) });
+    // The ids record the branch's head as the sync's own push, only together with that push.
+    let recordedIds = await idsOf(createBranch ? commit : undefined);
     // Only a run that went through every document finishes the rebuild: one that stopped (also while finding the
     // documents to relink, before they are changes) leaves the rest to the next run.
     const rebuilt = cacheLost && merged && result.stopped === undefined ? { message: UPLOADS_REBUILT, always: true } : {};
@@ -1070,20 +1072,11 @@ export async function writeTrackedToLinear(context: RunContext, options: WriteOp
       { ref: stateRef(options.config, 'ids'), expected: expected.ids, next: ids },
       ...(uploadsCommit === null ? [] : [{ ref: stateRef(options.config, 'uploads'), expected: expected.uploads, next: uploadsCommit }]),
     ];
-    const createBranch = options.createSyncBranch === true && commit !== linearTip;
-    let recordedIds = idsCommit;
-    let pushed: PushResult;
-    if (createBranch) {
-      // The ids record the branch's head as the sync's own push, only together with that push.
-      recordedIds = await commitIds(git, expected.ids, nextIds, identity, { message: idsMessage, reserved: nextReserved, superseded: nextSuperseded(), always: true, syncPushed: commit });
-      pushed = await pushAtomic(git, options.config, [...updates(recordedIds), { ref: branchRef(options.config.syncBranch), expected: null, next: commit }]);
-      // The branch is optional: a refusal that is not a lease (a rule on branch names, missing rights) moved nothing,
-      // and the record goes on without it.
-      if (!pushed.ok && pushed.reason === 'rejected') {
-        recordedIds = idsCommit;
-        pushed = await pushAtomic(git, options.config, updates(recordedIds));
-      }
-    } else {
+    let pushed = await pushAtomic(git, options.config, createBranch ? [...updates(recordedIds), { ref: branchRef(options.config.syncBranch), expected: null, next: commit }] : updates(recordedIds));
+    // The branch is optional: a refusal that is not a lease (a rule on branch names, missing rights) moved nothing,
+    // and the record goes on without it.
+    if (!pushed.ok && pushed.reason === 'rejected' && createBranch) {
+      recordedIds = await idsOf();
       pushed = await pushAtomic(git, options.config, updates(recordedIds));
     }
     if (!pushed.ok) return null;

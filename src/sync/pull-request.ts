@@ -77,6 +77,8 @@ export const SYNC_PULL_REQUEST_TITLE = 'Changes from Linear';
 export const SYNC_BRANCH_MERGE_MESSAGE = "Merge Linear's latest changes";
 /** The message of a merge of the tracked branch into the sync branch, made when pending edits there conflict with it. */
 export const TRACKED_MERGE_MESSAGE = 'Merge the tracked branch into the sync branch';
+/** A commit of the sync's own on a head whose earlier checks are unknown: its push runs the checks again. */
+export const CHECKS_AGAIN_MESSAGE = 'Run the checks again on the sync branch';
 /** GitHub's reason for a merge it refuses because the head conflicts with the base ("Pull Request has merge conflicts"). */
 const CONFLICT_REFUSAL = /merge conflict/i;
 /** Paths listed in the pull request's description; the rest are counted. */
@@ -247,8 +249,8 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
     const merger = markedMerger(git, options.state.ids, identity, frozen);
     /** What this run's merges into the sync branch resolved; reported only once the branch has moved to them. */
     const resolved: Resolution = { marked: [], decided: [] };
-    // A head whose earlier checks the history does not show is never kept: the sync's next push (Linear's changes) is
-    // what lets it merge again.
+    // A head whose earlier checks the history does not show is never kept: the sync's next push (Linear's changes, or
+    // a commit that runs the checks again, below) is what lets it merge again.
     const checkedExpectation = async () => {
       const known = await expectedChecks(github, sync as Oid, options.requiredChecks ?? [], { body: open?.body, git, base: tracked, pushed: await readSyncPushed(git, options.state.ids) });
       return known.complete ? checkExpectation(options, known.checks) : null;
@@ -313,6 +315,14 @@ export async function syncPullRequest(context: RunContext, options: PullRequestO
       }
     }
     if (open === null && !result.needed && headTree === trackedTree) return result;
+    // A head whose earlier checks the branch's history does not show (no head the sync recorded pushing is below it:
+    // the branch was rewritten, or the sync last pushed it before it recorded its heads) gets a commit of the sync's own
+    // on top, with the same tree. Its push starts the repository's whole CI and is recorded, so the pull request can
+    // merge without waiting for a Linear change.
+    if (head === sync && pending && options.state.ids !== null
+      && !(await expectedChecks(github, sync as Oid, [], { body: open?.body, git, base: tracked, pushed: await readSyncPushed(git, options.state.ids) })).complete) {
+      head = await commitTree(git, { base: headTree as string, changes: new Map(), parents: [sync as Oid], message: CHECKS_AGAIN_MESSAGE, identity, skipIfUnchanged: false });
+    }
 
     if (head !== sync) {
       const pushed = await pushSyncBranch(context, options, sync, head);

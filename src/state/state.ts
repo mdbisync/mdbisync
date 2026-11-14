@@ -526,7 +526,12 @@ export async function readSyncPushed(git: Git, commit: Oid | null): Promise<Oid 
   if (commit === null) return undefined;
   const read = await git.run(['cat-file', 'blob', `${commit}:${SYNC_PUSHED_FILE}`], { okCodes: [0, 128] });
   if (read.code !== 0) return undefined;
-  const { head } = await readJsonFile(git, commit, SYNC_PUSHED_FILE);
+  let head: unknown;
+  try {
+    head = (JSON.parse(read.stdout.toString('utf8')) as { head?: unknown } | null)?.head;
+  } catch {
+    throw new Error(message('state.invalid-json', { file: SYNC_PUSHED_FILE, commit }));
+  }
   if (typeof head !== 'string' || !/^[0-9a-f]{40,64}$/.test(head)) throw new Error(message('state.invalid-entry', { file: SYNC_PUSHED_FILE }));
   return head;
 }
